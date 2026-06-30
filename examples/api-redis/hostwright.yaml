@@ -1,0 +1,23 @@
+project: api-redis
+
+services:
+  api:
+    image: ghcr.io/example/api:latest
+    ports:
+      - "8081:8080"
+    env:
+      APP_ENV: development
+      REDIS_HOST: redis
+    health:
+      command: ["curl", "-f", "http://localhost:8081/health"]
+      interval: 10s
+    restart:
+      policy: on-failure
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+    restart:
+      policy: unless-stopped
+

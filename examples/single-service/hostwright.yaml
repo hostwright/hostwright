@@ -1,0 +1,13 @@
+project: single-service
+
+services:
+  web:
+    image: docker.io/library/nginx:1.27
+    ports:
+      - "8080:80"
+    health:
+      command: ["curl", "-f", "http://localhost:8080/"]
+      interval: 30s
+    restart:
+      policy: on-failure
+

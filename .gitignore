@@ -1,0 +1,26 @@
+.DS_Store
+.build/
+.swiftpm/
+DerivedData/
+*.xcodeproj/
+*.xcworkspace/
+Package.resolved
+
+# Local-only project material
+site/
+.claude/
+hostwright_naming_convention/
+DIAGRAM_BRIEF.md
+
+# Root originals are preserved under docs/source-material/originals/
+/Orchard_Agent_Engineering_Manual (1).docx
+/Orchard_Final_Production_Arsenal.pdf
+/Orchard_Document_2_Security_and_Apple_Silicon_Acceleration.pdf
+/Orchard_Document_3_Network_Tunnels_Protocols_Cloud_Security.pdf
+/Hostwright_Naming_Convention_Folder.zip
+
+# Root brand-source assets are preserved under assets/brand/originals/
+/ChatGPT Image Jun 29, 2026, 11_22_44 AM.png
+/ChatGPT Image Jun 29, 2026, 11_35_08 AM.png
+/ChatGPT Image Jun 29, 2026, 11_37_17 AM.png
+/cc7fa227-8d41-4d45-8432-1b6959410d12.png

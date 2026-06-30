@@ -1,0 +1,151 @@
+# Requirements
+
+This file gives Hostwright stable requirement IDs for the first supported release. Requirements are source-grounded in the preserved source documents and naming archive.
+
+Status values:
+
+- Implemented: present in the current repo.
+- Partially implemented: a boundary, stub, or narrow subset exists.
+- Planned: required for first supported release but not built yet.
+- Deferred: intentionally later than first supported release.
+- Rejected: explicitly out of scope.
+
+## Naming
+
+| ID | Requirement | Source document | Current status | Implementation file if any | Test coverage if any | Release phase |
+| --- | --- | --- | --- | --- | --- | --- |
+| HW-NAME-001 | Public project name must be Hostwright. | Naming Convention Folder | Implemented | `Sources/HostwrightCore/HostwrightIdentity.swift`, `docs/naming/` | `scripts/grep-orchard.sh .` | 0 |
+| HW-NAME-002 | CLI name must be `hostwright`. | Naming Convention Folder | Implemented | `Package.swift`, `Sources/HostwrightCore/HostwrightIdentity.swift` | SwiftPM build; CLI smoke tests | 1 |
+| HW-NAME-003 | Daemon name must be `hostwrightd`. | Naming Convention Folder | Implemented as scaffold | `Package.swift`, `Sources/HostwrightDaemon/main.swift` | SwiftPM build | 1 |
+| HW-NAME-004 | Manifest filename must be `hostwright.yaml`. | Naming Convention Folder | Implemented | `Sources/HostwrightCore/HostwrightIdentity.swift` | CLI and manifest smoke tests | 2 |
+| HW-NAME-005 | Old codename references must remain only in source-material or naming-history contexts. | Naming Convention Folder | Partially implemented | `scripts/grep-orchard.sh`, `docs/source-material/README.md`, `docs/naming/` | `scripts/grep-orchard.sh .` | 0 |
+
+## CLI
+
+| ID | Requirement | Source document | Current status | Implementation file if any | Test coverage if any | Release phase |
+| --- | --- | --- | --- | --- | --- | --- |
+| HW-CLI-001 | CLI must route command intent without owning business logic. | Final Production Arsenal | Partially implemented | `Sources/HostwrightCLI/` | CLI smoke tests | 2 |
+| HW-CLI-002 | `hostwright --version` must print a development or release version. | Phase 2 maintainer scope; naming archive command surface | Implemented | `Sources/HostwrightCLI/main.swift` | CLI smoke tests | 2 |
+| HW-CLI-003 | `hostwright init` must create `hostwright.yaml` without overwriting by default. | Agent Engineering Manual | Implemented | `Sources/HostwrightCLI/main.swift` | CLI smoke tests | 2 |
+| HW-CLI-004 | `hostwright validate` must validate manifest shape without registry or runtime calls. | Agent Engineering Manual | Implemented for restricted subset | `Sources/HostwrightCLI/main.swift`, `Sources/HostwrightManifest/` | CLI and manifest smoke tests | 2 |
+| HW-CLI-005 | `hostwright plan` must be non-mutating and show that runtime observation is unavailable until implemented. | Agent Engineering Manual | Implemented for Phase 2 subset | `Sources/HostwrightCLI/main.swift`, `Sources/HostwrightReconciler/ReconciliationPlanner.swift` | CLI and reconciler smoke tests | 2 |
+| HW-CLI-006 | `hostwright status` must not claim runtime state unless observed. | Agent Engineering Manual | Implemented for manifest-level status | `Sources/HostwrightCLI/main.swift` | CLI smoke tests | 2 |
+| HW-CLI-007 | `hostwright doctor` must run safe local checks. | Final Production Arsenal; Document 2 | Partially implemented | `Sources/HostwrightHealth/DoctorModels.swift`, `Sources/HostwrightCLI/main.swift` | CLI and health smoke tests | 2 |
+| HW-CLI-008 | `hostwright apply` must validate, plan, persist intent, apply idempotently, and emit events. | Agent Engineering Manual | Planned | None | None | 8 |
+
+## Manifest
+
+| ID | Requirement | Source document | Current status | Implementation file if any | Test coverage if any | Release phase |
+| --- | --- | --- | --- | --- | --- | --- |
+| HW-MANIFEST-001 | Manifest must be named `hostwright.yaml`. | Naming Convention Folder | Implemented | `HostwrightIdentity.manifestFileName` | CLI smoke tests | 2 |
+| HW-MANIFEST-002 | Manifest must define a local project and services. | Agent Engineering Manual | Implemented for Phase 2 shape | `Sources/HostwrightManifest/ManifestModel.swift` | Manifest smoke tests | 2 |
+| HW-MANIFEST-003 | Manifest parser must fail closed on unsupported Phase 2 shapes. | Phase 2 maintainer scope | Implemented | `Sources/HostwrightManifest/ManifestParser.swift` | Manifest smoke tests | 2 |
+| HW-MANIFEST-004 | Full YAML parser dependency decision must be made before expanding beyond the restricted subset. | Final Production Arsenal | Planned | None | None | 4 |
+| HW-MANIFEST-005 | Manifest must eventually support image digest and architecture policy. | Document 2 | Planned | None | None | 7 |
+
+## Validation
+
+| ID | Requirement | Source document | Current status | Implementation file if any | Test coverage if any | Release phase |
+| --- | --- | --- | --- | --- | --- | --- |
+| HW-VALID-001 | Validate project and service names. | Agent Engineering Manual | Implemented | `ManifestValidator.swift` | Manifest smoke tests | 2 |
+| HW-VALID-002 | Validate every service has an image. | Agent Engineering Manual | Implemented | `ManifestValidator.swift` | Manifest smoke tests | 2 |
+| HW-VALID-003 | Validate port syntax before any runtime action. | Agent Engineering Manual; Document 3 | Implemented for string ports | `ManifestValidator.swift`, `HostwrightNetworking/NetworkingModels.swift` | Manifest and networking smoke tests | 2 |
+| HW-VALID-004 | Validate volumes conservatively and block unsafe host mounts before mutation. | Document 2 | Partially implemented | `ManifestValidator.swift` | Manifest smoke tests | 7 |
+| HW-VALID-005 | Validate secrets/env paths to prevent credential leakage. | Document 2 | Planned | None | None | 7 |
+| HW-VALID-006 | Validate unsupported runtime and networking features explicitly. | Agent Engineering Manual; Document 3 | Partially implemented | `docs/reference/limitations.md`, `ManifestParser.swift` | Docs review; manifest smoke tests | 3 |
+
+## RuntimeAdapter
+
+| ID | Requirement | Source document | Current status | Implementation file if any | Test coverage if any | Release phase |
+| --- | --- | --- | --- | --- | --- | --- |
+| HW-RUNTIME-001 | Every runtime operation must go through `RuntimeAdapter`. | Agent Engineering Manual; Final Production Arsenal | Partially implemented | `Sources/HostwrightRuntime/RuntimeAdapter.swift`, `Sources/HostwrightRuntime/RuntimeModels.swift` | Runtime and reconciler smoke tests | 4 |
+| HW-RUNTIME-002 | No reconciler or CLI code may call Apple container directly. | Agent Engineering Manual; Final Production Arsenal | Partially implemented | Runtime behavior is isolated in `HostwrightRuntime`; current CLI process lookup is documented as a non-runtime doctor/toolchain exception. | Code review; smoke tests | 4 |
+| HW-RUNTIME-003 | Adapter must expose typed observation, planning, events, and errors. | Agent Engineering Manual | Implemented as contract infrastructure | `RuntimeAdapter.swift`, `RuntimeModels.swift`, `MockRuntimeAdapter.swift` | Runtime smoke tests | 4 |
+| HW-RUNTIME-004 | Runtime subprocess execution must have timeouts, stderr capture, cancellation, and typed errors. | Agent Engineering Manual | Implemented as contract/fake-runner infrastructure | `RuntimeCommand.swift`, `RuntimeRedaction.swift` | Runtime smoke tests with fake runner only | 4 |
+| HW-RUNTIME-005 | Apple container observation must begin read-only before mutation. | Final Production Arsenal | Planned | None | None | 5 |
+| HW-RUNTIME-006 | Runtime mutation must not begin until state, planning, and safety gates exist. | Agent Engineering Manual; Document 2 | Enforced as unavailable in Phase 4 contracts | `RuntimeAdapter.swift`, `MockRuntimeAdapter.swift` | Runtime smoke tests | 8 |
+
+## State / SQLite
+
+| ID | Requirement | Source document | Current status | Implementation file if any | Test coverage if any | Release phase |
+| --- | --- | --- | --- | --- | --- | --- |
+| HW-STATE-001 | Desired state must be stored durably in SQLite. | Agent Engineering Manual; Final Production Arsenal | Planned | `Sources/HostwrightState/StateStore.swift` scaffold | State smoke tests only | 6 |
+| HW-STATE-002 | State store must include migrations and transaction boundaries. | Agent Engineering Manual; Final Production Arsenal | Planned | None | None | 6 |
+| HW-STATE-003 | Event and operation records must survive process restart. | Agent Engineering Manual; Document 2 | Planned | None | None | 6 |
+| HW-STATE-004 | Secrets must not be stored in plaintext state. | Document 2 | Planned | None | None | 6 |
+| HW-STATE-005 | Ownership ledger must distinguish Hostwright-owned resources from user-owned resources. | Agent Engineering Manual; Document 2 | Planned | None | None | 6 |
+
+## Reconciler / Planner
+
+| ID | Requirement | Source document | Current status | Implementation file if any | Test coverage if any | Release phase |
+| --- | --- | --- | --- | --- | --- | --- |
+| HW-RECON-001 | Reconciliation must compare desired and observed state as separate inputs. | Agent Engineering Manual | Partially implemented | `Sources/HostwrightReconciler/ReconciliationPlanner.swift` | Reconciler smoke tests | 2 |
+| HW-RECON-002 | Plans must be deterministic and non-mutating before apply. | Agent Engineering Manual; Document 2 | Partially implemented | `ManifestDryRunPlanner` | Reconciler and CLI smoke tests | 2 |
+| HW-RECON-003 | Drift detection must identify missing, stopped, unhealthy, and modified resources. | Agent Engineering Manual | Planned | None | None | 7 |
+| HW-RECON-004 | Apply must be idempotent and persist intent before mutation. | Agent Engineering Manual; Document 2 | Planned | None | None | 8 |
+| HW-RECON-005 | Partial apply failure must leave recoverable operation records. | Document 2 | Planned | None | None | 8 |
+
+## Health
+
+| ID | Requirement | Source document | Current status | Implementation file if any | Test coverage if any | Release phase |
+| --- | --- | --- | --- | --- | --- | --- |
+| HW-HEALTH-001 | Manifest must model health checks. | Agent Engineering Manual | Partially implemented | `ManifestModel.swift`, `ManifestValidator.swift` | Manifest smoke tests | 2 |
+| HW-HEALTH-002 | Runtime health execution must be honest about observed runtime state. | Agent Engineering Manual | Planned | None | None | 9 |
+| HW-HEALTH-003 | Restart policy must include crash-loop backoff. | Document 2 | Planned | None | None | 9 |
+
+## Networking
+
+| ID | Requirement | Source document | Current status | Implementation file if any | Test coverage if any | Release phase |
+| --- | --- | --- | --- | --- | --- | --- |
+| HW-NET-001 | Networking must be declared state, not incidental shell output. | Document 3 | Planned | `Sources/HostwrightNetworking/NetworkingModels.swift` scaffold | Networking smoke tests | 7 |
+| HW-NET-002 | Port conflicts must fail during planning before mutation. | Document 3 | Planned | `NetworkingModels.swift` scaffold | None | 7 |
+| HW-NET-003 | Project and localhost exposure may be considered first; LAN, tunnel, and public exposure are blocked by default. | Document 3 | Partially implemented | `NetworkingModels.swift`, `docs/architecture/networking-boundary.md` | Networking smoke tests | 7 |
+| HW-NET-004 | DNS, tunnel, and cloud connector behavior require separate research gates. | Document 3 | Deferred | Docs only | Docs review | Deferred |
+
+## Safety / Security
+
+| ID | Requirement | Source document | Current status | Implementation file if any | Test coverage if any | Release phase |
+| --- | --- | --- | --- | --- | --- | --- |
+| HW-SAFE-001 | Every apply operation must support dry-run planning before mutation. | Document 2 | Planned | `ManifestDryRunPlanner` subset | CLI and reconciler smoke tests | 8 |
+| HW-SAFE-002 | Destructive operations require preview, ownership checks, confirmation design, and audit events. | Document 2 | Planned | Docs only | None | 9 |
+| HW-SAFE-003 | Named volumes must not be deleted by default. | Document 2 | Planned | None | None | 9 |
+| HW-SAFE-004 | Secret values must not appear in manifests, logs, events, status, reports, fixtures, or docs examples. | Document 2 | Planned | Docs only | None | 6 |
+| HW-SAFE-005 | Privileged helpers are rejected unless a future threat model proves necessity. | Document 2 | Rejected for first release | Docs only | Docs review | Rejected |
+| HW-SAFE-006 | Public/LAN/tunnel exposure must require explicit policy and review. | Document 3 | Deferred for first release | Docs and networking scaffold | Docs review | Deferred |
+
+## Observability
+
+| ID | Requirement | Source document | Current status | Implementation file if any | Test coverage if any | Release phase |
+| --- | --- | --- | --- | --- | --- | --- |
+| HW-OBS-001 | Hostwright must emit local events for meaningful operations. | Agent Engineering Manual; Final Production Arsenal | Planned | `Sources/HostwrightObservability/ObservabilityModels.swift` scaffold | Observability smoke tests | 6 |
+| HW-OBS-002 | Status must distinguish desired state, observed runtime state, health, drift, restarts, and ports. | Agent Engineering Manual | Planned | Phase 2 manifest-level status only | CLI smoke tests only | 9 |
+| HW-OBS-003 | Logs and diagnostics must avoid secret leakage. | Document 2 | Planned | None | None | 9 |
+| HW-OBS-004 | OSLog is the planned local logging direction. | Final Production Arsenal | Planned | None | None | 9 |
+
+## Compatibility
+
+| ID | Requirement | Source document | Current status | Implementation file if any | Test coverage if any | Release phase |
+| --- | --- | --- | --- | --- | --- | --- |
+| HW-COMPAT-001 | First supported release targets Apple silicon. | Agent Engineering Manual; Document 2 | Implemented as compatibility gate | `HostwrightIdentity.swift`, `DoctorModels.swift` | Core and CLI smoke tests | 1 |
+| HW-COMPAT-002 | First supported release targets macOS 26+. | Agent Engineering Manual; Final Production Arsenal | Implemented as compatibility gate | `Package.swift`, `HostwrightIdentity.swift` | Core and CLI smoke tests | 1 |
+| HW-COMPAT-003 | Intel Macs and older macOS releases are out of first-release scope. | Agent Engineering Manual | Implemented in docs/gate | `docs/reference/compatibility.md` | Docs review | 1 |
+| HW-COMPAT-004 | GPU/ANE/Metal/Core ML/MLX support inside containers must not be claimed without proof. | Document 2 | Rejected for first release | Docs only | Docs review | Rejected |
+| HW-COMPAT-005 | CRI, Kubernetes, Docker API, and full Compose parity must not be claimed. | Agent Engineering Manual; Final Production Arsenal | Rejected for first release | Docs and ADRs | Docs review | Rejected |
+
+## Docs / Site
+
+| ID | Requirement | Source document | Current status | Implementation file if any | Test coverage if any | Release phase |
+| --- | --- | --- | --- | --- | --- | --- |
+| HW-DOCS-001 | Every supported command must have reference docs. | Agent Engineering Manual | Partially implemented | `docs/reference/cli.md` | Docs review | 2 |
+| HW-DOCS-002 | Unsupported behavior must be explicit and searchable. | Agent Engineering Manual | Partially implemented | `docs/reference/limitations.md`, site limitations page | `scripts/grep-orchard.sh .`; docs review | 3 |
+| HW-DOCS-003 | Public website copy must not claim unimplemented behavior as current support. | Agent Engineering Manual; Final Production Arsenal | Planned for separate website repository | Not committed in core repo; website belongs in `hostwright.dev` | Website repo review | 3 |
+| HW-DOCS-004 | Source material must remain preserved and traceable. | Final Production Arsenal; Naming Convention Folder | Implemented | `docs/source-material/README.md` | Preservation log review | 0 |
+
+## Release
+
+| ID | Requirement | Source document | Current status | Implementation file if any | Test coverage if any | Release phase |
+| --- | --- | --- | --- | --- | --- | --- |
+| HW-REL-001 | Release language must use Foundation, Reconciliation, Networking, Security Hardening, Public Preview, Stable. | Final Production Arsenal | Planned | Docs only | Docs review | 10 |
+| HW-REL-002 | Public release requires build, tests, docs, examples, compatibility matrix, and limitations review. | Agent Engineering Manual | Planned | None | None | 10 |
+| HW-REL-003 | Signing, notarization, SBOM, checksums, and provenance are considered before public artifacts. | Final Production Arsenal; Document 2 | Planned | None | None | 10 |
+| HW-REL-004 | Benchmarks begin before claims about Apple silicon performance. | Document 2; Final Production Arsenal | Planned | None | None | 10 |

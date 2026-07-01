@@ -1,0 +1,31 @@
+{
+  "schema": "hostwright.apple-container.observation.v1",
+  "project": "demo",
+  "runtimeVersion": "fixture-runtime-0",
+  "services": [
+    {
+      "name": "api",
+      "instance": "api-1",
+      "image": "ghcr.io/example/api:latest",
+      "lifecycle": "running",
+      "health": "healthy",
+      "observedAt": "2026-06-30T00:00:00Z",
+      "ports": [
+        {
+          "host": 8080,
+          "container": 8080,
+          "protocol": "tcp",
+          "bind": "127.0.0.1"
+        }
+      ],
+      "mounts": [
+        {
+          "source": "/tmp/hostwright-fixture",
+          "target": "/data",
+          "access": "readOnly"
+        }
+      ]
+    }
+  ]
+}
+

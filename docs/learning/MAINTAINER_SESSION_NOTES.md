@@ -314,3 +314,93 @@ swift test
 scripts/grep-orchard.sh .
 scripts/test.sh
 ```
+
+## Phase 5 update: read-only Apple container observation
+
+### Stage goal
+
+Begin Apple container integration with read-only observation infrastructure only.
+
+### Problem
+
+Before Phase 5, Hostwright had a strong runtime contract but no adapter that could attempt Apple container observation. The project needed a path to observe runtime state without opening a mutation path or scattering shell commands through CLI, health, state, or reconciler code.
+
+### Solution
+
+Phase 5 adds:
+
+- `AppleContainerReadOnlyAdapter` behind `RuntimeAdapter`;
+- `AppleContainerCommand` as the only place for Apple command shapes;
+- `RuntimeExecutableResolver` for executable lookup;
+- `FoundationRuntimeProcessRunner` for policy-approved read-only specs;
+- `AppleContainerObservationParser` for a fixture-defined observation schema;
+- fixtures for empty, running, and redaction cases;
+- smoke checks for missing executable, command policy, parser failure, redaction, mutation-unavailable behavior, and boundary isolation.
+
+### Why this design
+
+The design lets Hostwright attempt read-only observation without making unverified Apple container output into product truth. If `container` is missing, the adapter reports runtime unavailable. If output is unsupported, the parser fails closed. Mutation remains unavailable until Phase 8.
+
+### Files changed
+
+| File | What changed | Why it matters | What breaks if removed |
+| ---- | ------------ | -------------- | ---------------------- |
+| `Sources/HostwrightRuntime/AppleContainerReadOnlyAdapter.swift` | Added read-only adapter. | Gives Apple observation one RuntimeAdapter entry point. | No Phase 5 adapter exists. |
+| `Sources/HostwrightRuntime/AppleContainerCommand.swift` | Isolated Apple command shapes. | Prevents command strings from spreading. | CLI/reconciler may grow ad hoc runtime command logic. |
+| `Sources/HostwrightRuntime/AppleContainerObservationParser.swift` | Added fail-closed parser. | Converts fixture-defined output into typed observed state. | Runtime output cannot become typed observations safely. |
+| `Sources/HostwrightRuntime/FoundationRuntimeProcessRunner.swift` | Added guarded live runner. | Enforces read-only classification, resolution, timeout, capture, and redaction. | Future adapter work would need unsafe process execution. |
+| `Sources/HostwrightRuntime/RuntimeExecutableResolver.swift` | Added executable resolver. | Proves live specs use resolved executables. | Commands could use arbitrary unresolved paths. |
+| `Tests/HostwrightRuntimeTests/Fixtures/*` | Added empty, running, and redaction fixtures. | Gives parser deterministic coverage. | Parser behavior becomes unreviewable. |
+| `Tests/HostwrightRuntimeTests/HostwrightRuntimeSmoke.swift` | Added Phase 5 smoke checks. | Proves boundaries compile and basic behavior holds. | Regression risk increases. |
+| `docs/*` Phase 5 updates | Updated runtime docs, requirements, limits, build status, and devlog. | Keeps public claims honest. | Maintainer may overclaim runtime support. |
+
+### Concepts I must understand
+
+- Read-only observation is not runtime mutation.
+- The CLI still does not expose observed runtime status.
+- `doctor` still only checks executable presence.
+- Apple command shapes must remain inside the runtime adapter layer.
+- The parser schema is fixture-defined and fail-closed, not a verified public Apple CLI compatibility claim.
+- `FoundationRuntimeProcessRunner` is guarded by command classification and executable resolution.
+
+### Risks
+
+- Real Apple container output may not match the fixture-defined parser schema.
+- SwiftPM warns that fixture `.txt` files are unhandled resources because `Package.swift` was not changed in this phase.
+- Smoke tests remain weaker than XCTest or Swift Testing.
+- Redaction rules are conservative but not complete.
+
+### How to verify
+
+```bash
+swift build
+swift test
+scripts/grep-orchard.sh .
+scripts/test.sh
+git status --short
+git diff --stat
+git diff --name-only
+```
+
+### Maintainer checklist
+
+- [ ] I can explain why Phase 5 is observation-only.
+- [ ] I can explain why the live runner is not a general shell-out path.
+- [ ] I can explain how missing Apple container degrades.
+- [ ] I can explain how unsupported output fails closed.
+- [ ] I can explain why `apply` and runtime mutation remain absent.
+
+### Quiz
+
+Answer these before approving the Phase 5 commit:
+
+1. Why does `FoundationRuntimeProcessRunner` require a typed `RuntimeCommandSpec`?
+2. What makes a Phase 5 command executable?
+3. Where are Apple container command shapes allowed to live?
+4. What happens when `container` is missing?
+5. What happens when Apple container output does not match the fixture schema?
+6. Why does `doctor` not become runtime observation in Phase 5?
+7. Which tests prove mutation remains unavailable?
+8. Why are parser fixtures useful even if they are not proof of real Apple CLI output?
+9. What does redaction protect in Phase 5?
+10. Why does runtime mutation wait until Phase 8?

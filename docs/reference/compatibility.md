@@ -16,7 +16,6 @@ platforms: [.macOS(.v26)]
 
 This was locally validated with Swift 6.3.2 before creating `Package.swift`.
 
-## Phase 1 Limitation
+## Runtime Limitation
 
-The package can express macOS 26, but runtime compatibility is not fully implemented. Apple container CLI was not found during local inspection, so runtime behavior remains unverified.
-
+The package can express macOS 26, but runtime compatibility is not fully implemented. Phase 5 adds read-only observation infrastructure behind `RuntimeAdapter`, but real Apple container behavior remains unverified unless local output matches the supported parser shape.

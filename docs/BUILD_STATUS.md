@@ -8,19 +8,30 @@
 
 ## Verified On 2026-06-30
 
-- `swift build` succeeds after the Phase 4 RuntimeAdapter contract infrastructure changes.
-- `swift test` succeeds as compile/link smoke verification, including Phase 4 runtime contract smoke checks.
+- `swift build` succeeds after the Phase 5 read-only Apple container observation infrastructure changes.
+- `swift test` succeeds as compile/link smoke verification, including Phase 5 runtime contract and parser fixture smoke checks.
 - `scripts/grep-orchard.sh .` succeeds and reports historical references only in `docs/source-material/` and `docs/naming/`.
 - `scripts/test.sh` succeeds and runs `swift build` plus `swift test`.
 
 ## Current Implementation Truth
 
-- Phase 4 changes Swift runtime contract models and smoke checks.
+- Phase 5 adds read-only Apple container observation infrastructure behind `RuntimeAdapter`.
 - No Apple container command was called.
-- No live RuntimeAdapter process execution was implemented.
-- A fake runtime process runner exists for tests only.
+- `FoundationRuntimeProcessRunner` exists for policy-approved read-only command specs, but local verification in this session used fake process execution only.
+- `AppleContainerReadOnlyAdapter` reports missing `container` as runtime unavailable and rejects mutation through the adapter contract.
+- `AppleContainerObservationParser` accepts only the fixture-defined `hostwright.apple-container.observation.v1` schema and fails closed on unsupported output.
 - No SQLite schema, migration, durable state, or database file was created.
-- No `apply`, cleanup, daemon loop, runtime mutation, or runtime observation was implemented.
+- No `apply`, cleanup, daemon loop, runtime mutation, CLI-exposed observed runtime status, or guaranteed live Apple container observation was implemented.
+
+## SwiftPM Fixture Resources
+
+The three Phase 5 text fixtures under `Tests/HostwrightRuntimeTests/Fixtures/` are declared as `HostwrightRuntimeTests` resources in `Package.swift`:
+
+- `apple-container-list-empty.txt`
+- `apple-container-list-running.txt`
+- `apple-container-list-redaction.txt`
+
+SwiftPM copies them during `swift test`, and the unhandled-resource warning is gone.
 
 ## Test Framework Limitation
 

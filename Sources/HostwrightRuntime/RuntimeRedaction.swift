@@ -30,11 +30,16 @@ public struct RuntimeRedactionPolicy: Equatable, Sendable {
         var redacted = text
         let patterns = [
             #"(?i)(password|passwd|token|secret|credential|authorization|auth)[=:]\s*([^\s,;]+)"#,
+            #"(?i)("(?:password|passwd|token|secret|credential|authorization|auth)"\s*:\s*")([^"]+)(")"#,
             #"(?i)(bearer)\s+([A-Za-z0-9._~+/=-]+)"#
         ]
 
         for pattern in patterns {
-            redacted = redacted.replacing(pattern: pattern, with: "$1=\(replacement)")
+            if pattern.contains(#""\s*:\s*""#) {
+                redacted = redacted.replacing(pattern: pattern, with: "$1\(replacement)$3")
+            } else {
+                redacted = redacted.replacing(pattern: pattern, with: "$1=\(replacement)")
+            }
         }
 
         return redacted

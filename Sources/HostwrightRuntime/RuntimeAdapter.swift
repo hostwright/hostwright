@@ -66,35 +66,37 @@ public protocol RuntimeAdapter: Sendable {
 }
 
 public struct AppleContainerCLIAdapter: RuntimeAdapter {
-    public init() {}
+    private let readOnlyAdapter: AppleContainerReadOnlyAdapter
+
+    public init(
+        executableResolver: RuntimeExecutableResolving = RuntimeExecutableResolver(),
+        processRunner: RuntimeProcessRunning = FoundationRuntimeProcessRunner(),
+        redactionPolicy: RuntimeRedactionPolicy = .default
+    ) {
+        self.readOnlyAdapter = AppleContainerReadOnlyAdapter(
+            executableResolver: executableResolver,
+            processRunner: processRunner,
+            redactionPolicy: redactionPolicy
+        )
+    }
 
     public func metadata() async -> RuntimeAdapterMetadata {
-        RuntimeAdapterMetadata(
-            adapterName: "AppleContainerCLIAdapter",
-            adapterVersion: "0.0.0-dev",
-            runtimeName: "Apple container CLI",
-            runtimeVersion: nil,
-            supportsMutation: false,
-            capabilities: []
-        )
+        await readOnlyAdapter.metadata()
     }
 
     public func capabilities() async throws -> [RuntimeCapability] {
-        []
+        try await readOnlyAdapter.capabilities()
     }
 
     public func observe(desiredState: DesiredRuntimeState) async throws -> ObservedRuntimeState {
-        throw RuntimeAdapterError.runtimeUnavailable("Apple container CLI observation begins in Phase 5; Phase 4 does not execute Apple container.")
+        try await readOnlyAdapter.observe(desiredState: desiredState)
     }
 
     public func plan(desiredState: DesiredRuntimeState, observedState: ObservedRuntimeState) async throws -> RuntimePlan {
-        RuntimePlan(
-            actions: [],
-            warnings: ["Apple container CLI adapter is a Phase 4 contract scaffold. No Apple container command was executed."]
-        )
+        try await readOnlyAdapter.plan(desiredState: desiredState, observedState: observedState)
     }
 
     public func execute(_ action: PlannedRuntimeAction, confirmation: RuntimeMutationConfirmation?) async throws -> RuntimeEvent {
-        throw RuntimeAdapterError.mutationUnavailableInCurrentPhase("Runtime mutation begins in Phase 8; Phase 4 cannot execute action '\(action.kind.rawValue)'.")
+        try await readOnlyAdapter.execute(action, confirmation: confirmation)
     }
 }

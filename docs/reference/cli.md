@@ -1,6 +1,6 @@
 # CLI Reference
 
-Phase 2 provides a dependency-free, non-mutating `hostwright` CLI foundation.
+The current CLI provides a dependency-free, non-mutating `hostwright` command surface.
 
 ## Commands
 
@@ -25,7 +25,7 @@ Prints the development version:
 
 Creates `hostwright.yaml` in the current directory only when the file does not already exist.
 
-Phase 2 does not implement `--force`; existing manifests are not overwritten.
+`--force` is not implemented; existing manifests are not overwritten.
 
 ## `hostwright validate [path]`
 
@@ -42,7 +42,7 @@ It does not:
 
 Reads and validates the manifest, then prints a non-mutating dry-run plan.
 
-Runtime observation is unavailable in Phase 2. The plan does not inspect Apple container and does not claim resources are running, stopped, healthy, or unhealthy.
+Runtime observation infrastructure exists behind `RuntimeAdapter`, but `hostwright plan` does not inspect Apple container and does not claim resources are running, stopped, healthy, or unhealthy.
 
 ## `hostwright status [path]`
 
@@ -61,4 +61,3 @@ Runs safe local checks only:
 - `hostwright.yaml` presence.
 
 `doctor` does not run Apple container commands.
-

@@ -1,0 +1,6 @@
+{
+  "schema": "hostwright.apple-container.observation.v1",
+  "project": "demo",
+  "services": []
+}
+

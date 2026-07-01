@@ -1,0 +1,6 @@
+{
+  "schema": "unsupported",
+  "project": "demo",
+  "message": "token=fake-token password=fake-password"
+}
+

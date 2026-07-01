@@ -30,6 +30,28 @@ let hostwrightReconcilerSmoke: Void = {
     precondition(unhealthyPlan.actions.isEmpty)
     precondition(unhealthyPlan.warnings.contains { $0.contains("unhealthy") })
 
+    let adapterObserved = ObservedRuntimeState(
+        projectName: "demo",
+        services: [
+            ObservedRuntimeService(
+                identity: identity,
+                image: "ghcr.io/example/web:latest",
+                lifecycleState: .running,
+                healthState: .healthy
+            )
+        ],
+        adapterMetadata: RuntimeAdapterMetadata(
+            adapterName: "AppleContainerReadOnlyAdapter",
+            adapterVersion: "0.0.0-dev",
+            runtimeName: "Apple container CLI",
+            supportsMutation: false,
+            capabilities: [.readOnlyObservation]
+        )
+    )
+    let adapterPlan = planner.plan(desired: desired, observed: adapterObserved)
+    precondition(adapterPlan.actions.isEmpty)
+    precondition(adapterPlan.warnings.isEmpty)
+
     let dryRun = ManifestDryRunPlanner.plan(
         for: HostwrightManifest(
             project: "api-local",

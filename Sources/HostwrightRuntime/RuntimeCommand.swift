@@ -5,6 +5,11 @@ public enum RuntimeCommandClassification: String, Equatable, Sendable {
     case unknown
 }
 
+public enum RuntimeExecutableResolution: String, Equatable, Sendable {
+    case unresolved
+    case resolvedByRuntimeExecutableResolver
+}
+
 public struct RuntimeCommandTimeout: Equatable, Sendable {
     public static let defaultSeconds = 30
     public static let maximumSeconds = 300
@@ -23,6 +28,7 @@ public struct RuntimeCommandSpec: Equatable, Sendable {
     public let workingDirectory: String?
     public let timeout: RuntimeCommandTimeout
     public let classification: RuntimeCommandClassification
+    public let executableResolution: RuntimeExecutableResolution
     public let purpose: String
 
     public init(
@@ -32,6 +38,7 @@ public struct RuntimeCommandSpec: Equatable, Sendable {
         workingDirectory: String? = nil,
         timeout: RuntimeCommandTimeout = RuntimeCommandTimeout(),
         classification: RuntimeCommandClassification,
+        executableResolution: RuntimeExecutableResolution = .unresolved,
         purpose: String
     ) {
         self.executablePath = executablePath
@@ -40,6 +47,7 @@ public struct RuntimeCommandSpec: Equatable, Sendable {
         self.workingDirectory = workingDirectory
         self.timeout = timeout
         self.classification = classification
+        self.executableResolution = executableResolution
         self.purpose = purpose
     }
 
@@ -51,6 +59,7 @@ public struct RuntimeCommandSpec: Equatable, Sendable {
             workingDirectory: workingDirectory,
             timeout: timeout,
             classification: classification,
+            executableResolution: executableResolution,
             purpose: purpose
         )
     }
@@ -94,13 +103,28 @@ public struct RuntimeCommandResult: Equatable, Sendable {
 
 public enum RuntimeCommandPolicy {
     public static func validatePhase4(_ spec: RuntimeCommandSpec) throws {
+        try validateReadOnlyClassification(spec, phaseName: "Phase 4")
+    }
+
+    public static func validateReadOnlyExecution(_ spec: RuntimeCommandSpec, phaseName: String = "Phase 5") throws {
+        try validateReadOnlyClassification(spec, phaseName: phaseName)
+
+        guard spec.executableResolution == .resolvedByRuntimeExecutableResolver else {
+            throw RuntimeAdapterError.commandRejected(
+                classification: spec.classification,
+                message: "\(phaseName) refuses runtime command specs whose executable was not resolved through RuntimeExecutableResolver."
+            )
+        }
+    }
+
+    private static func validateReadOnlyClassification(_ spec: RuntimeCommandSpec, phaseName: String) throws {
         switch spec.classification {
         case .readOnly:
             return
         case .mutating, .forbidden, .unknown:
             throw RuntimeAdapterError.commandRejected(
                 classification: spec.classification,
-                message: "Phase 4 does not execute mutating, forbidden, or unknown runtime command specs."
+                message: "\(phaseName) does not execute mutating, forbidden, or unknown runtime command specs."
             )
         }
     }
@@ -125,7 +149,7 @@ public struct FakeRuntimeProcessRunner: RuntimeProcessRunning {
     }
 
     public func run(_ spec: RuntimeCommandSpec) async throws -> RuntimeCommandResult {
-        try RuntimeCommandPolicy.validatePhase4(spec)
+        try RuntimeCommandPolicy.validateReadOnlyExecution(spec, phaseName: "Phase 5")
 
         switch behavior {
         case .result(let result):

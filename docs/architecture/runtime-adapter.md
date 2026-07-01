@@ -6,30 +6,34 @@ All runtime-related behavior must go through `RuntimeAdapter`.
 
 Hostwright needs to observe, plan, and eventually mutate container runtime state without scattering shell commands across CLI, daemon, reconciler, state, health, or cleanup code. The adapter boundary keeps runtime assumptions isolated, typed, redacted, and testable.
 
-## Phase 4 State
+## Phase 5 State
 
-Phase 4 builds runtime contract infrastructure only.
+Phase 5 adds read-only Apple container observation infrastructure behind `RuntimeAdapter`.
 
-Implemented in Phase 4:
+Implemented by Phase 5:
 
 - typed runtime service identity, desired service, observed service, lifecycle state, health state, ports, mounts, environment values, events, capabilities, and adapter metadata;
 - expanded `RuntimeAdapter` protocol for metadata, capability discovery, read-only observation, planning, and future mutation hooks;
 - `MockRuntimeAdapter` for deterministic tests without live process execution;
 - runtime command specs, command results, command classification, timeout model, and process runner protocol;
 - fake process runner for tests;
-- redaction policy for command args, env values, stdout, stderr, and runtime errors.
+- Foundation-backed process runner for policy-approved read-only runtime commands;
+- executable resolution through `RuntimeExecutableResolver`;
+- `AppleContainerReadOnlyAdapter` for read-only observation attempts;
+- fixture-defined observation parser for empty and running service snapshots;
+- redaction policy for command args, env values, stdout, stderr, parser errors, and runtime errors.
 
-Not implemented in Phase 4:
+Not implemented in Phase 5:
 
-- Apple container observation;
 - Apple container mutation;
 - `hostwright apply`;
 - SQLite state;
 - cleanup;
 - restart policy execution;
-- live runtime process execution.
+- daemon runtime loop;
+- CLI status backed by observed runtime state.
 
-Apple container observation begins in Phase 5. Runtime mutation begins only in Phase 8.
+Runtime mutation begins only in Phase 8.
 
 ## RuntimeAdapter Protocol Shape
 
@@ -57,7 +61,16 @@ The command spec records:
 - classification;
 - purpose.
 
-Phase 4 includes only fake process execution for tests. No live Apple container command is executed.
+Phase 5 includes `FoundationRuntimeProcessRunner`, but it is not a general shell-out path. Before any live process can run:
+
+- the command must be represented as `RuntimeCommandSpec`;
+- the command classification must be `readOnly`;
+- the executable must be resolved through `RuntimeExecutableResolver`;
+- mutating, forbidden, unknown, and unresolved specs are rejected;
+- timeout and output capture are enforced;
+- command args, env, stdout, stderr, and errors are redacted.
+
+Tests use fake process execution and fixtures. Local live observation is allowed only through `AppleContainerReadOnlyAdapter`.
 
 ## Command Classification
 
@@ -68,9 +81,9 @@ Phase 4 includes only fake process execution for tests. No live Apple container 
 - `forbidden`;
 - `unknown`.
 
-Phase 4 permits only read-only command specs through the policy gate, and only in fake process-runner tests. Mutating, forbidden, and unknown command specs are rejected.
+Phase 5 permits only read-only command specs through the policy gate. Mutating, forbidden, unknown, and unresolved command specs are rejected before execution.
 
-Examples in code are illustrative Hostwright command specs. They are not claims about verified Apple container command semantics. Exact Apple container behavior must be verified in Phase 5 before becoming implementation truth.
+Apple container command strings live only in `AppleContainerCommand` and the read-only adapter. The current list-style command shape is a Phase 5 adapter assumption guarded by fail-closed parsing; it is not a public compatibility claim.
 
 ## Timeout And Cancellation Model
 
@@ -88,7 +101,7 @@ The command result model records:
 - whether the command timed out;
 - whether the command was cancelled.
 
-Live cancellation behavior is not implemented in Phase 4 because no live process runner exists yet. The contract exists so Phase 5 can implement read-only execution safely.
+The live runner enforces timeout by terminating the process and returning a redacted timeout error with partial output. Cancellation remains represented in the result model and should be tightened when the daemon loop exists.
 
 ## Redaction Rules
 
@@ -98,6 +111,7 @@ Runtime redaction applies to:
 - environment variables;
 - stdout;
 - stderr;
+- parser errors;
 - runtime error messages.
 
 The default policy redacts key/value patterns and sensitive key fragments such as token, password, secret, credential, auth, and key. Tests use fake placeholder values only.
@@ -110,3 +124,9 @@ The default policy redacts key/value patterns and sensitive key fragments such a
 - Health code must not mutate runtime state.
 - Runtime-related process execution must not bypass `RuntimeAdapter`.
 - Safe local diagnostics, such as reading files, checking manifest presence, executable lookup, and current `swift --version` doctor behavior, may remain outside `RuntimeAdapter` when they are not runtime behavior.
+
+## Parser Boundary
+
+`AppleContainerObservationParser` accepts only the Phase 5 fixture-defined JSON schema `hostwright.apple-container.observation.v1`. It fails closed on malformed output, unsupported schema names, unknown keys, unsupported lifecycle values, unsupported health values, unsupported protocols, and unsupported mount access values.
+
+If real Apple container output does not match this schema, Hostwright reports a parse failure instead of guessing. This protects the runtime boundary from turning unverified Apple CLI output into fake product truth.

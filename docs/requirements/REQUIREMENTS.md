@@ -58,12 +58,12 @@ Status values:
 
 | ID | Requirement | Source document | Current status | Implementation file if any | Test coverage if any | Release phase |
 | --- | --- | --- | --- | --- | --- | --- |
-| HW-RUNTIME-001 | Every runtime operation must go through `RuntimeAdapter`. | Agent Engineering Manual; Final Production Arsenal | Partially implemented | `Sources/HostwrightRuntime/RuntimeAdapter.swift`, `Sources/HostwrightRuntime/RuntimeModels.swift` | Runtime and reconciler smoke tests | 4 |
-| HW-RUNTIME-002 | No reconciler or CLI code may call Apple container directly. | Agent Engineering Manual; Final Production Arsenal | Partially implemented | Runtime behavior is isolated in `HostwrightRuntime`; current CLI process lookup is documented as a non-runtime doctor/toolchain exception. | Code review; smoke tests | 4 |
+| HW-RUNTIME-001 | Every runtime operation must go through `RuntimeAdapter`. | Agent Engineering Manual; Final Production Arsenal | Partially implemented | `Sources/HostwrightRuntime/RuntimeAdapter.swift`, `Sources/HostwrightRuntime/RuntimeModels.swift`, `Sources/HostwrightRuntime/AppleContainerReadOnlyAdapter.swift` | Runtime and reconciler smoke tests | 4 |
+| HW-RUNTIME-002 | No reconciler or CLI code may call Apple container directly. | Agent Engineering Manual; Final Production Arsenal | Partially implemented | Runtime behavior is isolated in `HostwrightRuntime`; current CLI process lookup is documented as a non-runtime doctor/toolchain exception. | Boundary smoke checks; code review | 4 |
 | HW-RUNTIME-003 | Adapter must expose typed observation, planning, events, and errors. | Agent Engineering Manual | Implemented as contract infrastructure | `RuntimeAdapter.swift`, `RuntimeModels.swift`, `MockRuntimeAdapter.swift` | Runtime smoke tests | 4 |
-| HW-RUNTIME-004 | Runtime subprocess execution must have timeouts, stderr capture, cancellation, and typed errors. | Agent Engineering Manual | Implemented as contract/fake-runner infrastructure | `RuntimeCommand.swift`, `RuntimeRedaction.swift` | Runtime smoke tests with fake runner only | 4 |
-| HW-RUNTIME-005 | Apple container observation must begin read-only before mutation. | Final Production Arsenal | Planned | None | None | 5 |
-| HW-RUNTIME-006 | Runtime mutation must not begin until state, planning, and safety gates exist. | Agent Engineering Manual; Document 2 | Enforced as unavailable in Phase 4 contracts | `RuntimeAdapter.swift`, `MockRuntimeAdapter.swift` | Runtime smoke tests | 8 |
+| HW-RUNTIME-004 | Runtime subprocess execution must have timeouts, stderr capture, cancellation, and typed errors. | Agent Engineering Manual | Implemented for read-only Phase 5 commands | `RuntimeCommand.swift`, `RuntimeRedaction.swift`, `FoundationRuntimeProcessRunner.swift`, `RuntimeExecutableResolver.swift` | Runtime smoke tests with fake runner; build coverage for live runner | 4 |
+| HW-RUNTIME-005 | Apple container observation must begin read-only before mutation. | Final Production Arsenal | Implemented as read-only adapter infrastructure | `AppleContainerReadOnlyAdapter.swift`, `AppleContainerCommand.swift`, `AppleContainerObservationParser.swift` | Runtime smoke tests with fixtures | 5 |
+| HW-RUNTIME-006 | Runtime mutation must not begin until state, planning, and safety gates exist. | Agent Engineering Manual; Document 2 | Enforced as unavailable in Phase 5 contracts | `RuntimeAdapter.swift`, `MockRuntimeAdapter.swift`, `AppleContainerReadOnlyAdapter.swift` | Runtime smoke tests | 8 |
 
 ## State / SQLite
 

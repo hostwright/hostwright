@@ -1,6 +1,6 @@
 # Limitations
 
-Hostwright is in Phase 3 alignment and test-foundation state. Phase 3 adds source-grounded requirements and acceptance gates. It does not add runtime behavior.
+Hostwright is in Phase 5 read-only Apple container observation infrastructure state. It can model and attempt read-only runtime observation through `RuntimeAdapter`, but runtime observation still depends on local Apple container availability and parser-supported output.
 
 ## Implemented Today
 
@@ -14,15 +14,18 @@ Hostwright is in Phase 3 alignment and test-foundation state. Phase 3 adds sourc
 - Swift Package Manager module boundaries.
 - RuntimeAdapter contract infrastructure, state scaffolds, reconciler scaffolds, health models, networking scaffolds, and observability scaffolds.
 - `MockRuntimeAdapter` and fake runtime process runner for tests only.
+- `AppleContainerReadOnlyAdapter` for read-only observation attempts through `RuntimeAdapter`.
+- `FoundationRuntimeProcessRunner` guarded by read-only command classification, executable resolution, timeouts, and redaction.
+- Fixture-defined Apple container observation parser for empty and running snapshots.
 - Source-material preservation and Hostwright naming controls.
 
 ## Not Implemented Today
 
 - Runtime mutation.
 - `hostwright apply`.
-- Apple container observation.
-- Apple container start, stop, create, delete, restart, cleanup, log, or inspect operations.
-- Live RuntimeAdapter process execution.
+- Guaranteed Apple container observation on every machine.
+- Apple container start, stop, create, delete, restart, cleanup, log, or detailed inspect operations.
+- Apple container mutation of any kind.
 - SQLite schema, migrations, durable state, or database files.
 - Desired-vs-observed drift detection from real runtime state.
 - Daemon scheduling loop.
@@ -65,6 +68,6 @@ The Phase 2 parser is not a general YAML parser. It accepts only the documented 
 
 ## Runtime Truth
 
-No current command observes Apple container runtime state. `hostwright plan` and `hostwright status` must be read as manifest-level outputs only. They do not prove that services are running, stopped, healthy, unhealthy, created, deleted, or reachable.
+The runtime module now contains read-only Apple container observation infrastructure, but the CLI still does not expose observed runtime status. `hostwright plan` and `hostwright status` remain manifest-level outputs only. They do not prove that services are running, stopped, healthy, unhealthy, created, deleted, or reachable.
 
-Phase 4 adds runtime contract infrastructure only. It does not execute Apple container commands. Apple container observation begins in Phase 5. Runtime mutation begins only in Phase 8.
+The Phase 5 parser accepts only the fixture-defined `hostwright.apple-container.observation.v1` schema. Unsupported or malformed output fails closed with redacted errors. Runtime mutation begins only in Phase 8.

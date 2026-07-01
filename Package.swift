@@ -81,7 +81,10 @@ let package = Package(
         ),
         .testTarget(
             name: "HostwrightRuntimeTests",
-            dependencies: ["HostwrightRuntime"]
+            dependencies: ["HostwrightRuntime"],
+            resources: [
+                .process("Fixtures")
+            ]
         ),
         .testTarget(
             name: "HostwrightStateTests",

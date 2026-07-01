@@ -404,3 +404,102 @@ Answer these before approving the Phase 5 commit:
 8. Why are parser fixtures useful even if they are not proof of real Apple CLI output?
 9. What does redaction protect in Phase 5?
 10. Why does runtime mutation wait until Phase 8?
+
+## Phase 6 update: SQLite state and event ledger
+
+### Stage goal
+
+Add durable local persistence for Hostwright state without adding runtime mutation.
+
+### Problem
+
+Before Phase 6, `HostwrightState` was only a scaffold. Hostwright could parse manifests and model read-only observations, but it could not persist desired state, observed snapshots, events, operation records, or ownership records. Without that ledger, future `apply`, recovery, cleanup, and drift decisions would have no durable memory.
+
+### Solution
+
+Phase 6 adds:
+
+- a dependency-free system `SQLite3` binding through a small internal wrapper;
+- explicit-path `SQLiteStateStore`;
+- schema migrations;
+- repository APIs for desired state, observed snapshots, events, operations, and ownership;
+- redaction before persistence;
+- temp-database smoke checks.
+
+### Why this design
+
+SQLite gives Hostwright durable local state without a service dependency. The explicit-path policy prevents hidden writes to the repository, home directory, Application Support, or global system paths. Repositories keep SQL inside `HostwrightState`, while typed manifest/runtime models remain the input/output boundary.
+
+### Files changed
+
+| File | What changed | Why it matters | What breaks if removed |
+| ---- | ------------ | -------------- | ---------------------- |
+| `Package.swift` | Linked system `sqlite3`; allowed `HostwrightState` to map manifest/runtime models. | Keeps Phase 6 dependency-free while enabling typed persistence. | State cannot compile against SQLite or typed manifest/runtime inputs. |
+| `Sources/HostwrightState/SQLiteConnection.swift` | Added SQLite connection wrapper. | Isolates raw C API open, execute, query, and transactions. | SQL handling would leak or duplicate. |
+| `Sources/HostwrightState/SQLiteStatement.swift` | Added prepared-statement wrapper. | Binds values and finalizes statements. | Statement lifecycle becomes unsafe. |
+| `Sources/HostwrightState/SQLiteStateStore.swift` | Added explicit-path store. | Gives callers a concrete state store without hidden default writes. | State remains scaffold-only. |
+| `Sources/HostwrightState/MigrationRunner.swift` | Added schema version 1. | Makes schema creation explicit and idempotent. | Database shape is unmanaged. |
+| `Sources/HostwrightState/StateRecords.swift` | Added durable record types. | Defines what Hostwright persists. | Repositories lose typed records. |
+| `Sources/HostwrightState/StateRepositories.swift` | Added desired, observed, event, operation, and ownership repositories. | Provides deterministic state APIs without SQL in CLI/reconciler. | Future phases cannot persist/reload state safely. |
+| `Sources/HostwrightState/StateStoreConfiguration.swift` | Added explicit path policy. | Prevents hidden database writes. | Callers could assume a default path exists. |
+| `Sources/HostwrightState/StateStoreError.swift` | Added typed errors. | Makes failures explainable and testable. | SQLite failures become unstructured. |
+| `Sources/HostwrightState/StateJSON.swift` | Added deterministic JSON helper. | Keeps blob persistence consistent. | JSON blob encoding becomes ad hoc. |
+| `Tests/HostwrightStateTests/HostwrightStateSmoke.swift` | Added temp DB smoke checks. | Exercises real migration and persistence behavior. | Phase 6 has no local verification. |
+| `docs/*` Phase 6 updates | Updated roadmap, requirements, acceptance, limitations, build status, and devlog. | Keeps public claims aligned with implementation. | Maintainer may overclaim state maturity. |
+
+### Concepts I must understand
+
+- SQLite is local durability, not runtime control.
+- A schema migration records how database structure changes over time.
+- Transactions make multi-row writes atomic.
+- Desired state and observed state are persisted separately.
+- Operation records are future safety records; they do not execute operations.
+- Ownership records enable future cleanup decisions; cleanup is not implemented.
+- Explicit paths prevent hidden global or user database writes.
+- Redaction must happen before values are persisted.
+- Smoke tests are useful but weaker than XCTest/Swift Testing.
+
+### Risks
+
+- The raw SQLite wrapper is intentionally small and must remain carefully reviewed.
+- Redaction is conservative and should be expanded before secrets-heavy use cases.
+- JSON blobs are pragmatic now but can become harder to query later.
+- Production durability, backups, corruption recovery, and concurrency behavior are not claimed yet.
+
+### How to verify
+
+```bash
+swift build
+swift test
+scripts/grep-orchard.sh .
+scripts/test.sh
+git status --short
+git diff --stat
+git diff --name-only
+```
+
+### Maintainer checklist
+
+- [ ] I can explain why Phase 6 adds persistence but not mutation.
+- [ ] I can explain why there is no default database path yet.
+- [ ] I can explain what each schema table stores.
+- [ ] I can explain why SQL is isolated in `HostwrightState`.
+- [ ] I can explain how migrations are applied idempotently.
+- [ ] I can explain what gets redacted before persistence.
+- [ ] I can explain why operation records do not execute anything.
+- [ ] I can explain why ownership records do not imply cleanup.
+
+### Quiz
+
+Answer these before approving the Phase 6 commit:
+
+1. Why is using system `SQLite3` acceptable here while adding a Swift SQLite package was deferred?
+2. Why does `SQLiteStateStore` require an explicit path?
+3. What does `schema_migrations` protect us from?
+4. Which tables represent desired state and which tables represent observed state?
+5. Why are event and operation ledgers separate?
+6. What does an ownership record enable later, and what does it not do now?
+7. Where is SQL allowed to live?
+8. What fake secret values are redacted in the smoke test?
+9. Why does Phase 6 not implement drift planning?
+10. What would be dangerous about adding a default user database path too early?

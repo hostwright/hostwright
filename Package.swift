@@ -48,7 +48,14 @@ let package = Package(
         ),
         .target(
             name: "HostwrightState",
-            dependencies: ["HostwrightCore"]
+            dependencies: [
+                "HostwrightCore",
+                "HostwrightManifest",
+                "HostwrightRuntime"
+            ],
+            linkerSettings: [
+                .linkedLibrary("sqlite3")
+            ]
         ),
         .target(
             name: "HostwrightReconciler",
@@ -88,7 +95,11 @@ let package = Package(
         ),
         .testTarget(
             name: "HostwrightStateTests",
-            dependencies: ["HostwrightState"]
+            dependencies: [
+                "HostwrightManifest",
+                "HostwrightRuntime",
+                "HostwrightState"
+            ]
         ),
         .testTarget(
             name: "HostwrightReconcilerTests",

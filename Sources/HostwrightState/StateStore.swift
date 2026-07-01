@@ -18,21 +18,6 @@ public struct StateStoreDescription: Equatable, Sendable {
 
 public protocol StateStore: Sendable {
     func describe() async -> StateStoreDescription
+    func migrate() throws
+    func schemaVersion() throws -> Int
 }
-
-public struct SQLiteStateStore: StateStore {
-    public let path: String
-
-    public init(path: String) {
-        self.path = path
-    }
-
-    public func describe() async -> StateStoreDescription {
-        StateStoreDescription(
-            backend: .sqlite,
-            isImplemented: false,
-            message: "SQLite state store is an interface boundary in Phase 1; no database is opened."
-        )
-    }
-}
-

@@ -69,11 +69,11 @@ Status values:
 
 | ID | Requirement | Source document | Current status | Implementation file if any | Test coverage if any | Release phase |
 | --- | --- | --- | --- | --- | --- | --- |
-| HW-STATE-001 | Desired state must be stored durably in SQLite. | Agent Engineering Manual; Final Production Arsenal | Planned | `Sources/HostwrightState/StateStore.swift` scaffold | State smoke tests only | 6 |
-| HW-STATE-002 | State store must include migrations and transaction boundaries. | Agent Engineering Manual; Final Production Arsenal | Planned | None | None | 6 |
-| HW-STATE-003 | Event and operation records must survive process restart. | Agent Engineering Manual; Document 2 | Planned | None | None | 6 |
-| HW-STATE-004 | Secrets must not be stored in plaintext state. | Document 2 | Planned | None | None | 6 |
-| HW-STATE-005 | Ownership ledger must distinguish Hostwright-owned resources from user-owned resources. | Agent Engineering Manual; Document 2 | Planned | None | None | 6 |
+| HW-STATE-001 | Desired state must be stored durably in SQLite. | Agent Engineering Manual; Final Production Arsenal | Implemented for explicit local database paths | `Sources/HostwrightState/SQLiteStateStore.swift`, `Sources/HostwrightState/StateRepositories.swift` | State smoke tests with temp SQLite database | 6 |
+| HW-STATE-002 | State store must include migrations and transaction boundaries. | Agent Engineering Manual; Final Production Arsenal | Implemented | `Sources/HostwrightState/MigrationRunner.swift`, `Sources/HostwrightState/SQLiteConnection.swift` | Migration and repository smoke tests | 6 |
+| HW-STATE-003 | Event and operation records must survive process restart. | Agent Engineering Manual; Document 2 | Implemented as persistence records only | `Sources/HostwrightState/StateRepositories.swift`, `Sources/HostwrightState/StateRecords.swift` | State smoke tests reload persisted records | 6 |
+| HW-STATE-004 | Secrets must not be stored in plaintext state. | Document 2 | Implemented for Phase 6 repository writes | `Sources/HostwrightState/StateRepositories.swift`, `Sources/HostwrightState/StateJSON.swift` | State smoke tests assert fake secrets are redacted | 6 |
+| HW-STATE-005 | Ownership ledger must distinguish Hostwright-owned resources from user-owned resources. | Agent Engineering Manual; Document 2 | Implemented as non-mutating ownership records | `Sources/HostwrightState/StateRepositories.swift`, `Sources/HostwrightState/StateRecords.swift` | Ownership smoke tests | 6 |
 
 ## Reconciler / Planner
 
@@ -117,7 +117,7 @@ Status values:
 
 | ID | Requirement | Source document | Current status | Implementation file if any | Test coverage if any | Release phase |
 | --- | --- | --- | --- | --- | --- | --- |
-| HW-OBS-001 | Hostwright must emit local events for meaningful operations. | Agent Engineering Manual; Final Production Arsenal | Planned | `Sources/HostwrightObservability/ObservabilityModels.swift` scaffold | Observability smoke tests | 6 |
+| HW-OBS-001 | Hostwright must emit local events for meaningful operations. | Agent Engineering Manual; Final Production Arsenal | Partially implemented as persisted event ledger records | `Sources/HostwrightState/StateRepositories.swift`, `Sources/HostwrightObservability/ObservabilityModels.swift` scaffold | State and observability smoke tests | 6 |
 | HW-OBS-002 | Status must distinguish desired state, observed runtime state, health, drift, restarts, and ports. | Agent Engineering Manual | Planned | Phase 2 manifest-level status only | CLI smoke tests only | 9 |
 | HW-OBS-003 | Logs and diagnostics must avoid secret leakage. | Document 2 | Planned | None | None | 9 |
 | HW-OBS-004 | OSLog is the planned local logging direction. | Final Production Arsenal | Planned | None | None | 9 |

@@ -4,12 +4,13 @@
 
 - macOS 26.5
 - Apple silicon (`arm64`)
-- Swift 6.3.2 through Command Line Tools
+- Swift 6.3.2 through full Xcode developer tools
 
 ## Verified On 2026-07-01
 
-- `swift build` succeeds after the Phase 6 SQLite state ledger changes.
-- `swift test` succeeds as compile/link smoke verification, including Phase 5 runtime checks and Phase 6 temp-database state smoke checks.
+- `swift build` succeeds after the XCTest foundation changes.
+- `swift test list` lists real XCTest cases across Hostwright test targets.
+- `swift test` executes real XCTest assertions across CLI, core, health, manifest, networking, observability, reconciler, runtime, and state targets.
 - `scripts/grep-orchard.sh .` succeeds and reports historical references only in `docs/source-material/` and `docs/naming/`.
 - `scripts/test.sh` succeeds and runs `swift build` plus `swift test`.
 
@@ -35,16 +36,18 @@ The three Phase 5 text fixtures under `Tests/HostwrightRuntimeTests/Fixtures/` a
 
 SwiftPM copies them during `swift test`, and the unhandled-resource warning is gone.
 
-## Test Framework Limitation
+## XCTest Status
 
-This local Command Line Tools environment does not expose `XCTest` or Swift Testing as importable modules to SwiftPM test targets:
+XCTest is available through a real SwiftPM test target in the current full Xcode toolchain.
 
-- `import XCTest` failed with `no such module 'XCTest'`.
-- `import Testing` failed with `no such module 'Testing'`.
+Important diagnostic correction:
 
-The test targets are therefore compile/link smoke targets. They prove the module boundaries and public APIs type-check under `swift test`, but they are not a substitute for executable unit tests. When a full test framework is available, replace these smoke files with real test cases.
+- `swift -e 'import XCTest'` can still fail and is not the correct gate.
+- A minimal SwiftPM XCTest probe passed after Xcode was fixed.
+- `swift test list` is the local proof that Hostwright now exposes real XCTest cases.
+- `swift test` executes 44 XCTest cases.
 
-The Phase 6 state smoke target does execute top-level precondition checks against a temporary SQLite database, but it is still not a substitute for structured XCTest or Swift Testing cases.
+The old top-level smoke/precondition posture has been replaced with XCTest assertions. Some test file names still include `Smoke.swift`, but the contents are XCTest cases.
 
 ## CI Limitation
 

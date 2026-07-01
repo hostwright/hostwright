@@ -1,286 +1,280 @@
-import HostwrightCore
-import HostwrightRuntime
-import Dispatch
 import Foundation
+import XCTest
+@testable import HostwrightRuntime
 
-final class AsyncResultBox<T>: @unchecked Sendable {
-    var result: Result<T, Error>?
-}
+final class HostwrightRuntimeTests: XCTestCase {
+    func testRuntimePlanReportsMutationAndDestructiveFlags() {
+        let identity = RuntimeServiceIdentity(projectName: "demo", serviceName: "web")
+        let plan = RuntimePlan(actions: [
+            PlannedRuntimeAction(kind: .create, identity: identity, isDestructive: false, summary: "create web")
+        ])
 
-func runAsync<T>(_ operation: @escaping @Sendable () async throws -> T) -> Result<T, Error> {
-    let semaphore = DispatchSemaphore(value: 0)
-    let box = AsyncResultBox<T>()
-
-    Task {
-        do {
-            box.result = .success(try await operation())
-        } catch {
-            box.result = .failure(error)
-        }
-        semaphore.signal()
+        XCTAssertTrue(plan.mutatesRuntime)
+        XCTAssertFalse(plan.includesDestructiveAction)
     }
 
-    semaphore.wait()
-    return box.result ?? .failure(RuntimeAdapterError.runtimeUnavailable("Async smoke helper did not produce a result."))
-}
+    func testRedactionHandlesSensitiveEnvironmentArgumentsAndJSON() {
+        let secretEnvironment = RuntimeEnvironmentValue(name: "API_TOKEN", value: "fake-token-123", isSensitive: true)
+        XCTAssertEqual(secretEnvironment.redacted().value, "[REDACTED]")
 
-let hostwrightRuntimeSmoke: Void = {
-    let identity = RuntimeServiceIdentity(projectName: "demo", serviceName: "web")
-    let plan = RuntimePlan(actions: [
-        PlannedRuntimeAction(kind: .create, identity: identity, isDestructive: false, summary: "create web")
-    ])
-
-    precondition(plan.mutatesRuntime)
-    precondition(!plan.includesDestructiveAction)
-
-    let secretEnvironment = RuntimeEnvironmentValue(name: "API_TOKEN", value: "fake-token-123", isSensitive: true)
-    precondition(secretEnvironment.redacted().value == "[REDACTED]")
-
-    let readOnly = RuntimeCommandSpec(
-        executablePath: "/usr/bin/example",
-        arguments: ["list", "token=fake-token-123"],
-        environment: ["PASSWORD": "fake-password"],
-        timeout: RuntimeCommandTimeout(seconds: 999),
-        classification: .readOnly,
-        executableResolution: .resolvedByRuntimeExecutableResolver,
-        purpose: "fixture"
-    )
-    precondition(readOnly.timeout.seconds == RuntimeCommandTimeout.maximumSeconds)
-    precondition((try? RuntimeCommandPolicy.validatePhase4(readOnly)) != nil)
-    precondition((try? RuntimeCommandPolicy.validateReadOnlyExecution(readOnly)) != nil)
-    precondition(readOnly.redacted().arguments[1].contains("[REDACTED]"))
-    precondition(readOnly.redacted().environment["PASSWORD"] == "[REDACTED]")
-    precondition(!RuntimeRedactionPolicy.default.redact(#""token":"fake-token-123""#).contains("fake-token-123"))
-
-    for rejectedClassification in [RuntimeCommandClassification.mutating, .forbidden, .unknown] {
-        let rejected = RuntimeCommandSpec(
+        let readOnly = RuntimeCommandSpec(
             executablePath: "/usr/bin/example",
-            arguments: ["not-allowed"],
-            classification: rejectedClassification,
+            arguments: ["list", "token=fake-token-123"],
+            environment: ["PASSWORD": "fake-password"],
+            timeout: RuntimeCommandTimeout(seconds: 999),
+            classification: .readOnly,
             executableResolution: .resolvedByRuntimeExecutableResolver,
             purpose: "fixture"
         )
-        precondition((try? RuntimeCommandPolicy.validatePhase4(rejected)) == nil)
-        precondition((try? RuntimeCommandPolicy.validateReadOnlyExecution(rejected)) == nil)
+
+        XCTAssertEqual(readOnly.timeout.seconds, RuntimeCommandTimeout.maximumSeconds)
+        XCTAssertTrue(readOnly.redacted().arguments[1].contains("[REDACTED]"))
+        XCTAssertEqual(readOnly.redacted().environment["PASSWORD"], "[REDACTED]")
+        XCTAssertFalse(RuntimeRedactionPolicy.default.redact(#""token":"fake-token-123""#).contains("fake-token-123"))
     }
 
-    let unresolvedReadOnly = RuntimeCommandSpec(
-        executablePath: "/usr/bin/example",
-        arguments: ["list"],
-        classification: .readOnly,
-        purpose: "fixture"
-    )
-    precondition((try? RuntimeCommandPolicy.validatePhase4(unresolvedReadOnly)) != nil)
-    precondition((try? RuntimeCommandPolicy.validateReadOnlyExecution(unresolvedReadOnly)) == nil)
+    func testRuntimeCommandPolicyAcceptsReadOnlyResolvedSpecs() {
+        let readOnly = RuntimeCommandSpec(
+            executablePath: "/usr/bin/example",
+            arguments: ["list"],
+            classification: .readOnly,
+            executableResolution: .resolvedByRuntimeExecutableResolver,
+            purpose: "fixture"
+        )
 
-    let adapter = AppleContainerCLIAdapter()
-    _ = adapter
-}()
+        XCTAssertNoThrow(try RuntimeCommandPolicy.validatePhase4(readOnly))
+        XCTAssertNoThrow(try RuntimeCommandPolicy.validateReadOnlyExecution(readOnly))
+    }
 
-let hostwrightRuntimeAsyncSmoke: Void = {
-    let mockIdentity = RuntimeServiceIdentity(projectName: "demo", serviceName: "api")
-    let mockDesired = DesiredRuntimeState(
-        projectName: "demo",
-        services: [
-            DesiredRuntimeService(identity: mockIdentity, image: "ghcr.io/example/api:latest")
+    func testRuntimeCommandPolicyRejectsMutatingForbiddenAndUnknownSpecs() {
+        for rejectedClassification in [RuntimeCommandClassification.mutating, .forbidden, .unknown] {
+            let rejected = RuntimeCommandSpec(
+                executablePath: "/usr/bin/example",
+                arguments: ["not-allowed"],
+                classification: rejectedClassification,
+                executableResolution: .resolvedByRuntimeExecutableResolver,
+                purpose: "fixture"
+            )
+
+            XCTAssertThrowsError(try RuntimeCommandPolicy.validatePhase4(rejected))
+            XCTAssertThrowsError(try RuntimeCommandPolicy.validateReadOnlyExecution(rejected))
+        }
+    }
+
+    func testReadOnlyExecutionRejectsUnresolvedExecutable() {
+        let unresolvedReadOnly = RuntimeCommandSpec(
+            executablePath: "/usr/bin/example",
+            arguments: ["list"],
+            classification: .readOnly,
+            purpose: "fixture"
+        )
+
+        XCTAssertNoThrow(try RuntimeCommandPolicy.validatePhase4(unresolvedReadOnly))
+        XCTAssertThrowsError(try RuntimeCommandPolicy.validateReadOnlyExecution(unresolvedReadOnly))
+    }
+
+    func testMockRuntimeAdapterCanObserveServices() async throws {
+        let observedService = ObservedRuntimeService(
+            identity: identity,
+            image: "ghcr.io/example/api:latest",
+            lifecycleState: .running,
+            healthState: .healthy
+        )
+        let adapter = MockRuntimeAdapter(scenario: .observed([observedService]))
+
+        let observed = try await adapter.observe(desiredState: desiredState)
+
+        XCTAssertEqual(observed.services.count, 1)
+        XCTAssertEqual(observed.services[0].lifecycleState, .running)
+    }
+
+    func testMockRuntimeAdapterPlansMissingServicesWithoutExecuting() async throws {
+        let adapter = MockRuntimeAdapter(scenario: .availableEmpty)
+        let observed = try await adapter.observe(desiredState: desiredState)
+
+        let plan = try await adapter.plan(desiredState: desiredState, observedState: observed)
+
+        XCTAssertEqual(plan.actions.map(\.kind), [.create])
+    }
+
+    func testMockRuntimeAdapterRedactsFailureOutput() async {
+        let adapter = MockRuntimeAdapter(scenario: .redactedFailure("password=fake-password token=fake-token"))
+
+        do {
+            _ = try await adapter.observe(desiredState: desiredState)
+            XCTFail("Expected redacted command failure.")
+        } catch let error as RuntimeAdapterError {
+            guard case .commandFailed(_, _, let standardError) = error else {
+                return XCTFail("Expected commandFailed, got \(error).")
+            }
+            XCTAssertFalse(standardError.contains("fake-password"))
+            XCTAssertFalse(standardError.contains("fake-token"))
+            XCTAssertTrue(standardError.contains("[REDACTED]"))
+        } catch {
+            XCTFail("Unexpected error: \(error).")
+        }
+    }
+
+    func testRuntimeMutationRemainsUnavailable() async {
+        let adapter = MockRuntimeAdapter(scenario: .availableEmpty)
+
+        do {
+            _ = try await adapter.execute(
+                PlannedRuntimeAction(kind: .start, identity: identity, isDestructive: false, summary: "start"),
+                confirmation: nil
+            )
+            XCTFail("Expected mutation unavailable.")
+        } catch let error as RuntimeAdapterError {
+            guard case .mutationUnavailableInCurrentPhase = error else {
+                return XCTFail("Expected mutationUnavailableInCurrentPhase, got \(error).")
+            }
+        } catch {
+            XCTFail("Unexpected error: \(error).")
+        }
+    }
+
+    func testAppleContainerReadOnlyAdapterMissingExecutableDegradesHonestly() async {
+        let adapter = AppleContainerReadOnlyAdapter(
+            executableResolver: FixedRuntimeExecutableResolver(executables: [:]),
+            processRunner: FakeRuntimeProcessRunner(behavior: .failure(.runtimeUnavailable("should not run")))
+        )
+
+        do {
+            _ = try await adapter.observe(desiredState: desiredState)
+            XCTFail("Expected missing executable to fail.")
+        } catch let error as RuntimeAdapterError {
+            guard case .runtimeUnavailable(let message) = error else {
+                return XCTFail("Expected runtimeUnavailable, got \(error).")
+            }
+            XCTAssertTrue(message.contains("not found"))
+        } catch {
+            XCTFail("Unexpected error: \(error).")
+        }
+    }
+
+    func testAppleContainerParserParsesEmptyFixture() async throws {
+        let adapter = AppleContainerReadOnlyAdapter(
+            executableResolver: resolvedContainer,
+            processRunner: FakeRuntimeProcessRunner(
+                behavior: .result(
+                    RuntimeCommandResult(
+                        spec: listSpec,
+                        exitStatus: 0,
+                        standardOutput: try fixture("apple-container-list-empty.txt"),
+                        standardError: ""
+                    )
+                )
+            )
+        )
+
+        let observed = try await adapter.observe(desiredState: desiredState)
+
+        XCTAssertTrue(observed.services.isEmpty)
+        XCTAssertEqual(observed.adapterMetadata?.supportsMutation, false)
+    }
+
+    func testAppleContainerParserParsesRunningFixture() async throws {
+        let adapter = AppleContainerReadOnlyAdapter(
+            executableResolver: resolvedContainer,
+            processRunner: FakeRuntimeProcessRunner(
+                behavior: .result(
+                    RuntimeCommandResult(
+                        spec: listSpec,
+                        exitStatus: 0,
+                        standardOutput: try fixture("apple-container-list-running.txt"),
+                        standardError: ""
+                    )
+                )
+            )
+        )
+
+        let observed = try await adapter.observe(desiredState: desiredState)
+
+        XCTAssertEqual(observed.services.count, 1)
+        XCTAssertEqual(observed.services[0].identity.serviceName, "api")
+        XCTAssertEqual(observed.services[0].lifecycleState, .running)
+        XCTAssertEqual(observed.services[0].healthState, .healthy)
+        XCTAssertEqual(observed.services[0].ports.first?.hostPort, 8080)
+        XCTAssertEqual(observed.services[0].mounts.first?.access, .readOnly)
+    }
+
+    func testAppleContainerParserFailsClosedForMalformedOutputWithRedaction() {
+        XCTAssertThrowsError(
+            try AppleContainerObservationParser.parse(
+                "not-json token=fake-token password=fake-password",
+                desiredState: desiredState,
+                metadata: MockRuntimeAdapter.defaultMetadata
+            )
+        ) { error in
+            guard case RuntimeAdapterError.outputParseFailed(let message) = error else {
+                return XCTFail("Expected outputParseFailed, got \(error).")
+            }
+            XCTAssertFalse(message.contains("fake-token"))
+            XCTAssertFalse(message.contains("fake-password"))
+            XCTAssertTrue(message.contains("[REDACTED]"))
+        }
+    }
+
+    func testAppleContainerParserFailsClosedForRedactionFixture() throws {
+        let redactionFixture = try fixture("apple-container-list-redaction.txt")
+
+        XCTAssertThrowsError(
+            try AppleContainerObservationParser.parse(
+                redactionFixture,
+                desiredState: desiredState,
+                metadata: MockRuntimeAdapter.defaultMetadata
+            )
+        ) { error in
+            guard case RuntimeAdapterError.outputParseFailed(let message) = error else {
+                return XCTFail("Expected outputParseFailed, got \(error).")
+            }
+            XCTAssertFalse(message.contains("fake-token"))
+            XCTAssertFalse(message.contains("fake-password"))
+            XCTAssertTrue(message.contains("Unsupported keys"))
+        }
+    }
+
+    func testCLIReconcilerAndHealthDoNotBypassRuntimeBoundary() throws {
+        let runtimeCommandFiles = [
+            "Sources/HostwrightCLI/main.swift",
+            "Sources/HostwrightReconciler/ReconciliationPlanner.swift",
+            "Sources/HostwrightHealth/DoctorModels.swift"
         ]
-    )
-    let mockObservedService = ObservedRuntimeService(
-        identity: mockIdentity,
-        image: "ghcr.io/example/api:latest",
-        lifecycleState: .running,
-        healthState: .healthy
-    )
-    let mockAdapter = MockRuntimeAdapter(scenario: .observed([mockObservedService]))
 
-    switch runAsync({ try await mockAdapter.observe(desiredState: mockDesired) }) {
-    case .success(let mockObserved):
-        precondition(mockObserved.services.count == 1)
-        precondition(mockObserved.services[0].lifecycleState == .running)
-    case .failure(let error):
-        preconditionFailure("Unexpected mock observe failure: \(error).")
-    }
-
-    let emptyAdapter = MockRuntimeAdapter(scenario: .availableEmpty)
-    let emptyObserved: ObservedRuntimeState
-    switch runAsync({ try await emptyAdapter.observe(desiredState: mockDesired) }) {
-    case .success(let observed):
-        emptyObserved = observed
-    case .failure(let error):
-        preconditionFailure("Unexpected empty observe failure: \(error).")
-    }
-
-    switch runAsync({ try await emptyAdapter.plan(desiredState: mockDesired, observedState: emptyObserved) }) {
-    case .success(let mockPlan):
-        precondition(mockPlan.actions.map(\.kind) == [.create])
-    case .failure(let error):
-        preconditionFailure("Unexpected mock plan failure: \(error).")
-    }
-
-    let redactingAdapter = MockRuntimeAdapter(scenario: .redactedFailure("password=fake-password token=fake-token"))
-    switch runAsync({ try await redactingAdapter.observe(desiredState: mockDesired) }) {
-    case .success:
-        preconditionFailure("Expected redacted failure.")
-    case .failure(let error as RuntimeAdapterError):
-        if case .commandFailed(_, _, let standardError) = error {
-            precondition(!standardError.contains("fake-password"))
-            precondition(!standardError.contains("fake-token"))
-            precondition(standardError.contains("[REDACTED]"))
-        } else {
-            preconditionFailure("Unexpected runtime error: \(error).")
+        for file in runtimeCommandFiles {
+            let text = try String(contentsOfFile: file, encoding: .utf8)
+            XCTAssertFalse(text.contains("AppleContainerCommand"), file)
+            XCTAssertFalse(text.contains("AppleContainerReadOnlyAdapter"), file)
+            XCTAssertFalse(text.contains("FoundationRuntimeProcessRunner"), file)
         }
-    case .failure(let error):
-        preconditionFailure("Unexpected error: \(error).")
     }
 
-    switch runAsync({
-        try await mockAdapter.execute(
-            PlannedRuntimeAction(kind: .start, identity: mockIdentity, isDestructive: false, summary: "start"),
-            confirmation: nil
+    private var identity: RuntimeServiceIdentity {
+        RuntimeServiceIdentity(projectName: "demo", serviceName: "api")
+    }
+
+    private var desiredState: DesiredRuntimeState {
+        DesiredRuntimeState(
+            projectName: "demo",
+            services: [
+                DesiredRuntimeService(identity: identity, image: "ghcr.io/example/api:latest")
+            ]
         )
-    }) {
-    case .success:
-        preconditionFailure("Expected mutation unavailable.")
-    case .failure(let error as RuntimeAdapterError):
-        if case .mutationUnavailableInCurrentPhase = error {
-            precondition(true)
-        } else {
-            preconditionFailure("Unexpected runtime error: \(error).")
-        }
-    case .failure(let error):
-        preconditionFailure("Unexpected error: \(error).")
     }
 
-    let missingAppleAdapter = AppleContainerReadOnlyAdapter(
-        executableResolver: FixedRuntimeExecutableResolver(executables: [:]),
-        processRunner: FakeRuntimeProcessRunner(behavior: .failure(.runtimeUnavailable("should not run")))
-    )
-    switch runAsync({ try await missingAppleAdapter.observe(desiredState: mockDesired) }) {
-    case .success:
-        preconditionFailure("Expected missing executable to degrade honestly.")
-    case .failure(let error as RuntimeAdapterError):
-        if case .runtimeUnavailable(let message) = error {
-            precondition(message.contains("not found"))
-        } else {
-            preconditionFailure("Unexpected missing executable error: \(error).")
-        }
-    case .failure(let error):
-        preconditionFailure("Unexpected error: \(error).")
+    private var resolvedContainer: FixedRuntimeExecutableResolver {
+        FixedRuntimeExecutableResolver(executables: ["container": "/usr/bin/container-fixture"])
     }
 
-    func fixture(_ name: String) -> String {
-        let path = "Tests/HostwrightRuntimeTests/Fixtures/\(name)"
-        guard let text = try? String(contentsOfFile: path, encoding: .utf8) else {
-            preconditionFailure("Missing fixture at \(path).")
-        }
-        return text
-    }
-
-    let resolvedContainer = FixedRuntimeExecutableResolver(executables: ["container": "/usr/bin/container-fixture"])
-    let emptySpec = AppleContainerCommand.spec(
-        kind: .listContainers,
-        executable: ResolvedRuntimeExecutable(name: "container", path: "/usr/bin/container-fixture")
-    )
-    let emptyAppleAdapter = AppleContainerReadOnlyAdapter(
-        executableResolver: resolvedContainer,
-        processRunner: FakeRuntimeProcessRunner(
-            behavior: .result(
-                RuntimeCommandResult(
-                    spec: emptySpec,
-                    exitStatus: 0,
-                    standardOutput: fixture("apple-container-list-empty.txt"),
-                    standardError: ""
-                )
-            )
+    private var listSpec: RuntimeCommandSpec {
+        AppleContainerCommand.spec(
+            kind: .listContainers,
+            executable: ResolvedRuntimeExecutable(name: "container", path: "/usr/bin/container-fixture")
         )
-    )
-    switch runAsync({ try await emptyAppleAdapter.observe(desiredState: mockDesired) }) {
-    case .success(let observed):
-        precondition(observed.services.isEmpty)
-        precondition(observed.adapterMetadata?.supportsMutation == false)
-    case .failure(let error):
-        preconditionFailure("Unexpected empty fixture failure: \(error).")
     }
 
-    let runningAdapter = AppleContainerReadOnlyAdapter(
-        executableResolver: resolvedContainer,
-        processRunner: FakeRuntimeProcessRunner(
-            behavior: .result(
-                RuntimeCommandResult(
-                    spec: emptySpec,
-                    exitStatus: 0,
-                    standardOutput: fixture("apple-container-list-running.txt"),
-                    standardError: ""
-                )
-            )
-        )
-    )
-    switch runAsync({ try await runningAdapter.observe(desiredState: mockDesired) }) {
-    case .success(let observed):
-        precondition(observed.services.count == 1)
-        precondition(observed.services[0].identity.serviceName == "api")
-        precondition(observed.services[0].lifecycleState == .running)
-        precondition(observed.services[0].healthState == .healthy)
-        precondition(observed.services[0].ports.first?.hostPort == 8080)
-        precondition(observed.services[0].mounts.first?.access == .readOnly)
-    case .failure(let error):
-        preconditionFailure("Unexpected running fixture failure: \(error).")
+    private func fixture(_ name: String) throws -> String {
+        let url = try XCTUnwrap(Bundle.module.url(forResource: name, withExtension: nil))
+        return try String(contentsOf: url, encoding: .utf8)
     }
-
-    switch runAsync({
-        try AppleContainerObservationParser.parse(
-            "not-json token=fake-token password=fake-password",
-            desiredState: mockDesired,
-            metadata: MockRuntimeAdapter.defaultMetadata
-        )
-    }) {
-    case .success:
-        preconditionFailure("Expected malformed output to fail closed.")
-    case .failure(let error as RuntimeAdapterError):
-        if case .outputParseFailed(let message) = error {
-            precondition(!message.contains("fake-token"))
-            precondition(!message.contains("fake-password"))
-            precondition(message.contains("[REDACTED]"))
-        } else {
-            preconditionFailure("Unexpected parse error: \(error).")
-        }
-    case .failure(let error):
-        preconditionFailure("Unexpected error: \(error).")
-    }
-
-    let redactionFixture = fixture("apple-container-list-redaction.txt")
-    switch runAsync({
-        try AppleContainerObservationParser.parse(
-            redactionFixture,
-            desiredState: mockDesired,
-            metadata: MockRuntimeAdapter.defaultMetadata
-        )
-    }) {
-    case .success:
-        preconditionFailure("Expected unsupported schema to fail closed.")
-    case .failure(let error as RuntimeAdapterError):
-        if case .outputParseFailed(let message) = error {
-            precondition(!message.contains("fake-token"))
-            precondition(!message.contains("fake-password"))
-            precondition(message.contains("[REDACTED]"))
-        } else {
-            preconditionFailure("Unexpected parse error: \(error).")
-        }
-    case .failure(let error):
-        preconditionFailure("Unexpected error: \(error).")
-    }
-
-    let runtimeCommandFiles = [
-        "Sources/HostwrightCLI/main.swift",
-        "Sources/HostwrightReconciler/ReconciliationPlanner.swift",
-        "Sources/HostwrightHealth/DoctorModels.swift"
-    ]
-    for file in runtimeCommandFiles {
-        guard let text = try? String(contentsOfFile: file, encoding: .utf8) else {
-            preconditionFailure("Unable to inspect \(file).")
-        }
-        precondition(!text.contains("AppleContainerCommand"))
-        precondition(!text.contains("AppleContainerReadOnlyAdapter"))
-        precondition(!text.contains("FoundationRuntimeProcessRunner"))
-    }
-}()
+}

@@ -1,7 +1,82 @@
-import HostwrightManifest
+import XCTest
+@testable import HostwrightManifest
 
-let hostwrightManifestSmoke: Void = {
-    let valid = """
+final class HostwrightManifestTests: XCTestCase {
+    func testValidManifestParsesAndValidates() throws {
+        let manifest = try ManifestValidator.validated(Self.validManifest)
+
+        XCTAssertEqual(manifest.project, "api-local")
+        XCTAssertEqual(manifest.services.count, 1)
+        XCTAssertEqual(manifest.services[0].name, "api")
+        XCTAssertEqual(manifest.services[0].ports, ["8080:8080"])
+        XCTAssertEqual(manifest.services[0].health?.interval, "10s")
+        XCTAssertEqual(manifest.services[0].restart?.policy, "on-failure")
+    }
+
+    func testMissingProjectFailsValidation() {
+        assertManifestFailure(
+            """
+            services:
+              api:
+                image: ghcr.io/example/api:latest
+            """,
+            contains: "project"
+        )
+    }
+
+    func testMissingImageFailsValidation() {
+        assertManifestFailure(
+            """
+            project: api-local
+            services:
+              api:
+                ports:
+                  - "8080:8080"
+            """,
+            contains: "image"
+        )
+    }
+
+    func testMalformedPortFailsValidation() {
+        assertManifestFailure(
+            """
+            project: api-local
+            services:
+              api:
+                image: ghcr.io/example/api:latest
+                ports:
+                  - "not-a-port"
+            """,
+            contains: "host:container"
+        )
+    }
+
+    func testUnsupportedKubernetesStyleYamlFailsClosed() {
+        XCTAssertThrowsError(
+            try ManifestParser.parse(
+                """
+                apiVersion: hostwright.dev/v1alpha1
+                kind: Stack
+                """
+            )
+        ) { error in
+            guard let manifestError = error as? ManifestParseError else {
+                return XCTFail("Expected ManifestParseError, got \(error).")
+            }
+            XCTAssertTrue(manifestError.issues.contains { $0.code.rawValue == "HW-MANIFEST-003" })
+        }
+    }
+
+    private func assertManifestFailure(_ text: String, contains expectedText: String) {
+        XCTAssertThrowsError(try ManifestValidator.validated(text)) { error in
+            guard let manifestError = error as? ManifestParseError else {
+                return XCTFail("Expected ManifestParseError, got \(error).")
+            }
+            XCTAssertTrue(manifestError.issues.contains { $0.message.contains(expectedText) })
+        }
+    }
+
+    private static let validManifest = """
     project: api-local
 
     services:
@@ -16,70 +91,4 @@ let hostwrightManifestSmoke: Void = {
           policy: on-failure
 
     """
-
-    do {
-        let manifest = try ManifestValidator.validated(valid)
-        precondition(manifest.project == "api-local")
-        precondition(manifest.services.count == 1)
-        precondition(manifest.services[0].ports == ["8080:8080"])
-    } catch {
-        preconditionFailure("Expected valid manifest, got \(error).")
-    }
-
-    do {
-        _ = try ManifestValidator.validated("""
-        services:
-          api:
-            image: ghcr.io/example/api:latest
-        """)
-        preconditionFailure("Expected missing project validation failure.")
-    } catch let error as ManifestParseError {
-        precondition(error.issues.contains { $0.message.contains("project") })
-    } catch {
-        preconditionFailure("Unexpected error: \(error).")
-    }
-
-    do {
-        _ = try ManifestValidator.validated("""
-        project: api-local
-        services:
-          api:
-            ports:
-              - "8080:8080"
-        """)
-        preconditionFailure("Expected missing image validation failure.")
-    } catch let error as ManifestParseError {
-        precondition(error.issues.contains { $0.message.contains("image") })
-    } catch {
-        preconditionFailure("Unexpected error: \(error).")
-    }
-
-    do {
-        _ = try ManifestValidator.validated("""
-        project: api-local
-        services:
-          api:
-            image: ghcr.io/example/api:latest
-            ports:
-              - "not-a-port"
-        """)
-        preconditionFailure("Expected malformed port validation failure.")
-    } catch let error as ManifestParseError {
-        precondition(error.issues.contains { $0.message.contains("host:container") })
-    } catch {
-        preconditionFailure("Unexpected error: \(error).")
-    }
-
-    do {
-        _ = try ManifestParser.parse("""
-        apiVersion: hostwright.dev/v1alpha1
-        kind: Stack
-        """)
-        preconditionFailure("Expected unsupported YAML shape failure.")
-    } catch let error as ManifestParseError {
-        precondition(error.issues.contains { $0.code.rawValue == "HW-MANIFEST-003" })
-    } catch {
-        preconditionFailure("Unexpected error: \(error).")
-    }
-}()
-
+}

@@ -1,11 +1,22 @@
-import HostwrightObservability
+import XCTest
+@testable import HostwrightObservability
 
-let hostwrightObservabilitySmoke: Void = {
-    let redacted = SecretRedactor.redact(
-        value: "token=abc123",
-        secretKeys: ["abc123"]
-    )
+final class HostwrightObservabilityTests: XCTestCase {
+    func testSecretRedactorReplacesConfiguredSecrets() {
+        let redacted = SecretRedactor.redact(
+            value: "token=abc123",
+            secretKeys: ["abc123"]
+        )
 
-    precondition(redacted == "token=[REDACTED]")
-}()
+        XCTAssertEqual(redacted, "token=[REDACTED]")
+    }
 
+    func testEmptySecretDoesNotChangeValue() {
+        let redacted = SecretRedactor.redact(
+            value: "token=abc123",
+            secretKeys: [""]
+        )
+
+        XCTAssertEqual(redacted, "token=abc123")
+    }
+}

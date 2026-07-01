@@ -1,11 +1,19 @@
-import HostwrightNetworking
+import XCTest
+@testable import HostwrightNetworking
 
-let hostwrightNetworkingSmoke: Void = {
-    let tunnelBinding = PortBinding(target: 443, published: 443, protocolName: .tcp, scope: .tunnel)
-    precondition(tunnelBinding.validate().count == 1)
-    precondition(!NetworkExposureScope.tunnel.isAllowedInFirstRelease)
+final class HostwrightNetworkingTests: XCTestCase {
+    func testTunnelExposureIsRejectedForFirstRelease() {
+        let tunnelBinding = PortBinding(target: 443, published: 443, protocolName: .tcp, scope: .tunnel)
+        let diagnostics = tunnelBinding.validate()
 
-    let localhostBinding = PortBinding(target: 80, published: 8080, protocolName: .tcp, scope: .localhost)
-    precondition(localhostBinding.validate().isEmpty)
-}()
+        XCTAssertEqual(diagnostics.count, 1)
+        XCTAssertFalse(NetworkExposureScope.tunnel.isAllowedInFirstRelease)
+    }
 
+    func testLocalhostExposureWithValidPortsPasses() {
+        let localhostBinding = PortBinding(target: 80, published: 8080, protocolName: .tcp, scope: .localhost)
+
+        XCTAssertTrue(localhostBinding.validate().isEmpty)
+        XCTAssertTrue(NetworkExposureScope.localhost.isAllowedInFirstRelease)
+    }
+}

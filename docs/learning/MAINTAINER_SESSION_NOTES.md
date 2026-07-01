@@ -24,8 +24,8 @@ The source material describes a serious infrastructure project. The safe first m
 | `assets/brand/README.md` | Added asset caveat. | Prevents PNGs from being treated as final brand assets. | Users may overclaim asset quality or transparency. |
 | `README.md` | Added conservative project overview. | Defines what Hostwright is and is not. | Public scope becomes unclear. |
 | `Package.swift` | Added SwiftPM package skeleton. | Makes the repo buildable. | Swift targets cannot build or test. |
-| `docs/BUILD_STATUS.md` | Added local build/test limitation notes. | Explains why test targets are compile-only in this environment. | Maintainers may mistake smoke targets for full unit tests. |
-| `Tests/*Smoke.swift` | Added compile-only smoke targets. | Proves public module boundaries type-check under `swift test`. | Phase 1 loses any automated check that modules import cleanly. |
+| `docs/BUILD_STATUS.md` | Added local build/test notes. | Explains the current verification gate. | Maintainers may overstate what tests prove. |
+| `Tests/*Smoke.swift` | Initially added smoke targets; later converted to XCTest. | Proves public module boundaries and behavior through `swift test`. | The repo loses automated checks. |
 
 ## Concepts I must understand
 
@@ -108,7 +108,7 @@ This is a control gate, not a feature phase. It keeps the project from implement
 ### Risks
 
 - Requirements can become stale if future phases do not update them.
-- The test suite is still smoke-level because XCTest/Swift Testing are unavailable locally.
+- This phase originally used smoke-level checks; the pre-Phase-7 test foundation later replaced them with XCTest.
 - The restricted manifest parser remains a temporary choice that needs a future dependency/ADR decision.
 
 ### How to verify
@@ -232,7 +232,7 @@ Answer these before approving Phase 5:
 9. Which phase first allows read-only Apple container observation?
 10. Which phase first allows runtime mutation?
 
-`swift build` proves the Swift package compiles. `swift test` currently proves the compile-only smoke targets build and link; it does not run full unit tests because this local Command Line Tools environment does not expose `XCTest` or Swift Testing. `scripts/grep-orchard.sh .` finds remaining old-name references for review. `scripts/test.sh` runs the local safe test gate.
+`swift build` proves the Swift package compiles. `swift test list` proves XCTest discovery. `swift test` now runs real XCTest assertions. `scripts/grep-orchard.sh .` finds remaining old-name references for review. `scripts/test.sh` runs the local safe test gate.
 
 ## Maintainer checklist
 
@@ -241,7 +241,7 @@ Answer these before approving Phase 5:
 - [ ] I can explain why `RuntimeAdapter` exists before Apple container integration.
 - [ ] I can explain why `hostwrightd` is only a scaffold.
 - [ ] I can explain which old-name references are allowed.
-- [ ] I can explain why the current test targets are smoke placeholders rather than full unit tests.
+- [ ] I can explain why the repository moved from smoke placeholders to XCTest before Phase 7.
 
 ## Quiz
 
@@ -254,7 +254,7 @@ Answer these before approving the next phase:
 5. Why is `hostwrightd` not a real daemon yet?
 6. What runtime behavior is explicitly not implemented?
 7. Why are the PNG assets not final production brand assets?
-8. Why did this environment force compile-only smoke tests instead of full unit tests?
+8. Why was it important to replace compile-only smoke tests with XCTest before Phase 7?
 
 ## Phase 2 update: CLI and manifest foundation
 
@@ -503,3 +503,83 @@ Answer these before approving the Phase 6 commit:
 8. What fake secret values are redacted in the smoke test?
 9. Why does Phase 6 not implement drift planning?
 10. What would be dangerous about adding a default user database path too early?
+
+## Test foundation gate: XCTest before Phase 7
+
+### Stage goal
+
+Replace top-level smoke/precondition tests with real XCTest cases before implementing deterministic drift planning.
+
+### Problem
+
+The package previously built test targets but executed zero real XCTest cases. That was acceptable only while Hostwright was mostly scaffolding. Phase 7 will add deterministic planning behavior, so test discovery and assertion-based failures must work first.
+
+### Diagnosis
+
+The earlier `swift -e 'import XCTest'` probe was misleading. The correct proof is a SwiftPM test target. After the local Xcode toolchain was fixed, a temporary SwiftPM XCTest package listed and executed a real XCTest case.
+
+Hostwright now uses:
+
+```bash
+swift test list
+swift test
+```
+
+as the local test-discovery and execution gates.
+
+### Solution
+
+Converted existing test targets from top-level smoke/precondition code into XCTest classes with assertions:
+
+- `HostwrightCoreTests`
+- `HostwrightManifestTests`
+- `HostwrightCLITests`
+- `HostwrightHealthTests`
+- `HostwrightNetworkingTests`
+- `HostwrightObservabilityTests`
+- `HostwrightReconcilerTests`
+- `HostwrightRuntimeTests`
+- `HostwrightStateTests`
+
+### Why this design
+
+XCTest gives SwiftPM-discoverable test names, structured assertions, clearer failure output, async test support, and a real gate for Phase 7 planner work. The conversion does not change product behavior.
+
+### Files changed
+
+| File | What changed | Why it matters | What breaks if removed |
+| ---- | ------------ | -------------- | ---------------------- |
+| `Tests/Hostwright*Tests/*Smoke.swift` | Replaced top-level preconditions with XCTest cases. | Tests now execute real assertions. | `swift test` can regress to zero useful tests. |
+| `docs/BUILD_STATUS.md` | Recorded XCTest status and corrected the misleading `swift -e` gate. | Maintainers know how to verify tests. | Toolchain confusion returns. |
+| `docs/requirements/ACCEPTANCE_MATRIX.md` | Updated gates from smoke checks to XCTest cases. | Future phases must meet real test gates. | Phase 7 could proceed on weak verification. |
+
+### Concepts I must understand
+
+- `swift test list` proves test discovery.
+- `swift test` proves the assertions execute.
+- A successful build is not the same as a useful test suite.
+- XCTest can work in SwiftPM even if `swift -e 'import XCTest'` fails.
+- Phase 7 should not begin until this test spine is merged.
+
+### Risks
+
+- Some test filenames still say `Smoke.swift`, but their contents are XCTest cases.
+- The test suite is broader but still not exhaustive.
+- Async runtime tests use mocks and fixtures; they do not call Apple container.
+
+### How to verify
+
+```bash
+swift build
+swift test list
+swift test
+scripts/grep-orchard.sh .
+scripts/test.sh
+```
+
+### Maintainer checklist
+
+- [ ] I can explain why `swift test` executing zero tests was not acceptable before Phase 7.
+- [ ] I can explain why a SwiftPM XCTest target is the correct XCTest probe.
+- [ ] I can explain which modules now have real XCTest coverage.
+- [ ] I can explain why this PR changes tests/docs only, not product behavior.

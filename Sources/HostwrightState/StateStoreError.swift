@@ -1,0 +1,40 @@
+public enum StateStoreError: Error, Equatable, CustomStringConvertible, Sendable {
+    case invalidPath(String)
+    case openFailed(path: String, message: String)
+    case closeFailed(path: String, message: String)
+    case executeFailed(message: String)
+    case prepareFailed(sql: String, message: String)
+    case bindFailed(index: Int32, message: String)
+    case stepFailed(message: String)
+    case migrationFailed(version: Int, message: String)
+    case transactionFailed(message: String)
+    case invalidRecord(String)
+    case notFound(String)
+
+    public var description: String {
+        switch self {
+        case .invalidPath(let path):
+            return "Invalid state database path: \(path)"
+        case .openFailed(let path, let message):
+            return "Failed to open state database at \(path): \(message)"
+        case .closeFailed(let path, let message):
+            return "Failed to close state database at \(path): \(message)"
+        case .executeFailed(let message):
+            return "SQLite execution failed: \(message)"
+        case .prepareFailed(let sql, let message):
+            return "Failed to prepare SQLite statement '\(sql)': \(message)"
+        case .bindFailed(let index, let message):
+            return "Failed to bind SQLite value at index \(index): \(message)"
+        case .stepFailed(let message):
+            return "SQLite step failed: \(message)"
+        case .migrationFailed(let version, let message):
+            return "Migration \(version) failed: \(message)"
+        case .transactionFailed(let message):
+            return "SQLite transaction failed: \(message)"
+        case .invalidRecord(let message):
+            return "Invalid state record: \(message)"
+        case .notFound(let message):
+            return "State record not found: \(message)"
+        }
+    }
+}

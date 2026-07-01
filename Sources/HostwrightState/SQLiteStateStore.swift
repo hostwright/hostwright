@@ -1,0 +1,60 @@
+public struct SQLiteStateStore: StateStore {
+    public let configuration: StateStoreConfiguration
+
+    public var path: String {
+        configuration.databasePath
+    }
+
+    public var desiredStates: DesiredStateRepository {
+        DesiredStateRepository(store: self)
+    }
+
+    public var observedStates: ObservedStateRepository {
+        ObservedStateRepository(store: self)
+    }
+
+    public var events: EventLedger {
+        EventLedger(store: self)
+    }
+
+    public var operations: OperationLedger {
+        OperationLedger(store: self)
+    }
+
+    public var ownership: OwnershipRepository {
+        OwnershipRepository(store: self)
+    }
+
+    public init(path: String) {
+        self.configuration = StateStoreConfiguration(explicitDatabasePath: path)
+    }
+
+    public init(configuration: StateStoreConfiguration) {
+        self.configuration = configuration
+    }
+
+    public func describe() async -> StateStoreDescription {
+        StateStoreDescription(
+            backend: .sqlite,
+            isImplemented: true,
+            message: "SQLite state store is implemented for explicit local database paths only. No default user database path is used in Phase 6."
+        )
+    }
+
+    public func migrate() throws {
+        try configuration.validate()
+        try MigrationRunner().apply(to: self)
+    }
+
+    public func schemaVersion() throws -> Int {
+        try configuration.validate()
+        let versions = try MigrationRunner().appliedVersions(in: self)
+        return versions.max() ?? 0
+    }
+
+    func withConnection<T>(_ body: (SQLiteConnection) throws -> T) throws -> T {
+        try configuration.validate()
+        let connection = try SQLiteConnection(path: configuration.databasePath)
+        return try body(connection)
+    }
+}

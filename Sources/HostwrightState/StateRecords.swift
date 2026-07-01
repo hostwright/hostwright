@@ -1,0 +1,307 @@
+import HostwrightRuntime
+
+public struct StateProjectRecord: Equatable, Sendable {
+    public let id: String
+    public let name: String
+    public let manifestPath: String?
+    public let manifestHash: String
+    public let createdAt: String
+    public let updatedAt: String
+
+    public init(id: String, name: String, manifestPath: String?, manifestHash: String, createdAt: String, updatedAt: String) {
+        self.id = id
+        self.name = name
+        self.manifestPath = manifestPath
+        self.manifestHash = manifestHash
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+}
+
+public struct DesiredServiceRecord: Equatable, Sendable {
+    public let id: String
+    public let projectID: String
+    public let serviceName: String
+    public let image: String
+    public let commandJSON: String
+    public let portsJSON: String
+    public let mountsJSON: String
+    public let environmentJSONRedacted: String
+    public let manifestHash: String
+    public let desiredGeneration: Int
+    public let createdAt: String
+    public let updatedAt: String
+
+    public init(
+        id: String,
+        projectID: String,
+        serviceName: String,
+        image: String,
+        commandJSON: String,
+        portsJSON: String,
+        mountsJSON: String,
+        environmentJSONRedacted: String,
+        manifestHash: String,
+        desiredGeneration: Int,
+        createdAt: String,
+        updatedAt: String
+    ) {
+        self.id = id
+        self.projectID = projectID
+        self.serviceName = serviceName
+        self.image = image
+        self.commandJSON = commandJSON
+        self.portsJSON = portsJSON
+        self.mountsJSON = mountsJSON
+        self.environmentJSONRedacted = environmentJSONRedacted
+        self.manifestHash = manifestHash
+        self.desiredGeneration = desiredGeneration
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+}
+
+public struct ObservedRuntimeSnapshotRecord: Equatable, Sendable {
+    public let id: String
+    public let projectID: String
+    public let runtimeAdapter: String
+    public let runtimeName: String
+    public let runtimeVersion: String?
+    public let observedAt: String
+    public let parserVersion: String
+    public let rawOutputHash: String?
+    public let redactedSummary: String
+    public let capabilitiesJSON: String
+
+    public init(
+        id: String,
+        projectID: String,
+        runtimeAdapter: String,
+        runtimeName: String,
+        runtimeVersion: String?,
+        observedAt: String,
+        parserVersion: String,
+        rawOutputHash: String?,
+        redactedSummary: String,
+        capabilitiesJSON: String
+    ) {
+        self.id = id
+        self.projectID = projectID
+        self.runtimeAdapter = runtimeAdapter
+        self.runtimeName = runtimeName
+        self.runtimeVersion = runtimeVersion
+        self.observedAt = observedAt
+        self.parserVersion = parserVersion
+        self.rawOutputHash = rawOutputHash
+        self.redactedSummary = redactedSummary
+        self.capabilitiesJSON = capabilitiesJSON
+    }
+}
+
+public struct ObservedServiceRecord: Equatable, Sendable {
+    public let id: String
+    public let snapshotID: String
+    public let projectName: String
+    public let serviceName: String
+    public let instanceName: String?
+    public let image: String?
+    public let lifecycleState: RuntimeLifecycleState
+    public let healthState: RuntimeHealthState
+    public let portsJSON: String
+    public let mountsJSON: String
+    public let runtimeIdentifiersJSON: String
+
+    public init(
+        id: String,
+        snapshotID: String,
+        projectName: String,
+        serviceName: String,
+        instanceName: String?,
+        image: String?,
+        lifecycleState: RuntimeLifecycleState,
+        healthState: RuntimeHealthState,
+        portsJSON: String,
+        mountsJSON: String,
+        runtimeIdentifiersJSON: String
+    ) {
+        self.id = id
+        self.snapshotID = snapshotID
+        self.projectName = projectName
+        self.serviceName = serviceName
+        self.instanceName = instanceName
+        self.image = image
+        self.lifecycleState = lifecycleState
+        self.healthState = healthState
+        self.portsJSON = portsJSON
+        self.mountsJSON = mountsJSON
+        self.runtimeIdentifiersJSON = runtimeIdentifiersJSON
+    }
+}
+
+public enum StateEventSeverity: String, Equatable, Sendable {
+    case info
+    case warning
+    case error
+}
+
+public struct EventRecord: Equatable, Sendable {
+    public let id: String
+    public let timestamp: String
+    public let severity: StateEventSeverity
+    public let type: String
+    public let source: String
+    public let projectID: String?
+    public let serviceName: String?
+    public let runtimeAdapter: String?
+    public let message: String
+    public let payloadJSONRedacted: String
+
+    public init(
+        id: String,
+        timestamp: String,
+        severity: StateEventSeverity,
+        type: String,
+        source: String,
+        projectID: String?,
+        serviceName: String?,
+        runtimeAdapter: String?,
+        message: String,
+        payloadJSONRedacted: String
+    ) {
+        self.id = id
+        self.timestamp = timestamp
+        self.severity = severity
+        self.type = type
+        self.source = source
+        self.projectID = projectID
+        self.serviceName = serviceName
+        self.runtimeAdapter = runtimeAdapter
+        self.message = message
+        self.payloadJSONRedacted = payloadJSONRedacted
+    }
+
+    public func redacted(using policy: RuntimeRedactionPolicy = .default) -> EventRecord {
+        EventRecord(
+            id: id,
+            timestamp: timestamp,
+            severity: severity,
+            type: type,
+            source: source,
+            projectID: projectID,
+            serviceName: serviceName,
+            runtimeAdapter: runtimeAdapter,
+            message: policy.redact(message),
+            payloadJSONRedacted: policy.redact(payloadJSONRedacted)
+        )
+    }
+}
+
+public enum OperationStatus: String, Equatable, Sendable {
+    case planned
+    case recorded
+    case abandoned
+}
+
+public struct OperationRecord: Equatable, Sendable {
+    public let id: String
+    public let createdAt: String
+    public let updatedAt: String
+    public let plannedActionType: String
+    public let projectID: String?
+    public let serviceName: String?
+    public let status: OperationStatus
+    public let idempotencyKey: String
+    public let planHash: String
+    public let payloadJSONRedacted: String
+
+    public init(
+        id: String,
+        createdAt: String,
+        updatedAt: String,
+        plannedActionType: String,
+        projectID: String?,
+        serviceName: String?,
+        status: OperationStatus,
+        idempotencyKey: String,
+        planHash: String,
+        payloadJSONRedacted: String
+    ) {
+        self.id = id
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.plannedActionType = plannedActionType
+        self.projectID = projectID
+        self.serviceName = serviceName
+        self.status = status
+        self.idempotencyKey = idempotencyKey
+        self.planHash = planHash
+        self.payloadJSONRedacted = payloadJSONRedacted
+    }
+
+    public func redacted(using policy: RuntimeRedactionPolicy = .default) -> OperationRecord {
+        OperationRecord(
+            id: id,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            plannedActionType: plannedActionType,
+            projectID: projectID,
+            serviceName: serviceName,
+            status: status,
+            idempotencyKey: idempotencyKey,
+            planHash: planHash,
+            payloadJSONRedacted: policy.redact(payloadJSONRedacted)
+        )
+    }
+}
+
+public struct OwnershipRecord: Equatable, Sendable {
+    public let id: String
+    public let resourceIdentifier: String
+    public let resourceType: String
+    public let projectID: String?
+    public let serviceName: String?
+    public let runtimeAdapter: String
+    public let createdAt: String
+    public let observedAt: String
+    public let cleanupEligible: Bool
+    public let metadataJSONRedacted: String
+
+    public init(
+        id: String,
+        resourceIdentifier: String,
+        resourceType: String,
+        projectID: String?,
+        serviceName: String?,
+        runtimeAdapter: String,
+        createdAt: String,
+        observedAt: String,
+        cleanupEligible: Bool,
+        metadataJSONRedacted: String
+    ) {
+        self.id = id
+        self.resourceIdentifier = resourceIdentifier
+        self.resourceType = resourceType
+        self.projectID = projectID
+        self.serviceName = serviceName
+        self.runtimeAdapter = runtimeAdapter
+        self.createdAt = createdAt
+        self.observedAt = observedAt
+        self.cleanupEligible = cleanupEligible
+        self.metadataJSONRedacted = metadataJSONRedacted
+    }
+
+    public func redacted(using policy: RuntimeRedactionPolicy = .default) -> OwnershipRecord {
+        OwnershipRecord(
+            id: id,
+            resourceIdentifier: resourceIdentifier,
+            resourceType: resourceType,
+            projectID: projectID,
+            serviceName: serviceName,
+            runtimeAdapter: runtimeAdapter,
+            createdAt: createdAt,
+            observedAt: observedAt,
+            cleanupEligible: cleanupEligible,
+            metadataJSONRedacted: policy.redact(metadataJSONRedacted)
+        )
+    }
+}

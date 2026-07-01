@@ -45,10 +45,11 @@ Verification types:
 
 | Requirement IDs | Acceptance criteria | Verification type | Verification command or review |
 | --- | --- | --- | --- |
-| HW-STATE-001, HW-STATE-002 | SQLite schema and migrations are explicit and isolated in `HostwrightState`. | Automated | Migration tests on temporary databases. |
-| HW-STATE-003, HW-OBS-001 | Events and operation records survive process restart. | Automated | Crash/reopen state tests. |
-| HW-STATE-004, HW-SAFE-004 | Known secret fixtures never appear in state, logs, status, or events. | Automated | Redaction tests. |
-| HW-STATE-005 | Ownership ledger can distinguish owned, unowned, and ambiguous resources. | Automated | Ledger tests. |
+| HW-STATE-001, HW-STATE-002 | SQLite schema and migrations are explicit and isolated in `HostwrightState`. | Automated | `swift test` builds/runs state smoke checks against temporary databases. |
+| HW-STATE-003, HW-OBS-001 | Events and operation records persist and reload from SQLite. | Automated | State smoke checks append, reload, and verify event/operation records. |
+| HW-STATE-004, HW-SAFE-004 | Known fake secret values do not appear in persisted env, event, operation, ownership, or observed-summary fields. | Automated | State smoke checks assert redacted payloads. |
+| HW-STATE-005 | Ownership ledger stores resource ownership and cleanup eligibility without cleanup behavior. | Automated | State smoke checks persist and reload ownership records with `cleanupEligible` false. |
+| HW-RECON-003 | Drift planning does not start in Phase 6. | Manual | Review changed files: no Phase 7 drift planner or apply path. |
 
 ## Phase 7 Gate: Real Planning And Drift
 

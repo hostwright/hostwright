@@ -57,6 +57,13 @@ public enum HostwrightCLI {
             return CLIRunResult(standardOutput: PlanRenderer.render(plan))
         case .status(let path):
             return status(path: path, environment: environment)
+        case .apply(let path, let stateDatabasePath, let confirmedPlanHash):
+            return ApplyCommandRunner(
+                manifestPath: path,
+                stateDatabasePath: stateDatabasePath,
+                confirmedPlanHash: confirmedPlanHash,
+                environment: environment
+            ).run()
         case .doctor:
             return doctor(environment: environment)
         }
@@ -71,10 +78,12 @@ public enum HostwrightCLI {
       hostwright validate [path]
       hostwright plan [path]
       hostwright status [path]
+      hostwright apply [path] --state-db <path> --confirm-plan <hash>
       hostwright doctor
 
     Commands are non-mutating except init, which creates hostwright.yaml only when absent.
-    CLI plan output is deterministic but does not perform live runtime observation. Apply is not implemented.
+    CLI plan output is deterministic but does not perform live runtime observation.
+    Phase 8B apply is create-only, requires explicit state DB and plan hash confirmation, and mutates only through RuntimeAdapter.
 
     """
 

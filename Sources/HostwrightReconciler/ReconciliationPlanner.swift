@@ -38,7 +38,8 @@ public struct ReconciliationPlanner: Sendable {
                     kind: .create,
                     identity: service.identity,
                     isDestructive: false,
-                    summary: "Would create missing service \(service.identity.displayName)."
+                    summary: "Would create missing service \(service.identity.displayName).",
+                    desiredService: service
                 )
             }
 

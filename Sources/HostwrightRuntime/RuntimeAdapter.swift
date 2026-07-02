@@ -50,10 +50,12 @@ public enum RuntimeAdapterError: Error, Equatable, Sendable {
 public struct RuntimeMutationConfirmation: Equatable, Sendable {
     public let confirmed: Bool
     public let reason: String
+    public let planHash: String?
 
-    public init(confirmed: Bool, reason: String) {
+    public init(confirmed: Bool, reason: String, planHash: String? = nil) {
         self.confirmed = confirmed
         self.reason = reason
+        self.planHash = planHash
     }
 }
 
@@ -66,14 +68,14 @@ public protocol RuntimeAdapter: Sendable {
 }
 
 public struct AppleContainerCLIAdapter: RuntimeAdapter {
-    private let readOnlyAdapter: AppleContainerReadOnlyAdapter
+    private let applyAdapter: AppleContainerApplyAdapter
 
     public init(
         executableResolver: RuntimeExecutableResolving = RuntimeExecutableResolver(),
         processRunner: RuntimeProcessRunning = FoundationRuntimeProcessRunner(),
         redactionPolicy: RuntimeRedactionPolicy = .default
     ) {
-        self.readOnlyAdapter = AppleContainerReadOnlyAdapter(
+        self.applyAdapter = AppleContainerApplyAdapter(
             executableResolver: executableResolver,
             processRunner: processRunner,
             redactionPolicy: redactionPolicy
@@ -81,22 +83,28 @@ public struct AppleContainerCLIAdapter: RuntimeAdapter {
     }
 
     public func metadata() async -> RuntimeAdapterMetadata {
-        await readOnlyAdapter.metadata()
+        await applyAdapter.metadata()
     }
 
     public func capabilities() async throws -> [RuntimeCapability] {
-        try await readOnlyAdapter.capabilities()
+        try await applyAdapter.capabilities()
     }
 
     public func observe(desiredState: DesiredRuntimeState) async throws -> ObservedRuntimeState {
-        try await readOnlyAdapter.observe(desiredState: desiredState)
+        try await applyAdapter.observe(desiredState: desiredState)
     }
 
     public func plan(desiredState: DesiredRuntimeState, observedState: ObservedRuntimeState) async throws -> RuntimePlan {
-        try await readOnlyAdapter.plan(desiredState: desiredState, observedState: observedState)
+        try await applyAdapter.plan(desiredState: desiredState, observedState: observedState)
     }
 
     public func execute(_ action: PlannedRuntimeAction, confirmation: RuntimeMutationConfirmation?) async throws -> RuntimeEvent {
-        try await readOnlyAdapter.execute(action, confirmation: confirmation)
+        try await applyAdapter.execute(action, confirmation: confirmation)
+    }
+}
+
+public enum RuntimeAdapterFactory {
+    public static func defaultLocal() -> any RuntimeAdapter {
+        AppleContainerCLIAdapter()
     }
 }

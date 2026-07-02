@@ -199,6 +199,8 @@ public struct EventRecord: Equatable, Sendable {
 public enum OperationStatus: String, Equatable, Sendable {
     case planned
     case recorded
+    case succeeded
+    case failed
     case abandoned
 }
 

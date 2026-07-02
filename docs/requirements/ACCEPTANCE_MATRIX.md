@@ -74,9 +74,12 @@ Phase 8A is a required preflight before this mutation gate. It proves real read-
 
 | Requirement IDs | Acceptance criteria | Verification type | Verification command or review |
 | --- | --- | --- | --- |
-| HW-CLI-008, HW-RECON-004, HW-RUNTIME-006 | `apply` persists intent before mutation and mutates only through `RuntimeAdapter`. | Automated + manual | Mock adapter tests; disposable Apple container integration tests. |
-| HW-RECON-005 | Partial apply failure leaves recoverable operation records. | Automated | Failure injection tests. |
-| HW-SAFE-001 | `plan` remains non-mutating and reviewable before `apply`. | Automated | CLI and planner tests. |
+| HW-CLI-008, HW-RECON-004, HW-RUNTIME-006 | `apply` requires explicit `--state-db`, explicit `--confirm-plan`, recomputes the observed plan, persists intent before mutation, and executes only one `createMissingService` action through `RuntimeAdapter`. | Automated + manual | CLI XCTest cases; RuntimeAdapter boundary scans; code review. |
+| HW-RUNTIME-004, HW-RUNTIME-006 | Runtime process execution accepts read-only commands and the single Phase 8B create-missing-service command kind; unknown, forbidden, unresolved, and unsupported mutating specs fail before execution. | Automated | Runtime XCTest cases with fake process runners. |
+| HW-VALID-004, HW-VALID-005, HW-NET-003, HW-SAFE-004 | Phase 8B create rejects volumes/mounts, sensitive or redacted env values, privileged host ports, and broad bind addresses before mutation. | Automated | CLI and runtime XCTest cases. |
+| HW-RECON-005, HW-STATE-003, HW-OBS-001 | Partial apply failure leaves recoverable operation records and redacted failure events. | Automated | CLI and state failure-injection XCTest cases. |
+| HW-SAFE-001 | `plan` remains non-mutating and reviewable before `apply`; `apply` only proceeds when the provided plan hash matches the recomputed plan. | Automated | CLI and planner XCTest cases. |
+| HW-RUNTIME-005, HW-RUNTIME-006 | Live create is not considered fully proven until a local Apple container image source is approved and one disposable create-only apply is demonstrated. | Blocked + manual | Current `container image list --format json` output is `[]`; no pull/load/create has been approved. |
 
 ## Phase 9 Gate: Operability And Cleanup
 

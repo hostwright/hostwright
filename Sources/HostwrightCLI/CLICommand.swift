@@ -1,3 +1,4 @@
+import Foundation
 import HostwrightCore
 
 public enum CLICommand: Equatable, Sendable {
@@ -6,6 +7,7 @@ public enum CLICommand: Equatable, Sendable {
     case validate(path: String)
     case plan(path: String)
     case status(path: String)
+    case apply(path: String, stateDatabasePath: String, confirmedPlanHash: String)
     case doctor
     case help
 
@@ -30,6 +32,8 @@ public enum CLICommand: Equatable, Sendable {
             return try pathCommand(arguments: arguments, commandName: "plan", make: CLICommand.plan)
         case "status":
             return try pathCommand(arguments: arguments, commandName: "status", make: CLICommand.status)
+        case "apply":
+            return try applyCommand(arguments: arguments)
         case "doctor":
             guard arguments.count == 1 else { throw CLIUsageError("doctor does not accept arguments in Phase 2.") }
             return .doctor
@@ -48,6 +52,54 @@ public enum CLICommand: Equatable, Sendable {
         }
 
         throw CLIUsageError("\(commandName) accepts at most one manifest path.")
+    }
+
+    private static func applyCommand(arguments: [String]) throws -> CLICommand {
+        var path: String?
+        var stateDatabasePath: String?
+        var confirmedPlanHash: String?
+        var index = 1
+
+        while index < arguments.count {
+            let argument = arguments[index]
+            switch argument {
+            case "--state-db":
+                guard index + 1 < arguments.count else {
+                    throw CLIUsageError("apply requires a value after --state-db.")
+                }
+                stateDatabasePath = arguments[index + 1]
+                index += 2
+            case "--confirm-plan":
+                guard index + 1 < arguments.count else {
+                    throw CLIUsageError("apply requires a value after --confirm-plan.")
+                }
+                confirmedPlanHash = arguments[index + 1]
+                index += 2
+            default:
+                guard !argument.hasPrefix("-") else {
+                    throw CLIUsageError("apply does not support flag '\(argument)' in Phase 8B.")
+                }
+                guard path == nil else {
+                    throw CLIUsageError("apply accepts at most one manifest path.")
+                }
+                path = argument
+                index += 1
+            }
+        }
+
+        guard let stateDatabasePath, !stateDatabasePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw CLIUsageError("apply requires --state-db <path>. Phase 8B does not use a default state database path.")
+        }
+
+        guard let confirmedPlanHash, !confirmedPlanHash.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw CLIUsageError("apply requires --confirm-plan <hash>. Run plan/apply preview first and confirm the exact hash.")
+        }
+
+        return .apply(
+            path: path ?? HostwrightIdentity.manifestFileName,
+            stateDatabasePath: stateDatabasePath,
+            confirmedPlanHash: confirmedPlanHash
+        )
     }
 }
 
@@ -70,4 +122,3 @@ public struct CLIRunResult: Equatable, Sendable {
         self.exitCode = exitCode
     }
 }
-

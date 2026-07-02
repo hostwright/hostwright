@@ -1,6 +1,6 @@
 # CLI Reference
 
-The current CLI provides a dependency-free, non-mutating `hostwright` command surface.
+The current CLI provides a dependency-free `hostwright` command surface with one narrow Phase 8B mutation gate.
 
 ## Commands
 
@@ -10,6 +10,7 @@ hostwright init
 hostwright validate [path]
 hostwright plan [path]
 hostwright status [path]
+hostwright apply [path] --state-db <path> --confirm-plan <hash>
 hostwright doctor
 ```
 
@@ -45,6 +46,34 @@ Reads and validates the manifest, maps the supported manifest subset into runtim
 The output includes a deterministic plan hash, typed issues, typed planned actions, and an explicit execution-unavailable notice.
 
 Runtime observation infrastructure exists behind `RuntimeAdapter`, but `hostwright plan` does not inspect Apple container by default and does not claim resources are running, stopped, healthy, or unhealthy.
+
+## `hostwright apply [path] --state-db <path> --confirm-plan <hash>`
+
+Runs the Phase 8B create-only apply gate.
+
+This command:
+
+- validates the manifest;
+- observes Apple container through `RuntimeAdapter`;
+- recomputes the deterministic plan;
+- requires an explicit state database path;
+- requires the supplied plan hash to match the current observed plan;
+- persists desired state, observed state, operation intent, and an apply-start event before mutation;
+- executes exactly one `createMissingService` action through `RuntimeAdapter`;
+- records success or failure events and operation status.
+
+It refuses mutation when:
+
+- `--state-db` is missing;
+- `--confirm-plan` is missing or mismatched;
+- runtime observation fails;
+- the plan has blockers;
+- zero executable create actions exist;
+- more than one executable create action exists;
+- the service uses mounts, sensitive environment values, privileged host ports, or broad bind addresses;
+- the local Apple container image cannot be confirmed.
+
+It does not implement start, stop, delete, restart, remove, cleanup, rollback, image pull, daemon loops, or multi-action apply.
 
 ## `hostwright status [path]`
 

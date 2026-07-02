@@ -10,6 +10,10 @@ public enum RuntimeExecutableResolution: String, Equatable, Sendable {
     case resolvedByRuntimeExecutableResolver
 }
 
+public enum RuntimeMutationCommandKind: String, Equatable, Sendable {
+    case createMissingService
+}
+
 public struct RuntimeCommandTimeout: Equatable, Sendable {
     public static let defaultSeconds = 30
     public static let maximumSeconds = 300
@@ -29,6 +33,7 @@ public struct RuntimeCommandSpec: Equatable, Sendable {
     public let timeout: RuntimeCommandTimeout
     public let classification: RuntimeCommandClassification
     public let executableResolution: RuntimeExecutableResolution
+    public let mutationKind: RuntimeMutationCommandKind?
     public let purpose: String
 
     public init(
@@ -39,6 +44,7 @@ public struct RuntimeCommandSpec: Equatable, Sendable {
         timeout: RuntimeCommandTimeout = RuntimeCommandTimeout(),
         classification: RuntimeCommandClassification,
         executableResolution: RuntimeExecutableResolution = .unresolved,
+        mutationKind: RuntimeMutationCommandKind? = nil,
         purpose: String
     ) {
         self.executablePath = executablePath
@@ -48,6 +54,7 @@ public struct RuntimeCommandSpec: Equatable, Sendable {
         self.timeout = timeout
         self.classification = classification
         self.executableResolution = executableResolution
+        self.mutationKind = mutationKind
         self.purpose = purpose
     }
 
@@ -60,6 +67,7 @@ public struct RuntimeCommandSpec: Equatable, Sendable {
             timeout: timeout,
             classification: classification,
             executableResolution: executableResolution,
+            mutationKind: mutationKind,
             purpose: purpose
         )
     }
@@ -117,6 +125,29 @@ public enum RuntimeCommandPolicy {
         }
     }
 
+    public static func validatePhase8BMutation(_ spec: RuntimeCommandSpec) throws {
+        guard spec.executableResolution == .resolvedByRuntimeExecutableResolver else {
+            throw RuntimeAdapterError.commandRejected(
+                classification: spec.classification,
+                message: "Phase 8B refuses runtime command specs whose executable was not resolved through RuntimeExecutableResolver."
+            )
+        }
+
+        guard spec.classification == .mutating else {
+            throw RuntimeAdapterError.commandRejected(
+                classification: spec.classification,
+                message: "Phase 8B executes only explicitly classified mutating createMissingService specs."
+            )
+        }
+
+        guard spec.mutationKind == .createMissingService else {
+            throw RuntimeAdapterError.commandRejected(
+                classification: spec.classification,
+                message: "Phase 8B mutation policy accepts only createMissingService."
+            )
+        }
+    }
+
     private static func validateReadOnlyClassification(_ spec: RuntimeCommandSpec, phaseName: String) throws {
         switch spec.classification {
         case .readOnly:
@@ -149,13 +180,27 @@ public struct FakeRuntimeProcessRunner: RuntimeProcessRunning {
     }
 
     public func run(_ spec: RuntimeCommandSpec) async throws -> RuntimeCommandResult {
-        try RuntimeCommandPolicy.validateReadOnlyExecution(spec, phaseName: "Phase 5")
+        try validate(spec)
 
         switch behavior {
         case .result(let result):
             return result.redacted(using: redactionPolicy)
         case .failure(let error):
             throw error.redacted(using: redactionPolicy)
+        }
+    }
+
+    private func validate(_ spec: RuntimeCommandSpec) throws {
+        switch spec.classification {
+        case .readOnly:
+            try RuntimeCommandPolicy.validateReadOnlyExecution(spec, phaseName: "Phase 5")
+        case .mutating:
+            try RuntimeCommandPolicy.validatePhase8BMutation(spec)
+        case .forbidden, .unknown:
+            throw RuntimeAdapterError.commandRejected(
+                classification: spec.classification,
+                message: "FakeRuntimeProcessRunner rejects forbidden and unknown runtime command specs."
+            )
         }
     }
 }

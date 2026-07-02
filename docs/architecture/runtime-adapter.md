@@ -6,9 +6,9 @@ All runtime-related behavior must go through `RuntimeAdapter`.
 
 Hostwright needs to observe, plan, and eventually mutate container runtime state without scattering shell commands across CLI, daemon, reconciler, state, health, or cleanup code. The adapter boundary keeps runtime assumptions isolated, typed, redacted, and testable.
 
-## Phase 5 State
+## Phase 8B State
 
-Phase 5 adds read-only Apple container observation infrastructure behind `RuntimeAdapter`.
+Phase 5 added read-only Apple container observation infrastructure behind `RuntimeAdapter`. Phase 8B adds the first mutation-capable adapter path, limited to create-missing-service.
 
 Implemented by Phase 5:
 
@@ -17,23 +17,22 @@ Implemented by Phase 5:
 - `MockRuntimeAdapter` for deterministic tests without live process execution;
 - runtime command specs, command results, command classification, timeout model, and process runner protocol;
 - fake process runner for tests;
-- Foundation-backed process runner for policy-approved read-only runtime commands;
+- Foundation-backed process runner for policy-approved read-only runtime commands and the Phase 8B create-missing-service mutation spec;
 - executable resolution through `RuntimeExecutableResolver`;
 - `AppleContainerReadOnlyAdapter` for read-only observation attempts;
+- `AppleContainerApplyAdapter` for create-only Phase 8B mutation;
 - fixture-defined observation parser for empty and running service snapshots;
 - redaction policy for command args, env values, stdout, stderr, parser errors, and runtime errors.
 
-Not implemented in Phase 5:
+Not implemented:
 
-- Apple container mutation;
-- `hostwright apply`;
-- SQLite state;
 - cleanup;
+- start, stop, delete, restart, remove, run, pull, build, exec, or prune;
 - restart policy execution;
 - daemon runtime loop;
 - CLI status backed by observed runtime state.
 
-Runtime mutation begins only in Phase 8.
+Runtime mutation is limited to Phase 8B create-missing-service.
 
 ## RuntimeAdapter Protocol Shape
 
@@ -45,7 +44,7 @@ The adapter exposes:
 - `plan(desiredState:observedState:)` for adapter-aware planning hooks;
 - `execute(_:confirmation:)` for future mutation hooks.
 
-In Phase 4, mutation hooks exist only so callers can compile against the future shape. Implementations must return mutation-unavailable errors.
+In Phase 8B, `execute(_:confirmation:)` may perform exactly one create-missing-service action when confirmation, plan hash, local image availability, safe-subset validation, and state persistence gates have passed.
 
 ## Process Runner Boundary
 
@@ -59,18 +58,20 @@ The command spec records:
 - working directory;
 - timeout;
 - classification;
+- mutation kind, when classification is mutating;
 - purpose.
 
-Phase 5 includes `FoundationRuntimeProcessRunner`, but it is not a general shell-out path. Before any live process can run:
+`FoundationRuntimeProcessRunner` is not a general shell-out path. Before any live process can run:
 
 - the command must be represented as `RuntimeCommandSpec`;
-- the command classification must be `readOnly`;
 - the executable must be resolved through `RuntimeExecutableResolver`;
-- mutating, forbidden, unknown, and unresolved specs are rejected;
+- read-only commands must pass read-only policy;
+- mutating commands must be classified as `mutating` and carry the `createMissingService` mutation kind;
+- forbidden, unknown, unsupported mutating, and unresolved specs are rejected;
 - timeout and output capture are enforced;
 - command args, env, stdout, stderr, and errors are redacted.
 
-Tests use fake process execution and fixtures. Local live observation is allowed only through `AppleContainerReadOnlyAdapter`.
+Tests use fake process execution and fixtures. Local live observation and create-only mutation are allowed only through RuntimeAdapter implementations in `HostwrightRuntime`.
 
 ## Command Classification
 
@@ -81,9 +82,9 @@ Tests use fake process execution and fixtures. Local live observation is allowed
 - `forbidden`;
 - `unknown`.
 
-Phase 5 permits only read-only command specs through the policy gate. Mutating, forbidden, unknown, and unresolved command specs are rejected before execution.
+Phase 8B permits read-only command specs and exactly one mutating command kind: `createMissingService`. Forbidden, unknown, destructive, unresolved, and unsupported mutating specs are rejected before execution.
 
-Apple container command strings live only in `AppleContainerCommand` and the read-only adapter. The current list-style command shape is a Phase 5 adapter assumption guarded by fail-closed parsing; it is not a public compatibility claim.
+Apple container command strings live only in `AppleContainerCommand` and runtime adapters. The current list-style command shape and create command shape are based on local Apple container 1.0.0 help output and guarded by fail-closed parsing and policy checks; they are not broad Apple CLI compatibility claims.
 
 ## Timeout And Cancellation Model
 
@@ -130,3 +131,14 @@ The default policy redacts key/value patterns and sensitive key fragments such a
 `AppleContainerObservationParser` accepts only the Phase 5 fixture-defined JSON schema `hostwright.apple-container.observation.v1`. It fails closed on malformed output, unsupported schema names, unknown keys, unsupported lifecycle values, unsupported health values, unsupported protocols, and unsupported mount access values.
 
 If real Apple container output does not match this schema, Hostwright reports a parse failure instead of guessing. This protects the runtime boundary from turning unverified Apple CLI output into fake product truth.
+
+## Create-Only Mutation Boundary
+
+Phase 8B supports only:
+
+- `container image list --format json` as a read-only local-image availability gate;
+- `container create --name <name> --env KEY=value --publish host:container <image> [command...]`.
+
+The adapter rejects mounts, DNS, custom networks, capabilities, Rosetta, virtualization, custom runtime/kernel, SSH forwarding, `--rm`, `run`, start-after-create, image pull, delete, restart, remove, cleanup, prune, build, and exec.
+
+The local machine currently reports no local images with `container image list --format json`, so live create remains blocked until a local image source is explicitly approved.

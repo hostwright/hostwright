@@ -181,12 +181,20 @@ public struct PlannedRuntimeAction: Equatable, Sendable {
     public let identity: RuntimeServiceIdentity
     public let isDestructive: Bool
     public let summary: String
+    public let desiredService: DesiredRuntimeService?
 
-    public init(kind: PlannedRuntimeActionKind, identity: RuntimeServiceIdentity, isDestructive: Bool, summary: String) {
+    public init(
+        kind: PlannedRuntimeActionKind,
+        identity: RuntimeServiceIdentity,
+        isDestructive: Bool,
+        summary: String,
+        desiredService: DesiredRuntimeService? = nil
+    ) {
         self.kind = kind
         self.identity = identity
         self.isDestructive = isDestructive
         self.summary = summary
+        self.desiredService = desiredService
     }
 }
 
@@ -218,11 +226,18 @@ public struct RuntimeEvent: Equatable, Sendable {
     public let identity: RuntimeServiceIdentity?
     public let severity: RuntimeEventSeverity
     public let message: String
+    public let resourceIdentifier: String?
 
-    public init(identity: RuntimeServiceIdentity?, severity: RuntimeEventSeverity = .info, message: String) {
+    public init(
+        identity: RuntimeServiceIdentity?,
+        severity: RuntimeEventSeverity = .info,
+        message: String,
+        resourceIdentifier: String? = nil
+    ) {
         self.identity = identity
         self.severity = severity
         self.message = message
+        self.resourceIdentifier = resourceIdentifier
     }
 }
 

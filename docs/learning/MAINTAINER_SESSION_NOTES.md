@@ -735,3 +735,84 @@ scripts/test.sh
 - [ ] I can explain why non-empty real output is still unsupported.
 - [ ] I can explain why this phase does not mutate runtime state.
 - [ ] I can explain why Phase 8B must be planned separately.
+
+## Phase 8B update: create-only apply gate
+
+### Stage goal
+
+Add Hostwright's first mutation path without turning `apply` into general lifecycle management.
+
+### Problem
+
+Before Phase 8B, Hostwright could validate manifests, persist state, observe an empty Apple container runtime, and compute deterministic drift plans. It could not persist an apply intent, confirm that the user's plan matched the current plan, or route a runtime mutation through `RuntimeAdapter`.
+
+### Solution
+
+Phase 8B adds:
+
+- `hostwright apply [path] --state-db <path> --confirm-plan <hash>`;
+- explicit state database path validation;
+- recomputed plan-hash confirmation before mutation;
+- operation intent and `apply.started` event persistence before runtime execution;
+- a single `createMissingService` execution path through `RuntimeAdapter`;
+- success, failure, and ownership records after execution;
+- runtime command policy for one mutating command kind: `createMissingService`.
+
+### Why this design
+
+The first mutation must prove the safety pipeline before expanding the feature surface. Create-only is the least destructive lifecycle action. It can be tested with fake adapters, confirmed by plan hash, recorded before execution, and blocked when local image availability is unknown. Stop, delete, cleanup, restart, volumes, broad networking, and sensitive env handling are harder to make safe and remain out of scope.
+
+### Files changed
+
+| File | What changed | Why it matters | What breaks if removed |
+| ---- | ------------ | -------------- | ---------------------- |
+| `Sources/HostwrightCLI/ApplyCommand.swift` | Adds the create-only `apply` runner. | Orchestrates validation, planning, state persistence, and RuntimeAdapter execution. | `hostwright apply` has no implementation. |
+| `Sources/HostwrightCLI/CLICommand.swift` | Parses `apply`, `--state-db`, and `--confirm-plan`. | Makes mutation explicit and refuses missing confirmation. | CLI cannot route the command safely. |
+| `Sources/HostwrightCLI/CLIEnvironment.swift` | Adds runtime adapter injection. | Lets tests use fake adapters and production use the local runtime adapter factory. | CLI tests would need live runtime or hidden construction. |
+| `Sources/HostwrightRuntime/AppleContainerApplyAdapter.swift` | Adds guarded Apple container create-only adapter. | Keeps Apple command execution behind RuntimeAdapter. | The first mutation path would bypass the runtime boundary or not exist. |
+| `Sources/HostwrightRuntime/AppleContainerCommand.swift` | Adds local image list and create command descriptors. | Isolates Apple command strings to runtime code. | Commands may leak into CLI/reconciler code. |
+| `Sources/HostwrightRuntime/RuntimeCommand.swift` | Adds mutation kind and Phase 8B mutation policy. | Prevents unknown, forbidden, or unsupported mutation specs from executing. | Process execution could become a general shell-out path. |
+| `Sources/HostwrightState/StateRecords.swift` | Adds succeeded and failed operation states. | Allows apply result tracking. | Failure/success records cannot be represented. |
+| `Sources/HostwrightReconciler/*` | Marks missing-service create actions as Phase 8B-available. | Lets apply select exactly one executable planned action. | Apply cannot distinguish supported from unsupported actions. |
+| `Tests/*` | Adds CLI, runtime, reconciler, and state XCTest coverage. | Proves plan-hash refusal, persistence, redaction, create gating, and failure records. | Mutation regressions become unreviewable. |
+
+### Concepts I must understand
+
+- `hostwright apply` is not general apply yet.
+- The CLI orchestrates business logic but does not shell out to Apple container.
+- Runtime mutation still goes through `RuntimeAdapter`.
+- `FoundationRuntimeProcessRunner` is policy-gated, not a free shell.
+- The command must be typed, resolved, classified, and approved before execution.
+- A matching plan hash proves the user confirmed the currently recomputed plan; it does not prove the runtime will succeed.
+- State intent is written before mutation so failures can be audited.
+- Phase 8B rejects mounts, sensitive env values, privileged ports, and broad bind addresses.
+- Live create was not executed because `container image list --format json` returned `[]`.
+
+### Risks
+
+- The plan-confirmation flow is still rough because there is no dedicated `apply --dry-run` preview command.
+- Non-empty real Apple container image list output is not parsed yet.
+- Live create remains unproven until a local image source is approved.
+- Create-only support could be mistaken for full lifecycle management if docs or PR text are sloppy.
+
+### How to verify
+
+```bash
+container system status
+container image list --format json
+swift build
+swift test list
+swift test
+scripts/grep-orchard.sh .
+scripts/test.sh
+```
+
+### Maintainer checklist
+
+- [ ] I can explain why Phase 8B supports only createMissingService.
+- [ ] I can explain why `--state-db` is required.
+- [ ] I can explain why `--confirm-plan` is required.
+- [ ] I can explain what is persisted before mutation.
+- [ ] I can explain how success and failure are recorded.
+- [ ] I can explain why no local image means no live create proof yet.
+- [ ] I can explain why stop/delete/restart/remove/cleanup remain forbidden.

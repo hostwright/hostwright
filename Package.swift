@@ -26,7 +26,9 @@ let package = Package(
                 "HostwrightCore",
                 "HostwrightHealth",
                 "HostwrightManifest",
-                "HostwrightReconciler"
+                "HostwrightReconciler",
+                "HostwrightRuntime",
+                "HostwrightState"
             ]
         ),
         .executableTarget(
@@ -107,7 +109,13 @@ let package = Package(
         ),
         .testTarget(
             name: "HostwrightCLITests",
-            dependencies: ["HostwrightCLI"]
+            dependencies: [
+                "HostwrightCLI",
+                "HostwrightManifest",
+                "HostwrightReconciler",
+                "HostwrightRuntime",
+                "HostwrightState"
+            ]
         ),
         .testTarget(
             name: "HostwrightHealthTests",

@@ -108,6 +108,7 @@ public enum PlanActionKind: String, Equatable, Sendable {
 
 public enum PlanExecutionAvailability: String, Equatable, Sendable {
     case unavailableUntilPhase8
+    case availableForPhase8BCreate
 }
 
 public struct PlannedAction: Equatable, Sendable {

@@ -16,6 +16,7 @@
 - Apple container 1.0.0 is installed locally at `/usr/local/bin/container`.
 - `container system status` reports the container system service as running.
 - `container list --all --format json` returned the verified empty runtime shape `[]`.
+- `container image list --format json` returned `[]`, so live Phase 8B create is blocked until a local image source is approved.
 
 ## Current Implementation Truth
 
@@ -23,14 +24,16 @@
 - Phase 6 adds SQLite-backed local state for explicit database paths.
 - Phase 7 adds deterministic non-mutating desired-vs-observed planning, typed drift records, typed plan issues, typed planned actions, and a deterministic plan hash.
 - Phase 8A adds parser and fixture support for the verified real empty Apple container JSON list output.
+- Phase 8B adds a create-only apply gate that requires explicit state DB path, explicit plan hash confirmation, operation intent persistence before mutation, and RuntimeAdapter execution.
 - No Apple container command was called by Phase 6 or Phase 7.
-- `FoundationRuntimeProcessRunner` exists for policy-approved read-only command specs; automated tests still use fake process execution.
+- `FoundationRuntimeProcessRunner` exists for policy-approved read-only command specs and Phase 8B create-missing-service mutation specs; automated tests still use fake process execution.
 - `AppleContainerReadOnlyAdapter` reports missing `container` as runtime unavailable and rejects mutation through the adapter contract.
 - `AppleContainerObservationParser` accepts the fixture-defined `hostwright.apple-container.observation.v1` schema and the verified real empty JSON array shape `[]`; non-empty real Apple container JSON output is not yet supported.
 - `SQLiteStateStore` uses system `SQLite3`, schema migrations, transactions, and repository APIs for desired services, observed snapshots, events, operations, and ownership records.
 - Phase 6 state tests use explicit temporary database paths only.
 - Phase 7 planner tests use in-memory desired and observed runtime models only.
-- No default user database path, hidden global database write, `apply`, cleanup, daemon loop, runtime mutation, CLI live runtime observation, or non-empty live Apple container observation was implemented.
+- No default user database path, hidden global database write, cleanup, daemon loop, multi-action apply, start/stop/delete/restart/remove, CLI status live runtime observation, or non-empty live Apple container observation was implemented.
+- Live create was not run because no local Apple container image is available and no pull/load was approved.
 
 ## SwiftPM Fixture Resources
 
@@ -52,7 +55,7 @@ Important diagnostic correction:
 - `swift -e 'import XCTest'` can still fail and is not the correct gate.
 - A minimal SwiftPM XCTest probe passed after Xcode was fixed.
 - `swift test list` is the local proof that Hostwright now exposes real XCTest cases.
-- `swift test` executes 61 XCTest cases after the Phase 8A parser/fixture update.
+- `swift test` executes 69 XCTest cases after the Phase 8B create-only apply gate update.
 
 The old top-level smoke/precondition posture has been replaced with XCTest assertions. Some test file names still include `Smoke.swift`, but the contents are XCTest cases.
 

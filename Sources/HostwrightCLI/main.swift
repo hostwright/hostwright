@@ -53,8 +53,8 @@ public enum HostwrightCLI {
             return CLIRunResult(standardOutput: "Valid hostwright manifest: \(path)\nProject: \(manifest.project ?? "<missing>")\nServices: \(manifest.services.count)\n")
         case .plan(let path):
             let manifest = try loadValidManifest(path: path, environment: environment)
-            let plan = ManifestDryRunPlanner.plan(for: manifest)
-            return CLIRunResult(standardOutput: render(plan: plan))
+            let plan = ReconciliationPlanner().plan(manifest: manifest)
+            return CLIRunResult(standardOutput: PlanRenderer.render(plan))
         case .status(let path):
             return status(path: path, environment: environment)
         case .doctor:
@@ -63,7 +63,7 @@ public enum HostwrightCLI {
     }
 
     public static let helpText = """
-    Hostwright Phase 2 CLI
+    Hostwright CLI
 
     Usage:
       hostwright --version
@@ -73,8 +73,8 @@ public enum HostwrightCLI {
       hostwright status [path]
       hostwright doctor
 
-    Phase 2 commands are non-mutating except init, which creates hostwright.yaml only when absent.
-    Runtime observation and apply are not implemented.
+    Commands are non-mutating except init, which creates hostwright.yaml only when absent.
+    CLI plan output is deterministic but does not perform live runtime observation. Apply is not implemented.
 
     """
 
@@ -94,7 +94,7 @@ public enum HostwrightCLI {
                 standardOutput: """
                 Hostwright status
                 Manifest: \(path) not found
-                Runtime: unavailable in Phase 2; no Apple container state was inspected.
+                Runtime: unavailable in CLI status; no Apple container state was inspected.
 
                 """
             )
@@ -108,7 +108,7 @@ public enum HostwrightCLI {
                 Manifest: \(path) valid
                 Project: \(manifest.project ?? "<missing>")
                 Declared services: \(manifest.services.map(\.name).joined(separator: ", "))
-                Runtime: unavailable in Phase 2; no Apple container state was inspected.
+                Runtime: unavailable in CLI status; no Apple container state was inspected.
 
                 """
             )
@@ -117,7 +117,7 @@ public enum HostwrightCLI {
                 standardOutput: """
                 Hostwright status
                 Manifest: \(path) invalid
-                Runtime: unavailable in Phase 2; no Apple container state was inspected.
+                Runtime: unavailable in CLI status; no Apple container state was inspected.
 
                 """,
                 standardError: render(issues: error.issues),
@@ -146,23 +146,6 @@ public enum HostwrightCLI {
     private static func loadValidManifest(path: String, environment: CLIEnvironment) throws -> HostwrightManifest {
         let text = try environment.readTextFile(path)
         return try ManifestValidator.validated(text)
-    }
-
-    private static func render(plan: ManifestDryRunPlan) -> String {
-        let serviceLines = plan.services.map { service in
-            let ports = service.ports.isEmpty ? "no ports declared" : "ports \(service.ports.joined(separator: ", "))"
-            return "- \(service.name): image \(service.image), \(ports)"
-        }
-
-        return """
-        Hostwright plan (non-mutating)
-        Project: \(plan.project)
-        Runtime observation: \(plan.runtimeObservation)
-        Services Hostwright would manage in a future apply:
-        \(serviceLines.joined(separator: "\n"))
-        No runtime actions were executed.
-
-        """
     }
 
     private static func failure(issues: [ManifestIssue]) -> CLIRunResult {

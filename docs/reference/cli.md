@@ -40,9 +40,11 @@ It does not:
 
 ## `hostwright plan [path]`
 
-Reads and validates the manifest, then prints a non-mutating dry-run plan.
+Reads and validates the manifest, maps the supported manifest subset into runtime-shaped desired state, runs Phase 7 planning policy checks, and prints a non-mutating dry-run plan.
 
-Runtime observation infrastructure exists behind `RuntimeAdapter`, but `hostwright plan` does not inspect Apple container and does not claim resources are running, stopped, healthy, or unhealthy.
+The output includes a deterministic plan hash, typed issues, typed planned actions, and an explicit execution-unavailable notice.
+
+Runtime observation infrastructure exists behind `RuntimeAdapter`, but `hostwright plan` does not inspect Apple container by default and does not claim resources are running, stopped, healthy, or unhealthy.
 
 ## `hostwright status [path]`
 

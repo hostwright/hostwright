@@ -18,13 +18,15 @@
 
 - Phase 5 adds read-only Apple container observation infrastructure behind `RuntimeAdapter`.
 - Phase 6 adds SQLite-backed local state for explicit database paths.
+- Phase 7 adds deterministic non-mutating desired-vs-observed planning, typed drift records, typed plan issues, typed planned actions, and a deterministic plan hash.
 - No Apple container command was called by Phase 6.
 - `FoundationRuntimeProcessRunner` exists for policy-approved read-only command specs, but local verification in this session used fake process execution only.
 - `AppleContainerReadOnlyAdapter` reports missing `container` as runtime unavailable and rejects mutation through the adapter contract.
 - `AppleContainerObservationParser` accepts only the fixture-defined `hostwright.apple-container.observation.v1` schema and fails closed on unsupported output.
 - `SQLiteStateStore` uses system `SQLite3`, schema migrations, transactions, and repository APIs for desired services, observed snapshots, events, operations, and ownership records.
 - Phase 6 state tests use explicit temporary database paths only.
-- No default user database path, hidden global database write, `apply`, cleanup, daemon loop, runtime mutation, CLI-exposed observed runtime status, drift planner, or guaranteed live Apple container observation was implemented.
+- Phase 7 planner tests use in-memory desired and observed runtime models only.
+- No default user database path, hidden global database write, `apply`, cleanup, daemon loop, runtime mutation, CLI live runtime observation, or guaranteed live Apple container observation was implemented.
 
 ## SwiftPM Fixture Resources
 
@@ -45,7 +47,7 @@ Important diagnostic correction:
 - `swift -e 'import XCTest'` can still fail and is not the correct gate.
 - A minimal SwiftPM XCTest probe passed after Xcode was fixed.
 - `swift test list` is the local proof that Hostwright now exposes real XCTest cases.
-- `swift test` executes 44 XCTest cases.
+- `swift test` executes 59 XCTest cases after Phase 7.
 
 The old top-level smoke/precondition posture has been replaced with XCTest assertions. Some test file names still include `Smoke.swift`, but the contents are XCTest cases.
 

@@ -47,6 +47,8 @@ final class HostwrightCLITests: XCTestCase {
         XCTAssertEqual(planResult.exitCode, 0)
         XCTAssertTrue(planResult.standardOutput.contains("non-mutating"))
         XCTAssertTrue(planResult.standardOutput.contains("Runtime observation"))
+        XCTAssertTrue(planResult.standardOutput.contains("Plan hash"))
+        XCTAssertTrue(planResult.standardOutput.contains("Execution: unavailable until Phase 8"))
         XCTAssertTrue(planResult.standardOutput.contains("No runtime actions were executed"))
 
         let statusResult = HostwrightCLI.run(arguments: ["status"], environment: environment(files: validFiles))
@@ -55,6 +57,29 @@ final class HostwrightCLITests: XCTestCase {
         XCTAssertTrue(statusResult.standardOutput.contains("Runtime: unavailable"))
         XCTAssertFalse(statusResult.standardOutput.contains("running"))
         XCTAssertFalse(statusResult.standardOutput.contains("stopped"))
+    }
+
+    func testPlanOutputRedactsSecretLikeEnvironmentValues() {
+        let files = FileBox(
+            files: [
+                HostwrightIdentity.manifestFileName: """
+                project: api-local
+                services:
+                  api:
+                    image: ghcr.io/example/api:latest
+                    env:
+                      API_TOKEN: token=super-secret
+
+                """
+            ]
+        )
+
+        let planResult = HostwrightCLI.run(arguments: ["plan"], environment: environment(files: files))
+
+        XCTAssertEqual(planResult.exitCode, 0)
+        XCTAssertTrue(planResult.standardOutput.contains("secretRedacted"))
+        XCTAssertTrue(planResult.standardOutput.contains("API_TOKEN"))
+        XCTAssertFalse(planResult.standardOutput.contains("super-secret"))
     }
 
     func testDoctorReportsMissingAppleContainerAsWarning() {

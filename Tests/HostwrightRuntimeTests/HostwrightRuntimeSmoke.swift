@@ -173,6 +173,28 @@ final class HostwrightRuntimeTests: XCTestCase {
         XCTAssertEqual(observed.adapterMetadata?.supportsMutation, false)
     }
 
+    func testAppleContainerParserParsesRealEmptyJSONFixture() async throws {
+        let adapter = AppleContainerReadOnlyAdapter(
+            executableResolver: resolvedContainer,
+            processRunner: FakeRuntimeProcessRunner(
+                behavior: .result(
+                    RuntimeCommandResult(
+                        spec: listSpec,
+                        exitStatus: 0,
+                        standardOutput: try fixture("apple-container-list-empty-real-json.txt"),
+                        standardError: ""
+                    )
+                )
+            )
+        )
+
+        let observed = try await adapter.observe(desiredState: desiredState)
+
+        XCTAssertTrue(observed.services.isEmpty)
+        XCTAssertEqual(observed.projectName, desiredState.projectName)
+        XCTAssertEqual(AppleContainerCommand.arguments(for: .listContainers), ["list", "--all", "--format", "json"])
+    }
+
     func testAppleContainerParserParsesRunningFixture() async throws {
         let adapter = AppleContainerReadOnlyAdapter(
             executableResolver: resolvedContainer,
@@ -212,6 +234,37 @@ final class HostwrightRuntimeTests: XCTestCase {
             XCTAssertFalse(message.contains("fake-token"))
             XCTAssertFalse(message.contains("fake-password"))
             XCTAssertTrue(message.contains("[REDACTED]"))
+        }
+    }
+
+    func testAppleContainerParserFailsClosedForUnsupportedRealJSONShapesWithRedaction() {
+        XCTAssertThrowsError(
+            try AppleContainerObservationParser.parse(
+                #"{"items":[],"token":"fake-token","password":"fake-password"}"#,
+                desiredState: desiredState,
+                metadata: MockRuntimeAdapter.defaultMetadata
+            )
+        ) { error in
+            guard case RuntimeAdapterError.outputParseFailed(let message) = error else {
+                return XCTFail("Expected outputParseFailed, got \(error).")
+            }
+            XCTAssertFalse(message.contains("fake-token"))
+            XCTAssertFalse(message.contains("fake-password"))
+            XCTAssertTrue(message.contains("Unsupported keys"))
+        }
+
+        XCTAssertThrowsError(
+            try AppleContainerObservationParser.parse(
+                #"[{"id":"abc","image":"example","token":"fake-token"}]"#,
+                desiredState: desiredState,
+                metadata: MockRuntimeAdapter.defaultMetadata
+            )
+        ) { error in
+            guard case RuntimeAdapterError.outputParseFailed(let message) = error else {
+                return XCTFail("Expected outputParseFailed, got \(error).")
+            }
+            XCTAssertFalse(message.contains("fake-token"))
+            XCTAssertTrue(message.contains("Non-empty real Apple container JSON list output is not supported yet"))
         }
     }
 

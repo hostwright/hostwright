@@ -62,6 +62,16 @@ Verification types:
 
 ## Phase 8 Gate: First Runtime Mutation
 
+Phase 8A is a required preflight before this mutation gate. It proves real read-only Apple container observation before `apply` implementation begins.
+
+| Requirement IDs | Acceptance criteria | Verification type | Verification command or review |
+| --- | --- | --- | --- |
+| HW-RUNTIME-005, HW-SAFE-004 | Parser supports the verified real empty Apple container JSON list output `[]` and fails closed for unsupported real JSON shapes. | Automated + manual | Runtime XCTest fixture tests; manual `container list --all --format json` preflight. |
+| HW-RUNTIME-001, HW-RUNTIME-002, HW-RUNTIME-006 | Phase 8A does not add `apply`, mutation command descriptors, cleanup, or Apple container calls outside `HostwrightRuntime`. | Automated + manual | Runtime mutation-unavailable XCTest cases; targeted `rg` scans of CLI/reconciler/state modules; code review. |
+| HW-REL-002 | Build and test gates still pass after real empty JSON fixture support. | Automated | `swift build`, `swift test list`, `swift test`, `scripts/test.sh`. |
+
+## Phase 8B Gate: First Runtime Mutation
+
 | Requirement IDs | Acceptance criteria | Verification type | Verification command or review |
 | --- | --- | --- | --- |
 | HW-CLI-008, HW-RECON-004, HW-RUNTIME-006 | `apply` persists intent before mutation and mutates only through `RuntimeAdapter`. | Automated + manual | Mock adapter tests; disposable Apple container integration tests. |

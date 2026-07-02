@@ -17,6 +17,21 @@ public enum AppleContainerObservationParser {
         do {
             let data = Data(trimmed.utf8)
             let json = try JSONSerialization.jsonObject(with: data)
+
+            if let realList = json as? [Any] {
+                guard realList.isEmpty else {
+                    throw RuntimeAdapterError.outputParseFailed(
+                        "Non-empty real Apple container JSON list output is not supported yet: \(redactionPolicy.redact(trimmed))"
+                    )
+                }
+
+                return ObservedRuntimeState(
+                    projectName: desiredState.projectName,
+                    services: [],
+                    adapterMetadata: metadata
+                )
+            }
+
             try validateAllowedKeys(in: json)
             let fixture = try JSONDecoder().decode(ObservationFixture.self, from: data)
 
@@ -171,4 +186,3 @@ private struct MountFixture: Decodable {
         return RuntimeMountReference(source: source, target: target, access: mountAccess)
     }
 }
-

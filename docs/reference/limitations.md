@@ -1,6 +1,6 @@
 # Limitations
 
-Hostwright is in Phase 7 deterministic planning and drift detection state. It can model and attempt read-only runtime observation through `RuntimeAdapter`, persist desired and observed state to an explicit SQLite database path, and compute non-mutating desired-vs-observed plans.
+Hostwright is in Phase 8A read-only Apple container preflight state. It can model and attempt read-only runtime observation through `RuntimeAdapter`, persist desired and observed state to an explicit SQLite database path, and compute non-mutating desired-vs-observed plans.
 
 ## Implemented Today
 
@@ -17,6 +17,7 @@ Hostwright is in Phase 7 deterministic planning and drift detection state. It ca
 - `AppleContainerReadOnlyAdapter` for read-only observation attempts through `RuntimeAdapter`.
 - `FoundationRuntimeProcessRunner` guarded by read-only command classification, executable resolution, timeouts, and redaction.
 - Fixture-defined Apple container observation parser for empty and running snapshots.
+- Verified real empty Apple container JSON list parsing for `container list --all --format json` output of `[]`.
 - SQLite state store using system `SQLite3`.
 - Explicit schema migrations.
 - Desired-state snapshot persistence.
@@ -36,6 +37,7 @@ Hostwright is in Phase 7 deterministic planning and drift detection state. It ca
 - Runtime mutation.
 - `hostwright apply`.
 - Guaranteed Apple container observation on every machine.
+- Non-empty real Apple container JSON list parsing.
 - Apple container start, stop, create, delete, restart, cleanup, log, or detailed inspect operations.
 - Apple container mutation of any kind.
 - Runtime mutation based on drift plans.
@@ -83,7 +85,7 @@ The Phase 2 parser is not a general YAML parser. It accepts only the documented 
 
 The runtime module contains read-only Apple container observation infrastructure, but the CLI still does not perform live runtime observation by default. `hostwright plan` renders deterministic desired-state and policy planning output. `hostwright status` remains manifest-level output only. Neither command proves that services are running, stopped, healthy, unhealthy, created, deleted, or reachable unless explicit observed state is supplied through library APIs.
 
-The Phase 5 parser accepts only the fixture-defined `hostwright.apple-container.observation.v1` schema. Unsupported or malformed output fails closed with redacted errors. Runtime mutation begins only in Phase 8.
+The runtime parser accepts the fixture-defined `hostwright.apple-container.observation.v1` schema and the verified real empty JSON array shape returned by `container list --all --format json`. Unsupported, malformed, or non-empty real Apple container JSON output fails closed with redacted errors. Runtime mutation is not implemented.
 
 ## State Truth
 

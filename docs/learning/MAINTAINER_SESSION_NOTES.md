@@ -660,3 +660,78 @@ scripts/test.sh
 - [ ] I can explain why `hostwright plan` still does not inspect Apple container by default.
 - [ ] I can explain why planned actions are execution-unavailable until Phase 8.
 - [ ] I can explain what the deterministic plan hash proves and what it does not prove.
+
+## Phase 8A update: real empty Apple container observation
+
+### Stage goal
+
+Prove and codify the first real Apple container read-only observation shape before implementing any runtime mutation.
+
+### Problem
+
+Phase 5 used synthetic fixtures for Apple container observation. That proved the RuntimeAdapter boundary and fail-closed parser behavior, but it did not prove Hostwright understood real Apple `container` output. Starting `apply` before a verified read-only observation shape would turn Phase 8 into assumption-driven infrastructure.
+
+### Solution
+
+Phase 8A verified Apple container 1.0.0 locally, started the Apple container system service, and confirmed:
+
+```bash
+container list --all --format json
+```
+
+returns the empty runtime shape:
+
+```json
+[]
+```
+
+The runtime parser now accepts that exact empty real JSON array as an empty observed runtime state. Non-empty real JSON arrays still fail closed until a real non-empty output shape is captured and reviewed.
+
+### Why this design
+
+An empty list is a real fact from the runtime. It is safe to support because it does not require inferring service identity, lifecycle, ports, mounts, or health. Non-empty output has not been observed yet, so supporting it would require guessing Apple CLI field names and semantics.
+
+### Files changed
+
+| File | What changed | Why it matters | What breaks if removed |
+| ---- | ------------ | -------------- | ---------------------- |
+| `Sources/HostwrightRuntime/AppleContainerObservationParser.swift` | Accepts verified empty real JSON array output. | Hostwright can parse a real empty Apple container observation. | Phase 8A would remain fixture-only. |
+| `Sources/HostwrightRuntime/AppleContainerCommand.swift` | Uses `list --all --format json` for read-only list observations. | Aligns adapter command shape with verified read-only CLI output. | Adapter would keep requesting table output that the parser does not target. |
+| `Tests/HostwrightRuntimeTests/Fixtures/apple-container-list-empty-real-json.txt` | Adds real empty JSON fixture. | Preserves the verified runtime output shape. | Tests would not prove the real shape. |
+| `Tests/HostwrightRuntimeTests/HostwrightRuntimeSmoke.swift` | Adds parser tests for real empty JSON and unsupported real JSON shapes. | Prevents accidental broad parsing or guessing. | Parser could overclaim support for unverified output. |
+
+### Concepts I must understand
+
+- Phase 8A is still read-only.
+- `[]` means Apple container reported no containers; Hostwright must not invent services.
+- Empty real JSON support does not imply non-empty runtime observation support.
+- `container list --all --format json` is read-only, but `create`, `run`, `start`, `stop`, `delete`, `remove`, `pull`, `build`, and `exec` remain forbidden.
+- Parser support is not runtime mutation.
+- Phase 8B is still a separate apply/mutation design and review gate.
+
+### Risks
+
+- Apple container 1.0.0 may change JSON fields in later versions.
+- Non-empty output is still unknown.
+- Hostwright CLI still does not perform live runtime observation by default.
+- Supporting only empty real JSON is intentionally conservative and incomplete.
+
+### How to verify
+
+```bash
+container system status
+container list --all --format json
+swift build
+swift test list
+swift test
+scripts/grep-orchard.sh .
+scripts/test.sh
+```
+
+### Maintainer checklist
+
+- [ ] I can explain why Phase 8A came before `apply`.
+- [ ] I can explain what real Apple container output was verified.
+- [ ] I can explain why non-empty real output is still unsupported.
+- [ ] I can explain why this phase does not mutate runtime state.
+- [ ] I can explain why Phase 8B must be planned separately.

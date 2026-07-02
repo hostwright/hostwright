@@ -26,7 +26,7 @@ public enum AppleContainerCommand {
         case .version:
             return ["--version"]
         case .listContainers:
-            return ["list"]
+            return ["list", "--all", "--format", "json"]
         }
     }
 
@@ -35,8 +35,7 @@ public enum AppleContainerCommand {
         case .version:
             return "Read Apple container CLI version."
         case .listContainers:
-            return "Read Apple container workload list for Phase 5 observation."
+            return "Read Apple container workload list as JSON for Phase 8A observation."
         }
     }
 }
-

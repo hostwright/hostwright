@@ -55,9 +55,10 @@ Verification types:
 
 | Requirement IDs | Acceptance criteria | Verification type | Verification command or review |
 | --- | --- | --- | --- |
-| HW-RECON-001, HW-RECON-002, HW-RECON-003 | Planner produces deterministic plans from desired and observed state. | Automated | Missing, stopped, unmanaged, unhealthy, changed, and duplicate resource tests. |
-| HW-NET-001, HW-NET-002, HW-NET-003 | Port and exposure validation happen during planning, before mutation. | Automated | Port conflict and unsafe exposure tests. |
-| HW-VALID-004, HW-VALID-005, HW-VALID-006 | Unsafe volumes, secret-like env paths, and unsupported features fail closed before mutation. | Automated | Manifest/policy tests. |
+| HW-RECON-001, HW-RECON-002, HW-RECON-003 | Planner produces deterministic non-mutating plans from desired and observed state. | Automated | Reconciler XCTest cases for missing, stopped, failed, unmanaged, unhealthy, image drift, port drift, mount drift, duplicate observed identity, unsupported observed state, observation unavailable, deterministic hash, and stable ordering. |
+| HW-NET-001, HW-NET-002, HW-NET-003 | Port and exposure validation happen during planning, before mutation. | Automated | Reconciler XCTest cases for duplicate desired host ports, unsafe broad bind address, and privileged host port warning. |
+| HW-VALID-004, HW-VALID-005, HW-VALID-006 | Unsafe volumes, secret-like env paths, and unsupported features fail closed before mutation. | Automated | Reconciler and CLI XCTest cases for unsafe root mounts, secret-like env redaction, and restricted manifest parser failures. |
+| HW-RUNTIME-001, HW-RUNTIME-002, HW-RUNTIME-006 | Phase 7 does not add runtime mutation, direct Apple container calls, cleanup, or `apply`. | Automated + manual | Runtime mutation-unavailable XCTest cases; targeted `rg` scans of CLI/reconciler/state modules; code review. |
 
 ## Phase 8 Gate: First Runtime Mutation
 

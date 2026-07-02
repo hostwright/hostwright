@@ -583,3 +583,80 @@ scripts/test.sh
 - [ ] I can explain why a SwiftPM XCTest target is the correct XCTest probe.
 - [ ] I can explain which modules now have real XCTest coverage.
 - [ ] I can explain why this PR changes tests/docs only, not product behavior.
+
+## Phase 7 update: deterministic planning and drift detection
+
+### Stage goal
+
+Add deterministic desired-vs-observed planning without adding runtime mutation.
+
+### Problem
+
+Before Phase 7, Hostwright had manifests, read-only runtime models, SQLite state records, and a small planner scaffold. It did not yet have a real plan engine that could compare desired state with observed runtime state and produce stable drift records, policy issues, planned actions, or a plan hash.
+
+### Solution
+
+Phase 7 adds:
+
+- manifest-to-runtime desired-state mapping outside the CLI;
+- typed drift records;
+- typed plan issues;
+- typed non-mutating planned actions;
+- planning policy checks;
+- deterministic action ordering;
+- deterministic plan hash;
+- CLI plan rendering that remains non-mutating and does not perform live runtime observation.
+
+### Why this design
+
+Planning must be proven before mutation. Phase 7 deliberately makes Hostwright better at judgment, not action. `apply`, runtime mutation, cleanup, and daemon loops stay out until later phases because they need safe intent persistence, adapter execution, recovery behavior, and confirmation design.
+
+### Files changed
+
+| File | What changed | Why it matters | What breaks if removed |
+| ---- | ------------ | -------------- | ---------------------- |
+| `Sources/HostwrightReconciler/DriftModels.swift` | Added drift, issue, action, planning input, plan, and hash models. | Gives Phase 7 a typed planning contract. | Plan output becomes ad hoc strings. |
+| `Sources/HostwrightReconciler/ManifestRuntimeMapper.swift` | Maps supported manifest fields to desired runtime state. | Keeps CLI from owning planning logic. | CLI or tests would duplicate mapping. |
+| `Sources/HostwrightReconciler/PlanningPolicy.swift` | Adds pre-mutation policy checks. | Blocks unsafe desired state before runtime execution exists. | Unsafe ports, mounts, or secrets may be missed. |
+| `Sources/HostwrightReconciler/DriftDetector.swift` | Compares desired and observed state. | Implements real non-mutating drift detection. | Phase 7 planner has no core behavior. |
+| `Sources/HostwrightReconciler/PlanRenderer.swift` | Renders redacted non-mutating plans. | Keeps CLI output honest and consistent. | Plan output may overclaim or leak detail. |
+| `Sources/HostwrightReconciler/ReconciliationPlanner.swift` | Wires mapper, policy, detector, and renderer-compatible plan APIs. | Provides a single planner entrypoint. | Callers would assemble planning manually. |
+| `Sources/HostwrightCLI/main.swift` | Uses Phase 7 plan rendering for `hostwright plan`. | CLI benefits from planning while staying non-mutating. | CLI remains Phase 2 manifest-only dry-run. |
+| `Tests/HostwrightReconcilerTests/HostwrightReconcilerSmoke.swift` | Adds drift, policy, determinism, redaction, and boundary tests. | Proves Phase 7 behavior with XCTest. | Planner regressions become hard to catch. |
+| `Tests/HostwrightCLITests/HostwrightCLISmoke.swift` | Adds plan output and redaction checks. | Proves CLI does not expose secret-like values. | CLI plan output can regress silently. |
+
+### Concepts I must understand
+
+- Desired state comes from the manifest.
+- Observed state comes from adapter-shaped runtime snapshots, not direct shell calls.
+- Drift is the typed difference between desired and observed state.
+- A planned action is not execution.
+- `executionAvailability` is `unavailableUntilPhase8`.
+- Policy issues run before mutation exists.
+- Plan hashes must not include timestamps, temp paths, raw secrets, or nondeterministic ordering.
+- CLI planning is still not live runtime observation.
+
+### Risks
+
+- The planner can only compare fields represented in the current models.
+- Env drift is not compared until observed runtime env fingerprints exist.
+- Broad exposure checks are limited by the current manifest/network representation.
+- Planned action names can be misread as execution unless reviewers preserve the Phase 7 boundary.
+
+### How to verify
+
+```bash
+swift build
+swift test list
+swift test
+scripts/grep-orchard.sh .
+scripts/test.sh
+```
+
+### Maintainer checklist
+
+- [ ] I can explain why Phase 7 is planning only.
+- [ ] I can explain the difference between drift records, plan issues, and planned actions.
+- [ ] I can explain why `hostwright plan` still does not inspect Apple container by default.
+- [ ] I can explain why planned actions are execution-unavailable until Phase 8.
+- [ ] I can explain what the deterministic plan hash proves and what it does not prove.

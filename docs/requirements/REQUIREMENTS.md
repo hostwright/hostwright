@@ -28,7 +28,7 @@ Status values:
 | HW-CLI-002 | `hostwright --version` must print a development or release version. | Phase 2 maintainer scope; naming archive command surface | Implemented | `Sources/HostwrightCLI/main.swift` | CLI smoke tests | 2 |
 | HW-CLI-003 | `hostwright init` must create `hostwright.yaml` without overwriting by default. | Agent Engineering Manual | Implemented | `Sources/HostwrightCLI/main.swift` | CLI smoke tests | 2 |
 | HW-CLI-004 | `hostwright validate` must validate manifest shape without registry or runtime calls. | Agent Engineering Manual | Implemented for restricted subset | `Sources/HostwrightCLI/main.swift`, `Sources/HostwrightManifest/` | CLI and manifest smoke tests | 2 |
-| HW-CLI-005 | `hostwright plan` must be non-mutating and show that runtime observation is unavailable until implemented. | Agent Engineering Manual | Implemented for Phase 2 subset | `Sources/HostwrightCLI/main.swift`, `Sources/HostwrightReconciler/ReconciliationPlanner.swift` | CLI and reconciler smoke tests | 2 |
+| HW-CLI-005 | `hostwright plan` must be non-mutating and show when runtime observation is not connected. | Agent Engineering Manual | Implemented with Phase 7 deterministic planning output | `Sources/HostwrightCLI/main.swift`, `Sources/HostwrightReconciler/` | CLI and reconciler XCTest cases | 2, 7 |
 | HW-CLI-006 | `hostwright status` must not claim runtime state unless observed. | Agent Engineering Manual | Implemented for manifest-level status | `Sources/HostwrightCLI/main.swift` | CLI smoke tests | 2 |
 | HW-CLI-007 | `hostwright doctor` must run safe local checks. | Final Production Arsenal; Document 2 | Partially implemented | `Sources/HostwrightHealth/DoctorModels.swift`, `Sources/HostwrightCLI/main.swift` | CLI and health smoke tests | 2 |
 | HW-CLI-008 | `hostwright apply` must validate, plan, persist intent, apply idempotently, and emit events. | Agent Engineering Manual | Planned | None | None | 8 |
@@ -50,8 +50,8 @@ Status values:
 | HW-VALID-001 | Validate project and service names. | Agent Engineering Manual | Implemented | `ManifestValidator.swift` | Manifest smoke tests | 2 |
 | HW-VALID-002 | Validate every service has an image. | Agent Engineering Manual | Implemented | `ManifestValidator.swift` | Manifest smoke tests | 2 |
 | HW-VALID-003 | Validate port syntax before any runtime action. | Agent Engineering Manual; Document 3 | Implemented for string ports | `ManifestValidator.swift`, `HostwrightNetworking/NetworkingModels.swift` | Manifest and networking smoke tests | 2 |
-| HW-VALID-004 | Validate volumes conservatively and block unsafe host mounts before mutation. | Document 2 | Partially implemented | `ManifestValidator.swift` | Manifest smoke tests | 7 |
-| HW-VALID-005 | Validate secrets/env paths to prevent credential leakage. | Document 2 | Planned | None | None | 7 |
+| HW-VALID-004 | Validate volumes conservatively and block unsafe host mounts before mutation. | Document 2 | Implemented for Phase 7 planning policy | `ManifestValidator.swift`, `Sources/HostwrightReconciler/PlanningPolicy.swift` | Manifest and reconciler XCTest cases | 7 |
+| HW-VALID-005 | Validate secrets/env paths to prevent credential leakage. | Document 2 | Implemented for desired env planning/redaction; observed env drift remains deferred | `Sources/HostwrightReconciler/PlanningPolicy.swift`, `Sources/HostwrightReconciler/PlanRenderer.swift` | CLI and reconciler XCTest cases | 7 |
 | HW-VALID-006 | Validate unsupported runtime and networking features explicitly. | Agent Engineering Manual; Document 3 | Partially implemented | `docs/reference/limitations.md`, `ManifestParser.swift` | Docs review; manifest smoke tests | 3 |
 
 ## RuntimeAdapter
@@ -79,9 +79,9 @@ Status values:
 
 | ID | Requirement | Source document | Current status | Implementation file if any | Test coverage if any | Release phase |
 | --- | --- | --- | --- | --- | --- | --- |
-| HW-RECON-001 | Reconciliation must compare desired and observed state as separate inputs. | Agent Engineering Manual | Partially implemented | `Sources/HostwrightReconciler/ReconciliationPlanner.swift` | Reconciler smoke tests | 2 |
-| HW-RECON-002 | Plans must be deterministic and non-mutating before apply. | Agent Engineering Manual; Document 2 | Partially implemented | `ManifestDryRunPlanner` | Reconciler and CLI smoke tests | 2 |
-| HW-RECON-003 | Drift detection must identify missing, stopped, unhealthy, and modified resources. | Agent Engineering Manual | Planned | None | None | 7 |
+| HW-RECON-001 | Reconciliation must compare desired and observed state as separate inputs. | Agent Engineering Manual | Implemented for Phase 7 planner input | `Sources/HostwrightReconciler/ReconciliationPlanner.swift`, `Sources/HostwrightReconciler/DriftDetector.swift` | Reconciler XCTest cases | 7 |
+| HW-RECON-002 | Plans must be deterministic and non-mutating before apply. | Agent Engineering Manual; Document 2 | Implemented for Phase 7 dry-run planner | `Sources/HostwrightReconciler/DriftModels.swift`, `Sources/HostwrightReconciler/PlanRenderer.swift` | Reconciler and CLI XCTest cases | 7 |
+| HW-RECON-003 | Drift detection must identify missing, stopped, unhealthy, and modified resources. | Agent Engineering Manual | Implemented for Phase 7 non-mutating planning | `Sources/HostwrightReconciler/DriftDetector.swift` | Reconciler XCTest cases | 7 |
 | HW-RECON-004 | Apply must be idempotent and persist intent before mutation. | Agent Engineering Manual; Document 2 | Planned | None | None | 8 |
 | HW-RECON-005 | Partial apply failure must leave recoverable operation records. | Document 2 | Planned | None | None | 8 |
 
@@ -97,9 +97,9 @@ Status values:
 
 | ID | Requirement | Source document | Current status | Implementation file if any | Test coverage if any | Release phase |
 | --- | --- | --- | --- | --- | --- | --- |
-| HW-NET-001 | Networking must be declared state, not incidental shell output. | Document 3 | Planned | `Sources/HostwrightNetworking/NetworkingModels.swift` scaffold | Networking smoke tests | 7 |
-| HW-NET-002 | Port conflicts must fail during planning before mutation. | Document 3 | Planned | `NetworkingModels.swift` scaffold | None | 7 |
-| HW-NET-003 | Project and localhost exposure may be considered first; LAN, tunnel, and public exposure are blocked by default. | Document 3 | Partially implemented | `NetworkingModels.swift`, `docs/architecture/networking-boundary.md` | Networking smoke tests | 7 |
+| HW-NET-001 | Networking must be declared state, not incidental shell output. | Document 3 | Implemented for manifest/runtime port planning models | `Sources/HostwrightNetworking/NetworkingModels.swift`, `Sources/HostwrightReconciler/ManifestRuntimeMapper.swift` | Networking and reconciler XCTest cases | 7 |
+| HW-NET-002 | Port conflicts must fail during planning before mutation. | Document 3 | Implemented for duplicate desired host ports | `Sources/HostwrightReconciler/PlanningPolicy.swift` | Reconciler XCTest cases | 7 |
+| HW-NET-003 | Project and localhost exposure may be considered first; LAN, tunnel, and public exposure are blocked by default. | Document 3 | Partially implemented; broad bind addresses blocked in planning policy where representable | `NetworkingModels.swift`, `docs/architecture/networking-boundary.md`, `Sources/HostwrightReconciler/PlanningPolicy.swift` | Networking and reconciler XCTest cases | 7 |
 | HW-NET-004 | DNS, tunnel, and cloud connector behavior require separate research gates. | Document 3 | Deferred | Docs only | Docs review | Deferred |
 
 ## Safety / Security

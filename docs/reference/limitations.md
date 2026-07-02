@@ -1,6 +1,6 @@
 # Limitations
 
-Hostwright is in Phase 6 SQLite state and event ledger state. It can model and attempt read-only runtime observation through `RuntimeAdapter`, and it can persist desired state, observed snapshots, events, operation records, and ownership records to an explicit SQLite database path.
+Hostwright is in Phase 7 deterministic planning and drift detection state. It can model and attempt read-only runtime observation through `RuntimeAdapter`, persist desired and observed state to an explicit SQLite database path, and compute non-mutating desired-vs-observed plans.
 
 ## Implemented Today
 
@@ -25,6 +25,10 @@ Hostwright is in Phase 6 SQLite state and event ledger state. It can model and a
 - Operation ledger records for future mutation safety.
 - Ownership records for future cleanup/apply decisions.
 - Explicit-path state configuration only.
+- Manifest-to-runtime desired-state mapping outside the CLI.
+- Typed deterministic drift records, plan issues, planned actions, and plan hash.
+- Planning policy checks for duplicate host ports, unsafe broad bind addresses, privileged host ports, unsafe root mounts, ambiguous mounts, invalid identities, and secret-like environment values.
+- Drift detection for missing, unmanaged, stopped, exited, failed, image mismatch, port mismatch, mount mismatch, unhealthy, duplicate observed identity, unsupported observed state, and unavailable observation cases.
 - Source-material preservation and Hostwright naming controls.
 
 ## Not Implemented Today
@@ -34,7 +38,7 @@ Hostwright is in Phase 6 SQLite state and event ledger state. It can model and a
 - Guaranteed Apple container observation on every machine.
 - Apple container start, stop, create, delete, restart, cleanup, log, or detailed inspect operations.
 - Apple container mutation of any kind.
-- Desired-vs-observed drift detection from real runtime state.
+- Runtime mutation based on drift plans.
 - Daemon scheduling loop.
 - Health check execution.
 - Restart policy execution.
@@ -77,7 +81,7 @@ The Phase 2 parser is not a general YAML parser. It accepts only the documented 
 
 ## Runtime Truth
 
-The runtime module now contains read-only Apple container observation infrastructure, but the CLI still does not expose observed runtime status. `hostwright plan` and `hostwright status` remain manifest-level outputs only. They do not prove that services are running, stopped, healthy, unhealthy, created, deleted, or reachable.
+The runtime module contains read-only Apple container observation infrastructure, but the CLI still does not perform live runtime observation by default. `hostwright plan` renders deterministic desired-state and policy planning output. `hostwright status` remains manifest-level output only. Neither command proves that services are running, stopped, healthy, unhealthy, created, deleted, or reachable unless explicit observed state is supplied through library APIs.
 
 The Phase 5 parser accepts only the fixture-defined `hostwright.apple-container.observation.v1` schema. Unsupported or malformed output fails closed with redacted errors. Runtime mutation begins only in Phase 8.
 
@@ -85,4 +89,4 @@ The Phase 5 parser accepts only the fixture-defined `hostwright.apple-container.
 
 The Phase 6 SQLite store writes only to explicit paths supplied by the caller. Hostwright does not choose a default path under the repository, Application Support, XDG locations, or any global directory.
 
-Phase 6 persists adapter-shaped observed state. It does not implement Phase 7 drift planning, Phase 8 apply, cleanup, a daemon loop, or production durability guarantees.
+Phase 6 persists adapter-shaped observed state. Phase 7 can consume runtime-shaped observed state in memory for planning, but it does not add a default state path, a state-backed CLI observation flow, Phase 8 apply, cleanup, a daemon loop, or production durability guarantees.

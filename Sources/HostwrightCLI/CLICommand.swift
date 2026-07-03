@@ -24,7 +24,7 @@ public enum CLICommand: Equatable, Sendable {
             guard arguments.count == 1 else { throw CLIUsageError("help does not accept arguments.") }
             return .help
         case "init":
-            guard arguments.count == 1 else { throw CLIUsageError("init does not support flags in Phase 2.") }
+            guard arguments.count == 1 else { throw CLIUsageError("init does not support flags.") }
             return .initManifest
         case "validate":
             return try pathCommand(arguments: arguments, commandName: "validate", make: CLICommand.validate)
@@ -35,7 +35,7 @@ public enum CLICommand: Equatable, Sendable {
         case "apply":
             return try applyCommand(arguments: arguments)
         case "doctor":
-            guard arguments.count == 1 else { throw CLIUsageError("doctor does not accept arguments in Phase 2.") }
+            guard arguments.count == 1 else { throw CLIUsageError("doctor does not accept arguments.") }
             return .doctor
         default:
             throw CLIUsageError("Unknown command '\(first)'.")

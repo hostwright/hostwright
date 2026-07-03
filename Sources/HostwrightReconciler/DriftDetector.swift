@@ -12,7 +12,7 @@ public enum DriftDetector {
                     kind: .observationUnavailable,
                     severity: .warning,
                     identity: nil,
-                    message: "Runtime observation is not connected in Phase 7 CLI planning; drift detection is incomplete."
+                    message: "Runtime observation is not connected for this plan; drift detection is incomplete."
                 )
             )
             drift.append(
@@ -126,7 +126,7 @@ public enum DriftDetector {
                 PlannedAction(
                     kind: .flagUnmanagedService,
                     identity: observed.identity,
-                    reason: "Observed service is unmanaged; Phase 7 does not remove it.",
+                    reason: "Observed service is unmanaged; cleanup is not available from this plan.",
                     driftKind: .unmanagedObservedService
                 )
             )
@@ -161,7 +161,7 @@ public enum DriftDetector {
                         identity: desired.identity,
                         reason: "Desired service is missing; create-only apply can create exactly one missing service after confirmation.",
                         driftKind: .missingDesiredService,
-                        executionAvailability: .availableForPhase8BCreate
+                        executionAvailability: .availableForCreateMissingService
                     )
                 )
                 continue
@@ -193,7 +193,7 @@ public enum DriftDetector {
                 PlannedAction(
                     kind: .proposeStartStoppedService,
                     identity: observed.identity,
-                    reason: "Observed service is not running; start remains unavailable until Phase 8.",
+                    reason: "Observed service is not running; start is not available from create-only apply.",
                     driftKind: .stoppedService,
                     stableDetailKey: observed.lifecycleState.rawValue
                 )
@@ -211,7 +211,7 @@ public enum DriftDetector {
                 PlannedAction(
                     kind: .investigateFailedService,
                     identity: observed.identity,
-                    reason: "Observed service failed; Phase 7 records a recovery plan only.",
+                    reason: "Observed service failed; restart policy is not available from create-only apply.",
                     driftKind: .failedService
                 )
             )
@@ -230,7 +230,7 @@ public enum DriftDetector {
                     identity: observed.identity,
                     reason: "Observed service is missing; create-only apply can create exactly one missing service after confirmation.",
                     driftKind: .missingDesiredService,
-                    executionAvailability: .availableForPhase8BCreate
+                    executionAvailability: .availableForCreateMissingService
                 )
             )
         case .unknown:
@@ -262,7 +262,7 @@ public enum DriftDetector {
             PlannedAction(
                 kind: .replaceForImageDrift,
                 identity: desired.identity,
-                reason: "Image drift detected; replacement execution remains unavailable until Phase 8.",
+                reason: "Image drift detected; replacement execution is not available from create-only apply.",
                 driftKind: .imageMismatch,
                 stableDetailKey: detail
             )
@@ -295,7 +295,7 @@ public enum DriftDetector {
             PlannedAction(
                 kind: .reconcilePortDrift,
                 identity: desired.identity,
-                reason: "Port drift detected; port mutation remains unavailable until Phase 8.",
+                reason: "Port drift detected; port mutation is not available from create-only apply.",
                 driftKind: .portMismatch,
                 stableDetailKey: detail
             )
@@ -328,7 +328,7 @@ public enum DriftDetector {
             PlannedAction(
                 kind: .reconcileMountDrift,
                 identity: desired.identity,
-                reason: "Mount drift detected; mount mutation remains unavailable until Phase 8.",
+                reason: "Mount drift detected; mount mutation is not available from create-only apply.",
                 driftKind: .mountMismatch,
                 stableDetailKey: detail
             )
@@ -362,7 +362,7 @@ public enum DriftDetector {
             PlannedAction(
                 kind: .investigateUnhealthyService,
                 identity: observed.identity,
-                reason: "Health drift detected; health execution remains unavailable until Phase 9.",
+                reason: "Health drift detected; health execution is not implemented yet.",
                 driftKind: .unhealthyService,
                 stableDetailKey: observed.healthState.rawValue
             )

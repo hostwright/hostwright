@@ -105,7 +105,7 @@ public struct MigrationRunner: Sendable {
         SchemaMigration(
             version: 1,
             description: "Initial Hostwright state ledger schema",
-            checksum: "phase6-state-ledger-v1",
+            checksum: "state-ledger-v1",
             statements: [
                 """
                 CREATE TABLE IF NOT EXISTS projects (

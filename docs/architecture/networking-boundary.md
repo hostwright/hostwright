@@ -2,7 +2,7 @@
 
 Networking is a high-risk surface. Hostwright must prove local reliability before exposing services beyond the local host.
 
-## Phase 1 State
+## Current State
 
 Networking contains model boundaries only. It does not implement DNS, tunnel management, packet filtering, LAN exposure, local proxying, or cloud integration.
 
@@ -18,4 +18,3 @@ Networking contains model boundaries only. It does not implement DNS, tunnel man
 - No local DNS resolver.
 - No Cloudflare, Tailscale, WireGuard, or tunnel integration.
 - No cloud control plane.
-

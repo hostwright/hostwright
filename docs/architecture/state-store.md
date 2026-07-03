@@ -6,9 +6,9 @@ Hostwright's intended local state store is SQLite.
 
 The state store persists desired state, observed snapshots, events, operation records, and ownership records. Restart history and drift-specific records remain planned for later phases.
 
-## Phase 8B State
+## Current State
 
-Phase 6 implemented a SQLite-backed state ledger inside `HostwrightState`. Phase 8B uses that ledger to persist apply intent before the first create-only runtime mutation.
+Hostwright has a SQLite-backed state ledger inside `HostwrightState`. Create-only apply uses that ledger to persist apply intent before runtime mutation.
 
 Implemented:
 
@@ -42,7 +42,7 @@ Not implemented:
 
 ## Path Policy
 
-Phase 6 requires explicit database paths. Hostwright does not silently write to the repository, `~/Library/Application Support`, XDG paths, or any global location.
+Hostwright requires explicit database paths. It does not silently write to the repository, `~/Library/Application Support`, XDG paths, or any global location.
 
 Tests use unique temporary database paths. Future CLI/dev commands may add an explicit state-path flag, but no default user path exists yet.
 

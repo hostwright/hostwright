@@ -22,7 +22,7 @@ public struct FoundationRuntimeProcessRunner: RuntimeProcessRunning {
     private func runSynchronously(_ spec: RuntimeCommandSpec) throws -> RuntimeCommandResult {
         switch spec.classification {
         case .readOnly:
-            try RuntimeCommandPolicy.validateReadOnlyExecution(spec, phaseName: "Phase 5")
+            try RuntimeCommandPolicy.validateReadOnlyExecution(spec)
         case .mutating:
             try RuntimeCommandPolicy.validateCreateMissingServiceMutation(spec)
         case .forbidden, .unknown:

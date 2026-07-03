@@ -2,9 +2,9 @@
 
 Hostwright must be conservative because it will eventually manage local runtime resources.
 
-## Phase 8B State
+## Current State
 
-Hostwright now has one runtime mutation gate: Phase 8B create-missing-service through `RuntimeAdapter`. It requires explicit `--state-db`, explicit `--confirm-plan`, state intent persistence before execution, local image confirmation, and conservative service-shape validation.
+Hostwright has one runtime mutation gate: create-missing-service through `RuntimeAdapter`. It requires explicit `--state-db`, explicit `--confirm-plan`, state intent persistence before execution, local image confirmation, and conservative service-shape validation.
 
 No destructive operation, general lifecycle mutation, privileged helper, service installer, DNS behavior, tunnel behavior, cloud integration, daemon loop, cleanup, or default database path exists.
 

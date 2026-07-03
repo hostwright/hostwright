@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://hostwright.dev/schemas/hostwright-yaml.schema.json",
   "title": "Hostwright Manifest",
-  "description": "Phase 2 Hostwright manifest shape. The Swift parser supports a restricted Hostwright subset, not general YAML.",
+  "description": "Hostwright manifest shape. The Swift parser supports a restricted Hostwright subset, not general YAML.",
   "type": "object",
   "required": ["project", "services"],
   "additionalProperties": false,
@@ -92,4 +92,3 @@
     }
   }
 }
-

@@ -1,6 +1,6 @@
 # CLI Reference
 
-The current CLI provides a dependency-free `hostwright` command surface with one narrow Phase 8B mutation gate.
+The current CLI provides a dependency-free `hostwright` command surface with one narrow create-only mutation gate.
 
 ## Commands
 
@@ -41,7 +41,7 @@ It does not:
 
 ## `hostwright plan [path]`
 
-Reads and validates the manifest, maps the supported manifest subset into runtime-shaped desired state, runs Phase 7 planning policy checks, and prints a non-mutating dry-run plan.
+Reads and validates the manifest, maps the supported manifest subset into runtime-shaped desired state, runs planning policy checks, and prints a non-mutating dry-run plan.
 
 The output includes a deterministic plan hash, typed issues, typed planned actions, and an explicit execution-unavailable notice.
 
@@ -49,7 +49,7 @@ Runtime observation infrastructure exists behind `RuntimeAdapter`, but `hostwrig
 
 ## `hostwright apply [path] --state-db <path> --confirm-plan <hash>`
 
-Runs the Phase 8B create-only apply gate.
+Runs the create-only apply gate.
 
 This command:
 

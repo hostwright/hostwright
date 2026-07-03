@@ -39,7 +39,7 @@ struct ApplyCommandRunner {
                 )
             }
 
-            let executableActions = plan.actions.filter { $0.executionAvailability == .availableForPhase8BCreate }
+            let executableActions = plan.actions.filter { $0.executionAvailability == .availableForCreateMissingService }
             guard !executableActions.isEmpty else {
                 return failure(
                     code: .runtimeMutationNotImplemented,
@@ -184,7 +184,7 @@ struct ApplyCommandRunner {
             projectID: projectID,
             observedState: observed,
             runtimeAdapter: observed.adapterMetadata?.adapterName ?? "runtime-adapter",
-            parserVersion: "phase-8b",
+            parserVersion: "create-only-apply-v1",
             rawOutputHash: nil,
             redactedSummary: PlanRenderer.render(plan, mode: .compact),
             observedAt: timestamp

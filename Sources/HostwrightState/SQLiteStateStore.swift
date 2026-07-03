@@ -37,7 +37,7 @@ public struct SQLiteStateStore: StateStore {
         StateStoreDescription(
             backend: .sqlite,
             isImplemented: true,
-            message: "SQLite state store is implemented for explicit local database paths only. No default user database path is used in Phase 6."
+                message: "SQLite state store requires an explicit local database path. No default user database path is used."
         )
     }
 

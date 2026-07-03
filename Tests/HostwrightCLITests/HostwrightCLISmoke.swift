@@ -66,7 +66,7 @@ final class HostwrightCLITests: XCTestCase {
         XCTAssertTrue(planResult.standardOutput.contains("non-mutating"))
         XCTAssertTrue(planResult.standardOutput.contains("Runtime observation"))
         XCTAssertTrue(planResult.standardOutput.contains("Plan hash"))
-        XCTAssertTrue(planResult.standardOutput.contains("Execution: unavailable until Phase 8"))
+        XCTAssertTrue(planResult.standardOutput.contains("Execution: unavailable unless a createMissingService action is explicitly confirmed"))
         XCTAssertTrue(planResult.standardOutput.contains("No runtime actions were executed"))
 
         let statusResult = HostwrightCLI.run(arguments: ["status"], environment: environment(files: validFiles))

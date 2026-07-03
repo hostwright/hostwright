@@ -22,7 +22,7 @@
       "creationDate": "2026-07-03T01:14:29Z",
       "id": "hostwright-proof-web",
       "image": {
-        "reference": "hostwright-proof-web:phase8b"
+        "reference": "hostwright-proof-web:create-only"
       },
       "labels": {},
       "mounts": [],

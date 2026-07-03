@@ -90,7 +90,7 @@ public enum HostwrightCLI {
     private static func initManifest(environment: CLIEnvironment) throws -> CLIRunResult {
         let path = HostwrightIdentity.manifestFileName
         if environment.fileExists(path) {
-            return failure(code: .fileAlreadyExists, message: "\(path) already exists. Phase 2 init will not overwrite it.")
+            return failure(code: .fileAlreadyExists, message: "\(path) already exists. init will not overwrite it.")
         }
 
         try environment.writeTextFile(path, starterManifest)

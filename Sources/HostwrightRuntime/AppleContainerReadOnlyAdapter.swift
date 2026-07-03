@@ -38,7 +38,7 @@ public struct AppleContainerReadOnlyAdapter: RuntimeAdapter {
         }
 
         let spec = AppleContainerCommand.spec(kind: .listContainers, executable: executable)
-        try RuntimeCommandPolicy.validateReadOnlyExecution(spec, phaseName: "Phase 5")
+        try RuntimeCommandPolicy.validateReadOnlyExecution(spec)
 
         let result = try await processRunner.run(spec)
         return try AppleContainerObservationParser.parse(
@@ -52,12 +52,11 @@ public struct AppleContainerReadOnlyAdapter: RuntimeAdapter {
     public func plan(desiredState: DesiredRuntimeState, observedState: ObservedRuntimeState) async throws -> RuntimePlan {
         RuntimePlan(
             actions: [],
-            warnings: ["Apple container read-only adapter does not plan runtime mutation in Phase 5."]
+            warnings: ["Apple container read-only adapter does not plan runtime mutation."]
         )
     }
 
     public func execute(_ action: PlannedRuntimeAction, confirmation: RuntimeMutationConfirmation?) async throws -> RuntimeEvent {
-        throw RuntimeAdapterError.mutationUnavailableInCurrentPhase("Runtime mutation begins in Phase 8; Phase 5 cannot execute action '\(action.kind.rawValue)'.")
+        throw RuntimeAdapterError.mutationUnavailableByPolicy("Read-only adapter cannot execute runtime action '\(action.kind.rawValue)'.")
     }
 }
-

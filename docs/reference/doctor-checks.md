@@ -12,6 +12,6 @@
 
 ## Safety Boundary
 
-`doctor` does not run Apple container commands. It does not inspect containers, networks, volumes, images, logs, or runtime state. Phase 5 read-only observation exists only behind `RuntimeAdapter`; doctor remains a diagnostic executable-presence check.
+`doctor` does not run Apple container commands. It does not inspect containers, networks, volumes, images, logs, or runtime state. Runtime observation exists only behind `RuntimeAdapter`; doctor remains a diagnostic executable-presence check.
 
 If `container` is missing, `doctor` reports a warning instead of crashing.

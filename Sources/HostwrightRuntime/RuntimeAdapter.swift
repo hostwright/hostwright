@@ -9,7 +9,7 @@ public enum RuntimeAdapterError: Error, Equatable, Sendable {
     case permissionDenied(String)
     case redactionFailure(String)
     case capabilityUnavailable(RuntimeCapability)
-    case mutationUnavailableInCurrentPhase(String)
+    case mutationUnavailableByPolicy(String)
 
     public func redacted(using policy: RuntimeRedactionPolicy = .default) -> RuntimeAdapterError {
         switch self {
@@ -41,8 +41,8 @@ public enum RuntimeAdapterError: Error, Equatable, Sendable {
             return .redactionFailure(policy.redact(message))
         case .capabilityUnavailable(let capability):
             return .capabilityUnavailable(capability)
-        case .mutationUnavailableInCurrentPhase(let message):
-            return .mutationUnavailableInCurrentPhase(policy.redact(message))
+        case .mutationUnavailableByPolicy(let message):
+            return .mutationUnavailableByPolicy(policy.redact(message))
         }
     }
 }

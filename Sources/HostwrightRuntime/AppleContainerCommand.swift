@@ -1,14 +1,17 @@
 public enum AppleContainerCommand {
     public static let executableName = "container"
 
-    public enum ReadOnlyKind: String, Equatable, Sendable {
+    public enum ReadOnlyKind: Equatable, Sendable {
         case version
         case listContainers
         case listImages
+        case logs(containerID: String, tail: Int)
     }
 
-    public enum MutatingKind: String, Equatable, Sendable {
+    public enum MutatingKind: Equatable, Sendable {
         case createContainer
+        case startContainer(containerID: String)
+        case deleteContainer(containerID: String)
     }
 
     public static func spec(
@@ -38,8 +41,24 @@ public enum AppleContainerCommand {
             timeout: timeout,
             classification: .mutating,
             executableResolution: .resolvedByRuntimeExecutableResolver,
-            mutationKind: .createMissingService,
+            mutationKind: mutationKind(for: kind),
             purpose: purpose(for: kind, desiredService: desiredService)
+        )
+    }
+
+    public static func spec(
+        kind: MutatingKind,
+        executable: ResolvedRuntimeExecutable,
+        timeout: RuntimeCommandTimeout = RuntimeCommandTimeout()
+    ) -> RuntimeCommandSpec {
+        RuntimeCommandSpec(
+            executablePath: executable.path,
+            arguments: arguments(for: kind),
+            timeout: timeout,
+            classification: .mutating,
+            executableResolution: .resolvedByRuntimeExecutableResolver,
+            mutationKind: mutationKind(for: kind),
+            purpose: purpose(for: kind)
         )
     }
 
@@ -51,6 +70,8 @@ public enum AppleContainerCommand {
             return ["list", "--all", "--format", "json"]
         case .listImages:
             return ["image", "list", "--format", "json"]
+        case .logs(let containerID, let tail):
+            return ["logs", "-n", String(clampedTail(tail)), containerID]
         }
     }
 
@@ -73,6 +94,19 @@ public enum AppleContainerCommand {
             arguments.append(desiredService.image)
             arguments += desiredService.command
             return arguments
+        case .startContainer, .deleteContainer:
+            return arguments(for: kind)
+        }
+    }
+
+    public static func arguments(for kind: MutatingKind) -> [String] {
+        switch kind {
+        case .createContainer:
+            return []
+        case .startContainer(let containerID):
+            return ["start", containerID]
+        case .deleteContainer(let containerID):
+            return ["delete", containerID]
         }
     }
 
@@ -83,7 +117,9 @@ public enum AppleContainerCommand {
         case .listContainers:
             return "Read Apple container workload list as JSON."
         case .listImages:
-            return "Read local Apple container image list as JSON before create-only apply."
+            return "Read local Apple container image list as JSON before confirmed create."
+        case .logs(let containerID, let tail):
+            return "Read last \(clampedTail(tail)) log lines for Hostwright-managed container \(containerID)."
         }
     }
 
@@ -91,11 +127,35 @@ public enum AppleContainerCommand {
         switch kind {
         case .createContainer:
             return "Create missing Hostwright-managed service \(desiredService.identity.displayName)."
+        case .startContainer, .deleteContainer:
+            return purpose(for: kind)
+        }
+    }
+
+    public static func purpose(for kind: MutatingKind) -> String {
+        switch kind {
+        case .createContainer:
+            return "Create missing Hostwright-managed service."
+        case .startContainer(let containerID):
+            return "Start Hostwright-managed container \(containerID)."
+        case .deleteContainer(let containerID):
+            return "Delete exact Hostwright-managed container \(containerID)."
+        }
+    }
+
+    public static func mutationKind(for kind: MutatingKind) -> RuntimeMutationCommandKind {
+        switch kind {
+        case .createContainer:
+            return .createMissingService
+        case .startContainer:
+            return .startManagedService
+        case .deleteContainer:
+            return .deleteManagedContainer
         }
     }
 
     public static func containerName(for identity: RuntimeServiceIdentity) -> String {
-        "hostwright-\(identity.projectName)-\(identity.serviceName)"
+        identity.managedResourceIdentifier
     }
 
     private static func stablePortOrdering(_ lhs: RuntimePortMapping, _ rhs: RuntimePortMapping) -> Bool {
@@ -109,5 +169,9 @@ public enum AppleContainerCommand {
             String(rhs.containerPort),
             rhs.protocolName.rawValue
         ].joined(separator: ":")
+    }
+
+    private static func clampedTail(_ tail: Int) -> Int {
+        min(max(1, tail), 1_000)
     }
 }

@@ -51,8 +51,20 @@ public enum ManifestRuntimeMapper {
             command: service.command,
             environment: environment,
             ports: ports,
-            mounts: mounts
+            mounts: mounts,
+            restartPolicy: mapRestartPolicy(service.restart?.policy)
         )
+    }
+
+    private static func mapRestartPolicy(_ value: String?) -> RuntimeRestartPolicy {
+        switch value {
+        case "on-failure":
+            return .onFailure
+        case "unless-stopped":
+            return .unlessStopped
+        default:
+            return .no
+        }
     }
 
     private static func parsePort(_ value: String, identity: RuntimeServiceIdentity, issues: inout [PlanIssue]) -> RuntimePortMapping? {

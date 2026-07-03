@@ -109,6 +109,7 @@ public enum PlanActionKind: String, Equatable, Sendable {
 public enum PlanExecutionAvailability: String, Equatable, Sendable {
     case unavailable
     case availableForCreateMissingService
+    case availableForStartManagedService
 }
 
 public struct PlannedAction: Equatable, Sendable {

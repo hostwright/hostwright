@@ -890,3 +890,92 @@ scripts/test.sh
 - [ ] I can explain what state records were written.
 - [ ] I can explain why repeat apply with the old hash refused to mutate.
 - [ ] I can explain why the proof container/image cleanup was allowed but general cleanup is still not implemented.
+
+## Phase 9 update: operability, managed start, logs, events, and safe cleanup
+
+### Stage goal
+
+Make Hostwright usable for local operation after create-only convergence: observe status, read bounded logs, inspect persisted events, start an eligible stopped managed service, and clean up exact owned stopped/created/exited containers.
+
+### Problem
+
+After Phase 8B, Hostwright could create one missing service safely, but it could not operate the service afterward. There was no live CLI status path, no log command, no event rendering, no restart-policy-aware start, and no product cleanup path based on ownership records.
+
+### Solution
+
+Phase 9 adds:
+
+- `hostwright status [path] --state-db <path>`;
+- `hostwright logs <service> [path] [--tail <n>] [--state-db <path>]`;
+- `hostwright events --state-db <path> [--project <name>]`;
+- `hostwright cleanup [path] --state-db <path> --dry-run`;
+- `hostwright cleanup [path] --state-db <path> --confirm-cleanup <token>`;
+- one new `apply` executable action: `startManagedService`, only when restart policy allows it;
+- RuntimeAdapter log, start, and delete command specs with strict command policy.
+
+### Why this design
+
+Operability should grow from ownership and observation, not from broad lifecycle commands. Status and logs are read-only. Start is bounded by restart policy and exact observed identity. Cleanup is destructive, so it requires dry-run, a token, ownership records, live observation, exact resource identifiers, and non-running lifecycle. Images, volumes, networks, unmanaged resources, and broad flags stay out of scope.
+
+### Files changed
+
+| File | What changed | Why it matters | What breaks if removed |
+| ---- | ------------ | -------------- | ---------------------- |
+| `Sources/HostwrightCLI/StatusCommand.swift` | Adds live RuntimeAdapter status with explicit state DB persistence. | Lets maintainers see desired vs observed state honestly. | `status --state-db` cannot record or render live status. |
+| `Sources/HostwrightCLI/LogsCommand.swift` | Adds bounded, redacted log reads through RuntimeAdapter. | Provides local diagnostics without follow/attach/exec. | Operators cannot inspect service logs safely. |
+| `Sources/HostwrightCLI/EventsCommand.swift` | Adds event ledger rendering. | Makes persisted operations reviewable. | State events remain hidden in SQLite. |
+| `Sources/HostwrightCLI/CleanupCommand.swift` | Adds dry-run and token-confirmed cleanup for eligible owned stopped/created/exited containers. | Introduces destructive behavior with explicit safety gates. | Cleanup candidates cannot be reviewed or executed safely. |
+| `Sources/HostwrightCLI/ApplyCommand.swift` | Adds one managed-start action after plan confirmation. | Allows restart-policy-permitted stopped services to start without broad lifecycle support. | Phase 9 cannot recover stopped created services. |
+| `Sources/HostwrightRuntime/*` | Adds logs, start, delete command descriptors and policy checks. | Keeps runtime execution behind RuntimeAdapter and rejects forbidden flags. | CLI could drift into unsafe or scattered shell behavior. |
+| `Sources/HostwrightReconciler/*` | Adds restart-policy-aware start availability. | Keeps start decisions in planning, not ad hoc CLI code. | Apply cannot know when start is allowed. |
+| `Tests/*` | Adds XCTest coverage for status, logs, events, cleanup, managed start, and command policy. | Proves Phase 9 safety rules are executable. | Future regressions would be mostly manual review. |
+
+### Concepts I must understand
+
+- RuntimeAdapter is still the only path for Apple container runtime behavior.
+- `status --state-db` observes runtime but does not mutate.
+- `logs` reads a bounded tail only; it does not follow, attach, or exec.
+- `events` reads persisted state only; it does not observe runtime.
+- `apply` still executes exactly one action after a matching current plan hash.
+- `startManagedService` is allowed only for stopped/created/exited managed services when restart policy is `on-failure` or `unless-stopped`.
+- Cleanup is destructive and therefore requires dry-run, ownership, live observation, exact resource IDs, non-running lifecycle, and a matching token.
+- Hostwright still does not delete images, volumes, networks, unmanaged containers, or broad resource sets.
+
+### Risks
+
+- Cleanup relies on ownership records being correct.
+- Live status can report runtime lifecycle but still does not prove application-level health or reachability.
+- Log output can still contain unusual secret formats not covered by the current redaction heuristics.
+- Managed start does not implement a daemon restart loop or backoff.
+- Live proof caught a real ownership bug: managed start originally overwrote cleanup eligibility. The fix keeps create ownership cleanup-eligible after start.
+
+### Live proof
+
+The proof used one disposable container:
+
+- project `phase9proof`;
+- service `web`;
+- existing local image `docker.io/library/python:alpine`;
+- command `python3 --version`;
+- container `hostwright-phase9proof-web`.
+
+It proved create, live status, managed start, logs, events, dry-run cleanup, confirmed cleanup, and final absence from `container list --all`. The first proof attempt was stopped after it found the ownership downgrade bug; the leftover exact proof container was deleted without broad flags before rerunning the fixed proof.
+
+### How to verify
+
+```bash
+swift build
+swift test list
+swift test
+scripts/grep-orchard.sh .
+scripts/test.sh
+```
+
+### Maintainer checklist
+
+- [ ] I can explain why cleanup is separate from apply.
+- [ ] I can explain why cleanup needs a dry-run token.
+- [ ] I can explain why Hostwright deletes containers but not images or volumes in Phase 9.
+- [ ] I can explain why start is restart-policy-gated.
+- [ ] I can explain why `logs` is bounded and non-following.
+- [ ] I can explain which events are persisted by status, logs, apply, and cleanup.

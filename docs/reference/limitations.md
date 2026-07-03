@@ -1,6 +1,6 @@
 # Limitations
 
-Hostwright can model and attempt read-only runtime observation through `RuntimeAdapter`, persist desired and observed state to an explicit SQLite database path, compute non-mutating desired-vs-observed plans, and execute one tightly gated create-missing-service mutation through `RuntimeAdapter` when all confirmation and local-image gates pass.
+Hostwright can model and attempt read-only runtime observation through `RuntimeAdapter`, persist desired and observed state to an explicit SQLite database path, compute deterministic desired-vs-observed plans, execute one tightly gated create-missing-service mutation, execute one restart-policy-allowed managed start, read bounded logs, render state events, and delete exact cleanup-eligible Hostwright-owned stopped/created/exited containers through `RuntimeAdapter`.
 
 ## Implemented Today
 
@@ -9,7 +9,10 @@ Hostwright can model and attempt read-only runtime observation through `RuntimeA
 - `hostwright init` without overwrite.
 - `hostwright validate` for a restricted Hostwright manifest subset.
 - `hostwright plan` as non-mutating manifest-level dry-run output.
-- `hostwright status` as manifest-level status only.
+- `hostwright status [path] --state-db <path>` with live RuntimeAdapter observation and event/snapshot persistence.
+- `hostwright logs <service>` with bounded tail output through RuntimeAdapter and redaction.
+- `hostwright events --state-db <path>` for persisted event ledger records.
+- `hostwright cleanup` dry-run and exact token-confirmed deletion of eligible Hostwright-owned stopped/created/exited containers.
 - `hostwright doctor` safe local checks.
 - Swift Package Manager module boundaries.
 - RuntimeAdapter contract infrastructure, state scaffolds, reconciler scaffolds, health models, networking scaffolds, and observability scaffolds.
@@ -27,17 +30,17 @@ Hostwright can model and attempt read-only runtime observation through `RuntimeA
 - Observed runtime snapshot persistence.
 - Event ledger persistence.
 - Operation ledger records for future mutation safety.
-- Ownership records for future cleanup/apply decisions.
+- Ownership records for cleanup/apply decisions.
 - Explicit-path state configuration only.
 - Manifest-to-runtime desired-state mapping outside the CLI.
 - Typed deterministic drift records, plan issues, planned actions, and plan hash.
 - Planning policy checks for duplicate host ports, unsafe broad bind addresses, privileged host ports, unsafe root mounts, ambiguous mounts, invalid identities, and secret-like environment values.
 - Drift detection for missing, unmanaged, stopped, exited, failed, image mismatch, port mismatch, mount mismatch, unhealthy, duplicate observed identity, unsupported observed state, and unavailable observation cases.
-- `hostwright apply [path] --state-db <path> --confirm-plan <hash>` for create-only apply.
+- `hostwright apply [path] --state-db <path> --confirm-plan <hash>` for one create-missing-service action or one restart-policy-allowed managed start action.
 - Operation intent persistence before mutation.
 - Apply success/failure event persistence.
-- Runtime mutation policy for `createMissingService` only.
-- One disposable live create proof for `hostwright-proof-web`, including stale-hash refusal and exact proof cleanup.
+- Runtime mutation policy for `createMissingService`, `startManagedService`, and `deleteManagedContainer`.
+- Disposable live create/start/logs/cleanup proofs for Hostwright-owned proof containers, including stale-hash refusal and exact proof cleanup.
 - Source-material preservation and Hostwright naming controls.
 
 ## Not Implemented Today
@@ -47,13 +50,12 @@ Hostwright can model and attempt read-only runtime observation through `RuntimeA
 - Guaranteed Apple container observation on every machine.
 - Broad non-empty Apple container JSON list parsing beyond the verified builder/proof shapes.
 - Broad non-empty Apple container image list parsing beyond the verified object shape.
-- Apple container start, stop, delete, restart, cleanup, log, or detailed inspect operations.
-- Runtime mutation beyond create-missing-service.
+- Apple container stop, restart, remove, broad cleanup, image deletion, volume deletion, log follow, attach, exec, or detailed inspect operations.
+- Runtime mutation beyond create-missing-service, managed start, and exact cleanup-eligible container delete.
 - Daemon scheduling loop.
 - Health check execution.
-- Restart policy execution.
-- Status based on observed runtime state.
-- Cleanup, teardown, garbage collection, or ownership-based deletion.
+- Restart loops or daemon-enforced restart policy.
+- Broad cleanup, teardown, garbage collection, image deletion, volume deletion, or unmanaged deletion.
 - Default user database path.
 - Hidden global state writes.
 - Production durability, backup, or corruption-recovery guarantees.
@@ -91,14 +93,14 @@ The manifest parser is not a general YAML parser. It accepts only the documented
 
 ## Runtime Truth
 
-The runtime module contains read-only Apple container observation infrastructure, but the CLI still does not perform live runtime observation by default. `hostwright plan` renders deterministic desired-state and policy planning output. `hostwright status` remains manifest-level output only. Neither command proves that services are running, stopped, healthy, unhealthy, created, deleted, or reachable unless explicit observed state is supplied through library APIs.
+The runtime module contains Apple container observation infrastructure and narrow mutation command descriptors. `hostwright plan` renders deterministic desired-state and policy planning output without live runtime observation by default. `hostwright status --state-db <path>` performs live RuntimeAdapter observation and records a status event. Status still does not prove reachability or application-level health beyond the observed runtime state.
 
 The runtime parser accepts the fixture-defined `hostwright.apple-container.observation.v1` schema, the verified real empty JSON array shape returned by `container list --all --format json`, Apple builder container output that is ignored, and the verified `hostwright-proof-web` created/stopped output. Unsupported, malformed, or broader real Apple container JSON output fails closed with redacted errors.
 
-Create-only apply is not general lifecycle management. It uses `container create` only after explicit plan confirmation, operation intent persistence, local image confirmation, and safe-subset validation. The live proof created exactly one disposable `hostwright-proof-web` container and then removed that exact proof container and image.
+Apply is not general lifecycle management. It uses `container create` only after explicit plan confirmation, operation intent persistence, local image confirmation, and safe-subset validation. It uses `container start <id>` only for one observed Hostwright-owned stopped/created/exited service when restart policy allows a managed start. Cleanup uses `container delete <id>` only after dry-run token confirmation and ownership/live-state eligibility checks.
 
 ## State Truth
 
 The SQLite store writes only to explicit paths supplied by the caller. Hostwright does not choose a default path under the repository, Application Support, XDG locations, or any global directory.
 
-Hostwright persists adapter-shaped observed state and can consume runtime-shaped observed state in memory for planning. Apply writes state only to explicit `--state-db` paths. It does not add a default state path, cleanup, a daemon loop, or production durability guarantees.
+Hostwright persists adapter-shaped observed state and can consume runtime-shaped observed state in memory for planning. Apply, status, logs, events, and cleanup write or read state only through explicit `--state-db` paths. Hostwright does not add a default state path, daemon loop, broad cleanup, or production durability guarantees.

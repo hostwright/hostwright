@@ -24,7 +24,7 @@ public struct FoundationRuntimeProcessRunner: RuntimeProcessRunning {
         case .readOnly:
             try RuntimeCommandPolicy.validateReadOnlyExecution(spec)
         case .mutating:
-            try RuntimeCommandPolicy.validateCreateMissingServiceMutation(spec)
+            try RuntimeCommandPolicy.validateSupportedMutation(spec)
         case .forbidden, .unknown:
             throw RuntimeAdapterError.commandRejected(
                 classification: spec.classification,

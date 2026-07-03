@@ -80,7 +80,7 @@ public struct PlanningPolicy: Equatable, Sendable {
                             kind: .privilegedHostPort,
                             severity: .warning,
                             identity: service.identity,
-                            message: "Desired host port \(hostPort) is privileged; create-only apply rejects privileged host ports.",
+                            message: "Desired host port \(hostPort) is privileged; confirmed create rejects privileged host ports.",
                             stableDetailKey: key
                         )
                     )

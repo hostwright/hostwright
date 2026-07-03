@@ -159,7 +159,7 @@ public enum DriftDetector {
                     PlannedAction(
                         kind: .createMissingService,
                         identity: desired.identity,
-                        reason: "Desired service is missing; create-only apply can create exactly one missing service after confirmation.",
+                        reason: "Desired service is missing; confirmed apply can create exactly one missing service.",
                         driftKind: .missingDesiredService,
                         executionAvailability: .availableForCreateMissingService
                     )
@@ -167,7 +167,7 @@ public enum DriftDetector {
                 continue
             }
 
-            detectLifecycleDrift(observed, drift: &drift, actions: &actions)
+            detectLifecycleDrift(desired: desired, observed: observed, drift: &drift, actions: &actions)
             detectImageDrift(desired: desired, observed: observed, drift: &drift, actions: &actions)
             detectPortDrift(desired: desired, observed: observed, drift: &drift, actions: &actions)
             detectMountDrift(desired: desired, observed: observed, drift: &drift, actions: &actions)
@@ -175,11 +175,20 @@ public enum DriftDetector {
         }
     }
 
-    private static func detectLifecycleDrift(_ observed: ObservedRuntimeService, drift: inout [DriftRecord], actions: inout [PlannedAction]) {
+    private static func detectLifecycleDrift(
+        desired: DesiredRuntimeService,
+        observed: ObservedRuntimeService,
+        drift: inout [DriftRecord],
+        actions: inout [PlannedAction]
+    ) {
         switch observed.lifecycleState {
         case .running:
             return
         case .stopped, .exited, .created:
+            let executionAvailability: PlanExecutionAvailability = desired.restartPolicy.allowsManagedStart ? .availableForStartManagedService : .unavailable
+            let reason = desired.restartPolicy.allowsManagedStart
+                ? "Observed service is not running; restart policy allows one confirmed managed start."
+                : "Observed service is not running; restart policy does not allow managed start."
             drift.append(
                 DriftRecord(
                     kind: .stoppedService,
@@ -193,9 +202,10 @@ public enum DriftDetector {
                 PlannedAction(
                     kind: .proposeStartStoppedService,
                     identity: observed.identity,
-                    reason: "Observed service is not running; start is not available from create-only apply.",
+                    reason: reason,
                     driftKind: .stoppedService,
-                    stableDetailKey: observed.lifecycleState.rawValue
+                    stableDetailKey: observed.lifecycleState.rawValue,
+                    executionAvailability: executionAvailability
                 )
             )
         case .failed:
@@ -211,7 +221,7 @@ public enum DriftDetector {
                 PlannedAction(
                     kind: .investigateFailedService,
                     identity: observed.identity,
-                    reason: "Observed service failed; restart policy is not available from create-only apply.",
+                    reason: "Observed service failed; managed start is not available for failed lifecycle state.",
                     driftKind: .failedService
                 )
             )
@@ -228,7 +238,7 @@ public enum DriftDetector {
                 PlannedAction(
                     kind: .createMissingService,
                     identity: observed.identity,
-                    reason: "Observed service is missing; create-only apply can create exactly one missing service after confirmation.",
+                    reason: "Observed service is missing; confirmed apply can create exactly one missing service.",
                     driftKind: .missingDesiredService,
                     executionAvailability: .availableForCreateMissingService
                 )
@@ -262,7 +272,7 @@ public enum DriftDetector {
             PlannedAction(
                 kind: .replaceForImageDrift,
                 identity: desired.identity,
-                reason: "Image drift detected; replacement execution is not available from create-only apply.",
+                reason: "Image drift detected; replacement execution is not available.",
                 driftKind: .imageMismatch,
                 stableDetailKey: detail
             )
@@ -295,7 +305,7 @@ public enum DriftDetector {
             PlannedAction(
                 kind: .reconcilePortDrift,
                 identity: desired.identity,
-                reason: "Port drift detected; port mutation is not available from create-only apply.",
+                reason: "Port drift detected; port mutation is not available.",
                 driftKind: .portMismatch,
                 stableDetailKey: detail
             )
@@ -328,7 +338,7 @@ public enum DriftDetector {
             PlannedAction(
                 kind: .reconcileMountDrift,
                 identity: desired.identity,
-                reason: "Mount drift detected; mount mutation is not available from create-only apply.",
+                reason: "Mount drift detected; mount mutation is not available.",
                 driftKind: .mountMismatch,
                 stableDetailKey: detail
             )

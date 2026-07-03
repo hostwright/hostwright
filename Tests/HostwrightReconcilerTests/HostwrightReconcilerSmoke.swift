@@ -28,6 +28,17 @@ final class HostwrightReconcilerTests: XCTestCase {
         XCTAssertTrue(plan.actions.allSatisfy { $0.executionAvailability == .unavailable })
     }
 
+    func testRestartPolicyAllowsManagedStartForStoppedService() {
+        let desired = desiredState(services: [desiredService(restartPolicy: .onFailure)])
+        let plan = ReconciliationPlanner().reconcile(
+            PlanningInput(desiredState: desired, observedState: observedState([observed(lifecycleState: .created)]))
+        )
+
+        XCTAssertEqual(plan.actions.map(\.kind), [.proposeStartStoppedService])
+        XCTAssertEqual(plan.actions[0].executionAvailability, .availableForStartManagedService)
+        XCTAssertTrue(plan.actions[0].reason.contains("restart policy allows"))
+    }
+
     func testFailedServiceCreatesInvestigationActionWithoutExecution() {
         let plan = ReconciliationPlanner().reconcile(
             PlanningInput(desiredState: desiredState(), observedState: observedState([observed(lifecycleState: .failed)]))
@@ -254,14 +265,16 @@ final class HostwrightReconcilerTests: XCTestCase {
         image: String? = nil,
         environment: [RuntimeEnvironmentValue] = [],
         ports: [RuntimePortMapping] = [],
-        mounts: [RuntimeMountReference] = []
+        mounts: [RuntimeMountReference] = [],
+        restartPolicy: RuntimeRestartPolicy = .no
     ) -> DesiredRuntimeService {
         DesiredRuntimeService(
             identity: identity(serviceName: name),
             image: image ?? "ghcr.io/example/\(name):latest",
             environment: environment,
             ports: ports,
-            mounts: mounts
+            mounts: mounts,
+            restartPolicy: restartPolicy
         )
     }
 

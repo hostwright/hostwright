@@ -6,11 +6,11 @@
 - Apple silicon (`arm64`)
 - Swift 6.3.2 through full Xcode developer tools
 
-## Verified On 2026-07-02
+## Verified On 2026-07-03
 
-- `swift build` succeeds after the XCTest foundation changes.
-- `swift test list` lists real XCTest cases across Hostwright test targets.
-- `swift test` executes real XCTest assertions across CLI, core, health, manifest, networking, observability, reconciler, runtime, and state targets.
+- `swift build` succeeds after the Phase 9 operability changes.
+- `swift test list` lists 82 real XCTest cases across Hostwright test targets.
+- `swift test` executes 82 real XCTest assertions across CLI, core, health, manifest, networking, observability, reconciler, runtime, and state targets with 0 failures.
 - `scripts/grep-orchard.sh .` succeeds and reports historical references only in `docs/source-material/` and `docs/naming/`.
 - `scripts/test.sh` succeeds and runs `swift build` plus `swift test`.
 - Apple container 1.0.0 is installed locally at `/usr/local/bin/container`.
@@ -20,6 +20,13 @@
 - `hostwright apply` created exactly one Apple container named `hostwright-proof-web` through `RuntimeAdapter`.
 - A stale repeat apply using the old plan hash was rejected before any second mutation.
 - Exact proof cleanup removed `hostwright-proof-web` and `hostwright-proof-web:phase8b` without `--all` or `--force`.
+- Phase 9 live proof used existing local image `docker.io/library/python:alpine` without pulling images.
+- `hostwright apply` created `hostwright-phase9proof-web`.
+- A second confirmed `hostwright apply` started `hostwright-phase9proof-web` through `startManagedService`; the container exited/stopped after `python3 --version`.
+- `hostwright logs web ... --tail 20` returned `Python 3.14.6`.
+- `hostwright cleanup --dry-run` produced token `cleanup-8ecbbdd9ef3cdd74`.
+- `hostwright cleanup --confirm-cleanup cleanup-8ecbbdd9ef3cdd74` deleted exactly `hostwright-phase9proof-web`.
+- `container list --all` after cleanup showed only Apple builder runtime state.
 
 ## Current Implementation Truth
 
@@ -28,16 +35,17 @@
 - Phase 7 adds deterministic non-mutating desired-vs-observed planning, typed drift records, typed plan issues, typed planned actions, and a deterministic plan hash.
 - Phase 8A adds parser and fixture support for the verified real empty Apple container JSON list output.
 - Phase 8B adds a create-only apply gate that requires explicit state DB path, explicit plan hash confirmation, operation intent persistence before mutation, and RuntimeAdapter execution.
+- Phase 9 adds live `status --state-db`, bounded `logs`, event rendering, one restart-policy-allowed managed start action, and ownership-based cleanup for exact stopped/created/exited containers.
 - No Apple container command was called by Phase 6 or Phase 7.
-- `FoundationRuntimeProcessRunner` exists for policy-approved read-only command specs and Phase 8B create-missing-service mutation specs; automated tests still use fake process execution.
+- `FoundationRuntimeProcessRunner` exists for policy-approved read-only command specs and supported mutation specs; automated tests still use fake process execution.
 - `AppleContainerReadOnlyAdapter` reports missing `container` as runtime unavailable and rejects mutation through the adapter contract.
 - `AppleContainerObservationParser` accepts the fixture-defined `hostwright.apple-container.observation.v1` schema, the verified real empty JSON array shape `[]`, Apple builder container list output, and the verified created/stopped proof container output.
 - `AppleContainerImageListParser` accepts the verified real object-based image list shape with `configuration.name`.
 - `SQLiteStateStore` uses system `SQLite3`, schema migrations, transactions, and repository APIs for desired services, observed snapshots, events, operations, and ownership records.
 - Phase 6 state tests use explicit temporary database paths only.
 - Phase 7 planner tests use in-memory desired and observed runtime models only.
-- No default user database path, hidden global database write, cleanup, daemon loop, multi-action apply, start/stop/delete/restart/remove, or CLI status live runtime observation was implemented.
-- Live create was run only for the exact disposable `hostwright-proof-web` proof service and then cleaned up.
+- No default user database path, hidden global database write, daemon loop, multi-action apply, stop/restart/remove, image deletion, volume deletion, broad cleanup, or CLI Apple container shell-out bypass was implemented.
+- Live mutation proofs were run only for exact disposable Hostwright-owned proof containers and then cleaned up.
 
 ## SwiftPM Fixture Resources
 
@@ -62,7 +70,7 @@ Important diagnostic correction:
 - `swift -e 'import XCTest'` can still fail and is not the correct gate.
 - A minimal SwiftPM XCTest probe passed after Xcode was fixed.
 - `swift test list` is the local proof that Hostwright now exposes real XCTest cases.
-- `swift test` executes 71 XCTest cases after the Phase 8B live proof parser/fixture update.
+- `swift test` executes 82 XCTest cases after the Phase 9 operability update.
 
 The old top-level smoke/precondition posture has been replaced with XCTest assertions. Some test file names still include `Smoke.swift`, but the contents are XCTest cases.
 

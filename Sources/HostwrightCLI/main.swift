@@ -55,13 +55,37 @@ public enum HostwrightCLI {
             let manifest = try loadValidManifest(path: path, environment: environment)
             let plan = ReconciliationPlanner().plan(manifest: manifest)
             return CLIRunResult(standardOutput: PlanRenderer.render(plan))
-        case .status(let path):
-            return status(path: path, environment: environment)
+        case .status(let path, let stateDatabasePath):
+            return StatusCommandRunner(
+                manifestPath: path,
+                stateDatabasePath: stateDatabasePath,
+                environment: environment
+            ).run()
         case .apply(let path, let stateDatabasePath, let confirmedPlanHash):
             return ApplyCommandRunner(
                 manifestPath: path,
                 stateDatabasePath: stateDatabasePath,
                 confirmedPlanHash: confirmedPlanHash,
+                environment: environment
+            ).run()
+        case .logs(let serviceName, let path, let tail, let stateDatabasePath):
+            return LogsCommandRunner(
+                serviceName: serviceName,
+                manifestPath: path,
+                tail: tail,
+                stateDatabasePath: stateDatabasePath,
+                environment: environment
+            ).run()
+        case .events(let stateDatabasePath, let projectName):
+            return EventsCommandRunner(
+                stateDatabasePath: stateDatabasePath,
+                projectName: projectName
+            ).run()
+        case .cleanup(let path, let stateDatabasePath, let confirmation):
+            return CleanupCommandRunner(
+                manifestPath: path,
+                stateDatabasePath: stateDatabasePath,
+                confirmation: confirmation,
                 environment: environment
             ).run()
         case .doctor:
@@ -77,13 +101,18 @@ public enum HostwrightCLI {
       hostwright init
       hostwright validate [path]
       hostwright plan [path]
-      hostwright status [path]
+      hostwright status [path] [--state-db <path>]
       hostwright apply [path] --state-db <path> --confirm-plan <hash>
+      hostwright logs <service> [path] [--tail <n>] [--state-db <path>]
+      hostwright events --state-db <path> [--project <name>]
+      hostwright cleanup [path] --state-db <path> --dry-run
+      hostwright cleanup [path] --state-db <path> --confirm-cleanup <token>
       hostwright doctor
 
-    Commands are non-mutating except init, which creates hostwright.yaml only when absent.
+    Most commands are read-only. init writes hostwright.yaml only when absent.
     CLI plan output is deterministic but does not perform live runtime observation.
-    Apply is create-only, requires explicit state DB and plan hash confirmation, and mutates only through RuntimeAdapter.
+    Apply can execute exactly one confirmed createMissingService or restart-policy-allowed startManagedService action through RuntimeAdapter.
+    Cleanup deletes only exact cleanup-eligible Hostwright-owned stopped/created/exited containers after dry-run token confirmation.
 
     """
 
@@ -95,46 +124,6 @@ public enum HostwrightCLI {
 
         try environment.writeTextFile(path, starterManifest)
         return CLIRunResult(standardOutput: "Created \(path)\n")
-    }
-
-    private static func status(path: String, environment: CLIEnvironment) -> CLIRunResult {
-        guard environment.fileExists(path) else {
-            return CLIRunResult(
-                standardOutput: """
-                Hostwright status
-                Manifest: \(path) not found
-                Runtime: unavailable in CLI status; no Apple container state was inspected.
-
-                """
-            )
-        }
-
-        do {
-            let manifest = try loadValidManifest(path: path, environment: environment)
-            return CLIRunResult(
-                standardOutput: """
-                Hostwright status
-                Manifest: \(path) valid
-                Project: \(manifest.project ?? "<missing>")
-                Declared services: \(manifest.services.map(\.name).joined(separator: ", "))
-                Runtime: unavailable in CLI status; no Apple container state was inspected.
-
-                """
-            )
-        } catch let error as ManifestParseError {
-            return CLIRunResult(
-                standardOutput: """
-                Hostwright status
-                Manifest: \(path) invalid
-                Runtime: unavailable in CLI status; no Apple container state was inspected.
-
-                """,
-                standardError: render(issues: error.issues),
-                exitCode: 1
-            )
-        } catch {
-            return failure(code: .manifestFileIOFailed, message: String(describing: error))
-        }
     }
 
     private static func doctor(environment: CLIEnvironment) -> CLIRunResult {

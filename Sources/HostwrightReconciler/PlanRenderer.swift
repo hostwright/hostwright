@@ -19,7 +19,7 @@ public enum PlanRenderer {
             "Project: \(plan.projectName)",
             "Plan hash: \(plan.planHash)",
             "Runtime observation: \(plan.observationConnected ? "connected from supplied observed state" : "not connected for CLI plan; no Apple container state was inspected")",
-            "Execution: unavailable unless a createMissingService action is explicitly confirmed",
+            "Execution: unavailable unless one createMissingService or startManagedService action is explicitly confirmed",
             ""
         ]
 

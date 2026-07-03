@@ -8,7 +8,7 @@ The state store persists desired state, observed snapshots, events, operation re
 
 ## Current State
 
-Hostwright has a SQLite-backed state ledger inside `HostwrightState`. Create-only apply uses that ledger to persist apply intent before runtime mutation.
+Hostwright has a SQLite-backed state ledger inside `HostwrightState`. Apply uses that ledger to persist operation intent before runtime mutation, and cleanup uses ownership records plus live observation before deleting an exact eligible managed container.
 
 Implemented:
 
@@ -18,15 +18,15 @@ Implemented:
 - observed runtime snapshot persistence
 - event ledger
 - operation ledger records for mutation safety
-- operation statuses for recorded, succeeded, and failed apply attempts
-- ownership records for future cleanup/apply decisions
+- operation statuses for recorded, succeeded, and failed apply/cleanup attempts
+- ownership records for apply and cleanup decisions
 - temp-database smoke checks
 
 Not implemented:
 
 - multi-action `hostwright apply`
-- runtime mutation beyond create-missing-service
-- cleanup
+- runtime mutation beyond create-missing-service, restart-policy-allowed managed start, and exact cleanup-eligible managed container delete
+- broad cleanup, image cleanup, volume cleanup, or unmanaged cleanup
 - daemon loop
 - drift planner
 - production durability claims
@@ -75,7 +75,7 @@ Transactions wrap:
 - operation success/failure updates
 - ownership record upserts
 
-No transaction performs runtime mutation. Apply writes intent first, leaves the transaction, calls `RuntimeAdapter`, then records success or failure.
+No transaction performs runtime mutation. Apply and cleanup write intent first, leave the transaction, call `RuntimeAdapter`, then record success or failure.
 
 ## Module Boundary
 

@@ -28,7 +28,7 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
             runtimeName: "Apple container CLI",
             runtimeVersion: nil,
             supportsMutation: true,
-            capabilities: [.readOnlyObservation, .lifecycleMutation]
+            capabilities: [.readOnlyObservation, .lifecycleMutation, .logStreaming, .cleanup]
         )
     }
 
@@ -37,7 +37,7 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
             throw RuntimeAdapterError.runtimeUnavailable("Apple container CLI was not found on PATH.")
         }
 
-        return [.readOnlyObservation, .lifecycleMutation]
+        return [.readOnlyObservation, .lifecycleMutation, .logStreaming, .cleanup]
     }
 
     public func observe(desiredState: DesiredRuntimeState) async throws -> ObservedRuntimeState {
@@ -67,21 +67,39 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
         )
     }
 
+    public func logs(for identity: RuntimeServiceIdentity, tail: Int) async throws -> RuntimeLogResult {
+        try await readOnlyAdapter.logs(for: identity, tail: tail)
+    }
+
     public func execute(_ action: PlannedRuntimeAction, confirmation: RuntimeMutationConfirmation?) async throws -> RuntimeEvent {
         guard confirmation?.confirmed == true, confirmation?.planHash?.isEmpty == false else {
             throw RuntimeAdapterError.commandRejected(
                 classification: .mutating,
-                message: "Create-only apply requires explicit plan-hash confirmation."
+                message: "Runtime mutation requires explicit plan-hash confirmation."
             )
         }
-        guard action.kind == .create, let desiredService = action.desiredService else {
-            throw RuntimeAdapterError.mutationUnavailableByPolicy("Create-only apply executes only createMissingService runtime actions.")
-        }
-        try validateCreateSubset(desiredService)
 
         guard let executable = executableResolver.resolveExecutable(named: AppleContainerCommand.executableName) else {
             throw RuntimeAdapterError.runtimeUnavailable("Apple container CLI was not found on PATH.")
         }
+
+        switch action.kind {
+        case .create:
+            return try await executeCreate(action, executable: executable)
+        case .start:
+            return try await executeStart(action, executable: executable)
+        case .remove:
+            return try await executeDelete(action, executable: executable)
+        case .update, .stop, .noOp:
+            throw RuntimeAdapterError.mutationUnavailableByPolicy("Runtime action '\(action.kind.rawValue)' is not available.")
+        }
+    }
+
+    private func executeCreate(_ action: PlannedRuntimeAction, executable: ResolvedRuntimeExecutable) async throws -> RuntimeEvent {
+        guard let desiredService = action.desiredService else {
+            throw RuntimeAdapterError.mutationUnavailableByPolicy("Create-missing-service requires desired runtime service details.")
+        }
+        try validateCreateSubset(desiredService)
 
         let imageListSpec = AppleContainerCommand.spec(kind: .listImages, executable: executable)
         let imageListResult = try await processRunner.run(imageListSpec)
@@ -103,6 +121,38 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
             severity: .info,
             message: "Created missing service \(desiredService.identity.displayName). \(redactionPolicy.redact(result.standardOutput))",
             resourceIdentifier: resourceIdentifier
+        )
+    }
+
+    private func executeStart(_ action: PlannedRuntimeAction, executable: ResolvedRuntimeExecutable) async throws -> RuntimeEvent {
+        let containerID = AppleContainerCommand.containerName(for: action.identity)
+        let spec = AppleContainerCommand.spec(kind: .startContainer(containerID: containerID), executable: executable)
+        try RuntimeCommandPolicy.validateStartManagedServiceMutation(spec)
+        let result = try await processRunner.run(spec)
+        return RuntimeEvent(
+            identity: action.identity,
+            severity: .info,
+            message: "Started managed service \(action.identity.displayName). \(redactionPolicy.redact(result.standardOutput))",
+            resourceIdentifier: containerID
+        )
+    }
+
+    private func executeDelete(_ action: PlannedRuntimeAction, executable: ResolvedRuntimeExecutable) async throws -> RuntimeEvent {
+        guard action.isDestructive else {
+            throw RuntimeAdapterError.commandRejected(
+                classification: .mutating,
+                message: "Delete-managed-container requires an explicitly destructive planned action."
+            )
+        }
+        let containerID = AppleContainerCommand.containerName(for: action.identity)
+        let spec = AppleContainerCommand.spec(kind: .deleteContainer(containerID: containerID), executable: executable)
+        try RuntimeCommandPolicy.validateDeleteManagedContainerMutation(spec)
+        let result = try await processRunner.run(spec)
+        return RuntimeEvent(
+            identity: action.identity,
+            severity: .info,
+            message: "Deleted managed container \(action.identity.displayName). \(redactionPolicy.redact(result.standardOutput))",
+            resourceIdentifier: containerID
         )
     }
 

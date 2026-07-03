@@ -56,6 +56,23 @@ public struct AppleContainerReadOnlyAdapter: RuntimeAdapter {
         )
     }
 
+    public func logs(for identity: RuntimeServiceIdentity, tail: Int) async throws -> RuntimeLogResult {
+        guard let executable = executableResolver.resolveExecutable(named: AppleContainerCommand.executableName) else {
+            throw RuntimeAdapterError.runtimeUnavailable("Apple container CLI was not found on PATH.")
+        }
+
+        let containerID = AppleContainerCommand.containerName(for: identity)
+        let spec = AppleContainerCommand.spec(kind: .logs(containerID: containerID, tail: tail), executable: executable)
+        try RuntimeCommandPolicy.validateReadOnlyExecution(spec)
+
+        let result = try await processRunner.run(spec)
+        return RuntimeLogResult(
+            identity: identity,
+            text: redactionPolicy.redact(result.standardOutput),
+            lineLimit: min(max(1, tail), 1_000)
+        )
+    }
+
     public func execute(_ action: PlannedRuntimeAction, confirmation: RuntimeMutationConfirmation?) async throws -> RuntimeEvent {
         throw RuntimeAdapterError.mutationUnavailableByPolicy("Read-only adapter cannot execute runtime action '\(action.kind.rawValue)'.")
     }

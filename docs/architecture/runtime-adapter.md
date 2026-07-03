@@ -8,31 +8,30 @@ Hostwright needs to observe, plan, and eventually mutate container runtime state
 
 ## Current State
 
-Hostwright has read-only Apple container observation infrastructure behind `RuntimeAdapter` and one mutation-capable adapter path, limited to create-missing-service.
+Hostwright has Apple container observation infrastructure behind `RuntimeAdapter` and one mutation-capable adapter path, limited to create-missing-service, restart-policy-gated managed start, bounded logs, and ownership-gated cleanup delete.
 
 Implemented:
 
 - typed runtime service identity, desired service, observed service, lifecycle state, health state, ports, mounts, environment values, events, capabilities, and adapter metadata;
-- expanded `RuntimeAdapter` protocol for metadata, capability discovery, read-only observation, planning, and future mutation hooks;
+- expanded `RuntimeAdapter` protocol for metadata, capability discovery, read-only observation, planning, bounded logs, and mutation hooks;
 - `MockRuntimeAdapter` for deterministic tests without live process execution;
 - runtime command specs, command results, command classification, timeout model, and process runner protocol;
 - fake process runner for tests;
-- Foundation-backed process runner for policy-approved read-only runtime commands and the create-missing-service mutation spec;
+- Foundation-backed process runner for policy-approved read-only runtime commands and the supported mutation specs;
 - executable resolution through `RuntimeExecutableResolver`;
 - `AppleContainerReadOnlyAdapter` for read-only observation attempts;
-- `AppleContainerApplyAdapter` for create-only mutation;
+- `AppleContainerApplyAdapter` for narrow create, start, and delete mutation;
 - fixture-defined observation parser for empty and running service snapshots;
 - redaction policy for command args, env values, stdout, stderr, parser errors, and runtime errors.
 
 Not implemented:
 
-- cleanup;
-- start, stop, delete, restart, remove, run, pull, build, exec, or prune;
-- restart policy execution;
+- stop, restart, remove, run, pull, build, exec, image delete, volume delete, or prune;
+- daemon restart loops;
 - daemon runtime loop;
-- CLI status backed by observed runtime state.
+- broad cleanup or unmanaged cleanup.
 
-Runtime mutation is limited to create-missing-service.
+Runtime mutation is limited to create-missing-service, restart-policy-allowed managed start, and exact cleanup-eligible managed container delete.
 
 ## RuntimeAdapter Protocol Shape
 
@@ -42,9 +41,10 @@ The adapter exposes:
 - `capabilities()` for supported capability discovery;
 - `observe(desiredState:)` for future read-only runtime snapshots;
 - `plan(desiredState:observedState:)` for adapter-aware planning hooks;
+- `logs(for:tail:)` for bounded read-only log output;
 - `execute(_:confirmation:)` for future mutation hooks.
 
-`execute(_:confirmation:)` may perform exactly one create-missing-service action when confirmation, plan hash, local image availability, safe-subset validation, and state persistence gates have passed.
+`execute(_:confirmation:)` may perform exactly one supported mutation action when confirmation, plan hash, policy validation, and any state persistence gates have passed.
 
 ## Process Runner Boundary
 
@@ -66,12 +66,12 @@ The command spec records:
 - the command must be represented as `RuntimeCommandSpec`;
 - the executable must be resolved through `RuntimeExecutableResolver`;
 - read-only commands must pass read-only policy;
-- mutating commands must be classified as `mutating` and carry the `createMissingService` mutation kind;
+- mutating commands must be classified as `mutating` and carry a supported mutation kind;
 - forbidden, unknown, unsupported mutating, and unresolved specs are rejected;
 - timeout and output capture are enforced;
 - command args, env, stdout, stderr, and errors are redacted.
 
-Tests use fake process execution and fixtures. Local live observation and create-only mutation are allowed only through RuntimeAdapter implementations in `HostwrightRuntime`.
+Tests use fake process execution and fixtures. Local live observation and supported mutation are allowed only through RuntimeAdapter implementations in `HostwrightRuntime`.
 
 ## Command Classification
 
@@ -82,7 +82,7 @@ Tests use fake process execution and fixtures. Local live observation and create
 - `forbidden`;
 - `unknown`.
 
-The current policy permits read-only command specs and exactly one mutating command kind: `createMissingService`. Forbidden, unknown, destructive, unresolved, and unsupported mutating specs are rejected before execution.
+The current policy permits read-only command specs and three behavior-named mutating command kinds: `createMissingService`, `startManagedService`, and `deleteManagedContainer`. Forbidden, unknown, unresolved, and unsupported mutating specs are rejected before execution.
 
 Apple container command strings live only in `AppleContainerCommand` and runtime adapters. The current list-style command shape and create command shape are based on local Apple container 1.0.0 help output and guarded by fail-closed parsing and policy checks; they are not broad Apple CLI compatibility claims.
 
@@ -132,13 +132,15 @@ The default policy redacts key/value patterns and sensitive key fragments such a
 
 If broader real Apple container output does not match one of those reviewed shapes, Hostwright reports a parse failure instead of guessing. This protects the runtime boundary from turning unverified Apple CLI output into fake product truth.
 
-## Create-Only Mutation Boundary
+## Mutation Boundary
 
-Create-only apply supports only:
+Apply and cleanup support only:
 
 - `container image list --format json` as a read-only local-image availability gate;
 - `container create --name <name> --env KEY=value --publish host:container <image> [command...]`.
+- `container start <id>` for exact Hostwright-owned stopped/created/exited services when restart policy allows managed start.
+- `container delete <id>` for exact cleanup-eligible Hostwright-owned stopped/created/exited containers after dry-run token confirmation.
 
-The adapter rejects mounts, DNS, custom networks, capabilities, Rosetta, virtualization, custom runtime/kernel, SSH forwarding, `--rm`, `run`, start-after-create, image pull, delete, restart, remove, cleanup, prune, build, and exec.
+The adapter rejects mounts, DNS, custom networks, capabilities, Rosetta, virtualization, custom runtime/kernel, SSH forwarding, `--rm`, `run`, image pull, stop, restart, remove, broad cleanup, prune, build, exec, attach, interactive, `--all`, `--force`, image delete, and volume delete.
 
 The live proof used an explicitly approved disposable local image and created exactly one container named `hostwright-proof-web`. A stale repeat apply was rejected before mutation because the recomputed plan hash changed. Cleanup removed only the exact proof container and proof image. Apple builder runtime state and the downloaded base image remain outside Hostwright ownership.

@@ -15,6 +15,10 @@ public struct RuntimeServiceIdentity: Equatable, Hashable, Sendable {
         }
         return "\(projectName)/\(serviceName)"
     }
+
+    public var managedResourceIdentifier: String {
+        "hostwright-\(projectName)-\(serviceName)"
+    }
 }
 
 public enum RuntimeLifecycleState: String, Equatable, Sendable {
@@ -33,6 +37,16 @@ public enum RuntimeHealthState: String, Equatable, Sendable {
     case starting
     case healthy
     case unhealthy
+}
+
+public enum RuntimeRestartPolicy: String, Equatable, Sendable {
+    case no
+    case onFailure
+    case unlessStopped
+
+    public var allowsManagedStart: Bool {
+        self == .onFailure || self == .unlessStopped
+    }
 }
 
 public enum RuntimePortProtocol: String, Equatable, Sendable {
@@ -99,6 +113,7 @@ public struct DesiredRuntimeService: Equatable, Sendable {
     public let environment: [RuntimeEnvironmentValue]
     public let ports: [RuntimePortMapping]
     public let mounts: [RuntimeMountReference]
+    public let restartPolicy: RuntimeRestartPolicy
 
     public init(
         identity: RuntimeServiceIdentity,
@@ -106,7 +121,8 @@ public struct DesiredRuntimeService: Equatable, Sendable {
         command: [String] = [],
         environment: [RuntimeEnvironmentValue] = [],
         ports: [RuntimePortMapping] = [],
-        mounts: [RuntimeMountReference] = []
+        mounts: [RuntimeMountReference] = [],
+        restartPolicy: RuntimeRestartPolicy = .no
     ) {
         self.identity = identity
         self.image = image
@@ -114,6 +130,19 @@ public struct DesiredRuntimeService: Equatable, Sendable {
         self.environment = environment
         self.ports = ports
         self.mounts = mounts
+        self.restartPolicy = restartPolicy
+    }
+}
+
+public struct RuntimeLogResult: Equatable, Sendable {
+    public let identity: RuntimeServiceIdentity
+    public let text: String
+    public let lineLimit: Int
+
+    public init(identity: RuntimeServiceIdentity, text: String, lineLimit: Int) {
+        self.identity = identity
+        self.text = text
+        self.lineLimit = lineLimit
     }
 }
 

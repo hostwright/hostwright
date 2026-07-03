@@ -1,6 +1,6 @@
 # CLI Reference
 
-The current CLI provides a dependency-free `hostwright` command surface with one narrow create-only mutation gate.
+The current CLI provides a dependency-free `hostwright` command surface with narrow RuntimeAdapter-backed operation gates.
 
 ## Commands
 
@@ -9,8 +9,12 @@ hostwright --version
 hostwright init
 hostwright validate [path]
 hostwright plan [path]
-hostwright status [path]
+hostwright status [path] [--state-db <path>]
 hostwright apply [path] --state-db <path> --confirm-plan <hash>
+hostwright logs <service> [path] [--tail <n>] [--state-db <path>]
+hostwright events --state-db <path> [--project <name>]
+hostwright cleanup [path] --state-db <path> --dry-run
+hostwright cleanup [path] --state-db <path> --confirm-cleanup <token>
 hostwright doctor
 ```
 
@@ -49,7 +53,7 @@ Runtime observation infrastructure exists behind `RuntimeAdapter`, but `hostwrig
 
 ## `hostwright apply [path] --state-db <path> --confirm-plan <hash>`
 
-Runs the create-only apply gate.
+Runs the narrow confirmed apply gate.
 
 This command:
 
@@ -59,7 +63,7 @@ This command:
 - requires an explicit state database path;
 - requires the supplied plan hash to match the current observed plan;
 - persists desired state, observed state, operation intent, and an apply-start event before mutation;
-- executes exactly one `createMissingService` action through `RuntimeAdapter`;
+- executes exactly one `createMissingService` action or one restart-policy-allowed `startManagedService` action through `RuntimeAdapter`;
 - records success or failure events and operation status.
 
 It refuses mutation when:
@@ -68,18 +72,57 @@ It refuses mutation when:
 - `--confirm-plan` is missing or mismatched;
 - runtime observation fails;
 - the plan has blockers;
-- zero executable create actions exist;
-- more than one executable create action exists;
-- the service uses mounts, sensitive environment values, privileged host ports, or broad bind addresses;
-- the local Apple container image cannot be confirmed.
+- zero executable actions exist;
+- more than one executable action exists;
+- a create action uses mounts, sensitive environment values, privileged host ports, or broad bind addresses;
+- a create action cannot confirm the local Apple container image;
+- a start action is not for an observed Hostwright-managed stopped, created, or exited service allowed by restart policy.
 
-It does not implement start, stop, delete, restart, remove, cleanup, rollback, image pull, daemon loops, or multi-action apply.
+It does not implement stop, restart, image replacement, port mutation, mount mutation, rollback, image pull, daemon loops, or multi-action apply.
 
-## `hostwright status [path]`
+## `hostwright status [path] [--state-db <path>]`
 
-Reports manifest-level status only.
+Without `--state-db`, reports manifest-level status only.
 
-It does not inspect runtime state and must not be interpreted as service status.
+With `--state-db`, validates the manifest, observes Apple container through `RuntimeAdapter`, persists a status observation event and snapshot to the explicit state database path, and renders desired services against observed lifecycle/health/port facts.
+
+It does not mutate runtime state.
+
+## `hostwright logs <service> [path] [--tail <n>] [--state-db <path>]`
+
+Reads the last log lines for a declared and observed Hostwright-managed service through `RuntimeAdapter`.
+
+Rules:
+
+- default tail is 100 lines;
+- maximum tail is clamped to 1000 lines;
+- log output is redacted before display;
+- `--follow`, attach, interactive, and exec behavior are not implemented;
+- when `--state-db` is supplied, a `logs.read` event is persisted.
+
+## `hostwright events --state-db <path> [--project <name>]`
+
+Reads the SQLite event ledger from an explicit state database path and renders events in deterministic timestamp/id order.
+
+It does not inspect runtime state.
+
+## `hostwright cleanup [path] --state-db <path> --dry-run`
+
+Plans cleanup candidates only. A candidate is eligible only when all of these are true:
+
+- an ownership record marks the resource cleanup-eligible;
+- the resource type is `container`;
+- the runtime identifier is exact and Hostwright-owned;
+- the project/service match the manifest;
+- live observation shows the service is created, stopped, or exited, not running.
+
+The dry run prints an exact confirmation token.
+
+## `hostwright cleanup [path] --state-db <path> --confirm-cleanup <token>`
+
+Deletes only the exact eligible containers covered by the current cleanup token through `RuntimeAdapter`.
+
+It never deletes images, volumes, networks, or unmanaged containers and never uses broad flags such as `--all` or `--force`.
 
 ## `hostwright doctor`
 

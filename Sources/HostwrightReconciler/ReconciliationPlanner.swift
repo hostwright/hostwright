@@ -46,7 +46,7 @@ public struct ReconciliationPlanner: Sendable {
         let unmanagedObserved = observed.services
             .filter { desiredByIdentity[$0.identity] == nil }
             .sorted { $0.identity.displayName < $1.identity.displayName }
-            .map { "Observed service '\($0.identity.displayName)' is not in desired state; create-only planning does not remove it." }
+            .map { "Observed service '\($0.identity.displayName)' is not in desired state; Hostwright planning does not remove it." }
 
         let unhealthyObserved = observed.services
             .filter { desiredByIdentity[$0.identity] != nil && $0.healthState == .unhealthy }

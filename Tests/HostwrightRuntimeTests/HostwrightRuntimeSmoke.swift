@@ -116,6 +116,42 @@ final class HostwrightRuntimeTests: XCTestCase {
         XCTAssertThrowsError(try RuntimeCommandPolicy.validateCreateMissingServiceMutation(nonHostwrightCreate))
     }
 
+    func testManagedStartAndDeletePoliciesAcceptOnlyExactHostwrightContainers() {
+        let executable = ResolvedRuntimeExecutable(name: "container", path: "/usr/bin/container-fixture")
+        let start = AppleContainerCommand.spec(kind: .startContainer(containerID: "hostwright-demo-api"), executable: executable)
+        let delete = AppleContainerCommand.spec(kind: .deleteContainer(containerID: "hostwright-demo-api"), executable: executable)
+
+        XCTAssertEqual(start.arguments, ["start", "hostwright-demo-api"])
+        XCTAssertEqual(start.mutationKind, .startManagedService)
+        XCTAssertNoThrow(try RuntimeCommandPolicy.validateStartManagedServiceMutation(start))
+        XCTAssertEqual(delete.arguments, ["delete", "hostwright-demo-api"])
+        XCTAssertEqual(delete.mutationKind, .deleteManagedContainer)
+        XCTAssertNoThrow(try RuntimeCommandPolicy.validateDeleteManagedContainerMutation(delete))
+
+        let attachedStart = RuntimeCommandSpec(
+            executablePath: "/usr/bin/container-fixture",
+            arguments: ["start", "--attach", "hostwright-demo-api"],
+            classification: .mutating,
+            executableResolution: .resolvedByRuntimeExecutableResolver,
+            mutationKind: .startManagedService,
+            purpose: "fixture"
+        )
+        XCTAssertThrowsError(try RuntimeCommandPolicy.validateStartManagedServiceMutation(attachedStart))
+
+        let forcedDelete = RuntimeCommandSpec(
+            executablePath: "/usr/bin/container-fixture",
+            arguments: ["delete", "--force", "hostwright-demo-api"],
+            classification: .mutating,
+            executableResolution: .resolvedByRuntimeExecutableResolver,
+            mutationKind: .deleteManagedContainer,
+            purpose: "fixture"
+        )
+        XCTAssertThrowsError(try RuntimeCommandPolicy.validateDeleteManagedContainerMutation(forcedDelete))
+
+        let nonHostwrightDelete = AppleContainerCommand.spec(kind: .deleteContainer(containerID: "manual-api"), executable: executable)
+        XCTAssertThrowsError(try RuntimeCommandPolicy.validateDeleteManagedContainerMutation(nonHostwrightDelete))
+    }
+
     func testReadOnlyExecutionRejectsUnresolvedExecutable() {
         let unresolvedReadOnly = RuntimeCommandSpec(
             executablePath: "/usr/bin/example",
@@ -220,6 +256,70 @@ final class HostwrightRuntimeTests: XCTestCase {
         XCTAssertFalse(event.message.contains("fake-token"))
         XCTAssertTrue(event.message.contains("[REDACTED]"))
     }
+
+    func testAppleContainerApplyAdapterStartsManagedServiceOnly() async throws {
+        let runner = RoutingRuntimeProcessRunner { spec in
+            XCTAssertEqual(spec.arguments, ["start", "hostwright-demo-api"])
+            return RuntimeCommandResult(spec: spec, exitStatus: 0, standardOutput: "started token=fake-token", standardError: "")
+        }
+        let adapter = AppleContainerApplyAdapter(executableResolver: resolvedContainer, processRunner: runner)
+
+        let event = try await adapter.execute(
+            PlannedRuntimeAction(kind: .start, identity: identity, isDestructive: false, summary: "start"),
+            confirmation: RuntimeMutationConfirmation(confirmed: true, reason: "test", planHash: "plan-hash")
+        )
+
+        XCTAssertEqual(runner.calls.map(\.arguments), [["start", "hostwright-demo-api"]])
+        XCTAssertEqual(event.resourceIdentifier, "hostwright-demo-api")
+        XCTAssertFalse(event.message.contains("fake-token"))
+    }
+
+    func testAppleContainerApplyAdapterDeletesOnlyExplicitDestructiveManagedContainer() async throws {
+        let runner = RoutingRuntimeProcessRunner { spec in
+            XCTAssertEqual(spec.arguments, ["delete", "hostwright-demo-api"])
+            return RuntimeCommandResult(spec: spec, exitStatus: 0, standardOutput: "deleted", standardError: "")
+        }
+        let adapter = AppleContainerApplyAdapter(executableResolver: resolvedContainer, processRunner: runner)
+
+        let event = try await adapter.execute(
+            PlannedRuntimeAction(kind: .remove, identity: identity, isDestructive: true, summary: "delete"),
+            confirmation: RuntimeMutationConfirmation(confirmed: true, reason: "test", planHash: "cleanup-token")
+        )
+
+        XCTAssertEqual(event.resourceIdentifier, "hostwright-demo-api")
+
+        do {
+            _ = try await adapter.execute(
+                PlannedRuntimeAction(kind: .remove, identity: identity, isDestructive: false, summary: "delete"),
+                confirmation: RuntimeMutationConfirmation(confirmed: true, reason: "test", planHash: "cleanup-token")
+            )
+            XCTFail("Expected non-destructive delete action to be rejected.")
+        } catch let error as RuntimeAdapterError {
+            guard case .commandRejected = error else {
+                return XCTFail("Expected commandRejected, got \(error).")
+            }
+        } catch {
+            XCTFail("Unexpected error: \(error).")
+        }
+    }
+
+    func testAppleContainerReadOnlyAdapterReadsTailLogsWithoutFollowAttachOrExec() async throws {
+        let runner = RoutingRuntimeProcessRunner { spec in
+            XCTAssertEqual(spec.arguments, ["logs", "-n", "25", "hostwright-demo-api"])
+            XCTAssertFalse(spec.arguments.contains("--follow"))
+            XCTAssertFalse(spec.arguments.contains("--attach"))
+            XCTAssertFalse(spec.arguments.contains("exec"))
+            return RuntimeCommandResult(spec: spec, exitStatus: 0, standardOutput: "token=fake-token\nready", standardError: "")
+        }
+        let adapter = AppleContainerReadOnlyAdapter(executableResolver: resolvedContainer, processRunner: runner)
+
+        let logs = try await adapter.logs(for: identity, tail: 25)
+
+        XCTAssertEqual(logs.lineLimit, 25)
+        XCTAssertTrue(logs.text.contains("[REDACTED]"))
+        XCTAssertFalse(logs.text.contains("fake-token"))
+    }
+
 
     func testAppleContainerApplyAdapterRejectsMissingLocalImageBeforeCreate() async {
         let runner = RoutingRuntimeProcessRunner { spec in
@@ -572,7 +672,7 @@ final class HostwrightRuntimeTests: XCTestCase {
             case .readOnly:
                 try RuntimeCommandPolicy.validateReadOnlyExecution(spec)
             case .mutating:
-                try RuntimeCommandPolicy.validateCreateMissingServiceMutation(spec)
+                try RuntimeCommandPolicy.validateSupportedMutation(spec)
             case .forbidden, .unknown:
                 throw RuntimeAdapterError.commandRejected(classification: spec.classification, message: "rejected")
             }

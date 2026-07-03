@@ -8,24 +8,30 @@ Hostwright may adapt documented Apple container CLI behavior after local verific
 
 ## Current State
 
-`AppleContainerReadOnlyAdapter` can attempt read-only observation through `RuntimeAdapter`.
+`AppleContainerReadOnlyAdapter` can attempt read-only observation through `RuntimeAdapter`. `AppleContainerApplyAdapter` can execute only the currently supported narrow mutation commands through the same boundary.
 
-The adapter:
+The adapters:
 
 - resolves the `container` executable through `RuntimeExecutableResolver`;
-- builds read-only command specs in `AppleContainerCommand`;
-- runs only policy-approved read-only specs through `FoundationRuntimeProcessRunner`;
-- parses only fixture-defined observation output;
+- build command specs in `AppleContainerCommand`;
+- run only policy-approved specs through `FoundationRuntimeProcessRunner`;
+- parse only fixture-defined and locally verified observation output;
 - reports missing executables as runtime unavailable;
 - reports unsupported output as parse failure.
 
 The current list-style command shape is an adapter assumption based on verified local output, not a public Apple CLI compatibility claim. If local output does not match the supported parser schema, Hostwright must fail closed.
 
-The adapter does not create, start, stop, delete, restart, remove, clean up, apply, install, or mutate anything.
+Supported mutation is limited to:
+
+- create one missing Hostwright-managed service after plan-hash confirmation and local-image checks;
+- start one exact Hostwright-managed stopped/created/exited service when restart policy allows it;
+- delete exact cleanup-eligible Hostwright-owned stopped/created/exited containers after dry-run token confirmation.
+
+The adapter does not stop, restart, remove broadly, run, pull, push, build, exec, attach, use `--all`, use `--force`, delete images, delete volumes, install services, or mutate unmanaged resources.
 
 ## Future Requirements
 
-- Verify actual Apple container read-only output shape before documenting public command compatibility.
+- Verify additional Apple container output shapes before documenting broader command compatibility.
 - Prefer documented structured output when available.
 - Convert runtime errors into Hostwright errors.
 - Keep shell/process execution behind `RuntimeAdapter` and `RuntimeProcessRunning`.

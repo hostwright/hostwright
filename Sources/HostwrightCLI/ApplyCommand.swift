@@ -39,27 +39,32 @@ struct ApplyCommandRunner {
                 )
             }
 
-            let executableActions = plan.actions.filter { $0.executionAvailability == .availableForCreateMissingService }
+            let executableActions = plan.actions.filter {
+                $0.executionAvailability == .availableForCreateMissingService ||
+                $0.executionAvailability == .availableForStartManagedService
+            }
             guard !executableActions.isEmpty else {
                 return failure(
                     code: .runtimeMutationNotImplemented,
-                    message: "No executable createMissingService action exists in the current plan. No mutation was attempted.\n\n\(PlanRenderer.render(plan))"
+                    message: "No executable createMissingService or startManagedService action exists in the current plan. No mutation was attempted.\n\n\(PlanRenderer.render(plan))"
                 )
             }
             guard executableActions.count == 1, let action = executableActions.first else {
                 return failure(
                     code: .commandUsage,
-                    message: "Create-only apply supports exactly one createMissingService action. Current executable action count: \(executableActions.count). No mutation was attempted.\n\n\(PlanRenderer.render(plan))"
+                    message: "Apply supports exactly one executable action. Current executable action count: \(executableActions.count). No mutation was attempted.\n\n\(PlanRenderer.render(plan))"
                 )
             }
 
             let desiredByIdentity = Dictionary(uniqueKeysWithValues: mapping.desiredState.services.map { ($0.identity, $0) })
-            guard let desiredService = desiredByIdentity[action.identity] else {
-                return failure(code: .runtimeMutationNotImplemented, message: "Could not find desired service for \(action.identity.displayName). No mutation was attempted.")
-            }
-
-            if let safeSubsetFailure = validateCreateOnlyApplySubset(desiredService) {
-                return failure(code: .unsafeExposure, message: "\(safeSubsetFailure) No mutation was attempted.")
+            let desiredService = desiredByIdentity[action.identity]
+            if action.executionAvailability == .availableForCreateMissingService {
+                guard let desiredService else {
+                    return failure(code: .runtimeMutationNotImplemented, message: "Could not find desired service for \(action.identity.displayName). No mutation was attempted.")
+                }
+                if let safeSubsetFailure = validateCreateOnlyApplySubset(desiredService) {
+                    return failure(code: .unsafeExposure, message: "\(safeSubsetFailure) No mutation was attempted.")
+                }
             }
 
             let store = SQLiteStateStore(path: configuration.databasePath)
@@ -82,13 +87,7 @@ struct ApplyCommandRunner {
                 timestamp: timestamp
             )
 
-            let runtimeAction = PlannedRuntimeAction(
-                kind: .create,
-                identity: action.identity,
-                isDestructive: false,
-                summary: "Create missing service \(action.identity.displayName).",
-                desiredService: desiredService
-            )
+            let runtimeAction = runtimeAction(for: action, desiredService: desiredService)
 
             do {
                 let event = try waitForAsync {
@@ -159,6 +158,33 @@ struct ApplyCommandRunner {
         return nil
     }
 
+    private func runtimeAction(for action: PlannedAction, desiredService: DesiredRuntimeService?) -> PlannedRuntimeAction {
+        switch action.executionAvailability {
+        case .availableForCreateMissingService:
+            return PlannedRuntimeAction(
+                kind: .create,
+                identity: action.identity,
+                isDestructive: false,
+                summary: "Create missing service \(action.identity.displayName).",
+                desiredService: desiredService
+            )
+        case .availableForStartManagedService:
+            return PlannedRuntimeAction(
+                kind: .start,
+                identity: action.identity,
+                isDestructive: false,
+                summary: "Start managed service \(action.identity.displayName)."
+            )
+        case .unavailable:
+            return PlannedRuntimeAction(
+                kind: .noOp,
+                identity: action.identity,
+                isDestructive: false,
+                summary: "No runtime action is available."
+            )
+        }
+    }
+
     private func persistPreMutationState(
         store: SQLiteStateStore,
         manifest: HostwrightManifest,
@@ -184,7 +210,7 @@ struct ApplyCommandRunner {
             projectID: projectID,
             observedState: observed,
             runtimeAdapter: observed.adapterMetadata?.adapterName ?? "runtime-adapter",
-            parserVersion: "create-only-apply-v1",
+            parserVersion: "confirmed-apply-v1",
             rawOutputHash: nil,
             redactedSummary: PlanRenderer.render(plan, mode: .compact),
             observedAt: timestamp
@@ -208,12 +234,12 @@ struct ApplyCommandRunner {
                 id: "event-\(operationID)-started",
                 timestamp: timestamp,
                 severity: .info,
-                type: "apply.started",
+                type: action.executionAvailability == .availableForStartManagedService ? "apply.start-intent-recorded" : "apply.create-intent-recorded",
                 source: "hostwright-cli",
                 projectID: projectID,
                 serviceName: action.identity.serviceName,
                 runtimeAdapter: observed.adapterMetadata?.adapterName,
-                message: "Apply started for \(action.identity.displayName).",
+                message: "Apply intent recorded for \(action.identity.displayName).",
                 payloadJSONRedacted: #"{"planHash":"\#(plan.planHash)"}"#
             )
         ])
@@ -248,7 +274,7 @@ struct ApplyCommandRunner {
                 id: "event-\(operationID)-succeeded",
                 timestamp: timestamp,
                 severity: .info,
-                type: "apply.succeeded",
+                type: action.executionAvailability == .availableForStartManagedService ? "apply.started-service" : "apply.created-service",
                 source: "hostwright-cli",
                 projectID: projectID,
                 serviceName: action.identity.serviceName,
@@ -258,7 +284,7 @@ struct ApplyCommandRunner {
             )
         ])
 
-        if let resourceIdentifier = event.resourceIdentifier {
+        if action.executionAvailability == .availableForCreateMissingService, let resourceIdentifier = event.resourceIdentifier {
             try store.ownership.upsert(
                 OwnershipRecord(
                     id: "ownership-\(operationID)",
@@ -269,7 +295,7 @@ struct ApplyCommandRunner {
                     runtimeAdapter: "runtime-adapter",
                     createdAt: timestamp,
                     observedAt: timestamp,
-                    cleanupEligible: false,
+                    cleanupEligible: action.executionAvailability == .availableForCreateMissingService,
                     metadataJSONRedacted: #"{"planHash":"\#(planHash)"}"#
                 )
             )

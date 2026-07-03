@@ -6,6 +6,7 @@ public struct MockRuntimeAdapter: RuntimeAdapter {
         case commandFailure(RuntimeAdapterError)
         case timeout
         case redactedFailure(String)
+        case logs(String)
     }
 
     public let scenario: Scenario
@@ -58,6 +59,8 @@ public struct MockRuntimeAdapter: RuntimeAdapter {
             throw RuntimeAdapterError.commandTimedOut(command: "mock-runtime-observe", partialOutput: "", partialError: "")
         case .redactedFailure(let output):
             throw RuntimeAdapterError.commandFailed(exitStatus: 1, message: "mock command failed", standardError: redactionPolicy.redact(output))
+        case .logs:
+            return ObservedRuntimeState(projectName: desiredState.projectName, services: [], adapterMetadata: adapterMetadata)
         }
     }
 
@@ -79,5 +82,16 @@ public struct MockRuntimeAdapter: RuntimeAdapter {
 
     public func execute(_ action: PlannedRuntimeAction, confirmation: RuntimeMutationConfirmation?) async throws -> RuntimeEvent {
         throw RuntimeAdapterError.mutationUnavailableByPolicy("MockRuntimeAdapter does not execute runtime mutation.")
+    }
+
+    public func logs(for identity: RuntimeServiceIdentity, tail: Int) async throws -> RuntimeLogResult {
+        switch scenario {
+        case .logs(let text):
+            return RuntimeLogResult(identity: identity, text: redactionPolicy.redact(text), lineLimit: min(max(1, tail), 1_000))
+        case .unavailable(let message):
+            throw RuntimeAdapterError.runtimeUnavailable(redactionPolicy.redact(message))
+        default:
+            throw RuntimeAdapterError.capabilityUnavailable(.logStreaming)
+        }
     }
 }

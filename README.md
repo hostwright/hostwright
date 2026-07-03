@@ -6,9 +6,9 @@ Tagline: Desired-state container control for Apple silicon Macs.
 
 ## Current Status
 
-This repository contains the Hostwright core foundation: source-material preservation, documentation boundaries, a dependency-free Swift Package Manager package, CLI commands, a restricted `hostwright.yaml` manifest parser/validator, typed runtime contracts, deterministic planning, explicit SQLite state paths, read-only Apple container observation, and one narrow create-only apply gate.
+This repository contains the Hostwright core foundation: source-material preservation, documentation boundaries, a dependency-free Swift Package Manager package, CLI commands, a restricted `hostwright.yaml` manifest parser/validator, typed runtime contracts, deterministic planning, explicit SQLite state paths, Apple container observation, a narrow confirmed apply gate, bounded logs, event rendering, and ownership-gated cleanup for exact stopped/created/exited containers.
 
-Hostwright is not production ready. It does not implement general lifecycle management, multi-action apply, restart policy execution, cleanup, daemon reconciliation, DNS, tunnels, Kubernetes compatibility, a Docker API, or full Docker Compose parity.
+Hostwright is not production ready. It does not implement general lifecycle management, multi-action apply, daemon restart loops, stop/restart commands, image replacement, volume cleanup, daemon reconciliation, DNS, tunnels, Kubernetes compatibility, a Docker API, or full Docker Compose parity.
 
 ## First Supported Release Boundary
 
@@ -58,16 +58,19 @@ scripts/test.sh
 Run the CLI:
 
 ```bash
-swift run hostwright -- --version
-swift run hostwright -- init
-swift run hostwright -- validate
-swift run hostwright -- plan
-swift run hostwright -- status
-swift run hostwright -- doctor
+swift run hostwright --version
+swift run hostwright init
+swift run hostwright validate
+swift run hostwright plan
+swift run hostwright status --state-db /tmp/hostwright.sqlite
+swift run hostwright logs api --state-db /tmp/hostwright.sqlite
+swift run hostwright events --state-db /tmp/hostwright.sqlite
+swift run hostwright cleanup --state-db /tmp/hostwright.sqlite --dry-run
+swift run hostwright doctor
 swift run hostwrightd
 ```
 
-`hostwright` commands are non-mutating except `init`, which creates `hostwright.yaml` only when absent. `hostwrightd` does not install a launch agent or start a runtime loop.
+`hostwright` mutates runtime only through explicit `apply --state-db <path> --confirm-plan <hash>` and `cleanup --state-db <path> --confirm-cleanup <token>` gates. `hostwrightd` does not install a launch agent or start a runtime loop.
 
 ## Manifest
 
@@ -89,7 +92,7 @@ The current parser is a restricted Hostwright manifest subset parser, not a gene
 
 `RuntimeAdapter` defines the runtime boundary, runtime state models, command classification, timeout model, redaction policy, fake process runner, and mock adapter behavior.
 
-Apple container read-only observation and create-only apply are implemented through this boundary. General mutation, restart, cleanup, and daemon reconciliation are not implemented.
+Apple container observation, bounded logs, create, restart-policy-gated managed start, and exact cleanup-eligible container delete are implemented through this boundary. General lifecycle management, image/volume cleanup, stop/restart commands, and daemon reconciliation are not implemented.
 
 ## Source Material
 

@@ -12,6 +12,8 @@ public enum RuntimeExecutableResolution: String, Equatable, Sendable {
 
 public enum RuntimeMutationCommandKind: String, Equatable, Sendable {
     case createMissingService
+    case startManagedService
+    case deleteManagedContainer
 }
 
 public struct RuntimeCommandTimeout: Equatable, Sendable {
@@ -181,6 +183,58 @@ public enum RuntimeCommandPolicy {
         }
     }
 
+    public static func validateSupportedMutation(_ spec: RuntimeCommandSpec) throws {
+        switch spec.mutationKind {
+        case .createMissingService:
+            try validateCreateMissingServiceMutation(spec)
+        case .startManagedService:
+            try validateStartManagedServiceMutation(spec)
+        case .deleteManagedContainer:
+            try validateDeleteManagedContainerMutation(spec)
+        case nil:
+            throw RuntimeAdapterError.commandRejected(
+                classification: spec.classification,
+                message: "Runtime mutation command specs must declare a supported mutation kind."
+            )
+        }
+    }
+
+    public static func validateStartManagedServiceMutation(_ spec: RuntimeCommandSpec) throws {
+        try validateResolvedMutatingSpec(spec, expectedKind: .startManagedService, commandName: "start-managed-service")
+
+        guard spec.arguments.count == 2, spec.arguments.first == "start" else {
+            throw RuntimeAdapterError.commandRejected(
+                classification: spec.classification,
+                message: "Start-managed-service mutation accepts only 'start <hostwright-container-id>'."
+            )
+        }
+
+        guard isHostwrightContainerIdentifier(spec.arguments[1]) else {
+            throw RuntimeAdapterError.commandRejected(
+                classification: spec.classification,
+                message: "Start-managed-service mutation requires an exact Hostwright-owned container identifier."
+            )
+        }
+    }
+
+    public static func validateDeleteManagedContainerMutation(_ spec: RuntimeCommandSpec) throws {
+        try validateResolvedMutatingSpec(spec, expectedKind: .deleteManagedContainer, commandName: "delete-managed-container")
+
+        guard spec.arguments.count == 2, spec.arguments.first == "delete" else {
+            throw RuntimeAdapterError.commandRejected(
+                classification: spec.classification,
+                message: "Delete-managed-container mutation accepts only 'delete <hostwright-container-id>'."
+            )
+        }
+
+        guard isHostwrightContainerIdentifier(spec.arguments[1]) else {
+            throw RuntimeAdapterError.commandRejected(
+                classification: spec.classification,
+                message: "Delete-managed-container mutation requires an exact Hostwright-owned container identifier."
+            )
+        }
+    }
+
     private static func rejectNonReadOnlyCommand(_ spec: RuntimeCommandSpec) throws {
         switch spec.classification {
         case .readOnly:
@@ -191,6 +245,59 @@ public enum RuntimeCommandPolicy {
                 message: "Read-only runtime execution rejects mutating, forbidden, and unknown command specs."
             )
         }
+    }
+
+    private static func validateResolvedMutatingSpec(
+        _ spec: RuntimeCommandSpec,
+        expectedKind: RuntimeMutationCommandKind,
+        commandName: String
+    ) throws {
+        guard spec.executableResolution == .resolvedByRuntimeExecutableResolver else {
+            throw RuntimeAdapterError.commandRejected(
+                classification: spec.classification,
+                message: "\(commandName) mutation refuses command specs whose executable was not resolved through RuntimeExecutableResolver."
+            )
+        }
+
+        guard spec.classification == .mutating else {
+            throw RuntimeAdapterError.commandRejected(
+                classification: spec.classification,
+                message: "\(commandName) mutation accepts only explicitly classified mutating specs."
+            )
+        }
+
+        guard spec.mutationKind == expectedKind else {
+            throw RuntimeAdapterError.commandRejected(
+                classification: spec.classification,
+                message: "\(commandName) mutation policy received unsupported mutation kind."
+            )
+        }
+
+        let forbiddenArguments = [
+            "--all",
+            "--force",
+            "--attach",
+            "--interactive",
+            "stop",
+            "restart",
+            "remove",
+            "prune",
+            "pull",
+            "push",
+            "build",
+            "exec",
+            "run"
+        ]
+        if spec.arguments.contains(where: { forbiddenArguments.contains($0) }) {
+            throw RuntimeAdapterError.commandRejected(
+                classification: spec.classification,
+                message: "\(commandName) mutation command spec contains a forbidden argument."
+            )
+        }
+    }
+
+    private static func isHostwrightContainerIdentifier(_ value: String) -> Bool {
+        value.hasPrefix("hostwright-") && !value.contains("/") && !value.contains(" ")
     }
 }
 
@@ -228,7 +335,7 @@ public struct FakeRuntimeProcessRunner: RuntimeProcessRunning {
         case .readOnly:
             try RuntimeCommandPolicy.validateReadOnlyExecution(spec)
         case .mutating:
-            try RuntimeCommandPolicy.validateCreateMissingServiceMutation(spec)
+            try RuntimeCommandPolicy.validateSupportedMutation(spec)
         case .forbidden, .unknown:
             throw RuntimeAdapterError.commandRejected(
                 classification: spec.classification,

@@ -61,6 +61,61 @@ final class HostwrightRuntimeTests: XCTestCase {
         }
     }
 
+    func testPhase8BMutationPolicyAcceptsOnlyResolvedCreateMissingServiceSpecs() {
+        let create = AppleContainerCommand.spec(
+            kind: .createContainer,
+            executable: ResolvedRuntimeExecutable(name: "container", path: "/usr/bin/container-fixture"),
+            desiredService: desiredService
+        )
+
+        XCTAssertNoThrow(try RuntimeCommandPolicy.validatePhase8BMutation(create))
+        XCTAssertEqual(create.classification, .mutating)
+        XCTAssertEqual(create.mutationKind, .createMissingService)
+        XCTAssertEqual(create.arguments.prefix(3), ["create", "--name", "hostwright-demo-api"])
+        XCTAssertTrue(create.arguments.contains("--publish"))
+        XCTAssertFalse(create.arguments.contains("run"))
+        XCTAssertFalse(create.arguments.contains("--rm"))
+
+        let unresolved = RuntimeCommandSpec(
+            executablePath: "/usr/bin/container-fixture",
+            arguments: ["create"],
+            classification: .mutating,
+            mutationKind: .createMissingService,
+            purpose: "fixture"
+        )
+        XCTAssertThrowsError(try RuntimeCommandPolicy.validatePhase8BMutation(unresolved))
+
+        let forbidden = RuntimeCommandSpec(
+            executablePath: "/usr/bin/container-fixture",
+            arguments: ["delete"],
+            classification: .forbidden,
+            executableResolution: .resolvedByRuntimeExecutableResolver,
+            mutationKind: .createMissingService,
+            purpose: "fixture"
+        )
+        XCTAssertThrowsError(try RuntimeCommandPolicy.validatePhase8BMutation(forbidden))
+
+        let mislabeledDelete = RuntimeCommandSpec(
+            executablePath: "/usr/bin/container-fixture",
+            arguments: ["delete", "hostwright-demo-api"],
+            classification: .mutating,
+            executableResolution: .resolvedByRuntimeExecutableResolver,
+            mutationKind: .createMissingService,
+            purpose: "fixture"
+        )
+        XCTAssertThrowsError(try RuntimeCommandPolicy.validatePhase8BMutation(mislabeledDelete))
+
+        let nonHostwrightCreate = RuntimeCommandSpec(
+            executablePath: "/usr/bin/container-fixture",
+            arguments: ["create", "--name", "manual-api", "local/demo:latest"],
+            classification: .mutating,
+            executableResolution: .resolvedByRuntimeExecutableResolver,
+            mutationKind: .createMissingService,
+            purpose: "fixture"
+        )
+        XCTAssertThrowsError(try RuntimeCommandPolicy.validatePhase8BMutation(nonHostwrightCreate))
+    }
+
     func testReadOnlyExecutionRejectsUnresolvedExecutable() {
         let unresolvedReadOnly = RuntimeCommandSpec(
             executablePath: "/usr/bin/example",
@@ -133,6 +188,102 @@ final class HostwrightRuntimeTests: XCTestCase {
         }
     }
 
+    func testAppleContainerApplyAdapterCreatesOnlyWhenLocalImageIsAvailable() async throws {
+        let imageListFixture = try fixture("apple-container-image-list-real-json.txt")
+        let runner = RoutingRuntimeProcessRunner { spec in
+            if spec.arguments == ["image", "list", "--format", "json"] {
+                return RuntimeCommandResult(spec: spec, exitStatus: 0, standardOutput: imageListFixture, standardError: "")
+            }
+            if spec.arguments.first == "create" {
+                return RuntimeCommandResult(spec: spec, exitStatus: 0, standardOutput: "created token=fake-token", standardError: "")
+            }
+            throw RuntimeAdapterError.commandRejected(classification: spec.classification, message: "unexpected command")
+        }
+        let adapter = AppleContainerApplyAdapter(
+            executableResolver: resolvedContainer,
+            processRunner: runner
+        )
+
+        let event = try await adapter.execute(
+            PlannedRuntimeAction(
+                kind: .create,
+                identity: proofIdentity,
+                isDestructive: false,
+                summary: "create",
+                desiredService: proofService
+            ),
+            confirmation: RuntimeMutationConfirmation(confirmed: true, reason: "test", planHash: "plan-hash")
+        )
+
+        XCTAssertEqual(runner.calls.compactMap(\.arguments.first), ["image", "create"])
+        XCTAssertEqual(event.resourceIdentifier, "hostwright-proof-web")
+        XCTAssertFalse(event.message.contains("fake-token"))
+        XCTAssertTrue(event.message.contains("[REDACTED]"))
+    }
+
+    func testAppleContainerApplyAdapterRejectsMissingLocalImageBeforeCreate() async {
+        let runner = RoutingRuntimeProcessRunner { spec in
+            if spec.arguments == ["image", "list", "--format", "json"] {
+                return RuntimeCommandResult(spec: spec, exitStatus: 0, standardOutput: "[]", standardError: "")
+            }
+            throw RuntimeAdapterError.commandRejected(classification: spec.classification, message: "create should not run")
+        }
+        let adapter = AppleContainerApplyAdapter(
+            executableResolver: resolvedContainer,
+            processRunner: runner
+        )
+
+        do {
+            _ = try await adapter.execute(
+                PlannedRuntimeAction(
+                    kind: .create,
+                    identity: identity,
+                    isDestructive: false,
+                    summary: "create",
+                    desiredService: desiredService
+                ),
+                confirmation: RuntimeMutationConfirmation(confirmed: true, reason: "test", planHash: "plan-hash")
+            )
+            XCTFail("Expected local image availability failure.")
+        } catch let error as RuntimeAdapterError {
+            guard case .capabilityUnavailable(.lifecycleMutation) = error else {
+                return XCTFail("Expected lifecycleMutation capabilityUnavailable, got \(error).")
+            }
+            XCTAssertEqual(runner.calls.count, 1)
+        } catch {
+            XCTFail("Unexpected error: \(error).")
+        }
+    }
+
+    func testAppleContainerApplyAdapterRejectsUnsupportedCreateSubsets() async {
+        let adapter = AppleContainerApplyAdapter(
+            executableResolver: resolvedContainer,
+            processRunner: RoutingRuntimeProcessRunner { _ in
+                throw RuntimeAdapterError.commandFailed(exitStatus: 1, message: "should not run", standardError: "")
+            }
+        )
+        let mounted = DesiredRuntimeService(
+            identity: identity,
+            image: "ghcr.io/example/api:latest",
+            mounts: [RuntimeMountReference(source: "./data", target: "/data")]
+        )
+
+        do {
+            _ = try await adapter.execute(
+                PlannedRuntimeAction(kind: .create, identity: identity, isDestructive: false, summary: "create", desiredService: mounted),
+                confirmation: RuntimeMutationConfirmation(confirmed: true, reason: "test", planHash: "plan-hash")
+            )
+            XCTFail("Expected unsupported subset failure.")
+        } catch let error as RuntimeAdapterError {
+            guard case .commandRejected(classification: .mutating, message: let message) = error else {
+                return XCTFail("Expected commandRejected, got \(error).")
+            }
+            XCTAssertTrue(message.contains("mounts"))
+        } catch {
+            XCTFail("Unexpected error: \(error).")
+        }
+    }
+
     func testAppleContainerReadOnlyAdapterMissingExecutableDegradesHonestly() async {
         let adapter = AppleContainerReadOnlyAdapter(
             executableResolver: FixedRuntimeExecutableResolver(executables: [:]),
@@ -193,6 +344,54 @@ final class HostwrightRuntimeTests: XCTestCase {
         XCTAssertTrue(observed.services.isEmpty)
         XCTAssertEqual(observed.projectName, desiredState.projectName)
         XCTAssertEqual(AppleContainerCommand.arguments(for: .listContainers), ["list", "--all", "--format", "json"])
+    }
+
+    func testAppleContainerParserIgnoresRealBuilderContainerFixture() async throws {
+        let adapter = AppleContainerReadOnlyAdapter(
+            executableResolver: resolvedContainer,
+            processRunner: FakeRuntimeProcessRunner(
+                behavior: .result(
+                    RuntimeCommandResult(
+                        spec: listSpec,
+                        exitStatus: 0,
+                        standardOutput: try fixture("apple-container-list-builder-real-json.txt"),
+                        standardError: ""
+                    )
+                )
+            )
+        )
+
+        let observed = try await adapter.observe(desiredState: proofDesiredState)
+
+        XCTAssertTrue(observed.services.isEmpty)
+        XCTAssertEqual(observed.projectName, "proof")
+    }
+
+    func testAppleContainerParserParsesRealCreatedProofContainerFixture() async throws {
+        let adapter = AppleContainerReadOnlyAdapter(
+            executableResolver: resolvedContainer,
+            processRunner: FakeRuntimeProcessRunner(
+                behavior: .result(
+                    RuntimeCommandResult(
+                        spec: listSpec,
+                        exitStatus: 0,
+                        standardOutput: try fixture("apple-container-list-proof-created-real-json.txt"),
+                        standardError: ""
+                    )
+                )
+            )
+        )
+
+        let observed = try await adapter.observe(desiredState: proofDesiredState)
+
+        XCTAssertEqual(observed.services.count, 1)
+        XCTAssertEqual(observed.services[0].identity, proofIdentity)
+        XCTAssertEqual(observed.services[0].image, "hostwright-proof-web:phase8b")
+        XCTAssertEqual(observed.services[0].lifecycleState, .stopped)
+        XCTAssertEqual(observed.services[0].ports.first?.hostPort, 18080)
+        XCTAssertEqual(observed.services[0].ports.first?.containerPort, 80)
+        XCTAssertEqual(observed.services[0].ports.first?.protocolName, .tcp)
+        XCTAssertEqual(observed.services[0].ports.first?.bindAddress, "0.0.0.0")
     }
 
     func testAppleContainerParserParsesRunningFixture() async throws {
@@ -264,7 +463,7 @@ final class HostwrightRuntimeTests: XCTestCase {
                 return XCTFail("Expected outputParseFailed, got \(error).")
             }
             XCTAssertFalse(message.contains("fake-token"))
-            XCTAssertTrue(message.contains("Non-empty real Apple container JSON list output is not supported yet"))
+            XCTAssertTrue(message.contains("Unsupported real Apple container list item shape"))
         }
     }
 
@@ -310,9 +509,35 @@ final class HostwrightRuntimeTests: XCTestCase {
         DesiredRuntimeState(
             projectName: "demo",
             services: [
-                DesiredRuntimeService(identity: identity, image: "ghcr.io/example/api:latest")
+                desiredService
             ]
         )
+    }
+
+    private var desiredService: DesiredRuntimeService {
+        DesiredRuntimeService(
+            identity: identity,
+            image: "ghcr.io/example/api:latest",
+            command: ["serve"],
+            environment: [RuntimeEnvironmentValue(name: "APP_ENV", value: "development")],
+            ports: [RuntimePortMapping(hostPort: 8080, containerPort: 8080)]
+        )
+    }
+
+    private var proofIdentity: RuntimeServiceIdentity {
+        RuntimeServiceIdentity(projectName: "proof", serviceName: "web")
+    }
+
+    private var proofService: DesiredRuntimeService {
+        DesiredRuntimeService(
+            identity: proofIdentity,
+            image: "hostwright-proof-web:phase8b",
+            ports: [RuntimePortMapping(hostPort: 18080, containerPort: 80)]
+        )
+    }
+
+    private var proofDesiredState: DesiredRuntimeState {
+        DesiredRuntimeState(projectName: "proof", services: [proofService])
     }
 
     private var resolvedContainer: FixedRuntimeExecutableResolver {
@@ -329,5 +554,29 @@ final class HostwrightRuntimeTests: XCTestCase {
     private func fixture(_ name: String) throws -> String {
         let url = try XCTUnwrap(Bundle.module.url(forResource: name, withExtension: nil))
         return try String(contentsOf: url, encoding: .utf8)
+    }
+
+    private final class RoutingRuntimeProcessRunner: RuntimeProcessRunning, @unchecked Sendable {
+        typealias Handler = @Sendable (RuntimeCommandSpec) throws -> RuntimeCommandResult
+
+        private let handler: Handler
+        private(set) var calls: [RuntimeCommandSpec] = []
+
+        init(handler: @escaping Handler) {
+            self.handler = handler
+        }
+
+        func run(_ spec: RuntimeCommandSpec) async throws -> RuntimeCommandResult {
+            calls.append(spec)
+            switch spec.classification {
+            case .readOnly:
+                try RuntimeCommandPolicy.validateReadOnlyExecution(spec)
+            case .mutating:
+                try RuntimeCommandPolicy.validatePhase8BMutation(spec)
+            case .forbidden, .unknown:
+                throw RuntimeAdapterError.commandRejected(classification: spec.classification, message: "rejected")
+            }
+            return try handler(spec).redacted()
+        }
     }
 }

@@ -20,7 +20,17 @@ public struct FoundationRuntimeProcessRunner: RuntimeProcessRunning {
     }
 
     private func runSynchronously(_ spec: RuntimeCommandSpec) throws -> RuntimeCommandResult {
-        try RuntimeCommandPolicy.validateReadOnlyExecution(spec, phaseName: "Phase 5")
+        switch spec.classification {
+        case .readOnly:
+            try RuntimeCommandPolicy.validateReadOnlyExecution(spec, phaseName: "Phase 5")
+        case .mutating:
+            try RuntimeCommandPolicy.validatePhase8BMutation(spec)
+        case .forbidden, .unknown:
+            throw RuntimeAdapterError.commandRejected(
+                classification: spec.classification,
+                message: "Runtime process runner rejects forbidden and unknown command specs."
+            )
+        }
 
         guard FileManager.default.isExecutableFile(atPath: spec.executablePath) else {
             throw RuntimeAdapterError.executableNotFound(spec.executablePath).redacted(using: redactionPolicy)
@@ -84,7 +94,7 @@ public struct FoundationRuntimeProcessRunner: RuntimeProcessRunning {
         guard result.exitStatus == 0 else {
             throw RuntimeAdapterError.commandFailed(
                 exitStatus: result.exitStatus,
-                message: "Read-only runtime command failed.",
+                message: "\(spec.classification.rawValue) runtime command failed.",
                 standardError: result.standardError
             )
         }

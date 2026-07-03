@@ -101,11 +101,42 @@ final class HostwrightStateTests: XCTestCase {
                     payloadJSONRedacted: #"{"password":"\#(fakeSecret)"}"#
                 )
             )
+            try store.operations.record(
+                OperationRecord(
+                    id: "operation-2",
+                    createdAt: timestamp,
+                    updatedAt: timestamp,
+                    plannedActionType: "createMissingService",
+                    projectID: projectID,
+                    serviceName: "api",
+                    status: .succeeded,
+                    idempotencyKey: "plan-hash:create:api:2",
+                    planHash: "plan-hash",
+                    payloadJSONRedacted: #"{"result":"succeeded"}"#
+                )
+            )
+            try store.operations.record(
+                OperationRecord(
+                    id: "operation-3",
+                    createdAt: timestamp,
+                    updatedAt: timestamp,
+                    plannedActionType: "createMissingService",
+                    projectID: projectID,
+                    serviceName: "api",
+                    status: .failed,
+                    idempotencyKey: "plan-hash:create:api:3",
+                    planHash: "plan-hash",
+                    payloadJSONRedacted: #"{"error":"token=\#(fakeSecret)"}"#
+                )
+            )
 
             let operations = try store.operations.loadAll()
-            XCTAssertEqual(operations.count, 1)
+            XCTAssertEqual(operations.count, 3)
             XCTAssertEqual(operations[0].status, .planned)
+            XCTAssertEqual(operations[1].status, .succeeded)
+            XCTAssertEqual(operations[2].status, .failed)
             XCTAssertFalse(operations[0].payloadJSONRedacted.contains(fakeSecret))
+            XCTAssertFalse(operations[2].payloadJSONRedacted.contains(fakeSecret))
         }
     }
 

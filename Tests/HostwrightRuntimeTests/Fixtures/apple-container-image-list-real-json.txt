@@ -1,0 +1,28 @@
+[
+  {
+    "configuration": {
+      "name": "docker.io/library/python:alpine",
+      "descriptor": {
+        "annotations": {
+          "io.containerd.image.name": "docker.io/library/python:alpine"
+        }
+      }
+    },
+    "id": "26730869004e2b9c4b9ad09cab8625e81d256d1ce97e72df5520e806b1709f92",
+    "variants": []
+  },
+  {
+    "configuration": {
+      "name": "hostwright-proof-web:phase8b",
+      "descriptor": {
+        "annotations": {
+          "com.apple.containerization.image.name": "hostwright-proof-web:phase8b",
+          "io.containerd.image.name": "docker.io/library/hostwright-proof-web:phase8b",
+          "org.opencontainers.image.ref.name": "phase8b"
+        }
+      }
+    },
+    "id": "1ab83bce6ed4ff17859a4945cf25402aca44e8223ada2a88971f810c48226050",
+    "variants": []
+  }
+]

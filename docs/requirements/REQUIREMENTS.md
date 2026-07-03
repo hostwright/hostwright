@@ -31,7 +31,7 @@ Status values:
 | HW-CLI-005 | `hostwright plan` must be non-mutating and show when runtime observation is not connected. | Agent Engineering Manual | Implemented with Phase 7 deterministic planning output | `Sources/HostwrightCLI/main.swift`, `Sources/HostwrightReconciler/` | CLI and reconciler XCTest cases | 2, 7 |
 | HW-CLI-006 | `hostwright status` must not claim runtime state unless observed. | Agent Engineering Manual | Implemented for manifest-level status | `Sources/HostwrightCLI/main.swift` | CLI smoke tests | 2 |
 | HW-CLI-007 | `hostwright doctor` must run safe local checks. | Final Production Arsenal; Document 2 | Partially implemented | `Sources/HostwrightHealth/DoctorModels.swift`, `Sources/HostwrightCLI/main.swift` | CLI and health smoke tests | 2 |
-| HW-CLI-008 | `hostwright apply` must validate, plan, persist intent, apply idempotently, and emit events. | Agent Engineering Manual | Planned | None | None | 8 |
+| HW-CLI-008 | `hostwright apply` must validate, plan, persist intent, apply idempotently, and emit events. | Agent Engineering Manual | Partially implemented for Phase 8B create-missing-service only | `Sources/HostwrightCLI/ApplyCommand.swift`, `Sources/HostwrightCLI/CLICommand.swift` | CLI XCTest cases for plan-hash refusal, intent persistence, success, and failure | 8 |
 
 ## Manifest
 
@@ -58,12 +58,12 @@ Status values:
 
 | ID | Requirement | Source document | Current status | Implementation file if any | Test coverage if any | Release phase |
 | --- | --- | --- | --- | --- | --- | --- |
-| HW-RUNTIME-001 | Every runtime operation must go through `RuntimeAdapter`. | Agent Engineering Manual; Final Production Arsenal | Partially implemented | `Sources/HostwrightRuntime/RuntimeAdapter.swift`, `Sources/HostwrightRuntime/RuntimeModels.swift`, `Sources/HostwrightRuntime/AppleContainerReadOnlyAdapter.swift` | Runtime and reconciler smoke tests | 4 |
-| HW-RUNTIME-002 | No reconciler or CLI code may call Apple container directly. | Agent Engineering Manual; Final Production Arsenal | Partially implemented | Runtime behavior is isolated in `HostwrightRuntime`; current CLI process lookup is documented as a non-runtime doctor/toolchain exception. | Boundary smoke checks; code review | 4 |
+| HW-RUNTIME-001 | Every runtime operation must go through `RuntimeAdapter`. | Agent Engineering Manual; Final Production Arsenal | Implemented for read-only observation and Phase 8B create-only mutation | `Sources/HostwrightRuntime/RuntimeAdapter.swift`, `Sources/HostwrightRuntime/RuntimeModels.swift`, `Sources/HostwrightRuntime/AppleContainerReadOnlyAdapter.swift`, `Sources/HostwrightRuntime/AppleContainerApplyAdapter.swift` | Runtime and reconciler XCTest cases; boundary scans | 4, 8 |
+| HW-RUNTIME-002 | No reconciler or CLI code may call Apple container directly. | Agent Engineering Manual; Final Production Arsenal | Implemented for runtime behavior | Runtime behavior is isolated in `HostwrightRuntime`; current CLI process lookup remains documented as a non-runtime doctor/toolchain exception. | Boundary scans; code review | 4, 8 |
 | HW-RUNTIME-003 | Adapter must expose typed observation, planning, events, and errors. | Agent Engineering Manual | Implemented as contract infrastructure | `RuntimeAdapter.swift`, `RuntimeModels.swift`, `MockRuntimeAdapter.swift` | Runtime smoke tests | 4 |
-| HW-RUNTIME-004 | Runtime subprocess execution must have timeouts, stderr capture, cancellation, and typed errors. | Agent Engineering Manual | Implemented for read-only Phase 5 commands | `RuntimeCommand.swift`, `RuntimeRedaction.swift`, `FoundationRuntimeProcessRunner.swift`, `RuntimeExecutableResolver.swift` | Runtime smoke tests with fake runner; build coverage for live runner | 4 |
-| HW-RUNTIME-005 | Apple container observation must begin read-only before mutation. | Final Production Arsenal | Implemented as read-only adapter infrastructure | `AppleContainerReadOnlyAdapter.swift`, `AppleContainerCommand.swift`, `AppleContainerObservationParser.swift` | Runtime smoke tests with fixtures | 5 |
-| HW-RUNTIME-006 | Runtime mutation must not begin until state, planning, and safety gates exist. | Agent Engineering Manual; Document 2 | Enforced as unavailable in Phase 5 contracts | `RuntimeAdapter.swift`, `MockRuntimeAdapter.swift`, `AppleContainerReadOnlyAdapter.swift` | Runtime smoke tests | 8 |
+| HW-RUNTIME-004 | Runtime subprocess execution must have timeouts, stderr capture, cancellation, and typed errors. | Agent Engineering Manual | Implemented for read-only Phase 5 commands and the Phase 8B create-missing-service command kind | `RuntimeCommand.swift`, `RuntimeRedaction.swift`, `FoundationRuntimeProcessRunner.swift`, `RuntimeExecutableResolver.swift` | Runtime XCTest cases with fake runner; build coverage for live runner | 4, 8 |
+| HW-RUNTIME-005 | Apple container observation must begin read-only before mutation. | Final Production Arsenal | Implemented as read-only adapter infrastructure with verified empty, builder, and proof-container real output shapes | `AppleContainerReadOnlyAdapter.swift`, `AppleContainerCommand.swift`, `AppleContainerObservationParser.swift` | Runtime XCTest cases with fixture-defined and verified real-shape fixtures | 5, 8 |
+| HW-RUNTIME-006 | Runtime mutation must not begin until state, planning, and safety gates exist. | Agent Engineering Manual; Document 2 | Partially implemented as a Phase 8B create-missing-service gate only | `RuntimeAdapter.swift`, `RuntimeCommand.swift`, `AppleContainerApplyAdapter.swift`, `MockRuntimeAdapter.swift` | Runtime XCTest cases for accepted create specs and rejected mutating/forbidden/unknown specs | 8 |
 
 ## State / SQLite
 
@@ -82,8 +82,8 @@ Status values:
 | HW-RECON-001 | Reconciliation must compare desired and observed state as separate inputs. | Agent Engineering Manual | Implemented for Phase 7 planner input | `Sources/HostwrightReconciler/ReconciliationPlanner.swift`, `Sources/HostwrightReconciler/DriftDetector.swift` | Reconciler XCTest cases | 7 |
 | HW-RECON-002 | Plans must be deterministic and non-mutating before apply. | Agent Engineering Manual; Document 2 | Implemented for Phase 7 dry-run planner | `Sources/HostwrightReconciler/DriftModels.swift`, `Sources/HostwrightReconciler/PlanRenderer.swift` | Reconciler and CLI XCTest cases | 7 |
 | HW-RECON-003 | Drift detection must identify missing, stopped, unhealthy, and modified resources. | Agent Engineering Manual | Implemented for Phase 7 non-mutating planning | `Sources/HostwrightReconciler/DriftDetector.swift` | Reconciler XCTest cases | 7 |
-| HW-RECON-004 | Apply must be idempotent and persist intent before mutation. | Agent Engineering Manual; Document 2 | Planned | None | None | 8 |
-| HW-RECON-005 | Partial apply failure must leave recoverable operation records. | Document 2 | Planned | None | None | 8 |
+| HW-RECON-004 | Apply must be idempotent and persist intent before mutation. | Agent Engineering Manual; Document 2 | Partially implemented for a single confirmed createMissingService action | `Sources/HostwrightCLI/ApplyCommand.swift`, `Sources/HostwrightReconciler/DriftDetector.swift`, `Sources/HostwrightState/StateRepositories.swift` | CLI, reconciler, and state XCTest cases | 8 |
+| HW-RECON-005 | Partial apply failure must leave recoverable operation records. | Document 2 | Partially implemented for Phase 8B create failure recording | `Sources/HostwrightCLI/ApplyCommand.swift`, `Sources/HostwrightState/StateRecords.swift` | CLI and state XCTest cases | 8 |
 
 ## Health
 
@@ -106,10 +106,10 @@ Status values:
 
 | ID | Requirement | Source document | Current status | Implementation file if any | Test coverage if any | Release phase |
 | --- | --- | --- | --- | --- | --- | --- |
-| HW-SAFE-001 | Every apply operation must support dry-run planning before mutation. | Document 2 | Planned | `ManifestDryRunPlanner` subset | CLI and reconciler smoke tests | 8 |
+| HW-SAFE-001 | Every apply operation must support dry-run planning before mutation. | Document 2 | Partially implemented through deterministic plan hashing and explicit `--confirm-plan` for Phase 8B create-only apply | `Sources/HostwrightCLI/ApplyCommand.swift`, `Sources/HostwrightReconciler/PlanRenderer.swift` | CLI and reconciler XCTest cases | 8 |
 | HW-SAFE-002 | Destructive operations require preview, ownership checks, confirmation design, and audit events. | Document 2 | Planned | Docs only | None | 9 |
 | HW-SAFE-003 | Named volumes must not be deleted by default. | Document 2 | Planned | None | None | 9 |
-| HW-SAFE-004 | Secret values must not appear in manifests, logs, events, status, reports, fixtures, or docs examples. | Document 2 | Planned | Docs only | None | 6 |
+| HW-SAFE-004 | Secret values must not appear in manifests, logs, events, status, reports, fixtures, or docs examples. | Document 2 | Partially implemented for runtime command output, plan rendering, state payloads, and Phase 8B apply errors | `Sources/HostwrightRuntime/RuntimeRedaction.swift`, `Sources/HostwrightState/StateJSON.swift`, `Sources/HostwrightCLI/ApplyCommand.swift` | Runtime, state, CLI, and reconciler XCTest cases with fake secret values | 6, 8 |
 | HW-SAFE-005 | Privileged helpers are rejected unless a future threat model proves necessity. | Document 2 | Rejected for first release | Docs only | Docs review | Rejected |
 | HW-SAFE-006 | Public/LAN/tunnel exposure must require explicit policy and review. | Document 3 | Deferred for first release | Docs and networking scaffold | Docs review | Deferred |
 

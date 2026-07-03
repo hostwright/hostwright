@@ -6,9 +6,9 @@ Hostwright's intended local state store is SQLite.
 
 The state store persists desired state, observed snapshots, events, operation records, and ownership records. Restart history and drift-specific records remain planned for later phases.
 
-## Phase 6 State
+## Phase 8B State
 
-Phase 6 implements a SQLite-backed state ledger inside `HostwrightState`.
+Phase 6 implemented a SQLite-backed state ledger inside `HostwrightState`. Phase 8B uses that ledger to persist apply intent before the first create-only runtime mutation.
 
 Implemented:
 
@@ -17,14 +17,15 @@ Implemented:
 - desired manifest snapshot persistence
 - observed runtime snapshot persistence
 - event ledger
-- operation ledger records for future mutation safety
+- operation ledger records for mutation safety
+- operation statuses for recorded, succeeded, and failed apply attempts
 - ownership records for future cleanup/apply decisions
 - temp-database smoke checks
 
 Not implemented:
 
-- `hostwright apply`
-- runtime mutation
+- multi-action `hostwright apply`
+- runtime mutation beyond create-missing-service
 - cleanup
 - daemon loop
 - drift planner
@@ -71,9 +72,10 @@ Transactions wrap:
 - observed runtime snapshot plus observed service writes
 - grouped event appends
 - operation record creation
+- operation success/failure updates
 - ownership record upserts
 
-No transaction performs runtime mutation.
+No transaction performs runtime mutation. Apply writes intent first, leaves the transaction, calls `RuntimeAdapter`, then records success or failure.
 
 ## Module Boundary
 

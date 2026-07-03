@@ -1,0 +1,45 @@
+[
+  {
+    "configuration": {
+      "id": "buildkit",
+      "image": {
+        "reference": "ghcr.io/apple/container-builder-shim/builder:0.12.0"
+      },
+      "labels": {
+        "com.apple.container.plugin": "builder",
+        "com.apple.container.resource.role": "builder"
+      },
+      "publishedPorts": []
+    },
+    "id": "buildkit",
+    "status": {
+      "state": "running",
+      "startedDate": "2026-07-03T01:10:48Z"
+    }
+  },
+  {
+    "configuration": {
+      "creationDate": "2026-07-03T01:14:29Z",
+      "id": "hostwright-proof-web",
+      "image": {
+        "reference": "hostwright-proof-web:phase8b"
+      },
+      "labels": {},
+      "mounts": [],
+      "publishedPorts": [
+        {
+          "containerPort": 80,
+          "count": 1,
+          "hostAddress": "0.0.0.0",
+          "hostPort": 18080,
+          "proto": "tcp"
+        }
+      ]
+    },
+    "id": "hostwright-proof-web",
+    "status": {
+      "networks": [],
+      "state": "stopped"
+    }
+  }
+]

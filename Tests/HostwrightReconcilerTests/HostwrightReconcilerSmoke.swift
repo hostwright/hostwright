@@ -11,7 +11,7 @@ final class HostwrightReconcilerTests: XCTestCase {
 
         XCTAssertEqual(plan.actions.map(\.kind), [.createMissingService])
         XCTAssertEqual(plan.drift.map(\.kind), [.missingDesiredService])
-        XCTAssertEqual(plan.actions[0].executionAvailability, .unavailableUntilPhase8)
+        XCTAssertEqual(plan.actions[0].executionAvailability, .availableForPhase8BCreate)
         XCTAssertFalse(plan.mutatesRuntime)
     }
 

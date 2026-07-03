@@ -735,3 +735,158 @@ scripts/test.sh
 - [ ] I can explain why non-empty real output is still unsupported.
 - [ ] I can explain why this phase does not mutate runtime state.
 - [ ] I can explain why Phase 8B must be planned separately.
+
+## Phase 8B update: create-only apply gate
+
+### Stage goal
+
+Add Hostwright's first mutation path without turning `apply` into general lifecycle management.
+
+### Problem
+
+Before Phase 8B, Hostwright could validate manifests, persist state, observe an empty Apple container runtime, and compute deterministic drift plans. It could not persist an apply intent, confirm that the user's plan matched the current plan, or route a runtime mutation through `RuntimeAdapter`.
+
+### Solution
+
+Phase 8B adds:
+
+- `hostwright apply [path] --state-db <path> --confirm-plan <hash>`;
+- explicit state database path validation;
+- recomputed plan-hash confirmation before mutation;
+- operation intent and `apply.started` event persistence before runtime execution;
+- a single `createMissingService` execution path through `RuntimeAdapter`;
+- success, failure, and ownership records after execution;
+- runtime command policy for one mutating command kind: `createMissingService`.
+
+### Why this design
+
+The first mutation must prove the safety pipeline before expanding the feature surface. Create-only is the least destructive lifecycle action. It can be tested with fake adapters, confirmed by plan hash, recorded before execution, and blocked when local image availability is unknown. Stop, delete, cleanup, restart, volumes, broad networking, and sensitive env handling are harder to make safe and remain out of scope.
+
+### Files changed
+
+| File | What changed | Why it matters | What breaks if removed |
+| ---- | ------------ | -------------- | ---------------------- |
+| `Sources/HostwrightCLI/ApplyCommand.swift` | Adds the create-only `apply` runner. | Orchestrates validation, planning, state persistence, and RuntimeAdapter execution. | `hostwright apply` has no implementation. |
+| `Sources/HostwrightCLI/CLICommand.swift` | Parses `apply`, `--state-db`, and `--confirm-plan`. | Makes mutation explicit and refuses missing confirmation. | CLI cannot route the command safely. |
+| `Sources/HostwrightCLI/CLIEnvironment.swift` | Adds runtime adapter injection. | Lets tests use fake adapters and production use the local runtime adapter factory. | CLI tests would need live runtime or hidden construction. |
+| `Sources/HostwrightRuntime/AppleContainerApplyAdapter.swift` | Adds guarded Apple container create-only adapter. | Keeps Apple command execution behind RuntimeAdapter. | The first mutation path would bypass the runtime boundary or not exist. |
+| `Sources/HostwrightRuntime/AppleContainerCommand.swift` | Adds local image list and create command descriptors. | Isolates Apple command strings to runtime code. | Commands may leak into CLI/reconciler code. |
+| `Sources/HostwrightRuntime/RuntimeCommand.swift` | Adds mutation kind and Phase 8B mutation policy. | Prevents unknown, forbidden, or unsupported mutation specs from executing. | Process execution could become a general shell-out path. |
+| `Sources/HostwrightState/StateRecords.swift` | Adds succeeded and failed operation states. | Allows apply result tracking. | Failure/success records cannot be represented. |
+| `Sources/HostwrightReconciler/*` | Marks missing-service create actions as Phase 8B-available. | Lets apply select exactly one executable planned action. | Apply cannot distinguish supported from unsupported actions. |
+| `Tests/*` | Adds CLI, runtime, reconciler, and state XCTest coverage. | Proves plan-hash refusal, persistence, redaction, create gating, and failure records. | Mutation regressions become unreviewable. |
+
+### Concepts I must understand
+
+- `hostwright apply` is not general apply yet.
+- The CLI orchestrates business logic but does not shell out to Apple container.
+- Runtime mutation still goes through `RuntimeAdapter`.
+- `FoundationRuntimeProcessRunner` is policy-gated, not a free shell.
+- The command must be typed, resolved, classified, and approved before execution.
+- A matching plan hash proves the user confirmed the currently recomputed plan; it does not prove the runtime will succeed.
+- State intent is written before mutation so failures can be audited.
+- Phase 8B rejects mounts, sensitive env values, privileged ports, and broad bind addresses.
+- The live proof created exactly one disposable container, `hostwright-proof-web`, from the approved local image `hostwright-proof-web:phase8b`.
+
+### Risks
+
+- The plan-confirmation flow is still rough because there is no dedicated `apply --dry-run` preview command.
+- Non-empty real Apple container image list parsing is supported only for the verified object shape used in the proof.
+- Broader real Apple container list parsing is supported only for the verified builder-container and proof-container shapes.
+- Create-only support could be mistaken for full lifecycle management if docs or PR text are sloppy.
+
+### How to verify
+
+```bash
+container system status
+container image list --format json
+swift build
+swift test list
+swift test
+scripts/grep-orchard.sh .
+scripts/test.sh
+```
+
+### Maintainer checklist
+
+- [ ] I can explain why Phase 8B supports only createMissingService.
+- [ ] I can explain why `--state-db` is required.
+- [ ] I can explain why `--confirm-plan` is required.
+- [ ] I can explain what is persisted before mutation.
+- [ ] I can explain how success and failure are recorded.
+- [ ] I can explain why the live proof does not mean general lifecycle management exists.
+- [ ] I can explain why stop/delete/restart/remove/cleanup remain forbidden.
+
+## Phase 8B live proof update: disposable Apple container create
+
+### Stage goal
+
+Prove Hostwright can perform its first real runtime mutation without widening the mutation surface beyond one reviewed create-missing-service action.
+
+### Problem
+
+Fake process runner tests proved the safety pipeline, but they did not prove Apple container would accept the actual create command or return parseable real output after creation. Without a live proof, Phase 8B would still depend on an unverified runtime assumption.
+
+### Solution
+
+An approved disposable image was built outside the repository at `/tmp/hostwright-phase8b-live-proof` using Apple container. Hostwright then ran:
+
+- a bogus-hash `hostwright apply`, which refused mutation and printed the expected plan hash;
+- a confirmed `hostwright apply`, which created exactly one container named `hostwright-proof-web`;
+- a repeat apply with the old hash, which failed before mutation because the observed plan changed;
+- exact cleanup of `hostwright-proof-web` and `hostwright-proof-web:phase8b`.
+
+### Why this design
+
+The proof exercises the real runtime path while keeping the blast radius tiny. It proves local-image gating, plan-hash confirmation, RuntimeAdapter execution, state/event persistence, observed-state parsing, stale-plan refusal, and exact cleanup of the proof resource. It does not prove stop/delete/restart/remove/cleanup support, daemon reconciliation, or general Apple container compatibility.
+
+### Files changed
+
+| File | What changed | Why it matters | What breaks if removed |
+| ---- | ------------ | -------------- | ---------------------- |
+| `Sources/HostwrightRuntime/AppleContainerObservationParser.swift` | Parses verified real builder-container and proof-container list shapes. | Lets Hostwright recognize the actual post-create proof output without guessing broader Apple JSON. | Repeat planning cannot observe the proof container. |
+| `Sources/HostwrightRuntime/AppleContainerApplyAdapter.swift` | Parses verified object-based image-list output by `configuration.name` and known image annotations. | Allows local image availability gating against real Apple image output. | Live create remains blocked because Hostwright cannot prove the local image exists. |
+| `Tests/HostwrightRuntimeTests/Fixtures/apple-container-image-list-real-json.txt` | Adds a sanitized real-shape image-list fixture. | Preserves the verified image output shape. | Image parser support becomes assumption-based. |
+| `Tests/HostwrightRuntimeTests/Fixtures/apple-container-list-builder-real-json.txt` | Adds a sanitized builder-container fixture. | Proves Apple builder runtime state is ignored for Hostwright planning. | Parser may treat Apple-owned builder internals as Hostwright services. |
+| `Tests/HostwrightRuntimeTests/Fixtures/apple-container-list-proof-created-real-json.txt` | Adds a sanitized created proof-container fixture. | Proves Hostwright can parse its created container. | Repeat apply cannot distinguish created from missing. |
+| `Tests/HostwrightRuntimeTests/HostwrightRuntimeSmoke.swift` | Adds XCTest coverage for real proof fixtures. | Prevents regressions in the exact verified shapes. | Broader or broken parser behavior may slip in. |
+| `docs/*` | Records the live proof result and remaining limits. | Maintainers can defend what is proven and what is not. | Reviewers may think Phase 8B is either blocked or broader than it is. |
+
+### Concepts I must understand
+
+- A live proof is stronger than a fake process runner test, but it is still narrow.
+- Hostwright owns only resources it explicitly creates and records.
+- Apple builder internals and base images are not Hostwright-owned proof resources.
+- The old confirmation hash fails after creation because observed state changed.
+- That stale-hash failure is a safety feature, not a bug.
+- The parser must support only reviewed shapes and fail closed on unknown shapes.
+- Exact proof cleanup is not the same as product cleanup or garbage collection.
+
+### Risks
+
+- The proof used Apple container 1.0.0; future Apple CLI JSON may change.
+- The created container is observed as `stopped`, so Phase 9 must handle start/status/health carefully.
+- Desired `nil` bind address versus observed `0.0.0.0` currently appears as port drift; that needs normalization or an explicit policy decision later.
+- The downloaded base image and Apple builder container remain outside Hostwright ownership.
+
+### How to verify
+
+```bash
+container system status
+container image list --format json
+container list --all --format json
+swift build
+swift test list
+swift test
+scripts/grep-orchard.sh .
+scripts/test.sh
+```
+
+### Maintainer checklist
+
+- [ ] I can explain why this proof used exactly one disposable service.
+- [ ] I can explain why `container build` was machine prep for the proof, not Hostwright product behavior.
+- [ ] I can explain why `hostwright apply` needed the plan hash before mutation.
+- [ ] I can explain what state records were written.
+- [ ] I can explain why repeat apply with the old hash refused to mutate.
+- [ ] I can explain why the proof container/image cleanup was allowed but general cleanup is still not implemented.

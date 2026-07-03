@@ -16,19 +16,20 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 | 5 | Read-Only Apple Observation | Complete | Begin safe Apple container integration through read-only observation only. | Runtime observation reports facts honestly and never creates, starts, stops, deletes, or mutates resources. |
 | 6 | SQLite State and Event Ledger | Complete | Add durable local state for desired state, snapshots, events, and operation records. | Migrations, transactions, crash recovery, and redaction behavior are tested. |
 | 7 | Real Planning and Drift Detection | Complete | Compare desired state with observed state and produce deterministic plans. | Tests cover missing, stopped, unmanaged, unhealthy, changed, and duplicate resources. |
-| 8 | First Runtime Mutation and `apply` | Planned | Implement minimal safe convergence through `RuntimeAdapter`. | Disposable Apple container integration tests pass and partial failures are recoverable. |
+| 8 | First Runtime Mutation and `apply` | Complete | Implement minimal safe convergence through `RuntimeAdapter`. | Disposable Apple container create-only proof passed and partial failures are recoverable. |
 | 9 | Health, Restart, Status, Logs, Cleanup | Planned | Make managed workloads operable and observable. | Health, restart backoff, events, logs, status, and ownership-based cleanup pass tests. |
 | 10 | Hardening and First Supported Release | Planned | Prove the narrow release contract. | Build, tests, docs, examples, benchmarks, security checklist, and reviewer approval pass. |
 
-## Hard Boundaries Through Phase 7
+## Hard Boundaries Through Phase 8B
 
-- No Apple container mutation is implemented.
-- Live Apple container execution exists only behind the Phase 5 read-only RuntimeAdapter path.
-- No `apply` command is implemented.
+- Apple container mutation is limited to the Phase 8B create-missing-service gate.
+- Live Apple container read-only execution exists behind the RuntimeAdapter path.
+- `hostwright apply` requires explicit `--state-db` and `--confirm-plan`.
 - No cleanup, restart enforcement, DNS, tunnel, cloud, GPU/ANE, privileged helper, or installer behavior is implemented.
 - No daemon loop is implemented.
 - Phase 6 state writes require explicit database paths; no default user database path exists.
-- Phase 7 planning is deterministic and non-mutating; all planned action execution is unavailable until Phase 8.
+- Phase 7 planning is deterministic and non-mutating.
+- Phase 8B executes at most one `createMissingService` action and refuses every other planned action.
 
 ## Phase 3 Outputs
 
@@ -73,6 +74,19 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 - Non-mutating CLI plan rendering with no live runtime observation by default.
 - XCTest coverage for planner drift, policy, determinism, redaction, and mutation-unavailable boundaries.
 
+## Phase 8B Outputs
+
+- `hostwright apply [path] --state-db <path> --confirm-plan <hash>`.
+- Recomputed observed plan hash confirmation before mutation.
+- Operation intent, desired state, observed state, and apply-start event persistence before mutation.
+- RuntimeAdapter-backed create-only execution.
+- Success/failure operation status and event persistence.
+- Ownership record persistence when a runtime resource identifier is available.
+- Fake-runner XCTest coverage for create success, failure, missing local image, unsupported subsets, redaction, and boundary behavior.
+- Live disposable proof using `hostwright-proof-web:phase8b`, `hostwright apply`, real Apple container create output, state DB verification, stale-hash refusal, and exact proof cleanup.
+
+Phase 8 remains intentionally narrow. It proves one create-only convergence path, not start, stop, delete, restart, cleanup, health execution, daemon reconciliation, DNS, tunnels, cloud, GPU/ANE behavior, or production readiness.
+
 ## Next Planned Phase
 
-Phase 8 should implement the first minimal runtime mutation path through `RuntimeAdapter`. It must persist intent before mutation and keep `plan` non-mutating.
+Phase 9 should add health, restart, status, logs, and ownership-based cleanup with separate safety gates. Destructive cleanup still requires dry-run, ownership checks, and explicit confirmation design.

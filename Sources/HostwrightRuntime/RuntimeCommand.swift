@@ -146,6 +146,39 @@ public enum RuntimeCommandPolicy {
                 message: "Phase 8B mutation policy accepts only createMissingService."
             )
         }
+
+        guard spec.arguments.first == "create" else {
+            throw RuntimeAdapterError.commandRejected(
+                classification: spec.classification,
+                message: "Phase 8B mutation policy accepts only create command specs."
+            )
+        }
+
+        guard let nameIndex = spec.arguments.firstIndex(of: "--name"),
+              spec.arguments.indices.contains(spec.arguments.index(after: nameIndex)),
+              spec.arguments[spec.arguments.index(after: nameIndex)].hasPrefix("hostwright-") else {
+            throw RuntimeAdapterError.commandRejected(
+                classification: spec.classification,
+                message: "Phase 8B create command specs must name a Hostwright-owned container."
+            )
+        }
+
+        let rejectedCreateFlags = [
+            "--rm",
+            "--mount",
+            "--volume",
+            "--network",
+            "--dns",
+            "--privileged",
+            "--cap-add",
+            "--cap-drop"
+        ]
+        if spec.arguments.contains(where: { rejectedCreateFlags.contains($0) }) {
+            throw RuntimeAdapterError.commandRejected(
+                classification: spec.classification,
+                message: "Phase 8B create command spec contains an unsupported create option."
+            )
+        }
     }
 
     private static func validateReadOnlyClassification(_ spec: RuntimeCommandSpec, phaseName: String) throws {

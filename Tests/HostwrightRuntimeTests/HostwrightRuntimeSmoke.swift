@@ -94,6 +94,26 @@ final class HostwrightRuntimeTests: XCTestCase {
             purpose: "fixture"
         )
         XCTAssertThrowsError(try RuntimeCommandPolicy.validatePhase8BMutation(forbidden))
+
+        let mislabeledDelete = RuntimeCommandSpec(
+            executablePath: "/usr/bin/container-fixture",
+            arguments: ["delete", "hostwright-demo-api"],
+            classification: .mutating,
+            executableResolution: .resolvedByRuntimeExecutableResolver,
+            mutationKind: .createMissingService,
+            purpose: "fixture"
+        )
+        XCTAssertThrowsError(try RuntimeCommandPolicy.validatePhase8BMutation(mislabeledDelete))
+
+        let nonHostwrightCreate = RuntimeCommandSpec(
+            executablePath: "/usr/bin/container-fixture",
+            arguments: ["create", "--name", "manual-api", "local/demo:latest"],
+            classification: .mutating,
+            executableResolution: .resolvedByRuntimeExecutableResolver,
+            mutationKind: .createMissingService,
+            purpose: "fixture"
+        )
+        XCTAssertThrowsError(try RuntimeCommandPolicy.validatePhase8BMutation(nonHostwrightCreate))
     }
 
     func testReadOnlyExecutionRejectsUnresolvedExecutable() {

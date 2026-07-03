@@ -71,11 +71,11 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
         guard confirmation?.confirmed == true, confirmation?.planHash?.isEmpty == false else {
             throw RuntimeAdapterError.commandRejected(
                 classification: .mutating,
-                message: "Phase 8B create requires explicit plan-hash confirmation."
+                message: "Create-only apply requires explicit plan-hash confirmation."
             )
         }
         guard action.kind == .create, let desiredService = action.desiredService else {
-            throw RuntimeAdapterError.mutationUnavailableInCurrentPhase("Phase 8B executes only createMissingService runtime actions.")
+            throw RuntimeAdapterError.mutationUnavailableInCurrentPhase("Create-only apply executes only createMissingService runtime actions.")
         }
         try validateCreateSubset(desiredService)
 
@@ -94,7 +94,7 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
             executable: executable,
             desiredService: desiredService
         )
-        try RuntimeCommandPolicy.validatePhase8BMutation(createSpec)
+        try RuntimeCommandPolicy.validateCreateMissingServiceMutation(createSpec)
         let result = try await processRunner.run(createSpec)
         let resourceIdentifier = AppleContainerCommand.containerName(for: desiredService.identity)
 
@@ -108,16 +108,16 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
 
     private func validateCreateSubset(_ service: DesiredRuntimeService) throws {
         guard service.mounts.isEmpty else {
-            throw RuntimeAdapterError.commandRejected(classification: .mutating, message: "Phase 8B create rejects mounts.")
+            throw RuntimeAdapterError.commandRejected(classification: .mutating, message: "Create-only apply rejects mounts.")
         }
         guard service.environment.allSatisfy({ !$0.isSensitive && $0.value != redactionPolicy.replacement }) else {
-            throw RuntimeAdapterError.commandRejected(classification: .mutating, message: "Phase 8B create rejects sensitive environment values.")
+            throw RuntimeAdapterError.commandRejected(classification: .mutating, message: "Create-only apply rejects sensitive environment values.")
         }
         guard service.ports.allSatisfy({ ($0.hostPort ?? 0) >= 1_024 }) else {
-            throw RuntimeAdapterError.commandRejected(classification: .mutating, message: "Phase 8B create rejects privileged host ports.")
+            throw RuntimeAdapterError.commandRejected(classification: .mutating, message: "Create-only apply rejects privileged host ports.")
         }
         guard service.ports.allSatisfy({ $0.bindAddress != "0.0.0.0" && $0.bindAddress != "::" }) else {
-            throw RuntimeAdapterError.commandRejected(classification: .mutating, message: "Phase 8B create rejects broad bind addresses.")
+            throw RuntimeAdapterError.commandRejected(classification: .mutating, message: "Create-only apply rejects broad bind addresses.")
         }
     }
 }

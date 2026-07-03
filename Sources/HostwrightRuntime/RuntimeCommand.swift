@@ -125,32 +125,32 @@ public enum RuntimeCommandPolicy {
         }
     }
 
-    public static func validatePhase8BMutation(_ spec: RuntimeCommandSpec) throws {
+    public static func validateCreateMissingServiceMutation(_ spec: RuntimeCommandSpec) throws {
         guard spec.executableResolution == .resolvedByRuntimeExecutableResolver else {
             throw RuntimeAdapterError.commandRejected(
                 classification: spec.classification,
-                message: "Phase 8B refuses runtime command specs whose executable was not resolved through RuntimeExecutableResolver."
+                message: "Create-missing-service mutation refuses runtime command specs whose executable was not resolved through RuntimeExecutableResolver."
             )
         }
 
         guard spec.classification == .mutating else {
             throw RuntimeAdapterError.commandRejected(
                 classification: spec.classification,
-                message: "Phase 8B executes only explicitly classified mutating createMissingService specs."
+                message: "Create-missing-service mutation accepts only explicitly classified mutating specs."
             )
         }
 
         guard spec.mutationKind == .createMissingService else {
             throw RuntimeAdapterError.commandRejected(
                 classification: spec.classification,
-                message: "Phase 8B mutation policy accepts only createMissingService."
+                message: "Create-missing-service mutation policy accepts only createMissingService."
             )
         }
 
         guard spec.arguments.first == "create" else {
             throw RuntimeAdapterError.commandRejected(
                 classification: spec.classification,
-                message: "Phase 8B mutation policy accepts only create command specs."
+                message: "Create-missing-service mutation policy accepts only create command specs."
             )
         }
 
@@ -159,7 +159,7 @@ public enum RuntimeCommandPolicy {
               spec.arguments[spec.arguments.index(after: nameIndex)].hasPrefix("hostwright-") else {
             throw RuntimeAdapterError.commandRejected(
                 classification: spec.classification,
-                message: "Phase 8B create command specs must name a Hostwright-owned container."
+                message: "Create-missing-service command specs must name a Hostwright-owned container."
             )
         }
 
@@ -176,7 +176,7 @@ public enum RuntimeCommandPolicy {
         if spec.arguments.contains(where: { rejectedCreateFlags.contains($0) }) {
             throw RuntimeAdapterError.commandRejected(
                 classification: spec.classification,
-                message: "Phase 8B create command spec contains an unsupported create option."
+                message: "Create-missing-service command spec contains an unsupported create option."
             )
         }
     }
@@ -228,7 +228,7 @@ public struct FakeRuntimeProcessRunner: RuntimeProcessRunning {
         case .readOnly:
             try RuntimeCommandPolicy.validateReadOnlyExecution(spec, phaseName: "Phase 5")
         case .mutating:
-            try RuntimeCommandPolicy.validatePhase8BMutation(spec)
+            try RuntimeCommandPolicy.validateCreateMissingServiceMutation(spec)
         case .forbidden, .unknown:
             throw RuntimeAdapterError.commandRejected(
                 classification: spec.classification,

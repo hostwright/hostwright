@@ -83,7 +83,7 @@ public enum HostwrightCLI {
 
     Commands are non-mutating except init, which creates hostwright.yaml only when absent.
     CLI plan output is deterministic but does not perform live runtime observation.
-    Phase 8B apply is create-only, requires explicit state DB and plan hash confirmation, and mutates only through RuntimeAdapter.
+    Apply is create-only, requires explicit state DB and plan hash confirmation, and mutates only through RuntimeAdapter.
 
     """
 

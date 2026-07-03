@@ -49,7 +49,7 @@ struct ApplyCommandRunner {
             guard executableActions.count == 1, let action = executableActions.first else {
                 return failure(
                     code: .commandUsage,
-                    message: "Phase 8B applies exactly one createMissingService action. Current executable action count: \(executableActions.count). No mutation was attempted.\n\n\(PlanRenderer.render(plan))"
+                    message: "Create-only apply supports exactly one createMissingService action. Current executable action count: \(executableActions.count). No mutation was attempted.\n\n\(PlanRenderer.render(plan))"
                 )
             }
 
@@ -58,7 +58,7 @@ struct ApplyCommandRunner {
                 return failure(code: .runtimeMutationNotImplemented, message: "Could not find desired service for \(action.identity.displayName). No mutation was attempted.")
             }
 
-            if let safeSubsetFailure = validatePhase8BSafeSubset(desiredService) {
+            if let safeSubsetFailure = validateCreateOnlyApplySubset(desiredService) {
                 return failure(code: .unsafeExposure, message: "\(safeSubsetFailure) No mutation was attempted.")
             }
 
@@ -143,18 +143,18 @@ struct ApplyCommandRunner {
         }
     }
 
-    private func validatePhase8BSafeSubset(_ service: DesiredRuntimeService) -> String? {
+    private func validateCreateOnlyApplySubset(_ service: DesiredRuntimeService) -> String? {
         if !service.mounts.isEmpty {
-            return "Phase 8B create-only apply rejects volumes and mounts."
+            return "Create-only apply rejects volumes and mounts."
         }
         if service.environment.contains(where: { $0.isSensitive || $0.value == RuntimeRedactionPolicy.default.replacement }) {
-            return "Phase 8B create-only apply rejects sensitive environment values until secret handling is designed."
+            return "Create-only apply rejects sensitive environment values until secret handling is designed."
         }
         if service.ports.contains(where: { ($0.hostPort ?? 0) < 1_024 }) {
-            return "Phase 8B create-only apply rejects privileged host ports."
+            return "Create-only apply rejects privileged host ports."
         }
         if service.ports.contains(where: { $0.bindAddress == "0.0.0.0" || $0.bindAddress == "::" }) {
-            return "Phase 8B create-only apply rejects broad bind addresses."
+            return "Create-only apply rejects broad bind addresses."
         }
         return nil
     }

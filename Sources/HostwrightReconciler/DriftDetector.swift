@@ -159,7 +159,7 @@ public enum DriftDetector {
                     PlannedAction(
                         kind: .createMissingService,
                         identity: desired.identity,
-                        reason: "Desired service is missing; Phase 8B can create exactly one missing service after confirmation.",
+                        reason: "Desired service is missing; create-only apply can create exactly one missing service after confirmation.",
                         driftKind: .missingDesiredService,
                         executionAvailability: .availableForPhase8BCreate
                     )
@@ -228,7 +228,7 @@ public enum DriftDetector {
                 PlannedAction(
                     kind: .createMissingService,
                     identity: observed.identity,
-                    reason: "Observed service is missing; Phase 8B can create exactly one missing service after confirmation.",
+                    reason: "Observed service is missing; create-only apply can create exactly one missing service after confirmation.",
                     driftKind: .missingDesiredService,
                     executionAvailability: .availableForPhase8BCreate
                 )

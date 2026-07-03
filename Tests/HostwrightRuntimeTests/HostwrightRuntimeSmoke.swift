@@ -61,14 +61,14 @@ final class HostwrightRuntimeTests: XCTestCase {
         }
     }
 
-    func testPhase8BMutationPolicyAcceptsOnlyResolvedCreateMissingServiceSpecs() {
+    func testCreateMissingServiceMutationPolicyAcceptsOnlyResolvedCreateSpecs() {
         let create = AppleContainerCommand.spec(
             kind: .createContainer,
             executable: ResolvedRuntimeExecutable(name: "container", path: "/usr/bin/container-fixture"),
             desiredService: desiredService
         )
 
-        XCTAssertNoThrow(try RuntimeCommandPolicy.validatePhase8BMutation(create))
+        XCTAssertNoThrow(try RuntimeCommandPolicy.validateCreateMissingServiceMutation(create))
         XCTAssertEqual(create.classification, .mutating)
         XCTAssertEqual(create.mutationKind, .createMissingService)
         XCTAssertEqual(create.arguments.prefix(3), ["create", "--name", "hostwright-demo-api"])
@@ -83,7 +83,7 @@ final class HostwrightRuntimeTests: XCTestCase {
             mutationKind: .createMissingService,
             purpose: "fixture"
         )
-        XCTAssertThrowsError(try RuntimeCommandPolicy.validatePhase8BMutation(unresolved))
+        XCTAssertThrowsError(try RuntimeCommandPolicy.validateCreateMissingServiceMutation(unresolved))
 
         let forbidden = RuntimeCommandSpec(
             executablePath: "/usr/bin/container-fixture",
@@ -93,7 +93,7 @@ final class HostwrightRuntimeTests: XCTestCase {
             mutationKind: .createMissingService,
             purpose: "fixture"
         )
-        XCTAssertThrowsError(try RuntimeCommandPolicy.validatePhase8BMutation(forbidden))
+        XCTAssertThrowsError(try RuntimeCommandPolicy.validateCreateMissingServiceMutation(forbidden))
 
         let mislabeledDelete = RuntimeCommandSpec(
             executablePath: "/usr/bin/container-fixture",
@@ -103,7 +103,7 @@ final class HostwrightRuntimeTests: XCTestCase {
             mutationKind: .createMissingService,
             purpose: "fixture"
         )
-        XCTAssertThrowsError(try RuntimeCommandPolicy.validatePhase8BMutation(mislabeledDelete))
+        XCTAssertThrowsError(try RuntimeCommandPolicy.validateCreateMissingServiceMutation(mislabeledDelete))
 
         let nonHostwrightCreate = RuntimeCommandSpec(
             executablePath: "/usr/bin/container-fixture",
@@ -113,7 +113,7 @@ final class HostwrightRuntimeTests: XCTestCase {
             mutationKind: .createMissingService,
             purpose: "fixture"
         )
-        XCTAssertThrowsError(try RuntimeCommandPolicy.validatePhase8BMutation(nonHostwrightCreate))
+        XCTAssertThrowsError(try RuntimeCommandPolicy.validateCreateMissingServiceMutation(nonHostwrightCreate))
     }
 
     func testReadOnlyExecutionRejectsUnresolvedExecutable() {
@@ -572,7 +572,7 @@ final class HostwrightRuntimeTests: XCTestCase {
             case .readOnly:
                 try RuntimeCommandPolicy.validateReadOnlyExecution(spec)
             case .mutating:
-                try RuntimeCommandPolicy.validatePhase8BMutation(spec)
+                try RuntimeCommandPolicy.validateCreateMissingServiceMutation(spec)
             case .forbidden, .unknown:
                 throw RuntimeAdapterError.commandRejected(classification: spec.classification, message: "rejected")
             }

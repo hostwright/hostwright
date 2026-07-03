@@ -77,7 +77,7 @@ public enum CLICommand: Equatable, Sendable {
                 index += 2
             default:
                 guard !argument.hasPrefix("-") else {
-                    throw CLIUsageError("apply does not support flag '\(argument)' in Phase 8B.")
+                    throw CLIUsageError("apply does not support flag '\(argument)' in the create-only gate.")
                 }
                 guard path == nil else {
                     throw CLIUsageError("apply accepts at most one manifest path.")
@@ -88,7 +88,7 @@ public enum CLICommand: Equatable, Sendable {
         }
 
         guard let stateDatabasePath, !stateDatabasePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw CLIUsageError("apply requires --state-db <path>. Phase 8B does not use a default state database path.")
+            throw CLIUsageError("apply requires --state-db <path>. The create-only gate does not use a default state database path.")
         }
 
         guard let confirmedPlanHash, !confirmedPlanHash.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {

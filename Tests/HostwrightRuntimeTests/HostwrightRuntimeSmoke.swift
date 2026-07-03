@@ -169,9 +169,10 @@ final class HostwrightRuntimeTests: XCTestCase {
     }
 
     func testAppleContainerApplyAdapterCreatesOnlyWhenLocalImageIsAvailable() async throws {
+        let imageListFixture = try fixture("apple-container-image-list-real-json.txt")
         let runner = RoutingRuntimeProcessRunner { spec in
             if spec.arguments == ["image", "list", "--format", "json"] {
-                return RuntimeCommandResult(spec: spec, exitStatus: 0, standardOutput: #"["ghcr.io/example/api:latest"]"#, standardError: "")
+                return RuntimeCommandResult(spec: spec, exitStatus: 0, standardOutput: imageListFixture, standardError: "")
             }
             if spec.arguments.first == "create" {
                 return RuntimeCommandResult(spec: spec, exitStatus: 0, standardOutput: "created token=fake-token", standardError: "")
@@ -186,16 +187,16 @@ final class HostwrightRuntimeTests: XCTestCase {
         let event = try await adapter.execute(
             PlannedRuntimeAction(
                 kind: .create,
-                identity: identity,
+                identity: proofIdentity,
                 isDestructive: false,
                 summary: "create",
-                desiredService: desiredService
+                desiredService: proofService
             ),
             confirmation: RuntimeMutationConfirmation(confirmed: true, reason: "test", planHash: "plan-hash")
         )
 
         XCTAssertEqual(runner.calls.compactMap(\.arguments.first), ["image", "create"])
-        XCTAssertEqual(event.resourceIdentifier, "hostwright-demo-api")
+        XCTAssertEqual(event.resourceIdentifier, "hostwright-proof-web")
         XCTAssertFalse(event.message.contains("fake-token"))
         XCTAssertTrue(event.message.contains("[REDACTED]"))
     }
@@ -325,6 +326,54 @@ final class HostwrightRuntimeTests: XCTestCase {
         XCTAssertEqual(AppleContainerCommand.arguments(for: .listContainers), ["list", "--all", "--format", "json"])
     }
 
+    func testAppleContainerParserIgnoresRealBuilderContainerFixture() async throws {
+        let adapter = AppleContainerReadOnlyAdapter(
+            executableResolver: resolvedContainer,
+            processRunner: FakeRuntimeProcessRunner(
+                behavior: .result(
+                    RuntimeCommandResult(
+                        spec: listSpec,
+                        exitStatus: 0,
+                        standardOutput: try fixture("apple-container-list-builder-real-json.txt"),
+                        standardError: ""
+                    )
+                )
+            )
+        )
+
+        let observed = try await adapter.observe(desiredState: proofDesiredState)
+
+        XCTAssertTrue(observed.services.isEmpty)
+        XCTAssertEqual(observed.projectName, "proof")
+    }
+
+    func testAppleContainerParserParsesRealCreatedProofContainerFixture() async throws {
+        let adapter = AppleContainerReadOnlyAdapter(
+            executableResolver: resolvedContainer,
+            processRunner: FakeRuntimeProcessRunner(
+                behavior: .result(
+                    RuntimeCommandResult(
+                        spec: listSpec,
+                        exitStatus: 0,
+                        standardOutput: try fixture("apple-container-list-proof-created-real-json.txt"),
+                        standardError: ""
+                    )
+                )
+            )
+        )
+
+        let observed = try await adapter.observe(desiredState: proofDesiredState)
+
+        XCTAssertEqual(observed.services.count, 1)
+        XCTAssertEqual(observed.services[0].identity, proofIdentity)
+        XCTAssertEqual(observed.services[0].image, "hostwright-proof-web:phase8b")
+        XCTAssertEqual(observed.services[0].lifecycleState, .stopped)
+        XCTAssertEqual(observed.services[0].ports.first?.hostPort, 18080)
+        XCTAssertEqual(observed.services[0].ports.first?.containerPort, 80)
+        XCTAssertEqual(observed.services[0].ports.first?.protocolName, .tcp)
+        XCTAssertEqual(observed.services[0].ports.first?.bindAddress, "0.0.0.0")
+    }
+
     func testAppleContainerParserParsesRunningFixture() async throws {
         let adapter = AppleContainerReadOnlyAdapter(
             executableResolver: resolvedContainer,
@@ -394,7 +443,7 @@ final class HostwrightRuntimeTests: XCTestCase {
                 return XCTFail("Expected outputParseFailed, got \(error).")
             }
             XCTAssertFalse(message.contains("fake-token"))
-            XCTAssertTrue(message.contains("Non-empty real Apple container JSON list output is not supported yet"))
+            XCTAssertTrue(message.contains("Unsupported real Apple container list item shape"))
         }
     }
 
@@ -453,6 +502,22 @@ final class HostwrightRuntimeTests: XCTestCase {
             environment: [RuntimeEnvironmentValue(name: "APP_ENV", value: "development")],
             ports: [RuntimePortMapping(hostPort: 8080, containerPort: 8080)]
         )
+    }
+
+    private var proofIdentity: RuntimeServiceIdentity {
+        RuntimeServiceIdentity(projectName: "proof", serviceName: "web")
+    }
+
+    private var proofService: DesiredRuntimeService {
+        DesiredRuntimeService(
+            identity: proofIdentity,
+            image: "hostwright-proof-web:phase8b",
+            ports: [RuntimePortMapping(hostPort: 18080, containerPort: 80)]
+        )
+    }
+
+    private var proofDesiredState: DesiredRuntimeState {
+        DesiredRuntimeState(projectName: "proof", services: [proofService])
     }
 
     private var resolvedContainer: FixedRuntimeExecutableResolver {

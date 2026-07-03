@@ -128,9 +128,9 @@ The default policy redacts key/value patterns and sensitive key fragments such a
 
 ## Parser Boundary
 
-`AppleContainerObservationParser` accepts only the Phase 5 fixture-defined JSON schema `hostwright.apple-container.observation.v1`. It fails closed on malformed output, unsupported schema names, unknown keys, unsupported lifecycle values, unsupported health values, unsupported protocols, and unsupported mount access values.
+`AppleContainerObservationParser` accepts the Phase 5 fixture-defined JSON schema `hostwright.apple-container.observation.v1`, the verified real empty Apple container list output, the verified Apple builder-container output as ignored non-Hostwright runtime state, and the verified created/stopped `hostwright-proof-web` proof container output.
 
-If real Apple container output does not match this schema, Hostwright reports a parse failure instead of guessing. This protects the runtime boundary from turning unverified Apple CLI output into fake product truth.
+If broader real Apple container output does not match one of those reviewed shapes, Hostwright reports a parse failure instead of guessing. This protects the runtime boundary from turning unverified Apple CLI output into fake product truth.
 
 ## Create-Only Mutation Boundary
 
@@ -141,4 +141,4 @@ Phase 8B supports only:
 
 The adapter rejects mounts, DNS, custom networks, capabilities, Rosetta, virtualization, custom runtime/kernel, SSH forwarding, `--rm`, `run`, start-after-create, image pull, delete, restart, remove, cleanup, prune, build, and exec.
 
-The local machine currently reports no local images with `container image list --format json`, so live create remains blocked until a local image source is explicitly approved.
+The Phase 8B live proof used an explicitly approved disposable local image, `hostwright-proof-web:phase8b`, and created exactly one container named `hostwright-proof-web`. A stale repeat apply was rejected before mutation because the recomputed plan hash changed. Cleanup removed only the exact proof container and proof image. Apple builder runtime state and the downloaded base image remain outside Hostwright ownership.

@@ -19,16 +19,12 @@ public enum AppleContainerObservationParser {
             let json = try JSONSerialization.jsonObject(with: data)
 
             if let realList = json as? [Any] {
-                guard realList.isEmpty else {
-                    throw RuntimeAdapterError.outputParseFailed(
-                        "Non-empty real Apple container JSON list output is not supported yet: \(redactionPolicy.redact(trimmed))"
-                    )
-                }
-
-                return ObservedRuntimeState(
-                    projectName: desiredState.projectName,
-                    services: [],
-                    adapterMetadata: metadata
+                return try parseRealList(
+                    realList,
+                    desiredState: desiredState,
+                    metadata: metadata,
+                    redactionPolicy: redactionPolicy,
+                    rawOutput: trimmed
                 )
             }
 
@@ -93,6 +89,102 @@ public enum AppleContainerObservationParser {
         let unknown = keys.subtracting(allowed)
         guard unknown.isEmpty else {
             throw RuntimeAdapterError.outputParseFailed("Unsupported keys in \(context): \(unknown.sorted().joined(separator: ", ")).")
+        }
+    }
+
+    private static func parseRealList(
+        _ list: [Any],
+        desiredState: DesiredRuntimeState,
+        metadata: RuntimeAdapterMetadata,
+        redactionPolicy: RuntimeRedactionPolicy,
+        rawOutput: String
+    ) throws -> ObservedRuntimeState {
+        let desiredByContainerID = Dictionary(
+            uniqueKeysWithValues: desiredState.services.map {
+                (AppleContainerCommand.containerName(for: $0.identity), $0)
+            }
+        )
+        var services: [ObservedRuntimeService] = []
+
+        for item in list {
+            guard let object = item as? [String: Any],
+                  let id = object["id"] as? String,
+                  let configuration = object["configuration"] as? [String: Any],
+                  let status = object["status"] as? [String: Any] else {
+                throw RuntimeAdapterError.outputParseFailed(
+                    "Unsupported real Apple container list item shape: \(redactionPolicy.redact(rawOutput))"
+                )
+            }
+
+            if isAppleBuilderContainer(id: id, configuration: configuration) {
+                continue
+            }
+
+            guard let desired = desiredByContainerID[id] else {
+                if id.hasPrefix("hostwright-") {
+                    throw RuntimeAdapterError.outputParseFailed(
+                        "Observed Hostwright-looking Apple container '\(redactionPolicy.redact(id))' is not in the current desired state."
+                    )
+                }
+                continue
+            }
+
+            guard let rawState = status["state"] as? String,
+                  let lifecycleState = RuntimeLifecycleState(rawValue: rawState) else {
+                throw RuntimeAdapterError.outputParseFailed(
+                    "Unsupported Apple container lifecycle state for '\(redactionPolicy.redact(id))'."
+                )
+            }
+
+            let image = (configuration["image"] as? [String: Any])?["reference"] as? String
+            let observedAt = status["startedDate"] as? String ?? configuration["creationDate"] as? String
+            let ports = try parsePublishedPorts(configuration["publishedPorts"] as? [[String: Any]] ?? [])
+
+            services.append(
+                ObservedRuntimeService(
+                    identity: desired.identity,
+                    image: image,
+                    lifecycleState: lifecycleState,
+                    healthState: .unknown,
+                    ports: ports,
+                    mounts: [],
+                    observedAt: observedAt
+                )
+            )
+        }
+
+        return ObservedRuntimeState(
+            projectName: desiredState.projectName,
+            services: services.sorted { $0.identity.displayName < $1.identity.displayName },
+            adapterMetadata: metadata
+        )
+    }
+
+    private static func isAppleBuilderContainer(id: String, configuration: [String: Any]) -> Bool {
+        if id == "buildkit" {
+            return true
+        }
+        let labels = configuration["labels"] as? [String: String] ?? [:]
+        return labels["com.apple.container.plugin"] == "builder" ||
+            labels["com.apple.container.resource.role"] == "builder"
+    }
+
+    private static func parsePublishedPorts(_ ports: [[String: Any]]) throws -> [RuntimePortMapping] {
+        try ports.map { port in
+            let hostPort = port["hostPort"] as? Int ?? port["host"] as? Int
+            guard let containerPort = port["containerPort"] as? Int ?? port["container"] as? Int else {
+                throw RuntimeAdapterError.outputParseFailed("Unsupported Apple container published port shape.")
+            }
+            let rawProtocol = (port["protocol"] as? String ?? port["proto"] as? String ?? "tcp").lowercased()
+            guard let protocolName = RuntimePortProtocol(rawValue: rawProtocol) else {
+                throw RuntimeAdapterError.outputParseFailed("Unsupported Apple container published port protocol '\(rawProtocol)'.")
+            }
+            return RuntimePortMapping(
+                hostPort: hostPort,
+                containerPort: containerPort,
+                protocolName: protocolName,
+                bindAddress: port["hostAddress"] as? String ?? port["bind"] as? String
+            )
         }
     }
 }

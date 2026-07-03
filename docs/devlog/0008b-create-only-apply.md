@@ -25,7 +25,7 @@ Add the first Hostwright runtime mutation path while keeping the scope limited t
 - No volume or mount support in apply.
 - No broad bind-address support in apply.
 - No sensitive environment value support in apply.
-- No live create proof yet because the local Apple container image list is empty.
+- No general lifecycle management beyond the single create-missing-service proof.
 
 ## Commands Run
 
@@ -33,6 +33,13 @@ Add the first Hostwright runtime mutation path while keeping the scope limited t
 container system status
 container create --help
 container image list --format json
+container build --tag hostwright-proof-web:phase8b --file Dockerfile .
+swift run hostwright apply /tmp/hostwright-phase8b-live-proof/hostwright.yaml --state-db /tmp/hostwright-phase8b-live-proof/hostwright.sqlite --confirm-plan bogus
+swift run hostwright apply /tmp/hostwright-phase8b-live-proof/hostwright.yaml --state-db /tmp/hostwright-phase8b-live-proof/hostwright.sqlite --confirm-plan 747c4fc317324046
+container list --all --format json
+container inspect hostwright-proof-web
+container delete hostwright-proof-web
+container image delete hostwright-proof-web:phase8b
 swift build
 swift test list
 swift test
@@ -40,17 +47,25 @@ scripts/grep-orchard.sh .
 scripts/test.sh
 ```
 
+## Live Proof
+
+The approved proof built one disposable local image, `hostwright-proof-web:phase8b`, outside the repository in `/tmp/hostwright-phase8b-live-proof`.
+
+The first `hostwright apply` used a bogus confirmation hash and refused mutation while printing the expected plan hash, `747c4fc317324046`. The confirmed apply then created exactly one Apple container named `hostwright-proof-web` through `RuntimeAdapter`.
+
+After creation, `container list --all --format json` and `container inspect hostwright-proof-web` showed the proof container in Apple container output. Re-running `hostwright apply` with the old hash failed before mutation because observed state changed and the recomputed plan hash was different. Cleanup deleted only `hostwright-proof-web` and `hostwright-proof-web:phase8b`.
+
 ## Risks
 
-- The create path is covered by fake process runners, but live create is not complete until a local image source is approved.
-- Non-empty real Apple container image list output is not supported yet.
+- The create path is proven only for the approved disposable image and one missing service.
+- The live proof left Apple-managed builder state and the downloaded base image outside Hostwright ownership; Hostwright must not clean those up without explicit ownership design.
 - The plan-confirmation workflow is usable but still rough; a future apply preview flow may be needed.
 - The existence of `apply` can be overread as full lifecycle support unless docs keep saying create-only.
 
 ## Unknowns
 
-- Exact non-empty Apple container image-list JSON shape.
-- Exact successful `container create` output shape for a disposable local image.
+- Broader non-empty Apple container image-list JSON shapes beyond the verified object form.
+- Broader non-empty container-list JSON shapes beyond the verified builder and proof-container forms.
 - Whether Apple container create semantics change across 1.0.x releases.
 
 ## What I Need To Understand
@@ -62,4 +77,4 @@ scripts/test.sh
 
 ## Next Action
 
-Approve a local image source and run one disposable create-only apply proof. If that passes, Phase 8 can be marked complete and tagged. If it fails, keep the code path but document the blocker before Phase 9 planning.
+Review the Phase 8B live proof diff, then commit, push, open a PR, and merge if CI and review stay clean. After merge, tag Phase 8 and plan Phase 9 health/restart/status/logs/cleanup gates without widening mutation semantics casually.

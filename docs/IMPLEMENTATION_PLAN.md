@@ -16,7 +16,7 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 | 5 | Read-Only Apple Observation | Complete | Begin safe Apple container integration through read-only observation only. | Runtime observation reports facts honestly and never creates, starts, stops, deletes, or mutates resources. |
 | 6 | SQLite State and Event Ledger | Complete | Add durable local state for desired state, snapshots, events, and operation records. | Migrations, transactions, crash recovery, and redaction behavior are tested. |
 | 7 | Real Planning and Drift Detection | Complete | Compare desired state with observed state and produce deterministic plans. | Tests cover missing, stopped, unmanaged, unhealthy, changed, and duplicate resources. |
-| 8 | First Runtime Mutation and `apply` | In progress | Implement minimal safe convergence through `RuntimeAdapter`. | Disposable Apple container integration tests pass and partial failures are recoverable. |
+| 8 | First Runtime Mutation and `apply` | Complete | Implement minimal safe convergence through `RuntimeAdapter`. | Disposable Apple container create-only proof passed and partial failures are recoverable. |
 | 9 | Health, Restart, Status, Logs, Cleanup | Planned | Make managed workloads operable and observable. | Health, restart backoff, events, logs, status, and ownership-based cleanup pass tests. |
 | 10 | Hardening and First Supported Release | Planned | Prove the narrow release contract. | Build, tests, docs, examples, benchmarks, security checklist, and reviewer approval pass. |
 
@@ -83,9 +83,10 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 - Success/failure operation status and event persistence.
 - Ownership record persistence when a runtime resource identifier is available.
 - Fake-runner XCTest coverage for create success, failure, missing local image, unsupported subsets, redaction, and boundary behavior.
+- Live disposable proof using `hostwright-proof-web:phase8b`, `hostwright apply`, real Apple container create output, state DB verification, stale-hash refusal, and exact proof cleanup.
 
-Live Phase 8 completion remains blocked until a local Apple container image source is approved and one disposable create-only apply is demonstrated. The current local image list is `[]`.
+Phase 8 remains intentionally narrow. It proves one create-only convergence path, not start, stop, delete, restart, cleanup, health execution, daemon reconciliation, DNS, tunnels, cloud, GPU/ANE behavior, or production readiness.
 
 ## Next Planned Phase
 
-Finish the live Phase 8B create proof after approving a local image source. After Phase 8 is fully proven and tagged, Phase 9 should add health, restart, status, logs, and ownership-based cleanup with separate safety gates.
+Phase 9 should add health, restart, status, logs, and ownership-based cleanup with separate safety gates. Destructive cleanup still requires dry-run, ownership checks, and explicit confirmation design.

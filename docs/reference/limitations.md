@@ -1,6 +1,6 @@
 # Limitations
 
-Hostwright is in Phase 8B create-only apply gate work. It can model and attempt read-only runtime observation through `RuntimeAdapter`, persist desired and observed state to an explicit SQLite database path, compute non-mutating desired-vs-observed plans, and execute one tightly gated create-missing-service mutation through `RuntimeAdapter` when all confirmation and local-image gates pass.
+Hostwright has completed the Phase 8B create-only apply proof. It can model and attempt read-only runtime observation through `RuntimeAdapter`, persist desired and observed state to an explicit SQLite database path, compute non-mutating desired-vs-observed plans, and execute one tightly gated create-missing-service mutation through `RuntimeAdapter` when all confirmation and local-image gates pass.
 
 ## Implemented Today
 
@@ -18,6 +18,9 @@ Hostwright is in Phase 8B create-only apply gate work. It can model and attempt 
 - `FoundationRuntimeProcessRunner` guarded by read-only command classification, executable resolution, timeouts, and redaction.
 - Fixture-defined Apple container observation parser for empty and running snapshots.
 - Verified real empty Apple container JSON list parsing for `container list --all --format json` output of `[]`.
+- Verified real Apple builder-container list parsing as ignored non-Hostwright runtime state.
+- Verified real created/stopped Hostwright proof container parsing.
+- Verified real object-based Apple container image list parsing by `configuration.name`.
 - SQLite state store using system `SQLite3`.
 - Explicit schema migrations.
 - Desired-state snapshot persistence.
@@ -34,6 +37,7 @@ Hostwright is in Phase 8B create-only apply gate work. It can model and attempt 
 - Operation intent persistence before mutation.
 - Apply success/failure event persistence.
 - Phase 8B runtime mutation policy for `createMissingService` only.
+- One disposable live create proof with `hostwright-proof-web:phase8b`, including stale-hash refusal and exact proof cleanup.
 - Source-material preservation and Hostwright naming controls.
 
 ## Not Implemented Today
@@ -41,9 +45,8 @@ Hostwright is in Phase 8B create-only apply gate work. It can model and attempt 
 - General runtime mutation.
 - Multi-action `hostwright apply`.
 - Guaranteed Apple container observation on every machine.
-- Non-empty real Apple container JSON list parsing.
-- Non-empty real Apple container image list parsing.
-- Live create completion without an approved local image source.
+- Broad non-empty Apple container JSON list parsing beyond the verified builder/proof shapes.
+- Broad non-empty Apple container image list parsing beyond the verified object shape.
 - Apple container start, stop, delete, restart, cleanup, log, or detailed inspect operations.
 - Runtime mutation beyond create-missing-service.
 - Daemon scheduling loop.
@@ -90,9 +93,9 @@ The Phase 2 parser is not a general YAML parser. It accepts only the documented 
 
 The runtime module contains read-only Apple container observation infrastructure, but the CLI still does not perform live runtime observation by default. `hostwright plan` renders deterministic desired-state and policy planning output. `hostwright status` remains manifest-level output only. Neither command proves that services are running, stopped, healthy, unhealthy, created, deleted, or reachable unless explicit observed state is supplied through library APIs.
 
-The runtime parser accepts the fixture-defined `hostwright.apple-container.observation.v1` schema and the verified real empty JSON array shape returned by `container list --all --format json`. Unsupported, malformed, or non-empty real Apple container JSON output fails closed with redacted errors.
+The runtime parser accepts the fixture-defined `hostwright.apple-container.observation.v1` schema, the verified real empty JSON array shape returned by `container list --all --format json`, Apple builder container output that is ignored, and the verified `hostwright-proof-web` created/stopped output. Unsupported, malformed, or broader real Apple container JSON output fails closed with redacted errors.
 
-Phase 8B adds a create-only mutation path, but it is not general lifecycle management. It uses `container create` only after explicit plan confirmation, operation intent persistence, local image confirmation, and safe-subset validation. The local machine currently reports `container image list --format json` as `[]`, so live create remains blocked until a local image source is explicitly approved.
+Phase 8B adds a create-only mutation path, but it is not general lifecycle management. It uses `container create` only after explicit plan confirmation, operation intent persistence, local image confirmation, and safe-subset validation. The live proof created exactly one disposable `hostwright-proof-web` container and then removed that exact proof container and image.
 
 ## State Truth
 

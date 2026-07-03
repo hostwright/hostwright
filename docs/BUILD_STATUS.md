@@ -16,7 +16,10 @@
 - Apple container 1.0.0 is installed locally at `/usr/local/bin/container`.
 - `container system status` reports the container system service as running.
 - `container list --all --format json` returned the verified empty runtime shape `[]`.
-- `container image list --format json` returned `[]`, so live Phase 8B create is blocked until a local image source is approved.
+- A disposable local image `hostwright-proof-web:phase8b` was built from the Apple tutorial-style `python:alpine` flow.
+- `hostwright apply` created exactly one Apple container named `hostwright-proof-web` through `RuntimeAdapter`.
+- A stale repeat apply using the old plan hash was rejected before any second mutation.
+- Exact proof cleanup removed `hostwright-proof-web` and `hostwright-proof-web:phase8b` without `--all` or `--force`.
 
 ## Current Implementation Truth
 
@@ -28,12 +31,13 @@
 - No Apple container command was called by Phase 6 or Phase 7.
 - `FoundationRuntimeProcessRunner` exists for policy-approved read-only command specs and Phase 8B create-missing-service mutation specs; automated tests still use fake process execution.
 - `AppleContainerReadOnlyAdapter` reports missing `container` as runtime unavailable and rejects mutation through the adapter contract.
-- `AppleContainerObservationParser` accepts the fixture-defined `hostwright.apple-container.observation.v1` schema and the verified real empty JSON array shape `[]`; non-empty real Apple container JSON output is not yet supported.
+- `AppleContainerObservationParser` accepts the fixture-defined `hostwright.apple-container.observation.v1` schema, the verified real empty JSON array shape `[]`, Apple builder container list output, and the verified created/stopped proof container output.
+- `AppleContainerImageListParser` accepts the verified real object-based image list shape with `configuration.name`.
 - `SQLiteStateStore` uses system `SQLite3`, schema migrations, transactions, and repository APIs for desired services, observed snapshots, events, operations, and ownership records.
 - Phase 6 state tests use explicit temporary database paths only.
 - Phase 7 planner tests use in-memory desired and observed runtime models only.
-- No default user database path, hidden global database write, cleanup, daemon loop, multi-action apply, start/stop/delete/restart/remove, CLI status live runtime observation, or non-empty live Apple container observation was implemented.
-- Live create was not run because no local Apple container image is available and no pull/load was approved.
+- No default user database path, hidden global database write, cleanup, daemon loop, multi-action apply, start/stop/delete/restart/remove, or CLI status live runtime observation was implemented.
+- Live create was run only for the exact disposable `hostwright-proof-web` proof service and then cleaned up.
 
 ## SwiftPM Fixture Resources
 
@@ -41,8 +45,11 @@ The runtime text fixtures under `Tests/HostwrightRuntimeTests/Fixtures/` are dec
 
 - `apple-container-list-empty.txt`
 - `apple-container-list-empty-real-json.txt`
+- `apple-container-list-builder-real-json.txt`
+- `apple-container-list-proof-created-real-json.txt`
 - `apple-container-list-running.txt`
 - `apple-container-list-redaction.txt`
+- `apple-container-image-list-real-json.txt`
 
 SwiftPM copies them during `swift test`, and the unhandled-resource warning is gone.
 
@@ -55,7 +62,7 @@ Important diagnostic correction:
 - `swift -e 'import XCTest'` can still fail and is not the correct gate.
 - A minimal SwiftPM XCTest probe passed after Xcode was fixed.
 - `swift test list` is the local proof that Hostwright now exposes real XCTest cases.
-- `swift test` executes 69 XCTest cases after the Phase 8B create-only apply gate update.
+- `swift test` executes 71 XCTest cases after the Phase 8B live proof parser/fixture update.
 
 The old top-level smoke/precondition posture has been replaced with XCTest assertions. Some test file names still include `Smoke.swift`, but the contents are XCTest cases.
 

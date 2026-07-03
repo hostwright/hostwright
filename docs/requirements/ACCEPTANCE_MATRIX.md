@@ -79,7 +79,7 @@ Phase 8A is a required preflight before this mutation gate. It proves real read-
 | HW-VALID-004, HW-VALID-005, HW-NET-003, HW-SAFE-004 | Phase 8B create rejects volumes/mounts, sensitive or redacted env values, privileged host ports, and broad bind addresses before mutation. | Automated | CLI and runtime XCTest cases. |
 | HW-RECON-005, HW-STATE-003, HW-OBS-001 | Partial apply failure leaves recoverable operation records and redacted failure events. | Automated | CLI and state failure-injection XCTest cases. |
 | HW-SAFE-001 | `plan` remains non-mutating and reviewable before `apply`; `apply` only proceeds when the provided plan hash matches the recomputed plan. | Automated | CLI and planner XCTest cases. |
-| HW-RUNTIME-005, HW-RUNTIME-006 | Live create is not considered fully proven until a local Apple container image source is approved and one disposable create-only apply is demonstrated. | Blocked + manual | Current `container image list --format json` output is `[]`; no pull/load/create has been approved. |
+| HW-RUNTIME-005, HW-RUNTIME-006 | Live create is proven only for the approved disposable proof image and the single create-missing-service action. Stale repeat apply must fail before mutation after observed state changes. | Automated + manual | Built `hostwright-proof-web:phase8b`, ran `hostwright apply` with matching plan hash, verified `hostwright-proof-web` in Apple container output, reran with stale hash and observed refusal before duplicate create, then deleted only the exact proof container and proof image. |
 
 ## Phase 9 Gate: Operability And Cleanup
 

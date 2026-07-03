@@ -786,13 +786,13 @@ The first mutation must prove the safety pipeline before expanding the feature s
 - A matching plan hash proves the user confirmed the currently recomputed plan; it does not prove the runtime will succeed.
 - State intent is written before mutation so failures can be audited.
 - Phase 8B rejects mounts, sensitive env values, privileged ports, and broad bind addresses.
-- Live create was not executed because `container image list --format json` returned `[]`.
+- The live proof created exactly one disposable container, `hostwright-proof-web`, from the approved local image `hostwright-proof-web:phase8b`.
 
 ### Risks
 
 - The plan-confirmation flow is still rough because there is no dedicated `apply --dry-run` preview command.
-- Non-empty real Apple container image list output is not parsed yet.
-- Live create remains unproven until a local image source is approved.
+- Non-empty real Apple container image list parsing is supported only for the verified object shape used in the proof.
+- Broader real Apple container list parsing is supported only for the verified builder-container and proof-container shapes.
 - Create-only support could be mistaken for full lifecycle management if docs or PR text are sloppy.
 
 ### How to verify
@@ -814,5 +814,79 @@ scripts/test.sh
 - [ ] I can explain why `--confirm-plan` is required.
 - [ ] I can explain what is persisted before mutation.
 - [ ] I can explain how success and failure are recorded.
-- [ ] I can explain why no local image means no live create proof yet.
+- [ ] I can explain why the live proof does not mean general lifecycle management exists.
 - [ ] I can explain why stop/delete/restart/remove/cleanup remain forbidden.
+
+## Phase 8B live proof update: disposable Apple container create
+
+### Stage goal
+
+Prove Hostwright can perform its first real runtime mutation without widening the mutation surface beyond one reviewed create-missing-service action.
+
+### Problem
+
+Fake process runner tests proved the safety pipeline, but they did not prove Apple container would accept the actual create command or return parseable real output after creation. Without a live proof, Phase 8B would still depend on an unverified runtime assumption.
+
+### Solution
+
+An approved disposable image was built outside the repository at `/tmp/hostwright-phase8b-live-proof` using Apple container. Hostwright then ran:
+
+- a bogus-hash `hostwright apply`, which refused mutation and printed the expected plan hash;
+- a confirmed `hostwright apply`, which created exactly one container named `hostwright-proof-web`;
+- a repeat apply with the old hash, which failed before mutation because the observed plan changed;
+- exact cleanup of `hostwright-proof-web` and `hostwright-proof-web:phase8b`.
+
+### Why this design
+
+The proof exercises the real runtime path while keeping the blast radius tiny. It proves local-image gating, plan-hash confirmation, RuntimeAdapter execution, state/event persistence, observed-state parsing, stale-plan refusal, and exact cleanup of the proof resource. It does not prove stop/delete/restart/remove/cleanup support, daemon reconciliation, or general Apple container compatibility.
+
+### Files changed
+
+| File | What changed | Why it matters | What breaks if removed |
+| ---- | ------------ | -------------- | ---------------------- |
+| `Sources/HostwrightRuntime/AppleContainerObservationParser.swift` | Parses verified real builder-container and proof-container list shapes. | Lets Hostwright recognize the actual post-create proof output without guessing broader Apple JSON. | Repeat planning cannot observe the proof container. |
+| `Sources/HostwrightRuntime/AppleContainerApplyAdapter.swift` | Parses verified object-based image-list output by `configuration.name` and known image annotations. | Allows local image availability gating against real Apple image output. | Live create remains blocked because Hostwright cannot prove the local image exists. |
+| `Tests/HostwrightRuntimeTests/Fixtures/apple-container-image-list-real-json.txt` | Adds a sanitized real-shape image-list fixture. | Preserves the verified image output shape. | Image parser support becomes assumption-based. |
+| `Tests/HostwrightRuntimeTests/Fixtures/apple-container-list-builder-real-json.txt` | Adds a sanitized builder-container fixture. | Proves Apple builder runtime state is ignored for Hostwright planning. | Parser may treat Apple-owned builder internals as Hostwright services. |
+| `Tests/HostwrightRuntimeTests/Fixtures/apple-container-list-proof-created-real-json.txt` | Adds a sanitized created proof-container fixture. | Proves Hostwright can parse its created container. | Repeat apply cannot distinguish created from missing. |
+| `Tests/HostwrightRuntimeTests/HostwrightRuntimeSmoke.swift` | Adds XCTest coverage for real proof fixtures. | Prevents regressions in the exact verified shapes. | Broader or broken parser behavior may slip in. |
+| `docs/*` | Records the live proof result and remaining limits. | Maintainers can defend what is proven and what is not. | Reviewers may think Phase 8B is either blocked or broader than it is. |
+
+### Concepts I must understand
+
+- A live proof is stronger than a fake process runner test, but it is still narrow.
+- Hostwright owns only resources it explicitly creates and records.
+- Apple builder internals and base images are not Hostwright-owned proof resources.
+- The old confirmation hash fails after creation because observed state changed.
+- That stale-hash failure is a safety feature, not a bug.
+- The parser must support only reviewed shapes and fail closed on unknown shapes.
+- Exact proof cleanup is not the same as product cleanup or garbage collection.
+
+### Risks
+
+- The proof used Apple container 1.0.0; future Apple CLI JSON may change.
+- The created container is observed as `stopped`, so Phase 9 must handle start/status/health carefully.
+- Desired `nil` bind address versus observed `0.0.0.0` currently appears as port drift; that needs normalization or an explicit policy decision later.
+- The downloaded base image and Apple builder container remain outside Hostwright ownership.
+
+### How to verify
+
+```bash
+container system status
+container image list --format json
+container list --all --format json
+swift build
+swift test list
+swift test
+scripts/grep-orchard.sh .
+scripts/test.sh
+```
+
+### Maintainer checklist
+
+- [ ] I can explain why this proof used exactly one disposable service.
+- [ ] I can explain why `container build` was machine prep for the proof, not Hostwright product behavior.
+- [ ] I can explain why `hostwright apply` needed the plan hash before mutation.
+- [ ] I can explain what state records were written.
+- [ ] I can explain why repeat apply with the old hash refused to mutate.
+- [ ] I can explain why the proof container/image cleanup was allowed but general cleanup is still not implemented.

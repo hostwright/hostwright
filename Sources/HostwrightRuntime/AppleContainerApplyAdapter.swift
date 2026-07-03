@@ -143,9 +143,27 @@ public enum AppleContainerImageListParser {
                 return strings.contains(image)
             }
 
-            throw RuntimeAdapterError.outputParseFailed(
-                "Non-empty real Apple container image list output is not supported yet: \(redactionPolicy.redact(trimmed))"
-            )
+            for item in list {
+                guard let object = item as? [String: Any],
+                      let configuration = object["configuration"] as? [String: Any] else {
+                    throw RuntimeAdapterError.outputParseFailed(
+                        "Unsupported Apple container image list item shape: \(redactionPolicy.redact(trimmed))"
+                    )
+                }
+
+                let names = imageNames(in: configuration)
+                guard !names.isEmpty else {
+                    throw RuntimeAdapterError.outputParseFailed(
+                        "Apple container image list item did not include a supported image name: \(redactionPolicy.redact(trimmed))"
+                    )
+                }
+
+                if names.contains(image) {
+                    return true
+                }
+            }
+
+            return false
         } catch let error as RuntimeAdapterError {
             throw error.redacted(using: redactionPolicy)
         } catch {
@@ -153,5 +171,21 @@ public enum AppleContainerImageListParser {
                 "Failed to parse Apple container image list output: \(redactionPolicy.redact(trimmed))"
             )
         }
+    }
+
+    private static func imageNames(in configuration: [String: Any]) -> Set<String> {
+        var names = Set<String>()
+        if let name = configuration["name"] as? String {
+            names.insert(name)
+        }
+        if let descriptor = configuration["descriptor"] as? [String: Any],
+           let annotations = descriptor["annotations"] as? [String: String] {
+            for key in ["com.apple.containerization.image.name", "io.containerd.image.name", "org.opencontainers.image.ref.name"] {
+                if let value = annotations[key] {
+                    names.insert(value)
+                }
+            }
+        }
+        return names
     }
 }

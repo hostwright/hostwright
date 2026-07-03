@@ -1,0 +1,20 @@
+[
+  {
+    "configuration": {
+      "id": "buildkit",
+      "image": {
+        "reference": "ghcr.io/apple/container-builder-shim/builder:0.12.0"
+      },
+      "labels": {
+        "com.apple.container.plugin": "builder",
+        "com.apple.container.resource.role": "builder"
+      },
+      "publishedPorts": []
+    },
+    "id": "buildkit",
+    "status": {
+      "state": "running",
+      "startedDate": "2026-07-03T01:10:48Z"
+    }
+  }
+]

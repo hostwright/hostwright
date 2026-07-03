@@ -107,8 +107,8 @@ public enum PlanActionKind: String, Equatable, Sendable {
 }
 
 public enum PlanExecutionAvailability: String, Equatable, Sendable {
-    case unavailableUntilPhase8
-    case availableForPhase8BCreate
+    case unavailable
+    case availableForCreateMissingService
 }
 
 public struct PlannedAction: Equatable, Sendable {
@@ -125,7 +125,7 @@ public struct PlannedAction: Equatable, Sendable {
         reason: String,
         driftKind: DriftKind,
         stableDetailKey: String = "",
-        executionAvailability: PlanExecutionAvailability = .unavailableUntilPhase8
+        executionAvailability: PlanExecutionAvailability = .unavailable
     ) {
         self.kind = kind
         self.identity = identity

@@ -42,7 +42,7 @@ final class HostwrightRuntimeTests: XCTestCase {
             purpose: "fixture"
         )
 
-        XCTAssertNoThrow(try RuntimeCommandPolicy.validatePhase4(readOnly))
+        XCTAssertNoThrow(try RuntimeCommandPolicy.validateReadOnlyCommandClassification(readOnly))
         XCTAssertNoThrow(try RuntimeCommandPolicy.validateReadOnlyExecution(readOnly))
     }
 
@@ -56,7 +56,7 @@ final class HostwrightRuntimeTests: XCTestCase {
                 purpose: "fixture"
             )
 
-            XCTAssertThrowsError(try RuntimeCommandPolicy.validatePhase4(rejected))
+            XCTAssertThrowsError(try RuntimeCommandPolicy.validateReadOnlyCommandClassification(rejected))
             XCTAssertThrowsError(try RuntimeCommandPolicy.validateReadOnlyExecution(rejected))
         }
     }
@@ -124,7 +124,7 @@ final class HostwrightRuntimeTests: XCTestCase {
             purpose: "fixture"
         )
 
-        XCTAssertNoThrow(try RuntimeCommandPolicy.validatePhase4(unresolvedReadOnly))
+        XCTAssertNoThrow(try RuntimeCommandPolicy.validateReadOnlyCommandClassification(unresolvedReadOnly))
         XCTAssertThrowsError(try RuntimeCommandPolicy.validateReadOnlyExecution(unresolvedReadOnly))
     }
 
@@ -180,8 +180,8 @@ final class HostwrightRuntimeTests: XCTestCase {
             )
             XCTFail("Expected mutation unavailable.")
         } catch let error as RuntimeAdapterError {
-            guard case .mutationUnavailableInCurrentPhase = error else {
-                return XCTFail("Expected mutationUnavailableInCurrentPhase, got \(error).")
+            guard case .mutationUnavailableByPolicy = error else {
+                return XCTFail("Expected mutationUnavailableByPolicy, got \(error).")
             }
         } catch {
             XCTFail("Unexpected error: \(error).")
@@ -386,7 +386,7 @@ final class HostwrightRuntimeTests: XCTestCase {
 
         XCTAssertEqual(observed.services.count, 1)
         XCTAssertEqual(observed.services[0].identity, proofIdentity)
-        XCTAssertEqual(observed.services[0].image, "hostwright-proof-web:phase8b")
+        XCTAssertEqual(observed.services[0].image, "hostwright-proof-web:create-only")
         XCTAssertEqual(observed.services[0].lifecycleState, .stopped)
         XCTAssertEqual(observed.services[0].ports.first?.hostPort, 18080)
         XCTAssertEqual(observed.services[0].ports.first?.containerPort, 80)
@@ -531,7 +531,7 @@ final class HostwrightRuntimeTests: XCTestCase {
     private var proofService: DesiredRuntimeService {
         DesiredRuntimeService(
             identity: proofIdentity,
-            image: "hostwright-proof-web:phase8b",
+            image: "hostwright-proof-web:create-only",
             ports: [RuntimePortMapping(hostPort: 18080, containerPort: 80)]
         )
     }

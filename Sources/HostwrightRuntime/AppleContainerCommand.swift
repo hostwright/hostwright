@@ -81,7 +81,7 @@ public enum AppleContainerCommand {
         case .version:
             return "Read Apple container CLI version."
         case .listContainers:
-            return "Read Apple container workload list as JSON for Phase 8A observation."
+            return "Read Apple container workload list as JSON."
         case .listImages:
             return "Read local Apple container image list as JSON before create-only apply."
         }

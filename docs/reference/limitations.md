@@ -1,6 +1,6 @@
 # Limitations
 
-Hostwright has completed the Phase 8B create-only apply proof. It can model and attempt read-only runtime observation through `RuntimeAdapter`, persist desired and observed state to an explicit SQLite database path, compute non-mutating desired-vs-observed plans, and execute one tightly gated create-missing-service mutation through `RuntimeAdapter` when all confirmation and local-image gates pass.
+Hostwright can model and attempt read-only runtime observation through `RuntimeAdapter`, persist desired and observed state to an explicit SQLite database path, compute non-mutating desired-vs-observed plans, and execute one tightly gated create-missing-service mutation through `RuntimeAdapter` when all confirmation and local-image gates pass.
 
 ## Implemented Today
 
@@ -33,11 +33,11 @@ Hostwright has completed the Phase 8B create-only apply proof. It can model and 
 - Typed deterministic drift records, plan issues, planned actions, and plan hash.
 - Planning policy checks for duplicate host ports, unsafe broad bind addresses, privileged host ports, unsafe root mounts, ambiguous mounts, invalid identities, and secret-like environment values.
 - Drift detection for missing, unmanaged, stopped, exited, failed, image mismatch, port mismatch, mount mismatch, unhealthy, duplicate observed identity, unsupported observed state, and unavailable observation cases.
-- `hostwright apply [path] --state-db <path> --confirm-plan <hash>` for Phase 8B create-only apply.
+- `hostwright apply [path] --state-db <path> --confirm-plan <hash>` for create-only apply.
 - Operation intent persistence before mutation.
 - Apply success/failure event persistence.
-- Phase 8B runtime mutation policy for `createMissingService` only.
-- One disposable live create proof with `hostwright-proof-web:phase8b`, including stale-hash refusal and exact proof cleanup.
+- Runtime mutation policy for `createMissingService` only.
+- One disposable live create proof for `hostwright-proof-web`, including stale-hash refusal and exact proof cleanup.
 - Source-material preservation and Hostwright naming controls.
 
 ## Not Implemented Today
@@ -87,7 +87,7 @@ Hostwright has completed the Phase 8B create-only apply proof. It can model and 
 
 ## Parser Limitation
 
-The Phase 2 parser is not a general YAML parser. It accepts only the documented Hostwright manifest subset and fails closed for unsupported YAML features. Expanding beyond that subset requires a dependency/design decision before the manifest surface grows.
+The manifest parser is not a general YAML parser. It accepts only the documented Hostwright manifest subset and fails closed for unsupported YAML features. Expanding beyond that subset requires a dependency/design decision before the manifest surface grows.
 
 ## Runtime Truth
 
@@ -95,10 +95,10 @@ The runtime module contains read-only Apple container observation infrastructure
 
 The runtime parser accepts the fixture-defined `hostwright.apple-container.observation.v1` schema, the verified real empty JSON array shape returned by `container list --all --format json`, Apple builder container output that is ignored, and the verified `hostwright-proof-web` created/stopped output. Unsupported, malformed, or broader real Apple container JSON output fails closed with redacted errors.
 
-Phase 8B adds a create-only mutation path, but it is not general lifecycle management. It uses `container create` only after explicit plan confirmation, operation intent persistence, local image confirmation, and safe-subset validation. The live proof created exactly one disposable `hostwright-proof-web` container and then removed that exact proof container and image.
+Create-only apply is not general lifecycle management. It uses `container create` only after explicit plan confirmation, operation intent persistence, local image confirmation, and safe-subset validation. The live proof created exactly one disposable `hostwright-proof-web` container and then removed that exact proof container and image.
 
 ## State Truth
 
-The Phase 6 SQLite store writes only to explicit paths supplied by the caller. Hostwright does not choose a default path under the repository, Application Support, XDG locations, or any global directory.
+The SQLite store writes only to explicit paths supplied by the caller. Hostwright does not choose a default path under the repository, Application Support, XDG locations, or any global directory.
 
-Phase 6 persists adapter-shaped observed state. Phase 7 can consume runtime-shaped observed state in memory for planning. Phase 8B writes state only to explicit `--state-db` paths. It does not add a default state path, cleanup, a daemon loop, or production durability guarantees.
+Hostwright persists adapter-shaped observed state and can consume runtime-shaped observed state in memory for planning. Apply writes state only to explicit `--state-db` paths. It does not add a default state path, cleanup, a daemon loop, or production durability guarantees.

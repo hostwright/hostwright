@@ -75,7 +75,7 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
             )
         }
         guard action.kind == .create, let desiredService = action.desiredService else {
-            throw RuntimeAdapterError.mutationUnavailableInCurrentPhase("Create-only apply executes only createMissingService runtime actions.")
+            throw RuntimeAdapterError.mutationUnavailableByPolicy("Create-only apply executes only createMissingService runtime actions.")
         }
         try validateCreateSubset(desiredService)
 

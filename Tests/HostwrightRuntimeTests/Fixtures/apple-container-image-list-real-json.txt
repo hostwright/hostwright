@@ -13,12 +13,12 @@
   },
   {
     "configuration": {
-      "name": "hostwright-proof-web:phase8b",
+      "name": "hostwright-proof-web:create-only",
       "descriptor": {
         "annotations": {
-          "com.apple.containerization.image.name": "hostwright-proof-web:phase8b",
-          "io.containerd.image.name": "docker.io/library/hostwright-proof-web:phase8b",
-          "org.opencontainers.image.ref.name": "phase8b"
+          "com.apple.containerization.image.name": "hostwright-proof-web:create-only",
+          "io.containerd.image.name": "docker.io/library/hostwright-proof-web:create-only",
+          "org.opencontainers.image.ref.name": "create-only"
         }
       }
     },

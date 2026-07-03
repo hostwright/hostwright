@@ -6,21 +6,21 @@ All runtime-related behavior must go through `RuntimeAdapter`.
 
 Hostwright needs to observe, plan, and eventually mutate container runtime state without scattering shell commands across CLI, daemon, reconciler, state, health, or cleanup code. The adapter boundary keeps runtime assumptions isolated, typed, redacted, and testable.
 
-## Phase 8B State
+## Current State
 
-Phase 5 added read-only Apple container observation infrastructure behind `RuntimeAdapter`. Phase 8B adds the first mutation-capable adapter path, limited to create-missing-service.
+Hostwright has read-only Apple container observation infrastructure behind `RuntimeAdapter` and one mutation-capable adapter path, limited to create-missing-service.
 
-Implemented by Phase 5:
+Implemented:
 
 - typed runtime service identity, desired service, observed service, lifecycle state, health state, ports, mounts, environment values, events, capabilities, and adapter metadata;
 - expanded `RuntimeAdapter` protocol for metadata, capability discovery, read-only observation, planning, and future mutation hooks;
 - `MockRuntimeAdapter` for deterministic tests without live process execution;
 - runtime command specs, command results, command classification, timeout model, and process runner protocol;
 - fake process runner for tests;
-- Foundation-backed process runner for policy-approved read-only runtime commands and the Phase 8B create-missing-service mutation spec;
+- Foundation-backed process runner for policy-approved read-only runtime commands and the create-missing-service mutation spec;
 - executable resolution through `RuntimeExecutableResolver`;
 - `AppleContainerReadOnlyAdapter` for read-only observation attempts;
-- `AppleContainerApplyAdapter` for create-only Phase 8B mutation;
+- `AppleContainerApplyAdapter` for create-only mutation;
 - fixture-defined observation parser for empty and running service snapshots;
 - redaction policy for command args, env values, stdout, stderr, parser errors, and runtime errors.
 
@@ -32,7 +32,7 @@ Not implemented:
 - daemon runtime loop;
 - CLI status backed by observed runtime state.
 
-Runtime mutation is limited to Phase 8B create-missing-service.
+Runtime mutation is limited to create-missing-service.
 
 ## RuntimeAdapter Protocol Shape
 
@@ -44,7 +44,7 @@ The adapter exposes:
 - `plan(desiredState:observedState:)` for adapter-aware planning hooks;
 - `execute(_:confirmation:)` for future mutation hooks.
 
-In Phase 8B, `execute(_:confirmation:)` may perform exactly one create-missing-service action when confirmation, plan hash, local image availability, safe-subset validation, and state persistence gates have passed.
+`execute(_:confirmation:)` may perform exactly one create-missing-service action when confirmation, plan hash, local image availability, safe-subset validation, and state persistence gates have passed.
 
 ## Process Runner Boundary
 
@@ -82,7 +82,7 @@ Tests use fake process execution and fixtures. Local live observation and create
 - `forbidden`;
 - `unknown`.
 
-Phase 8B permits read-only command specs and exactly one mutating command kind: `createMissingService`. Forbidden, unknown, destructive, unresolved, and unsupported mutating specs are rejected before execution.
+The current policy permits read-only command specs and exactly one mutating command kind: `createMissingService`. Forbidden, unknown, destructive, unresolved, and unsupported mutating specs are rejected before execution.
 
 Apple container command strings live only in `AppleContainerCommand` and runtime adapters. The current list-style command shape and create command shape are based on local Apple container 1.0.0 help output and guarded by fail-closed parsing and policy checks; they are not broad Apple CLI compatibility claims.
 
@@ -128,17 +128,17 @@ The default policy redacts key/value patterns and sensitive key fragments such a
 
 ## Parser Boundary
 
-`AppleContainerObservationParser` accepts the Phase 5 fixture-defined JSON schema `hostwright.apple-container.observation.v1`, the verified real empty Apple container list output, the verified Apple builder-container output as ignored non-Hostwright runtime state, and the verified created/stopped `hostwright-proof-web` proof container output.
+`AppleContainerObservationParser` accepts the fixture-defined JSON schema `hostwright.apple-container.observation.v1`, the verified real empty Apple container list output, the verified Apple builder-container output as ignored non-Hostwright runtime state, and the verified created/stopped `hostwright-proof-web` proof container output.
 
 If broader real Apple container output does not match one of those reviewed shapes, Hostwright reports a parse failure instead of guessing. This protects the runtime boundary from turning unverified Apple CLI output into fake product truth.
 
 ## Create-Only Mutation Boundary
 
-Phase 8B supports only:
+Create-only apply supports only:
 
 - `container image list --format json` as a read-only local-image availability gate;
 - `container create --name <name> --env KEY=value --publish host:container <image> [command...]`.
 
 The adapter rejects mounts, DNS, custom networks, capabilities, Rosetta, virtualization, custom runtime/kernel, SSH forwarding, `--rm`, `run`, start-after-create, image pull, delete, restart, remove, cleanup, prune, build, and exec.
 
-The Phase 8B live proof used an explicitly approved disposable local image, `hostwright-proof-web:phase8b`, and created exactly one container named `hostwright-proof-web`. A stale repeat apply was rejected before mutation because the recomputed plan hash changed. Cleanup removed only the exact proof container and proof image. Apple builder runtime state and the downloaded base image remain outside Hostwright ownership.
+The live proof used an explicitly approved disposable local image and created exactly one container named `hostwright-proof-web`. A stale repeat apply was rejected before mutation because the recomputed plan hash changed. Cleanup removed only the exact proof container and proof image. Apple builder runtime state and the downloaded base image remain outside Hostwright ownership.

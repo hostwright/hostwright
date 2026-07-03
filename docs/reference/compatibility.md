@@ -18,4 +18,4 @@ This was locally validated with Swift 6.3.2 before creating `Package.swift`.
 
 ## Runtime Limitation
 
-The package can express macOS 26, but runtime compatibility is not fully implemented. Phase 5 adds read-only observation infrastructure behind `RuntimeAdapter`, but real Apple container behavior remains unverified unless local output matches the supported parser shape.
+The package can express macOS 26, but runtime compatibility is not complete. Read-only observation is implemented behind `RuntimeAdapter` for verified Apple container output shapes. Unsupported output still fails closed instead of being guessed.

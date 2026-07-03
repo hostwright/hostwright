@@ -46,12 +46,12 @@ public struct ReconciliationPlanner: Sendable {
         let unmanagedObserved = observed.services
             .filter { desiredByIdentity[$0.identity] == nil }
             .sorted { $0.identity.displayName < $1.identity.displayName }
-            .map { "Observed service '\($0.identity.displayName)' is not in desired state; Phase 7 planning does not remove it." }
+            .map { "Observed service '\($0.identity.displayName)' is not in desired state; create-only planning does not remove it." }
 
         let unhealthyObserved = observed.services
             .filter { desiredByIdentity[$0.identity] != nil && $0.healthState == .unhealthy }
             .sorted { $0.identity.displayName < $1.identity.displayName }
-            .map { "Observed service '\($0.identity.displayName)' is unhealthy; Phase 7 records this as a warning only." }
+            .map { "Observed service '\($0.identity.displayName)' is unhealthy; health recovery is not implemented yet." }
 
         return RuntimePlan(actions: createActions, warnings: unmanagedObserved + unhealthyObserved)
     }
@@ -94,7 +94,7 @@ public struct ManifestDryRunService: Equatable, Sendable {
 }
 
 public enum ManifestDryRunPlanner {
-    public static let unavailableRuntimeObservation = "Runtime observation is not connected in Phase 7 CLI planning; no Apple container state was inspected."
+    public static let unavailableRuntimeObservation = "Runtime observation is not connected for CLI planning; no Apple container state was inspected."
 
     public static func plan(for manifest: HostwrightManifest) -> ManifestDryRunPlan {
         ManifestDryRunPlan(

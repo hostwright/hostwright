@@ -80,7 +80,7 @@ public struct PlanningPolicy: Equatable, Sendable {
                             kind: .privilegedHostPort,
                             severity: .warning,
                             identity: service.identity,
-                            message: "Desired host port \(hostPort) is privileged; Phase 7 records this before any mutation exists.",
+                            message: "Desired host port \(hostPort) is privileged; create-only apply rejects privileged host ports.",
                             stableDetailKey: key
                         )
                     )
@@ -127,7 +127,7 @@ public struct PlanningPolicy: Equatable, Sendable {
                             kind: .unsafeVolumePath,
                             severity: .blocker,
                             identity: service.identity,
-                            message: "Root host mount is blocked by Phase 7 planning policy.",
+                            message: "Root host mount is blocked by planning policy.",
                             stableDetailKey: mount.target
                         )
                     )

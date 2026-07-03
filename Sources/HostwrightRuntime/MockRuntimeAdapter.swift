@@ -78,6 +78,6 @@ public struct MockRuntimeAdapter: RuntimeAdapter {
     }
 
     public func execute(_ action: PlannedRuntimeAction, confirmation: RuntimeMutationConfirmation?) async throws -> RuntimeEvent {
-        throw RuntimeAdapterError.mutationUnavailableInCurrentPhase("MockRuntimeAdapter does not execute runtime mutation in Phase 4.")
+        throw RuntimeAdapterError.mutationUnavailableByPolicy("MockRuntimeAdapter does not execute runtime mutation.")
     }
 }

@@ -2,7 +2,7 @@
 
 The manifest filename is `hostwright.yaml`.
 
-## Phase 2 Shape
+## Current Shape
 
 ```yaml
 project: api-local
@@ -25,7 +25,7 @@ Do not use Kubernetes-style `apiVersion`, `kind`, or `metadata` in canonical Hos
 
 ## Parser Limitation
 
-Phase 2 uses a restricted Hostwright manifest subset parser, not a general YAML parser.
+Hostwright uses a restricted manifest subset parser, not a general YAML parser.
 
 Supported forms are intentionally narrow:
 
@@ -55,4 +55,3 @@ Validation currently checks:
 - restart policy is `no`, `on-failure`, or `unless-stopped`.
 
 Validation does not contact registries or Apple container.
-

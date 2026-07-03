@@ -2,7 +2,7 @@
 
 Stable error codes are used for CLI and manifest diagnostics.
 
-| Code | Meaning | Phase 2 status |
+| Code | Meaning | Status |
 | --- | --- | --- |
 | `HW-CLI-001` | Invalid CLI usage. | Implemented |
 | `HW-CLI-002` | Refused to overwrite an existing file. | Implemented for `init` |
@@ -16,4 +16,3 @@ Stable error codes are used for CLI and manifest diagnostics.
 | `HW-MANIFEST-004` | Manifest file I/O failed. | Implemented |
 | `HW-STATE-001` | State store unavailable. | Modelled |
 | `HW-SECURITY-001` | Unsafe exposure. | Modelled |
-

@@ -4,7 +4,8 @@ Hostwright is not yet production ready. Security-sensitive behavior must be desi
 
 ## Current Security Posture
 
-- No runtime mutation is implemented in Phase 1.
+- Runtime mutation is limited to the create-missing-service apply gate.
+- No destructive or general lifecycle mutation is implemented.
 - No privileged helper exists.
 - No launch agent or service installer exists.
 - No tunnel, DNS, cloud, CRI, Kubernetes, or Docker API behavior exists.
@@ -21,4 +22,3 @@ Hostwright is not yet production ready. Security-sensitive behavior must be desi
 ## Reporting
 
 This repository is local-only at the moment. Do not publish sensitive reports in public trackers until the project has a published security contact and disclosure process.
-

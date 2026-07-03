@@ -11,7 +11,7 @@ final class HostwrightReconcilerTests: XCTestCase {
 
         XCTAssertEqual(plan.actions.map(\.kind), [.createMissingService])
         XCTAssertEqual(plan.drift.map(\.kind), [.missingDesiredService])
-        XCTAssertEqual(plan.actions[0].executionAvailability, .availableForPhase8BCreate)
+        XCTAssertEqual(plan.actions[0].executionAvailability, .availableForCreateMissingService)
         XCTAssertFalse(plan.mutatesRuntime)
     }
 
@@ -25,7 +25,7 @@ final class HostwrightReconcilerTests: XCTestCase {
         )
 
         XCTAssertEqual(plan.actions.map(\.kind), [.proposeStartStoppedService, .proposeStartStoppedService])
-        XCTAssertTrue(plan.actions.allSatisfy { $0.executionAvailability == .unavailableUntilPhase8 })
+        XCTAssertTrue(plan.actions.allSatisfy { $0.executionAvailability == .unavailable })
     }
 
     func testFailedServiceCreatesInvestigationActionWithoutExecution() {

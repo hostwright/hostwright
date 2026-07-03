@@ -110,17 +110,17 @@ public struct RuntimeCommandResult: Equatable, Sendable {
 }
 
 public enum RuntimeCommandPolicy {
-    public static func validatePhase4(_ spec: RuntimeCommandSpec) throws {
-        try validateReadOnlyClassification(spec, phaseName: "Phase 4")
+    public static func validateReadOnlyCommandClassification(_ spec: RuntimeCommandSpec) throws {
+        try rejectNonReadOnlyCommand(spec)
     }
 
-    public static func validateReadOnlyExecution(_ spec: RuntimeCommandSpec, phaseName: String = "Phase 5") throws {
-        try validateReadOnlyClassification(spec, phaseName: phaseName)
+    public static func validateReadOnlyExecution(_ spec: RuntimeCommandSpec) throws {
+        try rejectNonReadOnlyCommand(spec)
 
         guard spec.executableResolution == .resolvedByRuntimeExecutableResolver else {
             throw RuntimeAdapterError.commandRejected(
                 classification: spec.classification,
-                message: "\(phaseName) refuses runtime command specs whose executable was not resolved through RuntimeExecutableResolver."
+                message: "Read-only runtime execution refuses command specs whose executable was not resolved through RuntimeExecutableResolver."
             )
         }
     }
@@ -181,14 +181,14 @@ public enum RuntimeCommandPolicy {
         }
     }
 
-    private static func validateReadOnlyClassification(_ spec: RuntimeCommandSpec, phaseName: String) throws {
+    private static func rejectNonReadOnlyCommand(_ spec: RuntimeCommandSpec) throws {
         switch spec.classification {
         case .readOnly:
             return
         case .mutating, .forbidden, .unknown:
             throw RuntimeAdapterError.commandRejected(
                 classification: spec.classification,
-                message: "\(phaseName) does not execute mutating, forbidden, or unknown runtime command specs."
+                message: "Read-only runtime execution rejects mutating, forbidden, and unknown command specs."
             )
         }
     }
@@ -226,7 +226,7 @@ public struct FakeRuntimeProcessRunner: RuntimeProcessRunning {
     private func validate(_ spec: RuntimeCommandSpec) throws {
         switch spec.classification {
         case .readOnly:
-            try RuntimeCommandPolicy.validateReadOnlyExecution(spec, phaseName: "Phase 5")
+            try RuntimeCommandPolicy.validateReadOnlyExecution(spec)
         case .mutating:
             try RuntimeCommandPolicy.validateCreateMissingServiceMutation(spec)
         case .forbidden, .unknown:

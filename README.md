@@ -6,9 +6,9 @@ Tagline: Desired-state container control for Apple silicon Macs.
 
 ## Current Status
 
-This repository is in Phase 4 RuntimeAdapter contract infrastructure state. It contains the normalized project structure, source-material preservation log, documentation boundaries, a dependency-free Swift Package Manager skeleton, non-mutating CLI commands, a restricted `hostwright.yaml` manifest parser/validator, and typed runtime contract models with mock adapter coverage.
+This repository contains the Hostwright core foundation: source-material preservation, documentation boundaries, a dependency-free Swift Package Manager package, CLI commands, a restricted `hostwright.yaml` manifest parser/validator, typed runtime contracts, deterministic planning, explicit SQLite state paths, read-only Apple container observation, and one narrow create-only apply gate.
 
-Hostwright is not production ready. It does not yet mutate runtime state, apply plans, observe Apple container workloads, execute live runtime commands, install a daemon, manage DNS, create tunnels, implement Kubernetes compatibility, expose a Docker API, or provide full Docker Compose parity.
+Hostwright is not production ready. It does not implement general lifecycle management, multi-action apply, restart policy execution, cleanup, daemon reconciliation, DNS, tunnels, Kubernetes compatibility, a Docker API, or full Docker Compose parity.
 
 ## First Supported Release Boundary
 
@@ -71,7 +71,7 @@ swift run hostwrightd
 
 ## Manifest
 
-Phase 2 uses this canonical manifest shape:
+The current canonical manifest shape is:
 
 ```yaml
 project: api-local
@@ -87,10 +87,10 @@ The current parser is a restricted Hostwright manifest subset parser, not a gene
 
 ## Runtime Boundary
 
-Phase 4 defines the `RuntimeAdapter` contract, runtime state models, command classification, timeout model, redaction policy, fake process runner, and mock adapter behavior. These are contract and test foundations only.
+`RuntimeAdapter` defines the runtime boundary, runtime state models, command classification, timeout model, redaction policy, fake process runner, and mock adapter behavior.
 
-Apple container read-only observation begins in a later phase. Runtime mutation and `apply` begin only after observation, state, planning, and safety gates are implemented.
+Apple container read-only observation and create-only apply are implemented through this boundary. General mutation, restart, cleanup, and daemon reconciliation are not implemented.
 
 ## Source Material
 
-The original planning, architecture, security, networking, production, naming, and brand-source materials are preserved under `docs/source-material/originals/` and `assets/brand/originals/`. The original root files are also preserved untouched during Phase 0.
+The original planning, architecture, security, networking, production, naming, and brand-source materials are preserved under `docs/source-material/originals/` and `assets/brand/originals/`. The original root files are also preserved untouched from the initial normalization pass.

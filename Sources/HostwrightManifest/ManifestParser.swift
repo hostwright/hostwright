@@ -2,7 +2,7 @@ import Foundation
 import HostwrightCore
 
 public enum ManifestParser {
-    public static let limitation = "Hostwright Phase 2 uses a restricted Hostwright manifest subset parser, not a general YAML parser."
+    public static let limitation = "Hostwright uses a restricted manifest subset parser, not a general YAML parser."
 
     public static func parse(_ text: String) throws -> HostwrightManifest {
         let lines = text.components(separatedBy: .newlines)
@@ -230,4 +230,3 @@ private extension String {
         return result
     }
 }
-

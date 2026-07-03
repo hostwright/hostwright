@@ -18,8 +18,8 @@ public enum PlanRenderer {
             "Hostwright plan (non-mutating)",
             "Project: \(plan.projectName)",
             "Plan hash: \(plan.planHash)",
-            "Runtime observation: \(plan.observationConnected ? "connected from supplied observed state" : "not connected in Phase 7 CLI plan; no Apple container state was inspected")",
-            "Execution: unavailable until Phase 8",
+            "Runtime observation: \(plan.observationConnected ? "connected from supplied observed state" : "not connected for CLI plan; no Apple container state was inspected")",
+            "Execution: unavailable unless a createMissingService action is explicitly confirmed",
             ""
         ]
 

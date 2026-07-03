@@ -66,7 +66,7 @@ public enum ManifestRuntimeMapper {
                     kind: .unsupportedFeature,
                     severity: .blocker,
                     identity: identity,
-                    message: "Port '\(value)' cannot be mapped to a Phase 7 runtime port.",
+                    message: "Port '\(value)' cannot be mapped to a supported runtime port.",
                     stableDetailKey: value
                 )
             )
@@ -84,7 +84,7 @@ public enum ManifestRuntimeMapper {
                     kind: .ambiguousVolumeReference,
                     severity: .blocker,
                     identity: identity,
-                    message: "Volume '\(value)' cannot be mapped to a Phase 7 runtime mount.",
+                    message: "Volume '\(value)' cannot be mapped to a supported runtime mount.",
                     stableDetailKey: value
                 )
             )

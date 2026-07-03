@@ -6,7 +6,7 @@ Apple container is the first planned runtime substrate.
 
 Hostwright may adapt documented Apple container CLI behavior after local verification. It must not depend on private helper internals or undocumented behavior.
 
-## Phase 5 State
+## Current State
 
 `AppleContainerReadOnlyAdapter` can attempt read-only observation through `RuntimeAdapter`.
 
@@ -19,7 +19,7 @@ The adapter:
 - reports missing executables as runtime unavailable;
 - reports unsupported output as parse failure.
 
-The current list-style command shape is a Phase 5 adapter assumption, not a public Apple CLI compatibility claim. If local output does not match the Phase 5 parser schema, Hostwright must fail closed.
+The current list-style command shape is an adapter assumption based on verified local output, not a public Apple CLI compatibility claim. If local output does not match the supported parser schema, Hostwright must fail closed.
 
 The adapter does not create, start, stop, delete, restart, remove, clean up, apply, install, or mutate anything.
 

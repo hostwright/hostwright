@@ -2,7 +2,7 @@
 
 Hostwright targets Apple silicon Macs on macOS 26+ for the first supported release.
 
-## Phase 1 State
+## Current State
 
 The Swift package declares macOS 26 as the package platform. Runtime compatibility checks are modelled in code but do not inspect Apple container state.
 
@@ -13,4 +13,3 @@ The Swift package declares macOS 26 as the package platform. Runtime compatibili
 - GPU, ANE, Metal, Core ML, and MLX support inside containers is not claimed.
 - Rosetta behavior is not claimed.
 - Sleep/wake, memory pressure, and thermal behavior require future measurement.
-

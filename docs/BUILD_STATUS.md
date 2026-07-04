@@ -8,9 +8,9 @@
 
 ## Verified On 2026-07-03
 
-- `swift build` succeeds after the Phase 9 operability changes.
-- `swift test list` lists 82 real XCTest cases across Hostwright test targets.
-- `swift test` executes 82 real XCTest assertions across CLI, core, health, manifest, networking, observability, reconciler, runtime, and state targets with 0 failures.
+- `swift build` succeeds after the Phase 10 release-hardening changes.
+- `swift test list` lists 84 real XCTest cases across Hostwright test targets.
+- `swift test` executes 84 real XCTest assertions across CLI, core, health, manifest, networking, observability, reconciler, runtime, and state targets with 0 failures.
 - `scripts/grep-orchard.sh .` succeeds and reports historical references only in `docs/source-material/` and `docs/naming/`.
 - `scripts/test.sh` succeeds and runs `swift build` plus `swift test`.
 - Apple container 1.0.0 is installed locally at `/usr/local/bin/container`.
@@ -36,6 +36,7 @@
 - Phase 8A adds parser and fixture support for the verified real empty Apple container JSON list output.
 - Phase 8B adds a create-only apply gate that requires explicit state DB path, explicit plan hash confirmation, operation intent persistence before mutation, and RuntimeAdapter execution.
 - Phase 9 adds live `status --state-db`, bounded `logs`, event rendering, one restart-policy-allowed managed start action, and ownership-based cleanup for exact stopped/created/exited containers.
+- Phase 10 prepares the source-only `v0.1.0-alpha.1` pre-release docs, version output, compatibility matrix, install/build instructions, security/safety notes, release checklist, and release notes draft.
 - No Apple container command was called by Phase 6 or Phase 7.
 - `FoundationRuntimeProcessRunner` exists for policy-approved read-only command specs and supported mutation specs; automated tests still use fake process execution.
 - `AppleContainerReadOnlyAdapter` reports missing `container` as runtime unavailable and rejects mutation through the adapter contract.
@@ -70,7 +71,7 @@ Important diagnostic correction:
 - `swift -e 'import XCTest'` can still fail and is not the correct gate.
 - A minimal SwiftPM XCTest probe passed after Xcode was fixed.
 - `swift test list` is the local proof that Hostwright now exposes real XCTest cases.
-- `swift test` executes 82 XCTest cases after the Phase 9 operability update.
+- `swift test` executes 84 XCTest cases after the Phase 10 release-hardening update.
 
 The old top-level smoke/precondition posture has been replaced with XCTest assertions. Some test file names still include `Smoke.swift`, but the contents are XCTest cases.
 

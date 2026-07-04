@@ -36,7 +36,7 @@ This file maps the preserved source-material claims to Hostwright requirement ID
 | No CRI, Kubernetes API server, Kubernetes scheduler, Docker API shim, or full Compose parity in first release. | Document 1; Final document | HW-COMPAT-005 | Rejected | ADRs and limitations document this. |
 | Every supported command must have docs, examples, and tests. | Document 1 | HW-DOCS-001, HW-DOCS-002 | Partially implemented | Phase 2 commands are documented. Future commands must update docs with implementation. |
 | Public docs must state unsupported behavior clearly. | Document 1; Final document | HW-DOCS-002, HW-DOCS-003 | Partially implemented | Phase 3 audits and corrects overclaims. |
-| Public release requires build/test/docs/security/release gates. | Document 1; Final document; Document 2 | HW-REL-001, HW-REL-002, HW-REL-003, HW-REL-004 | Planned | Release hardening is Phase 10. |
+| Public release requires build/test/docs/security/release gates. | Document 1; Final document; Document 2 | HW-REL-001, HW-REL-002, HW-REL-003, HW-REL-004 | Implemented for `v0.1.0-alpha.1` prep | Phase 10 prepares a source-only alpha release candidate with release docs, compatibility matrix, safety notes, limitations, and verification gates. |
 
 ## Deferred Or Rejected Source Claims
 

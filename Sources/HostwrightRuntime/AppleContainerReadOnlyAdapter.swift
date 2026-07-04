@@ -1,3 +1,5 @@
+import HostwrightCore
+
 public struct AppleContainerReadOnlyAdapter: RuntimeAdapter {
     public let executableResolver: RuntimeExecutableResolving
     public let processRunner: RuntimeProcessRunning
@@ -16,7 +18,7 @@ public struct AppleContainerReadOnlyAdapter: RuntimeAdapter {
     public func metadata() async -> RuntimeAdapterMetadata {
         RuntimeAdapterMetadata(
             adapterName: "AppleContainerReadOnlyAdapter",
-            adapterVersion: "0.0.0-dev",
+            adapterVersion: HostwrightIdentity.version,
             runtimeName: "Apple container CLI",
             runtimeVersion: nil,
             supportsMutation: false,

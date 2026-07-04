@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+@testable import HostwrightCore
 @testable import HostwrightManifest
 @testable import HostwrightRuntime
 @testable import HostwrightState
@@ -251,7 +252,7 @@ final class HostwrightStateTests: XCTestCase {
             ],
             adapterMetadata: RuntimeAdapterMetadata(
                 adapterName: "apple-container-read-only",
-                adapterVersion: "0.0.0-dev",
+                adapterVersion: HostwrightIdentity.version,
                 runtimeName: "apple-container",
                 runtimeVersion: nil,
                 supportsMutation: false,

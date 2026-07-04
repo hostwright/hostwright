@@ -979,3 +979,67 @@ scripts/test.sh
 - [ ] I can explain why start is restart-policy-gated.
 - [ ] I can explain why `logs` is bounded and non-following.
 - [ ] I can explain which events are persisted by status, logs, apply, and cleanup.
+
+## Phase 10 update: release hardening for v0.1.0-alpha.1
+
+### Stage goal
+
+Prepare Hostwright for an honest source-only GitHub pre-release named `Hostwright v0.1.0-alpha.1`.
+
+### Problem
+
+After Phase 9, Hostwright had real local behavior but no public-release discipline. The CLI still reported a development placeholder version, release tag policy was not centralized, install/build instructions were scattered, and the artifact decision was not explicit.
+
+### Solution
+
+Phase 10 sets `HostwrightIdentity.version` to `0.1.0-alpha.1`, adds release process docs, drafts `v0.1.0-alpha.1` release notes, expands compatibility/install/security docs, and adds XCTest coverage for release-doc truth.
+
+### Why this design
+
+The first public release is an alpha, not a production launch. Source-only release avoids pretending we have signing, notarization, installers, checksums, SBOM, or provenance. `phase-*` tags remain internal checkpoints; only `v*` tags may get GitHub Releases.
+
+### Files changed
+
+| File | What changed | Why it matters | What breaks if removed |
+| ---- | ------------ | -------------- | ---------------------- |
+| `Sources/HostwrightCore/HostwrightIdentity.swift` | Central version is `0.1.0-alpha.1`. | Gives CLI/runtime one version source of truth. | `hostwright --version` can drift from release docs. |
+| `docs/release/RELEASE_PROCESS.md` | Defines tag policy, release ladder, and source-only artifact policy. | Prevents random public releases and phase-tag releases. | Maintainers may tag or publish inconsistently. |
+| `docs/release/v0.1.0-alpha.1-notes.md` | Drafts the GitHub pre-release body. | Makes release claims reviewable before publishing. | Release notes become ad hoc and easy to overclaim. |
+| `docs/reference/install.md` | Adds source build instructions. | Users can build without installer/Homebrew claims. | Alpha users lack a safe install path. |
+| `docs/reference/security-safety.md` | Documents runtime, apply, cleanup, and redaction boundaries. | Keeps safety limits visible. | Users may assume broad lifecycle or cleanup support. |
+| `Tests/*` | Adds release-doc and example/schema assertions. | Makes public-release truth part of `swift test`. | Version or docs can drift silently. |
+
+### Concepts I must understand
+
+- `phase-*` tags are engineering checkpoints; `v*` tags are public release tags.
+- GitHub Releases are only for `v*` tags.
+- `v0.1.0-alpha.1` is source-only.
+- No binaries, installers, Homebrew formula, signing, or notarization are claimed.
+- `hostwrightd` is still a scaffold.
+- Not production ready means users should expect sharp edges and limited support.
+
+### Risks
+
+- Users may overread `v0.1.0-alpha.1` as stability unless docs keep saying alpha and not production ready.
+- Source-only install still requires a working Swift/Xcode and Apple container environment.
+- The release notes must be reviewed again before the public GitHub pre-release is created.
+
+### How to verify
+
+```bash
+swift build
+swift test list
+swift test
+scripts/grep-orchard.sh .
+scripts/test.sh
+git tag --list | sort
+git ls-files | rg "\\.DS_Store|\\.build|site/|\\.env|\\.pem|id_rsa|hostwright_naming_convention|DIAGRAM_BRIEF" || true
+```
+
+### Maintainer checklist
+
+- [ ] I can explain why this is `v0.1.0-alpha.1`, not `v1.0.0`.
+- [ ] I can explain why the alpha is source-only.
+- [ ] I can explain why no GitHub Release is created from a `phase-*` tag.
+- [ ] I can explain what must pass before creating the public `v0.1.0-alpha.1` tag.
+- [ ] I can explain what Hostwright still does not support.

@@ -1,6 +1,8 @@
 # Limitations
 
-Hostwright can model and attempt read-only runtime observation through `RuntimeAdapter`, persist desired and observed state to an explicit SQLite database path, compute deterministic desired-vs-observed plans, execute one tightly gated create-missing-service mutation, execute one restart-policy-allowed managed start, read bounded logs, render state events, and delete exact cleanup-eligible Hostwright-owned stopped/created/exited containers through `RuntimeAdapter`.
+Hostwright `v0.1.0-alpha.1` can model and attempt read-only runtime observation through `RuntimeAdapter`, persist desired and observed state to an explicit SQLite database path, compute deterministic desired-vs-observed plans, execute one tightly gated create-missing-service mutation, execute one restart-policy-allowed managed start, read bounded logs, render state events, and delete exact cleanup-eligible Hostwright-owned stopped/created/exited containers through `RuntimeAdapter`.
+
+Hostwright is not production ready.
 
 ## Implemented Today
 
@@ -14,6 +16,7 @@ Hostwright can model and attempt read-only runtime observation through `RuntimeA
 - `hostwright events --state-db <path>` for persisted event ledger records.
 - `hostwright cleanup` dry-run and exact token-confirmed deletion of eligible Hostwright-owned stopped/created/exited containers.
 - `hostwright doctor` safe local checks.
+- Source-only release candidate packaging for `v0.1.0-alpha.1`.
 - Swift Package Manager module boundaries.
 - RuntimeAdapter contract infrastructure, state scaffolds, reconciler scaffolds, health models, networking scaffolds, and observability scaffolds.
 - `MockRuntimeAdapter` and fake runtime process runner for tests only.
@@ -65,6 +68,7 @@ Hostwright can model and attempt read-only runtime observation through `RuntimeA
 - Cloud control plane.
 - Web dashboard.
 - Production readiness.
+- Binary downloads, installer packages, Homebrew formulae, signing, notarization, SBOM, or binary provenance.
 
 ## Explicitly Out Of Scope For The First Supported Release
 

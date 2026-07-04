@@ -43,7 +43,7 @@ public enum HostwrightCLI {
     public static func run(command: CLICommand, environment: CLIEnvironment = .live) throws -> CLIRunResult {
         switch command {
         case .version:
-            return CLIRunResult(standardOutput: "\(HostwrightIdentity.developmentVersion)\n")
+            return CLIRunResult(standardOutput: "\(HostwrightIdentity.version)\n")
         case .help:
             return CLIRunResult(standardOutput: helpText)
         case .initManifest:

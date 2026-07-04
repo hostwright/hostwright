@@ -51,7 +51,7 @@ final class HostwrightCLITests: XCTestCase {
         let result = HostwrightCLI.run(arguments: ["--version"], environment: environment(files: FileBox()))
 
         XCTAssertEqual(result.exitCode, 0)
-        XCTAssertEqual(result.standardOutput, "0.0.0-dev\n")
+        XCTAssertEqual(result.standardOutput, "0.1.0-alpha.1\n")
         XCTAssertEqual(result.standardError, "")
     }
 

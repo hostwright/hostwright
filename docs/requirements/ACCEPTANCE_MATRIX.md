@@ -95,6 +95,6 @@ Phase 8A is a required preflight before this mutation gate. It proves real read-
 
 | Requirement IDs | Acceptance criteria | Verification type | Verification command or review |
 | --- | --- | --- | --- |
-| HW-REL-001, HW-REL-002 | Release checklist passes with build, tests, docs, examples, compatibility, and limitations reviewed. | Automated + manual | Local release checklist and reviewer signoff. |
-| HW-REL-003 | Signing, notarization, SBOM, checksums, and provenance decisions are documented before public artifacts. | Manual | Release hardening review. |
-| HW-REL-004 | Apple silicon performance claims are backed by benchmark data. | Automated + manual | Benchmark scripts and benchmark report. |
+| HW-REL-001, HW-REL-002 | Release checklist passes with build, tests, docs, examples, compatibility, limitations, and release notes reviewed for `v0.1.0-alpha.1`. | Automated + manual | `swift build`, `swift test list`, `swift test`, `scripts/grep-orchard.sh .`, `scripts/test.sh`, release-doc XCTest cases, reviewer signoff. |
+| HW-REL-003 | Source-only artifact decision is documented; no binaries, installers, Homebrew formula, signing, notarization, SBOM, or provenance claim is made. | Automated + manual | Release-doc XCTest cases and release hardening review. |
+| HW-REL-004 | No Apple silicon performance claim is made without benchmark data. | Manual | Release notes and limitations review. |

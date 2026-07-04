@@ -1,3 +1,5 @@
+import HostwrightCore
+
 public struct MockRuntimeAdapter: RuntimeAdapter {
     public enum Scenario: Sendable {
         case unavailable(String)
@@ -25,7 +27,7 @@ public struct MockRuntimeAdapter: RuntimeAdapter {
 
     public static let defaultMetadata = RuntimeAdapterMetadata(
         adapterName: "MockRuntimeAdapter",
-        adapterVersion: "0.0.0-dev",
+        adapterVersion: HostwrightIdentity.version,
         runtimeName: "mock",
         runtimeVersion: nil,
         supportsMutation: false,

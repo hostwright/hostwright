@@ -17,8 +17,8 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 | 6 | SQLite State and Event Ledger | Complete | Add durable local state for desired state, snapshots, events, and operation records. | Migrations, transactions, crash recovery, and redaction behavior are tested. |
 | 7 | Real Planning and Drift Detection | Complete | Compare desired state with observed state and produce deterministic plans. | Tests cover missing, stopped, unmanaged, unhealthy, changed, and duplicate resources. |
 | 8 | First Runtime Mutation and `apply` | Complete | Implement minimal safe convergence through `RuntimeAdapter`. | Disposable Apple container create-only proof passed and partial failures are recoverable. |
-| 9 | Operability, Restart, Logs, and Safe Cleanup | Complete locally | Make managed workloads operable and observable without broad lifecycle management. | Live status, bounded logs, event rendering, restart-policy-gated start, and ownership-based cleanup pass tests. |
-| 10 | Hardening and First Supported Release | Planned | Prove the narrow release contract. | Build, tests, docs, examples, benchmarks, security checklist, and reviewer approval pass. |
+| 9 | Operability, Restart, Logs, and Safe Cleanup | Complete | Make managed workloads operable and observable without broad lifecycle management. | Live status, bounded logs, event rendering, restart-policy-gated start, and ownership-based cleanup pass tests. |
+| 10 | Hardening and First Supported Release | Complete locally | Prepare `v0.1.0-alpha.1` as an honest source-only GitHub pre-release candidate. | Build, tests, docs, examples, compatibility, release notes, security checklist, and reviewer approval pass. |
 
 ## Current Hard Boundaries After Phase 9
 
@@ -100,6 +100,14 @@ Phase 8 remains intentionally narrow as historical context. It proved one create
 
 Phase 9 remains intentionally narrow. It does not implement stop, restart command, image replacement, port mutation, mount mutation, daemon restart loops, image cleanup, volume cleanup, DNS, tunnels, cloud, GPU/ANE behavior, or production readiness.
 
-## Next Planned Phase
+## Phase 10 Outputs
 
-Phase 10 should harden the first supported release contract: docs, examples, compatibility checks, benchmark baseline, security checklist, live proof notes, CI verification, and release review.
+- Central version source of truth is `0.1.0-alpha.1`.
+- `hostwright --version` reports `0.1.0-alpha.1`.
+- Release process docs define `phase-*` as internal checkpoints and `v*` as public release tags.
+- `docs/release/v0.1.0-alpha.1-notes.md` drafts the GitHub pre-release body.
+- Compatibility, install/build, security/safety, limitations, and CLI docs explain the source-only alpha boundary.
+- Release artifact policy is source-only: no binaries, installer, Homebrew formula, signing, notarization, SBOM, or provenance claim.
+- Tests cover version output, release docs, public overclaim checks, and example/schema alignment.
+
+Phase 10 does not create the public `v0.1.0-alpha.1` tag or a GitHub Release. Those happen only after the release-hardening branch is merged to `main` and final verification passes.

@@ -8,7 +8,7 @@ public enum HostwrightIdentity {
     public static let domain = "hostwright.dev"
     public static let description = "Mac-native desired-state control plane for Apple container workloads."
     public static let tagline = "Desired-state container control for Apple silicon Macs."
-    public static let developmentVersion = "0.0.0-dev"
+    public static let version = "0.1.0-alpha.1"
 }
 
 public enum HostwrightErrorCode: String, Sendable {

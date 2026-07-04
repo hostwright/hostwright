@@ -20,11 +20,13 @@ hostwright doctor
 
 ## `hostwright --version`
 
-Prints the development version:
+Prints the current release candidate version:
 
 ```text
-0.0.0-dev
+0.1.0-alpha.1
 ```
+
+The first public release target is `v0.1.0-alpha.1`.
 
 ## `hostwright init`
 

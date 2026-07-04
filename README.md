@@ -8,7 +8,15 @@ Tagline: Desired-state container control for Apple silicon Macs.
 
 This repository contains the Hostwright core foundation: source-material preservation, documentation boundaries, a dependency-free Swift Package Manager package, CLI commands, a restricted `hostwright.yaml` manifest parser/validator, typed runtime contracts, deterministic planning, explicit SQLite state paths, Apple container observation, a narrow confirmed apply gate, bounded logs, event rendering, and ownership-gated cleanup for exact stopped/created/exited containers.
 
-Hostwright is not production ready. It does not implement general lifecycle management, multi-action apply, daemon restart loops, stop/restart commands, image replacement, volume cleanup, daemon reconciliation, DNS, tunnels, Kubernetes compatibility, a Docker API, or full Docker Compose parity.
+Hostwright `v0.1.0-alpha.1` is a source-only alpha release candidate. Hostwright is not production ready. It does not implement general lifecycle management, multi-action apply, daemon restart loops, stop/restart commands, image replacement, image/volume cleanup, daemon reconciliation, DNS, tunnels, Kubernetes compatibility, a Docker API, or full Docker Compose parity.
+
+## Release Candidate
+
+- First public release target: `v0.1.0-alpha.1`.
+- Release title: `Hostwright v0.1.0-alpha.1`.
+- Release type: GitHub pre-release.
+- Artifact policy: source-only.
+- Binary downloads, installers, Homebrew formulae, signing, and notarization are not provided for this alpha.
 
 ## First Supported Release Boundary
 
@@ -55,6 +63,16 @@ scripts/grep-orchard.sh .
 scripts/test.sh
 ```
 
+Build from the public alpha tag after it exists:
+
+```bash
+git clone https://github.com/hostwright/hostwright.git
+cd hostwright
+git checkout v0.1.0-alpha.1
+swift build
+swift test
+```
+
 Run the CLI:
 
 ```bash
@@ -71,6 +89,13 @@ swift run hostwrightd
 ```
 
 `hostwright` mutates runtime only through explicit `apply --state-db <path> --confirm-plan <hash>` and `cleanup --state-db <path> --confirm-cleanup <token>` gates. `hostwrightd` does not install a launch agent or start a runtime loop.
+
+More detail:
+
+- Install/build instructions: `docs/reference/install.md`.
+- Compatibility matrix: `docs/reference/compatibility.md`.
+- Security and safety notes: `docs/reference/security-safety.md`.
+- Release process: `docs/release/RELEASE_PROCESS.md`.
 
 ## Manifest
 

@@ -146,7 +146,7 @@ Status values:
 
 | ID | Requirement | Source document | Current status | Implementation file if any | Test coverage if any | Release phase |
 | --- | --- | --- | --- | --- | --- | --- |
-| HW-REL-001 | Release language must use Foundation, Reconciliation, Networking, Security Hardening, Public Preview, Stable. | Final Production Arsenal | Planned | Docs only | Docs review | 10 |
-| HW-REL-002 | Public release requires build, tests, docs, examples, compatibility matrix, and limitations review. | Agent Engineering Manual | Planned | None | None | 10 |
-| HW-REL-003 | Signing, notarization, SBOM, checksums, and provenance are considered before public artifacts. | Final Production Arsenal; Document 2 | Planned | None | None | 10 |
-| HW-REL-004 | Benchmarks begin before claims about Apple silicon performance. | Document 2; Final Production Arsenal | Planned | None | None | 10 |
+| HW-REL-001 | Public releases must use real `v*` release tags and keep `phase-*` tags as internal engineering checkpoints. | Final Production Arsenal | Implemented for `v0.1.0-alpha.1` planning | `docs/release/RELEASE_PROCESS.md` | Core release-doc XCTest case | 10 |
+| HW-REL-002 | Public release requires build, tests, docs, examples, compatibility matrix, and limitations review. | Agent Engineering Manual | Implemented for `v0.1.0-alpha.1` release candidate prep | `README.md`, `docs/reference/`, `docs/release/` | Core and manifest XCTest cases; release checklist | 10 |
+| HW-REL-003 | Signing, notarization, SBOM, checksums, and provenance are considered before public artifacts. | Final Production Arsenal; Document 2 | Implemented as source-only alpha decision with no binary artifacts | `docs/release/RELEASE_PROCESS.md`, `docs/reference/install.md`, `docs/reference/security-safety.md` | Core release-doc XCTest case | 10 |
+| HW-REL-004 | Benchmarks begin before claims about Apple silicon performance. | Document 2; Final Production Arsenal | Implemented by release policy: no performance claims are made in `v0.1.0-alpha.1` | `docs/release/v0.1.0-alpha.1-notes.md`, `docs/reference/limitations.md` | Docs review | 10 |

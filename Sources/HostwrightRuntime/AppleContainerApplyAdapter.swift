@@ -1,4 +1,5 @@
 import Foundation
+import HostwrightCore
 
 public struct AppleContainerApplyAdapter: RuntimeAdapter {
     public let executableResolver: RuntimeExecutableResolving
@@ -24,7 +25,7 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
     public func metadata() async -> RuntimeAdapterMetadata {
         RuntimeAdapterMetadata(
             adapterName: "AppleContainerApplyAdapter",
-            adapterVersion: "0.0.0-dev",
+            adapterVersion: HostwrightIdentity.version,
             runtimeName: "Apple container CLI",
             runtimeVersion: nil,
             supportsMutation: true,

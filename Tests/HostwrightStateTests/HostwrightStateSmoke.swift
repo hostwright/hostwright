@@ -125,15 +125,30 @@ final class HostwrightStateTests: XCTestCase {
                     plannedActionType: "createMissingService",
                     projectID: projectID,
                     serviceName: "api",
+                    status: .recorded,
+                    idempotencyKey: "plan-hash:create:api:retry",
+                    planHash: "plan-hash",
+                    payloadJSONRedacted: #"{"intent":"recorded"}"#
+                )
+            )
+            try store.operations.record(
+                OperationRecord(
+                    id: "operation-4",
+                    createdAt: timestamp,
+                    updatedAt: timestamp,
+                    plannedActionType: "createMissingService",
+                    projectID: projectID,
+                    serviceName: "api",
                     status: .failed,
                     idempotencyKey: "plan-hash:create:api:retry",
                     planHash: "plan-hash",
                     payloadJSONRedacted: #"{"error":"token=\#(fakeSecret)"}"#
                 )
             )
+            XCTAssertEqual(try store.operations.latest(idempotencyKey: "plan-hash:create:api:retry")?.status, .failed)
             try store.operations.record(
                 OperationRecord(
-                    id: "operation-4",
+                    id: "operation-5",
                     createdAt: timestamp,
                     updatedAt: "2026-07-01T00:00:01Z",
                     plannedActionType: "createMissingService",
@@ -147,13 +162,14 @@ final class HostwrightStateTests: XCTestCase {
             )
 
             let operations = try store.operations.loadAll()
-            XCTAssertEqual(operations.count, 4)
+            XCTAssertEqual(operations.count, 5)
             XCTAssertEqual(operations[0].status, .planned)
             XCTAssertEqual(operations[1].status, .succeeded)
-            XCTAssertEqual(operations[2].status, .failed)
-            XCTAssertEqual(operations[3].status, .succeeded)
+            XCTAssertEqual(operations[2].status, .recorded)
+            XCTAssertEqual(operations[3].status, .failed)
+            XCTAssertEqual(operations[4].status, .succeeded)
             XCTAssertFalse(operations[0].payloadJSONRedacted.contains(fakeSecret))
-            XCTAssertFalse(operations[2].payloadJSONRedacted.contains(fakeSecret))
+            XCTAssertFalse(operations[3].payloadJSONRedacted.contains(fakeSecret))
             XCTAssertEqual(try store.operations.latest(idempotencyKey: "plan-hash:create:api:retry")?.status, .succeeded)
         }
     }

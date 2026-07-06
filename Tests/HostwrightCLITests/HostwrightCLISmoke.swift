@@ -456,6 +456,35 @@ final class HostwrightCLITests: XCTestCase {
         }
     }
 
+    func testApplyCanRetryAfterFailedOperationWithSamePlanHash() throws {
+        try withTemporaryDatabase { databasePath in
+            let files = FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest])
+            let failingAdapter = FakeApplyRuntimeAdapter(executeError: .commandFailed(exitStatus: 2, message: "failed", standardError: "token=\(fakeSecret)"))
+            let expectedHash = try planHash(for: singleServiceManifest, observed: failingAdapter.observedState)
+
+            let first = HostwrightCLI.run(
+                arguments: ["apply", "--state-db", databasePath, "--confirm-plan", expectedHash],
+                environment: environment(files: files, runtimeAdapter: failingAdapter)
+            )
+            let retryAdapter = FakeApplyRuntimeAdapter(observedState: failingAdapter.observedState)
+            let second = HostwrightCLI.run(
+                arguments: ["apply", "--state-db", databasePath, "--confirm-plan", expectedHash],
+                environment: environment(files: files, runtimeAdapter: retryAdapter)
+            )
+
+            XCTAssertEqual(first.exitCode, 1)
+            XCTAssertEqual(second.exitCode, 0)
+            XCTAssertEqual(failingAdapter.executedActions.count, 1)
+            XCTAssertEqual(retryAdapter.executedActions.count, 1)
+
+            let store = SQLiteStateStore(path: databasePath)
+            let operations = try store.operations.loadAll()
+            XCTAssertEqual(operations.map(\.status), [.recorded, .failed, .recorded, .succeeded])
+            let idempotencyKey = try XCTUnwrap(operations.first?.idempotencyKey)
+            XCTAssertEqual(try store.operations.latest(idempotencyKey: idempotencyKey)?.status, .succeeded)
+        }
+    }
+
     func testApplyObservationFailureIsRuntimeFailure() throws {
         try withTemporaryDatabase { databasePath in
             let files = FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest])

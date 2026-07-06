@@ -452,7 +452,7 @@ public struct OperationLedger: Sendable {
                        status, idempotency_key, plan_hash, payload_json_redacted
                 FROM operation_ledger
                 WHERE idempotency_key = ?
-                ORDER BY updated_at DESC, created_at DESC, id DESC
+                ORDER BY updated_at DESC, created_at DESC, rowid DESC
                 LIMIT 1
                 """,
                 bindings: [.text(idempotencyKey)]

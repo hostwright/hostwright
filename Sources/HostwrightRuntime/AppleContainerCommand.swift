@@ -88,7 +88,7 @@ public enum AppleContainerCommand {
             }
             for port in desiredService.ports.sorted(by: stablePortOrdering) {
                 if let hostPort = port.hostPort {
-                    arguments += ["--publish", "\(hostPort):\(port.containerPort)"]
+                    arguments += ["--publish", publishSpec(for: port, hostPort: hostPort)]
                 }
             }
             arguments.append(desiredService.image)
@@ -162,13 +162,26 @@ public enum AppleContainerCommand {
         [
             lhs.hostPort.map(String.init) ?? "",
             String(lhs.containerPort),
+            lhs.bindAddress ?? "",
             lhs.protocolName.rawValue
         ].joined(separator: ":") <
         [
             rhs.hostPort.map(String.init) ?? "",
             String(rhs.containerPort),
+            rhs.bindAddress ?? "",
             rhs.protocolName.rawValue
         ].joined(separator: ":")
+    }
+
+    private static func publishSpec(for port: RuntimePortMapping, hostPort: Int) -> String {
+        let bindAddress = port.bindAddress ?? "127.0.0.1"
+        let base = "\(bindAddress):\(hostPort):\(port.containerPort)"
+        switch port.protocolName {
+        case .tcp:
+            return base
+        case .udp:
+            return "\(base)/udp"
+        }
     }
 
     private static func clampedTail(_ tail: Int) -> Int {

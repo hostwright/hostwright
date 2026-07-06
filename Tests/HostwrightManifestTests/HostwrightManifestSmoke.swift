@@ -52,6 +52,39 @@ final class HostwrightManifestTests: XCTestCase {
         )
     }
 
+    func testFlagLikeImageAndServiceCommandTokensFailValidation() {
+        assertManifestFailure(
+            """
+            project: api-local
+            services:
+              api:
+                image: --mount=src=/,dst=/host
+            """,
+            contains: "image must not begin"
+        )
+
+        assertManifestFailure(
+            """
+            project: api-local
+            services:
+              api:
+                image: -bad
+            """,
+            contains: "image must not begin"
+        )
+
+        assertManifestFailure(
+            """
+            project: api-local
+            services:
+              api:
+                image: ghcr.io/example/api:latest
+                command: ["--flag"]
+            """,
+            contains: "command token"
+        )
+    }
+
     func testUnsupportedKubernetesStyleYamlFailsClosed() {
         XCTAssertThrowsError(
             try ManifestParser.parse(

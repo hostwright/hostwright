@@ -157,9 +157,8 @@ final class HostwrightCLITests: XCTestCase {
 
             let store = SQLiteStateStore(path: databasePath)
             let operations = try store.operations.loadAll()
-            XCTAssertEqual(operations.count, 1)
-            XCTAssertEqual(operations[0].status, .succeeded)
-            XCTAssertEqual(operations[0].planHash, expectedHash)
+            XCTAssertEqual(operations.map(\.status), [.recorded, .succeeded])
+            XCTAssertEqual(operations.map(\.planHash), [expectedHash, expectedHash])
 
             let events = try store.events.loadAll()
             XCTAssertTrue(events.contains { $0.type == "apply.create-intent-recorded" })
@@ -368,6 +367,9 @@ final class HostwrightCLITests: XCTestCase {
                 events.firstIndex { $0.type == "cleanup.planned" }!,
                 events.firstIndex { $0.type == "cleanup.deleted" }!
             )
+            let ownership = try SQLiteStateStore(path: databasePath).ownership.loadAll()
+            XCTAssertEqual(ownership.count, 1)
+            XCTAssertFalse(ownership[0].cleanupEligible)
         }
     }
 
@@ -387,11 +389,214 @@ final class HostwrightCLITests: XCTestCase {
 
             let store = SQLiteStateStore(path: databasePath)
             let operations = try store.operations.loadAll()
-            XCTAssertEqual(operations[0].status, .failed)
+            XCTAssertEqual(operations.map(\.status), [.recorded, .failed])
 
             let events = try store.events.loadAll()
             XCTAssertTrue(events.contains { $0.type == "apply.failed" })
             XCTAssertFalse(events.map(\.message).joined(separator: "\n").contains(fakeSecret))
+        }
+    }
+
+    func testApplyExecutesWithOriginalSecretEnvAndRedactsSurfaces() throws {
+        try withTemporaryDatabase { databasePath in
+            let manifest = """
+            project: demo
+            services:
+              api:
+                image: local/demo:latest
+                env:
+                  API_TOKEN: token=\(fakeSecret)
+                ports:
+                  - "8080:8080"
+
+            """
+            let files = FileBox(files: [HostwrightIdentity.manifestFileName: manifest])
+            let adapter = FakeApplyRuntimeAdapter()
+            let expectedHash = try planHash(for: manifest, observed: adapter.observedState)
+
+            let result = HostwrightCLI.run(
+                arguments: ["apply", "--state-db", databasePath, "--confirm-plan", expectedHash],
+                environment: environment(files: files, runtimeAdapter: adapter)
+            )
+
+            XCTAssertEqual(result.exitCode, 0)
+            XCTAssertFalse(result.standardOutput.contains(fakeSecret))
+            let executedService = try XCTUnwrap(adapter.executedActions.first?.desiredService)
+            XCTAssertEqual(executedService.environment.first?.value, "token=\(fakeSecret)")
+
+            let store = SQLiteStateStore(path: databasePath)
+            let desired = try store.desiredStates.loadDesiredServices(projectID: "project-demo")
+            XCTAssertTrue(desired[0].environmentJSONRedacted.contains("[REDACTED]"))
+            XCTAssertFalse(desired[0].environmentJSONRedacted.contains(fakeSecret))
+            let events = try store.events.loadAll()
+            XCTAssertFalse(events.map(\.message).joined(separator: "\n").contains(fakeSecret))
+        }
+    }
+
+    func testApplyIdempotencyBlocksDuplicateSucceededPlan() throws {
+        try withTemporaryDatabase { databasePath in
+            let files = FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest])
+            let adapter = FakeApplyRuntimeAdapter()
+            let expectedHash = try planHash(for: singleServiceManifest, observed: adapter.observedState)
+
+            let first = HostwrightCLI.run(
+                arguments: ["apply", "--state-db", databasePath, "--confirm-plan", expectedHash],
+                environment: environment(files: files, runtimeAdapter: adapter)
+            )
+            let second = HostwrightCLI.run(
+                arguments: ["apply", "--state-db", databasePath, "--confirm-plan", expectedHash],
+                environment: environment(files: files, runtimeAdapter: adapter)
+            )
+
+            XCTAssertEqual(first.exitCode, 0)
+            XCTAssertEqual(second.exitCode, 1)
+            XCTAssertTrue(second.standardError.contains("idempotency key"))
+            XCTAssertEqual(adapter.executedActions.count, 1)
+            XCTAssertEqual(try SQLiteStateStore(path: databasePath).operations.loadAll().map(\.status), [.recorded, .succeeded])
+        }
+    }
+
+    func testApplyCanRetryAfterFailedOperationWithSamePlanHash() throws {
+        try withTemporaryDatabase { databasePath in
+            let files = FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest])
+            let failingAdapter = FakeApplyRuntimeAdapter(executeError: .commandFailed(exitStatus: 2, message: "failed", standardError: "token=\(fakeSecret)"))
+            let expectedHash = try planHash(for: singleServiceManifest, observed: failingAdapter.observedState)
+
+            let first = HostwrightCLI.run(
+                arguments: ["apply", "--state-db", databasePath, "--confirm-plan", expectedHash],
+                environment: environment(files: files, runtimeAdapter: failingAdapter)
+            )
+            let retryAdapter = FakeApplyRuntimeAdapter(observedState: failingAdapter.observedState)
+            let second = HostwrightCLI.run(
+                arguments: ["apply", "--state-db", databasePath, "--confirm-plan", expectedHash],
+                environment: environment(files: files, runtimeAdapter: retryAdapter)
+            )
+
+            XCTAssertEqual(first.exitCode, 1)
+            XCTAssertEqual(second.exitCode, 0)
+            XCTAssertEqual(failingAdapter.executedActions.count, 1)
+            XCTAssertEqual(retryAdapter.executedActions.count, 1)
+
+            let store = SQLiteStateStore(path: databasePath)
+            let operations = try store.operations.loadAll()
+            XCTAssertEqual(operations.map(\.status), [.recorded, .failed, .recorded, .succeeded])
+            let idempotencyKey = try XCTUnwrap(operations.first?.idempotencyKey)
+            XCTAssertEqual(try store.operations.latest(idempotencyKey: idempotencyKey)?.status, .succeeded)
+        }
+    }
+
+    func testApplyObservationFailureIsRuntimeFailure() throws {
+        try withTemporaryDatabase { databasePath in
+            let files = FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest])
+            let adapter = FakeApplyRuntimeAdapter(observeError: .runtimeUnavailable("observe failed token=\(fakeSecret)"))
+
+            let result = HostwrightCLI.run(
+                arguments: ["apply", "--state-db", databasePath, "--confirm-plan", "unused"],
+                environment: environment(files: files, runtimeAdapter: adapter)
+            )
+
+            XCTAssertEqual(result.exitCode, 1)
+            XCTAssertTrue(result.standardError.contains(HostwrightErrorCode.runtimeUnavailable.rawValue))
+            XCTAssertFalse(result.standardError.contains(HostwrightErrorCode.stateStoreUnavailable.rawValue))
+            XCTAssertFalse(result.standardError.contains(fakeSecret))
+            XCTAssertTrue(adapter.executedActions.isEmpty)
+        }
+    }
+
+    func testApplyRuntimeFailureRemainsPrimaryWhenFailurePersistenceFails() throws {
+        try withTemporaryDatabase { databasePath in
+            let files = FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest])
+            let adapter = FakeApplyRuntimeAdapter(
+                executeError: .commandFailed(exitStatus: 2, message: "runtime failed", standardError: "token=\(fakeSecret)"),
+                onExecute: { _ in
+                    try FileManager.default.removeItem(atPath: databasePath)
+                    try FileManager.default.createDirectory(atPath: databasePath, withIntermediateDirectories: false)
+                }
+            )
+            let expectedHash = try planHash(for: singleServiceManifest, observed: adapter.observedState)
+
+            let result = HostwrightCLI.run(
+                arguments: ["apply", "--state-db", databasePath, "--confirm-plan", expectedHash],
+                environment: environment(files: files, runtimeAdapter: adapter)
+            )
+
+            XCTAssertEqual(result.exitCode, 1)
+            XCTAssertTrue(result.standardError.contains(HostwrightErrorCode.runtimeUnavailable.rawValue))
+            XCTAssertTrue(result.standardError.contains("Failure state persistence also failed"))
+            XCTAssertFalse(result.standardError.contains(HostwrightErrorCode.stateStoreUnavailable.rawValue))
+            XCTAssertFalse(result.standardError.contains(fakeSecret))
+        }
+    }
+
+    func testCleanupPartialFailureReportsSuccessAndFailureAndPreservesOwnership() throws {
+        try withTemporaryDatabase { databasePath in
+            let files = FileBox(files: [HostwrightIdentity.manifestFileName: twoServiceManifest])
+            let store = SQLiteStateStore(path: databasePath)
+            try store.migrate()
+            try saveDesiredManifest(store: store, manifestText: twoServiceManifest)
+            for service in ["api", "worker"] {
+                try store.ownership.upsert(
+                    OwnershipRecord(
+                        id: "owner-\(service)",
+                        resourceIdentifier: "hostwright-demo-\(service)",
+                        resourceType: "container",
+                        projectID: "project-demo",
+                        serviceName: service,
+                        runtimeAdapter: "fake",
+                        createdAt: "2026-07-01T00:00:00Z",
+                        observedAt: "2026-07-01T00:00:00Z",
+                        cleanupEligible: true,
+                        metadataJSONRedacted: "{}"
+                    )
+                )
+            }
+            let observed = ObservedRuntimeState(
+                projectName: "demo",
+                services: [
+                    ObservedRuntimeService(identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"), lifecycleState: .stopped),
+                    ObservedRuntimeService(identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "worker"), lifecycleState: .stopped)
+                ],
+                adapterMetadata: fakeAdapterMetadata
+            )
+            let secret = fakeSecret
+            let adapter = FakeApplyRuntimeAdapter(
+                observedState: observed,
+                onExecute: { action in
+                    if action.identity.serviceName == "worker" {
+                        throw RuntimeAdapterError.commandFailed(exitStatus: 2, message: "delete failed", standardError: "token=\(secret)")
+                    }
+                }
+            )
+
+            let dryRun = HostwrightCLI.run(
+                arguments: ["cleanup", "--state-db", databasePath, "--dry-run"],
+                environment: environment(files: files, runtimeAdapter: adapter)
+            )
+            let token = dryRun.standardOutput
+                .split(separator: "\n")
+                .first { $0.hasPrefix("Confirmation token: ") }!
+                .replacingOccurrences(of: "Confirmation token: ", with: "")
+            let confirmed = HostwrightCLI.run(
+                arguments: ["cleanup", "--state-db", databasePath, "--confirm-cleanup", token],
+                environment: environment(files: files, runtimeAdapter: adapter)
+            )
+
+            XCTAssertEqual(confirmed.exitCode, 1)
+            XCTAssertTrue(confirmed.standardOutput.contains("- deleted hostwright-demo-api"))
+            XCTAssertTrue(confirmed.standardOutput.contains("- failed hostwright-demo-worker"))
+            XCTAssertTrue(confirmed.standardError.contains(HostwrightErrorCode.runtimeUnavailable.rawValue))
+            XCTAssertFalse(confirmed.standardError.contains(HostwrightErrorCode.stateStoreUnavailable.rawValue))
+            XCTAssertFalse(confirmed.standardOutput.contains(fakeSecret))
+
+            let operations = try store.operations.loadAll()
+            XCTAssertTrue(operations.contains { $0.serviceName == "api" && $0.status == .succeeded })
+            XCTAssertTrue(operations.contains { $0.serviceName == "worker" && $0.status == .failed })
+            let events = try store.events.loadAll()
+            XCTAssertTrue(events.contains { $0.type == "cleanup.deleted" })
+            XCTAssertTrue(events.contains { $0.type == "cleanup.failed" })
+            let ownership = try store.ownership.loadAll()
+            XCTAssertFalse(try XCTUnwrap(ownership.first { $0.serviceName == "api" }).cleanupEligible)
+            XCTAssertTrue(try XCTUnwrap(ownership.first { $0.serviceName == "worker" }).cleanupEligible)
         }
     }
 
@@ -430,6 +635,22 @@ final class HostwrightCLITests: XCTestCase {
               - "8080:8080"
             restart:
               policy: on-failure
+
+        """
+    }
+
+    private var twoServiceManifest: String {
+        """
+        project: demo
+        services:
+          api:
+            image: local/demo:latest
+            ports:
+              - "8080:8080"
+          worker:
+            image: local/worker:latest
+            ports:
+              - "8081:8080"
 
         """
     }
@@ -491,16 +712,22 @@ final class HostwrightCLITests: XCTestCase {
     }
 
     private final class FakeApplyRuntimeAdapter: RuntimeAdapter, @unchecked Sendable {
+        typealias ExecuteHook = @Sendable (PlannedRuntimeAction) throws -> Void
+
         let observedState: ObservedRuntimeState
+        let observeError: RuntimeAdapterError?
         let executeError: RuntimeAdapterError?
         let logsText: String
+        let onExecute: ExecuteHook?
         var executedActions: [PlannedRuntimeAction] = []
         var logRequests: [RuntimeServiceIdentity] = []
 
         init(
             observedState: ObservedRuntimeState? = nil,
+            observeError: RuntimeAdapterError? = nil,
             executeError: RuntimeAdapterError? = nil,
-            logsText: String = ""
+            logsText: String = "",
+            onExecute: ExecuteHook? = nil
         ) {
             self.observedState = observedState ?? ObservedRuntimeState(
                 projectName: "demo",
@@ -514,8 +741,10 @@ final class HostwrightCLITests: XCTestCase {
                     capabilities: [.readOnlyObservation, .lifecycleMutation, .logStreaming, .cleanup]
                 )
             )
+            self.observeError = observeError
             self.executeError = executeError
             self.logsText = logsText
+            self.onExecute = onExecute
         }
 
         func metadata() async -> RuntimeAdapterMetadata {
@@ -527,7 +756,10 @@ final class HostwrightCLITests: XCTestCase {
         }
 
         func observe(desiredState: DesiredRuntimeState) async throws -> ObservedRuntimeState {
-            observedState
+            if let observeError {
+                throw observeError
+            }
+            return observedState
         }
 
         func plan(desiredState: DesiredRuntimeState, observedState: ObservedRuntimeState) async throws -> RuntimePlan {
@@ -536,6 +768,7 @@ final class HostwrightCLITests: XCTestCase {
 
         func execute(_ action: PlannedRuntimeAction, confirmation: RuntimeMutationConfirmation?) async throws -> RuntimeEvent {
             executedActions.append(action)
+            try onExecute?(action)
             if let executeError {
                 throw executeError
             }

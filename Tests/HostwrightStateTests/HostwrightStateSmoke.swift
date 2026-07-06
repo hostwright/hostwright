@@ -66,7 +66,7 @@ final class HostwrightStateTests: XCTestCase {
                 ),
                 EventRecord(
                     id: "event-2",
-                    timestamp: "2026-07-01T00:00:02Z",
+                    timestamp: "2026-07-01T00:00:01Z",
                     severity: .warning,
                     type: "state.observed.saved",
                     source: "state-test",
@@ -80,6 +80,7 @@ final class HostwrightStateTests: XCTestCase {
 
             let events = try store.events.loadAll()
             XCTAssertEqual(events.map(\.id), ["event-1", "event-2"])
+            XCTAssertEqual(events.map(\.timestamp), ["2026-07-01T00:00:01Z", "2026-07-01T00:00:01Z"])
             XCTAssertTrue(events[0].message.contains("[REDACTED]"))
             XCTAssertFalse(events[0].payloadJSONRedacted.contains(fakeSecret))
         }
@@ -124,20 +125,52 @@ final class HostwrightStateTests: XCTestCase {
                     plannedActionType: "createMissingService",
                     projectID: projectID,
                     serviceName: "api",
+                    status: .recorded,
+                    idempotencyKey: "plan-hash:create:api:retry",
+                    planHash: "plan-hash",
+                    payloadJSONRedacted: #"{"intent":"recorded"}"#
+                )
+            )
+            try store.operations.record(
+                OperationRecord(
+                    id: "operation-4",
+                    createdAt: timestamp,
+                    updatedAt: timestamp,
+                    plannedActionType: "createMissingService",
+                    projectID: projectID,
+                    serviceName: "api",
                     status: .failed,
-                    idempotencyKey: "plan-hash:create:api:3",
+                    idempotencyKey: "plan-hash:create:api:retry",
                     planHash: "plan-hash",
                     payloadJSONRedacted: #"{"error":"token=\#(fakeSecret)"}"#
                 )
             )
+            XCTAssertEqual(try store.operations.latest(idempotencyKey: "plan-hash:create:api:retry")?.status, .failed)
+            try store.operations.record(
+                OperationRecord(
+                    id: "operation-5",
+                    createdAt: timestamp,
+                    updatedAt: "2026-07-01T00:00:01Z",
+                    plannedActionType: "createMissingService",
+                    projectID: projectID,
+                    serviceName: "api",
+                    status: .succeeded,
+                    idempotencyKey: "plan-hash:create:api:retry",
+                    planHash: "plan-hash",
+                    payloadJSONRedacted: #"{"result":"succeeded"}"#
+                )
+            )
 
             let operations = try store.operations.loadAll()
-            XCTAssertEqual(operations.count, 3)
+            XCTAssertEqual(operations.count, 5)
             XCTAssertEqual(operations[0].status, .planned)
             XCTAssertEqual(operations[1].status, .succeeded)
-            XCTAssertEqual(operations[2].status, .failed)
+            XCTAssertEqual(operations[2].status, .recorded)
+            XCTAssertEqual(operations[3].status, .failed)
+            XCTAssertEqual(operations[4].status, .succeeded)
             XCTAssertFalse(operations[0].payloadJSONRedacted.contains(fakeSecret))
-            XCTAssertFalse(operations[2].payloadJSONRedacted.contains(fakeSecret))
+            XCTAssertFalse(operations[3].payloadJSONRedacted.contains(fakeSecret))
+            XCTAssertEqual(try store.operations.latest(idempotencyKey: "plan-hash:create:api:retry")?.status, .succeeded)
         }
     }
 

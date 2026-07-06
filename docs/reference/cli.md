@@ -76,11 +76,13 @@ It refuses mutation when:
 - the plan has blockers;
 - zero executable actions exist;
 - more than one executable action exists;
-- a create action uses mounts, sensitive environment values, privileged host ports, or broad bind addresses;
+- a create action uses mounts, privileged host ports, broad bind addresses, flag-like image values, or service command tokens beginning with `-`;
 - a create action cannot confirm the local Apple container image;
 - a start action is not for an observed Hostwright-managed stopped, created, or exited service allowed by restart policy.
 
-It does not implement stop, restart, image replacement, port mutation, mount mutation, rollback, image pull, daemon loops, or multi-action apply.
+Manifest-declared ports are published to `127.0.0.1` by default during Hostwright-created container creation. Sensitive environment values are passed to the runtime for execution, but plan output, state rows, events, logs, and errors use redacted values.
+
+It does not implement stop, restart, image replacement, port mutation, mount mutation, rollback, image pull, daemon loops, broad bind exposure, or multi-action apply.
 
 ## `hostwright status [path] [--state-db <path>]`
 

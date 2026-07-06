@@ -85,7 +85,7 @@ struct LogsCommandRunner {
         )
         try store.events.append([
             EventRecord(
-                id: "event-logs-\(timestamp)-\(serviceName)",
+                id: hostwrightUniqueID(prefix: "event-logs"),
                 timestamp: timestamp,
                 severity: .info,
                 type: "logs.read",

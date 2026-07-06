@@ -121,4 +121,4 @@ Apple container observation, bounded logs, create, restart-policy-gated managed 
 
 ## Source Material
 
-The original planning, architecture, security, networking, production, naming, and brand-source materials are preserved under `docs/source-material/originals/` and `assets/brand/originals/`. The original root files are also preserved untouched from the initial normalization pass.
+Original planning, architecture, security, networking, production, naming, and brand-source materials were used to seed the repository. Bulky internal source files and generated brand-source images are no longer kept in the current public tree; maintainers should use the private archive and the checksum log in `docs/source-material/README.md` when provenance review is needed.

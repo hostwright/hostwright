@@ -33,3 +33,7 @@ func hostwrightStableHash(_ value: String) -> String {
 func hostwrightTimestamp() -> String {
     ISO8601DateFormatter().string(from: Date())
 }
+
+func hostwrightUniqueID(prefix: String) -> String {
+    "\(prefix)-\(UUID().uuidString)"
+}

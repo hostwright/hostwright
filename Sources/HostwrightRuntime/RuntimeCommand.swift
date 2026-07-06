@@ -181,6 +181,8 @@ public enum RuntimeCommandPolicy {
                 message: "Create-missing-service command spec contains an unsupported create option."
             )
         }
+
+        try validateCreateImageAndCommandTokens(spec)
     }
 
     public static func validateSupportedMutation(_ spec: RuntimeCommandSpec) throws {
@@ -298,6 +300,44 @@ public enum RuntimeCommandPolicy {
 
     private static func isHostwrightContainerIdentifier(_ value: String) -> Bool {
         value.hasPrefix("hostwright-") && !value.contains("/") && !value.contains(" ")
+    }
+
+    private static func validateCreateImageAndCommandTokens(_ spec: RuntimeCommandSpec) throws {
+        var index = 1
+        while index < spec.arguments.count {
+            let argument = spec.arguments[index]
+            switch argument {
+            case "--name", "--env", "--publish":
+                let valueIndex = index + 1
+                guard valueIndex < spec.arguments.count else {
+                    throw RuntimeAdapterError.commandRejected(
+                        classification: spec.classification,
+                        message: "Create-missing-service command spec is missing a value for \(argument)."
+                    )
+                }
+                index += 2
+            default:
+                guard !argument.hasPrefix("-") else {
+                    throw RuntimeAdapterError.commandRejected(
+                        classification: spec.classification,
+                        message: "Create-missing-service image must not begin with '-'."
+                    )
+                }
+
+                for token in spec.arguments.dropFirst(index + 1) where token.hasPrefix("-") {
+                    throw RuntimeAdapterError.commandRejected(
+                        classification: spec.classification,
+                        message: "Create-missing-service command tokens beginning with '-' are not supported in this apply scope."
+                    )
+                }
+                return
+            }
+        }
+
+        throw RuntimeAdapterError.commandRejected(
+            classification: spec.classification,
+            message: "Create-missing-service command spec must include an image."
+        )
     }
 }
 

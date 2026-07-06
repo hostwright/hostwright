@@ -51,7 +51,7 @@ struct StatusCommandRunner {
                 timestamp: timestamp
             )
             try store.observedStates.saveSnapshot(
-                snapshotID: "status-\(timestamp)-\(plan.planHash)",
+                snapshotID: hostwrightUniqueID(prefix: "status-snapshot"),
                 projectID: projectID,
                 observedState: observed,
                 runtimeAdapter: observed.adapterMetadata?.adapterName ?? "runtime-adapter",
@@ -62,7 +62,7 @@ struct StatusCommandRunner {
             )
             try store.events.append([
                 EventRecord(
-                    id: "event-status-\(timestamp)-\(plan.planHash)",
+                    id: hostwrightUniqueID(prefix: "event-status"),
                     timestamp: timestamp,
                     severity: .info,
                     type: "status.observed",

@@ -46,6 +46,8 @@ scripts/grep-orchard.sh .
 scripts/test.sh
 ```
 
+`scripts/lint.sh` is currently only a Swift package metadata sanity check (`swift package dump-package`). No Swift formatting or style lint is enforced for this alpha.
+
 Review and record:
 
 - GitHub CI passes on the release-hardening pull request.
@@ -67,4 +69,3 @@ git push origin v0.1.0-alpha.1
 ```
 
 Then create a GitHub pre-release for `v0.1.0-alpha.1` named `Hostwright v0.1.0-alpha.1` using `docs/release/v0.1.0-alpha.1-notes.md` as the body.
-

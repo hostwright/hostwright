@@ -61,6 +61,20 @@ public struct FoundationRuntimeProcessRunner: RuntimeProcessRunning {
             )
         }
 
+        let outputData = PipeReadBuffer()
+        let errorData = PipeReadBuffer()
+        let pipeReaders = DispatchGroup()
+        pipeReaders.enter()
+        DispatchQueue.global(qos: .utility).async {
+            outputData.set(outputPipe.fileHandleForReading.readDataToEndOfFile())
+            pipeReaders.leave()
+        }
+        pipeReaders.enter()
+        DispatchQueue.global(qos: .utility).async {
+            errorData.set(errorPipe.fileHandleForReading.readDataToEndOfFile())
+            pipeReaders.leave()
+        }
+
         let semaphore = DispatchSemaphore(value: 0)
         DispatchQueue.global(qos: .utility).async {
             process.waitUntilExit()
@@ -71,9 +85,10 @@ public struct FoundationRuntimeProcessRunner: RuntimeProcessRunning {
         if timeoutResult == .timedOut {
             process.terminate()
             process.waitUntilExit()
+            pipeReaders.wait()
 
-            let partialOutput = String(data: outputPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            let partialError = String(data: errorPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            let partialOutput = String(data: outputData.value(), encoding: .utf8) ?? ""
+            let partialError = String(data: errorData.value(), encoding: .utf8) ?? ""
 
             throw RuntimeAdapterError.commandTimedOut(
                 command: spec.redacted(using: redactionPolicy).purpose,
@@ -82,8 +97,10 @@ public struct FoundationRuntimeProcessRunner: RuntimeProcessRunning {
             )
         }
 
-        let standardOutput = String(data: outputPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        let standardError = String(data: errorPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        pipeReaders.wait()
+
+        let standardOutput = String(data: outputData.value(), encoding: .utf8) ?? ""
+        let standardError = String(data: errorData.value(), encoding: .utf8) ?? ""
         let result = RuntimeCommandResult(
             spec: spec,
             exitStatus: process.terminationStatus,
@@ -100,5 +117,22 @@ public struct FoundationRuntimeProcessRunner: RuntimeProcessRunning {
         }
 
         return result
+    }
+}
+
+private final class PipeReadBuffer: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored = Data()
+
+    func set(_ data: Data) {
+        lock.lock()
+        stored = data
+        lock.unlock()
+    }
+
+    func value() -> Data {
+        lock.lock()
+        defer { lock.unlock() }
+        return stored
     }
 }

@@ -217,6 +217,10 @@ final class HostwrightReconcilerTests: XCTestCase {
             ]
         )
 
+        let mapping = ManifestRuntimeMapper.map(manifest)
+        XCTAssertEqual(mapping.desiredState.services[0].environment[0].value, "token=raw-value")
+        XCTAssertEqual(mapping.desiredState.services[0].ports[0].bindAddress, "127.0.0.1")
+
         let plan = ReconciliationPlanner().plan(manifest: manifest)
 
         XCTAssertEqual(plan.projectName, "demo")

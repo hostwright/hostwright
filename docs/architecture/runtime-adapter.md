@@ -137,7 +137,7 @@ If broader real Apple container output does not match one of those reviewed shap
 Apply and cleanup support only:
 
 - `container image list --format json` as a read-only local-image availability gate;
-- `container create --name <name> --env KEY=value --publish host:container <image> [command...]`.
+- `container create --name <name> --env KEY=value --publish 127.0.0.1:host:container <image> [command...]`.
 - `container start <id>` for exact Hostwright-owned stopped/created/exited services when restart policy allows managed start.
 - `container delete <id>` for exact cleanup-eligible Hostwright-owned stopped/created/exited containers after dry-run token confirmation.
 

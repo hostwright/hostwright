@@ -289,7 +289,7 @@ public struct ObservedStateRepository: Sendable {
     private func insert(_ snapshot: ObservedRuntimeSnapshotRecord, projectID: String?, on connection: SQLiteConnection) throws {
         try connection.run(
             """
-            INSERT OR REPLACE INTO observed_runtime_snapshots (
+            INSERT INTO observed_runtime_snapshots (
                 id, project_id, runtime_adapter, runtime_name, runtime_version, observed_at,
                 parser_version, raw_output_hash, redacted_summary, capabilities_json
             )
@@ -313,7 +313,7 @@ public struct ObservedStateRepository: Sendable {
     private func insert(_ service: ObservedServiceRecord, on connection: SQLiteConnection) throws {
         try connection.run(
             """
-            INSERT OR REPLACE INTO observed_services (
+            INSERT INTO observed_services (
                 id, snapshot_id, project_name, service_name, instance_name, image, lifecycle_state,
                 health_state, ports_json, mounts_json, runtime_identifiers_json
             )
@@ -351,7 +351,7 @@ public struct EventLedger: Sendable {
                 for event in redactedEvents {
                     try connection.run(
                         """
-                        INSERT OR REPLACE INTO event_ledger (
+                        INSERT INTO event_ledger (
                             id, timestamp, severity, type, source, project_id, service_name,
                             runtime_adapter, message, payload_json_redacted
                         )
@@ -383,7 +383,7 @@ public struct EventLedger: Sendable {
                 SELECT id, timestamp, severity, type, source, project_id, service_name,
                        runtime_adapter, message, payload_json_redacted
                 FROM event_ledger
-                ORDER BY timestamp ASC, id ASC
+                ORDER BY timestamp ASC, rowid ASC
                 """
             )
             return try rows.map(eventRecord(from:))
@@ -405,7 +405,7 @@ public struct OperationLedger: Sendable {
             try connection.transaction {
                 try connection.run(
                     """
-                    INSERT OR REPLACE INTO operation_ledger (
+                    INSERT INTO operation_ledger (
                         id, created_at, updated_at, planned_action_type, project_id, service_name,
                         status, idempotency_key, plan_hash, payload_json_redacted
                     )
@@ -436,10 +436,28 @@ public struct OperationLedger: Sendable {
                 SELECT id, created_at, updated_at, planned_action_type, project_id, service_name,
                        status, idempotency_key, plan_hash, payload_json_redacted
                 FROM operation_ledger
-                ORDER BY created_at ASC, id ASC
+                ORDER BY created_at ASC, rowid ASC
                 """
             )
             return try rows.map(operationRecord(from:))
+        }
+    }
+
+    public func latest(idempotencyKey: String) throws -> OperationRecord? {
+        try store.withConnection { connection in
+            try MigrationRunner().apply(on: connection)
+            let rows = try connection.query(
+                """
+                SELECT id, created_at, updated_at, planned_action_type, project_id, service_name,
+                       status, idempotency_key, plan_hash, payload_json_redacted
+                FROM operation_ledger
+                WHERE idempotency_key = ?
+                ORDER BY updated_at DESC, created_at DESC, id DESC
+                LIMIT 1
+                """,
+                bindings: [.text(idempotencyKey)]
+            )
+            return try rows.first.map(operationRecord(from:))
         }
     }
 }
@@ -500,6 +518,33 @@ public struct OwnershipRepository: Sendable {
                 """
             )
             return try rows.map(ownershipRecord(from:))
+        }
+    }
+
+    public func markCleanupCompleted(
+        resourceIdentifier: String,
+        runtimeAdapter: String,
+        observedAt: String,
+        metadataJSONRedacted: String
+    ) throws {
+        let redactedMetadata = RuntimeRedactionPolicy.default.redact(metadataJSONRedacted)
+        try store.withConnection { connection in
+            try MigrationRunner().apply(on: connection)
+            try connection.transaction {
+                try connection.run(
+                    """
+                    UPDATE ownership_records
+                    SET observed_at = ?, cleanup_eligible = 0, metadata_json_redacted = ?
+                    WHERE resource_identifier = ? AND runtime_adapter = ?
+                    """,
+                    bindings: [
+                        .text(observedAt),
+                        .text(redactedMetadata),
+                        .text(resourceIdentifier),
+                        .text(runtimeAdapter)
+                    ]
+                )
+            }
         }
     }
 }

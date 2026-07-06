@@ -40,7 +40,7 @@ public enum ManifestRuntimeMapper {
             .map { key, value in
                 RuntimeEnvironmentValue(
                     name: key,
-                    value: policy.redactionPolicy.redact(value),
+                    value: value,
                     isSensitive: policy.redactionPolicy.isSensitiveKey(key)
                 )
             }
@@ -85,7 +85,7 @@ public enum ManifestRuntimeMapper {
             return nil
         }
 
-        return RuntimePortMapping(hostPort: hostPort, containerPort: containerPort)
+        return RuntimePortMapping(hostPort: hostPort, containerPort: containerPort, bindAddress: "127.0.0.1")
     }
 
     private static func parseMount(_ value: String, identity: RuntimeServiceIdentity, issues: inout [PlanIssue]) -> RuntimeMountReference? {

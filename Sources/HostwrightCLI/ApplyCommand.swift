@@ -20,8 +20,13 @@ struct ApplyCommandRunner {
             let manifest = try ManifestValidator.validated(manifestText)
             let mapping = ManifestRuntimeMapper.map(manifest)
             let adapter = environment.runtimeAdapter()
-            let observed = try waitForAsync {
-                try await adapter.observe(desiredState: mapping.desiredState)
+            let observed: ObservedRuntimeState
+            do {
+                observed = try waitForAsync {
+                    try await adapter.observe(desiredState: mapping.desiredState)
+                }
+            } catch {
+                return failure(code: .runtimeUnavailable, message: "Runtime observation failed: \(RuntimeRedactionPolicy.default.redact(String(describing: error)))")
             }
             let plan = ReconciliationPlanner().plan(manifest: manifest, observedState: observed)
 
@@ -71,8 +76,14 @@ struct ApplyCommandRunner {
             try store.migrate()
             let timestamp = isoTimestamp()
             let projectID = "project-\(plan.projectName)"
-            let operationID = "operation-\(plan.planHash)-\(action.identity.serviceName)"
             let idempotencyKey = "\(plan.planHash):\(action.kind.rawValue):\(action.identity.displayName)"
+            if let existingOperation = try blockingOperation(store: store, idempotencyKey: idempotencyKey) {
+                return failure(
+                    code: .commandUsage,
+                    message: "Operation with the same idempotency key is already \(existingOperation.status.rawValue). No mutation was attempted."
+                )
+            }
+            let operationID = hostwrightUniqueID(prefix: "operation-apply")
 
             try persistPreMutationState(
                 store: store,
@@ -123,17 +134,25 @@ struct ApplyCommandRunner {
                     """
                 )
             } catch {
-                try persistFailure(
-                    store: store,
-                    error: error,
-                    action: action,
-                    operationID: operationID,
-                    idempotencyKey: idempotencyKey,
-                    planHash: plan.planHash,
-                    projectID: projectID,
-                    timestamp: timestamp
-                )
-                return failure(code: .runtimeUnavailable, message: "Runtime mutation failed after operation intent was recorded: \(RuntimeRedactionPolicy.default.redact(String(describing: error)))")
+                let runtimeErrorDescription = RuntimeRedactionPolicy.default.redact(String(describing: error))
+                do {
+                    try persistFailure(
+                        store: store,
+                        error: error,
+                        action: action,
+                        operationID: operationID,
+                        idempotencyKey: idempotencyKey,
+                        planHash: plan.planHash,
+                        projectID: projectID,
+                        timestamp: timestamp
+                    )
+                } catch {
+                    return failure(
+                        code: .runtimeUnavailable,
+                        message: "Runtime mutation failed after operation intent was recorded: \(runtimeErrorDescription). Failure state persistence also failed: \(RuntimeRedactionPolicy.default.redact(String(describing: error)))"
+                    )
+                }
+                return failure(code: .runtimeUnavailable, message: "Runtime mutation failed after operation intent was recorded: \(runtimeErrorDescription)")
             }
         } catch let error as ManifestParseError {
             return CLIRunResult(standardError: error.issues.map(\.rendered).joined(separator: "\n") + "\n", exitCode: 1)
@@ -146,14 +165,17 @@ struct ApplyCommandRunner {
         if !service.mounts.isEmpty {
             return "Create-only apply rejects volumes and mounts."
         }
-        if service.environment.contains(where: { $0.isSensitive || $0.value == RuntimeRedactionPolicy.default.replacement }) {
-            return "Create-only apply rejects sensitive environment values until secret handling is designed."
-        }
         if service.ports.contains(where: { ($0.hostPort ?? 0) < 1_024 }) {
             return "Create-only apply rejects privileged host ports."
         }
         if service.ports.contains(where: { $0.bindAddress == "0.0.0.0" || $0.bindAddress == "::" }) {
             return "Create-only apply rejects broad bind addresses."
+        }
+        if service.image.hasPrefix("-") {
+            return "Create-only apply rejects image values beginning with '-'."
+        }
+        if service.command.contains(where: { $0.hasPrefix("-") }) {
+            return "Create-only apply rejects command tokens beginning with '-'."
         }
         return nil
     }
@@ -206,7 +228,7 @@ struct ApplyCommandRunner {
             timestamp: timestamp
         )
         try store.observedStates.saveSnapshot(
-            snapshotID: "snapshot-\(plan.planHash)",
+            snapshotID: hostwrightUniqueID(prefix: "snapshot-apply"),
             projectID: projectID,
             observedState: observed,
             runtimeAdapter: observed.adapterMetadata?.adapterName ?? "runtime-adapter",
@@ -217,7 +239,7 @@ struct ApplyCommandRunner {
         )
         try store.operations.record(
             OperationRecord(
-                id: operationID,
+                id: "\(operationID)-recorded",
                 createdAt: timestamp,
                 updatedAt: timestamp,
                 plannedActionType: action.kind.rawValue,
@@ -231,7 +253,7 @@ struct ApplyCommandRunner {
         )
         try store.events.append([
             EventRecord(
-                id: "event-\(operationID)-started",
+                id: hostwrightUniqueID(prefix: "event-apply-started"),
                 timestamp: timestamp,
                 severity: .info,
                 type: action.executionAvailability == .availableForStartManagedService ? "apply.start-intent-recorded" : "apply.create-intent-recorded",
@@ -257,7 +279,7 @@ struct ApplyCommandRunner {
     ) throws {
         try store.operations.record(
             OperationRecord(
-                id: operationID,
+                id: "\(operationID)-succeeded",
                 createdAt: timestamp,
                 updatedAt: timestamp,
                 plannedActionType: action.kind.rawValue,
@@ -271,7 +293,7 @@ struct ApplyCommandRunner {
         )
         try store.events.append([
             EventRecord(
-                id: "event-\(operationID)-succeeded",
+                id: hostwrightUniqueID(prefix: "event-apply-succeeded"),
                 timestamp: timestamp,
                 severity: .info,
                 type: action.executionAvailability == .availableForStartManagedService ? "apply.started-service" : "apply.created-service",
@@ -315,7 +337,7 @@ struct ApplyCommandRunner {
         let redactedError = RuntimeRedactionPolicy.default.redact(String(describing: error))
         try store.operations.record(
             OperationRecord(
-                id: operationID,
+                id: "\(operationID)-failed",
                 createdAt: timestamp,
                 updatedAt: timestamp,
                 plannedActionType: action.kind.rawValue,
@@ -329,7 +351,7 @@ struct ApplyCommandRunner {
         )
         try store.events.append([
             EventRecord(
-                id: "event-\(operationID)-failed",
+                id: hostwrightUniqueID(prefix: "event-apply-failed"),
                 timestamp: timestamp,
                 severity: .error,
                 type: "apply.failed",
@@ -345,6 +367,19 @@ struct ApplyCommandRunner {
 
     private func failure(code: HostwrightErrorCode, message: String) -> CLIRunResult {
         CLIRunResult(standardError: "\(code.rawValue): \(message)\n", exitCode: 1)
+    }
+
+    private func blockingOperation(store: SQLiteStateStore, idempotencyKey: String) throws -> OperationRecord? {
+        guard let latest = try store.operations.latest(idempotencyKey: idempotencyKey) else {
+            return nil
+        }
+
+        switch latest.status {
+        case .planned, .recorded, .succeeded:
+            return latest
+        case .failed, .abandoned:
+            return nil
+        }
     }
 }
 

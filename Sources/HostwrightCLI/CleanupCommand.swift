@@ -20,8 +20,13 @@ struct CleanupCommandRunner {
             try store.migrate()
 
             let adapter = environment.runtimeAdapter()
-            let observed = try hostwrightWaitForAsync {
-                try await adapter.observe(desiredState: mapping.desiredState)
+            let observed: ObservedRuntimeState
+            do {
+                observed = try hostwrightWaitForAsync {
+                    try await adapter.observe(desiredState: mapping.desiredState)
+                }
+            } catch {
+                return failure(code: .runtimeUnavailable, message: "Runtime observation failed: \(RuntimeRedactionPolicy.default.redact(String(describing: error)))")
             }
             let candidates = try cleanupCandidates(
                 store: store,
@@ -75,7 +80,8 @@ struct CleanupCommandRunner {
                 return CleanupCandidate(
                     identity: observedService.identity,
                     resourceIdentifier: ownership.resourceIdentifier,
-                    lifecycleState: observedService.lifecycleState
+                    lifecycleState: observedService.lifecycleState,
+                    runtimeAdapter: ownership.runtimeAdapter
                 )
             }
             .sorted { $0.resourceIdentifier < $1.resourceIdentifier }
@@ -95,6 +101,8 @@ struct CleanupCommandRunner {
     ) throws -> CLIRunResult {
         let timestamp = hostwrightTimestamp()
         let projectID = "project-\(projectName)"
+        let runtimeAdapter = observed.adapterMetadata?.adapterName
+        var hadFailure = false
         var lines = [
             "Hostwright cleanup",
             "State DB: \(stateDatabasePath)",
@@ -103,70 +111,135 @@ struct CleanupCommandRunner {
         ]
 
         for candidate in candidates {
-            let operationID = "operation-cleanup-\(token)-\(candidate.identity.serviceName)"
+            let idempotencyKey = "\(token):\(candidate.resourceIdentifier)"
+            if let existingOperation = try store.operations.latest(idempotencyKey: idempotencyKey),
+               existingOperation.status == .planned || existingOperation.status == .recorded || existingOperation.status == .succeeded {
+                lines.append("- skipped \(candidate.resourceIdentifier): operation already \(existingOperation.status.rawValue)")
+                continue
+            }
+
+            let operationID = hostwrightUniqueID(prefix: "operation-cleanup")
             try store.operations.record(
                 OperationRecord(
-                    id: operationID,
+                    id: "\(operationID)-recorded",
                     createdAt: timestamp,
                     updatedAt: timestamp,
                     plannedActionType: "deleteManagedContainer",
                     projectID: projectID,
                     serviceName: candidate.identity.serviceName,
                     status: .recorded,
-                    idempotencyKey: "\(token):\(candidate.resourceIdentifier)",
+                    idempotencyKey: idempotencyKey,
                     planHash: token,
                     payloadJSONRedacted: #"{"resourceIdentifier":"\#(candidate.resourceIdentifier)"}"#
                 )
             )
 
-            let event = try hostwrightWaitForAsync {
-                try await adapter.execute(
-                    PlannedRuntimeAction(
-                        kind: .remove,
-                        identity: candidate.identity,
-                        isDestructive: true,
-                        summary: "Delete cleanup-eligible Hostwright-owned container \(candidate.resourceIdentifier)."
-                    ),
-                    confirmation: RuntimeMutationConfirmation(
-                        confirmed: true,
-                        reason: "Confirmed Hostwright cleanup \(token)",
-                        planHash: token
+            do {
+                let event = try hostwrightWaitForAsync {
+                    try await adapter.execute(
+                        PlannedRuntimeAction(
+                            kind: .remove,
+                            identity: candidate.identity,
+                            isDestructive: true,
+                            summary: "Delete cleanup-eligible Hostwright-owned container \(candidate.resourceIdentifier)."
+                        ),
+                        confirmation: RuntimeMutationConfirmation(
+                            confirmed: true,
+                            reason: "Confirmed Hostwright cleanup \(token)",
+                            planHash: token
+                        )
+                    )
+                }
+
+                let successTimestamp = hostwrightTimestamp()
+                try store.operations.record(
+                    OperationRecord(
+                        id: "\(operationID)-succeeded",
+                        createdAt: timestamp,
+                        updatedAt: successTimestamp,
+                        plannedActionType: "deleteManagedContainer",
+                        projectID: projectID,
+                        serviceName: candidate.identity.serviceName,
+                        status: .succeeded,
+                        idempotencyKey: idempotencyKey,
+                        planHash: token,
+                        payloadJSONRedacted: #"{"result":"deleted"}"#
                     )
                 )
+                try store.events.append([
+                    EventRecord(
+                        id: hostwrightUniqueID(prefix: "event-cleanup-deleted"),
+                        timestamp: successTimestamp,
+                        severity: .info,
+                        type: "cleanup.deleted",
+                        source: "hostwright-cli",
+                        projectID: projectID,
+                        serviceName: candidate.identity.serviceName,
+                        runtimeAdapter: runtimeAdapter,
+                        message: event.message,
+                        payloadJSONRedacted: #"{"resourceIdentifier":"\#(candidate.resourceIdentifier)"}"#
+                    )
+                ])
+                try store.ownership.markCleanupCompleted(
+                    resourceIdentifier: candidate.resourceIdentifier,
+                    runtimeAdapter: candidate.runtimeAdapter,
+                    observedAt: successTimestamp,
+                    metadataJSONRedacted: #"{"cleanupToken":"\#(token)","cleanupStatus":"deleted"}"#
+                )
+                lines.append("- deleted \(candidate.resourceIdentifier)")
+            } catch {
+                hadFailure = true
+                let redactedError = RuntimeRedactionPolicy.default.redact(String(describing: error))
+                do {
+                    try store.operations.record(
+                        OperationRecord(
+                            id: "\(operationID)-failed",
+                            createdAt: timestamp,
+                            updatedAt: hostwrightTimestamp(),
+                            plannedActionType: "deleteManagedContainer",
+                            projectID: projectID,
+                            serviceName: candidate.identity.serviceName,
+                            status: .failed,
+                            idempotencyKey: idempotencyKey,
+                            planHash: token,
+                            payloadJSONRedacted: #"{"error":"\#(redactedError)"}"#
+                        )
+                    )
+                    try store.events.append([
+                        EventRecord(
+                            id: hostwrightUniqueID(prefix: "event-cleanup-failed"),
+                            timestamp: hostwrightTimestamp(),
+                            severity: .error,
+                            type: "cleanup.failed",
+                            source: "hostwright-cli",
+                            projectID: projectID,
+                            serviceName: candidate.identity.serviceName,
+                            runtimeAdapter: runtimeAdapter,
+                            message: "Cleanup failed for \(candidate.resourceIdentifier): \(redactedError)",
+                            payloadJSONRedacted: #"{"resourceIdentifier":"\#(candidate.resourceIdentifier)"}"#
+                        )
+                    ])
+                } catch {
+                    lines.append("- failed \(candidate.resourceIdentifier): \(redactedError)")
+                    lines.append("")
+                    return CLIRunResult(
+                        standardOutput: lines.joined(separator: "\n"),
+                        standardError: "\(HostwrightErrorCode.runtimeUnavailable.rawValue): Cleanup runtime failure was primary: \(redactedError). Failure state persistence also failed: \(RuntimeRedactionPolicy.default.redact(String(describing: error)))\n",
+                        exitCode: 1
+                    )
+                }
+                lines.append("- failed \(candidate.resourceIdentifier): \(redactedError)")
             }
-
-            try store.operations.record(
-                OperationRecord(
-                    id: operationID,
-                    createdAt: timestamp,
-                    updatedAt: hostwrightTimestamp(),
-                    plannedActionType: "deleteManagedContainer",
-                    projectID: projectID,
-                    serviceName: candidate.identity.serviceName,
-                    status: .succeeded,
-                    idempotencyKey: "\(token):\(candidate.resourceIdentifier)",
-                    planHash: token,
-                    payloadJSONRedacted: #"{"result":"deleted"}"#
-                )
-            )
-            try store.events.append([
-                EventRecord(
-                    id: "event-cleanup-1-deleted-\(token)-\(candidate.identity.serviceName)",
-                    timestamp: hostwrightTimestamp(),
-                    severity: .info,
-                    type: "cleanup.deleted",
-                    source: "hostwright-cli",
-                    projectID: projectID,
-                    serviceName: candidate.identity.serviceName,
-                    runtimeAdapter: observed.adapterMetadata?.adapterName,
-                    message: event.message,
-                    payloadJSONRedacted: #"{"resourceIdentifier":"\#(candidate.resourceIdentifier)"}"#
-                )
-            ])
-            lines.append("- deleted \(candidate.resourceIdentifier)")
         }
 
         lines.append("")
+        if hadFailure {
+            return CLIRunResult(
+                standardOutput: lines.joined(separator: "\n"),
+                standardError: "\(HostwrightErrorCode.runtimeUnavailable.rawValue): cleanup completed with one or more runtime failures; successful deletions were preserved in the report.\n",
+                exitCode: 1
+            )
+        }
         return CLIRunResult(standardOutput: lines.joined(separator: "\n"))
     }
 
@@ -180,7 +253,7 @@ struct CleanupCommandRunner {
         let timestamp = hostwrightTimestamp()
         try store.events.append([
             EventRecord(
-                id: "event-cleanup-0-planned-\(token)",
+                id: hostwrightUniqueID(prefix: "event-cleanup-planned"),
                 timestamp: timestamp,
                 severity: .info,
                 type: "cleanup.planned",
@@ -226,4 +299,5 @@ private struct CleanupCandidate: Equatable {
     let identity: RuntimeServiceIdentity
     let resourceIdentifier: String
     let lifecycleState: RuntimeLifecycleState
+    let runtimeAdapter: String
 }

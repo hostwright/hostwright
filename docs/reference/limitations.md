@@ -38,6 +38,7 @@ Hostwright is not production ready.
 - Manifest-to-runtime desired-state mapping outside the CLI.
 - Typed deterministic drift records, plan issues, planned actions, and plan hash.
 - Planning policy checks for duplicate host ports, unsafe broad bind addresses, privileged host ports, unsafe root mounts, ambiguous mounts, invalid identities, and secret-like environment values.
+- Hostwright-created Apple container port publishes are explicitly localhost-scoped by default.
 - Drift detection for missing, unmanaged, stopped, exited, failed, image mismatch, port mismatch, mount mismatch, unhealthy, duplicate observed identity, unsupported observed state, and unavailable observation cases.
 - `hostwright apply [path] --state-db <path> --confirm-plan <hash>` for one create-missing-service action or one restart-policy-allowed managed start action.
 - Operation intent persistence before mutation.
@@ -101,7 +102,7 @@ The runtime module contains Apple container observation infrastructure and narro
 
 The runtime parser accepts the fixture-defined `hostwright.apple-container.observation.v1` schema, the verified real empty JSON array shape returned by `container list --all --format json`, Apple builder container output that is ignored, and the verified `hostwright-proof-web` created/stopped output. Unsupported, malformed, or broader real Apple container JSON output fails closed with redacted errors.
 
-Apply is not general lifecycle management. It uses `container create` only after explicit plan confirmation, operation intent persistence, local image confirmation, and safe-subset validation. It uses `container start <id>` only for one observed Hostwright-owned stopped/created/exited service when restart policy allows a managed start. Cleanup uses `container delete <id>` only after dry-run token confirmation and ownership/live-state eligibility checks.
+Apply is not general lifecycle management. It uses `container create` only after explicit plan confirmation, idempotency checks, operation intent persistence, local image confirmation, and safe-subset validation. Created port bindings are emitted as explicit `127.0.0.1:host:container` publishes. It uses `container start <id>` only for one observed Hostwright-owned stopped/created/exited service when restart policy allows a managed start. Cleanup uses `container delete <id>` only after dry-run token confirmation and ownership/live-state eligibility checks.
 
 ## State Truth
 

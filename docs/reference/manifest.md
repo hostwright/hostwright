@@ -48,6 +48,8 @@ Validation currently checks:
 - project name is present and DNS-like;
 - service names are DNS-like;
 - each service has an image;
+- image values do not contain whitespace and do not begin with `-`;
+- service-level `command` tokens do not begin with `-`;
 - ports use `"host:container"` with values from 1 to 65535;
 - volumes use `source:/absolute/container/path[:ro|rw]`;
 - health command is non-empty when health is present;
@@ -55,3 +57,7 @@ Validation currently checks:
 - restart policy is `no`, `on-failure`, or `unless-stopped`.
 
 Validation does not contact registries or Apple container.
+
+Manifest port syntax does not expose a bind-address field in this alpha. Hostwright-created runtime port publishes default to `127.0.0.1` when mapped to Apple container.
+
+Service-level command tokens beginning with `-` are blocked in the current conservative apply scope because Apple container parses image and command positions after its own flags. Health-check command flags are unaffected because Hostwright does not execute health checks in this alpha.

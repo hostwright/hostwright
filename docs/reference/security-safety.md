@@ -35,9 +35,13 @@ Cleanup does not delete images, volumes, networks, Apple builder resources, base
 
 ## Secrets And Redaction
 
-Hostwright redacts known secret-like values in command output, logs, state payloads, events, and failure messages.
+Hostwright keeps execution environment values separate from display and persistence values. Runtime command construction receives the manifest value, while command output, logs, state payloads, events, plan output, and failure messages use redacted values.
 
 Redaction is heuristic. Users should not place real credentials in manifests, logs, examples, fixtures, or issue reports.
+
+## Network Exposure
+
+Manifest ports use `"host:container"` syntax in this alpha and do not expose a bind-address field. Hostwright-created Apple container publishes use explicit `127.0.0.1:host:container` bindings by default. Broad bind addresses such as `0.0.0.0` and `::` remain blocked when represented in runtime desired state.
 
 ## Unsupported Security-Sensitive Scope
 
@@ -51,4 +55,3 @@ This alpha does not include:
 - Kubernetes, CRI, Docker API, or Docker Compose compatibility;
 - GPU/ANE scheduling or Metal/Core ML/MLX container support;
 - signing, notarization, SBOM, or binary provenance.
-

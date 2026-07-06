@@ -161,14 +161,17 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
         guard service.mounts.isEmpty else {
             throw RuntimeAdapterError.commandRejected(classification: .mutating, message: "Create-only apply rejects mounts.")
         }
-        guard service.environment.allSatisfy({ !$0.isSensitive && $0.value != redactionPolicy.replacement }) else {
-            throw RuntimeAdapterError.commandRejected(classification: .mutating, message: "Create-only apply rejects sensitive environment values.")
-        }
         guard service.ports.allSatisfy({ ($0.hostPort ?? 0) >= 1_024 }) else {
             throw RuntimeAdapterError.commandRejected(classification: .mutating, message: "Create-only apply rejects privileged host ports.")
         }
         guard service.ports.allSatisfy({ $0.bindAddress != "0.0.0.0" && $0.bindAddress != "::" }) else {
             throw RuntimeAdapterError.commandRejected(classification: .mutating, message: "Create-only apply rejects broad bind addresses.")
+        }
+        guard !service.image.hasPrefix("-") else {
+            throw RuntimeAdapterError.commandRejected(classification: .mutating, message: "Create-only apply rejects image values beginning with '-'.")
+        }
+        guard service.command.allSatisfy({ !$0.hasPrefix("-") }) else {
+            throw RuntimeAdapterError.commandRejected(classification: .mutating, message: "Create-only apply rejects command tokens beginning with '-'.")
         }
     }
 }

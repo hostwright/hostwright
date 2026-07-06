@@ -28,6 +28,8 @@ public enum ManifestValidator {
                 issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Service '\(service.name)' must define a non-empty image."))
             }
 
+            validateCommand(service.command, serviceName: service.name, issues: &issues)
+
             for port in service.ports {
                 validatePort(port, serviceName: service.name, issues: &issues)
             }
@@ -76,8 +78,22 @@ public enum ManifestValidator {
     }
 
     private static func validateImage(_ image: String, serviceName: String, issues: inout [ManifestIssue]) {
-        if image.contains(" ") {
-            issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Service '\(serviceName)' image must not contain spaces."))
+        if image.rangeOfCharacter(from: .whitespacesAndNewlines) != nil {
+            issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Service '\(serviceName)' image must not contain whitespace."))
+        }
+        if image.hasPrefix("-") {
+            issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Service '\(serviceName)' image must not begin with '-'."))
+        }
+    }
+
+    private static func validateCommand(_ command: [String], serviceName: String, issues: inout [ManifestIssue]) {
+        for token in command where token.hasPrefix("-") {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "Service '\(serviceName)' command token '\(token)' is not supported because command tokens beginning with '-' can be parsed as container CLI flags."
+                )
+            )
         }
     }
 
@@ -151,4 +167,3 @@ public enum ManifestValidator {
         (1...65_535).contains(port)
     }
 }
-

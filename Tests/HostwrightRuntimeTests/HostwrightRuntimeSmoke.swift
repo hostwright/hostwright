@@ -73,6 +73,7 @@ final class HostwrightRuntimeTests: XCTestCase {
         XCTAssertEqual(create.mutationKind, .createMissingService)
         XCTAssertEqual(create.arguments.prefix(3), ["create", "--name", "hostwright-demo-api"])
         XCTAssertTrue(create.arguments.contains("--publish"))
+        XCTAssertTrue(create.arguments.contains("127.0.0.1:8080:8080"))
         XCTAssertFalse(create.arguments.contains("run"))
         XCTAssertFalse(create.arguments.contains("--rm"))
 
@@ -114,6 +115,42 @@ final class HostwrightRuntimeTests: XCTestCase {
             purpose: "fixture"
         )
         XCTAssertThrowsError(try RuntimeCommandPolicy.validateCreateMissingServiceMutation(nonHostwrightCreate))
+    }
+
+    func testCreateMissingServiceMutationPolicyRejectsFlagLikeImageAndCommandTokens() {
+        let unsafeImage = RuntimeCommandSpec(
+            executablePath: "/usr/bin/container-fixture",
+            arguments: ["create", "--name", "hostwright-demo-api", "--mount=src=/,dst=/host"],
+            classification: .mutating,
+            executableResolution: .resolvedByRuntimeExecutableResolver,
+            mutationKind: .createMissingService,
+            purpose: "fixture"
+        )
+        XCTAssertThrowsError(try RuntimeCommandPolicy.validateCreateMissingServiceMutation(unsafeImage)) { error in
+            XCTAssertTrue(String(describing: error).contains("image"))
+        }
+
+        let badImage = RuntimeCommandSpec(
+            executablePath: "/usr/bin/container-fixture",
+            arguments: ["create", "--name", "hostwright-demo-api", "-bad"],
+            classification: .mutating,
+            executableResolution: .resolvedByRuntimeExecutableResolver,
+            mutationKind: .createMissingService,
+            purpose: "fixture"
+        )
+        XCTAssertThrowsError(try RuntimeCommandPolicy.validateCreateMissingServiceMutation(badImage))
+
+        let unsafeCommandToken = RuntimeCommandSpec(
+            executablePath: "/usr/bin/container-fixture",
+            arguments: ["create", "--name", "hostwright-demo-api", "local/demo:latest", "--flag"],
+            classification: .mutating,
+            executableResolution: .resolvedByRuntimeExecutableResolver,
+            mutationKind: .createMissingService,
+            purpose: "fixture"
+        )
+        XCTAssertThrowsError(try RuntimeCommandPolicy.validateCreateMissingServiceMutation(unsafeCommandToken)) { error in
+            XCTAssertTrue(String(describing: error).contains("command tokens beginning"))
+        }
     }
 
     func testManagedStartAndDeletePoliciesAcceptOnlyExactHostwrightContainers() {
@@ -206,6 +243,39 @@ final class HostwrightRuntimeTests: XCTestCase {
         }
     }
 
+    func testFoundationRuntimeProcessRunnerDrainsLargeStdout() async throws {
+        let runner = FoundationRuntimeProcessRunner()
+        let result = try await runner.run(shellSpec("/usr/bin/yes x | /usr/bin/head -c 131072"))
+
+        XCTAssertEqual(result.exitStatus, 0)
+        XCTAssertGreaterThan(result.standardOutput.utf8.count, 65_536)
+    }
+
+    func testFoundationRuntimeProcessRunnerDrainsLargeStderr() async throws {
+        let runner = FoundationRuntimeProcessRunner()
+        let result = try await runner.run(shellSpec("/usr/bin/yes e | /usr/bin/head -c 131072 >&2"))
+
+        XCTAssertEqual(result.exitStatus, 0)
+        XCTAssertGreaterThan(result.standardError.utf8.count, 65_536)
+    }
+
+    func testFoundationRuntimeProcessRunnerTimeoutRedactsPartialOutput() async {
+        let runner = FoundationRuntimeProcessRunner()
+
+        do {
+            _ = try await runner.run(shellSpec("printf 'token=fake-secret\\n'; sleep 2", timeout: 1))
+            XCTFail("Expected timeout.")
+        } catch let error as RuntimeAdapterError {
+            guard case .commandTimedOut(_, let partialOutput, _) = error else {
+                return XCTFail("Expected commandTimedOut, got \(error).")
+            }
+            XCTAssertTrue(partialOutput.contains("[REDACTED]"))
+            XCTAssertFalse(partialOutput.contains("fake-secret"))
+        } catch {
+            XCTFail("Unexpected error: \(error).")
+        }
+    }
+
     func testRuntimeMutationRemainsUnavailable() async {
         let adapter = MockRuntimeAdapter(scenario: .availableEmpty)
 
@@ -254,6 +324,38 @@ final class HostwrightRuntimeTests: XCTestCase {
         XCTAssertEqual(runner.calls.compactMap(\.arguments.first), ["image", "create"])
         XCTAssertEqual(event.resourceIdentifier, "hostwright-proof-web")
         XCTAssertFalse(event.message.contains("fake-token"))
+        XCTAssertTrue(event.message.contains("[REDACTED]"))
+    }
+
+    func testAppleContainerApplyAdapterUsesOriginalEnvironmentValuesInCreateSpec() async throws {
+        let imageListFixture = try fixture("apple-container-image-list-real-json.txt")
+        let fakeSecret = "fake-secret-token"
+        let service = DesiredRuntimeService(
+            identity: proofIdentity,
+            image: "hostwright-proof-web:create-only",
+            environment: [RuntimeEnvironmentValue(name: "API_TOKEN", value: fakeSecret, isSensitive: true)],
+            ports: [RuntimePortMapping(hostPort: 18080, containerPort: 80, bindAddress: "127.0.0.1")]
+        )
+        let runner = RoutingRuntimeProcessRunner { spec in
+            if spec.arguments == ["image", "list", "--format", "json"] {
+                return RuntimeCommandResult(spec: spec, exitStatus: 0, standardOutput: imageListFixture, standardError: "")
+            }
+            if spec.arguments.first == "create" {
+                return RuntimeCommandResult(spec: spec, exitStatus: 0, standardOutput: "created token=\(fakeSecret)", standardError: "")
+            }
+            throw RuntimeAdapterError.commandRejected(classification: spec.classification, message: "unexpected command")
+        }
+        let adapter = AppleContainerApplyAdapter(executableResolver: resolvedContainer, processRunner: runner)
+
+        let event = try await adapter.execute(
+            PlannedRuntimeAction(kind: .create, identity: proofIdentity, isDestructive: false, summary: "create", desiredService: service),
+            confirmation: RuntimeMutationConfirmation(confirmed: true, reason: "test", planHash: "plan-hash")
+        )
+
+        let createArguments = try XCTUnwrap(runner.calls.first { $0.arguments.first == "create" }?.arguments)
+        XCTAssertTrue(createArguments.contains("API_TOKEN=\(fakeSecret)"))
+        XCTAssertTrue(createArguments.contains("127.0.0.1:18080:80"))
+        XCTAssertFalse(event.message.contains(fakeSecret))
         XCTAssertTrue(event.message.contains("[REDACTED]"))
     }
 
@@ -654,6 +756,17 @@ final class HostwrightRuntimeTests: XCTestCase {
     private func fixture(_ name: String) throws -> String {
         let url = try XCTUnwrap(Bundle.module.url(forResource: name, withExtension: nil))
         return try String(contentsOf: url, encoding: .utf8)
+    }
+
+    private func shellSpec(_ script: String, timeout: Int = 5) -> RuntimeCommandSpec {
+        RuntimeCommandSpec(
+            executablePath: "/bin/sh",
+            arguments: ["-c", script],
+            timeout: RuntimeCommandTimeout(seconds: timeout),
+            classification: .readOnly,
+            executableResolution: .resolvedByRuntimeExecutableResolver,
+            purpose: "shell fixture"
+        )
     }
 
     private final class RoutingRuntimeProcessRunner: RuntimeProcessRunning, @unchecked Sendable {

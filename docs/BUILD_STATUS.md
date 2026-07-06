@@ -81,6 +81,6 @@ The local `.github/workflows/ci.yml` template was not run and the hosted runner 
 
 ## Core Repo Boundary
 
-The root `hostwright_naming_convention/` archive and original root source files remain present locally as preserved input material, but they are ignored for the core repository because normalized preserved copies live under `docs/source-material/originals/`, `docs/naming/`, and `assets/brand/originals/`.
+The root `hostwright_naming_convention/` archive and original root source files are treated as private source material. Bulky internal documents and generated brand-source images are no longer kept in the current public tree; `docs/source-material/README.md` keeps checksum provenance for private-archive review.
 
 The local `site/` folder is not part of the core repository. The public website/docs site belongs in the separate `hostwright.dev` repository.

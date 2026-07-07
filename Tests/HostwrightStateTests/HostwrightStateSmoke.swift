@@ -68,12 +68,14 @@ final class HostwrightStateTests: XCTestCase {
     func testFutureSchemaVersionFailsBeforeMigrationOrRead() throws {
         try withTemporaryStore { store, databaseURL in
             try store.migrate()
+            let futureVersion = MigrationRunner.latestSchemaVersion + 1
             let connection = try SQLiteConnection(path: databaseURL.path)
             try connection.run(
                 """
                 INSERT INTO schema_migrations (version, description, checksum, applied_at)
-                    VALUES (3, 'future schema', 'future-checksum', '2026-07-01T00:00:00Z')
-                """
+                    VALUES (?, 'future schema', 'future-checksum', '2026-07-01T00:00:00Z')
+                """,
+                bindings: [.int(futureVersion)]
             )
 
             for action in [
@@ -84,7 +86,7 @@ final class HostwrightStateTests: XCTestCase {
                     guard case .incompatibleSchema(let foundVersion, let latestSupported, let message) = error as? StateStoreError else {
                         return XCTFail("Expected incompatibleSchema, got \(error).")
                     }
-                    XCTAssertEqual(foundVersion, 3)
+                    XCTAssertEqual(foundVersion, futureVersion)
                     XCTAssertEqual(latestSupported, MigrationRunner.latestSchemaVersion)
                     XCTAssertTrue(message.contains("newer Hostwright release"))
                 }
@@ -434,6 +436,51 @@ final class HostwrightStateTests: XCTestCase {
             XCTAssertEqual(state.attemptCount, 3)
             XCTAssertFalse(state.metadataJSONRedacted.contains(fakeSecret))
             XCTAssertEqual(try store.restartPolicies.loadProject(projectID: projectID).count, 1)
+        }
+    }
+
+    func testRestartRecoveryRecordsAppendAndRedactHints() throws {
+        try withTemporaryStore { store, _ in
+            try saveDesiredState(in: store)
+            try store.restartRecovery.append(
+                RestartRecoveryRecord(
+                    id: "recovery-1",
+                    operationID: "operation-restart",
+                    projectID: projectID,
+                    serviceName: "api",
+                    resourceIdentifier: "hostwright-demo-api",
+                    planHash: "plan-hash",
+                    status: .prepared,
+                    completedStepsJSONRedacted: #"[]"#,
+                    manualRecoveryHintRedacted: "prepared token=\(fakeSecret)",
+                    createdAt: timestamp,
+                    updatedAt: timestamp,
+                    metadataJSONRedacted: #"{"token":"\#(fakeSecret)"}"#
+                )
+            )
+            try store.restartRecovery.append(
+                RestartRecoveryRecord(
+                    id: "recovery-2",
+                    operationID: "operation-restart",
+                    projectID: projectID,
+                    serviceName: "api",
+                    resourceIdentifier: "hostwright-demo-api",
+                    planHash: "plan-hash",
+                    status: .stopSucceeded,
+                    completedStepsJSONRedacted: #"["stop"]"#,
+                    manualRecoveryHintRedacted: "container stopped; password=\(fakeSecret)",
+                    createdAt: timestamp,
+                    updatedAt: "2026-07-01T00:00:01Z",
+                    metadataJSONRedacted: "{}"
+                )
+            )
+
+            let records = try store.restartRecovery.load(operationID: "operation-restart")
+            XCTAssertEqual(records.map(\.status), [.prepared, .stopSucceeded])
+            XCTAssertEqual(try store.restartRecovery.latest(operationID: "operation-restart")?.status, .stopSucceeded)
+            XCTAssertEqual(try store.restartRecovery.loadAll().count, 2)
+            XCTAssertFalse(records.map(\.manualRecoveryHintRedacted).joined().contains(fakeSecret))
+            XCTAssertFalse(records.map(\.metadataJSONRedacted).joined().contains(fakeSecret))
         }
     }
 

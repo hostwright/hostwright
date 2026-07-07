@@ -8,9 +8,9 @@
 
 ## Verified On 2026-07-07
 
-- `swift build` succeeds after the Phase 16 health and restart-policy state changes.
-- `swift test list` lists 141 real XCTest cases across Hostwright test targets.
-- `swift test` executes 141 real XCTest test cases across CLI, core, daemon, health, manifest, networking, observability, reconciler, runtime, and state targets with 0 failures.
+- `swift build` succeeds after the Phase 17 managed restart changes.
+- `swift test list` lists 162 real XCTest cases across Hostwright test targets.
+- `swift test` executes 162 real XCTest test cases across CLI, core, daemon, health, manifest, networking, observability, reconciler, runtime, and state targets with 0 failures.
 - `scripts/grep-orchard.sh .` succeeds and reports historical references only in `docs/source-material/` and `docs/naming/`.
 - `scripts/test.sh` succeeds and runs `swift build` plus `swift test`.
 - Apple container 1.0.0 is installed locally at `/usr/local/bin/container`.
@@ -27,6 +27,11 @@
 - `hostwright cleanup --dry-run` produced token `cleanup-8ecbbdd9ef3cdd74`.
 - `hostwright cleanup --confirm-cleanup cleanup-8ecbbdd9ef3cdd74` deleted exactly `hostwright-phase9proof-web`.
 - `container list --all` after cleanup showed only Apple builder runtime state.
+- Phase 17 live proof used existing local image `docker.io/library/python:alpine` without pulling images.
+- `hostwright apply` created and started exactly one disposable Apple container named `hostwright-phase17proof-api`.
+- `hostwrightd --foreground --max-iterations 1` recorded an unhealthy direct `false` health check without runtime mutation.
+- `hostwright apply` restarted `hostwright-phase17proof-api` through `restartManagedService`, implemented as internal stop-then-start through `RuntimeAdapter`.
+- The exact proof container was stopped and then deleted through `hostwright cleanup --dry-run` plus token confirmation; `container list --all` after cleanup showed only Apple builder runtime state.
 
 ## Current Implementation Truth
 
@@ -42,15 +47,16 @@
 - Phase 14 adds migration checksums, future-schema refusal, corrupt/locked state error classification, explicit read-vs-migrate boundaries, and state backup/restore/export policy docs.
 - Phase 15 adds `hostwrightd --foreground --config <path> --state-db <path>` for non-mutating daemon observation/planning with event and operation persistence, cadence, jitter, backoff, shutdown, lock, and sleep/wake test seams.
 - Phase 16 adds bounded host-side health check execution, append-only health result persistence, restart policy state with max attempts/backoff/operator hold/manual-disable/crash-loop blocking, redacted health/restart events, and apply/daemon planning gates that avoid aggressive restart loops.
+- Phase 17 adds one restart-policy-gated managed restart path for exact Hostwright-owned running/unhealthy services, using live runtime lifecycle observation, a fresh persisted unhealthy health result from the explicit state DB, status/apply plan-hash parity, internal stop-then-start runtime execution, operation ledger records, partial restart failure records, and redacted events.
 - No Apple container command was called by Phase 6 or Phase 7.
 - `FoundationRuntimeProcessRunner` exists for policy-approved read-only command specs and supported mutation specs; automated tests still use fake process execution.
 - `AppleContainerReadOnlyAdapter` reports missing `container` as runtime unavailable and rejects mutation through the adapter contract.
 - `AppleContainerObservationParser` accepts the fixture-defined `hostwright.apple-container.observation.v1` schema, the verified real empty JSON array shape `[]`, Apple builder container list output, and the verified created/stopped proof container output.
 - `AppleContainerImageListParser` accepts the verified real object-based image list shape with `configuration.name`.
-- `SQLiteStateStore` uses system `SQLite3`, schema migrations, transactions, and repository APIs for desired services, observed snapshots, events, operations, ownership records, health results, and restart policy state.
+- `SQLiteStateStore` uses system `SQLite3`, schema migrations, transactions, and repository APIs for desired services, observed snapshots, events, operations, ownership records, health results, restart policy state, and restart recovery records.
 - Phase 6 state tests use explicit temporary database paths only.
 - Phase 7 planner tests use in-memory desired and observed runtime models only.
-- No default user database path, hidden global database write, unattended daemon mutation, launch agent, multi-action apply, stop/restart/remove command, image deletion, volume deletion, broad cleanup, aggressive restart loop, or CLI Apple container shell-out bypass was implemented.
+- No default user database path, hidden global database write, unattended daemon mutation, launch agent, multi-action apply, user-facing stop/restart/remove command, image deletion, volume deletion, broad cleanup, aggressive restart loop, or CLI Apple container shell-out bypass was implemented.
 - Live mutation proofs were run only for exact disposable Hostwright-owned proof containers and then cleaned up.
 
 ## SwiftPM Fixture Resources
@@ -76,7 +82,7 @@ Important diagnostic correction:
 - `swift -e 'import XCTest'` can still fail and is not the correct gate.
 - A minimal SwiftPM XCTest probe passed after Xcode was fixed.
 - `swift test list` is the local proof that Hostwright now exposes real XCTest cases.
-- `swift test` executes 141 XCTest cases after the Phase 16 health/restart-policy update.
+- `swift test` executes 162 XCTest cases after the Phase 17 managed restart update.
 
 The old top-level smoke/precondition posture has been replaced with XCTest assertions. Some test file names still include `Smoke.swift`, but the contents are XCTest cases.
 

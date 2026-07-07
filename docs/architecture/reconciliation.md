@@ -17,7 +17,7 @@ Hostwright has a deterministic planner. It maps the supported `hostwright.yaml` 
 
 `hostwright plan` still does not perform live runtime observation by default. It renders desired-state and policy diagnostics and states that runtime observation is not connected in the CLI path.
 
-`hostwright apply` is separate from `hostwright plan`. Apply recomputes the observed plan, requires a matching `--confirm-plan` hash, persists intent before mutation, and executes exactly one executable action: `createMissingService` or restart-policy-allowed `startManagedService`.
+`hostwright apply` is separate from `hostwright plan`. Apply recomputes the observed plan, requires a matching `--confirm-plan` hash, persists intent before mutation, and executes exactly one executable action: `createMissingService`, restart-policy-allowed `startManagedService`, or restart-policy-allowed `restartManagedService`.
 
 Cleanup is separate from apply. It requires dry-run token confirmation and deletes only exact cleanup-eligible Hostwright-owned stopped/created/exited containers. There is no rollback, multi-action apply, broad cleanup, or unattended daemon mutation.
 
@@ -38,7 +38,7 @@ The planner detects:
 - unsupported unknown observed lifecycle state;
 - unavailable observation.
 
-Only `createMissingService` and restart-policy-allowed `proposeStartStoppedService` can be marked executable. Every other action remains unavailable.
+Only `createMissingService`, restart-policy-allowed `proposeStartStoppedService`, and restart-policy-allowed `restartManagedService` can be marked executable. Every other action remains unavailable.
 
 ## Correctness Requirements
 
@@ -49,4 +49,5 @@ Only `createMissingService` and restart-policy-allowed `proposeStartStoppedServi
 - Mutation must require plan-hash confirmation.
 - Operation intent must be persisted before mutation.
 - Failures must be observable through events.
+- Managed restart must require Hostwright ownership, live observed running state, fresh persisted unhealthy health state, and recovery records.
 - Cleanup must require ownership records, live observation, non-running lifecycle, dry-run token confirmation, and exact resource identifiers.

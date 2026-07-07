@@ -42,9 +42,23 @@ struct StatusCommandRunner {
             let observed = try hostwrightWaitForAsync {
                 try await adapter.observe(desiredState: mapping.desiredState)
             }
-            let plan = ReconciliationPlanner().plan(manifest: manifest, observedState: observed)
             let timestamp = hostwrightTimestamp()
-            let projectID = "project-\(plan.projectName)"
+            let projectName = mapping.desiredState.projectName
+            let projectID = "project-\(projectName)"
+            let restartPolicyStates = try hostwrightRestartPolicyStateMap(store: store, projectID: projectID, projectName: projectName)
+            let observedForPlanning = try hostwrightPlanningObservedState(
+                observed: observed,
+                desiredState: mapping.desiredState,
+                store: store,
+                projectID: projectID,
+                currentTimestamp: timestamp
+            )
+            let plan = ReconciliationPlanner().plan(
+                manifest: manifest,
+                observedState: observedForPlanning,
+                restartPolicyStates: restartPolicyStates,
+                currentTimestamp: timestamp
+            )
 
             try store.desiredStates.saveManifestSnapshot(
                 projectID: projectID,
@@ -57,7 +71,7 @@ struct StatusCommandRunner {
             try store.observedStates.saveSnapshot(
                 snapshotID: hostwrightUniqueID(prefix: "status-snapshot"),
                 projectID: projectID,
-                observedState: observed,
+                observedState: observedForPlanning,
                 runtimeAdapter: observed.adapterMetadata?.adapterName ?? "runtime-adapter",
                 parserVersion: "status-observation-v1",
                 rawOutputHash: nil,
@@ -85,12 +99,12 @@ struct StatusCommandRunner {
                         manifestPath: manifestPath,
                         stateDatabasePath: stateDatabasePath,
                         manifest: manifest,
-                        observed: observed,
+                        observed: observedForPlanning,
                         plan: plan
                     )
                 )
             }
-            return CLIRunResult(standardOutput: render(manifest: manifest, observed: observed, plan: plan, stateDatabasePath: stateDatabasePath))
+            return CLIRunResult(standardOutput: render(manifest: manifest, observed: observedForPlanning, plan: plan, stateDatabasePath: stateDatabasePath))
         } catch let error as ManifestParseError {
             if output == .json {
                 return CLIRunResult(standardError: CLIJSON.manifestError(issues: error.issues, exitCode: .validation), exitCode: CLIExitCode.validation.rawValue)

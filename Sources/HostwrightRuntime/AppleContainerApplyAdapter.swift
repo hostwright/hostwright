@@ -89,6 +89,8 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
             return try await executeCreate(action, executable: executable)
         case .start:
             return try await executeStart(action, executable: executable)
+        case .restart:
+            return try await executeRestart(action, executable: executable)
         case .remove:
             return try await executeDelete(action, executable: executable)
         case .update, .stop, .noOp:
@@ -136,6 +138,54 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
             message: "Started managed service \(action.identity.displayName). \(redactionPolicy.redact(result.standardOutput))",
             resourceIdentifier: containerID
         )
+    }
+
+    private func executeRestart(_ action: PlannedRuntimeAction, executable: ResolvedRuntimeExecutable) async throws -> RuntimeEvent {
+        guard action.isDestructive else {
+            throw RuntimeAdapterError.commandRejected(
+                classification: .mutating,
+                message: "Restart-managed-service requires an explicitly destructive planned action."
+            )
+        }
+
+        let containerID = AppleContainerCommand.containerName(for: action.identity)
+        let stopSpec = AppleContainerCommand.spec(kind: .stopForManagedRestart(containerID: containerID), executable: executable)
+        try RuntimeCommandPolicy.validateRestartManagedServiceMutation(stopSpec)
+        let stopResult = try await processRunner.run(stopSpec)
+
+        let startSpec = AppleContainerCommand.spec(kind: .startForManagedRestart(containerID: containerID), executable: executable)
+        let startResult: RuntimeCommandResult
+        do {
+            try RuntimeCommandPolicy.validateRestartManagedServiceMutation(startSpec)
+            startResult = try await processRunner.run(startSpec)
+        } catch {
+            throw managedRestartStartFailedAfterStop(error)
+        }
+
+        return RuntimeEvent(
+            identity: action.identity,
+            severity: .info,
+            message: "Restarted managed service \(action.identity.displayName). stop: \(redactionPolicy.redact(stopResult.standardOutput)) start: \(redactionPolicy.redact(startResult.standardOutput))",
+            resourceIdentifier: containerID
+        )
+    }
+
+    private func managedRestartStartFailedAfterStop(_ error: Error) -> RuntimeAdapterError {
+        let redacted = redactionPolicy.redact(String(describing: error))
+        if let runtimeError = error as? RuntimeAdapterError {
+            switch runtimeError.redacted(using: redactionPolicy) {
+            case .commandFailed(_, let message, let standardError):
+                return .managedRestartStartFailedAfterStop(message: message, standardError: standardError)
+            case .commandTimedOut(let command, let partialOutput, let partialError):
+                return .managedRestartStartFailedAfterStop(
+                    message: "Managed restart start timed out after stop succeeded: \(command) \(partialOutput)",
+                    standardError: partialError
+                )
+            default:
+                return .managedRestartStartFailedAfterStop(message: redactionPolicy.redact(String(describing: runtimeError)), standardError: "")
+            }
+        }
+        return .managedRestartStartFailedAfterStop(message: redacted, standardError: "")
     }
 
     private func executeDelete(_ action: PlannedRuntimeAction, executable: ResolvedRuntimeExecutable) async throws -> RuntimeEvent {

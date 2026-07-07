@@ -6,9 +6,9 @@ Tagline: Desired-state container control for Apple silicon Macs.
 
 ## Current Status
 
-This repository contains the Hostwright core foundation: source-material preservation, documentation boundaries, a dependency-free Swift Package Manager package, CLI commands, a restricted `hostwright.yaml` manifest parser/validator, typed runtime contracts, deterministic planning, explicit SQLite state paths, Apple container observation, a narrow confirmed apply gate, bounded logs, event rendering, foreground daemon reconciliation with in-process loopback health probes and restart-state blocking, and ownership-gated cleanup for exact stopped/created/exited containers.
+This repository contains the Hostwright core foundation: source-material preservation, documentation boundaries, a dependency-free Swift Package Manager package, CLI commands, a restricted `hostwright.yaml` manifest parser/validator, typed runtime contracts, deterministic planning, explicit SQLite state paths, Apple container observation, a narrow confirmed apply gate, bounded logs, event rendering, foreground daemon reconciliation with in-process loopback health probes and restart-state blocking, managed restart recovery records, and ownership-gated cleanup for exact stopped/created/exited containers.
 
-Hostwright `v0.1.0-alpha.1` is a source-only alpha release candidate. Hostwright is not production ready. It does not implement general lifecycle management, multi-action apply, daemon restart loops, stop/restart commands, image replacement, image/volume cleanup, unattended daemon mutation, DNS, tunnels, Kubernetes compatibility, a Docker API, or full Docker Compose parity.
+Hostwright `v0.1.0-alpha.1` is a source-only alpha release candidate. Hostwright is not production ready. It does not implement general lifecycle management, multi-action apply, daemon restart loops, user-facing stop/restart commands, image replacement, image/volume cleanup, unattended daemon mutation, DNS, tunnels, Kubernetes compatibility, a Docker API, or full Docker Compose parity.
 
 ## Release Candidate
 
@@ -118,7 +118,7 @@ The current parser is a restricted Hostwright manifest subset parser, not a gene
 
 `RuntimeAdapter` defines the runtime boundary, runtime state models, command classification, timeout model, redaction policy, fake process runner, and mock adapter behavior.
 
-Apple container observation, bounded logs, create, restart-policy-gated managed start, exact cleanup-eligible container delete, and foreground daemon observation/planning are implemented through this boundary. General lifecycle management, image/volume cleanup, stop/restart commands, and unattended daemon mutation are not implemented.
+Apple container observation, bounded logs, create, restart-policy-gated managed start, restart-policy-gated managed restart, exact cleanup-eligible container delete, and foreground daemon observation/planning are implemented through this boundary. General lifecycle management, image/volume cleanup, user-facing stop/restart commands, and unattended daemon mutation are not implemented.
 
 ## Source Material
 

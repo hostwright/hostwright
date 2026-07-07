@@ -4,7 +4,7 @@ Hostwright's intended local state store is SQLite.
 
 ## Purpose
 
-The state store persists desired state, observed snapshots, events, operation records, and ownership records. Restart history and drift-specific records remain planned for later phases.
+The state store persists desired state, observed snapshots, events, operation records, ownership records, health results, restart policy state, and managed restart recovery records. Broader drift-specific records remain planned for later phases.
 
 ## Current State
 
@@ -20,6 +20,9 @@ Implemented:
 - operation ledger records for mutation safety
 - operation statuses for recorded, succeeded, and failed apply/cleanup attempts
 - ownership records for apply and cleanup decisions
+- health check result records
+- restart policy state records
+- restart recovery records
 - temp-database smoke checks
 - migration checksums and future-version refusal
 - actionable corrupt/locked database failures
@@ -29,7 +32,7 @@ Implemented:
 Not implemented:
 
 - multi-action `hostwright apply`
-- runtime mutation beyond create-missing-service, restart-policy-allowed managed start, and exact cleanup-eligible managed container delete
+- runtime mutation beyond create-missing-service, restart-policy-allowed managed start, restart-policy-allowed managed restart, and exact cleanup-eligible managed container delete
 - broad cleanup, image cleanup, volume cleanup, or unmanaged cleanup
 - drift planner
 - production durability claims
@@ -56,7 +59,7 @@ Tests use unique temporary database paths. Future CLI/dev commands may add an ex
 
 `SQLiteStateStore.migrate()` is the only explicit migration path. Repository reads and writes validate the already-applied schema before accessing tables; they do not create a missing database, create `schema_migrations`, or apply migrations as a side effect.
 
-Schema version 1 is the latest supported state schema. A database migrated by a newer Hostwright release fails closed with an incompatible-schema error. Hostwright does not downgrade state databases and does not attempt compatibility conversion.
+Schema version 3 is the latest supported state schema. A database migrated by a newer Hostwright release fails closed with an incompatible-schema error. Hostwright does not downgrade state databases and does not attempt compatibility conversion.
 
 Each migration records a checksum in `schema_migrations`. Current builds accept the historical Phase 6 checksum for schema version 1 and record an algorithmic checksum for fresh migrations. If a known migration version has an unexpected checksum, Hostwright fails before reading or writing application records.
 
@@ -73,9 +76,18 @@ Version 1 creates:
 - `operation_ledger`
 - `ownership_records`
 
-Normalized columns hold identifiers, project names, service names, timestamps, lifecycle states, operation status, event severity, and hashes.
+Version 2 creates:
 
-JSON blobs hold ports, mounts, environment snapshots, runtime capabilities, runtime identifiers, event payloads, operation payloads, and ownership metadata. Payload fields are redacted before persistence.
+- `health_check_results`
+- `restart_policy_state`
+
+Version 3 creates:
+
+- `restart_recovery_records`
+
+Normalized columns hold identifiers, project names, service names, timestamps, lifecycle states, operation status, event severity, restart status, and hashes.
+
+JSON blobs hold ports, mounts, environment snapshots, runtime capabilities, runtime identifiers, event payloads, operation payloads, ownership metadata, health command/output metadata, and restart recovery completed-step metadata. Payload fields and manual recovery hints are redacted before persistence.
 
 ## Backup, Restore, And Export
 

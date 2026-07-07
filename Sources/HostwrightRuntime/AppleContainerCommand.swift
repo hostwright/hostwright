@@ -11,6 +11,8 @@ public enum AppleContainerCommand {
     public enum MutatingKind: Equatable, Sendable {
         case createContainer
         case startContainer(containerID: String)
+        case stopForManagedRestart(containerID: String)
+        case startForManagedRestart(containerID: String)
         case deleteContainer(containerID: String)
     }
 
@@ -94,7 +96,7 @@ public enum AppleContainerCommand {
             arguments.append(desiredService.image)
             arguments += desiredService.command
             return arguments
-        case .startContainer, .deleteContainer:
+        case .startContainer, .stopForManagedRestart, .startForManagedRestart, .deleteContainer:
             return arguments(for: kind)
         }
     }
@@ -104,6 +106,10 @@ public enum AppleContainerCommand {
         case .createContainer:
             return []
         case .startContainer(let containerID):
+            return ["start", containerID]
+        case .stopForManagedRestart(let containerID):
+            return ["stop", containerID]
+        case .startForManagedRestart(let containerID):
             return ["start", containerID]
         case .deleteContainer(let containerID):
             return ["delete", containerID]
@@ -127,7 +133,7 @@ public enum AppleContainerCommand {
         switch kind {
         case .createContainer:
             return "Create missing Hostwright-managed service \(desiredService.identity.displayName)."
-        case .startContainer, .deleteContainer:
+        case .startContainer, .stopForManagedRestart, .startForManagedRestart, .deleteContainer:
             return purpose(for: kind)
         }
     }
@@ -138,6 +144,10 @@ public enum AppleContainerCommand {
             return "Create missing Hostwright-managed service."
         case .startContainer(let containerID):
             return "Start Hostwright-managed container \(containerID)."
+        case .stopForManagedRestart(let containerID):
+            return "Stop Hostwright-managed container \(containerID) as the first managed restart step."
+        case .startForManagedRestart(let containerID):
+            return "Start Hostwright-managed container \(containerID) as the second managed restart step."
         case .deleteContainer(let containerID):
             return "Delete exact Hostwright-managed container \(containerID)."
         }
@@ -149,6 +159,8 @@ public enum AppleContainerCommand {
             return .createMissingService
         case .startContainer:
             return .startManagedService
+        case .stopForManagedRestart, .startForManagedRestart:
+            return .restartManagedService
         case .deleteContainer:
             return .deleteManagedContainer
         }

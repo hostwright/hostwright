@@ -25,9 +25,10 @@ Supported mutation is limited to:
 
 - create one missing Hostwright-managed service after plan-hash confirmation and local-image checks;
 - start one exact Hostwright-managed stopped/created/exited service when restart policy allows it;
+- internally stop then start one exact Hostwright-managed running/unhealthy service when restart policy allows managed restart;
 - delete exact cleanup-eligible Hostwright-owned stopped/created/exited containers after dry-run token confirmation.
 
-The adapter does not stop, restart, remove broadly, run, pull, push, build, exec, attach, use `--all`, use `--force`, delete images, delete volumes, install services, or mutate unmanaged resources.
+The adapter does not expose public stop/restart commands, remove broadly, run, pull, push, build, exec, attach, use `--all`, use `--force`, delete images, delete volumes, install services, or mutate unmanaged resources.
 
 ## Future Requirements
 

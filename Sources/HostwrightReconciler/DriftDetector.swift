@@ -186,7 +186,16 @@ public enum DriftDetector {
             detectImageDrift(desired: desired, observed: observed, drift: &drift, actions: &actions)
             detectPortDrift(desired: desired, observed: observed, drift: &drift, actions: &actions)
             detectMountDrift(desired: desired, observed: observed, drift: &drift, actions: &actions)
-            detectHealthDrift(observed, policy: policy, drift: &drift, actions: &actions)
+            detectHealthDrift(
+                desired: desired,
+                observed: observed,
+                restartPolicyState: restartPolicyState(for: desired.identity, in: restartPolicyStates),
+                currentTimestamp: currentTimestamp,
+                policy: policy,
+                issues: &issues,
+                drift: &drift,
+                actions: &actions
+            )
         }
     }
 
@@ -376,8 +385,12 @@ public enum DriftDetector {
     }
 
     private static func detectHealthDrift(
-        _ observed: ObservedRuntimeService,
+        desired: DesiredRuntimeService,
+        observed: ObservedRuntimeService,
+        restartPolicyState: RestartPolicyStateRecord?,
+        currentTimestamp: String?,
         policy: PlanningPolicy,
+        issues: inout [PlanIssue],
         drift: inout [DriftRecord],
         actions: inout [PlannedAction]
     ) {
@@ -398,6 +411,38 @@ public enum DriftDetector {
                 stableDetailKey: observed.healthState.rawValue
             )
         )
+        if observed.lifecycleState == .running,
+           observed.healthState == .unhealthy,
+           desired.restartPolicy.allowsManagedStart {
+            let decision = RestartPolicyEvaluator.restartDecision(
+                desired: desired,
+                state: restartPolicyState,
+                currentTimestamp: currentTimestamp
+            )
+            if decision.isBlocked {
+                issues.append(
+                    PlanIssue(
+                        kind: .restartPolicyBlocked,
+                        severity: .warning,
+                        identity: desired.identity,
+                        message: decision.reason,
+                        stableDetailKey: restartPolicyState?.status.rawValue ?? "blocked"
+                    )
+                )
+            }
+            actions.append(
+                PlannedAction(
+                    kind: .restartManagedService,
+                    identity: observed.identity,
+                    reason: decision.reason,
+                    driftKind: .unhealthyService,
+                    stableDetailKey: observed.healthState.rawValue,
+                    executionAvailability: decision.executionAvailability
+                )
+            )
+            return
+        }
+
         actions.append(
             PlannedAction(
                 kind: .investigateUnhealthyService,

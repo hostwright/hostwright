@@ -7,6 +7,8 @@ public enum DoctorCheckIdentifier: String, Equatable, Sendable {
     case swiftToolchain
     case appleContainerCLI
     case manifestPresence
+    case statePathPolicy
+    case telemetryPolicy
 }
 
 public enum DoctorCheckStatus: String, Equatable, Sendable {
@@ -102,6 +104,8 @@ public enum HostwrightDoctor {
                 message: inputs.manifestExists ? "Found hostwright.yaml in the current directory." : "No hostwright.yaml found in the current directory."
             )
         )
+        checks.append(DoctorCheck(identifier: .statePathPolicy, status: .pass, message: "State database paths are explicit; Hostwright does not choose a default user database path."))
+        checks.append(DoctorCheck(identifier: .telemetryPolicy, status: .pass, message: "Telemetry is local-only. Hostwright does not upload diagnostics or events."))
 
         return DoctorReport(checks: checks)
     }

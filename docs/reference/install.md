@@ -38,15 +38,16 @@ swift run hostwright status --state-db /tmp/hostwright.sqlite --output json
 swift run hostwright logs api --state-db /tmp/hostwright.sqlite
 swift run hostwright events --state-db /tmp/hostwright.sqlite
 swift run hostwright events --state-db /tmp/hostwright.sqlite --output json
+swift run hostwright diagnostics --state-db /tmp/hostwright.sqlite --bundle /tmp/hostwright-diagnostics.json
 swift run hostwright cleanup --state-db /tmp/hostwright.sqlite --dry-run
 swift run hostwrightd --foreground --config hostwright.yaml --state-db /tmp/hostwright.sqlite --max-iterations 1
 ```
 
-State databases are never chosen implicitly. `status`, `logs --state-db`, `apply`, `cleanup`, and `hostwrightd --foreground` can run explicit migrations before writing state. `events` reads an already-migrated state database and fails rather than creating or migrating one as a side effect.
+State databases are never chosen implicitly. `status`, `logs --state-db`, `apply`, `cleanup`, and `hostwrightd --foreground` can run explicit migrations before writing state. `events` and `diagnostics` read an already-migrated state database and fail rather than creating or migrating one as a side effect.
 
 `hostwrightd` requires explicit `--config` and `--state-db` paths. It observes, plans, and records daemon loop events only; it does not install a launch agent or perform unattended runtime mutation.
 
-For backup or restore, stop Hostwright commands using the database and copy the explicit SQLite file plus sidecar files such as `state.sqlite-wal` and `state.sqlite-shm` if they exist. Hostwright does not provide online backup, restore, export, or repair commands in this phase.
+For backup or restore, stop Hostwright commands using the database and copy the explicit SQLite file plus sidecar files such as `state.sqlite-wal` and `state.sqlite-shm` if they exist. `hostwright diagnostics` can write a local redacted JSON bundle for review, but Hostwright does not provide online backup, restore, repair, hosted diagnostics, or automatic upload commands in this phase.
 
 JSON output is also available for safe diagnostics:
 

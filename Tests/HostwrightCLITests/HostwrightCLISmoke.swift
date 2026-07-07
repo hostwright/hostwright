@@ -37,11 +37,20 @@ final class HostwrightCLITests: XCTestCase {
         )
         XCTAssertEqual(
             try CLICommand.parse(arguments: ["events", "--state-db", "/tmp/state.sqlite", "--project", "demo"]),
-            .events(stateDatabasePath: "/tmp/state.sqlite", projectName: "demo", output: .text)
+            .events(stateDatabasePath: "/tmp/state.sqlite", projectName: "demo", filters: EventFilters(), output: .text)
         )
         XCTAssertEqual(
             try CLICommand.parse(arguments: ["events", "--state-db", "/tmp/state.sqlite", "--output", "json"]),
-            .events(stateDatabasePath: "/tmp/state.sqlite", projectName: nil, output: .json)
+            .events(stateDatabasePath: "/tmp/state.sqlite", projectName: nil, filters: EventFilters(), output: .json)
+        )
+        XCTAssertEqual(
+            try CLICommand.parse(arguments: ["events", "--state-db", "/tmp/state.sqlite", "--type", "cleanup.failed", "--service", "api", "--severity", "error", "--limit", "5", "--sort", "desc", "--output", "json"]),
+            .events(
+                stateDatabasePath: "/tmp/state.sqlite",
+                projectName: nil,
+                filters: EventFilters(type: "cleanup.failed", serviceName: "api", severity: .error, limit: 5, sort: .descending),
+                output: .json
+            )
         )
         XCTAssertEqual(
             try CLICommand.parse(arguments: ["recovery", "--state-db", "/tmp/state.sqlite", "--project", "demo", "--output", "json"]),
@@ -51,9 +60,15 @@ final class HostwrightCLITests: XCTestCase {
             try CLICommand.parse(arguments: ["cleanup", "--state-db", "/tmp/state.sqlite", "--dry-run"]),
             .cleanup(path: "hostwright.yaml", stateDatabasePath: "/tmp/state.sqlite", confirmation: .dryRun)
         )
+        XCTAssertEqual(
+            try CLICommand.parse(arguments: ["diagnostics", "--state-db", "/tmp/state.sqlite", "--bundle", "/tmp/diagnostics.json", "--project", "demo", "--manifest", "custom.yaml"]),
+            .diagnostics(stateDatabasePath: "/tmp/state.sqlite", bundlePath: "/tmp/diagnostics.json", projectName: "demo", manifestPath: "custom.yaml")
+        )
         XCTAssertEqual(try CLICommand.parse(arguments: ["doctor"]), .doctor(output: .text))
         XCTAssertEqual(try CLICommand.parse(arguments: ["doctor", "--output", "json"]), .doctor(output: .json))
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["doctor", "--output", "yaml"]))
+        XCTAssertThrowsError(try CLICommand.parse(arguments: ["events", "--state-db", "/tmp/state.sqlite", "--sort", "newest"]))
+        XCTAssertThrowsError(try CLICommand.parse(arguments: ["diagnostics", "--state-db", "/tmp/state.sqlite"]))
     }
 
     func testApplyRequiresStateDBAndConfirmedPlanHash() {
@@ -78,7 +93,9 @@ final class HostwrightCLITests: XCTestCase {
         XCTAssertTrue(result.standardOutput.contains("hostwright plan [path] [--output text|json]"))
         XCTAssertTrue(result.standardOutput.contains("hostwright status [path] [--state-db <path>] [--output text|json]"))
         XCTAssertTrue(result.standardOutput.contains("hostwright recovery --state-db <path> [--project <name>] [--output text|json]"))
+        XCTAssertTrue(result.standardOutput.contains("hostwright diagnostics --state-db <path> --bundle <path>"))
         XCTAssertTrue(result.standardOutput.contains("JSON output is supported for plan, status, events, recovery, doctor"))
+        XCTAssertTrue(result.standardOutput.contains("Diagnostics writes a local redacted JSON bundle only"))
         XCTAssertTrue(result.standardOutput.contains("hostwright doctor --output json"))
     }
 
@@ -188,6 +205,8 @@ final class HostwrightCLITests: XCTestCase {
         XCTAssertEqual(json["hasFailures"] as? Bool, false)
         let checks = try XCTUnwrap(json["checks"] as? [[String: Any]])
         XCTAssertTrue(checks.contains { $0["identifier"] as? String == "appleContainerCLI" && $0["status"] as? String == "warning" })
+        XCTAssertTrue(checks.contains { $0["identifier"] as? String == "telemetryPolicy" && $0["status"] as? String == "pass" })
+        XCTAssertTrue(checks.contains { $0["identifier"] as? String == "statePathPolicy" && $0["status"] as? String == "pass" })
     }
 
     func testDoctorCompatibilityFailureUsesValidationExitCode() throws {
@@ -887,6 +906,8 @@ final class HostwrightCLITests: XCTestCase {
 
             XCTAssertEqual(result.exitCode, 0)
             XCTAssertTrue(result.standardOutput.contains("Runtime: observed"))
+            XCTAssertTrue(result.standardOutput.contains("Runtime parser: status-observation-v1"))
+            XCTAssertTrue(result.standardOutput.contains("Telemetry: local-only; no upload"))
             XCTAssertTrue(result.standardOutput.contains("lifecycle=running"))
             let events = try SQLiteStateStore(path: databasePath).events.loadAll()
             XCTAssertTrue(events.contains { $0.type == "status.observed" })
@@ -928,6 +949,9 @@ final class HostwrightCLITests: XCTestCase {
             XCTAssertNotNil(json["planHash"])
             let observedRuntime = try XCTUnwrap(json["runtime"] as? [String: Any])
             XCTAssertEqual(observedRuntime["observed"] as? Bool, true)
+            XCTAssertEqual(observedRuntime["parser"] as? String, "status-observation-v1")
+            XCTAssertEqual(observedRuntime["runtimeName"] as? String, "fake-runtime")
+            XCTAssertEqual(json["telemetryPolicy"] as? String, "local-only; no upload")
             let services = try XCTUnwrap(json["services"] as? [[String: Any]])
             XCTAssertEqual(services.first?["name"] as? String, "api")
         }
@@ -1035,6 +1059,144 @@ final class HostwrightCLITests: XCTestCase {
             let events = try XCTUnwrap(json["events"] as? [[String: Any]])
             XCTAssertEqual(events.map { $0["type"] as? String }, ["status.observed", "logs.read"])
             XCTAssertEqual(events.last?["message"] as? String, "token=[REDACTED]")
+        }
+    }
+
+    func testEventsFiltersSortsAndLimitsResults() throws {
+        try withTemporaryDatabase { databasePath in
+            let store = SQLiteStateStore(path: databasePath)
+            try store.migrate()
+            try saveDesiredManifest(store: store, manifestText: twoServiceManifest)
+            try store.events.append([
+                EventRecord(id: "event-1", timestamp: "2026-07-01T00:00:01Z", severity: .info, type: "status.observed", source: "test", projectID: "project-demo", serviceName: nil, runtimeAdapter: nil, message: "ok", payloadJSONRedacted: "{}"),
+                EventRecord(id: "event-2", timestamp: "2026-07-01T00:00:02Z", severity: .error, type: "cleanup.failed", source: "test", projectID: "project-demo", serviceName: "api", runtimeAdapter: nil, message: "token=\(fakeSecret)", payloadJSONRedacted: "{}"),
+                EventRecord(id: "event-3", timestamp: "2026-07-01T00:00:03Z", severity: .error, type: "cleanup.failed", source: "test", projectID: "project-demo", serviceName: "worker", runtimeAdapter: nil, message: "worker failed", payloadJSONRedacted: "{}")
+            ])
+
+            let result = HostwrightCLI.run(
+                arguments: ["events", "--state-db", databasePath, "--project", "demo", "--type", "cleanup.failed", "--severity", "error", "--sort", "desc", "--limit", "1", "--output", "json"],
+                environment: environment(files: FileBox())
+            )
+
+            XCTAssertEqual(result.exitCode, 0)
+            XCTAssertFalse(result.standardOutput.contains(fakeSecret))
+            let json = try jsonObject(result.standardOutput)
+            let filters = try XCTUnwrap(json["filters"] as? [String: Any])
+            XCTAssertEqual(filters["type"] as? String, "cleanup.failed")
+            XCTAssertEqual(filters["sort"] as? String, "desc")
+            XCTAssertEqual(filters["limit"] as? Int, 1)
+            let events = try XCTUnwrap(json["events"] as? [[String: Any]])
+            XCTAssertEqual(events.count, 1)
+            XCTAssertEqual(events[0]["id"] as? String, "event-3")
+        }
+    }
+
+    func testDiagnosticsWritesLocalRedactedBundleWithoutRuntimeObservation() throws {
+        try withTemporaryDatabase { databasePath in
+            let bundlePath = "/tmp/hostwright-diagnostics-\(UUID().uuidString).json"
+            let files = FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest])
+            let store = SQLiteStateStore(path: databasePath)
+            try store.migrate()
+            try saveDesiredManifest(store: store, manifestText: singleServiceManifest)
+            try store.events.append([
+                EventRecord(id: "event-secret", timestamp: "2026-07-01T00:00:01Z", severity: .error, type: "apply.failed", source: "test", projectID: "project-demo", serviceName: "api", runtimeAdapter: "fake", message: "token=\(fakeSecret)", payloadJSONRedacted: #"{"token":"\#(fakeSecret)"}"#),
+                EventRecord(id: "event-other", timestamp: "2026-07-01T00:00:02Z", severity: .info, type: "status.observed", source: "test", projectID: nil, serviceName: "api", runtimeAdapter: "fake", message: "global event", payloadJSONRedacted: "{}")
+            ])
+            try store.operations.record(
+                OperationRecord(
+                    id: "operation-secret",
+                    createdAt: "2026-07-01T00:00:01Z",
+                    updatedAt: "2026-07-01T00:00:02Z",
+                    plannedActionType: "createMissingService",
+                    projectID: "project-demo",
+                    serviceName: "api",
+                    status: .failed,
+                    idempotencyKey: "plan:create:api",
+                    planHash: "plan",
+                    payloadJSONRedacted: #"{"error":"token=\#(fakeSecret)"}"#
+                )
+            )
+
+            let result = HostwrightCLI.run(
+                arguments: ["diagnostics", "--state-db", databasePath, "--bundle", bundlePath, "--project", "demo", "--manifest", HostwrightIdentity.manifestFileName],
+                environment: environment(files: files, runtimeAdapter: FakeApplyRuntimeAdapter(observeError: .runtimeUnavailable("should not observe")))
+            )
+
+            XCTAssertEqual(result.exitCode, 0)
+            XCTAssertTrue(result.standardOutput.contains("Telemetry: local-only; no upload"))
+            let bundle = try XCTUnwrap(files.files[bundlePath])
+            XCTAssertFalse(bundle.contains(fakeSecret))
+            let json = try jsonObject(bundle)
+            XCTAssertEqual(json["kind"] as? String, "diagnostics")
+            XCTAssertEqual(json["projectID"] as? String, "project-demo")
+            XCTAssertEqual(json["telemetryPolicy"] as? String, "local-only; no upload")
+            let events = try XCTUnwrap(json["events"] as? [[String: Any]])
+            XCTAssertEqual(events.count, 1)
+            XCTAssertEqual(events.first?["message"] as? String, "token=[REDACTED]")
+            let manifest = try XCTUnwrap(json["manifest"] as? [String: Any])
+            XCTAssertEqual(manifest["projectName"] as? String, "demo")
+
+            let overwrite = HostwrightCLI.run(
+                arguments: ["diagnostics", "--state-db", databasePath, "--bundle", bundlePath],
+                environment: environment(files: files)
+            )
+            XCTAssertEqual(overwrite.exitCode, CLIExitCode.commandUsage.rawValue)
+            XCTAssertTrue(overwrite.standardError.contains(HostwrightErrorCode.fileAlreadyExists.rawValue))
+
+            let stateOnlyBundlePath = "/tmp/hostwright-diagnostics-state-only-\(UUID().uuidString).json"
+            let stateOnly = HostwrightCLI.run(
+                arguments: ["diagnostics", "--state-db", databasePath, "--bundle", stateOnlyBundlePath, "--project", "demo"],
+                environment: environment(files: files)
+            )
+            XCTAssertEqual(stateOnly.exitCode, 0)
+            let stateOnlyJSON = try jsonObject(try XCTUnwrap(files.files[stateOnlyBundlePath]))
+            XCTAssertNil(stateOnlyJSON["manifest"])
+        }
+    }
+
+    func testDiagnosticsClassifiesLocalFileFailuresWithoutBlamingState() throws {
+        try withTemporaryDatabase { databasePath in
+            let store = SQLiteStateStore(path: databasePath)
+            try store.migrate()
+            let writeFailure = HostwrightCLI.run(
+                arguments: ["diagnostics", "--state-db", databasePath, "--bundle", "/tmp/unwritable.json"],
+                environment: environment(
+                    files: FileBox(),
+                    writeError: NSError(domain: "HostwrightCLITest", code: 1, userInfo: [NSLocalizedDescriptionKey: "permission denied token=\(fakeSecret)"])
+                )
+            )
+
+            XCTAssertEqual(writeFailure.exitCode, CLIExitCode.commandUsage.rawValue)
+            XCTAssertTrue(writeFailure.standardError.contains(HostwrightErrorCode.fileIOFailed.rawValue))
+            XCTAssertFalse(writeFailure.standardError.contains(HostwrightErrorCode.stateStoreUnavailable.rawValue))
+            XCTAssertFalse(writeFailure.standardError.contains(fakeSecret))
+
+            let manifestFailure = HostwrightCLI.run(
+                arguments: ["diagnostics", "--state-db", databasePath, "--bundle", "/tmp/diagnostics.json", "--manifest", "missing.yaml"],
+                environment: environment(files: FileBox())
+            )
+
+            XCTAssertEqual(manifestFailure.exitCode, CLIExitCode.commandUsage.rawValue)
+            XCTAssertTrue(manifestFailure.standardError.contains(HostwrightErrorCode.fileIOFailed.rawValue))
+            XCTAssertFalse(manifestFailure.standardError.contains(HostwrightErrorCode.stateStoreUnavailable.rawValue))
+        }
+    }
+
+    func testDiagnosticsDoesNotCreateOrMigrateMissingStateDatabase() throws {
+        try withTemporaryDatabase { databasePath in
+            let files = FileBox()
+            let bundlePath = "/tmp/hostwright-diagnostics-\(UUID().uuidString).json"
+
+            let result = HostwrightCLI.run(
+                arguments: ["diagnostics", "--state-db", databasePath, "--bundle", bundlePath],
+                environment: environment(files: files)
+            )
+
+            XCTAssertEqual(result.exitCode, CLIExitCode.stateUnavailable.rawValue)
+            XCTAssertEqual(result.standardOutput, "")
+            XCTAssertTrue(result.standardError.contains(HostwrightErrorCode.stateStoreUnavailable.rawValue))
+            XCTAssertFalse(FileManager.default.fileExists(atPath: databasePath))
+            XCTAssertNil(files.files[bundlePath])
         }
     }
 
@@ -1819,7 +1981,8 @@ final class HostwrightCLITests: XCTestCase {
         files: FileBox,
         containerPath: String? = nil,
         runtimeAdapter: (any RuntimeAdapter)? = nil,
-        platform: PlatformSnapshot = PlatformSnapshot(macOSMajorVersion: 26, architecture: "arm64")
+        platform: PlatformSnapshot = PlatformSnapshot(macOSMajorVersion: 26, architecture: "arm64"),
+        writeError: Error? = nil
     ) -> CLIEnvironment {
         CLIEnvironment(
             fileExists: { files.files[$0] != nil },
@@ -1830,6 +1993,9 @@ final class HostwrightCLITests: XCTestCase {
                 return text
             },
             writeTextFile: { path, text in
+                if let writeError {
+                    throw writeError
+                }
                 files.files[path] = text
             },
             executablePath: { name in name == "container" ? containerPath : "/usr/bin/\(name)" },

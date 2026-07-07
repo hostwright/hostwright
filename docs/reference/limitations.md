@@ -1,6 +1,6 @@
 # Limitations
 
-Hostwright `v0.1.0-alpha.1` can model and attempt read-only runtime observation through `RuntimeAdapter`, persist desired and observed state to an explicit SQLite database path, compute deterministic desired-vs-observed plans, execute one tightly gated create-missing-service mutation, execute one restart-policy-allowed managed start, execute one restart-policy-allowed managed restart for an exact Hostwright-owned running/unhealthy service, read bounded logs, render state events, run a foreground daemon loop with in-process loopback health probes and restart-state blocking, and delete exact cleanup-eligible Hostwright-owned stopped/created/exited containers through `RuntimeAdapter`.
+Hostwright `v0.1.0-alpha.1` can model and attempt read-only runtime observation through `RuntimeAdapter`, persist desired and observed state to an explicit SQLite database path, compute deterministic desired-vs-observed plans, execute one tightly gated create-missing-service mutation, execute one restart-policy-allowed managed start, execute one restart-policy-allowed managed restart for an exact Hostwright-owned running/unhealthy service, read bounded logs, render and filter state events, write a local redacted diagnostics bundle, run a foreground daemon loop with in-process loopback health probes and restart-state blocking, and delete exact cleanup-eligible Hostwright-owned stopped/created/exited containers through `RuntimeAdapter`.
 
 Hostwright is not production ready.
 
@@ -17,7 +17,8 @@ Hostwright is not production ready.
 - Stable process exit categories for usage, validation, state unavailable, runtime unavailable, confirmation mismatch, unsafe operation, and partial failure.
 - `hostwright status [path] --state-db <path>` with live RuntimeAdapter observation and event/snapshot persistence.
 - `hostwright logs <service>` with bounded tail output through RuntimeAdapter and redaction.
-- `hostwright events --state-db <path>` for persisted event ledger records.
+- `hostwright events --state-db <path>` for persisted event ledger records, with project/type/service/severity/limit/sort filtering.
+- `hostwright diagnostics --state-db <path> --bundle <path>` for a local redacted JSON bundle from existing state rows.
 - `hostwright cleanup` dry-run classification and exact token-confirmed deletion of eligible Hostwright-owned stopped/created/exited containers.
 - `hostwrightd --foreground --config <path> --state-db <path>` for a local foreground development loop that observes, plans, and records daemon events without runtime mutation.
 - In-process loopback health checks from `health.command` for allowlisted probe command shapes and arguments, with redacted result/event persistence.
@@ -47,6 +48,7 @@ Hostwright is not production ready.
 - Restart policy state records.
 - Restart recovery records for managed restart attempts.
 - Operation recovery groups and step records for apply checkpoints, partial failures, interruption diagnostics, and manual recovery hints.
+- Local-only telemetry policy reporting in doctor/status/diagnostics output.
 - Explicit-path state configuration only.
 - Manifest-to-runtime desired-state mapping outside the CLI.
 - Typed deterministic drift records, plan issues, planned actions, and plan hash.
@@ -82,7 +84,8 @@ Hostwright is not production ready.
 - Default user database path.
 - Hidden global state writes.
 - Production durability or automatic corruption-recovery guarantees.
-- Online state backup, restore, export, or repair commands.
+- Online state backup, restore, or repair commands.
+- External telemetry, hosted diagnostics, automatic bundle upload, OSLog integration, or production support-bundle workflows.
 - Launch agent or service installer.
 - DNS behavior.
 - Tunnel management.
@@ -126,8 +129,10 @@ Apply is not general lifecycle management. It uses `container create` only after
 
 Recovery is diagnostic and manual. `hostwright recovery` reads operation groups and steps from the explicit state database and reports whether an apply operation completed, failed, or was interrupted. It does not observe Apple container, retry mutation, stop/start/delete resources, or roll back changes automatically.
 
+Diagnostics are local and manual. `hostwright diagnostics` reads existing state rows from the explicit state database and writes a redacted JSON bundle to an explicit file path. It does not observe Apple container, run health checks, create or migrate a missing database, overwrite existing bundle files, upload telemetry, or prove service reachability.
+
 ## State Truth
 
 The SQLite store writes only to explicit paths supplied by the caller. Hostwright does not choose a default path under the repository, Application Support, XDG locations, or any global directory.
 
-Hostwright persists adapter-shaped observed state and can consume runtime-shaped observed state in memory for planning. Apply, status, logs, events, cleanup, and foreground `hostwrightd` write or read state only through explicit `--state-db` paths. Hostwright does not add a default state path, background daemon service, unattended mutation, broad cleanup, or production durability guarantees.
+Hostwright persists adapter-shaped observed state and can consume runtime-shaped observed state in memory for planning. Apply, status, logs, events, diagnostics, cleanup, and foreground `hostwrightd` write or read state only through explicit `--state-db` paths. Hostwright does not add a default state path, background daemon service, unattended mutation, broad cleanup, external telemetry, or production durability guarantees.

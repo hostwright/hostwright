@@ -48,6 +48,8 @@ Redaction is heuristic. Users should not place real credentials in manifests, lo
 
 Health check stdout, stderr, command payloads, events, operation recovery hints, operation recovery metadata, and persisted result metadata are redacted before display or storage.
 
+Diagnostic bundles are local-only JSON exports. They redact known secret-like values before writing, refuse to overwrite an existing file, and are never uploaded by Hostwright. They can still contain sensitive local context such as project names, service names, file paths, hostnames, resource identifiers, event timing, and redacted-but-contextual metadata. Review bundles before sharing.
+
 ## Untrusted Manifest Input
 
 Treat `hostwright.yaml` files from third parties as untrusted input. Hostwright validates a restricted manifest subset and rejects unsupported YAML, Kubernetes-style fields, Compose-style fields, unknown service fields, unsupported manifest versions, unsafe host-root or parent-traversal mount sources, and unsafe environment keys before planning or mutation.
@@ -70,3 +72,4 @@ This alpha does not include:
 - Kubernetes, CRI, Docker API, or Docker Compose compatibility;
 - GPU/ANE scheduling or Metal/Core ML/MLX container support;
 - signing, notarization, SBOM, or binary provenance.
+- external telemetry, hosted diagnostics, or automatic diagnostic upload.

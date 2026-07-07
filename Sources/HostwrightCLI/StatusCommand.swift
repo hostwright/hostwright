@@ -141,6 +141,8 @@ struct StatusCommandRunner {
             "Project: \(manifest.project ?? "<missing>")",
             "State DB: \(stateDatabasePath)",
             "Runtime: observed through \(observed.adapterMetadata?.adapterName ?? "runtime-adapter")",
+            "Runtime parser: status-observation-v1",
+            "Telemetry: local-only; no upload",
             "Plan hash: \(plan.planHash)",
             ""
         ]

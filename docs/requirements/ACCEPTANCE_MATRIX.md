@@ -177,3 +177,12 @@ Phase 8A is a required preflight before this mutation gate. It proves real read-
 | HW-SAFE-002, HW-RUNTIME-006 | Confirmed cleanup deletes only exact eligible Hostwright-owned created/stopped/exited containers covered by the current token. | Automated + manual | CLI XCTest eligible-only execution assertions and runtime boundary scans. |
 | HW-STATE-003, HW-OBS-001 | Cleanup reports runtime partial failure and delete-success/state-persistence failure without hiding completed deletions. | Automated | CLI XCTest cases for partial runtime failure and state persistence failure after delete success. |
 | HW-DOCS-002, HW-SAFE-001 | Docs describe cleanup classification without claiming broad garbage collection, image cleanup, volume cleanup, unmanaged deletion, or automatic cleanup. | Manual | CLI, limitations, security-safety, requirements, and implementation-plan docs review. |
+
+## Phase 20 Gate: Observability And Diagnostics
+
+| Requirement IDs | Acceptance criteria | Verification type | Verification command or review |
+| --- | --- | --- | --- |
+| HW-OBS-005, HW-SAFE-004, HW-STATE-001 | `hostwright diagnostics` writes a redacted local JSON bundle from an explicit existing state database path, refuses overwrite, does not create or migrate missing state, and does not observe or mutate runtime state. | Automated + manual | CLI and state XCTest diagnostics export cases; runtime-boundary scans; CLI and state-store docs review. |
+| HW-OBS-006, HW-OBS-001 | `hostwright events` supports project, type, service, severity, limit, and ascending/descending sort filters while preserving deterministic read-only event rendering. | Automated | CLI XCTest event filtering/sorting/limit cases. |
+| HW-OBS-002, HW-CLI-007 | `hostwright status` and `hostwright doctor` report parser/state-path/telemetry policy metadata without claiming service reachability or external telemetry. | Automated + manual | CLI and health XCTest cases; doctor, status, limitations, and security docs review. |
+| HW-DOCS-002, HW-SAFE-004 | Docs describe local-only diagnostics and forensic records without claiming hosted diagnostics, upload, OSLog integration, production monitoring, or support-bundle workflows. | Manual | CLI, limitations, security-safety, state-store, daemon, requirements, and implementation-plan docs review. |

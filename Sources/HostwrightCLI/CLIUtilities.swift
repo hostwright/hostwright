@@ -240,11 +240,18 @@ enum CLIJSON {
         ])
     }
 
-    static func events(stateDatabasePath: String, projectName: String?, events: [EventRecord]) -> String {
+    static func events(stateDatabasePath: String, projectName: String?, filters: EventFilters, events: [EventRecord]) -> String {
         render([
             "kind": "events",
             "stateDatabasePath": stateDatabasePath,
             "project": projectName as Any,
+            "filters": [
+                "type": filters.type as Any,
+                "serviceName": filters.serviceName as Any,
+                "severity": filters.severity?.rawValue as Any,
+                "limit": filters.limit as Any,
+                "sort": filters.sort.rawValue
+            ].compactNilValues(),
             "events": events.map { event in
                 [
                     "id": event.id,
@@ -357,8 +364,12 @@ enum CLIJSON {
             "stateDatabasePath": stateDatabasePath,
             "runtime": [
                 "observed": true,
-                "adapter": observed.adapterMetadata?.adapterName as Any
+                "adapter": observed.adapterMetadata?.adapterName as Any,
+                "runtimeName": observed.adapterMetadata?.runtimeName as Any,
+                "runtimeVersion": observed.adapterMetadata?.runtimeVersion as Any,
+                "parser": "status-observation-v1"
             ].compactNilValues(),
+            "telemetryPolicy": "local-only; no upload",
             "planHash": plan.planHash,
             "services": manifest.services.sorted { $0.name < $1.name }.map { service in
                 let observedService = observedByName[service.name]

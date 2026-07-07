@@ -13,8 +13,8 @@ Stable error codes are used for CLI and manifest diagnostics.
 | `HW-RUNTIME-001` | Runtime adapter unavailable. | Modelled |
 | `HW-RUNTIME-002` | Runtime mutation not implemented. | Modelled |
 | `HW-MANIFEST-001` | Manifest parsing failed. | Implemented |
-| `HW-MANIFEST-002` | Manifest validation failed. | Implemented |
-| `HW-MANIFEST-003` | Unsupported manifest/YAML feature. | Implemented |
+| `HW-MANIFEST-002` | Manifest validation failed. | Implemented, including invalid version shape and unsafe env/volume values |
+| `HW-MANIFEST-003` | Unsupported manifest/YAML feature. | Implemented, including unsupported fields and explicit older/newer manifest versions |
 | `HW-MANIFEST-004` | Manifest file I/O failed. | Implemented |
 | `HW-STATE-001` | State store unavailable. | Modelled |
 | `HW-SECURITY-001` | Unsafe exposure. | Modelled |

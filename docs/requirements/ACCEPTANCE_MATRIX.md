@@ -57,7 +57,7 @@ Verification types:
 | --- | --- | --- | --- |
 | HW-RECON-001, HW-RECON-002, HW-RECON-003 | Planner produces deterministic non-mutating plans from desired and observed state. | Automated | Reconciler XCTest cases for missing, stopped, failed, unmanaged, unhealthy, image drift, port drift, mount drift, duplicate observed identity, unsupported observed state, observation unavailable, deterministic hash, and stable ordering. |
 | HW-NET-001, HW-NET-002, HW-NET-003 | Port and exposure validation happen during planning, before mutation. | Automated | Reconciler XCTest cases for duplicate desired host ports, unsafe broad bind address, and privileged host port warning. |
-| HW-VALID-004, HW-VALID-005, HW-VALID-006 | Unsafe volumes, secret-like env paths, and unsupported features fail closed before mutation. | Automated | Reconciler and CLI XCTest cases for unsafe root mounts, secret-like env redaction, and restricted manifest parser failures. |
+| HW-VALID-004, HW-VALID-005, HW-VALID-006 | Unsafe volumes, secret-like env paths, and unsupported features fail closed before mutation. | Automated | Reconciler and CLI XCTest cases for unsafe mount sources, secret-like env redaction, and restricted manifest parser failures. |
 | HW-RUNTIME-001, HW-RUNTIME-002, HW-RUNTIME-006 | Phase 7 does not add runtime mutation, direct Apple container calls, cleanup, or `apply`. | Automated + manual | Runtime mutation-unavailable XCTest cases; targeted `rg` scans of CLI/reconciler/state modules; code review. |
 
 ## Phase 8 Gate: First Runtime Mutation
@@ -107,3 +107,13 @@ Phase 8A is a required preflight before this mutation gate. It proves real read-
 | HW-CLI-001, HW-DOCS-001 | Every supported command has documented synopsis, arguments, exit-code behavior, output modes, and failure examples. | Automated + manual | CLI reference review; help-output XCTest checks. |
 | HW-SAFE-004, HW-OBS-003 | JSON output and JSON errors redact fake secrets and runtime/state-derived sensitive strings. | Automated | CLI XCTest cases for plan, events, status, doctor, and JSON error redaction. |
 | HW-RUNTIME-001, HW-RUNTIME-002, HW-STATE-001 | CLI hardening does not add runtime mutation, hidden state paths, direct Apple container shell-out, or SQLite access outside `HostwrightState`. | Automated + manual | Full local gate plus targeted boundary scans. |
+
+## Phase 13 Gate: Manifest Schema Maturity
+
+| Requirement IDs | Acceptance criteria | Verification type | Verification command or review |
+| --- | --- | --- | --- |
+| HW-MANIFEST-002, HW-MANIFEST-003, HW-MANIFEST-004 | Parser, validator, schema, starter manifest, and examples agree on the supported restricted manifest subset. | Automated + manual | Manifest XCTest schema/example alignment; manifest reference review. |
+| HW-MANIFEST-003, HW-VALID-006 | Unsupported top-level, service, health, restart, Kubernetes-style, and Compose-style fields fail closed with stable manifest errors. | Automated | Manifest XCTest unsupported-field fixtures. |
+| HW-MANIFEST-002, HW-VALID-006 | Manifest version policy accepts `version: 1`, treats omitted version as legacy v1 input, and rejects explicit older/newer versions without upgrade or downgrade conversion. | Automated + manual | Manifest XCTest version fixtures; manifest reference review. |
+| HW-VALID-004, HW-VALID-005, HW-SAFE-004 | Untrusted manifest handling rejects unsafe host-root or parent-traversal mount sources and unsafe environment keys before planning or mutation. | Automated + manual | Manifest XCTest unsafe fixtures; security-safety docs review. |
+| HW-RUNTIME-001, HW-RUNTIME-002, HW-STATE-001 | Schema maturity does not add runtime mutation, hidden state paths, direct Apple container shell-out, YAML dependency, or Compose parity. | Automated + manual | Full local gate plus targeted boundary scans and dependency review. |

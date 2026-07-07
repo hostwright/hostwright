@@ -83,6 +83,7 @@ final class HostwrightCLITests: XCTestCase {
 
         XCTAssertEqual(initResult.exitCode, 0)
         XCTAssertTrue(initFiles.files[HostwrightIdentity.manifestFileName]?.contains("project: api-local") == true)
+        XCTAssertNoThrow(try ManifestValidator.validated(XCTUnwrap(initFiles.files[HostwrightIdentity.manifestFileName])))
 
         let existingFiles = FileBox(files: [HostwrightIdentity.manifestFileName: "project: existing\nservices:\n"])
         let overwriteResult = HostwrightCLI.run(arguments: ["init"], environment: environment(files: existingFiles))

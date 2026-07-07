@@ -21,7 +21,7 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 | 10 | Hardening and First Supported Release | Complete locally | Prepare `v0.1.0-alpha.1` as an honest source-only GitHub pre-release candidate. | Build, tests, docs, examples, compatibility, release notes, security checklist, and reviewer approval pass. |
 | 11 | Release Feedback and Alpha Stabilization | Complete | Address pre-alpha review blockers after external review. | Pipe draining, localhost publishing, redaction, cleanup failure handling, append-only ledgers, idempotency retry, command-token validation, and error preservation are covered by tests. |
 | 12 | CLI and Developer Workflow Hardening | Complete locally | Add stable CLI exit conventions, structured JSON output, better help/errors/examples, and command consistency. | CLI parsing, JSON success/error shapes, exit codes, redaction, help docs, and full local verification pass. |
-| 13 | Manifest Schema Maturity | Planned | Align parser, schema, examples, manifest version policy, and untrusted-manifest handling. | Parser, validator, schema, examples, and docs agree on accepted and rejected manifest shapes. |
+| 13 | Manifest Schema Maturity | Complete locally | Align parser, schema, examples, manifest version policy, and untrusted-manifest handling. | Parser, validator, schema, examples, and docs agree on accepted and rejected manifest shapes. |
 | 14 | State Migrations and Upgrade Safety | Planned | Harden state migrations, compatibility, corruption handling, and locking. | Fresh, existing, future-version, corrupt, locked, and repeated migration cases are tested. |
 | 15 | Local Daemon Reconciliation Loop | Planned | Turn `hostwrightd` into explicit foreground dev-mode reconciliation only. | Fake-clock loop, backoff, lock, shutdown, and sleep/wake behavior pass without unattended mutation. |
 | 16 | Health Checks and Restart Policy Expansion | Planned | Add bounded health execution and crash-loop-aware restart policy state. | Health results, max attempts, backoff, operator hold, manual disable, and redacted events are tested. |
@@ -30,7 +30,7 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 | 19 | Cleanup and Garbage Collection Maturity | Planned | Improve cleanup classification, ownership mismatch handling, stale ID protection, and partial failure behavior. | Dry-run classifications and exact delete boundaries pass without image, volume, or unmanaged deletion. |
 | 20 | Observability and Diagnostics | Planned | Add redacted diagnostics, local-only telemetry policy, audit trail, event filtering, and improved doctor/status output. | Diagnostic bundles, redaction, event ordering/filtering, and local-only telemetry policy are tested. |
 
-## Current Hard Boundaries After Phase 9
+## Current Hard Boundaries
 
 - Apple container mutation is limited to create-missing-service, restart-policy-allowed managed start, and exact cleanup-eligible managed container delete.
 - Live Apple container read-only execution exists behind the RuntimeAdapter path.
@@ -41,6 +41,8 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 - Phase 6 state writes require explicit database paths; no default user database path exists.
 - Planning is deterministic and non-mutating.
 - Apply executes at most one supported action and refuses every other planned action.
+- Manifest parsing remains a restricted Hostwright subset, not general YAML or Compose parity.
+- Explicit `version: 1` manifests are supported; omitted version is legacy v1 input; explicit older/newer versions fail closed with no automatic conversion.
 
 ## Phase 3 Outputs
 
@@ -80,7 +82,7 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 
 - Manifest-to-runtime desired-state mapping outside the CLI.
 - Typed drift records, plan issues, planned action kinds, and deterministic plan hash.
-- Policy checks for duplicate desired host ports, unsafe broad exposure, privileged host ports, unsafe root mounts, ambiguous mounts, invalid identities, and secret-like environment values.
+- Policy checks for duplicate desired host ports, unsafe broad exposure, privileged host ports, unsafe host-root or parent-traversal mount sources, ambiguous mounts, invalid identities, and secret-like environment values.
 - Drift detection for missing desired services, unmanaged observed services, stopped/exited/failed services, image drift, port drift, mount drift, unhealthy/unknown health, duplicate observed identities, unsupported unknown observed lifecycle state, and unavailable observation.
 - Non-mutating CLI plan rendering with no live runtime observation by default.
 - XCTest coverage for planner drift, policy, determinism, redaction, and mutation-unavailable boundaries.
@@ -131,3 +133,14 @@ Phase 10 does not create the public `v0.1.0-alpha.1` tag or a GitHub Release. Th
 - XCTest coverage for output-mode parsing, JSON success shapes, JSON errors, exit codes, event ordering, status shapes, and redaction.
 
 Phase 12 does not add runtime mutation, default state database paths, shell completion installation, background behavior, release tags, or GitHub Releases.
+
+## Phase 13 Outputs
+
+- Optional manifest `version: 1` support with versionless alpha manifests treated as legacy v1 input.
+- Explicit older/newer manifest versions fail closed; no automatic upgrade or downgrade conversion is implemented.
+- Unsupported top-level, service, health, restart, Kubernetes-style, and Compose-style fields report contextual manifest errors.
+- Manifest validation rejects unsafe host-root or parent-traversal mount sources, unsafe environment keys, and empty service command tokens.
+- Schema, examples, starter manifest, manifest reference, security notes, limitations, requirements, and acceptance matrix now describe the same supported subset.
+- XCTest coverage for version policy, unsupported fields, unsafe untrusted-manifest shapes, schema/example alignment, and starter manifest validity.
+
+Phase 13 does not add a YAML dependency, general YAML parsing, full Compose parity, registry/network validation, runtime mutation, default state paths, release tags, or GitHub Releases.

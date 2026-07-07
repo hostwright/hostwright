@@ -38,6 +38,49 @@ public struct HostwrightDiagnostic: Equatable, Sendable {
     }
 }
 
+public enum HostwrightPathPolicy {
+    public static func isHostRootMountSource(_ source: String) -> Bool {
+        let normalized = normalizedAbsoluteMountSource(source)
+        return normalized == "/"
+    }
+
+    public static func containsParentDirectoryTraversal(_ source: String) -> Bool {
+        mountSourceComponents(source).contains("..")
+    }
+
+    private static func normalizedAbsoluteMountSource(_ source: String) -> String? {
+        let trimmed = source.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("/") else {
+            return nil
+        }
+
+        var stack: [String] = []
+        for component in mountSourceComponents(trimmed) {
+            if component == "." {
+                continue
+            }
+
+            if component == ".." {
+                if !stack.isEmpty {
+                    stack.removeLast()
+                }
+                continue
+            }
+
+            stack.append(component)
+        }
+
+        return stack.isEmpty ? "/" : "/" + stack.joined(separator: "/")
+    }
+
+    private static func mountSourceComponents(_ source: String) -> [String] {
+        source
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(separator: "/", omittingEmptySubsequences: true)
+            .map(String.init)
+    }
+}
+
 public struct PlatformSnapshot: Equatable, Sendable {
     public let macOSMajorVersion: Int
     public let architecture: String

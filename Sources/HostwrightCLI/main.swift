@@ -7,6 +7,7 @@ import HostwrightReconciler
 
 public enum HostwrightCLI {
     public static let starterManifest = """
+    version: 1
     project: api-local
 
     services:

@@ -1,4 +1,5 @@
 import Foundation
+import HostwrightCore
 import HostwrightRuntime
 
 public struct PlanningPolicy: Equatable, Sendable {
@@ -121,13 +122,14 @@ public struct PlanningPolicy: Equatable, Sendable {
                     )
                 }
 
-                if mount.source == "/" {
+                if HostwrightPathPolicy.isHostRootMountSource(mount.source) ||
+                    HostwrightPathPolicy.containsParentDirectoryTraversal(mount.source) {
                     issues.append(
                         PlanIssue(
                             kind: .unsafeVolumePath,
                             severity: .blocker,
                             identity: service.identity,
-                            message: "Root host mount is blocked by planning policy.",
+                            message: "Unsafe host mount source is blocked by planning policy.",
                             stableDetailKey: mount.target
                         )
                     )

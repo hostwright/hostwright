@@ -37,12 +37,35 @@ public enum ManifestParser {
             case 0:
                 currentServiceIndex = nil
                 currentSection = nil
-                if trimmed.hasPrefix("project:") {
+                if trimmed.hasPrefix("version:") {
+                    if manifest.version != nil {
+                        issues.append(
+                            ManifestIssue(
+                                code: .manifestValidationFailed,
+                                message: "Manifest version must be declared at most once.",
+                                line: lineNumber
+                            )
+                        )
+                    } else {
+                        let rawVersion = value(after: "version:", in: trimmed)
+                        if let version = Int(rawVersion), String(version) == rawVersion {
+                            manifest.version = version
+                        } else {
+                            issues.append(
+                                ManifestIssue(
+                                    code: .manifestValidationFailed,
+                                    message: "Manifest version must be an integer. Supported manifest version is \(HostwrightManifest.currentVersion).",
+                                    line: lineNumber
+                                )
+                            )
+                        }
+                    }
+                } else if trimmed.hasPrefix("project:") {
                     manifest.project = value(after: "project:", in: trimmed)
                 } else if trimmed == "services:" {
                     seenServices = true
                 } else {
-                    issues.append(unsupportedKey(trimmed, lineNumber: lineNumber))
+                    issues.append(unsupportedKey(trimmed, lineNumber: lineNumber, context: "top-level manifest"))
                 }
             case 2:
                 guard seenServices else {
@@ -83,7 +106,7 @@ public enum ManifestParser {
                     manifest.services[serviceIndex].command = parseInlineArray(value(after: "command:", in: trimmed), lineNumber: lineNumber, issues: &issues)
                     currentSection = nil
                 } else {
-                    issues.append(unsupportedKey(trimmed, lineNumber: lineNumber))
+                    issues.append(unsupportedKey(trimmed, lineNumber: lineNumber, context: "service"))
                 }
             case 6:
                 guard let serviceIndex = currentServiceIndex, let section = currentSection else {
@@ -116,13 +139,13 @@ public enum ManifestParser {
                     } else if trimmed.hasPrefix("interval:") {
                         manifest.services[serviceIndex].health?.interval = value(after: "interval:", in: trimmed)
                     } else {
-                        issues.append(unsupportedKey(trimmed, lineNumber: lineNumber))
+                        issues.append(unsupportedKey(trimmed, lineNumber: lineNumber, context: "health"))
                     }
                 case .restart:
                     if trimmed.hasPrefix("policy:") {
                         manifest.services[serviceIndex].restart = HostwrightRestart(policy: value(after: "policy:", in: trimmed))
                     } else {
-                        issues.append(unsupportedKey(trimmed, lineNumber: lineNumber))
+                        issues.append(unsupportedKey(trimmed, lineNumber: lineNumber, context: "restart"))
                     }
                 }
             default:
@@ -164,12 +187,22 @@ public enum ManifestParser {
         trimmed.hasSuffix(">")
     }
 
-    private static func unsupportedKey(_ trimmed: String, lineNumber: Int) -> ManifestIssue {
-        ManifestIssue(
+    private static func unsupportedKey(_ trimmed: String, lineNumber: Int, context: String) -> ManifestIssue {
+        let field = unsupportedFieldName(trimmed)
+        let orchestratorHint = ["apiVersion", "kind", "metadata", "build", "depends_on", "deploy", "networks", "configs", "secrets"]
+            .contains(field)
+            ? " Hostwright is not a Kubernetes or Compose parser."
+            : ""
+        return ManifestIssue(
             code: .manifestUnsupportedFeature,
-            message: "\(limitation) Unsupported key or shape: \(trimmed)",
+            message: "\(limitation) Unsupported \(context) field '\(field)'.\(orchestratorHint)",
             line: lineNumber
         )
+    }
+
+    private static func unsupportedFieldName(_ trimmed: String) -> String {
+        let field = trimmed.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? trimmed
+        return field.trimmingCharacters(in: .whitespaces)
     }
 
     private static func value(after prefix: String, in line: String) -> String {

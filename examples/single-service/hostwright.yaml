@@ -1,3 +1,4 @@
+version: 1
 project: single-service
 
 services:
@@ -10,4 +11,3 @@ services:
       interval: 30s
     restart:
       policy: on-failure
-

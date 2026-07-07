@@ -1,3 +1,4 @@
+version: 1
 project: api-redis
 
 services:
@@ -20,4 +21,3 @@ services:
       - "6379:6379"
     restart:
       policy: unless-stopped
-

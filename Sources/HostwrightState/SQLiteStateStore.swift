@@ -46,15 +46,29 @@ public struct SQLiteStateStore: StateStore {
         try MigrationRunner().apply(to: self)
     }
 
+    public func validateSchema() throws {
+        try configuration.validate()
+        try withConnection(createIfNeeded: false, readOnly: true) { connection in
+            try MigrationRunner().validateAppliedSchema(on: connection)
+        }
+    }
+
     public func schemaVersion() throws -> Int {
         try configuration.validate()
         let versions = try MigrationRunner().appliedVersions(in: self)
         return versions.max() ?? 0
     }
 
-    func withConnection<T>(_ body: (SQLiteConnection) throws -> T) throws -> T {
+    func withConnection<T>(createIfNeeded: Bool = true, readOnly: Bool = false, _ body: (SQLiteConnection) throws -> T) throws -> T {
         try configuration.validate()
-        let connection = try SQLiteConnection(path: configuration.databasePath)
+        let connection = try SQLiteConnection(path: configuration.databasePath, createIfNeeded: createIfNeeded, readOnly: readOnly)
+        return try body(connection)
+    }
+
+    func withValidatedConnection<T>(readOnly: Bool = false, _ body: (SQLiteConnection) throws -> T) throws -> T {
+        try configuration.validate()
+        let connection = try SQLiteConnection(path: configuration.databasePath, createIfNeeded: false, readOnly: readOnly)
+        try MigrationRunner().validateAppliedSchema(on: connection)
         return try body(connection)
     }
 }

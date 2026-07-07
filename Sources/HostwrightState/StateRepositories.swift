@@ -40,8 +40,7 @@ public struct DesiredStateRepository: Sendable {
             )
         }
 
-        try store.withConnection { connection in
-            try MigrationRunner().apply(on: connection)
+        try store.withValidatedConnection { connection in
             try connection.transaction {
                 try upsert(project, on: connection)
                 for service in services {
@@ -52,8 +51,7 @@ public struct DesiredStateRepository: Sendable {
     }
 
     public func loadProject(id: String) throws -> StateProjectRecord {
-        try store.withConnection { connection in
-            try MigrationRunner().apply(on: connection)
+        try store.withValidatedConnection(readOnly: true) { connection in
             let rows = try connection.query(
                 """
                 SELECT id, name, manifest_path, manifest_hash, created_at, updated_at
@@ -70,8 +68,7 @@ public struct DesiredStateRepository: Sendable {
     }
 
     public func loadDesiredServices(projectID: String) throws -> [DesiredServiceRecord] {
-        try store.withConnection { connection in
-            try MigrationRunner().apply(on: connection)
+        try store.withValidatedConnection(readOnly: true) { connection in
             let rows = try connection.query(
                 """
                 SELECT id, project_id, service_name, image, command_json, ports_json, mounts_json,
@@ -210,8 +207,7 @@ public struct ObservedStateRepository: Sendable {
                 try observedServiceRecord(snapshotID: snapshotID, service: service)
             }
 
-        try store.withConnection { connection in
-            try MigrationRunner().apply(on: connection)
+        try store.withValidatedConnection { connection in
             try connection.transaction {
                 try insert(snapshot, projectID: projectID, on: connection)
                 for service in services {
@@ -222,8 +218,7 @@ public struct ObservedStateRepository: Sendable {
     }
 
     public func loadSnapshots(projectID: String?) throws -> [ObservedRuntimeSnapshotRecord] {
-        try store.withConnection { connection in
-            try MigrationRunner().apply(on: connection)
+        try store.withValidatedConnection(readOnly: true) { connection in
             let rows: [[String?]]
             if let projectID {
                 rows = try connection.query(
@@ -251,8 +246,7 @@ public struct ObservedStateRepository: Sendable {
     }
 
     public func loadObservedServices(snapshotID: String) throws -> [ObservedServiceRecord] {
-        try store.withConnection { connection in
-            try MigrationRunner().apply(on: connection)
+        try store.withValidatedConnection(readOnly: true) { connection in
             let rows = try connection.query(
                 """
                 SELECT id, snapshot_id, project_name, service_name, instance_name, image, lifecycle_state,
@@ -345,8 +339,7 @@ public struct EventLedger: Sendable {
 
     public func append(_ events: [EventRecord]) throws {
         let redactedEvents = events.map { $0.redacted() }
-        try store.withConnection { connection in
-            try MigrationRunner().apply(on: connection)
+        try store.withValidatedConnection { connection in
             try connection.transaction {
                 for event in redactedEvents {
                     try connection.run(
@@ -376,8 +369,7 @@ public struct EventLedger: Sendable {
     }
 
     public func loadAll() throws -> [EventRecord] {
-        try store.withConnection { connection in
-            try MigrationRunner().apply(on: connection)
+        try store.withValidatedConnection(readOnly: true) { connection in
             let rows = try connection.query(
                 """
                 SELECT id, timestamp, severity, type, source, project_id, service_name,
@@ -400,8 +392,7 @@ public struct OperationLedger: Sendable {
 
     public func record(_ operation: OperationRecord) throws {
         let redacted = operation.redacted()
-        try store.withConnection { connection in
-            try MigrationRunner().apply(on: connection)
+        try store.withValidatedConnection { connection in
             try connection.transaction {
                 try connection.run(
                     """
@@ -429,8 +420,7 @@ public struct OperationLedger: Sendable {
     }
 
     public func loadAll() throws -> [OperationRecord] {
-        try store.withConnection { connection in
-            try MigrationRunner().apply(on: connection)
+        try store.withValidatedConnection(readOnly: true) { connection in
             let rows = try connection.query(
                 """
                 SELECT id, created_at, updated_at, planned_action_type, project_id, service_name,
@@ -444,8 +434,7 @@ public struct OperationLedger: Sendable {
     }
 
     public func latest(idempotencyKey: String) throws -> OperationRecord? {
-        try store.withConnection { connection in
-            try MigrationRunner().apply(on: connection)
+        try store.withValidatedConnection(readOnly: true) { connection in
             let rows = try connection.query(
                 """
                 SELECT id, created_at, updated_at, planned_action_type, project_id, service_name,
@@ -471,8 +460,7 @@ public struct OwnershipRepository: Sendable {
 
     public func upsert(_ ownership: OwnershipRecord) throws {
         let redacted = ownership.redacted()
-        try store.withConnection { connection in
-            try MigrationRunner().apply(on: connection)
+        try store.withValidatedConnection { connection in
             try connection.transaction {
                 try connection.run(
                     """
@@ -507,8 +495,7 @@ public struct OwnershipRepository: Sendable {
     }
 
     public func loadAll() throws -> [OwnershipRecord] {
-        try store.withConnection { connection in
-            try MigrationRunner().apply(on: connection)
+        try store.withValidatedConnection(readOnly: true) { connection in
             let rows = try connection.query(
                 """
                 SELECT id, resource_identifier, resource_type, project_id, service_name, runtime_adapter,
@@ -528,8 +515,7 @@ public struct OwnershipRepository: Sendable {
         metadataJSONRedacted: String
     ) throws {
         let redactedMetadata = RuntimeRedactionPolicy.default.redact(metadataJSONRedacted)
-        try store.withConnection { connection in
-            try MigrationRunner().apply(on: connection)
+        try store.withValidatedConnection { connection in
             try connection.transaction {
                 try connection.run(
                     """

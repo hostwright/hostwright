@@ -117,3 +117,15 @@ Phase 8A is a required preflight before this mutation gate. It proves real read-
 | HW-MANIFEST-002, HW-VALID-006 | Manifest version policy accepts `version: 1`, treats omitted version as legacy v1 input, and rejects explicit older/newer versions without upgrade or downgrade conversion. | Automated + manual | Manifest XCTest version fixtures; manifest reference review. |
 | HW-VALID-004, HW-VALID-005, HW-SAFE-004 | Untrusted manifest handling rejects unsafe host-root or parent-traversal mount sources and unsafe environment keys before planning or mutation. | Automated + manual | Manifest XCTest unsafe fixtures; security-safety docs review. |
 | HW-RUNTIME-001, HW-RUNTIME-002, HW-STATE-001 | Schema maturity does not add runtime mutation, hidden state paths, direct Apple container shell-out, YAML dependency, or Compose parity. | Automated + manual | Full local gate plus targeted boundary scans and dependency review. |
+
+## Phase 14 Gate: State Migrations And Upgrade Safety
+
+| Requirement IDs | Acceptance criteria | Verification type | Verification command or review |
+| --- | --- | --- | --- |
+| HW-STATE-001, HW-STATE-002, HW-STATE-006 | Fresh and repeated explicit migrations record schema version and checksums, and rerunning migrations preserves existing rows. | Automated | State XCTest migration idempotency and row-count tests. |
+| HW-STATE-002 | Transaction failures roll back partial state writes. | Automated | State XCTest transaction rollback test. |
+| HW-STATE-002, HW-STATE-006 | Future-version and checksum-mismatched databases fail closed before state reads or writes. | Automated | State XCTest future-schema and checksum-mismatch tests. |
+| HW-STATE-001, HW-STATE-006 | Corrupt and locked databases produce actionable state errors rather than generic SQLite failures or hangs. | Automated | State XCTest corrupt-file and lock-contention tests. |
+| HW-STATE-001, HW-STATE-002 | Repository reads validate already-applied schema without creating databases or applying migrations as a side effect. | Automated + manual | State XCTest read-side-effect tests; review that repository reads use validated read-only connections. |
+| HW-STATE-007, HW-SAFE-002, HW-SAFE-004 | Backup, restore, debug export, downgrade, and locking policy preserve ownership/event records and avoid automatic repair or telemetry claims. | Manual | State-store architecture, install, limitations, and requirements docs review. |
+| HW-RUNTIME-001, HW-RUNTIME-002, HW-STATE-001 | State upgrade safety does not add runtime mutation, hidden default state paths, daemon behavior, destructive reset commands, or repair tooling. | Automated + manual | Full local gate plus targeted boundary scans and diff review. |

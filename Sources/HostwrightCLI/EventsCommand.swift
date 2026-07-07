@@ -12,7 +12,6 @@ struct EventsCommandRunner {
             let configuration = StateStoreConfiguration(explicitDatabasePath: stateDatabasePath)
             try configuration.validate()
             let store = SQLiteStateStore(configuration: configuration)
-            try store.migrate()
             let projectID = projectName.map { "project-\($0)" }
             let events = try store.events.loadAll()
                 .filter { event in projectID == nil || event.projectID == projectID }

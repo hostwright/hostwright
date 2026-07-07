@@ -17,6 +17,181 @@ final class HostwrightStateTests: XCTestCase {
         }
     }
 
+    func testRepeatedMigrationPreservesExistingStateRows() throws {
+        try withTemporaryStore { store, databaseURL in
+            try saveDesiredState(in: store)
+            let beforeCounts = try tableCounts(in: databaseURL.path)
+
+            try store.migrate()
+            try store.validateSchema()
+
+            let afterCounts = try tableCounts(in: databaseURL.path)
+            XCTAssertEqual(beforeCounts["projects"], 1)
+            XCTAssertEqual(beforeCounts["desired_services"], 1)
+            XCTAssertEqual(beforeCounts, afterCounts)
+            XCTAssertEqual(try store.desiredStates.loadProject(id: projectID).name, "api-local")
+        }
+    }
+
+    func testRepositoryReadsDoNotCreateOrMigrateStateDatabase() throws {
+        try withTemporaryDirectory { directory in
+            let databaseURL = directory.appendingPathComponent("missing.sqlite")
+            let store = SQLiteStateStore(path: databaseURL.path)
+
+            XCTAssertThrowsError(try store.events.loadAll()) { error in
+                XCTAssertTrue(String(describing: error).contains("Failed to open state database"))
+            }
+            XCTAssertFalse(FileManager.default.fileExists(atPath: databaseURL.path))
+        }
+    }
+
+    func testReadOfUnmigratedDatabaseDoesNotCreateMigrationTable() throws {
+        try withTemporaryStore { store, databaseURL in
+            _ = try SQLiteConnection(path: databaseURL.path)
+
+            XCTAssertThrowsError(try store.events.loadAll()) { error in
+                guard case .incompatibleSchema(let foundVersion, let latestSupported, let message) = error as? StateStoreError else {
+                    return XCTFail("Expected incompatibleSchema, got \(error).")
+                }
+                XCTAssertEqual(foundVersion, 0)
+                XCTAssertEqual(latestSupported, MigrationRunner.latestSchemaVersion)
+                XCTAssertTrue(message.contains("has not been migrated"))
+            }
+
+            let connection = try SQLiteConnection(path: databaseURL.path, createIfNeeded: false, readOnly: true)
+            let tables = try connection.query("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name ASC")
+                .compactMap { $0.first ?? nil }
+            XCTAssertFalse(tables.contains("schema_migrations"))
+        }
+    }
+
+    func testFutureSchemaVersionFailsBeforeMigrationOrRead() throws {
+        try withTemporaryStore { store, databaseURL in
+            try store.migrate()
+            let connection = try SQLiteConnection(path: databaseURL.path)
+            try connection.run(
+                """
+                INSERT INTO schema_migrations (version, description, checksum, applied_at)
+                VALUES (2, 'future schema', 'future-checksum', '2026-07-01T00:00:00Z')
+                """
+            )
+
+            for action in [
+                { try store.validateSchema() },
+                { try store.migrate() }
+            ] {
+                XCTAssertThrowsError(try action()) { error in
+                    guard case .incompatibleSchema(let foundVersion, let latestSupported, let message) = error as? StateStoreError else {
+                        return XCTFail("Expected incompatibleSchema, got \(error).")
+                    }
+                    XCTAssertEqual(foundVersion, 2)
+                    XCTAssertEqual(latestSupported, MigrationRunner.latestSchemaVersion)
+                    XCTAssertTrue(message.contains("newer Hostwright release"))
+                }
+            }
+        }
+    }
+
+    func testMigrationChecksumMismatchFailsClosed() throws {
+        try withTemporaryStore { store, databaseURL in
+            try store.migrate()
+            let connection = try SQLiteConnection(path: databaseURL.path)
+            try connection.run("UPDATE schema_migrations SET checksum = 'tampered' WHERE version = 1")
+
+            XCTAssertThrowsError(try store.validateSchema()) { error in
+                guard case .migrationFailed(let version, let message) = error as? StateStoreError else {
+                    return XCTFail("Expected migrationFailed, got \(error).")
+                }
+                XCTAssertEqual(version, 1)
+                XCTAssertTrue(message.contains("Recorded checksum tampered"))
+            }
+        }
+    }
+
+    func testExplicitMigrationRefusesExistingNonHostwrightDatabase() throws {
+        try withTemporaryStore { store, databaseURL in
+            let connection = try SQLiteConnection(path: databaseURL.path)
+            try connection.execute("CREATE TABLE unrelated (id TEXT PRIMARY KEY)")
+
+            XCTAssertThrowsError(try store.migrate()) { error in
+                guard case .incompatibleSchema(let foundVersion, let latestSupported, let message) = error as? StateStoreError else {
+                    return XCTFail("Expected incompatibleSchema, got \(error).")
+                }
+                XCTAssertNil(foundVersion)
+                XCTAssertEqual(latestSupported, MigrationRunner.latestSchemaVersion)
+                XCTAssertTrue(message.contains("non-Hostwright tables"))
+            }
+        }
+    }
+
+    func testCorruptDatabaseFailsWithActionableError() throws {
+        try withTemporaryDirectory { directory in
+            let databaseURL = directory.appendingPathComponent("state.sqlite")
+            try Data("not a sqlite database".utf8).write(to: databaseURL)
+            let store = SQLiteStateStore(path: databaseURL.path)
+
+            XCTAssertThrowsError(try store.validateSchema()) { error in
+                guard case .corruptDatabase(let path, let message) = error as? StateStoreError else {
+                    return XCTFail("Expected corruptDatabase, got \(error).")
+                }
+                XCTAssertEqual(path, databaseURL.path)
+                XCTAssertFalse(message.isEmpty)
+            }
+        }
+    }
+
+    func testLockedDatabaseFailsWithActionableError() throws {
+        try withTemporaryStore { store, databaseURL in
+            try store.migrate()
+            let lockedConnection = try SQLiteConnection(path: databaseURL.path)
+            try lockedConnection.execute("BEGIN EXCLUSIVE TRANSACTION")
+            defer {
+                try? lockedConnection.execute("ROLLBACK")
+            }
+
+            XCTAssertThrowsError(try store.migrate()) { error in
+                guard case .databaseLocked(let path, let message) = error as? StateStoreError else {
+                    return XCTFail("Expected databaseLocked, got \(error).")
+                }
+                XCTAssertEqual(path, databaseURL.path)
+                XCTAssertFalse(message.isEmpty)
+            }
+        }
+    }
+
+    func testTransactionFailureRollsBackPartialWrites() throws {
+        try withTemporaryStore { store, databaseURL in
+            try store.migrate()
+            let connection = try SQLiteConnection(path: databaseURL.path)
+
+            XCTAssertThrowsError(try connection.transaction {
+                try connection.run(
+                    """
+                    INSERT INTO event_ledger (
+                        id, timestamp, severity, type, source, project_id, service_name,
+                        runtime_adapter, message, payload_json_redacted
+                    )
+                    VALUES ('rollback-event', '2026-07-01T00:00:00Z', 'info', 'test', 'state-test',
+                            NULL, NULL, NULL, 'before failure', '{}')
+                    """
+                )
+                try connection.run(
+                    """
+                    INSERT INTO event_ledger (
+                        id, timestamp, severity, type, source, project_id, service_name,
+                        runtime_adapter, message, payload_json_redacted
+                    )
+                    VALUES ('rollback-event', '2026-07-01T00:00:01Z', 'info', 'test', 'state-test',
+                            NULL, NULL, NULL, 'duplicate failure', '{}')
+                    """
+                )
+            })
+
+            let countRows = try connection.query("SELECT COUNT(*) FROM event_ledger WHERE id = 'rollback-event'")
+            XCTAssertEqual(countRows.first?.first.flatMap { $0 }.flatMap(Int.init), 0)
+        }
+    }
+
     func testDesiredServicesPersistReloadAndRedactEnvironment() throws {
         try withTemporaryStore { store, _ in
             try saveDesiredState(in: store)
@@ -232,6 +407,7 @@ final class HostwrightStateTests: XCTestCase {
     }
 
     private func saveDesiredState(in store: SQLiteStateStore) throws {
+        try store.migrate()
         try store.desiredStates.saveManifestSnapshot(
             projectID: projectID,
             manifestPath: "/tmp/hostwright.yaml",
@@ -240,6 +416,27 @@ final class HostwrightStateTests: XCTestCase {
             manifest: manifest,
             timestamp: timestamp
         )
+    }
+
+    private func tableCounts(in databasePath: String) throws -> [String: Int] {
+        let connection = try SQLiteConnection(path: databasePath, createIfNeeded: false, readOnly: true)
+        let tableRows = try connection.query(
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'table'
+              AND name NOT LIKE 'sqlite_%'
+            ORDER BY name ASC
+            """
+        )
+        let tableNames = tableRows.compactMap { $0.first ?? nil }
+
+        var counts: [String: Int] = [:]
+        for tableName in tableNames {
+            let rows = try connection.query("SELECT COUNT(*) FROM \(tableName)")
+            counts[tableName] = rows.first?.first.flatMap { $0 }.flatMap(Int.init)
+        }
+        return counts
     }
 
     private func saveObservedSnapshot(in store: SQLiteStateStore) throws {

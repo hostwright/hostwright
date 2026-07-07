@@ -26,4 +26,4 @@ This was locally validated with Swift 6.3.2.
 
 The package can express macOS 26, but runtime compatibility is not complete. Read-only observation is implemented behind `RuntimeAdapter` for verified Apple container output shapes. Unsupported output still fails closed instead of being guessed.
 
-Runtime mutation remains narrow: create one missing managed service, start one restart-policy-allowed managed service, or delete one exact cleanup-eligible managed container after dry-run token confirmation.
+Runtime mutation remains narrow: create one missing managed service, start one restart-policy-allowed managed service, restart one exact Hostwright-owned running service with fresh unhealthy health state, or delete one exact cleanup-eligible managed container after dry-run token confirmation.

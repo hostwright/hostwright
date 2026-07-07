@@ -634,6 +634,96 @@ public struct RestartPolicyStateRepository: Sendable {
     }
 }
 
+public struct RestartRecoveryRecordRepository: Sendable {
+    private let store: SQLiteStateStore
+
+    public init(store: SQLiteStateStore) {
+        self.store = store
+    }
+
+    public func append(_ record: RestartRecoveryRecord) throws {
+        let redacted = record.redacted()
+        try store.withValidatedConnection { connection in
+            try connection.transaction {
+                try connection.run(
+                    """
+                    INSERT INTO restart_recovery_records (
+                        id, operation_id, project_id, service_name, resource_identifier, plan_hash,
+                        status, completed_steps_json_redacted, manual_recovery_hint_redacted,
+                        created_at, updated_at, metadata_json_redacted
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    bindings: [
+                        .text(redacted.id),
+                        .text(redacted.operationID),
+                        optionalText(redacted.projectID),
+                        .text(redacted.serviceName),
+                        .text(redacted.resourceIdentifier),
+                        .text(redacted.planHash),
+                        .text(redacted.status.rawValue),
+                        .text(redacted.completedStepsJSONRedacted),
+                        .text(redacted.manualRecoveryHintRedacted),
+                        .text(redacted.createdAt),
+                        .text(redacted.updatedAt),
+                        .text(redacted.metadataJSONRedacted)
+                    ]
+                )
+            }
+        }
+    }
+
+    public func loadAll() throws -> [RestartRecoveryRecord] {
+        try store.withValidatedConnection(readOnly: true) { connection in
+            let rows = try connection.query(
+                """
+                SELECT id, operation_id, project_id, service_name, resource_identifier, plan_hash,
+                       status, completed_steps_json_redacted, manual_recovery_hint_redacted,
+                       created_at, updated_at, metadata_json_redacted
+                FROM restart_recovery_records
+                ORDER BY created_at ASC, rowid ASC
+                """
+            )
+            return try rows.map(restartRecoveryRecord(from:))
+        }
+    }
+
+    public func load(operationID: String) throws -> [RestartRecoveryRecord] {
+        try store.withValidatedConnection(readOnly: true) { connection in
+            let rows = try connection.query(
+                """
+                SELECT id, operation_id, project_id, service_name, resource_identifier, plan_hash,
+                       status, completed_steps_json_redacted, manual_recovery_hint_redacted,
+                       created_at, updated_at, metadata_json_redacted
+                FROM restart_recovery_records
+                WHERE operation_id = ?
+                ORDER BY created_at ASC, rowid ASC
+                """,
+                bindings: [.text(operationID)]
+            )
+            return try rows.map(restartRecoveryRecord(from:))
+        }
+    }
+
+    public func latest(operationID: String) throws -> RestartRecoveryRecord? {
+        try store.withValidatedConnection(readOnly: true) { connection in
+            let rows = try connection.query(
+                """
+                SELECT id, operation_id, project_id, service_name, resource_identifier, plan_hash,
+                       status, completed_steps_json_redacted, manual_recovery_hint_redacted,
+                       created_at, updated_at, metadata_json_redacted
+                FROM restart_recovery_records
+                WHERE operation_id = ?
+                ORDER BY updated_at DESC, created_at DESC, rowid DESC
+                LIMIT 1
+                """,
+                bindings: [.text(operationID)]
+            )
+            return try rows.first.map(restartRecoveryRecord(from:))
+        }
+    }
+}
+
 public struct OwnershipRepository: Sendable {
     private let store: SQLiteStateStore
 
@@ -953,6 +1043,40 @@ private func restartPolicyStateRecord(from row: [String?]) throws -> RestartPoli
         backoffSeconds: backoffSeconds,
         backoffUntil: row[8],
         lastFailureAt: row[9],
+        updatedAt: updatedAt,
+        metadataJSONRedacted: metadataJSON
+    )
+}
+
+private func restartRecoveryRecord(from row: [String?]) throws -> RestartRecoveryRecord {
+    guard row.count == 12,
+          let id = row[0],
+          let operationID = row[1],
+          let serviceName = row[3],
+          let resourceIdentifier = row[4],
+          let planHash = row[5],
+          let statusText = row[6],
+          let status = RestartRecoveryStatus(rawValue: statusText),
+          let completedStepsJSON = row[7],
+          let manualRecoveryHint = row[8],
+          let createdAt = row[9],
+          let updatedAt = row[10],
+          let metadataJSON = row[11]
+    else {
+        throw StateStoreError.invalidRecord("Could not decode restart recovery row.")
+    }
+
+    return RestartRecoveryRecord(
+        id: id,
+        operationID: operationID,
+        projectID: row[2],
+        serviceName: serviceName,
+        resourceIdentifier: resourceIdentifier,
+        planHash: planHash,
+        status: status,
+        completedStepsJSONRedacted: completedStepsJSON,
+        manualRecoveryHintRedacted: manualRecoveryHint,
+        createdAt: createdAt,
         updatedAt: updatedAt,
         metadataJSONRedacted: metadataJSON
     )

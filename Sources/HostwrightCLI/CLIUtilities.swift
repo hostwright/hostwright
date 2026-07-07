@@ -40,8 +40,125 @@ func hostwrightTimestamp() -> String {
     ISO8601DateFormatter().string(from: Date())
 }
 
+func hostwrightTimestampAdding(seconds: Int, to timestamp: String) -> String {
+    let formatter = ISO8601DateFormatter()
+    let date = formatter.date(from: timestamp) ?? Date()
+    return formatter.string(from: date.addingTimeInterval(TimeInterval(seconds)))
+}
+
 func hostwrightUniqueID(prefix: String) -> String {
     "\(prefix)-\(UUID().uuidString)"
+}
+
+func hostwrightRestartPolicyStateMap(
+    store: SQLiteStateStore,
+    projectID: String,
+    projectName: String
+) throws -> [RuntimeServiceIdentity: RestartPolicyStateRecord] {
+    let states = try store.restartPolicies.loadProject(projectID: projectID)
+    return Dictionary(states.map { state in
+        (
+            RuntimeServiceIdentity(projectName: projectName, serviceName: state.serviceName),
+            state
+        )
+    }, uniquingKeysWith: { first, _ in first })
+}
+
+func hostwrightPlanningObservedState(
+    observed: ObservedRuntimeState,
+    desiredState: DesiredRuntimeState,
+    store: SQLiteStateStore,
+    projectID: String,
+    currentTimestamp: String
+) throws -> ObservedRuntimeState {
+    let desiredByIdentity = Dictionary(uniqueKeysWithValues: desiredState.services.map { ($0.identity, $0) })
+    let services = try observed.services.map { service in
+        guard let desired = desiredByIdentity[service.identity] else {
+            return service
+        }
+        guard let healthCheck = desired.healthCheck else {
+            return service.healthState == .unhealthy ? service.withHealthState(.unknown) : service
+        }
+
+        if let latest = try hostwrightFreshHealthResult(
+            store: store,
+            projectID: projectID,
+            serviceName: service.identity.serviceName,
+            healthCheck: healthCheck,
+            currentTimestamp: currentTimestamp
+        ) {
+            return service.withHealthState(hostwrightRuntimeHealthState(from: latest.status, fallback: service.healthState))
+        }
+
+        guard service.healthState == .unhealthy else {
+            return service
+        }
+        return service.withHealthState(.unknown)
+    }
+
+    return ObservedRuntimeState(
+        projectName: observed.projectName,
+        services: services,
+        adapterMetadata: observed.adapterMetadata
+    )
+}
+
+func hostwrightFreshHealthResult(
+    store: SQLiteStateStore,
+    projectID: String,
+    serviceName: String,
+    healthCheck: RuntimeHealthCheckSpec,
+    currentTimestamp: String
+) throws -> HealthCheckResultRecord? {
+    guard let latest = try store.healthResults.latest(projectID: projectID, serviceName: serviceName),
+          hostwrightIsFreshHealthResult(latest, intervalSeconds: healthCheck.intervalSeconds, currentTimestamp: currentTimestamp) else {
+        return nil
+    }
+    return latest
+}
+
+private func hostwrightRuntimeHealthState(
+    from status: RuntimeHealthCheckStatus,
+    fallback: RuntimeHealthState
+) -> RuntimeHealthState {
+    switch status {
+    case .healthy:
+        return .healthy
+    case .unhealthy:
+        return .unhealthy
+    case .unknown:
+        return .unknown
+    case .skipped, .notConfigured:
+        return fallback
+    }
+}
+
+private func hostwrightIsFreshHealthResult(
+    _ result: HealthCheckResultRecord,
+    intervalSeconds: Int,
+    currentTimestamp: String
+) -> Bool {
+    let formatter = ISO8601DateFormatter()
+    guard let checkedAt = formatter.date(from: result.checkedAt),
+          let current = formatter.date(from: currentTimestamp),
+          checkedAt <= current else {
+        return false
+    }
+    return checkedAt.addingTimeInterval(TimeInterval(intervalSeconds)) >= current
+}
+
+private extension ObservedRuntimeService {
+    func withHealthState(_ healthState: RuntimeHealthState) -> ObservedRuntimeService {
+        ObservedRuntimeService(
+            identity: identity,
+            image: image,
+            lifecycleState: lifecycleState,
+            healthState: healthState,
+            ports: ports,
+            mounts: mounts,
+            observedAt: observedAt
+        )
+    }
 }
 
 enum CLIJSON {
@@ -81,7 +198,7 @@ enum CLIJSON {
             "planHash": plan.planHash,
             "observationConnected": plan.observationConnected,
             "mutatesRuntime": plan.mutatesRuntime,
-            "execution": "unavailable unless one createMissingService or startManagedService action is explicitly confirmed",
+            "execution": "unavailable unless one createMissingService, startManagedService, or restartManagedService action is explicitly confirmed",
             "issues": plan.issues.map { issue in
                 [
                     "kind": issue.kind.rawValue,

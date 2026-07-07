@@ -37,7 +37,7 @@ public struct SchemaMigration: Equatable, Sendable {
 }
 
 public struct MigrationRunner: Sendable {
-    public static let latestSchemaVersion = 2
+    public static let latestSchemaVersion = 3
 
     public init() {}
 
@@ -385,6 +385,30 @@ public struct MigrationRunner: Sendable {
                 "CREATE INDEX IF NOT EXISTS health_check_results_project_idx ON health_check_results(project_id, service_name)",
                 "CREATE INDEX IF NOT EXISTS health_check_results_checked_at_idx ON health_check_results(checked_at)",
                 "CREATE INDEX IF NOT EXISTS restart_policy_state_project_idx ON restart_policy_state(project_id, service_name)"
+            ]
+        ),
+        SchemaMigration(
+            version: 3,
+            description: "Managed restart recovery records",
+            statements: [
+                """
+                CREATE TABLE IF NOT EXISTS restart_recovery_records (
+                    id TEXT PRIMARY KEY,
+                    operation_id TEXT NOT NULL,
+                    project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
+                    service_name TEXT NOT NULL,
+                    resource_identifier TEXT NOT NULL,
+                    plan_hash TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    completed_steps_json_redacted TEXT NOT NULL,
+                    manual_recovery_hint_redacted TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    metadata_json_redacted TEXT NOT NULL
+                )
+                """,
+                "CREATE INDEX IF NOT EXISTS restart_recovery_operation_idx ON restart_recovery_records(operation_id)",
+                "CREATE INDEX IF NOT EXISTS restart_recovery_project_idx ON restart_recovery_records(project_id, service_name)"
             ]
         )
     ]

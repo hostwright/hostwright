@@ -105,7 +105,7 @@ final class HostwrightCLITests: XCTestCase {
         XCTAssertTrue(planResult.standardOutput.contains("non-mutating"))
         XCTAssertTrue(planResult.standardOutput.contains("Runtime observation"))
         XCTAssertTrue(planResult.standardOutput.contains("Plan hash"))
-        XCTAssertTrue(planResult.standardOutput.contains("Execution: unavailable unless one createMissingService or startManagedService action is explicitly confirmed"))
+        XCTAssertTrue(planResult.standardOutput.contains("Execution: unavailable unless one createMissingService, startManagedService, or restartManagedService action is explicitly confirmed"))
         XCTAssertTrue(planResult.standardOutput.contains("No runtime actions were executed"))
 
         let statusResult = HostwrightCLI.run(arguments: ["status"], environment: environment(files: validFiles))
@@ -306,6 +306,365 @@ final class HostwrightCLITests: XCTestCase {
         }
     }
 
+    func testApplyRejectsManagedRestartWithoutOwnershipRecord() throws {
+        try withTemporaryDatabase { databasePath in
+            let manifestText = managedRestartHealthManifest
+            let files = FileBox(files: [HostwrightIdentity.manifestFileName: manifestText])
+            let store = SQLiteStateStore(path: databasePath)
+            try store.migrate()
+            try saveDesiredManifest(store: store, manifestText: manifestText)
+            try saveFreshUnhealthyHealthResult(store: store)
+            let observed = ObservedRuntimeState(
+                projectName: "demo",
+                services: [
+                    ObservedRuntimeService(
+                        identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"),
+                        image: "local/demo:latest",
+                        lifecycleState: .running,
+                        healthState: .unhealthy
+                    )
+                ],
+                adapterMetadata: fakeAdapterMetadata
+            )
+            let adapter = FakeApplyRuntimeAdapter(observedState: observed)
+            let expectedHash = try planHash(for: manifestText, observed: observed)
+
+            let result = HostwrightCLI.run(
+                arguments: ["apply", "--state-db", databasePath, "--confirm-plan", expectedHash],
+                environment: environment(files: files, runtimeAdapter: adapter)
+            )
+
+            XCTAssertEqual(result.exitCode, CLIExitCode.unsafeOperation.rawValue)
+            XCTAssertTrue(result.standardError.contains("Hostwright ownership record"))
+            XCTAssertTrue(adapter.executedActions.isEmpty)
+
+            XCTAssertTrue(try store.operations.loadAll().isEmpty)
+            XCTAssertTrue(try store.restartRecovery.loadAll().isEmpty)
+        }
+    }
+
+    func testApplyRestartsUnhealthyRunningOwnedServiceAndWritesRecoveryRecord() throws {
+        try withTemporaryDatabase { databasePath in
+            let manifestText = managedRestartHealthManifest
+            let files = FileBox(files: [HostwrightIdentity.manifestFileName: manifestText])
+            let store = SQLiteStateStore(path: databasePath)
+            try store.migrate()
+            try saveDesiredManifest(store: store, manifestText: manifestText)
+            try saveOwnership(store: store)
+            try saveFreshUnhealthyHealthResult(store: store)
+            let observed = ObservedRuntimeState(
+                projectName: "demo",
+                services: [
+                    ObservedRuntimeService(
+                        identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"),
+                        image: "local/demo:latest",
+                        lifecycleState: .running,
+                        healthState: .unhealthy
+                    )
+                ],
+                adapterMetadata: fakeAdapterMetadata
+            )
+            let adapter = FakeApplyRuntimeAdapter(observedState: observed)
+            let expectedHash = try planHash(for: manifestText, observed: observed)
+
+            let result = HostwrightCLI.run(
+                arguments: ["apply", "--state-db", databasePath, "--confirm-plan", expectedHash],
+                environment: environment(files: files, runtimeAdapter: adapter)
+            )
+
+            XCTAssertEqual(result.exitCode, 0)
+            XCTAssertTrue(result.standardOutput.contains("Applied action: restartManagedService demo/api"))
+            XCTAssertEqual(adapter.executedActions.map(\.kind), [.restart])
+            XCTAssertEqual(adapter.executedActions.map(\.isDestructive), [true])
+
+            let operations = try store.operations.loadAll()
+            XCTAssertEqual(operations.map(\.plannedActionType), ["restartManagedService", "restartManagedService"])
+            XCTAssertEqual(operations.map(\.status), [.recorded, .succeeded])
+
+            let recovery = try store.restartRecovery.loadAll()
+            XCTAssertEqual(recovery.map(\.status), [.prepared, .succeeded])
+            XCTAssertEqual(recovery.last?.completedStepsJSONRedacted, #"["stop","start"]"#)
+            XCTAssertTrue(recovery.last?.manualRecoveryHintRedacted.contains("No manual recovery") == true)
+
+            let states = try store.restartPolicies.loadProject(projectID: "project-demo")
+            XCTAssertEqual(states.count, 1)
+            XCTAssertEqual(states[0].status, .active)
+            XCTAssertEqual(states[0].attemptCount, 0)
+
+            let events = try store.events.loadAll()
+            XCTAssertTrue(events.contains { $0.type == "apply.restart-intent-recorded" })
+            XCTAssertTrue(events.contains { $0.type == "apply.restarted-service" })
+            XCTAssertTrue(events.contains { $0.type == "restart.policy.active" })
+        }
+    }
+
+    func testApplyFailedManagedRestartWritesRecoveryHintAndBackoff() throws {
+        try withTemporaryDatabase { databasePath in
+            let manifestText = managedRestartHealthManifest
+            let files = FileBox(files: [HostwrightIdentity.manifestFileName: manifestText])
+            let store = SQLiteStateStore(path: databasePath)
+            try store.migrate()
+            try saveDesiredManifest(store: store, manifestText: manifestText)
+            try saveOwnership(store: store)
+            try saveFreshUnhealthyHealthResult(store: store)
+            let observed = ObservedRuntimeState(
+                projectName: "demo",
+                services: [
+                    ObservedRuntimeService(
+                        identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"),
+                        image: "local/demo:latest",
+                        lifecycleState: .running,
+                        healthState: .unhealthy
+                    )
+                ],
+                adapterMetadata: fakeAdapterMetadata
+            )
+            let adapter = FakeApplyRuntimeAdapter(
+                observedState: observed,
+                executeError: .managedRestartStartFailedAfterStop(message: "start failed", standardError: "token=\(fakeSecret)")
+            )
+            let expectedHash = try planHash(for: manifestText, observed: observed)
+
+            let result = HostwrightCLI.run(
+                arguments: ["apply", "--state-db", databasePath, "--confirm-plan", expectedHash],
+                environment: environment(files: files, runtimeAdapter: adapter)
+            )
+
+            XCTAssertEqual(result.exitCode, CLIExitCode.runtimeUnavailable.rawValue)
+            XCTAssertFalse(result.standardError.contains(fakeSecret))
+            XCTAssertEqual(adapter.executedActions.map(\.kind), [.restart])
+
+            let operations = try store.operations.loadAll()
+            XCTAssertEqual(operations.map(\.status), [.recorded, .failed])
+            XCTAssertFalse(operations.map(\.payloadJSONRedacted).joined().contains(fakeSecret))
+
+            let recovery = try store.restartRecovery.loadAll()
+            XCTAssertEqual(recovery.map(\.status), [.prepared, .stopSucceeded, .failed])
+            XCTAssertEqual(recovery[1].completedStepsJSONRedacted, #"["stop"]"#)
+            XCTAssertTrue(recovery.last?.manualRecoveryHintRedacted.contains("Inspect the exact Hostwright-owned container") == true)
+
+            let states = try store.restartPolicies.loadProject(projectID: "project-demo")
+            XCTAssertEqual(states.count, 1)
+            XCTAssertEqual(states[0].status, .backingOff)
+            XCTAssertEqual(states[0].attemptCount, 1)
+
+            let events = try store.events.loadAll()
+            XCTAssertTrue(events.contains { $0.type == "restart.policy.backoff" })
+            XCTAssertFalse(events.contains { $0.type == "apply.restarted-service" })
+            XCTAssertFalse(events.map(\.message).joined().contains(fakeSecret))
+        }
+    }
+
+    func testApplyRefusesManagedRestartWithoutFreshPersistedHealthEvenWhenRuntimeUnhealthy() throws {
+        try withTemporaryDatabase { databasePath in
+            let manifestText = managedRestartHealthManifest
+            let files = FileBox(files: [HostwrightIdentity.manifestFileName: manifestText])
+            let store = SQLiteStateStore(path: databasePath)
+            try store.migrate()
+            try saveDesiredManifest(store: store, manifestText: manifestText)
+            try saveOwnership(store: store)
+            let observedUnhealthy = runningObservedService(healthState: .unhealthy)
+            let observedForPlanning = runningObservedService(healthState: .unknown)
+            let adapter = FakeApplyRuntimeAdapter(observedState: observedUnhealthy)
+            let expectedHash = try ReconciliationPlanner()
+                .plan(manifest: ManifestValidator.validated(manifestText), observedState: observedForPlanning)
+                .planHash
+
+            let result = HostwrightCLI.run(
+                arguments: ["apply", "--state-db", databasePath, "--confirm-plan", expectedHash],
+                environment: environment(files: files, runtimeAdapter: adapter)
+            )
+
+            XCTAssertEqual(result.exitCode, CLIExitCode.runtimeUnavailable.rawValue)
+            XCTAssertTrue(result.standardError.contains("No executable createMissingService, startManagedService, or restartManagedService action exists"))
+            XCTAssertTrue(adapter.executedActions.isEmpty)
+            XCTAssertTrue(try store.restartRecovery.loadAll().isEmpty)
+        }
+    }
+
+    func testApplyRefusesManagedRestartWithoutConfiguredHealthCheck() throws {
+        try withTemporaryDatabase { databasePath in
+            let manifestText = restartableServiceManifest
+            let files = FileBox(files: [HostwrightIdentity.manifestFileName: manifestText])
+            let store = SQLiteStateStore(path: databasePath)
+            try store.migrate()
+            try saveDesiredManifest(store: store, manifestText: manifestText)
+            try saveOwnership(store: store)
+            try saveFreshUnhealthyHealthResult(store: store)
+            let observedUnhealthy = runningObservedService(healthState: .unhealthy)
+            let observedForPlanning = runningObservedService(healthState: .unknown)
+            let adapter = FakeApplyRuntimeAdapter(observedState: observedUnhealthy)
+            let expectedHash = try ReconciliationPlanner()
+                .plan(manifest: ManifestValidator.validated(manifestText), observedState: observedForPlanning)
+                .planHash
+
+            let result = HostwrightCLI.run(
+                arguments: ["apply", "--state-db", databasePath, "--confirm-plan", expectedHash],
+                environment: environment(files: files, runtimeAdapter: adapter)
+            )
+
+            XCTAssertEqual(result.exitCode, CLIExitCode.runtimeUnavailable.rawValue)
+            XCTAssertTrue(result.standardError.contains("No executable createMissingService, startManagedService, or restartManagedService action exists"))
+            XCTAssertTrue(adapter.executedActions.isEmpty)
+            XCTAssertTrue(try store.restartRecovery.loadAll().isEmpty)
+        }
+    }
+
+    func testStatusPlanHashMatchesApplyForPersistedHealthManagedRestart() throws {
+        try withTemporaryDatabase { databasePath in
+            let manifestText = managedRestartHealthManifest
+            let files = FileBox(files: [HostwrightIdentity.manifestFileName: manifestText])
+            let store = SQLiteStateStore(path: databasePath)
+            try store.migrate()
+            try saveDesiredManifest(store: store, manifestText: manifestText)
+            try saveOwnership(store: store)
+            try saveFreshUnhealthyHealthResult(store: store)
+            let observedUnknown = runningObservedService(healthState: .unknown)
+            let adapter = FakeApplyRuntimeAdapter(observedState: observedUnknown)
+
+            let status = HostwrightCLI.run(
+                arguments: ["status", "--state-db", databasePath],
+                environment: environment(files: files, runtimeAdapter: adapter)
+            )
+            let statusHash = try planHash(fromStatusOutput: status.standardOutput)
+            XCTAssertTrue(status.standardOutput.contains("health=unhealthy"))
+
+            let apply = HostwrightCLI.run(
+                arguments: ["apply", "--state-db", databasePath, "--confirm-plan", statusHash],
+                environment: environment(files: files, runtimeAdapter: adapter)
+            )
+
+            XCTAssertEqual(apply.exitCode, 0)
+            XCTAssertEqual(adapter.executedActions.map(\.kind), [.restart])
+        }
+    }
+
+    func testStatusPlanHashMatchesApplyForRestartPolicyBlockedManagedRestart() throws {
+        try withTemporaryDatabase { databasePath in
+            let manifestText = managedRestartHealthManifest
+            let files = FileBox(files: [HostwrightIdentity.manifestFileName: manifestText])
+            let store = SQLiteStateStore(path: databasePath)
+            try store.migrate()
+            try saveDesiredManifest(store: store, manifestText: manifestText)
+            try saveOwnership(store: store)
+            try saveFreshUnhealthyHealthResult(store: store)
+            try store.restartPolicies.upsert(
+                RestartPolicyStateRecord(
+                    id: "restart-state-api",
+                    projectID: "project-demo",
+                    serviceName: "api",
+                    policy: .onFailure,
+                    status: .crashLoopBlocked,
+                    attemptCount: 3,
+                    maxAttempts: 3,
+                    backoffSeconds: 60,
+                    updatedAt: hostwrightTimestamp(),
+                    metadataJSONRedacted: "{}"
+                )
+            )
+            let observedUnknown = runningObservedService(healthState: .unknown)
+            let adapter = FakeApplyRuntimeAdapter(observedState: observedUnknown)
+
+            let status = HostwrightCLI.run(
+                arguments: ["status", "--state-db", databasePath],
+                environment: environment(files: files, runtimeAdapter: adapter)
+            )
+            let statusHash = try planHash(fromStatusOutput: status.standardOutput)
+            XCTAssertTrue(status.standardOutput.contains("health=unhealthy"))
+
+            let apply = HostwrightCLI.run(
+                arguments: ["apply", "--state-db", databasePath, "--confirm-plan", statusHash],
+                environment: environment(files: files, runtimeAdapter: adapter)
+            )
+
+            XCTAssertEqual(apply.exitCode, CLIExitCode.runtimeUnavailable.rawValue)
+            XCTAssertTrue(apply.standardError.contains("crash-loop protection"))
+            XCTAssertTrue(adapter.executedActions.isEmpty)
+        }
+    }
+
+    func testApplyUsesFreshPersistedHealthResultForManagedRestart() throws {
+        try withTemporaryDatabase { databasePath in
+            let manifestText = managedRestartHealthManifest
+            let files = FileBox(files: [HostwrightIdentity.manifestFileName: manifestText])
+            let store = SQLiteStateStore(path: databasePath)
+            try store.migrate()
+            try saveDesiredManifest(store: store, manifestText: manifestText)
+            try saveOwnership(store: store)
+            try store.healthResults.append([
+                HealthCheckResultRecord(
+                    id: "health-api",
+                    projectID: "project-demo",
+                    serviceName: "api",
+                    checkedAt: ISO8601DateFormatter().string(from: Date()),
+                    status: .unhealthy,
+                    exitStatus: 1,
+                    timedOut: false,
+                    commandJSONRedacted: #"["false"]"#,
+                    stdoutRedacted: "",
+                    stderrRedacted: "",
+                    metadataJSONRedacted: "{}"
+                )
+            ])
+            let observedUnknown = runningObservedService(healthState: .unknown)
+            let observedUnhealthy = runningObservedService(healthState: .unhealthy)
+            let adapter = FakeApplyRuntimeAdapter(observedState: observedUnknown)
+            let expectedHash = try ReconciliationPlanner()
+                .plan(manifest: ManifestValidator.validated(manifestText), observedState: observedUnhealthy)
+                .planHash
+
+            let result = HostwrightCLI.run(
+                arguments: ["apply", "--state-db", databasePath, "--confirm-plan", expectedHash],
+                environment: environment(files: files, runtimeAdapter: adapter)
+            )
+
+            XCTAssertEqual(result.exitCode, 0)
+            XCTAssertEqual(adapter.executedActions.map(\.kind), [.restart])
+            XCTAssertTrue(try store.restartRecovery.loadAll().contains { $0.status == .succeeded })
+        }
+    }
+
+    func testApplyIgnoresStalePersistedHealthResultForManagedRestart() throws {
+        try withTemporaryDatabase { databasePath in
+            let manifestText = managedRestartHealthManifest
+            let files = FileBox(files: [HostwrightIdentity.manifestFileName: manifestText])
+            let store = SQLiteStateStore(path: databasePath)
+            try store.migrate()
+            try saveDesiredManifest(store: store, manifestText: manifestText)
+            try saveOwnership(store: store)
+            try store.healthResults.append([
+                HealthCheckResultRecord(
+                    id: "health-api-stale",
+                    projectID: "project-demo",
+                    serviceName: "api",
+                    checkedAt: "2000-07-01T00:00:00Z",
+                    status: .unhealthy,
+                    exitStatus: 1,
+                    timedOut: false,
+                    commandJSONRedacted: #"["false"]"#,
+                    stdoutRedacted: "",
+                    stderrRedacted: "",
+                    metadataJSONRedacted: "{}"
+                )
+            ])
+            let observedUnknown = runningObservedService(healthState: .unknown)
+            let adapter = FakeApplyRuntimeAdapter(observedState: observedUnknown)
+            let expectedHash = try ReconciliationPlanner()
+                .plan(manifest: ManifestValidator.validated(manifestText), observedState: observedUnknown)
+                .planHash
+
+            let result = HostwrightCLI.run(
+                arguments: ["apply", "--state-db", databasePath, "--confirm-plan", expectedHash],
+                environment: environment(files: files, runtimeAdapter: adapter)
+            )
+
+            XCTAssertEqual(result.exitCode, CLIExitCode.runtimeUnavailable.rawValue)
+            XCTAssertTrue(result.standardError.contains("No executable createMissingService, startManagedService, or restartManagedService action exists"))
+            XCTAssertTrue(adapter.executedActions.isEmpty)
+            XCTAssertTrue(try store.restartRecovery.loadAll().isEmpty)
+        }
+    }
+
     func testApplySuccessfulStartPersistenceFailureDoesNotRecordFailedRestartAttempt() throws {
         try withTemporaryDatabase { databasePath in
             let files = FileBox(files: [HostwrightIdentity.manifestFileName: restartableServiceManifest])
@@ -402,7 +761,7 @@ final class HostwrightCLITests: XCTestCase {
             )
 
             XCTAssertNotEqual(result.exitCode, 0)
-            XCTAssertTrue(result.standardError.contains("No executable createMissingService or startManagedService action exists"))
+            XCTAssertTrue(result.standardError.contains("No executable createMissingService, startManagedService, or restartManagedService action exists"))
             XCTAssertTrue(result.standardError.contains("crash-loop protection"))
             XCTAssertTrue(adapter.executedActions.isEmpty)
         }
@@ -966,6 +1325,23 @@ final class HostwrightCLITests: XCTestCase {
         """
     }
 
+    private var managedRestartHealthManifest: String {
+        """
+        project: demo
+        services:
+          api:
+            image: local/demo:latest
+            ports:
+              - "8080:8080"
+            health:
+              command: ["false"]
+              interval: 60s
+            restart:
+              policy: on-failure
+
+        """
+    }
+
     private var twoServiceManifest: String {
         """
         project: demo
@@ -1023,6 +1399,11 @@ final class HostwrightCLITests: XCTestCase {
         return ReconciliationPlanner().plan(manifest: manifest, observedState: observed).planHash
     }
 
+    private func planHash(fromStatusOutput output: String) throws -> String {
+        let line = try XCTUnwrap(output.split(separator: "\n").first { $0.hasPrefix("Plan hash: ") })
+        return String(line.replacingOccurrences(of: "Plan hash: ", with: ""))
+    }
+
     private func withTemporaryDatabase(_ body: (String) throws -> Void) throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("hostwright-cli-xctest-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -1049,6 +1430,59 @@ final class HostwrightCLITests: XCTestCase {
             desiredGeneration: 1,
             manifest: try ManifestValidator.validated(manifestText),
             timestamp: "2026-07-01T00:00:00Z"
+        )
+    }
+
+    private func saveOwnership(store: SQLiteStateStore) throws {
+        try store.ownership.upsert(
+            OwnershipRecord(
+                id: "ownership-api",
+                resourceIdentifier: "hostwright-demo-api",
+                resourceType: "container",
+                projectID: "project-demo",
+                serviceName: "api",
+                runtimeAdapter: "runtime-adapter",
+                createdAt: "2026-07-01T00:00:00Z",
+                observedAt: "2026-07-01T00:00:00Z",
+                cleanupEligible: true,
+                metadataJSONRedacted: "{}"
+            )
+        )
+    }
+
+    private func saveFreshUnhealthyHealthResult(store: SQLiteStateStore) throws {
+        try store.healthResults.append([
+            HealthCheckResultRecord(
+                id: hostwrightUniqueID(prefix: "health-api"),
+                projectID: "project-demo",
+                serviceName: "api",
+                checkedAt: hostwrightTimestamp(),
+                status: .unhealthy,
+                exitStatus: 1,
+                timedOut: false,
+                commandJSONRedacted: #"["false"]"#,
+                stdoutRedacted: "",
+                stderrRedacted: "",
+                metadataJSONRedacted: "{}"
+            )
+        ])
+    }
+
+    private func runningObservedService(
+        healthState: RuntimeHealthState,
+        lifecycleState: RuntimeLifecycleState = .running
+    ) -> ObservedRuntimeState {
+        ObservedRuntimeState(
+            projectName: "demo",
+            services: [
+                ObservedRuntimeService(
+                    identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"),
+                    image: "local/demo:latest",
+                    lifecycleState: lifecycleState,
+                    healthState: healthState
+                )
+            ],
+            adapterMetadata: fakeAdapterMetadata
         )
     }
 

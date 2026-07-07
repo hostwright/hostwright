@@ -29,6 +29,10 @@ public struct SQLiteStateStore: StateStore {
         RestartPolicyStateRepository(store: self)
     }
 
+    public var restartRecovery: RestartRecoveryRecordRepository {
+        RestartRecoveryRecordRepository(store: self)
+    }
+
     public var ownership: OwnershipRepository {
         OwnershipRepository(store: self)
     }

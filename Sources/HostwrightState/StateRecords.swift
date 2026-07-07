@@ -385,6 +385,73 @@ public struct RestartPolicyStateRecord: Equatable, Sendable {
     }
 }
 
+public enum RestartRecoveryStatus: String, Equatable, Sendable {
+    case prepared
+    case stopSucceeded
+    case succeeded
+    case failed
+}
+
+public struct RestartRecoveryRecord: Equatable, Sendable {
+    public let id: String
+    public let operationID: String
+    public let projectID: String?
+    public let serviceName: String
+    public let resourceIdentifier: String
+    public let planHash: String
+    public let status: RestartRecoveryStatus
+    public let completedStepsJSONRedacted: String
+    public let manualRecoveryHintRedacted: String
+    public let createdAt: String
+    public let updatedAt: String
+    public let metadataJSONRedacted: String
+
+    public init(
+        id: String,
+        operationID: String,
+        projectID: String?,
+        serviceName: String,
+        resourceIdentifier: String,
+        planHash: String,
+        status: RestartRecoveryStatus,
+        completedStepsJSONRedacted: String,
+        manualRecoveryHintRedacted: String,
+        createdAt: String,
+        updatedAt: String,
+        metadataJSONRedacted: String
+    ) {
+        self.id = id
+        self.operationID = operationID
+        self.projectID = projectID
+        self.serviceName = serviceName
+        self.resourceIdentifier = resourceIdentifier
+        self.planHash = planHash
+        self.status = status
+        self.completedStepsJSONRedacted = completedStepsJSONRedacted
+        self.manualRecoveryHintRedacted = manualRecoveryHintRedacted
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.metadataJSONRedacted = metadataJSONRedacted
+    }
+
+    public func redacted(using policy: RuntimeRedactionPolicy = .default) -> RestartRecoveryRecord {
+        RestartRecoveryRecord(
+            id: id,
+            operationID: operationID,
+            projectID: projectID,
+            serviceName: serviceName,
+            resourceIdentifier: policy.redact(resourceIdentifier),
+            planHash: planHash,
+            status: status,
+            completedStepsJSONRedacted: policy.redact(completedStepsJSONRedacted),
+            manualRecoveryHintRedacted: policy.redact(manualRecoveryHintRedacted),
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            metadataJSONRedacted: policy.redact(metadataJSONRedacted)
+        )
+    }
+}
+
 public struct OwnershipRecord: Equatable, Sendable {
     public let id: String
     public let resourceIdentifier: String

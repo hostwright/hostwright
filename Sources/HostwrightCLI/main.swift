@@ -86,6 +86,12 @@ public enum HostwrightCLI {
                 projectName: projectName,
                 output: output
             ).run()
+        case .recovery(let stateDatabasePath, let projectName, let output):
+            return RecoveryCommandRunner(
+                stateDatabasePath: stateDatabasePath,
+                projectName: projectName,
+                output: output
+            ).run()
         case .cleanup(let path, let stateDatabasePath, let confirmation):
             return CleanupCommandRunner(
                 manifestPath: path,
@@ -110,6 +116,7 @@ public enum HostwrightCLI {
       hostwright apply [path] --state-db <path> --confirm-plan <hash>
       hostwright logs <service> [path] [--tail <n>] [--state-db <path>]
       hostwright events --state-db <path> [--project <name>] [--output text|json]
+      hostwright recovery --state-db <path> [--project <name>] [--output text|json]
       hostwright cleanup [path] --state-db <path> --dry-run
       hostwright cleanup [path] --state-db <path> --confirm-cleanup <token>
       hostwright doctor [--output text|json]
@@ -118,12 +125,13 @@ public enum HostwrightCLI {
     CLI plan output is deterministic but does not perform live runtime observation.
     Apply can execute exactly one confirmed createMissingService or restart-policy-allowed startManagedService action through RuntimeAdapter.
     Cleanup deletes only exact cleanup-eligible Hostwright-owned stopped/created/exited containers after dry-run token confirmation.
-    JSON output is supported for plan, status, events, doctor, and errors when --output json is present.
+    JSON output is supported for plan, status, events, recovery, doctor, and errors when --output json is present.
 
     Examples:
       hostwright plan --output json
       hostwright status --state-db /tmp/hostwright.sqlite --output json
       hostwright events --state-db /tmp/hostwright.sqlite --project api-local --output json
+      hostwright recovery --state-db /tmp/hostwright.sqlite --output json
       hostwright doctor --output json
 
     """

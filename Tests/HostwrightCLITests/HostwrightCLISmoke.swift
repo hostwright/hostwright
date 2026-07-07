@@ -44,6 +44,10 @@ final class HostwrightCLITests: XCTestCase {
             .events(stateDatabasePath: "/tmp/state.sqlite", projectName: nil, output: .json)
         )
         XCTAssertEqual(
+            try CLICommand.parse(arguments: ["recovery", "--state-db", "/tmp/state.sqlite", "--project", "demo", "--output", "json"]),
+            .recovery(stateDatabasePath: "/tmp/state.sqlite", projectName: "demo", output: .json)
+        )
+        XCTAssertEqual(
             try CLICommand.parse(arguments: ["cleanup", "--state-db", "/tmp/state.sqlite", "--dry-run"]),
             .cleanup(path: "hostwright.yaml", stateDatabasePath: "/tmp/state.sqlite", confirmation: .dryRun)
         )
@@ -73,7 +77,8 @@ final class HostwrightCLITests: XCTestCase {
         XCTAssertEqual(result.standardError, "")
         XCTAssertTrue(result.standardOutput.contains("hostwright plan [path] [--output text|json]"))
         XCTAssertTrue(result.standardOutput.contains("hostwright status [path] [--state-db <path>] [--output text|json]"))
-        XCTAssertTrue(result.standardOutput.contains("JSON output is supported for plan, status, events, doctor"))
+        XCTAssertTrue(result.standardOutput.contains("hostwright recovery --state-db <path> [--project <name>] [--output text|json]"))
+        XCTAssertTrue(result.standardOutput.contains("JSON output is supported for plan, status, events, recovery, doctor"))
         XCTAssertTrue(result.standardOutput.contains("hostwright doctor --output json"))
     }
 
@@ -253,6 +258,13 @@ final class HostwrightCLITests: XCTestCase {
             let operations = try store.operations.loadAll()
             XCTAssertEqual(operations.map(\.status), [.recorded, .succeeded])
             XCTAssertEqual(operations.map(\.planHash), [expectedHash, expectedHash])
+            let groups = try store.operationGroups.loadAll()
+            XCTAssertEqual(groups.map(\.status), [.succeeded])
+            XCTAssertEqual(groups[0].checkpoint, "completed")
+            XCTAssertFalse(groups[0].rollbackAvailable)
+            let steps = try store.operationGroupSteps.load(groupID: groups[0].id)
+            XCTAssertEqual(steps.map(\.stepKey), ["rollback", "runtime-execute", "runtime-execute"])
+            XCTAssertEqual(steps.map(\.status), [.unsupported, .started, .succeeded])
 
             let events = try store.events.loadAll()
             XCTAssertTrue(events.contains { $0.type == "apply.create-intent-recorded" })
@@ -442,6 +454,12 @@ final class HostwrightCLITests: XCTestCase {
             XCTAssertEqual(recovery.map(\.status), [.prepared, .stopSucceeded, .failed])
             XCTAssertEqual(recovery[1].completedStepsJSONRedacted, #"["stop"]"#)
             XCTAssertTrue(recovery.last?.manualRecoveryHintRedacted.contains("Inspect the exact Hostwright-owned container") == true)
+            let groups = try store.operationGroups.loadAll()
+            XCTAssertEqual(groups.map(\.status), [.failed])
+            XCTAssertEqual(groups[0].checkpoint, "runtime-failed")
+            let steps = try store.operationGroupSteps.load(groupID: groups[0].id)
+            XCTAssertEqual(steps.map(\.stepKey), ["rollback", "runtime-execute", "restart-stop", "runtime-execute"])
+            XCTAssertEqual(steps.map(\.status), [.unsupported, .started, .succeeded, .failed])
 
             let states = try store.restartPolicies.loadProject(projectID: "project-demo")
             XCTAssertEqual(states.count, 1)
@@ -709,9 +727,49 @@ final class HostwrightCLITests: XCTestCase {
 
             let states = try store.restartPolicies.loadProject(projectID: "project-demo")
             XCTAssertTrue(states.isEmpty)
+            let groups = try store.operationGroups.loadAll()
+            XCTAssertEqual(groups.map(\.status), [.interrupted])
+            XCTAssertEqual(groups[0].checkpoint, "runtime-finished-state-incomplete")
+            XCTAssertFalse(groups[0].rollbackAvailable)
+            let steps = try store.operationGroupSteps.load(groupID: groups[0].id)
+            XCTAssertEqual(steps.map(\.status), [.unsupported, .started, .succeeded])
             let events = try store.events.loadAll()
             XCTAssertFalse(events.contains { $0.type == "restart.policy.backoff" })
             XCTAssertFalse(events.contains { $0.type == "restart.policy.crash-loop-blocked" })
+        }
+    }
+
+    func testApplyPreRuntimeStateFailureMarksOperationGroupInterruptedWithoutMutation() throws {
+        try withTemporaryDatabase { databasePath in
+            let files = FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest])
+            let store = SQLiteStateStore(path: databasePath)
+            try store.migrate()
+            let connection = try SQLiteConnection(path: databasePath)
+            try connection.execute(
+                """
+                CREATE TRIGGER fail_pre_runtime_desired_service
+                BEFORE INSERT ON desired_services
+                BEGIN
+                  SELECT RAISE(FAIL, 'blocked pre-runtime persistence');
+                END
+                """
+            )
+            let adapter = FakeApplyRuntimeAdapter()
+            let expectedHash = try planHash(for: singleServiceManifest, observed: adapter.observedState)
+
+            let result = HostwrightCLI.run(
+                arguments: ["apply", "--state-db", databasePath, "--confirm-plan", expectedHash],
+                environment: environment(files: files, runtimeAdapter: adapter)
+            )
+
+            XCTAssertEqual(result.exitCode, CLIExitCode.stateUnavailable.rawValue)
+            XCTAssertTrue(result.standardError.contains("pre-runtime state persistence failed before mutation"))
+            XCTAssertTrue(adapter.executedActions.isEmpty)
+            let groups = try store.operationGroups.loadAll()
+            XCTAssertEqual(groups.map(\.status), [.interrupted])
+            XCTAssertEqual(groups[0].checkpoint, "pre-runtime-state-incomplete")
+            let steps = try store.operationGroupSteps.load(groupID: groups[0].id)
+            XCTAssertEqual(steps.map(\.status), [.unsupported])
         }
     }
 
@@ -980,9 +1038,126 @@ final class HostwrightCLITests: XCTestCase {
         }
     }
 
+    func testRecoveryJSONOutputDistinguishesManualAndUnsupportedRecovery() throws {
+        try withTemporaryDatabase { databasePath in
+            let store = SQLiteStateStore(path: databasePath)
+            try store.migrate()
+            try saveDesiredManifest(store: store, manifestText: singleServiceManifest)
+            _ = try store.operationGroups.acquire(
+                OperationGroupRecord(
+                    id: "group-recovery",
+                    operationID: "operation-recovery",
+                    groupKind: "apply",
+                    projectID: "project-demo",
+                    serviceName: "api",
+                    plannedActionType: "createMissingService",
+                    status: .active,
+                    groupIdempotencyKey: "plan-hash:create:api",
+                    planHash: "plan-hash",
+                    checkpoint: "runtime-started",
+                    lockOwner: "hostwright-cli",
+                    lockExpiresAt: "2026-07-01T00:10:00Z",
+                    rollbackAvailable: false,
+                    manualRecoveryHintRedacted: "inspect token=\(fakeSecret)",
+                    createdAt: "2026-07-01T00:00:00Z",
+                    updatedAt: "2026-07-01T00:00:00Z",
+                    metadataJSONRedacted: "{}"
+                )
+            )
+            try store.operationGroups.finish(
+                groupID: "group-recovery",
+                status: .failed,
+                checkpoint: "runtime-failed",
+                manualRecoveryHintRedacted: "manual password=\(fakeSecret)",
+                updatedAt: "2026-07-01T00:00:01Z",
+                metadataJSONRedacted: #"{"token":"\#(fakeSecret)"}"#
+            )
+            try store.operationGroupSteps.append(
+                OperationGroupStepRecord(
+                    id: "step-recovery",
+                    groupID: "group-recovery",
+                    stepKey: "runtime-execute",
+                    direction: .forward,
+                    plannedActionType: "createMissingService",
+                    serviceName: "api",
+                    resourceIdentifier: "hostwright-demo-api",
+                    stepIdempotencyKey: "plan-hash:create:api:forward:runtime-execute",
+                    status: .failed,
+                    startedAt: "2026-07-01T00:00:00Z",
+                    updatedAt: "2026-07-01T00:00:01Z",
+                    finishedAt: "2026-07-01T00:00:01Z",
+                    lastErrorRedacted: "token=\(fakeSecret)",
+                    manualRecoveryHintRedacted: "manual token=\(fakeSecret)",
+                    metadataJSONRedacted: "{}"
+                )
+            )
+
+            let result = HostwrightCLI.run(arguments: ["recovery", "--state-db", databasePath, "--project", "demo", "--output", "json"], environment: environment(files: FileBox()))
+
+            XCTAssertEqual(result.exitCode, 0)
+            XCTAssertFalse(result.standardOutput.contains(fakeSecret))
+            let json = try jsonObject(result.standardOutput)
+            XCTAssertEqual(json["kind"] as? String, "recovery")
+            let groups = try XCTUnwrap(json["operationGroups"] as? [[String: Any]])
+            XCTAssertEqual(groups.first?["status"] as? String, "failed")
+            let recovery = try XCTUnwrap(groups.first?["recovery"] as? [String: Any])
+            XCTAssertEqual(recovery["automatic"] as? String, "none")
+            XCTAssertEqual(recovery["manual"] as? String, "required")
+            XCTAssertEqual(recovery["rollback"] as? String, "unsupported")
+        }
+    }
+
+    func testRecoveryJSONOutputIncludesLegacyRestartRecoveryWhenNoOperationGroupExists() throws {
+        try withTemporaryDatabase { databasePath in
+            let store = SQLiteStateStore(path: databasePath)
+            try store.migrate()
+            try saveDesiredManifest(store: store, manifestText: singleServiceManifest)
+            try store.restartRecovery.append(
+                RestartRecoveryRecord(
+                    id: "legacy-restart",
+                    operationID: "operation-legacy",
+                    projectID: "project-demo",
+                    serviceName: "api",
+                    resourceIdentifier: "hostwright-demo-api",
+                    planHash: "plan-hash",
+                    status: .stopSucceeded,
+                    completedStepsJSONRedacted: #"["stop"]"#,
+                    manualRecoveryHintRedacted: "manual token=\(fakeSecret)",
+                    createdAt: "2026-07-01T00:00:00Z",
+                    updatedAt: "2026-07-01T00:00:01Z",
+                    metadataJSONRedacted: "{}"
+                )
+            )
+
+            let result = HostwrightCLI.run(arguments: ["recovery", "--state-db", databasePath, "--project", "demo", "--output", "json"], environment: environment(files: FileBox()))
+
+            XCTAssertEqual(result.exitCode, 0)
+            XCTAssertFalse(result.standardOutput.contains(fakeSecret))
+            let json = try jsonObject(result.standardOutput)
+            let groups = try XCTUnwrap(json["operationGroups"] as? [[String: Any]])
+            XCTAssertEqual(groups.count, 1)
+            XCTAssertEqual(groups.first?["groupKind"] as? String, "legacy-restart")
+            XCTAssertEqual(groups.first?["status"] as? String, "failed")
+            let steps = try XCTUnwrap(groups.first?["steps"] as? [[String: Any]])
+            XCTAssertEqual(steps.first?["stepKey"] as? String, "restart-stop")
+            XCTAssertEqual(steps.first?["status"] as? String, "succeeded")
+        }
+    }
+
     func testEventsCommandDoesNotCreateOrMigrateMissingStateDatabase() throws {
         try withTemporaryDatabase { databasePath in
             let result = HostwrightCLI.run(arguments: ["events", "--state-db", databasePath], environment: environment(files: FileBox()))
+
+            XCTAssertEqual(result.exitCode, CLIExitCode.stateUnavailable.rawValue)
+            XCTAssertEqual(result.standardOutput, "")
+            XCTAssertTrue(result.standardError.contains(HostwrightErrorCode.stateStoreUnavailable.rawValue))
+            XCTAssertFalse(FileManager.default.fileExists(atPath: databasePath))
+        }
+    }
+
+    func testRecoveryCommandDoesNotCreateOrMigrateMissingStateDatabase() throws {
+        try withTemporaryDatabase { databasePath in
+            let result = HostwrightCLI.run(arguments: ["recovery", "--state-db", databasePath], environment: environment(files: FileBox()))
 
             XCTAssertEqual(result.exitCode, CLIExitCode.stateUnavailable.rawValue)
             XCTAssertEqual(result.standardOutput, "")
@@ -1076,6 +1251,12 @@ final class HostwrightCLITests: XCTestCase {
             let store = SQLiteStateStore(path: databasePath)
             let operations = try store.operations.loadAll()
             XCTAssertEqual(operations.map(\.status), [.recorded, .failed])
+            let groups = try store.operationGroups.loadAll()
+            XCTAssertEqual(groups.map(\.status), [.failed])
+            XCTAssertEqual(groups[0].checkpoint, "runtime-failed")
+            let steps = try store.operationGroupSteps.load(groupID: groups[0].id)
+            XCTAssertEqual(steps.map(\.status), [.unsupported, .started, .failed])
+            XCTAssertFalse(steps.map { $0.lastErrorRedacted ?? "" }.joined().contains(fakeSecret))
 
             let events = try store.events.loadAll()
             XCTAssertTrue(events.contains { $0.type == "apply.failed" })
@@ -1211,6 +1392,44 @@ final class HostwrightCLITests: XCTestCase {
             XCTAssertTrue(result.standardError.contains("Failure state persistence also failed"))
             XCTAssertFalse(result.standardError.contains(HostwrightErrorCode.stateStoreUnavailable.rawValue))
             XCTAssertFalse(result.standardError.contains(fakeSecret))
+        }
+    }
+
+    func testApplyRuntimeFailurePersistenceErrorStillFinishesOperationGroup() throws {
+        try withTemporaryDatabase { databasePath in
+            let files = FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest])
+            let store = SQLiteStateStore(path: databasePath)
+            try store.migrate()
+            let connection = try SQLiteConnection(path: databasePath)
+            try connection.execute(
+                """
+                CREATE TRIGGER fail_failed_operation
+                BEFORE INSERT ON operation_ledger
+                WHEN NEW.status = 'failed'
+                BEGIN
+                  SELECT RAISE(FAIL, 'blocked failure persistence');
+                END
+                """
+            )
+            let adapter = FakeApplyRuntimeAdapter(
+                executeError: .commandFailed(exitStatus: 2, message: "runtime failed", standardError: "token=\(fakeSecret)")
+            )
+            let expectedHash = try planHash(for: singleServiceManifest, observed: adapter.observedState)
+
+            let result = HostwrightCLI.run(
+                arguments: ["apply", "--state-db", databasePath, "--confirm-plan", expectedHash],
+                environment: environment(files: files, runtimeAdapter: adapter)
+            )
+
+            XCTAssertEqual(result.exitCode, CLIExitCode.runtimeUnavailable.rawValue)
+            XCTAssertTrue(result.standardError.contains("Failure state persistence also failed"))
+            let groups = try store.operationGroups.loadAll()
+            XCTAssertEqual(groups.map(\.status), [.failed])
+            XCTAssertEqual(groups[0].checkpoint, "runtime-failed")
+            let steps = try store.operationGroupSteps.load(groupID: groups[0].id)
+            XCTAssertEqual(steps.map(\.status), [.unsupported, .started, .failed])
+            XCTAssertFalse(groups[0].metadataJSONRedacted.contains(fakeSecret))
+            XCTAssertFalse(steps.map(\.lastErrorRedacted).compactMap { $0 }.joined().contains(fakeSecret))
         }
     }
 

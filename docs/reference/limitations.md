@@ -18,7 +18,7 @@ Hostwright is not production ready.
 - `hostwright status [path] --state-db <path>` with live RuntimeAdapter observation and event/snapshot persistence.
 - `hostwright logs <service>` with bounded tail output through RuntimeAdapter and redaction.
 - `hostwright events --state-db <path>` for persisted event ledger records.
-- `hostwright cleanup` dry-run and exact token-confirmed deletion of eligible Hostwright-owned stopped/created/exited containers.
+- `hostwright cleanup` dry-run classification and exact token-confirmed deletion of eligible Hostwright-owned stopped/created/exited containers.
 - `hostwrightd --foreground --config <path> --state-db <path>` for a local foreground development loop that observes, plans, and records daemon events without runtime mutation.
 - In-process loopback health checks from `health.command` for allowlisted probe command shapes and arguments, with redacted result/event persistence.
 - Restart policy state with max attempts, backoff, manual-disable from `restart.policy: no`, preexisting operator hold state, and crash-loop blocking before managed start or managed restart is exposed as executable.
@@ -58,6 +58,7 @@ Hostwright is not production ready.
 - Apply success/failure event persistence.
 - Runtime mutation policy for `createMissingService`, `startManagedService`, `restartManagedService`, and `deleteManagedContainer`.
 - Disposable live create/start/logs/cleanup proofs for Hostwright-owned proof containers, including stale-hash refusal and exact proof cleanup.
+- Cleanup dry-run classifications for eligible, ambiguous, stale, running, unknown, blocked, and never-delete ownership-backed and observed-only resources.
 - Source-material preservation and Hostwright naming controls.
 
 ## Not Implemented Today

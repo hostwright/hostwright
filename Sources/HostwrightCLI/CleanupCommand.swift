@@ -28,17 +28,24 @@ struct CleanupCommandRunner {
             } catch {
                 return failure(code: .runtimeUnavailable, message: "Runtime observation failed: \(RuntimeRedactionPolicy.default.redact(String(describing: error)))")
             }
-            let candidates = try cleanupCandidates(
+            let assessments = try cleanupAssessments(
                 store: store,
                 projectName: mapping.desiredState.projectName,
                 observed: observed
             )
+            let candidates = assessments.compactMap(\.candidate)
             let token = cleanupToken(for: candidates)
 
             switch confirmation {
             case .dryRun:
-                try recordCleanupPlanned(store: store, projectName: mapping.desiredState.projectName, candidates: candidates, token: token, observed: observed)
-                return CLIRunResult(standardOutput: renderDryRun(candidates: candidates, token: token))
+                try recordCleanupPlanned(
+                    store: store,
+                    projectName: mapping.desiredState.projectName,
+                    assessments: assessments,
+                    token: token,
+                    observed: observed
+                )
+                return CLIRunResult(standardOutput: renderDryRun(assessments: assessments, token: token))
             case .confirmed(let providedToken):
                 guard providedToken == token else {
                     return failure(code: .confirmationMismatch, message: "cleanup confirmation token does not match current cleanup plan. Expected token: \(token)")
@@ -55,40 +62,148 @@ struct CleanupCommandRunner {
         }
     }
 
-    private func cleanupCandidates(store: SQLiteStateStore, projectName: String, observed: ObservedRuntimeState) throws -> [CleanupCandidate] {
+    private func cleanupAssessments(store: SQLiteStateStore, projectName: String, observed: ObservedRuntimeState) throws -> [CleanupAssessment] {
         let projectID = "project-\(projectName)"
-        let observedByIdentifier = Dictionary(uniqueKeysWithValues: observed.services.map {
-            ($0.identity.managedResourceIdentifier, $0)
-        })
+        var observedByIdentifier: [String: [ObservedRuntimeService]] = [:]
+        for observedService in observed.services {
+            observedByIdentifier[observedService.identity.managedResourceIdentifier, default: []].append(observedService)
+        }
+        let observedAdapterName = observed.adapterMetadata?.adapterName
 
-        return try store.ownership.loadAll()
-            .filter { ownership in
-                ownership.cleanupEligible &&
-                ownership.resourceType == "container" &&
-                ownership.projectID == projectID &&
-                ownership.resourceIdentifier.hasPrefix("hostwright-")
-            }
-            .compactMap { ownership in
-                guard let serviceName = ownership.serviceName,
-                      let observedService = observedByIdentifier[ownership.resourceIdentifier],
-                      observedService.identity.serviceName == serviceName,
-                      isCleanupLifecycle(observedService.lifecycleState)
-                else {
-                    return nil
-                }
-
-                return CleanupCandidate(
-                    identity: observedService.identity,
-                    resourceIdentifier: ownership.resourceIdentifier,
-                    lifecycleState: observedService.lifecycleState,
-                    runtimeAdapter: ownership.runtimeAdapter
+        let ownershipRecords = try store.ownership.loadAll()
+        let ownershipIdentifiers = Set(ownershipRecords.map(\.resourceIdentifier))
+        let ownershipAssessments = ownershipRecords
+            .map { ownership in
+                cleanupAssessment(
+                    ownership: ownership,
+                    projectID: projectID,
+                    observedServices: observedByIdentifier[ownership.resourceIdentifier] ?? [],
+                    observedAdapterName: observedAdapterName
                 )
             }
-            .sorted { $0.resourceIdentifier < $1.resourceIdentifier }
+
+        let observedOnlyAssessments = observedByIdentifier
+            .filter { resourceIdentifier, _ in !ownershipIdentifiers.contains(resourceIdentifier) }
+            .map { resourceIdentifier, services in
+                observedOnlyAssessment(resourceIdentifier: resourceIdentifier, observedServices: services)
+            }
+
+        return (ownershipAssessments + observedOnlyAssessments)
+            .sorted { lhs, rhs in
+                if lhs.resourceIdentifier != rhs.resourceIdentifier {
+                    return lhs.resourceIdentifier < rhs.resourceIdentifier
+                }
+                if lhs.classification.sortOrder != rhs.classification.sortOrder {
+                    return lhs.classification.sortOrder < rhs.classification.sortOrder
+                }
+                return lhs.serviceName < rhs.serviceName
+            }
     }
 
-    private func isCleanupLifecycle(_ state: RuntimeLifecycleState) -> Bool {
-        state == .created || state == .stopped || state == .exited
+    private func cleanupAssessment(
+        ownership: OwnershipRecord,
+        projectID: String,
+        observedServices: [ObservedRuntimeService],
+        observedAdapterName: String?
+    ) -> CleanupAssessment {
+        let serviceName = ownership.serviceName ?? "unknown"
+
+        func assessment(
+            _ classification: CleanupClassification,
+            reason: String,
+            observedService: ObservedRuntimeService? = nil
+        ) -> CleanupAssessment {
+            CleanupAssessment(
+                classification: classification,
+                resourceIdentifier: ownership.resourceIdentifier,
+                serviceName: serviceName,
+                lifecycleState: observedService?.lifecycleState,
+                reason: reason,
+                candidate: nil
+            )
+        }
+
+        guard ownership.cleanupEligible else {
+            return assessment(.neverDelete, reason: "ownership record is not cleanup-eligible")
+        }
+        guard ownership.resourceType == "container" else {
+            return assessment(.neverDelete, reason: "resource type '\(ownership.resourceType)' is outside cleanup scope")
+        }
+        guard ownership.projectID == projectID else {
+            return assessment(.neverDelete, reason: "ownership record belongs to a different project")
+        }
+        guard ownership.resourceIdentifier.hasPrefix("hostwright-") else {
+            return assessment(.neverDelete, reason: "resource identifier is not Hostwright-managed")
+        }
+        guard let expectedServiceName = ownership.serviceName else {
+            return assessment(.blocked, reason: "ownership record has no service name")
+        }
+        guard let observedAdapterName else {
+            return assessment(.blocked, reason: "runtime adapter metadata is unavailable")
+        }
+        guard ownership.runtimeAdapter == observedAdapterName else {
+            return assessment(.blocked, reason: "runtime adapter mismatch: ownership=\(ownership.runtimeAdapter) observed=\(observedAdapterName)")
+        }
+        guard !observedServices.isEmpty else {
+            return assessment(.stale, reason: "ownership record has no matching observed container")
+        }
+        guard observedServices.count == 1, let observedService = observedServices.first else {
+            return assessment(.ambiguous, reason: "multiple observed containers match this resource identifier")
+        }
+        guard observedService.identity.serviceName == expectedServiceName else {
+            return assessment(.blocked, reason: "observed service name does not match ownership record", observedService: observedService)
+        }
+
+        switch observedService.lifecycleState {
+        case .created, .stopped, .exited:
+            let candidate = CleanupCandidate(
+                identity: observedService.identity,
+                resourceIdentifier: ownership.resourceIdentifier,
+                lifecycleState: observedService.lifecycleState,
+                runtimeAdapter: ownership.runtimeAdapter
+            )
+            return CleanupAssessment(
+                classification: .eligible,
+                resourceIdentifier: ownership.resourceIdentifier,
+                serviceName: expectedServiceName,
+                lifecycleState: observedService.lifecycleState,
+                reason: "exact Hostwright-owned non-running container",
+                candidate: candidate
+            )
+        case .running:
+            return assessment(.running, reason: "running containers are never deleted by cleanup", observedService: observedService)
+        case .unknown:
+            return assessment(.unknown, reason: "runtime lifecycle is unknown", observedService: observedService)
+        case .missing:
+            return assessment(.stale, reason: "runtime reports the resource as missing", observedService: observedService)
+        case .failed:
+            return assessment(.blocked, reason: "failed lifecycle is not cleanup-eligible until observed stopped or exited", observedService: observedService)
+        }
+    }
+
+    private func observedOnlyAssessment(
+        resourceIdentifier: String,
+        observedServices: [ObservedRuntimeService]
+    ) -> CleanupAssessment {
+        guard observedServices.count == 1, let observedService = observedServices.first else {
+            return CleanupAssessment(
+                classification: .ambiguous,
+                resourceIdentifier: resourceIdentifier,
+                serviceName: "unknown",
+                lifecycleState: nil,
+                reason: "multiple observed containers share this resource identifier without a Hostwright ownership record",
+                candidate: nil
+            )
+        }
+
+        return CleanupAssessment(
+            classification: .neverDelete,
+            resourceIdentifier: resourceIdentifier,
+            serviceName: observedService.identity.serviceName,
+            lifecycleState: observedService.lifecycleState,
+            reason: "observed container has no Hostwright ownership record",
+            candidate: nil
+        )
     }
 
     private func executeCleanup(
@@ -152,41 +267,53 @@ struct CleanupCommandRunner {
                 }
 
                 let successTimestamp = hostwrightTimestamp()
-                try store.operations.record(
-                    OperationRecord(
-                        id: "\(operationID)-succeeded",
-                        createdAt: timestamp,
-                        updatedAt: successTimestamp,
-                        plannedActionType: "deleteManagedContainer",
-                        projectID: projectID,
-                        serviceName: candidate.identity.serviceName,
-                        status: .succeeded,
-                        idempotencyKey: idempotencyKey,
-                        planHash: token,
-                        payloadJSONRedacted: #"{"result":"deleted"}"#
+                do {
+                    try store.operations.record(
+                        OperationRecord(
+                            id: "\(operationID)-succeeded",
+                            createdAt: timestamp,
+                            updatedAt: successTimestamp,
+                            plannedActionType: "deleteManagedContainer",
+                            projectID: projectID,
+                            serviceName: candidate.identity.serviceName,
+                            status: .succeeded,
+                            idempotencyKey: idempotencyKey,
+                            planHash: token,
+                            payloadJSONRedacted: #"{"result":"deleted"}"#
+                        )
                     )
-                )
-                try store.events.append([
-                    EventRecord(
-                        id: hostwrightUniqueID(prefix: "event-cleanup-deleted"),
-                        timestamp: successTimestamp,
-                        severity: .info,
-                        type: "cleanup.deleted",
-                        source: "hostwright-cli",
-                        projectID: projectID,
-                        serviceName: candidate.identity.serviceName,
-                        runtimeAdapter: runtimeAdapter,
-                        message: event.message,
-                        payloadJSONRedacted: #"{"resourceIdentifier":"\#(candidate.resourceIdentifier)"}"#
+                    try store.events.append([
+                        EventRecord(
+                            id: hostwrightUniqueID(prefix: "event-cleanup-deleted"),
+                            timestamp: successTimestamp,
+                            severity: .info,
+                            type: "cleanup.deleted",
+                            source: "hostwright-cli",
+                            projectID: projectID,
+                            serviceName: candidate.identity.serviceName,
+                            runtimeAdapter: runtimeAdapter,
+                            message: event.message,
+                            payloadJSONRedacted: #"{"resourceIdentifier":"\#(candidate.resourceIdentifier)"}"#
+                        )
+                    ])
+                    try store.ownership.markCleanupCompleted(
+                        resourceIdentifier: candidate.resourceIdentifier,
+                        runtimeAdapter: candidate.runtimeAdapter,
+                        observedAt: successTimestamp,
+                        metadataJSONRedacted: #"{"cleanupToken":"\#(token)","cleanupStatus":"deleted"}"#
                     )
-                ])
-                try store.ownership.markCleanupCompleted(
-                    resourceIdentifier: candidate.resourceIdentifier,
-                    runtimeAdapter: candidate.runtimeAdapter,
-                    observedAt: successTimestamp,
-                    metadataJSONRedacted: #"{"cleanupToken":"\#(token)","cleanupStatus":"deleted"}"#
-                )
-                lines.append("- deleted \(candidate.resourceIdentifier)")
+                    lines.append("- deleted \(candidate.resourceIdentifier)")
+                } catch {
+                    let redactedPersistenceError = RuntimeRedactionPolicy.default.redact(String(describing: error))
+                    lines.append("- deleted \(candidate.resourceIdentifier)")
+                    lines.append("- state update failed \(candidate.resourceIdentifier): \(redactedPersistenceError)")
+                    lines.append("")
+                    return CLIRunResult(
+                        standardOutput: lines.joined(separator: "\n"),
+                        standardError: "\(HostwrightErrorCode.stateStoreUnavailable.rawValue): Cleanup deleted \(candidate.resourceIdentifier), but success state persistence failed: \(redactedPersistenceError)\n",
+                        exitCode: CLIExitCode.stateUnavailable.rawValue
+                    )
+                }
             } catch {
                 hadFailure = true
                 let redactedError = RuntimeRedactionPolicy.default.redact(String(describing: error))
@@ -246,11 +373,12 @@ struct CleanupCommandRunner {
     private func recordCleanupPlanned(
         store: SQLiteStateStore,
         projectName: String,
-        candidates: [CleanupCandidate],
+        assessments: [CleanupAssessment],
         token: String,
         observed: ObservedRuntimeState
     ) throws {
         let timestamp = hostwrightTimestamp()
+        let eligibleCount = assessments.filter { $0.classification == .eligible }.count
         try store.events.append([
             EventRecord(
                 id: hostwrightUniqueID(prefix: "event-cleanup-planned"),
@@ -261,24 +389,24 @@ struct CleanupCommandRunner {
                 projectID: "project-\(projectName)",
                 serviceName: nil,
                 runtimeAdapter: observed.adapterMetadata?.adapterName,
-                message: "Cleanup planned \(candidates.count) eligible Hostwright-owned container(s).",
-                payloadJSONRedacted: #"{"token":"\#(token)","count":\#(candidates.count)}"#
+                message: "Cleanup planned \(eligibleCount) eligible Hostwright-owned container(s).",
+                payloadJSONRedacted: #"{"token":"\#(token)","eligible":\#(eligibleCount),"total":\#(assessments.count)}"#
             )
         ])
     }
 
-    private func renderDryRun(candidates: [CleanupCandidate], token: String) -> String {
+    private func renderDryRun(assessments: [CleanupAssessment], token: String) -> String {
         var lines = [
             "Hostwright cleanup (dry run)",
             "State DB: \(stateDatabasePath)",
             "Confirmation token: \(token)",
             ""
         ]
-        if candidates.isEmpty {
-            lines.append("- no cleanup-eligible Hostwright-owned stopped/created/exited containers")
+        if assessments.isEmpty {
+            lines.append("- [blocked] no ownership records found for cleanup assessment")
         } else {
-            lines += candidates.map { candidate in
-                "- \(candidate.resourceIdentifier) service=\(candidate.identity.displayName) lifecycle=\(candidate.lifecycleState.rawValue)"
+            lines += assessments.map { assessment in
+                "- [\(assessment.classification.rawValue)] \(assessment.resourceIdentifier) service=\(assessment.serviceName) lifecycle=\(assessment.lifecycleText): \(assessment.reason)"
             }
         }
         lines.append("")
@@ -286,7 +414,14 @@ struct CleanupCommandRunner {
     }
 
     private func cleanupToken(for candidates: [CleanupCandidate]) -> String {
-        let joined = candidates.map(\.resourceIdentifier).joined(separator: "|")
+        let joined = candidates.map { candidate in
+            [
+                candidate.resourceIdentifier,
+                candidate.identity.displayName,
+                candidate.lifecycleState.rawValue,
+                candidate.runtimeAdapter
+            ].joined(separator: ":")
+        }.joined(separator: "|")
         return "cleanup-\(hostwrightStableHash(joined))"
     }
 
@@ -301,4 +436,39 @@ private struct CleanupCandidate: Equatable {
     let resourceIdentifier: String
     let lifecycleState: RuntimeLifecycleState
     let runtimeAdapter: String
+}
+
+private enum CleanupClassification: String, Equatable {
+    case eligible
+    case ambiguous
+    case stale
+    case running
+    case unknown
+    case blocked
+    case neverDelete = "never-delete"
+
+    var sortOrder: Int {
+        switch self {
+        case .eligible: 0
+        case .ambiguous: 1
+        case .stale: 2
+        case .running: 3
+        case .unknown: 4
+        case .blocked: 5
+        case .neverDelete: 6
+        }
+    }
+}
+
+private struct CleanupAssessment: Equatable {
+    let classification: CleanupClassification
+    let resourceIdentifier: String
+    let serviceName: String
+    let lifecycleState: RuntimeLifecycleState?
+    let reason: String
+    let candidate: CleanupCandidate?
+
+    var lifecycleText: String {
+        lifecycleState?.rawValue ?? "unobserved"
+    }
 }

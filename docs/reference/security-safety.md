@@ -36,6 +36,8 @@ Cleanup is destructive and requires all of these:
 - matching project and service;
 - created, stopped, or exited lifecycle state.
 
+Dry-run reports ambiguous, stale, running, unknown, blocked, and never-delete records without deleting them. Confirmation deletes only records classified as eligible in the current dry-run plan.
+
 Cleanup does not delete images, volumes, networks, Apple builder resources, base images, or unmanaged containers.
 
 ## Secrets And Redaction

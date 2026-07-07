@@ -4,9 +4,9 @@ Hostwright must be conservative because it will eventually manage local runtime 
 
 ## Current State
 
-Hostwright has narrow runtime mutation gates through `RuntimeAdapter`: create-missing-service, restart-policy-allowed managed start, and exact cleanup-eligible managed container delete. Create and start require explicit `--state-db`, explicit `--confirm-plan`, state intent persistence before execution, and conservative service-shape validation. Cleanup requires explicit `--state-db`, dry-run planning, an exact cleanup token, ownership records, live observation, and a non-running lifecycle.
+Hostwright has narrow runtime mutation gates through `RuntimeAdapter`: create-missing-service, restart-policy-allowed managed start, and exact cleanup-eligible managed container delete. Create and start require explicit `--state-db`, explicit `--confirm-plan`, state intent persistence before execution, and conservative service-shape validation. Cleanup requires explicit `--state-db`, dry-run planning, an exact cleanup token, ownership records, live observation, and a non-running lifecycle. The foreground `hostwrightd` loop observes and plans through `RuntimeAdapter`, but does not execute runtime mutation.
 
-No general lifecycle mutation, stop/restart command, broad cleanup, image deletion, volume deletion, unmanaged deletion, privileged helper, service installer, DNS behavior, tunnel behavior, cloud integration, daemon loop, or default database path exists.
+No general lifecycle mutation, stop/restart command, broad cleanup, image deletion, volume deletion, unmanaged deletion, privileged helper, service installer, launch agent, DNS behavior, tunnel behavior, cloud integration, unattended daemon mutation, or default database path exists.
 
 ## Requirements
 

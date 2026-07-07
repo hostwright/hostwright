@@ -19,7 +19,9 @@ Hostwright has a deterministic planner. It maps the supported `hostwright.yaml` 
 
 `hostwright apply` is separate from `hostwright plan`. Apply recomputes the observed plan, requires a matching `--confirm-plan` hash, persists intent before mutation, and executes exactly one executable action: `createMissingService` or restart-policy-allowed `startManagedService`.
 
-Cleanup is separate from apply. It requires dry-run token confirmation and deletes only exact cleanup-eligible Hostwright-owned stopped/created/exited containers. There is no rollback, multi-action apply, broad cleanup, or daemon scheduling loop.
+Cleanup is separate from apply. It requires dry-run token confirmation and deletes only exact cleanup-eligible Hostwright-owned stopped/created/exited containers. There is no rollback, multi-action apply, broad cleanup, or unattended daemon mutation.
+
+`hostwrightd --foreground` runs a non-mutating reconciliation loop. It reads the explicit config path, observes through `RuntimeAdapter`, computes a plan, and records daemon events and operation records to the explicit state database. It does not call `RuntimeAdapter.execute`.
 
 ## Drift Cases
 

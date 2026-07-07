@@ -112,4 +112,8 @@ public enum RuntimeAdapterFactory {
     public static func defaultLocal() -> any RuntimeAdapter {
         AppleContainerCLIAdapter()
     }
+
+    public static func defaultReadOnlyLocal() -> any RuntimeAdapter {
+        AppleContainerReadOnlyAdapter()
+    }
 }

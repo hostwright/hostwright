@@ -33,17 +33,19 @@ Each iteration:
 1. Reads and validates the explicit manifest/config path.
 2. Maps the manifest into desired runtime state.
 3. Observes runtime state through `RuntimeAdapter`.
-4. Computes a deterministic reconciliation plan.
-5. Persists desired state, observed state, a daemon operation record, and daemon events to the explicit state database.
-6. Sleeps according to cadence, jitter, and repeated-error backoff.
+4. Runs bounded in-process loopback health checks for configured running services.
+5. Persists health results and restart policy state.
+6. Computes a deterministic reconciliation plan with restart-state blocking.
+7. Persists desired state, observed state, a daemon operation record, and daemon events to the explicit state database.
+8. Sleeps according to cadence, jitter, and repeated-error backoff.
 
 Successful iterations persist desired and observed snapshots. Failed iterations persist a failed daemon operation and `daemon.reconcile.failed` event with a redacted diagnostic code; they do not claim a desired or observed snapshot was recorded.
 
-The daemon records `daemon.started`, `daemon.reconcile.succeeded`, `daemon.reconcile.failed`, `daemon.backoff`, `daemon.sleep_wake_resumed`, and `daemon.stopped` events.
+The daemon records `daemon.started`, `daemon.reconcile.succeeded`, `daemon.reconcile.failed`, `daemon.backoff`, `daemon.sleep_wake_resumed`, `daemon.stopped`, `health.check.*`, and `restart.policy.state` events.
 
 ## Mutation Policy
 
-Phase 15 uses the read-only local runtime adapter and does not call `RuntimeAdapter.execute`. The daemon may observe and plan actions, but it does not create, start, stop, restart, delete, repair, clean up, or otherwise mutate runtime resources.
+The foreground daemon uses the read-only local runtime adapter and does not call `RuntimeAdapter.execute`. It may observe, run bounded in-process loopback health checks, persist restart policy state, and plan actions, but it does not create, start, stop, restart, delete, repair, clean up, or otherwise mutate runtime resources.
 
 Confirmed mutation remains limited to existing explicit CLI gates:
 
@@ -67,6 +69,6 @@ The loop treats sleep/wake as a scheduler event. A wake-aware clock can report t
 - privileged helper
 - default state database path
 - unattended runtime mutation
-- crash-loop restart policy enforcement
+- aggressive crash-loop restart policy enforcement
 - broad lifecycle management
 - image, volume, or unmanaged cleanup

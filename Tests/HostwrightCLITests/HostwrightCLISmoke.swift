@@ -292,8 +292,119 @@ final class HostwrightCLITests: XCTestCase {
             XCTAssertTrue(result.standardOutput.contains("Applied action: proposeStartStoppedService demo/api"))
             XCTAssertEqual(adapter.executedActions.map(\.kind), [.start])
 
-            let events = try SQLiteStateStore(path: databasePath).events.loadAll()
+            let store = SQLiteStateStore(path: databasePath)
+            let states = try store.restartPolicies.loadProject(projectID: "project-demo")
+            XCTAssertEqual(states.count, 1)
+            XCTAssertEqual(states[0].policy, .onFailure)
+            XCTAssertEqual(states[0].status, .active)
+            XCTAssertEqual(states[0].attemptCount, 0)
+            XCTAssertNil(states[0].backoffUntil)
+
+            let events = try store.events.loadAll()
             XCTAssertTrue(events.contains { $0.type == "apply.started-service" })
+            XCTAssertTrue(events.contains { $0.type == "restart.policy.active" })
+        }
+    }
+
+    func testApplySuccessfulStartPersistenceFailureDoesNotRecordFailedRestartAttempt() throws {
+        try withTemporaryDatabase { databasePath in
+            let files = FileBox(files: [HostwrightIdentity.manifestFileName: restartableServiceManifest])
+            let store = SQLiteStateStore(path: databasePath)
+            try store.migrate()
+            let connection = try SQLiteConnection(path: databasePath)
+            try connection.execute(
+                """
+                CREATE TRIGGER fail_success_operation
+                BEFORE INSERT ON operation_ledger
+                WHEN NEW.status = 'succeeded'
+                BEGIN
+                  SELECT RAISE(FAIL, 'blocked success persistence');
+                END
+                """
+            )
+            let observed = ObservedRuntimeState(
+                projectName: "demo",
+                services: [
+                    ObservedRuntimeService(
+                        identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"),
+                        image: "local/demo:latest",
+                        lifecycleState: .stopped,
+                        healthState: .unknown
+                    )
+                ],
+                adapterMetadata: fakeAdapterMetadata
+            )
+            let adapter = FakeApplyRuntimeAdapter(observedState: observed)
+            let expectedHash = try planHash(for: restartableServiceManifest, observed: observed)
+
+            let result = HostwrightCLI.run(
+                arguments: ["apply", "--state-db", databasePath, "--confirm-plan", expectedHash],
+                environment: environment(files: files, runtimeAdapter: adapter)
+            )
+
+            XCTAssertEqual(result.exitCode, CLIExitCode.stateUnavailable.rawValue)
+            XCTAssertTrue(result.standardError.contains(HostwrightErrorCode.stateStoreUnavailable.rawValue))
+            XCTAssertFalse(result.standardError.contains(HostwrightErrorCode.runtimeUnavailable.rawValue))
+            XCTAssertFalse(result.standardError.contains("Runtime mutation failed"))
+            XCTAssertEqual(adapter.executedActions.map(\.kind), [.start])
+
+            let states = try store.restartPolicies.loadProject(projectID: "project-demo")
+            XCTAssertTrue(states.isEmpty)
+            let events = try store.events.loadAll()
+            XCTAssertFalse(events.contains { $0.type == "restart.policy.backoff" })
+            XCTAssertFalse(events.contains { $0.type == "restart.policy.crash-loop-blocked" })
+        }
+    }
+
+    func testApplyBlocksManagedStartWhenCrashLoopStateIsPersisted() throws {
+        try withTemporaryDatabase { databasePath in
+            let files = FileBox(files: [HostwrightIdentity.manifestFileName: restartableServiceManifest])
+            let store = SQLiteStateStore(path: databasePath)
+            try store.migrate()
+            try saveDesiredManifest(store: store, manifestText: restartableServiceManifest)
+            let crashLoopState = RestartPolicyStateRecord(
+                id: "restart-api",
+                projectID: "project-demo",
+                serviceName: "api",
+                policy: .onFailure,
+                status: .crashLoopBlocked,
+                attemptCount: 3,
+                maxAttempts: 3,
+                backoffSeconds: 60,
+                updatedAt: "2026-07-01T00:00:00Z",
+                metadataJSONRedacted: "{}"
+            )
+            try store.restartPolicies.upsert(crashLoopState)
+            let observed = ObservedRuntimeState(
+                projectName: "demo",
+                services: [
+                    ObservedRuntimeService(
+                        identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"),
+                        image: "local/demo:latest",
+                        lifecycleState: .exited,
+                        healthState: .unknown
+                    )
+                ],
+                adapterMetadata: fakeAdapterMetadata
+            )
+            let adapter = FakeApplyRuntimeAdapter(observedState: observed)
+            let manifest = try ManifestValidator.validated(restartableServiceManifest)
+            let expectedHash = ReconciliationPlanner().plan(
+                manifest: manifest,
+                observedState: observed,
+                restartPolicyStates: [RuntimeServiceIdentity(projectName: "demo", serviceName: "api"): crashLoopState],
+                currentTimestamp: "2026-07-01T00:00:01Z"
+            ).planHash
+
+            let result = HostwrightCLI.run(
+                arguments: ["apply", "--state-db", databasePath, "--confirm-plan", expectedHash],
+                environment: environment(files: files, runtimeAdapter: adapter)
+            )
+
+            XCTAssertNotEqual(result.exitCode, 0)
+            XCTAssertTrue(result.standardError.contains("No executable createMissingService or startManagedService action exists"))
+            XCTAssertTrue(result.standardError.contains("crash-loop protection"))
+            XCTAssertTrue(adapter.executedActions.isEmpty)
         }
     }
 

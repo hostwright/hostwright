@@ -96,14 +96,17 @@ Status values:
 | HW-DAEMON-002 | Daemon reconciliation must require explicit config and state database paths. | Phase 15 maintainer scope | Implemented | `Sources/HostwrightDaemonCore/DaemonCommand.swift`, `Sources/HostwrightDaemonCore/DaemonCore.swift` | Daemon parser and loop XCTest cases | 15 |
 | HW-DAEMON-003 | Daemon loop cadence, jitter, repeated-error backoff, shutdown, single-instance lock, and sleep/wake behavior must be testable. | Phase 15 maintainer scope | Implemented for foreground dev loop | `Sources/HostwrightDaemonCore/DaemonCore.swift`, `Sources/HostwrightDaemonCore/DaemonFileLock.swift` | Daemon fake-clock, backoff, shutdown, lock, and sleep/wake XCTest cases | 15 |
 | HW-DAEMON-004 | Daemon loop must not perform unattended runtime mutation before a later policy authorizes it. | Phase 15 maintainer scope | Implemented by omission and tests | `Sources/HostwrightDaemonCore/DaemonCore.swift` | Daemon XCTest asserts `RuntimeAdapter.execute` is not called | 15 |
+| HW-DAEMON-005 | Daemon health/restart reconciliation must record health results and restart policy state without starting or restarting services by itself. | Phase 16 maintainer scope | Implemented | `Sources/HostwrightDaemonCore/DaemonCore.swift` | Daemon health persistence and crash-loop blocking XCTest cases | 16 |
 
 ## Health
 
 | ID | Requirement | Source document | Current status | Implementation file if any | Test coverage if any | Release phase |
 | --- | --- | --- | --- | --- | --- | --- |
 | HW-HEALTH-001 | Manifest must model health checks. | Agent Engineering Manual | Partially implemented | `ManifestModel.swift`, `ManifestValidator.swift` | Manifest smoke tests | 2 |
-| HW-HEALTH-002 | Runtime health execution must be honest about observed runtime state. | Agent Engineering Manual | Planned | None | None | 9 |
-| HW-HEALTH-003 | Restart policy must include crash-loop backoff. | Document 2 | Planned | None | None | 9 |
+| HW-HEALTH-002 | Runtime health execution must be bounded, non-shell, and redacted before display or persistence. | Agent Engineering Manual; Phase 16 maintainer scope | Implemented for in-process loopback probes and direct true/false probes | `Sources/HostwrightRuntime/RuntimeHealthChecker.swift`, `Sources/HostwrightDaemonCore/DaemonCore.swift` | Runtime and daemon XCTest cases | 16 |
+| HW-HEALTH-003 | Restart policy must include crash-loop backoff. | Document 2; Phase 16 maintainer scope | Implemented for managed-start planning gates | `Sources/HostwrightReconciler/RestartPolicyEvaluator.swift`, `Sources/HostwrightCLI/ApplyCommand.swift`, `Sources/HostwrightState/StateRecords.swift` | Reconciler, CLI, daemon, and state XCTest cases | 16 |
+| HW-HEALTH-004 | Health check results must be persisted append-only with redacted stdout, stderr, command, and metadata surfaces. | Phase 16 maintainer scope | Implemented | `Sources/HostwrightState/MigrationRunner.swift`, `Sources/HostwrightState/StateRepositories.swift` | State and daemon XCTest cases | 16 |
+| HW-HEALTH-005 | Restart policy state must track max attempts, backoff, operator hold, manual-disable, and crash-loop blocking. | Phase 16 maintainer scope | Implemented for state, planning, manual-disable, preexisting operator hold, and managed-start failure gates | `Sources/HostwrightState/StateRecords.swift`, `Sources/HostwrightState/StateRepositories.swift`, `Sources/HostwrightReconciler/RestartPolicyEvaluator.swift`, `Sources/HostwrightCLI/ApplyCommand.swift` | State, reconciler, and CLI XCTest cases | 16 |
 
 ## Networking
 

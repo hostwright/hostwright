@@ -451,6 +451,189 @@ public struct OperationLedger: Sendable {
     }
 }
 
+public struct HealthCheckResultRepository: Sendable {
+    private let store: SQLiteStateStore
+
+    public init(store: SQLiteStateStore) {
+        self.store = store
+    }
+
+    public func append(_ results: [HealthCheckResultRecord]) throws {
+        let redactedResults = results.map { $0.redacted() }
+        try store.withValidatedConnection { connection in
+            try connection.transaction {
+                for result in redactedResults {
+                    try connection.run(
+                        """
+                        INSERT INTO health_check_results (
+                            id, project_id, service_name, checked_at, status, exit_status, timed_out,
+                            command_json_redacted, stdout_redacted, stderr_redacted, metadata_json_redacted
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        bindings: [
+                            .text(result.id),
+                            optionalText(result.projectID),
+                            .text(result.serviceName),
+                            .text(result.checkedAt),
+                            .text(result.status.rawValue),
+                            optionalInt32(result.exitStatus),
+                            .bool(result.timedOut),
+                            .text(result.commandJSONRedacted),
+                            .text(result.stdoutRedacted),
+                            .text(result.stderrRedacted),
+                            .text(result.metadataJSONRedacted)
+                        ]
+                    )
+                }
+            }
+        }
+    }
+
+    public func loadAll() throws -> [HealthCheckResultRecord] {
+        try store.withValidatedConnection(readOnly: true) { connection in
+            let rows = try connection.query(
+                """
+                SELECT id, project_id, service_name, checked_at, status, exit_status, timed_out,
+                       command_json_redacted, stdout_redacted, stderr_redacted, metadata_json_redacted
+                FROM health_check_results
+                ORDER BY checked_at ASC, rowid ASC
+                """
+            )
+            return try rows.map(healthCheckResultRecord(from:))
+        }
+    }
+
+    public func loadProject(projectID: String) throws -> [HealthCheckResultRecord] {
+        try store.withValidatedConnection(readOnly: true) { connection in
+            let rows = try connection.query(
+                """
+                SELECT id, project_id, service_name, checked_at, status, exit_status, timed_out,
+                       command_json_redacted, stdout_redacted, stderr_redacted, metadata_json_redacted
+                FROM health_check_results
+                WHERE project_id = ?
+                ORDER BY checked_at ASC, rowid ASC
+                """,
+                bindings: [.text(projectID)]
+            )
+            return try rows.map(healthCheckResultRecord(from:))
+        }
+    }
+
+    public func latest(projectID: String, serviceName: String) throws -> HealthCheckResultRecord? {
+        try store.withValidatedConnection(readOnly: true) { connection in
+            let rows = try connection.query(
+                """
+                SELECT id, project_id, service_name, checked_at, status, exit_status, timed_out,
+                       command_json_redacted, stdout_redacted, stderr_redacted, metadata_json_redacted
+                FROM health_check_results
+                WHERE project_id = ? AND service_name = ?
+                ORDER BY checked_at DESC, rowid DESC
+                LIMIT 1
+                """,
+                bindings: [.text(projectID), .text(serviceName)]
+            )
+            return try rows.first.map(healthCheckResultRecord(from:))
+        }
+    }
+}
+
+public struct RestartPolicyStateRepository: Sendable {
+    private let store: SQLiteStateStore
+
+    public init(store: SQLiteStateStore) {
+        self.store = store
+    }
+
+    public func upsert(_ state: RestartPolicyStateRecord) throws {
+        let redacted = state.redacted()
+        try store.withValidatedConnection { connection in
+            try connection.transaction {
+                try connection.run(
+                    """
+                    INSERT INTO restart_policy_state (
+                        id, project_id, service_name, policy, status, attempt_count, max_attempts,
+                        backoff_seconds, backoff_until, last_failure_at, updated_at, metadata_json_redacted
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(project_id, service_name) DO UPDATE SET
+                        id = excluded.id,
+                        policy = excluded.policy,
+                        status = excluded.status,
+                        attempt_count = excluded.attempt_count,
+                        max_attempts = excluded.max_attempts,
+                        backoff_seconds = excluded.backoff_seconds,
+                        backoff_until = excluded.backoff_until,
+                        last_failure_at = excluded.last_failure_at,
+                        updated_at = excluded.updated_at,
+                        metadata_json_redacted = excluded.metadata_json_redacted
+                    """,
+                    bindings: [
+                        .text(redacted.id),
+                        .text(redacted.projectID),
+                        .text(redacted.serviceName),
+                        .text(redacted.policy.rawValue),
+                        .text(redacted.status.rawValue),
+                        .int(redacted.attemptCount),
+                        .int(redacted.maxAttempts),
+                        .int(redacted.backoffSeconds),
+                        optionalText(redacted.backoffUntil),
+                        optionalText(redacted.lastFailureAt),
+                        .text(redacted.updatedAt),
+                        .text(redacted.metadataJSONRedacted)
+                    ]
+                )
+            }
+        }
+    }
+
+    public func load(projectID: String, serviceName: String) throws -> RestartPolicyStateRecord? {
+        try store.withValidatedConnection(readOnly: true) { connection in
+            let rows = try connection.query(
+                """
+                SELECT id, project_id, service_name, policy, status, attempt_count, max_attempts,
+                       backoff_seconds, backoff_until, last_failure_at, updated_at, metadata_json_redacted
+                FROM restart_policy_state
+                WHERE project_id = ? AND service_name = ?
+                LIMIT 1
+                """,
+                bindings: [.text(projectID), .text(serviceName)]
+            )
+            return try rows.first.map(restartPolicyStateRecord(from:))
+        }
+    }
+
+    public func loadProject(projectID: String) throws -> [RestartPolicyStateRecord] {
+        try store.withValidatedConnection(readOnly: true) { connection in
+            let rows = try connection.query(
+                """
+                SELECT id, project_id, service_name, policy, status, attempt_count, max_attempts,
+                       backoff_seconds, backoff_until, last_failure_at, updated_at, metadata_json_redacted
+                FROM restart_policy_state
+                WHERE project_id = ?
+                ORDER BY service_name ASC
+                """,
+                bindings: [.text(projectID)]
+            )
+            return try rows.map(restartPolicyStateRecord(from:))
+        }
+    }
+
+    public func loadAll() throws -> [RestartPolicyStateRecord] {
+        try store.withValidatedConnection(readOnly: true) { connection in
+            let rows = try connection.query(
+                """
+                SELECT id, project_id, service_name, policy, status, attempt_count, max_attempts,
+                       backoff_seconds, backoff_until, last_failure_at, updated_at, metadata_json_redacted
+                FROM restart_policy_state
+                ORDER BY project_id ASC, service_name ASC
+                """
+            )
+            return try rows.map(restartPolicyStateRecord(from:))
+        }
+    }
+}
+
 public struct OwnershipRepository: Sendable {
     private let store: SQLiteStateStore
 
@@ -707,6 +890,74 @@ private func operationRecord(from row: [String?]) throws -> OperationRecord {
     )
 }
 
+private func healthCheckResultRecord(from row: [String?]) throws -> HealthCheckResultRecord {
+    guard row.count == 11,
+          let id = row[0],
+          let serviceName = row[2],
+          let checkedAt = row[3],
+          let statusText = row[4],
+          let status = RuntimeHealthCheckStatus(rawValue: statusText),
+          let timedOutText = row[6],
+          let commandJSON = row[7],
+          let stdout = row[8],
+          let stderr = row[9],
+          let metadataJSON = row[10]
+    else {
+        throw StateStoreError.invalidRecord("Could not decode health check result row.")
+    }
+
+    return HealthCheckResultRecord(
+        id: id,
+        projectID: row[1],
+        serviceName: serviceName,
+        checkedAt: checkedAt,
+        status: status,
+        exitStatus: row[5].flatMap(Int32.init),
+        timedOut: timedOutText == "1",
+        commandJSONRedacted: commandJSON,
+        stdoutRedacted: stdout,
+        stderrRedacted: stderr,
+        metadataJSONRedacted: metadataJSON
+    )
+}
+
+private func restartPolicyStateRecord(from row: [String?]) throws -> RestartPolicyStateRecord {
+    guard row.count == 12,
+          let id = row[0],
+          let projectID = row[1],
+          let serviceName = row[2],
+          let policyText = row[3],
+          let policy = RuntimeRestartPolicy(rawValue: policyText),
+          let statusText = row[4],
+          let status = RestartPolicyStateStatus(rawValue: statusText),
+          let attemptCountText = row[5],
+          let attemptCount = Int(attemptCountText),
+          let maxAttemptsText = row[6],
+          let maxAttempts = Int(maxAttemptsText),
+          let backoffSecondsText = row[7],
+          let backoffSeconds = Int(backoffSecondsText),
+          let updatedAt = row[10],
+          let metadataJSON = row[11]
+    else {
+        throw StateStoreError.invalidRecord("Could not decode restart policy state row.")
+    }
+
+    return RestartPolicyStateRecord(
+        id: id,
+        projectID: projectID,
+        serviceName: serviceName,
+        policy: policy,
+        status: status,
+        attemptCount: attemptCount,
+        maxAttempts: maxAttempts,
+        backoffSeconds: backoffSeconds,
+        backoffUntil: row[8],
+        lastFailureAt: row[9],
+        updatedAt: updatedAt,
+        metadataJSONRedacted: metadataJSON
+    )
+}
+
 private func ownershipRecord(from row: [String?]) throws -> OwnershipRecord {
     guard row.count == 10,
           let id = row[0],
@@ -737,6 +988,10 @@ private func ownershipRecord(from row: [String?]) throws -> OwnershipRecord {
 
 private func optionalText(_ value: String?) -> SQLiteValue {
     value.map(SQLiteValue.text) ?? .null
+}
+
+private func optionalInt32(_ value: Int32?) -> SQLiteValue {
+    value.map { SQLiteValue.int(Int($0)) } ?? .null
 }
 
 private func portJSON(_ port: RuntimePortMapping) -> [String: Any] {

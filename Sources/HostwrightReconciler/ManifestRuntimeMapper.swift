@@ -52,7 +52,19 @@ public enum ManifestRuntimeMapper {
             environment: environment,
             ports: ports,
             mounts: mounts,
+            healthCheck: mapHealthCheck(service.health),
             restartPolicy: mapRestartPolicy(service.restart?.policy)
+        )
+    }
+
+    private static func mapHealthCheck(_ health: HostwrightHealthCheck?) -> RuntimeHealthCheckSpec? {
+        guard let health, !health.command.isEmpty else {
+            return nil
+        }
+
+        return RuntimeHealthCheckSpec(
+            command: health.command,
+            intervalSeconds: parseSeconds(health.interval) ?? RuntimeHealthCheckSpec.defaultIntervalSeconds
         )
     }
 
@@ -117,6 +129,13 @@ public enum ManifestRuntimeMapper {
             access = .unknown
         }
 
-        return RuntimeMountReference(source: String(parts[0]), target: String(parts[1]), access: access)
+            return RuntimeMountReference(source: String(parts[0]), target: String(parts[1]), access: access)
+    }
+
+    private static func parseSeconds(_ value: String?) -> Int? {
+        guard let value, value.hasSuffix("s") else {
+            return nil
+        }
+        return Int(value.dropLast())
     }
 }

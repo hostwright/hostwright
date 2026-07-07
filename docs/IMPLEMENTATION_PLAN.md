@@ -24,7 +24,7 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 | 13 | Manifest Schema Maturity | Complete locally | Align parser, schema, examples, manifest version policy, and untrusted-manifest handling. | Parser, validator, schema, examples, and docs agree on accepted and rejected manifest shapes. |
 | 14 | State Migrations and Upgrade Safety | Complete locally | Harden state migrations, compatibility, corruption handling, and locking. | Fresh, existing, future-version, corrupt, locked, checksum-mismatch, rollback, unrelated database, and repeated migration cases are tested. |
 | 15 | Local Daemon Reconciliation Loop | Complete locally | Turn `hostwrightd` into explicit foreground dev-mode reconciliation only. | Fake-clock loop, backoff, lock, shutdown, and sleep/wake behavior pass without unattended mutation. |
-| 16 | Health Checks and Restart Policy Expansion | Planned | Add bounded health execution and crash-loop-aware restart policy state. | Health results, max attempts, backoff, operator hold, manual disable, and redacted events are tested. |
+| 16 | Health Checks and Restart Policy Expansion | Complete locally | Add bounded health execution and crash-loop-aware restart policy state. | Health results, max attempts, backoff, manual disable, preexisting operator hold blocking, crash-loop blocking, and redacted events are tested. |
 | 17 | Managed Restart | Planned | Add one narrow Hostwright-owned restart path as an explicit stop-then-start sequence. | Ownership, running observed state, plan hash, operation ledger, recovery record, fake-runner tests, and disposable live proof pass. |
 | 18 | Rollback and Partial Failure Recovery | Planned | Model operation groups, locks, checkpoints, interruption recovery, and manual recovery hints. | Partial failure and crash/interruption records explain what changed and what remains manual. |
 | 19 | Cleanup and Garbage Collection Maturity | Planned | Improve cleanup classification, ownership mismatch handling, stale ID protection, and partial failure behavior. | Dry-run classifications and exact delete boundaries pass without image, volume, or unmanaged deletion. |
@@ -36,8 +36,8 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 - Live Apple container read-only execution exists behind the RuntimeAdapter path.
 - `hostwright apply` requires explicit `--state-db` and `--confirm-plan`.
 - `hostwright cleanup` requires explicit `--state-db`, dry-run planning, a matching cleanup token, ownership records, live observation, exact resource identifiers, and a non-running lifecycle.
-- No stop/restart command, image replacement, port mutation, mount mutation, image cleanup, volume cleanup, unmanaged cleanup, restart enforcement, DNS, tunnel, cloud, GPU/ANE, privileged helper, launch agent, or installer behavior is implemented.
-- `hostwrightd --foreground` can observe, plan, and record daemon loop events only; it does not perform unattended runtime mutation.
+- No stop/restart command, image replacement, port mutation, mount mutation, image cleanup, volume cleanup, unmanaged cleanup, aggressive restart loop, DNS, tunnel, cloud, GPU/ANE, privileged helper, launch agent, or installer behavior is implemented.
+- `hostwrightd --foreground` can observe, run bounded health checks, plan, and record daemon loop events only; it does not perform unattended runtime mutation.
 - Phase 6 state writes require explicit database paths; no default user database path exists.
 - State repository reads validate schema without implicit migration; `SQLiteStateStore.migrate()` is the explicit migration path.
 - Planning is deterministic and non-mutating.
@@ -167,3 +167,15 @@ Phase 14 does not add hidden default state paths, destructive reset commands, au
 - The live executable handles SIGINT/SIGTERM by requesting loop shutdown.
 
 Phase 15 does not add launch agent installation, default state paths, privileged helpers, unattended runtime mutation, restart-loop enforcement, image cleanup, volume cleanup, unmanaged cleanup, release tags, or GitHub Releases.
+
+## Phase 16 Outputs
+
+- Desired runtime services carry optional manifest health-check specs into planning.
+- Loopback-only health checks run through in-process URL fetches or direct `true`/`false` evaluation after allowlisted command-shape validation, timeouts, and redaction.
+- SQLite schema v2 adds append-only health check results and current restart policy state.
+- Restart policy planning considers max attempts, backoff, manual-disable, preexisting operator hold, and crash-loop-blocked states before exposing managed start as executable.
+- `hostwrightd` records health results, restart policy state, and redacted health/restart events without calling `RuntimeAdapter.execute`.
+- `hostwright apply` honors persisted crash-loop/backoff/hold/manual-disable restart state before executing the existing narrow managed start path and resets the attempt budget after a successful managed start.
+- XCTest coverage covers runtime health execution, state persistence, restart gating, daemon health persistence, daemon crash-loop blocking, and CLI apply blocking.
+
+Phase 16 does not add a broad restart command, daemon-enforced restart loops, stop/delete behavior, container exec health checks, external telemetry, release tags, or GitHub Releases.

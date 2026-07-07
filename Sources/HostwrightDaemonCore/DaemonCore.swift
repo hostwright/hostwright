@@ -137,6 +137,7 @@ public struct DaemonLoopRunner {
 
     private let configuration: DaemonConfiguration
     private let runtimeAdapter: any RuntimeAdapter
+    private let healthChecker: any RuntimeHealthChecking
     private let clock: any DaemonClock
     private let instanceLock: any DaemonInstanceLock
     private let shutdownToken: DaemonShutdownToken
@@ -144,6 +145,7 @@ public struct DaemonLoopRunner {
     public init(
         configuration: DaemonConfiguration,
         runtimeAdapter: any RuntimeAdapter,
+        healthChecker: any RuntimeHealthChecking = BoundedRuntimeHealthChecker(),
         clock: any DaemonClock,
         instanceLock: any DaemonInstanceLock,
         shutdownToken: DaemonShutdownToken = DaemonShutdownToken(),
@@ -153,6 +155,7 @@ public struct DaemonLoopRunner {
     ) {
         self.configuration = configuration
         self.runtimeAdapter = runtimeAdapter
+        self.healthChecker = healthChecker
         self.clock = clock
         self.instanceLock = instanceLock
         self.shutdownToken = shutdownToken
@@ -254,8 +257,7 @@ public struct DaemonLoopRunner {
             let manifest = try ManifestValidator.validated(manifestText)
             let mapping = ManifestRuntimeMapper.map(manifest)
             let observed = try await runtimeAdapter.observe(desiredState: mapping.desiredState)
-            let plan = ReconciliationPlanner().plan(manifest: manifest, observedState: observed)
-            let projectID = "project-\(plan.projectName)"
+            let projectID = "project-\(mapping.desiredState.projectName)"
             let adapterName = observed.adapterMetadata?.adapterName ?? "runtime-adapter"
 
             try store.desiredStates.saveManifestSnapshot(
@@ -266,12 +268,41 @@ public struct DaemonLoopRunner {
                 manifest: manifest,
                 timestamp: startedAt
             )
+
+            let healthResults = try await runHealthChecks(
+                desiredState: mapping.desiredState,
+                observedState: observed,
+                store: store,
+                projectID: projectID,
+                timestamp: startedAt
+            )
+            try persistHealthResults(healthResults, store: store, projectID: projectID, checkedAt: startedAt)
+            let observedWithHealth = observedState(observed, applying: healthResults)
+            try upsertRestartPolicyStates(
+                desiredState: mapping.desiredState,
+                observedState: observedWithHealth,
+                store: store,
+                projectID: projectID,
+                timestamp: startedAt
+            )
+            let restartPolicyStates = try restartPolicyStateMap(
+                store: store,
+                projectID: projectID,
+                projectName: mapping.desiredState.projectName
+            )
+            let plan = ReconciliationPlanner().plan(
+                manifest: manifest,
+                observedState: observedWithHealth,
+                restartPolicyStates: restartPolicyStates,
+                currentTimestamp: startedAt
+            )
+
             try store.observedStates.saveSnapshot(
                 snapshotID: idGenerator("daemon-snapshot"),
                 projectID: projectID,
-                observedState: observed,
+                observedState: observedWithHealth,
                 runtimeAdapter: adapterName,
-                parserVersion: "daemon-observation-v1",
+                parserVersion: "daemon-observation-v2",
                 rawOutputHash: nil,
                 redactedSummary: PlanRenderer.render(plan, mode: .compact),
                 observedAt: startedAt
@@ -290,8 +321,10 @@ public struct DaemonLoopRunner {
                     payloadJSONRedacted: payload([
                         "actions": plan.actions.count,
                         "drift": plan.drift.count,
+                        "healthChecks": healthResults.count,
                         "mutationAttempted": false,
-                        "planHash": plan.planHash
+                        "planHash": plan.planHash,
+                        "restartPolicyBlocked": plan.issues.filter { $0.kind == .restartPolicyBlocked }.count
                     ])
                 )
             )
@@ -305,12 +338,14 @@ public struct DaemonLoopRunner {
                     projectID: projectID,
                     serviceName: nil,
                     runtimeAdapter: adapterName,
-                    message: "Daemon reconciliation observed \(observed.services.count) service(s), planned \(plan.actions.count) action(s), and attempted no runtime mutation.",
+                    message: "Daemon reconciliation observed \(observedWithHealth.services.count) service(s), recorded \(healthResults.count) health check result(s), planned \(plan.actions.count) action(s), and attempted no runtime mutation.",
                     payloadJSONRedacted: payload([
                         "actions": plan.actions.count,
                         "drift": plan.drift.count,
+                        "healthChecks": healthResults.count,
                         "mutationAttempted": false,
-                        "planHash": plan.planHash
+                        "planHash": plan.planHash,
+                        "restartPolicyBlocked": plan.issues.filter { $0.kind == .restartPolicyBlocked }.count
                     ])
                 )
             ])
@@ -356,6 +391,304 @@ public struct DaemonLoopRunner {
             ])
             return .failure
         }
+    }
+
+    private func runHealthChecks(
+        desiredState: DesiredRuntimeState,
+        observedState: ObservedRuntimeState,
+        store: SQLiteStateStore,
+        projectID: String,
+        timestamp: String
+    ) async throws -> [RuntimeHealthCheckResult] {
+        let observedByIdentity = Dictionary(
+            observedState.services.map { (normalizedIdentity($0.identity), $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        var results: [RuntimeHealthCheckResult] = []
+
+        for desired in desiredState.services.sorted(by: { $0.identity.displayName < $1.identity.displayName }) {
+            guard let healthCheck = desired.healthCheck else {
+                continue
+            }
+
+            if let latest = try store.healthResults.latest(projectID: projectID, serviceName: desired.identity.serviceName),
+               !isHealthCheckDue(lastCheckedAt: latest.checkedAt, intervalSeconds: healthCheck.intervalSeconds, now: timestamp) {
+                continue
+            }
+
+            guard let observed = observedByIdentity[normalizedIdentity(desired.identity)],
+                  observed.lifecycleState == .running else {
+                results.append(
+                    RuntimeHealthCheckResult(
+                        identity: desired.identity,
+                        status: .skipped,
+                        exitStatus: nil,
+                        timedOut: false,
+                        command: RuntimeRedactionPolicy.default.redact(arguments: healthCheck.command),
+                        standardOutput: "",
+                        standardError: "Health check skipped because the observed service is not running."
+                    )
+                )
+                continue
+            }
+
+            results.append(await healthChecker.check(identity: desired.identity, spec: healthCheck))
+        }
+
+        return results
+    }
+
+    private func persistHealthResults(
+        _ results: [RuntimeHealthCheckResult],
+        store: SQLiteStateStore,
+        projectID: String,
+        checkedAt: String
+    ) throws {
+        guard !results.isEmpty else {
+            return
+        }
+
+        let records = results.map { result in
+            HealthCheckResultRecord(
+                id: idGenerator("health-result"),
+                projectID: projectID,
+                serviceName: result.identity.serviceName,
+                checkedAt: checkedAt,
+                status: result.status,
+                exitStatus: result.exitStatus,
+                timedOut: result.timedOut,
+                commandJSONRedacted: jsonArray(result.command),
+                stdoutRedacted: result.standardOutput,
+                stderrRedacted: result.standardError,
+                metadataJSONRedacted: payload([
+                    "timedOut": result.timedOut,
+                    "status": result.status.rawValue
+                ])
+            )
+        }
+        try store.healthResults.append(records)
+
+        try store.events.append(results.map { result in
+            EventRecord(
+                id: idGenerator("event-health"),
+                timestamp: checkedAt,
+                severity: healthEventSeverity(result.status),
+                type: "health.check.\(result.status.rawValue)",
+                source: "hostwrightd",
+                projectID: projectID,
+                serviceName: result.identity.serviceName,
+                runtimeAdapter: nil,
+                message: "Health check for \(result.identity.displayName) recorded \(result.status.rawValue).",
+                payloadJSONRedacted: payload([
+                    "command": result.command,
+                    "exitStatus": result.exitStatus.map { Int($0) } ?? NSNull(),
+                    "stderr": result.standardError,
+                    "stdout": result.standardOutput,
+                    "timedOut": result.timedOut
+                ])
+            )
+        })
+    }
+
+    private func observedState(
+        _ observedState: ObservedRuntimeState,
+        applying healthResults: [RuntimeHealthCheckResult]
+    ) -> ObservedRuntimeState {
+        let resultsByIdentity = Dictionary(
+            healthResults.map { (normalizedIdentity($0.identity), $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let services = observedState.services.map { service in
+            guard let result = resultsByIdentity[normalizedIdentity(service.identity)] else {
+                return service
+            }
+
+            let healthState: RuntimeHealthState
+            switch result.status {
+            case .healthy:
+                healthState = .healthy
+            case .unhealthy:
+                healthState = .unhealthy
+            case .unknown:
+                healthState = .unknown
+            case .skipped, .notConfigured:
+                healthState = service.healthState
+            }
+
+            return ObservedRuntimeService(
+                identity: service.identity,
+                image: service.image,
+                lifecycleState: service.lifecycleState,
+                healthState: healthState,
+                ports: service.ports,
+                mounts: service.mounts,
+                observedAt: service.observedAt
+            )
+        }
+
+        return ObservedRuntimeState(
+            projectName: observedState.projectName,
+            services: services,
+            adapterMetadata: observedState.adapterMetadata
+        )
+    }
+
+    private func upsertRestartPolicyStates(
+        desiredState: DesiredRuntimeState,
+        observedState: ObservedRuntimeState,
+        store: SQLiteStateStore,
+        projectID: String,
+        timestamp: String
+    ) throws {
+        let observedByIdentity = Dictionary(
+            observedState.services.map { (normalizedIdentity($0.identity), $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let existingStates = Dictionary(
+            try store.restartPolicies.loadProject(projectID: projectID).map { ($0.serviceName, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        var events: [EventRecord] = []
+
+        for desired in desiredState.services.sorted(by: { $0.identity.displayName < $1.identity.displayName }) {
+            let observed = observedByIdentity[normalizedIdentity(desired.identity)]
+            let previous = existingStates[desired.identity.serviceName]
+            let state = restartPolicyState(
+                desired: desired,
+                observed: observed,
+                previous: previous,
+                projectID: projectID,
+                timestamp: timestamp
+            )
+            try store.restartPolicies.upsert(state)
+
+            events.append(
+                EventRecord(
+                    id: idGenerator("event-restart-policy"),
+                    timestamp: timestamp,
+                    severity: restartStateSeverity(state.status),
+                    type: "restart.policy.state",
+                    source: "hostwrightd",
+                    projectID: projectID,
+                    serviceName: desired.identity.serviceName,
+                    runtimeAdapter: nil,
+                    message: "Restart policy state for \(desired.identity.displayName) is \(state.status.rawValue); daemon attempted no runtime mutation.",
+                    payloadJSONRedacted: state.metadataJSONRedacted
+                )
+            )
+        }
+
+        try store.events.append(events)
+    }
+
+    private func restartPolicyState(
+        desired: DesiredRuntimeService,
+        observed: ObservedRuntimeService?,
+        previous: RestartPolicyStateRecord?,
+        projectID: String,
+        timestamp: String
+    ) -> RestartPolicyStateRecord {
+        let maxAttempts = previous?.maxAttempts ?? RestartPolicyStateDefaults.maxAttempts
+        let backoffSeconds = previous?.backoffSeconds ?? RestartPolicyStateDefaults.backoffSeconds
+
+        let status: RestartPolicyStateStatus
+        let attemptCount: Int
+        let backoffUntil: String?
+        let lastFailureAt: String?
+
+        if desired.restartPolicy == .no {
+            status = .manualDisabled
+            attemptCount = 0
+            backoffUntil = nil
+            lastFailureAt = nil
+        } else if observed?.lifecycleState == .running && observed?.healthState == .healthy {
+            status = .active
+            attemptCount = 0
+            backoffUntil = nil
+            lastFailureAt = nil
+        } else if previous?.status == .operatorHold || previous?.status == .manualDisabled || previous?.status == .crashLoopBlocked {
+            status = previous?.status ?? .active
+            attemptCount = previous?.attemptCount ?? 0
+            backoffUntil = previous?.backoffUntil
+            lastFailureAt = previous?.lastFailureAt
+        } else {
+            status = previous?.status ?? .active
+            attemptCount = previous?.attemptCount ?? 0
+            backoffUntil = previous?.backoffUntil
+            lastFailureAt = previous?.lastFailureAt
+        }
+
+        return RestartPolicyStateRecord(
+            id: previous?.id ?? idGenerator("restart-policy"),
+            projectID: projectID,
+            serviceName: desired.identity.serviceName,
+            policy: desired.restartPolicy,
+            status: status,
+            attemptCount: attemptCount,
+            maxAttempts: maxAttempts,
+            backoffSeconds: backoffSeconds,
+            backoffUntil: backoffUntil,
+            lastFailureAt: lastFailureAt,
+            updatedAt: timestamp,
+            metadataJSONRedacted: payload([
+                "attemptCount": attemptCount,
+                "backoffUntil": backoffUntil ?? "",
+                "healthState": observed?.healthState.rawValue ?? "unknown",
+                "lifecycleState": observed?.lifecycleState.rawValue ?? "missing",
+                "maxAttempts": maxAttempts,
+                "mutationAttempted": false,
+                "policy": desired.restartPolicy.rawValue,
+                "status": status.rawValue
+            ])
+        )
+    }
+
+    private func restartPolicyStateMap(
+        store: SQLiteStateStore,
+        projectID: String,
+        projectName: String
+    ) throws -> [RuntimeServiceIdentity: RestartPolicyStateRecord] {
+        Dictionary(try store.restartPolicies.loadProject(projectID: projectID).map { state in
+            (
+                RuntimeServiceIdentity(projectName: projectName, serviceName: state.serviceName),
+                state
+            )
+        }, uniquingKeysWith: { first, _ in first })
+    }
+
+    private func normalizedIdentity(_ identity: RuntimeServiceIdentity) -> RuntimeServiceIdentity {
+        RuntimeServiceIdentity(projectName: identity.projectName, serviceName: identity.serviceName)
+    }
+
+    private func healthEventSeverity(_ status: RuntimeHealthCheckStatus) -> StateEventSeverity {
+        switch status {
+        case .healthy, .notConfigured:
+            return .info
+        case .skipped, .unknown:
+            return .warning
+        case .unhealthy:
+            return .error
+        }
+    }
+
+    private func restartStateSeverity(_ status: RestartPolicyStateStatus) -> StateEventSeverity {
+        switch status {
+        case .active:
+            return .info
+        case .backingOff, .operatorHold, .manualDisabled:
+            return .warning
+        case .crashLoopBlocked:
+            return .error
+        }
+    }
+
+    private func isHealthCheckDue(lastCheckedAt: String, intervalSeconds: Int, now: String) -> Bool {
+        let formatter = ISO8601DateFormatter()
+        guard let last = formatter.date(from: lastCheckedAt),
+              let current = formatter.date(from: now) else {
+            return true
+        }
+        return current.timeIntervalSince(last) >= TimeInterval(intervalSeconds)
     }
 
     private func delaySeconds(iteration: Int, consecutiveFailures: Int) -> Int {
@@ -432,14 +765,28 @@ private func stableHash(_ value: String) -> String {
 }
 
 private func payload(_ object: [String: Any]) -> String {
-    let redacted = object.mapValues { value -> Any in
-        if let string = value as? String {
-            return RuntimeRedactionPolicy.default.redact(string)
-        }
-        return value
-    }
+    let redacted = redactJSONValue(object)
     let data = try! JSONSerialization.data(withJSONObject: redacted, options: [.sortedKeys])
     return String(data: data, encoding: .utf8)!
+}
+
+private func jsonArray(_ values: [String]) -> String {
+    let redacted = values.map { RuntimeRedactionPolicy.default.redact($0) }
+    let data = try! JSONSerialization.data(withJSONObject: redacted, options: [.sortedKeys])
+    return String(data: data, encoding: .utf8)!
+}
+
+private func redactJSONValue(_ value: Any) -> Any {
+    if let string = value as? String {
+        return RuntimeRedactionPolicy.default.redact(string)
+    }
+    if let array = value as? [Any] {
+        return array.map(redactJSONValue)
+    }
+    if let dictionary = value as? [String: Any] {
+        return dictionary.mapValues(redactJSONValue)
+    }
+    return value
 }
 
 private func daemonDiagnostic(for error: Error) -> HostwrightDiagnostic {

@@ -1,6 +1,7 @@
 import Foundation
 import XCTest
 @testable import HostwrightDaemonCore
+@testable import HostwrightManifest
 @testable import HostwrightRuntime
 @testable import HostwrightState
 
@@ -77,6 +78,163 @@ final class HostwrightDaemonCoreTests: XCTestCase {
             XCTAssertEqual(operations.filter { $0.plannedActionType == "daemon.reconcile" }.map(\.status), [.succeeded])
             XCTAssertEqual(try store.desiredStates.loadProject(id: "project-demo").name, "demo")
             XCTAssertEqual(try store.observedStates.loadSnapshots(projectID: "project-demo").count, 1)
+        }
+    }
+
+    func testForegroundLoopPersistsRedactedHealthResultAndRestartState() async throws {
+        try await withTemporaryDirectory { directory in
+            let databasePath = directory.appendingPathComponent("state.sqlite").path
+            let healthChecker = FakeHealthChecker(results: [
+                RuntimeHealthCheckResult(
+                    identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"),
+                    status: .unhealthy,
+                    exitStatus: 22,
+                    timedOut: false,
+                    command: ["curl", "-f", "http://localhost:8080/health?token=fake-secret"],
+                    standardOutput: "token=fake-secret",
+                    standardError: "password=fake-password"
+                )
+            ])
+            let adapter = CountingRuntimeAdapter(observedServices: [Self.observedService(healthState: .unknown)])
+            let ids = DeterministicIDs()
+            let runner = DaemonLoopRunner(
+                configuration: DaemonConfiguration(
+                    configPath: "hostwright.yaml",
+                    stateDatabasePath: databasePath,
+                    maxIterations: 1
+                ),
+                runtimeAdapter: adapter,
+                healthChecker: healthChecker,
+                clock: FakeDaemonClock(),
+                instanceLock: FakeDaemonLock(),
+                readConfig: { _ in Self.healthRestartManifest },
+                idGenerator: ids.next
+            )
+
+            let summary = try await runner.run()
+
+            XCTAssertEqual(summary.successfulIterations, 1)
+            XCTAssertEqual(adapter.executeCount, 0)
+            XCTAssertEqual(healthChecker.calls.map(\.identity.serviceName), ["api"])
+
+            let store = SQLiteStateStore(path: databasePath)
+            let healthResults = try store.healthResults.loadProject(projectID: "project-demo")
+            XCTAssertEqual(healthResults.map(\.status), [.unhealthy])
+            XCTAssertEqual(healthResults[0].exitStatus, 22)
+            XCTAssertFalse(healthResults[0].commandJSONRedacted.contains("fake-secret"))
+            XCTAssertFalse(healthResults[0].stdoutRedacted.contains("fake-secret"))
+            XCTAssertFalse(healthResults[0].stderrRedacted.contains("fake-password"))
+
+            let latestSnapshot = try XCTUnwrap(store.observedStates.loadSnapshots(projectID: "project-demo").last)
+            let observed = try store.observedStates.loadObservedServices(snapshotID: latestSnapshot.id)
+            XCTAssertEqual(observed[0].healthState, .unhealthy)
+
+            let restartState = try XCTUnwrap(store.restartPolicies.load(projectID: "project-demo", serviceName: "api"))
+            XCTAssertEqual(restartState.policy, .onFailure)
+            XCTAssertEqual(restartState.status, .active)
+
+            let events = try store.events.loadAll()
+            XCTAssertTrue(events.contains { $0.type == "health.check.unhealthy" })
+            XCTAssertTrue(events.contains { $0.type == "restart.policy.state" })
+            XCTAssertFalse(events.map(\.payloadJSONRedacted).joined().contains("fake-secret"))
+            XCTAssertFalse(events.map(\.payloadJSONRedacted).joined().contains("fake-password"))
+        }
+    }
+
+    func testForegroundLoopHonorsPersistedHealthInterval() async throws {
+        try await withTemporaryDirectory { directory in
+            let databasePath = directory.appendingPathComponent("state.sqlite").path
+            let healthChecker = FakeHealthChecker(results: [
+                RuntimeHealthCheckResult(
+                    identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"),
+                    status: .healthy,
+                    exitStatus: 0,
+                    timedOut: false,
+                    command: ["curl", "-f", "http://localhost:8080/health"],
+                    standardOutput: "",
+                    standardError: ""
+                )
+            ])
+            let runner = DaemonLoopRunner(
+                configuration: DaemonConfiguration(
+                    configPath: "hostwright.yaml",
+                    stateDatabasePath: databasePath,
+                    cadenceSeconds: 1,
+                    jitterSeconds: 0,
+                    maxBackoffSeconds: 10,
+                    maxIterations: 2
+                ),
+                runtimeAdapter: CountingRuntimeAdapter(observedServices: [Self.observedService(healthState: .unknown)]),
+                healthChecker: healthChecker,
+                clock: FakeDaemonClock(),
+                instanceLock: FakeDaemonLock(),
+                readConfig: { _ in Self.healthRestartManifest },
+                idGenerator: DeterministicIDs().next
+            )
+
+            _ = try await runner.run()
+
+            XCTAssertEqual(healthChecker.calls.count, 1)
+            XCTAssertEqual(try SQLiteStateStore(path: databasePath).healthResults.loadProject(projectID: "project-demo").count, 1)
+        }
+    }
+
+    func testForegroundLoopHonorsCrashLoopRestartStateWithoutMutation() async throws {
+        try await withTemporaryDirectory { directory in
+            let databasePath = directory.appendingPathComponent("state.sqlite").path
+            let store = SQLiteStateStore(path: databasePath)
+            try store.migrate()
+            try store.desiredStates.saveManifestSnapshot(
+                projectID: "project-demo",
+                manifestPath: "hostwright.yaml",
+                manifestHash: "seed",
+                desiredGeneration: 1,
+                manifest: Self.healthRestartManifestModel,
+                timestamp: "2026-07-07T00:00:00Z"
+            )
+            try store.restartPolicies.upsert(
+                RestartPolicyStateRecord(
+                    id: "restart-api",
+                    projectID: "project-demo",
+                    serviceName: "api",
+                    policy: .onFailure,
+                    status: .crashLoopBlocked,
+                    attemptCount: 3,
+                    maxAttempts: 3,
+                    backoffSeconds: 60,
+                    updatedAt: "2026-07-07T00:00:00Z",
+                    metadataJSONRedacted: "{}"
+                )
+            )
+
+            let adapter = CountingRuntimeAdapter(observedServices: [
+                Self.observedService(lifecycleState: .exited, healthState: .unknown)
+            ])
+            let runner = DaemonLoopRunner(
+                configuration: DaemonConfiguration(
+                    configPath: "hostwright.yaml",
+                    stateDatabasePath: databasePath,
+                    maxIterations: 1
+                ),
+                runtimeAdapter: adapter,
+                healthChecker: FakeHealthChecker(results: []),
+                clock: FakeDaemonClock(),
+                instanceLock: FakeDaemonLock(),
+                readConfig: { _ in Self.healthRestartManifest },
+                idGenerator: DeterministicIDs().next
+            )
+
+            let summary = try await runner.run()
+
+            XCTAssertEqual(summary.successfulIterations, 1)
+            XCTAssertEqual(adapter.executeCount, 0)
+            let restartState = try XCTUnwrap(store.restartPolicies.load(projectID: "project-demo", serviceName: "api"))
+            XCTAssertEqual(restartState.status, .crashLoopBlocked)
+
+            let daemonOperation = try XCTUnwrap(try store.operations.loadAll().first { $0.plannedActionType == "daemon.reconcile" })
+            XCTAssertTrue(daemonOperation.payloadJSONRedacted.contains(#""restartPolicyBlocked":1"#))
+            let events = try store.events.loadAll()
+            XCTAssertTrue(events.contains { $0.type == "restart.policy.state" && $0.message.contains("crashLoopBlocked") })
         }
     }
 
@@ -288,12 +446,47 @@ final class HostwrightDaemonCoreTests: XCTestCase {
           - "8080:8080"
     """
 
-    private static func observedService() -> ObservedRuntimeService {
+    private static let healthRestartManifest = """
+    project: demo
+    services:
+      api:
+        image: ghcr.io/example/api:latest
+        ports:
+          - "8080:8080"
+        health:
+          command: ["curl", "-f", "http://localhost:8080/health?token=fake-secret"]
+          interval: 10s
+        restart:
+          policy: on-failure
+    """
+
+    private static var healthRestartManifestModel: HostwrightManifest {
+        HostwrightManifest(
+            project: "demo",
+            services: [
+                HostwrightService(
+                    name: "api",
+                    image: "ghcr.io/example/api:latest",
+                    ports: ["8080:8080"],
+                    health: HostwrightHealthCheck(
+                        command: ["curl", "-f", "http://localhost:8080/health?token=fake-secret"],
+                        interval: "10s"
+                    ),
+                    restart: HostwrightRestart(policy: "on-failure")
+                )
+            ]
+        )
+    }
+
+    private static func observedService(
+        lifecycleState: RuntimeLifecycleState = .running,
+        healthState: RuntimeHealthState = .healthy
+    ) -> ObservedRuntimeService {
         ObservedRuntimeService(
             identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"),
             image: "ghcr.io/example/api:latest",
-            lifecycleState: .running,
-            healthState: .healthy,
+            lifecycleState: lifecycleState,
+            healthState: healthState,
             ports: [RuntimePortMapping(hostPort: 8080, containerPort: 8080, bindAddress: "127.0.0.1")]
         )
     }
@@ -395,6 +588,36 @@ private final class CountingRuntimeAdapter: RuntimeAdapter, @unchecked Sendable 
     func execute(_ action: PlannedRuntimeAction, confirmation: RuntimeMutationConfirmation?) async throws -> RuntimeEvent {
         executeCount += 1
         return RuntimeEvent(identity: action.identity, severity: .info, message: "unexpected", resourceIdentifier: nil)
+    }
+}
+
+private final class FakeHealthChecker: RuntimeHealthChecking, @unchecked Sendable {
+    struct Call {
+        let identity: RuntimeServiceIdentity
+        let spec: RuntimeHealthCheckSpec
+    }
+
+    private var results: [RuntimeHealthCheckResult]
+    private(set) var calls: [Call] = []
+
+    init(results: [RuntimeHealthCheckResult]) {
+        self.results = results
+    }
+
+    func check(identity: RuntimeServiceIdentity, spec: RuntimeHealthCheckSpec) async -> RuntimeHealthCheckResult {
+        calls.append(Call(identity: identity, spec: spec))
+        if results.isEmpty {
+            return RuntimeHealthCheckResult(
+                identity: identity,
+                status: .healthy,
+                exitStatus: 0,
+                timedOut: false,
+                command: spec.command,
+                standardOutput: "",
+                standardError: ""
+            )
+        }
+        return results.removeFirst()
     }
 }
 

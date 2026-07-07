@@ -13,7 +13,9 @@ public struct ReconciliationPlanner: Sendable {
     public func plan(
         manifest: HostwrightManifest,
         observedState: ObservedRuntimeState? = nil,
-        policy: PlanningPolicy = .default
+        policy: PlanningPolicy = .default,
+        restartPolicyStates: [RuntimeServiceIdentity: RestartPolicyStateRecord] = [:],
+        currentTimestamp: String? = nil
     ) -> ReconciliationPlan {
         let mapping = ManifestRuntimeMapper.map(manifest, policy: policy)
         return reconcile(
@@ -21,7 +23,9 @@ public struct ReconciliationPlanner: Sendable {
                 desiredState: mapping.desiredState,
                 observedState: observedState,
                 policy: policy,
-                additionalIssues: mapping.issues
+                additionalIssues: mapping.issues,
+                restartPolicyStates: restartPolicyStates,
+                currentTimestamp: currentTimestamp
             )
         )
     }
@@ -51,7 +55,7 @@ public struct ReconciliationPlanner: Sendable {
         let unhealthyObserved = observed.services
             .filter { desiredByIdentity[$0.identity] != nil && $0.healthState == .unhealthy }
             .sorted { $0.identity.displayName < $1.identity.displayName }
-            .map { "Observed service '\($0.identity.displayName)' is unhealthy; health recovery is not implemented yet." }
+            .map { "Observed service '\($0.identity.displayName)' is unhealthy; bounded health results require operator review." }
 
         return RuntimePlan(actions: createActions, warnings: unmanagedObserved + unhealthyObserved)
     }

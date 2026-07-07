@@ -139,3 +139,13 @@ Phase 8A is a required preflight before this mutation gate. It proves real read-
 | HW-DAEMON-004, HW-RUNTIME-001, HW-RUNTIME-002 | Foreground daemon reconciliation observes through `RuntimeAdapter`, computes a plan, records state/events/operations, and never calls `RuntimeAdapter.execute`. | Automated + manual | Daemon XCTest no-execute assertion; targeted runtime-boundary scans. |
 | HW-STATE-001, HW-STATE-003, HW-OBS-001 | Successful daemon attempts persist desired state, observed snapshots, event records, and operation records to the explicit state database; failed attempts persist failed operation and event records with redacted diagnostic codes. | Automated | Daemon foreground loop persistence and failure-classification XCTest cases. |
 | HW-DOCS-002, HW-SAFE-001 | Docs distinguish foreground non-mutating daemon behavior from unsupported launch agent, background service, restart loop, and unattended mutation behavior. | Manual | Daemon architecture, limitations, CLI reference, security-safety, and README review. |
+
+## Phase 16 Gate: Health Checks And Restart Policy Expansion
+
+| Requirement IDs | Acceptance criteria | Verification type | Verification command or review |
+| --- | --- | --- | --- |
+| HW-HEALTH-002, HW-SAFE-004 | Health checks execute only as in-process loopback probes or direct true/false probes after allowlisted command-shape validation, map failures/timeouts to health results, and redact stdout/stderr/commands. | Automated | Runtime bounded health checker XCTest cases. |
+| HW-HEALTH-004, HW-STATE-001, HW-STATE-003 | Health check results are persisted append-only with redacted command, stdout, stderr, and metadata surfaces. | Automated | State and daemon health-result XCTest cases. |
+| HW-HEALTH-003, HW-HEALTH-005, HW-RECON-004 | Restart decisions include restart policy state, max attempts, backoff, preexisting operator hold, manual-disable, and crash-loop blocking before exposing a managed start action. | Automated | Reconciler restart-state XCTest cases and CLI restart-state XCTest cases. |
+| HW-DAEMON-004, HW-DAEMON-005 | Foreground daemon records health results and restart policy state but never calls `RuntimeAdapter.execute` or performs unattended restart mutation. | Automated + manual | Daemon XCTest no-execute assertions and targeted runtime-boundary scans. |
+| HW-DOCS-002, HW-SAFE-004 | Docs describe in-process loopback health checks, redacted health events, restart-state blocking, and the absence of aggressive restart loops or production readiness. | Manual | Manifest, daemon, limitations, security-safety, requirements, and build-status docs review. |

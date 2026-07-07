@@ -73,10 +73,10 @@ Validation does not contact registries or Apple container.
 
 Manifest port syntax does not expose a bind-address field in this alpha. Hostwright-created runtime port publishes default to `127.0.0.1` when mapped to Apple container.
 
-Service-level command tokens beginning with `-` are blocked in the current conservative apply scope because Apple container parses image and command positions after its own flags. Health-check command flags are unaffected because Hostwright does not execute health checks in this alpha.
+Service-level command tokens beginning with `-` are blocked in the current conservative apply scope because Apple container parses image and command positions after its own flags. Health-check command flags are allowed only after the health command name and arguments are accepted by the bounded health-check policy. Health checks are not shell commands and are not container `exec`; Hostwright does not execute host `curl` or `wget` binaries. Current bounded probes parse `curl`, `wget`, `true`, and `false` shaped commands. `curl` is limited to no-output status flags plus one loopback HTTP(S) URL. `wget` is limited to quiet spider mode plus one loopback HTTP(S) URL. Both URL-shaped probes run through Hostwright's in-process URL fetcher. `true` and `false` accept no arguments and are evaluated directly.
 
 ## Untrusted Manifests
 
-Treat manifests from third parties as untrusted input. `hostwright validate` and `hostwright plan` are non-mutating gates, but an accepted manifest can still describe images, ports, environment values, and paths that an operator should review before any confirmed apply.
+Treat manifests from third parties as untrusted input. `hostwright validate` and `hostwright plan` are non-mutating gates, but an accepted manifest can still describe images, ports, environment values, paths, and loopback health probe commands that an operator should review before any confirmed apply or daemon run.
 
 Do not place real credentials in manifests. Hostwright redacts known sensitive values from output and state, but redaction is heuristic and not a secret manager.

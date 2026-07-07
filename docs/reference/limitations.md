@@ -1,6 +1,6 @@
 # Limitations
 
-Hostwright `v0.1.0-alpha.1` can model and attempt read-only runtime observation through `RuntimeAdapter`, persist desired and observed state to an explicit SQLite database path, compute deterministic desired-vs-observed plans, execute one tightly gated create-missing-service mutation, execute one restart-policy-allowed managed start, read bounded logs, render state events, run a foreground non-mutating daemon loop, and delete exact cleanup-eligible Hostwright-owned stopped/created/exited containers through `RuntimeAdapter`.
+Hostwright `v0.1.0-alpha.1` can model and attempt read-only runtime observation through `RuntimeAdapter`, persist desired and observed state to an explicit SQLite database path, compute deterministic desired-vs-observed plans, execute one tightly gated create-missing-service mutation, execute one restart-policy-allowed managed start, read bounded logs, render state events, run a foreground daemon loop with in-process loopback health probes and restart-state blocking, and delete exact cleanup-eligible Hostwright-owned stopped/created/exited containers through `RuntimeAdapter`.
 
 Hostwright is not production ready.
 
@@ -20,6 +20,8 @@ Hostwright is not production ready.
 - `hostwright events --state-db <path>` for persisted event ledger records.
 - `hostwright cleanup` dry-run and exact token-confirmed deletion of eligible Hostwright-owned stopped/created/exited containers.
 - `hostwrightd --foreground --config <path> --state-db <path>` for a local foreground development loop that observes, plans, and records daemon events without runtime mutation.
+- In-process loopback health checks from `health.command` for allowlisted probe command shapes and arguments, with redacted result/event persistence.
+- Restart policy state with max attempts, backoff, manual-disable from `restart.policy: no`, preexisting operator hold state, and crash-loop blocking before managed start is exposed as executable.
 - `hostwright doctor` safe local checks.
 - Source-only release candidate packaging for `v0.1.0-alpha.1`.
 - Swift Package Manager module boundaries.
@@ -41,6 +43,8 @@ Hostwright is not production ready.
 - Event ledger persistence.
 - Operation ledger records for future mutation safety.
 - Ownership records for cleanup/apply decisions.
+- Health check result records.
+- Restart policy state records.
 - Explicit-path state configuration only.
 - Manifest-to-runtime desired-state mapping outside the CLI.
 - Typed deterministic drift records, plan issues, planned actions, and plan hash.
@@ -67,8 +71,8 @@ Hostwright is not production ready.
 - Shell completion installation or shell profile mutation.
 - Apple container stop, restart, remove, broad cleanup, image deletion, volume deletion, log follow, attach, exec, or detailed inspect operations.
 - Runtime mutation beyond create-missing-service, managed start, and exact cleanup-eligible container delete.
-- Health check execution.
-- Restart loops or daemon-enforced restart policy.
+- Container-exec or interactive health checks.
+- Aggressive restart loops or daemon-enforced restart mutation.
 - Background daemon service, launch agent installation, keepalive, or unattended runtime mutation.
 - Broad cleanup, teardown, garbage collection, image deletion, volume deletion, or unmanaged deletion.
 - Default user database path.

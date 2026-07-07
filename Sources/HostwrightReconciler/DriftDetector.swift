@@ -1,4 +1,5 @@
 import HostwrightRuntime
+import HostwrightState
 
 public enum DriftDetector {
     public static func detect(_ input: PlanningInput) -> ReconciliationPlan {
@@ -69,6 +70,9 @@ public enum DriftDetector {
             observedByIdentity: observedByIdentity,
             duplicateObservedIdentities: duplicateIdentities,
             policy: input.policy,
+            restartPolicyStates: input.restartPolicyStates,
+            currentTimestamp: input.currentTimestamp,
+            issues: &issues,
             drift: &drift,
             actions: &actions
         )
@@ -138,6 +142,9 @@ public enum DriftDetector {
         observedByIdentity: [RuntimeServiceIdentity: ObservedRuntimeService],
         duplicateObservedIdentities: Set<RuntimeServiceIdentity>,
         policy: PlanningPolicy,
+        restartPolicyStates: [RuntimeServiceIdentity: RestartPolicyStateRecord],
+        currentTimestamp: String?,
+        issues: inout [PlanIssue],
         drift: inout [DriftRecord],
         actions: inout [PlannedAction]
     ) {
@@ -167,7 +174,15 @@ public enum DriftDetector {
                 continue
             }
 
-            detectLifecycleDrift(desired: desired, observed: observed, drift: &drift, actions: &actions)
+            detectLifecycleDrift(
+                desired: desired,
+                observed: observed,
+                restartPolicyState: restartPolicyState(for: desired.identity, in: restartPolicyStates),
+                currentTimestamp: currentTimestamp,
+                issues: &issues,
+                drift: &drift,
+                actions: &actions
+            )
             detectImageDrift(desired: desired, observed: observed, drift: &drift, actions: &actions)
             detectPortDrift(desired: desired, observed: observed, drift: &drift, actions: &actions)
             detectMountDrift(desired: desired, observed: observed, drift: &drift, actions: &actions)
@@ -178,6 +193,9 @@ public enum DriftDetector {
     private static func detectLifecycleDrift(
         desired: DesiredRuntimeService,
         observed: ObservedRuntimeService,
+        restartPolicyState: RestartPolicyStateRecord?,
+        currentTimestamp: String?,
+        issues: inout [PlanIssue],
         drift: inout [DriftRecord],
         actions: inout [PlannedAction]
     ) {
@@ -185,10 +203,11 @@ public enum DriftDetector {
         case .running:
             return
         case .stopped, .exited, .created:
-            let executionAvailability: PlanExecutionAvailability = desired.restartPolicy.allowsManagedStart ? .availableForStartManagedService : .unavailable
-            let reason = desired.restartPolicy.allowsManagedStart
-                ? "Observed service is not running; restart policy allows one confirmed managed start."
-                : "Observed service is not running; restart policy does not allow managed start."
+            let decision = RestartPolicyEvaluator.decision(
+                desired: desired,
+                state: restartPolicyState,
+                currentTimestamp: currentTimestamp
+            )
             drift.append(
                 DriftRecord(
                     kind: .stoppedService,
@@ -198,14 +217,25 @@ public enum DriftDetector {
                     stableDetailKey: observed.lifecycleState.rawValue
                 )
             )
+            if decision.isBlocked {
+                issues.append(
+                    PlanIssue(
+                        kind: .restartPolicyBlocked,
+                        severity: .warning,
+                        identity: desired.identity,
+                        message: decision.reason,
+                        stableDetailKey: restartPolicyState?.status.rawValue ?? "blocked"
+                    )
+                )
+            }
             actions.append(
                 PlannedAction(
                     kind: .proposeStartStoppedService,
                     identity: observed.identity,
-                    reason: reason,
+                    reason: decision.reason,
                     driftKind: .stoppedService,
                     stableDetailKey: observed.lifecycleState.rawValue,
-                    executionAvailability: executionAvailability
+                    executionAvailability: decision.executionAvailability
                 )
             )
         case .failed:
@@ -372,7 +402,7 @@ public enum DriftDetector {
             PlannedAction(
                 kind: .investigateUnhealthyService,
                 identity: observed.identity,
-                reason: "Health drift detected; health execution is not implemented yet.",
+                reason: "Health drift detected; bounded health results are recorded for operator review.",
                 driftKind: .unhealthyService,
                 stableDetailKey: observed.healthState.rawValue
             )
@@ -390,5 +420,12 @@ public enum DriftDetector {
 
     private static func stableMountKey(_ mount: RuntimeMountReference) -> String {
         [mount.source, mount.target, mount.access.rawValue].joined(separator: ":")
+    }
+
+    private static func restartPolicyState(
+        for identity: RuntimeServiceIdentity,
+        in states: [RuntimeServiceIdentity: RestartPolicyStateRecord]
+    ) -> RestartPolicyStateRecord? {
+        states[RuntimeServiceIdentity(projectName: identity.projectName, serviceName: identity.serviceName)]
     }
 }

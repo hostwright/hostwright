@@ -16,7 +16,7 @@ Status values:
 | --- | --- | --- | --- | --- | --- | --- |
 | HW-NAME-001 | Public project name must be Hostwright. | Naming Convention Folder | Implemented | `Sources/HostwrightCore/HostwrightIdentity.swift`, `docs/naming/` | `scripts/grep-orchard.sh .` | 0 |
 | HW-NAME-002 | CLI name must be `hostwright`. | Naming Convention Folder | Implemented | `Package.swift`, `Sources/HostwrightCore/HostwrightIdentity.swift` | SwiftPM build; CLI smoke tests | 1 |
-| HW-NAME-003 | Daemon name must be `hostwrightd`. | Naming Convention Folder | Implemented as scaffold | `Package.swift`, `Sources/HostwrightDaemon/main.swift` | SwiftPM build | 1 |
+| HW-NAME-003 | Daemon name must be `hostwrightd`. | Naming Convention Folder | Implemented for foreground dev mode | `Package.swift`, `Sources/HostwrightDaemon/main.swift`, `Sources/HostwrightDaemonCore/` | SwiftPM build; daemon XCTest cases | 1, 15 |
 | HW-NAME-004 | Manifest filename must be `hostwright.yaml`. | Naming Convention Folder | Implemented | `Sources/HostwrightCore/HostwrightIdentity.swift` | CLI and manifest smoke tests | 2 |
 | HW-NAME-005 | Old codename references must remain only in source-material or naming-history contexts. | Naming Convention Folder | Partially implemented | `scripts/grep-orchard.sh`, `docs/source-material/README.md`, `docs/naming/` | `scripts/grep-orchard.sh .` | 0 |
 
@@ -87,6 +87,15 @@ Status values:
 | HW-RECON-003 | Drift detection must identify missing, stopped, unhealthy, and modified resources. | Agent Engineering Manual | Implemented for Phase 7 non-mutating planning | `Sources/HostwrightReconciler/DriftDetector.swift` | Reconciler XCTest cases | 7 |
 | HW-RECON-004 | Apply must be idempotent and persist intent before mutation. | Agent Engineering Manual; Document 2 | Partially implemented for single confirmed createMissingService and startManagedService actions | `Sources/HostwrightCLI/ApplyCommand.swift`, `Sources/HostwrightReconciler/DriftDetector.swift`, `Sources/HostwrightState/StateRepositories.swift` | CLI, reconciler, and state XCTest cases | 8, 9 |
 | HW-RECON-005 | Partial apply failure must leave recoverable operation records. | Document 2 | Partially implemented for Phase 8B create failure recording | `Sources/HostwrightCLI/ApplyCommand.swift`, `Sources/HostwrightState/StateRecords.swift` | CLI and state XCTest cases | 8 |
+
+## Daemon
+
+| ID | Requirement | Source document | Current status | Implementation file if any | Test coverage if any | Release phase |
+| --- | --- | --- | --- | --- | --- | --- |
+| HW-DAEMON-001 | `hostwrightd` must run only in explicit foreground development mode until launchd installation is separately approved. | Phase 15 maintainer scope | Implemented | `Sources/HostwrightDaemon/main.swift`, `Sources/HostwrightDaemonCore/DaemonCommand.swift` | Daemon command parser XCTest cases | 15 |
+| HW-DAEMON-002 | Daemon reconciliation must require explicit config and state database paths. | Phase 15 maintainer scope | Implemented | `Sources/HostwrightDaemonCore/DaemonCommand.swift`, `Sources/HostwrightDaemonCore/DaemonCore.swift` | Daemon parser and loop XCTest cases | 15 |
+| HW-DAEMON-003 | Daemon loop cadence, jitter, repeated-error backoff, shutdown, single-instance lock, and sleep/wake behavior must be testable. | Phase 15 maintainer scope | Implemented for foreground dev loop | `Sources/HostwrightDaemonCore/DaemonCore.swift`, `Sources/HostwrightDaemonCore/DaemonFileLock.swift` | Daemon fake-clock, backoff, shutdown, lock, and sleep/wake XCTest cases | 15 |
+| HW-DAEMON-004 | Daemon loop must not perform unattended runtime mutation before a later policy authorizes it. | Phase 15 maintainer scope | Implemented by omission and tests | `Sources/HostwrightDaemonCore/DaemonCore.swift` | Daemon XCTest asserts `RuntimeAdapter.execute` is not called | 15 |
 
 ## Health
 

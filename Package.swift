@@ -15,6 +15,7 @@ let package = Package(
         .library(name: "HostwrightRuntime", targets: ["HostwrightRuntime"]),
         .library(name: "HostwrightState", targets: ["HostwrightState"]),
         .library(name: "HostwrightReconciler", targets: ["HostwrightReconciler"]),
+        .library(name: "HostwrightDaemonCore", targets: ["HostwrightDaemonCore"]),
         .library(name: "HostwrightHealth", targets: ["HostwrightHealth"]),
         .library(name: "HostwrightNetworking", targets: ["HostwrightNetworking"]),
         .library(name: "HostwrightObservability", targets: ["HostwrightObservability"])
@@ -35,8 +36,8 @@ let package = Package(
             name: "HostwrightDaemon",
             dependencies: [
                 "HostwrightCore",
-                "HostwrightObservability",
-                "HostwrightReconciler"
+                "HostwrightDaemonCore",
+                "HostwrightRuntime"
             ]
         ),
         .target(name: "HostwrightCore"),
@@ -64,6 +65,16 @@ let package = Package(
             dependencies: [
                 "HostwrightCore",
                 "HostwrightManifest",
+                "HostwrightRuntime",
+                "HostwrightState"
+            ]
+        ),
+        .target(
+            name: "HostwrightDaemonCore",
+            dependencies: [
+                "HostwrightCore",
+                "HostwrightManifest",
+                "HostwrightReconciler",
                 "HostwrightRuntime",
                 "HostwrightState"
             ]
@@ -106,6 +117,14 @@ let package = Package(
         .testTarget(
             name: "HostwrightReconcilerTests",
             dependencies: ["HostwrightReconciler"]
+        ),
+        .testTarget(
+            name: "HostwrightDaemonTests",
+            dependencies: [
+                "HostwrightDaemonCore",
+                "HostwrightRuntime",
+                "HostwrightState"
+            ]
         ),
         .testTarget(
             name: "HostwrightCLITests",

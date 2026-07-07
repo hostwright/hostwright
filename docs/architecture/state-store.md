@@ -24,18 +24,19 @@ Implemented:
 - migration checksums and future-version refusal
 - actionable corrupt/locked database failures
 - read paths validate schema without applying migrations
+- foreground daemon loop event and operation records
 
 Not implemented:
 
 - multi-action `hostwright apply`
 - runtime mutation beyond create-missing-service, restart-policy-allowed managed start, and exact cleanup-eligible managed container delete
 - broad cleanup, image cleanup, volume cleanup, or unmanaged cleanup
-- daemon loop
 - drift planner
 - production durability claims
 - default user database path
 - automatic state repair
 - online backup/export commands
+- launch agent or background daemon service
 
 ## Requirements
 

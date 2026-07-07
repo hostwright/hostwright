@@ -23,7 +23,7 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 | 12 | CLI and Developer Workflow Hardening | Complete locally | Add stable CLI exit conventions, structured JSON output, better help/errors/examples, and command consistency. | CLI parsing, JSON success/error shapes, exit codes, redaction, help docs, and full local verification pass. |
 | 13 | Manifest Schema Maturity | Complete locally | Align parser, schema, examples, manifest version policy, and untrusted-manifest handling. | Parser, validator, schema, examples, and docs agree on accepted and rejected manifest shapes. |
 | 14 | State Migrations and Upgrade Safety | Complete locally | Harden state migrations, compatibility, corruption handling, and locking. | Fresh, existing, future-version, corrupt, locked, checksum-mismatch, rollback, unrelated database, and repeated migration cases are tested. |
-| 15 | Local Daemon Reconciliation Loop | Planned | Turn `hostwrightd` into explicit foreground dev-mode reconciliation only. | Fake-clock loop, backoff, lock, shutdown, and sleep/wake behavior pass without unattended mutation. |
+| 15 | Local Daemon Reconciliation Loop | Complete locally | Turn `hostwrightd` into explicit foreground dev-mode reconciliation only. | Fake-clock loop, backoff, lock, shutdown, and sleep/wake behavior pass without unattended mutation. |
 | 16 | Health Checks and Restart Policy Expansion | Planned | Add bounded health execution and crash-loop-aware restart policy state. | Health results, max attempts, backoff, operator hold, manual disable, and redacted events are tested. |
 | 17 | Managed Restart | Planned | Add one narrow Hostwright-owned restart path as an explicit stop-then-start sequence. | Ownership, running observed state, plan hash, operation ledger, recovery record, fake-runner tests, and disposable live proof pass. |
 | 18 | Rollback and Partial Failure Recovery | Planned | Model operation groups, locks, checkpoints, interruption recovery, and manual recovery hints. | Partial failure and crash/interruption records explain what changed and what remains manual. |
@@ -36,8 +36,8 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 - Live Apple container read-only execution exists behind the RuntimeAdapter path.
 - `hostwright apply` requires explicit `--state-db` and `--confirm-plan`.
 - `hostwright cleanup` requires explicit `--state-db`, dry-run planning, a matching cleanup token, ownership records, live observation, exact resource identifiers, and a non-running lifecycle.
-- No stop/restart command, image replacement, port mutation, mount mutation, image cleanup, volume cleanup, unmanaged cleanup, restart enforcement, DNS, tunnel, cloud, GPU/ANE, privileged helper, or installer behavior is implemented.
-- No daemon loop is implemented.
+- No stop/restart command, image replacement, port mutation, mount mutation, image cleanup, volume cleanup, unmanaged cleanup, restart enforcement, DNS, tunnel, cloud, GPU/ANE, privileged helper, launch agent, or installer behavior is implemented.
+- `hostwrightd --foreground` can observe, plan, and record daemon loop events only; it does not perform unattended runtime mutation.
 - Phase 6 state writes require explicit database paths; no default user database path exists.
 - State repository reads validate schema without implicit migration; `SQLiteStateStore.migrate()` is the explicit migration path.
 - Planning is deterministic and non-mutating.
@@ -156,3 +156,14 @@ Phase 13 does not add a YAML dependency, general YAML parsing, full Compose pari
 - XCTest coverage for repeated migrations with data, transaction rollback, read-side-effect prevention, future schemas, checksum mismatch, unrelated databases, corrupt databases, and lock contention.
 
 Phase 14 does not add hidden default state paths, destructive reset commands, automatic repair, online backup/export commands, runtime mutation, daemon behavior, release tags, or GitHub Releases.
+
+## Phase 15 Outputs
+
+- `HostwrightDaemonCore` contains the testable foreground loop, command parsing, shutdown token, sleep/wake model, and single-instance lock interface.
+- `hostwrightd --foreground --config <path> --state-db <path>` requires explicit config and state paths.
+- The loop observes through the read-only local `RuntimeAdapter`, computes a reconciliation plan, and persists successful desired/observed snapshots plus daemon operation and event records.
+- Failed daemon iterations persist failed operation and event records with redacted diagnostic codes.
+- Cadence, deterministic jitter, repeated-error backoff, shutdown handling, sleep/wake resume recording, and lock refusal are covered by XCTest.
+- The live executable handles SIGINT/SIGTERM by requesting loop shutdown.
+
+Phase 15 does not add launch agent installation, default state paths, privileged helpers, unattended runtime mutation, restart-loop enforcement, image cleanup, volume cleanup, unmanaged cleanup, release tags, or GitHub Releases.

@@ -8,5 +8,4 @@
 | RISK-004 | SQLite dependency choice is premature. | Bad persistence abstraction or dependency churn. | State interfaces exist; implementation deferred. | Open |
 | RISK-005 | Networking scope expands into DNS, tunnels, or LAN exposure. | Security exposure and unreliable local behavior. | Networking docs classify these as deferred. | Open |
 | RISK-006 | Brand assets are mistaken for final production assets. | Incorrect public presentation. | Asset README marks PNGs as source material only. | Open |
-| RISK-007 | `hostwrightd` appears to be an installable daemon. | Users may expect background runtime behavior. | Daemon target prints scaffold status only. | Open |
-
+| RISK-007 | `hostwrightd` appears to be an installable daemon. | Users may expect background runtime behavior. | Daemon runs only with explicit `--foreground --config <path> --state-db <path>` and does not install a launch agent or mutate runtime. | Open |

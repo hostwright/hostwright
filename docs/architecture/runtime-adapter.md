@@ -102,7 +102,7 @@ The command result model records:
 - whether the command timed out;
 - whether the command was cancelled.
 
-The live runner enforces timeout by terminating the process and returning a redacted timeout error with partial output. Cancellation remains represented in the result model and should be tightened when the daemon loop exists.
+The live runner enforces timeout by terminating the process and returning a redacted timeout error with partial output. Cancellation remains represented in the result model; foreground daemon shutdown currently stops between loop iterations and during daemon sleep, not in the middle of a runtime process call.
 
 ## Redaction Rules
 

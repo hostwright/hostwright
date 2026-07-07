@@ -54,7 +54,7 @@ Review and record:
 - `README.md`, CLI docs, install docs, compatibility docs, limitations, release notes, and security/safety notes agree.
 - No public docs claim production readiness.
 - No docs claim binaries, installers, Homebrew, signing, or notarization.
-- No docs claim Kubernetes, CRI, Docker API, Compose parity, tunnels, cloud, DNS, GPU/ANE, daemon loop, broad lifecycle, image cleanup, or volume cleanup support.
+- No docs claim Kubernetes, CRI, Docker API, Compose parity, tunnels, cloud, DNS, GPU/ANE, background daemon service, unattended daemon mutation, broad lifecycle, image cleanup, or volume cleanup support.
 - `git ls-files` contains no `.DS_Store`, `.build`, `site/`, `.env`, keys, local source archives outside preserved paths, or other local-only files.
 
 ## Tag And Release Steps

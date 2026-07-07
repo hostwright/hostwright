@@ -16,7 +16,7 @@ Supported mutation is intentionally narrow:
 - one restart-policy-allowed managed start action;
 - exact cleanup-eligible managed container delete after dry-run token confirmation.
 
-Hostwright does not implement broad lifecycle management, stop commands, restart commands, image replacement, mount mutation, port mutation, rollback, or daemon reconciliation.
+Hostwright does not implement broad lifecycle management, stop commands, restart commands, image replacement, mount mutation, port mutation, rollback, or unattended daemon mutation.
 
 ## Cleanup Safety
 
@@ -55,7 +55,7 @@ This alpha does not include:
 
 - privileged helper;
 - installer or launch agent;
-- daemon reconciliation loop;
+- unattended daemon mutation;
 - DNS or tunnel management;
 - cloud control plane;
 - Kubernetes, CRI, Docker API, or Docker Compose compatibility;

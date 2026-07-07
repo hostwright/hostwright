@@ -16,6 +16,7 @@ hostwright events --state-db <path> [--project <name>] [--output text|json]
 hostwright cleanup [path] --state-db <path> --dry-run
 hostwright cleanup [path] --state-db <path> --confirm-cleanup <token>
 hostwright doctor [--output text|json]
+hostwrightd --foreground --config <hostwright.yaml> --state-db <path> [options]
 ```
 
 ## Output Modes
@@ -135,7 +136,7 @@ It refuses mutation when:
 
 Manifest-declared ports are published to `127.0.0.1` by default during Hostwright-created container creation. Sensitive environment values are passed to the runtime for execution, but plan output, state rows, events, logs, and errors use redacted values.
 
-It does not implement stop, restart, image replacement, port mutation, mount mutation, rollback, image pull, daemon loops, broad bind exposure, or multi-action apply.
+It does not implement stop, restart, image replacement, port mutation, mount mutation, rollback, image pull, unattended daemon mutation, broad bind exposure, or multi-action apply.
 
 Failure example:
 
@@ -243,5 +244,21 @@ JSON shape:
   "checks": []
 }
 ```
+
+## `hostwrightd --foreground --config <path> --state-db <path> [options]`
+
+Runs the foreground development daemon loop. It requires explicit config and state paths.
+
+Options:
+
+- `--interval <seconds>`: base reconciliation cadence; default `30`.
+- `--jitter <seconds>`: deterministic jitter cap; default `5`.
+- `--max-backoff <seconds>`: repeated-error backoff cap; default `300`.
+- `--max-iterations <count>`: stop after a bounded number of iterations for development proof.
+- `--lock-file <path>`: explicit daemon lock path; default is `<state-db>.hostwrightd.lock`.
+
+Each iteration validates the manifest, observes runtime through `RuntimeAdapter`, computes a plan, and records daemon events plus operation records in the explicit state database.
+
+It does not call `RuntimeAdapter.execute`, does not install a launch agent, and does not perform unattended runtime mutation.
 
 Shell completion remains research-only in Phase 12. Hostwright does not install shell completions or mutate shell profile files.

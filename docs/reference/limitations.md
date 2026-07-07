@@ -1,6 +1,6 @@
 # Limitations
 
-Hostwright `v0.1.0-alpha.1` can model and attempt read-only runtime observation through `RuntimeAdapter`, persist desired and observed state to an explicit SQLite database path, compute deterministic desired-vs-observed plans, execute one tightly gated create-missing-service mutation, execute one restart-policy-allowed managed start, read bounded logs, render state events, and delete exact cleanup-eligible Hostwright-owned stopped/created/exited containers through `RuntimeAdapter`.
+Hostwright `v0.1.0-alpha.1` can model and attempt read-only runtime observation through `RuntimeAdapter`, persist desired and observed state to an explicit SQLite database path, compute deterministic desired-vs-observed plans, execute one tightly gated create-missing-service mutation, execute one restart-policy-allowed managed start, read bounded logs, render state events, run a foreground non-mutating daemon loop, and delete exact cleanup-eligible Hostwright-owned stopped/created/exited containers through `RuntimeAdapter`.
 
 Hostwright is not production ready.
 
@@ -19,6 +19,7 @@ Hostwright is not production ready.
 - `hostwright logs <service>` with bounded tail output through RuntimeAdapter and redaction.
 - `hostwright events --state-db <path>` for persisted event ledger records.
 - `hostwright cleanup` dry-run and exact token-confirmed deletion of eligible Hostwright-owned stopped/created/exited containers.
+- `hostwrightd --foreground --config <path> --state-db <path>` for a local foreground development loop that observes, plans, and records daemon events without runtime mutation.
 - `hostwright doctor` safe local checks.
 - Source-only release candidate packaging for `v0.1.0-alpha.1`.
 - Swift Package Manager module boundaries.
@@ -66,9 +67,9 @@ Hostwright is not production ready.
 - Shell completion installation or shell profile mutation.
 - Apple container stop, restart, remove, broad cleanup, image deletion, volume deletion, log follow, attach, exec, or detailed inspect operations.
 - Runtime mutation beyond create-missing-service, managed start, and exact cleanup-eligible container delete.
-- Daemon scheduling loop.
 - Health check execution.
 - Restart loops or daemon-enforced restart policy.
+- Background daemon service, launch agent installation, keepalive, or unattended runtime mutation.
 - Broad cleanup, teardown, garbage collection, image deletion, volume deletion, or unmanaged deletion.
 - Default user database path.
 - Hidden global state writes.
@@ -119,4 +120,4 @@ Apply is not general lifecycle management. It uses `container create` only after
 
 The SQLite store writes only to explicit paths supplied by the caller. Hostwright does not choose a default path under the repository, Application Support, XDG locations, or any global directory.
 
-Hostwright persists adapter-shaped observed state and can consume runtime-shaped observed state in memory for planning. Apply, status, logs, events, and cleanup write or read state only through explicit `--state-db` paths. Hostwright does not add a default state path, daemon loop, broad cleanup, or production durability guarantees.
+Hostwright persists adapter-shaped observed state and can consume runtime-shaped observed state in memory for planning. Apply, status, logs, events, cleanup, and foreground `hostwrightd` write or read state only through explicit `--state-db` paths. Hostwright does not add a default state path, background daemon service, unattended mutation, broad cleanup, or production durability guarantees.

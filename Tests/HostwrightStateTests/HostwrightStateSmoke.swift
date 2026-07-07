@@ -72,7 +72,7 @@ final class HostwrightStateTests: XCTestCase {
             try connection.run(
                 """
                 INSERT INTO schema_migrations (version, description, checksum, applied_at)
-                VALUES (2, 'future schema', 'future-checksum', '2026-07-01T00:00:00Z')
+                    VALUES (3, 'future schema', 'future-checksum', '2026-07-01T00:00:00Z')
                 """
             )
 
@@ -84,7 +84,7 @@ final class HostwrightStateTests: XCTestCase {
                     guard case .incompatibleSchema(let foundVersion, let latestSupported, let message) = error as? StateStoreError else {
                         return XCTFail("Expected incompatibleSchema, got \(error).")
                     }
-                    XCTAssertEqual(foundVersion, 2)
+                    XCTAssertEqual(foundVersion, 3)
                     XCTAssertEqual(latestSupported, MigrationRunner.latestSchemaVersion)
                     XCTAssertTrue(message.contains("newer Hostwright release"))
                 }
@@ -346,6 +346,94 @@ final class HostwrightStateTests: XCTestCase {
             XCTAssertFalse(operations[0].payloadJSONRedacted.contains(fakeSecret))
             XCTAssertFalse(operations[3].payloadJSONRedacted.contains(fakeSecret))
             XCTAssertEqual(try store.operations.latest(idempotencyKey: "plan-hash:create:api:retry")?.status, .succeeded)
+        }
+    }
+
+    func testHealthCheckResultsAppendInOrderAndRedactOutputs() throws {
+        try withTemporaryStore { store, _ in
+            try saveDesiredState(in: store)
+            try store.healthResults.append([
+                HealthCheckResultRecord(
+                    id: "health-1",
+                    projectID: projectID,
+                    serviceName: "api",
+                    checkedAt: "2026-07-01T00:00:01Z",
+                    status: .healthy,
+                    exitStatus: 0,
+                    timedOut: false,
+                    commandJSONRedacted: #"["curl","http://localhost?token=\#(fakeSecret)"]"#,
+                    stdoutRedacted: "ok token=\(fakeSecret)",
+                    stderrRedacted: "",
+                    metadataJSONRedacted: #"{"token":"\#(fakeSecret)"}"#
+                ),
+                HealthCheckResultRecord(
+                    id: "health-2",
+                    projectID: projectID,
+                    serviceName: "api",
+                    checkedAt: "2026-07-01T00:00:02Z",
+                    status: .unhealthy,
+                    exitStatus: 7,
+                    timedOut: false,
+                    commandJSONRedacted: #"["curl","http://localhost"]"#,
+                    stdoutRedacted: "",
+                    stderrRedacted: "password=\(fakeSecret)",
+                    metadataJSONRedacted: "{}"
+                )
+            ])
+
+            let results = try store.healthResults.loadProject(projectID: projectID)
+            XCTAssertEqual(results.map(\.id), ["health-1", "health-2"])
+            XCTAssertEqual(results.map(\.status), [.healthy, .unhealthy])
+            XCTAssertEqual(try store.healthResults.latest(projectID: projectID, serviceName: "api")?.id, "health-2")
+            XCTAssertFalse(results.map(\.commandJSONRedacted).joined().contains(fakeSecret))
+            XCTAssertFalse(results.map(\.stdoutRedacted).joined().contains(fakeSecret))
+            XCTAssertFalse(results.map(\.stderrRedacted).joined().contains(fakeSecret))
+            XCTAssertFalse(results.map(\.metadataJSONRedacted).joined().contains(fakeSecret))
+        }
+    }
+
+    func testRestartPolicyStateUpsertsAndRedactsMetadata() throws {
+        try withTemporaryStore { store, _ in
+            try saveDesiredState(in: store)
+            try store.restartPolicies.upsert(
+                RestartPolicyStateRecord(
+                    id: "restart-1",
+                    projectID: projectID,
+                    serviceName: "api",
+                    policy: .onFailure,
+                    status: .backingOff,
+                    attemptCount: 1,
+                    maxAttempts: 3,
+                    backoffSeconds: 60,
+                    backoffUntil: "2026-07-01T00:01:00Z",
+                    lastFailureAt: "2026-07-01T00:00:00Z",
+                    updatedAt: timestamp,
+                    metadataJSONRedacted: #"{"token":"\#(fakeSecret)"}"#
+                )
+            )
+            try store.restartPolicies.upsert(
+                RestartPolicyStateRecord(
+                    id: "restart-2",
+                    projectID: projectID,
+                    serviceName: "api",
+                    policy: .onFailure,
+                    status: .crashLoopBlocked,
+                    attemptCount: 3,
+                    maxAttempts: 3,
+                    backoffSeconds: 60,
+                    backoffUntil: nil,
+                    lastFailureAt: "2026-07-01T00:00:30Z",
+                    updatedAt: "2026-07-01T00:00:30Z",
+                    metadataJSONRedacted: #"{"password":"\#(fakeSecret)"}"#
+                )
+            )
+
+            let state = try XCTUnwrap(store.restartPolicies.load(projectID: projectID, serviceName: "api"))
+            XCTAssertEqual(state.id, "restart-2")
+            XCTAssertEqual(state.status, .crashLoopBlocked)
+            XCTAssertEqual(state.attemptCount, 3)
+            XCTAssertFalse(state.metadataJSONRedacted.contains(fakeSecret))
+            XCTAssertEqual(try store.restartPolicies.loadProject(projectID: projectID).count, 1)
         }
     }
 

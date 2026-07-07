@@ -37,7 +37,7 @@ public struct SchemaMigration: Equatable, Sendable {
 }
 
 public struct MigrationRunner: Sendable {
-    public static let latestSchemaVersion = 1
+    public static let latestSchemaVersion = 2
 
     public init() {}
 
@@ -344,6 +344,47 @@ public struct MigrationRunner: Sendable {
                 "CREATE INDEX IF NOT EXISTS event_ledger_timestamp_idx ON event_ledger(timestamp)",
                 "CREATE INDEX IF NOT EXISTS operation_ledger_project_idx ON operation_ledger(project_id)",
                 "CREATE INDEX IF NOT EXISTS ownership_records_project_idx ON ownership_records(project_id)"
+            ]
+        ),
+        SchemaMigration(
+            version: 2,
+            description: "Health results and restart policy state",
+            statements: [
+                """
+                CREATE TABLE IF NOT EXISTS health_check_results (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
+                    service_name TEXT NOT NULL,
+                    checked_at TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    exit_status INTEGER,
+                    timed_out INTEGER NOT NULL DEFAULT 0,
+                    command_json_redacted TEXT NOT NULL,
+                    stdout_redacted TEXT NOT NULL,
+                    stderr_redacted TEXT NOT NULL,
+                    metadata_json_redacted TEXT NOT NULL
+                )
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS restart_policy_state (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                    service_name TEXT NOT NULL,
+                    policy TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    attempt_count INTEGER NOT NULL,
+                    max_attempts INTEGER NOT NULL,
+                    backoff_seconds INTEGER NOT NULL,
+                    backoff_until TEXT,
+                    last_failure_at TEXT,
+                    updated_at TEXT NOT NULL,
+                    metadata_json_redacted TEXT NOT NULL,
+                    UNIQUE(project_id, service_name)
+                )
+                """,
+                "CREATE INDEX IF NOT EXISTS health_check_results_project_idx ON health_check_results(project_id, service_name)",
+                "CREATE INDEX IF NOT EXISTS health_check_results_checked_at_idx ON health_check_results(checked_at)",
+                "CREATE INDEX IF NOT EXISTS restart_policy_state_project_idx ON restart_policy_state(project_id, service_name)"
             ]
         )
     ]

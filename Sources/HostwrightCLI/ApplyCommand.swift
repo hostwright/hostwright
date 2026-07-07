@@ -19,6 +19,12 @@ struct ApplyCommandRunner {
             let manifestText = try environment.readTextFile(manifestPath)
             let manifest = try ManifestValidator.validated(manifestText)
             let mapping = ManifestRuntimeMapper.map(manifest)
+            let store = SQLiteStateStore(path: configuration.databasePath)
+            try store.migrate()
+            let timestamp = isoTimestamp()
+            let projectName = mapping.desiredState.projectName
+            let projectID = "project-\(projectName)"
+            let restartPolicyStates = try restartPolicyStateMap(store: store, projectID: projectID, projectName: projectName)
             let adapter = environment.runtimeAdapter()
             let observed: ObservedRuntimeState
             do {
@@ -28,7 +34,12 @@ struct ApplyCommandRunner {
             } catch {
                 return failure(code: .runtimeUnavailable, message: "Runtime observation failed: \(RuntimeRedactionPolicy.default.redact(String(describing: error)))")
             }
-            let plan = ReconciliationPlanner().plan(manifest: manifest, observedState: observed)
+            let plan = ReconciliationPlanner().plan(
+                manifest: manifest,
+                observedState: observed,
+                restartPolicyStates: restartPolicyStates,
+                currentTimestamp: timestamp
+            )
 
             guard plan.planHash == confirmedPlanHash else {
                 return failure(
@@ -63,19 +74,15 @@ struct ApplyCommandRunner {
 
             let desiredByIdentity = Dictionary(uniqueKeysWithValues: mapping.desiredState.services.map { ($0.identity, $0) })
             let desiredService = desiredByIdentity[action.identity]
+            guard let desiredService else {
+                return failure(code: .runtimeMutationNotImplemented, message: "Could not find desired service for \(action.identity.displayName). No mutation was attempted.")
+            }
             if action.executionAvailability == .availableForCreateMissingService {
-                guard let desiredService else {
-                    return failure(code: .runtimeMutationNotImplemented, message: "Could not find desired service for \(action.identity.displayName). No mutation was attempted.")
-                }
                 if let safeSubsetFailure = validateCreateOnlyApplySubset(desiredService) {
                     return failure(code: .unsafeExposure, message: "\(safeSubsetFailure) No mutation was attempted.")
                 }
             }
 
-            let store = SQLiteStateStore(path: configuration.databasePath)
-            try store.migrate()
-            let timestamp = isoTimestamp()
-            let projectID = "project-\(plan.projectName)"
             let idempotencyKey = "\(plan.planHash):\(action.kind.rawValue):\(action.identity.displayName)"
             if let existingOperation = try blockingOperation(store: store, idempotencyKey: idempotencyKey) {
                 return failure(
@@ -100,8 +107,9 @@ struct ApplyCommandRunner {
 
             let runtimeAction = runtimeAction(for: action, desiredService: desiredService)
 
+            let event: RuntimeEvent
             do {
-                let event = try waitForAsync {
+                event = try waitForAsync {
                     try await adapter.execute(
                         runtimeAction,
                         confirmation: RuntimeMutationConfirmation(
@@ -111,28 +119,6 @@ struct ApplyCommandRunner {
                         )
                     )
                 }
-
-                try persistSuccess(
-                    store: store,
-                    event: event,
-                    action: action,
-                    operationID: operationID,
-                    idempotencyKey: idempotencyKey,
-                    planHash: plan.planHash,
-                    projectID: projectID,
-                    timestamp: timestamp
-                )
-
-                return CLIRunResult(
-                    standardOutput: """
-                    Hostwright apply
-                    Plan hash: \(plan.planHash)
-                    Applied action: \(action.kind.rawValue) \(action.identity.displayName)
-                    Runtime event: \(RuntimeRedactionPolicy.default.redact(event.message))
-                    State DB: \(stateDatabasePath)
-
-                    """
-                )
             } catch {
                 let runtimeErrorDescription = RuntimeRedactionPolicy.default.redact(String(describing: error))
                 do {
@@ -146,6 +132,14 @@ struct ApplyCommandRunner {
                         projectID: projectID,
                         timestamp: timestamp
                     )
+                    try recordManagedStartAttempt(
+                        store: store,
+                        action: action,
+                        desiredService: desiredService,
+                        projectID: projectID,
+                        timestamp: timestamp,
+                        outcome: "failed"
+                    )
                 } catch {
                     return failure(
                         code: .runtimeUnavailable,
@@ -153,6 +147,43 @@ struct ApplyCommandRunner {
                     )
                 }
                 return failure(code: .runtimeUnavailable, message: "Runtime mutation failed after operation intent was recorded: \(runtimeErrorDescription)")
+            }
+
+            do {
+                try persistSuccess(
+                    store: store,
+                    event: event,
+                    action: action,
+                    operationID: operationID,
+                    idempotencyKey: idempotencyKey,
+                    planHash: plan.planHash,
+                    projectID: projectID,
+                    timestamp: timestamp
+                )
+                try recordManagedStartAttempt(
+                    store: store,
+                    action: action,
+                    desiredService: desiredService,
+                    projectID: projectID,
+                    timestamp: timestamp,
+                    outcome: "succeeded"
+                )
+
+                return CLIRunResult(
+                    standardOutput: """
+                    Hostwright apply
+                    Plan hash: \(plan.planHash)
+                    Applied action: \(action.kind.rawValue) \(action.identity.displayName)
+                    Runtime event: \(RuntimeRedactionPolicy.default.redact(event.message))
+                    State DB: \(stateDatabasePath)
+
+                    """
+                )
+            } catch {
+                return failure(
+                    code: .stateStoreUnavailable,
+                    message: "Runtime mutation succeeded but success state persistence failed: \(RuntimeRedactionPolicy.default.redact(String(describing: error)))"
+                )
             }
         } catch let error as ManifestParseError {
             return CLIRunResult(standardError: error.issues.map(\.rendered).joined(separator: "\n") + "\n", exitCode: CLIExitCode.validation.rawValue)
@@ -382,6 +413,114 @@ struct ApplyCommandRunner {
             return nil
         }
     }
+
+    private func restartPolicyStateMap(
+        store: SQLiteStateStore,
+        projectID: String,
+        projectName: String
+    ) throws -> [RuntimeServiceIdentity: RestartPolicyStateRecord] {
+        let states = try store.restartPolicies.loadProject(projectID: projectID)
+        return Dictionary(states.map { state in
+            (
+                RuntimeServiceIdentity(projectName: projectName, serviceName: state.serviceName),
+                state
+            )
+        }, uniquingKeysWith: { first, _ in first })
+    }
+
+    private func recordManagedStartAttempt(
+        store: SQLiteStateStore,
+        action: PlannedAction,
+        desiredService: DesiredRuntimeService,
+        projectID: String,
+        timestamp: String,
+        outcome: String
+    ) throws {
+        guard action.executionAvailability == .availableForStartManagedService else {
+            return
+        }
+
+        let previous = try store.restartPolicies.load(projectID: projectID, serviceName: action.identity.serviceName)
+        let maxAttempts = previous?.maxAttempts ?? RestartPolicyStateDefaults.maxAttempts
+        let backoffSeconds = previous?.backoffSeconds ?? RestartPolicyStateDefaults.backoffSeconds
+        let didFail = outcome == "failed"
+        let attemptCount = didFail ? (previous?.attemptCount ?? 0) + 1 : 0
+        let status: RestartPolicyStateStatus
+        if didFail {
+            status = attemptCount >= maxAttempts ? .crashLoopBlocked : .backingOff
+        } else {
+            status = .active
+        }
+        let backoffUntil = status == .backingOff ? isoTimestampAdding(seconds: backoffSeconds, to: timestamp) : nil
+
+        try store.restartPolicies.upsert(
+            RestartPolicyStateRecord(
+                id: hostwrightUniqueID(prefix: "restart-policy"),
+                projectID: projectID,
+                serviceName: action.identity.serviceName,
+                policy: desiredService.restartPolicy,
+                status: status,
+                attemptCount: attemptCount,
+                maxAttempts: maxAttempts,
+                backoffSeconds: backoffSeconds,
+                backoffUntil: backoffUntil,
+                lastFailureAt: didFail ? timestamp : nil,
+                updatedAt: timestamp,
+                metadataJSONRedacted: jsonPayload([
+                    "outcome": outcome,
+                    "planAction": action.kind.rawValue,
+                    "operatorActionRequired": status == .crashLoopBlocked
+                ])
+            )
+        )
+
+        let eventType: String
+        let severity: StateEventSeverity
+        let message: String
+        switch status {
+        case .active:
+            eventType = "restart.policy.active"
+            severity = .info
+            message = "Managed start succeeded for \(action.identity.displayName); restart attempt budget is reset."
+        case .crashLoopBlocked:
+            eventType = "restart.policy.crash-loop-blocked"
+            severity = .error
+            message = "Managed start attempts reached \(attemptCount)/\(maxAttempts); operator action is required before another start."
+        case .backingOff:
+            eventType = "restart.policy.backoff"
+            severity = .warning
+            message = "Managed start attempt \(attemptCount)/\(maxAttempts) failed; restart backoff active until \(backoffUntil ?? "operator reset")."
+        case .operatorHold:
+            eventType = "restart.policy.operator-hold"
+            severity = .warning
+            message = "Managed start is held by operator policy."
+        case .manualDisabled:
+            eventType = "restart.policy.manual-disabled"
+            severity = .warning
+            message = "Managed start is disabled by restart policy."
+        }
+
+        try store.events.append([
+            EventRecord(
+                id: hostwrightUniqueID(prefix: "event-restart-policy"),
+                timestamp: timestamp,
+                severity: severity,
+                type: eventType,
+                source: "hostwright-cli",
+                projectID: projectID,
+                serviceName: action.identity.serviceName,
+                runtimeAdapter: nil,
+                message: message,
+                payloadJSONRedacted: jsonPayload([
+                    "attemptCount": attemptCount,
+                    "backoffUntil": backoffUntil ?? "",
+                    "maxAttempts": maxAttempts,
+                    "outcome": outcome,
+                    "status": status.rawValue
+                ])
+            )
+        ])
+    }
 }
 
 private func waitForAsync<T: Sendable>(_ operation: @escaping @Sendable () async throws -> T) throws -> T {
@@ -416,4 +555,21 @@ private func stableHash(_ value: String) -> String {
 
 private func isoTimestamp() -> String {
     ISO8601DateFormatter().string(from: Date())
+}
+
+private func isoTimestampAdding(seconds: Int, to timestamp: String) -> String {
+    let formatter = ISO8601DateFormatter()
+    let date = formatter.date(from: timestamp) ?? Date()
+    return formatter.string(from: date.addingTimeInterval(TimeInterval(seconds)))
+}
+
+private func jsonPayload(_ object: [String: Any]) -> String {
+    let redacted = object.mapValues { value -> Any in
+        if let string = value as? String {
+            return RuntimeRedactionPolicy.default.redact(string)
+        }
+        return value
+    }
+    let data = try! JSONSerialization.data(withJSONObject: redacted, options: [.sortedKeys])
+    return String(data: data, encoding: .utf8)!
 }

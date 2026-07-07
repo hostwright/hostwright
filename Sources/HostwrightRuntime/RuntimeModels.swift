@@ -49,6 +49,63 @@ public enum RuntimeRestartPolicy: String, Equatable, Sendable {
     }
 }
 
+public struct RuntimeHealthCheckSpec: Equatable, Sendable {
+    public static let defaultIntervalSeconds = 30
+    public static let maximumIntervalSeconds = 86_400
+    public static let defaultTimeoutSeconds = 5
+    public static let maximumTimeoutSeconds = 30
+
+    public let command: [String]
+    public let intervalSeconds: Int
+    public let timeout: RuntimeCommandTimeout
+
+    public init(
+        command: [String],
+        intervalSeconds: Int = RuntimeHealthCheckSpec.defaultIntervalSeconds,
+        timeoutSeconds: Int = RuntimeHealthCheckSpec.defaultTimeoutSeconds
+    ) {
+        self.command = command
+        self.intervalSeconds = min(max(1, intervalSeconds), Self.maximumIntervalSeconds)
+        self.timeout = RuntimeCommandTimeout(seconds: min(max(1, timeoutSeconds), Self.maximumTimeoutSeconds))
+    }
+}
+
+public enum RuntimeHealthCheckStatus: String, Equatable, Sendable {
+    case notConfigured
+    case skipped
+    case healthy
+    case unhealthy
+    case unknown
+}
+
+public struct RuntimeHealthCheckResult: Equatable, Sendable {
+    public let identity: RuntimeServiceIdentity
+    public let status: RuntimeHealthCheckStatus
+    public let exitStatus: Int32?
+    public let timedOut: Bool
+    public let command: [String]
+    public let standardOutput: String
+    public let standardError: String
+
+    public init(
+        identity: RuntimeServiceIdentity,
+        status: RuntimeHealthCheckStatus,
+        exitStatus: Int32?,
+        timedOut: Bool,
+        command: [String],
+        standardOutput: String,
+        standardError: String
+    ) {
+        self.identity = identity
+        self.status = status
+        self.exitStatus = exitStatus
+        self.timedOut = timedOut
+        self.command = command
+        self.standardOutput = standardOutput
+        self.standardError = standardError
+    }
+}
+
 public enum RuntimePortProtocol: String, Equatable, Sendable {
     case tcp
     case udp
@@ -113,6 +170,7 @@ public struct DesiredRuntimeService: Equatable, Sendable {
     public let environment: [RuntimeEnvironmentValue]
     public let ports: [RuntimePortMapping]
     public let mounts: [RuntimeMountReference]
+    public let healthCheck: RuntimeHealthCheckSpec?
     public let restartPolicy: RuntimeRestartPolicy
 
     public init(
@@ -122,6 +180,7 @@ public struct DesiredRuntimeService: Equatable, Sendable {
         environment: [RuntimeEnvironmentValue] = [],
         ports: [RuntimePortMapping] = [],
         mounts: [RuntimeMountReference] = [],
+        healthCheck: RuntimeHealthCheckSpec? = nil,
         restartPolicy: RuntimeRestartPolicy = .no
     ) {
         self.identity = identity
@@ -130,6 +189,7 @@ public struct DesiredRuntimeService: Equatable, Sendable {
         self.environment = environment
         self.ports = ports
         self.mounts = mounts
+        self.healthCheck = healthCheck
         self.restartPolicy = restartPolicy
     }
 }

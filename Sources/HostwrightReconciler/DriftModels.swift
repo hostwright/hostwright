@@ -1,5 +1,6 @@
 import Foundation
 import HostwrightRuntime
+import HostwrightState
 
 public enum DriftSeverity: String, Comparable, Equatable, Sendable {
     case blocker
@@ -158,6 +159,7 @@ public enum PlanIssueKind: String, Equatable, Sendable {
     case duplicateObservedIdentity
     case unsupportedObservedState
     case observationUnavailable
+    case restartPolicyBlocked
 
     public var sortIndex: Int {
         switch self {
@@ -172,6 +174,7 @@ public enum PlanIssueKind: String, Equatable, Sendable {
         case .duplicateObservedIdentity: 8
         case .unsupportedObservedState: 9
         case .observationUnavailable: 10
+        case .restartPolicyBlocked: 11
         }
     }
 }
@@ -212,17 +215,23 @@ public struct PlanningInput: Equatable, Sendable {
     public let observedState: ObservedRuntimeState?
     public let policy: PlanningPolicy
     public let additionalIssues: [PlanIssue]
+    public let restartPolicyStates: [RuntimeServiceIdentity: RestartPolicyStateRecord]
+    public let currentTimestamp: String?
 
     public init(
         desiredState: DesiredRuntimeState,
         observedState: ObservedRuntimeState?,
         policy: PlanningPolicy = .default,
-        additionalIssues: [PlanIssue] = []
+        additionalIssues: [PlanIssue] = [],
+        restartPolicyStates: [RuntimeServiceIdentity: RestartPolicyStateRecord] = [:],
+        currentTimestamp: String? = nil
     ) {
         self.desiredState = desiredState
         self.observedState = observedState
         self.policy = policy
         self.additionalIssues = additionalIssues
+        self.restartPolicyStates = restartPolicyStates
+        self.currentTimestamp = currentTimestamp
     }
 }
 

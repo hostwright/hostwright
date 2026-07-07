@@ -256,6 +256,135 @@ public struct OperationRecord: Equatable, Sendable {
     }
 }
 
+public struct HealthCheckResultRecord: Equatable, Sendable {
+    public let id: String
+    public let projectID: String?
+    public let serviceName: String
+    public let checkedAt: String
+    public let status: RuntimeHealthCheckStatus
+    public let exitStatus: Int32?
+    public let timedOut: Bool
+    public let commandJSONRedacted: String
+    public let stdoutRedacted: String
+    public let stderrRedacted: String
+    public let metadataJSONRedacted: String
+
+    public init(
+        id: String,
+        projectID: String?,
+        serviceName: String,
+        checkedAt: String,
+        status: RuntimeHealthCheckStatus,
+        exitStatus: Int32?,
+        timedOut: Bool,
+        commandJSONRedacted: String,
+        stdoutRedacted: String,
+        stderrRedacted: String,
+        metadataJSONRedacted: String
+    ) {
+        self.id = id
+        self.projectID = projectID
+        self.serviceName = serviceName
+        self.checkedAt = checkedAt
+        self.status = status
+        self.exitStatus = exitStatus
+        self.timedOut = timedOut
+        self.commandJSONRedacted = commandJSONRedacted
+        self.stdoutRedacted = stdoutRedacted
+        self.stderrRedacted = stderrRedacted
+        self.metadataJSONRedacted = metadataJSONRedacted
+    }
+
+    public func redacted(using policy: RuntimeRedactionPolicy = .default) -> HealthCheckResultRecord {
+        HealthCheckResultRecord(
+            id: id,
+            projectID: projectID,
+            serviceName: serviceName,
+            checkedAt: checkedAt,
+            status: status,
+            exitStatus: exitStatus,
+            timedOut: timedOut,
+            commandJSONRedacted: policy.redact(commandJSONRedacted),
+            stdoutRedacted: policy.redact(stdoutRedacted),
+            stderrRedacted: policy.redact(stderrRedacted),
+            metadataJSONRedacted: policy.redact(metadataJSONRedacted)
+        )
+    }
+}
+
+public enum RestartPolicyStateStatus: String, Equatable, Sendable {
+    case active
+    case backingOff
+    case operatorHold
+    case manualDisabled
+    case crashLoopBlocked
+}
+
+public enum RestartPolicyStateDefaults {
+    public static let maxAttempts = 3
+    public static let backoffSeconds = 60
+}
+
+public struct RestartPolicyStateRecord: Equatable, Sendable {
+    public let id: String
+    public let projectID: String
+    public let serviceName: String
+    public let policy: RuntimeRestartPolicy
+    public let status: RestartPolicyStateStatus
+    public let attemptCount: Int
+    public let maxAttempts: Int
+    public let backoffSeconds: Int
+    public let backoffUntil: String?
+    public let lastFailureAt: String?
+    public let updatedAt: String
+    public let metadataJSONRedacted: String
+
+    public init(
+        id: String,
+        projectID: String,
+        serviceName: String,
+        policy: RuntimeRestartPolicy,
+        status: RestartPolicyStateStatus,
+        attemptCount: Int,
+        maxAttempts: Int = RestartPolicyStateDefaults.maxAttempts,
+        backoffSeconds: Int = RestartPolicyStateDefaults.backoffSeconds,
+        backoffUntil: String? = nil,
+        lastFailureAt: String? = nil,
+        updatedAt: String,
+        metadataJSONRedacted: String
+    ) {
+        self.id = id
+        self.projectID = projectID
+        self.serviceName = serviceName
+        self.policy = policy
+        self.status = status
+        self.attemptCount = max(0, attemptCount)
+        self.maxAttempts = max(1, maxAttempts)
+        self.backoffSeconds = max(1, backoffSeconds)
+        self.backoffUntil = backoffUntil
+        self.lastFailureAt = lastFailureAt
+        self.updatedAt = updatedAt
+        self.metadataJSONRedacted = metadataJSONRedacted
+    }
+
+    public func redacted(using policy: RuntimeRedactionPolicy = .default) -> RestartPolicyStateRecord {
+        RestartPolicyStateRecord(
+            id: id,
+            projectID: projectID,
+            serviceName: serviceName,
+            policy: self.policy,
+            status: status,
+            attemptCount: attemptCount,
+            maxAttempts: maxAttempts,
+            backoffSeconds: backoffSeconds,
+            backoffUntil: backoffUntil,
+            lastFailureAt: lastFailureAt,
+            updatedAt: updatedAt,
+            metadataJSONRedacted: policy.redact(metadataJSONRedacted)
+        )
+    }
+}
+
 public struct OwnershipRecord: Equatable, Sendable {
     public let id: String
     public let resourceIdentifier: String

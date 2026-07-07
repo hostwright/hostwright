@@ -18,6 +18,8 @@ Supported mutation is intentionally narrow:
 
 Hostwright does not implement broad lifecycle management, stop commands, restart commands, image replacement, mount mutation, port mutation, rollback, or unattended daemon mutation.
 
+Restart policy state can block the narrow managed-start path through backoff, preexisting operator hold state, manual-disable from `restart.policy: no`, and crash-loop protection. The foreground daemon records restart state but does not start or restart services by itself.
+
 ## Cleanup Safety
 
 Cleanup is destructive and requires all of these:
@@ -39,11 +41,13 @@ Hostwright keeps execution environment values separate from display and persiste
 
 Redaction is heuristic. Users should not place real credentials in manifests, logs, examples, fixtures, or issue reports.
 
+Health check stdout, stderr, command payloads, events, and persisted result metadata are redacted before display or storage.
+
 ## Untrusted Manifest Input
 
 Treat `hostwright.yaml` files from third parties as untrusted input. Hostwright validates a restricted manifest subset and rejects unsupported YAML, Kubernetes-style fields, Compose-style fields, unknown service fields, unsupported manifest versions, unsafe host-root or parent-traversal mount sources, and unsafe environment keys before planning or mutation.
 
-`hostwright validate` and `hostwright plan` are non-mutating review gates. Operators should still inspect image names, port publishes, environment values, and volume paths before running any confirmed `apply`.
+`hostwright validate` and `hostwright plan` are non-mutating review gates. Operators should still inspect image names, port publishes, environment values, volume paths, and loopback health probe commands before running any confirmed `apply` or daemon loop.
 
 ## Network Exposure
 

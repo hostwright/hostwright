@@ -2,6 +2,7 @@ import XCTest
 @testable import HostwrightManifest
 @testable import HostwrightRuntime
 @testable import HostwrightReconciler
+@testable import HostwrightState
 
 final class HostwrightReconcilerTests: XCTestCase {
     func testMissingDesiredServiceCreatesDeterministicCreateAction() {
@@ -37,6 +38,61 @@ final class HostwrightReconcilerTests: XCTestCase {
         XCTAssertEqual(plan.actions.map(\.kind), [.proposeStartStoppedService])
         XCTAssertEqual(plan.actions[0].executionAvailability, .availableForStartManagedService)
         XCTAssertTrue(plan.actions[0].reason.contains("restart policy allows"))
+    }
+
+    func testCrashLoopRestartStateBlocksManagedStart() {
+        let desired = desiredState(services: [desiredService(restartPolicy: .onFailure)])
+        let plan = ReconciliationPlanner().reconcile(
+            PlanningInput(
+                desiredState: desired,
+                observedState: observedState([observed(lifecycleState: .exited)]),
+                restartPolicyStates: [identity(): restartState(status: .crashLoopBlocked, attemptCount: 3, maxAttempts: 3)],
+                currentTimestamp: "2026-07-01T00:00:00Z"
+            )
+        )
+
+        XCTAssertEqual(plan.actions.map(\.kind), [.proposeStartStoppedService])
+        XCTAssertEqual(plan.actions[0].executionAvailability, .unavailable)
+        XCTAssertTrue(plan.actions[0].reason.contains("crash-loop protection"))
+        XCTAssertTrue(plan.issues.contains { $0.kind == .restartPolicyBlocked })
+    }
+
+    func testOperatorHoldAndManualDisableBlockManagedStart() {
+        for status in [RestartPolicyStateStatus.operatorHold, .manualDisabled] {
+            let desired = desiredState(services: [desiredService(restartPolicy: .unlessStopped)])
+            let plan = ReconciliationPlanner().reconcile(
+                PlanningInput(
+                    desiredState: desired,
+                    observedState: observedState([observed(lifecycleState: .stopped)]),
+                    restartPolicyStates: [identity(): restartState(status: status)],
+                    currentTimestamp: "2026-07-01T00:00:00Z"
+                )
+            )
+
+            XCTAssertEqual(plan.actions[0].executionAvailability, .unavailable, status.rawValue)
+            XCTAssertTrue(plan.issues.contains { $0.kind == .restartPolicyBlocked }, status.rawValue)
+        }
+    }
+
+    func testElapsedRestartBackoffAllowsOneManagedStart() {
+        let desired = desiredState(services: [desiredService(restartPolicy: .onFailure)])
+        let plan = ReconciliationPlanner().reconcile(
+            PlanningInput(
+                desiredState: desired,
+                observedState: observedState([observed(lifecycleState: .created)]),
+                restartPolicyStates: [
+                    identity(): restartState(
+                        status: .backingOff,
+                        attemptCount: 1,
+                        backoffUntil: "2026-07-01T00:00:30Z"
+                    )
+                ],
+                currentTimestamp: "2026-07-01T00:00:31Z"
+            )
+        )
+
+        XCTAssertEqual(plan.actions[0].executionAvailability, .availableForStartManagedService)
+        XCTAssertFalse(plan.issues.contains { $0.kind == .restartPolicyBlocked })
     }
 
     func testFailedServiceCreatesInvestigationActionWithoutExecution() {
@@ -303,6 +359,27 @@ final class HostwrightReconcilerTests: XCTestCase {
             healthState: healthState,
             ports: ports,
             mounts: mounts
+        )
+    }
+
+    private func restartState(
+        status: RestartPolicyStateStatus,
+        attemptCount: Int = 0,
+        maxAttempts: Int = 3,
+        backoffUntil: String? = nil
+    ) -> RestartPolicyStateRecord {
+        RestartPolicyStateRecord(
+            id: "restart-\(status.rawValue)",
+            projectID: "project-demo",
+            serviceName: "web",
+            policy: .onFailure,
+            status: status,
+            attemptCount: attemptCount,
+            maxAttempts: maxAttempts,
+            backoffSeconds: 60,
+            backoffUntil: backoffUntil,
+            updatedAt: "2026-07-01T00:00:00Z",
+            metadataJSONRedacted: "{}"
         )
     }
 }

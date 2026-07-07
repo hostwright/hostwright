@@ -122,6 +122,7 @@ let package = Package(
             name: "HostwrightDaemonTests",
             dependencies: [
                 "HostwrightDaemonCore",
+                "HostwrightManifest",
                 "HostwrightRuntime",
                 "HostwrightState"
             ]

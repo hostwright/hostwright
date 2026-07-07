@@ -11,6 +11,8 @@ Hostwright is not production ready.
 - `hostwright init` without overwrite.
 - `hostwright validate` for a restricted Hostwright manifest subset.
 - `hostwright plan` as non-mutating manifest-level dry-run output.
+- `--output json` for `plan`, `status`, `events`, `doctor`, and structured errors when JSON mode is requested.
+- Stable process exit categories for usage, validation, state unavailable, runtime unavailable, confirmation mismatch, unsafe operation, and partial failure.
 - `hostwright status [path] --state-db <path>` with live RuntimeAdapter observation and event/snapshot persistence.
 - `hostwright logs <service>` with bounded tail output through RuntimeAdapter and redaction.
 - `hostwright events --state-db <path>` for persisted event ledger records.
@@ -54,6 +56,8 @@ Hostwright is not production ready.
 - Guaranteed Apple container observation on every machine.
 - Broad non-empty Apple container JSON list parsing beyond the verified builder/proof shapes.
 - Broad non-empty Apple container image list parsing beyond the verified object shape.
+- JSON output for `validate`, `apply`, `logs`, and `cleanup` success paths.
+- Shell completion installation or shell profile mutation.
 - Apple container stop, restart, remove, broad cleanup, image deletion, volume deletion, log follow, attach, exec, or detailed inspect operations.
 - Runtime mutation beyond create-missing-service, managed start, and exact cleanup-eligible container delete.
 - Daemon scheduling loop.

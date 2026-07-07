@@ -41,7 +41,7 @@ struct CleanupCommandRunner {
                 return CLIRunResult(standardOutput: renderDryRun(candidates: candidates, token: token))
             case .confirmed(let providedToken):
                 guard providedToken == token else {
-                    return failure(code: .commandUsage, message: "cleanup confirmation token does not match current cleanup plan. Expected token: \(token)")
+                    return failure(code: .confirmationMismatch, message: "cleanup confirmation token does not match current cleanup plan. Expected token: \(token)")
                 }
                 guard !candidates.isEmpty else {
                     return failure(code: .commandUsage, message: "cleanup has no eligible Hostwright-owned stopped/created/exited containers.")
@@ -49,7 +49,7 @@ struct CleanupCommandRunner {
                 return try executeCleanup(candidates: candidates, token: token, adapter: adapter, observed: observed, store: store, projectName: mapping.desiredState.projectName)
             }
         } catch let error as ManifestParseError {
-            return CLIRunResult(standardError: error.issues.map(\.rendered).joined(separator: "\n") + "\n", exitCode: 1)
+            return CLIRunResult(standardError: error.issues.map(\.rendered).joined(separator: "\n") + "\n", exitCode: CLIExitCode.validation.rawValue)
         } catch {
             return failure(code: .stateStoreUnavailable, message: RuntimeRedactionPolicy.default.redact(String(describing: error)))
         }
@@ -225,7 +225,7 @@ struct CleanupCommandRunner {
                     return CLIRunResult(
                         standardOutput: lines.joined(separator: "\n"),
                         standardError: "\(HostwrightErrorCode.runtimeUnavailable.rawValue): Cleanup runtime failure was primary: \(redactedError). Failure state persistence also failed: \(RuntimeRedactionPolicy.default.redact(String(describing: error)))\n",
-                        exitCode: 1
+                        exitCode: CLIExitCode.runtimeUnavailable.rawValue
                     )
                 }
                 lines.append("- failed \(candidate.resourceIdentifier): \(redactedError)")
@@ -236,8 +236,8 @@ struct CleanupCommandRunner {
         if hadFailure {
             return CLIRunResult(
                 standardOutput: lines.joined(separator: "\n"),
-                standardError: "\(HostwrightErrorCode.runtimeUnavailable.rawValue): cleanup completed with one or more runtime failures; successful deletions were preserved in the report.\n",
-                exitCode: 1
+                standardError: "\(HostwrightErrorCode.partialFailure.rawValue): cleanup completed with one or more runtime failures; successful deletions were preserved in the report.\n",
+                exitCode: CLIExitCode.partialFailure.rawValue
             )
         }
         return CLIRunResult(standardOutput: lines.joined(separator: "\n"))
@@ -291,7 +291,8 @@ struct CleanupCommandRunner {
     }
 
     private func failure(code: HostwrightErrorCode, message: String) -> CLIRunResult {
-        CLIRunResult(standardError: "\(code.rawValue): \(message)\n", exitCode: 1)
+        let exitCode = CLIExitCode.mapped(from: code)
+        return CLIRunResult(standardError: "\(code.rawValue): \(message)\n", exitCode: exitCode.rawValue)
     }
 }
 

@@ -19,6 +19,16 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 | 8 | First Runtime Mutation and `apply` | Complete | Implement minimal safe convergence through `RuntimeAdapter`. | Disposable Apple container create-only proof passed and partial failures are recoverable. |
 | 9 | Operability, Restart, Logs, and Safe Cleanup | Complete | Make managed workloads operable and observable without broad lifecycle management. | Live status, bounded logs, event rendering, restart-policy-gated start, and ownership-based cleanup pass tests. |
 | 10 | Hardening and First Supported Release | Complete locally | Prepare `v0.1.0-alpha.1` as an honest source-only GitHub pre-release candidate. | Build, tests, docs, examples, compatibility, release notes, security checklist, and reviewer approval pass. |
+| 11 | Release Feedback and Alpha Stabilization | Complete | Address pre-alpha review blockers after external review. | Pipe draining, localhost publishing, redaction, cleanup failure handling, append-only ledgers, idempotency retry, command-token validation, and error preservation are covered by tests. |
+| 12 | CLI and Developer Workflow Hardening | Complete locally | Add stable CLI exit conventions, structured JSON output, better help/errors/examples, and command consistency. | CLI parsing, JSON success/error shapes, exit codes, redaction, help docs, and full local verification pass. |
+| 13 | Manifest Schema Maturity | Planned | Align parser, schema, examples, manifest version policy, and untrusted-manifest handling. | Parser, validator, schema, examples, and docs agree on accepted and rejected manifest shapes. |
+| 14 | State Migrations and Upgrade Safety | Planned | Harden state migrations, compatibility, corruption handling, and locking. | Fresh, existing, future-version, corrupt, locked, and repeated migration cases are tested. |
+| 15 | Local Daemon Reconciliation Loop | Planned | Turn `hostwrightd` into explicit foreground dev-mode reconciliation only. | Fake-clock loop, backoff, lock, shutdown, and sleep/wake behavior pass without unattended mutation. |
+| 16 | Health Checks and Restart Policy Expansion | Planned | Add bounded health execution and crash-loop-aware restart policy state. | Health results, max attempts, backoff, operator hold, manual disable, and redacted events are tested. |
+| 17 | Managed Restart | Planned | Add one narrow Hostwright-owned restart path as an explicit stop-then-start sequence. | Ownership, running observed state, plan hash, operation ledger, recovery record, fake-runner tests, and disposable live proof pass. |
+| 18 | Rollback and Partial Failure Recovery | Planned | Model operation groups, locks, checkpoints, interruption recovery, and manual recovery hints. | Partial failure and crash/interruption records explain what changed and what remains manual. |
+| 19 | Cleanup and Garbage Collection Maturity | Planned | Improve cleanup classification, ownership mismatch handling, stale ID protection, and partial failure behavior. | Dry-run classifications and exact delete boundaries pass without image, volume, or unmanaged deletion. |
+| 20 | Observability and Diagnostics | Planned | Add redacted diagnostics, local-only telemetry policy, audit trail, event filtering, and improved doctor/status output. | Diagnostic bundles, redaction, event ordering/filtering, and local-only telemetry policy are tested. |
 
 ## Current Hard Boundaries After Phase 9
 
@@ -111,3 +121,13 @@ Phase 9 remains intentionally narrow. It does not implement stop, restart comman
 - Tests cover version output, release docs, public overclaim checks, and example/schema alignment.
 
 Phase 10 does not create the public `v0.1.0-alpha.1` tag or a GitHub Release. Those happen only after the release-hardening branch is merged to `main` and final verification passes.
+
+## Phase 12 Outputs
+
+- Stable process exit categories for usage, validation, state unavailable, runtime unavailable, confirmation mismatch, unsafe operation, and partial failure.
+- `--output text|json` for `plan`, `status`, `events`, and `doctor`; text remains the default.
+- JSON error envelopes for usage, manifest, state, and runtime failures where the CLI can identify the requested JSON mode.
+- Expanded CLI help with output-mode examples and explicit state-path reminders.
+- XCTest coverage for output-mode parsing, JSON success shapes, JSON errors, exit codes, event ordering, status shapes, and redaction.
+
+Phase 12 does not add runtime mutation, default state database paths, shell completion installation, background behavior, release tags, or GitHub Releases.

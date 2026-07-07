@@ -54,7 +54,9 @@ struct LogsCommandRunner {
                 """
             )
         } catch let error as ManifestParseError {
-            return CLIRunResult(standardError: error.issues.map(\.rendered).joined(separator: "\n") + "\n", exitCode: 1)
+            return CLIRunResult(standardError: error.issues.map(\.rendered).joined(separator: "\n") + "\n", exitCode: CLIExitCode.validation.rawValue)
+        } catch let error as StateStoreError {
+            return failure(code: .stateStoreUnavailable, message: RuntimeRedactionPolicy.default.redact(String(describing: error)))
         } catch {
             return failure(code: .runtimeUnavailable, message: RuntimeRedactionPolicy.default.redact(String(describing: error)))
         }
@@ -100,6 +102,7 @@ struct LogsCommandRunner {
     }
 
     private func failure(code: HostwrightErrorCode, message: String) -> CLIRunResult {
-        CLIRunResult(standardError: "\(code.rawValue): \(message)\n", exitCode: 1)
+        let exitCode = CLIExitCode.mapped(from: code)
+        return CLIRunResult(standardError: "\(code.rawValue): \(message)\n", exitCode: exitCode.rawValue)
     }
 }

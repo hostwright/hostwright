@@ -7,10 +7,14 @@ import HostwrightState
 struct StatusCommandRunner {
     let manifestPath: String
     let stateDatabasePath: String?
+    let output: CLIOutputFormat
     let environment: CLIEnvironment
 
     func run() -> CLIRunResult {
         guard environment.fileExists(manifestPath) else {
+            if output == .json {
+                return CLIRunResult(standardOutput: CLIJSON.statusManifestMissing(manifestPath: manifestPath))
+            }
             return CLIRunResult(
                 standardOutput: """
                 Hostwright status
@@ -75,16 +79,35 @@ struct StatusCommandRunner {
                 )
             ])
 
+            if output == .json {
+                return CLIRunResult(
+                    standardOutput: CLIJSON.statusObserved(
+                        manifestPath: manifestPath,
+                        stateDatabasePath: stateDatabasePath,
+                        manifest: manifest,
+                        observed: observed,
+                        plan: plan
+                    )
+                )
+            }
             return CLIRunResult(standardOutput: render(manifest: manifest, observed: observed, plan: plan, stateDatabasePath: stateDatabasePath))
         } catch let error as ManifestParseError {
-            return CLIRunResult(standardError: error.issues.map(\.rendered).joined(separator: "\n") + "\n", exitCode: 1)
+            if output == .json {
+                return CLIRunResult(standardError: CLIJSON.manifestError(issues: error.issues, exitCode: .validation), exitCode: CLIExitCode.validation.rawValue)
+            }
+            return CLIRunResult(standardError: error.issues.map(\.rendered).joined(separator: "\n") + "\n", exitCode: CLIExitCode.validation.rawValue)
+        } catch let error as StateStoreError {
+            return failure(code: .stateStoreUnavailable, message: RuntimeRedactionPolicy.default.redact(String(describing: error)))
         } catch {
             return failure(code: .runtimeUnavailable, message: RuntimeRedactionPolicy.default.redact(String(describing: error)))
         }
     }
 
     private func manifestOnlyStatus(_ manifest: HostwrightManifest) -> CLIRunResult {
-        CLIRunResult(
+        if output == .json {
+            return CLIRunResult(standardOutput: CLIJSON.statusManifestOnly(manifestPath: manifestPath, manifest: manifest))
+        }
+        return CLIRunResult(
             standardOutput: """
             Hostwright status
             Manifest: \(manifestPath) valid
@@ -134,6 +157,10 @@ struct StatusCommandRunner {
     }
 
     private func failure(code: HostwrightErrorCode, message: String) -> CLIRunResult {
-        CLIRunResult(standardError: "\(code.rawValue): \(message)\n", exitCode: 1)
+        let exitCode = CLIExitCode.mapped(from: code)
+        if output == .json {
+            return CLIRunResult(standardError: CLIJSON.error(code: code, message: message, exitCode: exitCode), exitCode: exitCode.rawValue)
+        }
+        return CLIRunResult(standardError: "\(code.rawValue): \(message)\n", exitCode: exitCode.rawValue)
     }
 }

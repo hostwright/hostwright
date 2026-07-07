@@ -12,11 +12,16 @@ final class HostwrightCLITests: XCTestCase {
         XCTAssertEqual(try CLICommand.parse(arguments: ["init"]), .initManifest)
         XCTAssertEqual(try CLICommand.parse(arguments: ["validate"]), .validate(path: "hostwright.yaml"))
         XCTAssertEqual(try CLICommand.parse(arguments: ["validate", "custom.yaml"]), .validate(path: "custom.yaml"))
-        XCTAssertEqual(try CLICommand.parse(arguments: ["plan"]), .plan(path: "hostwright.yaml"))
-        XCTAssertEqual(try CLICommand.parse(arguments: ["status"]), .status(path: "hostwright.yaml", stateDatabasePath: nil))
+        XCTAssertEqual(try CLICommand.parse(arguments: ["plan"]), .plan(path: "hostwright.yaml", output: .text))
+        XCTAssertEqual(try CLICommand.parse(arguments: ["plan", "--output", "json"]), .plan(path: "hostwright.yaml", output: .json))
+        XCTAssertEqual(try CLICommand.parse(arguments: ["status"]), .status(path: "hostwright.yaml", stateDatabasePath: nil, output: .text))
         XCTAssertEqual(
             try CLICommand.parse(arguments: ["status", "--state-db", "/tmp/state.sqlite"]),
-            .status(path: "hostwright.yaml", stateDatabasePath: "/tmp/state.sqlite")
+            .status(path: "hostwright.yaml", stateDatabasePath: "/tmp/state.sqlite", output: .text)
+        )
+        XCTAssertEqual(
+            try CLICommand.parse(arguments: ["status", "custom.yaml", "--state-db", "/tmp/state.sqlite", "--output", "json"]),
+            .status(path: "custom.yaml", stateDatabasePath: "/tmp/state.sqlite", output: .json)
         )
         XCTAssertEqual(
             try CLICommand.parse(arguments: ["apply", "--state-db", "/tmp/state.sqlite", "--confirm-plan", "abc123"]),
@@ -32,13 +37,19 @@ final class HostwrightCLITests: XCTestCase {
         )
         XCTAssertEqual(
             try CLICommand.parse(arguments: ["events", "--state-db", "/tmp/state.sqlite", "--project", "demo"]),
-            .events(stateDatabasePath: "/tmp/state.sqlite", projectName: "demo")
+            .events(stateDatabasePath: "/tmp/state.sqlite", projectName: "demo", output: .text)
+        )
+        XCTAssertEqual(
+            try CLICommand.parse(arguments: ["events", "--state-db", "/tmp/state.sqlite", "--output", "json"]),
+            .events(stateDatabasePath: "/tmp/state.sqlite", projectName: nil, output: .json)
         )
         XCTAssertEqual(
             try CLICommand.parse(arguments: ["cleanup", "--state-db", "/tmp/state.sqlite", "--dry-run"]),
             .cleanup(path: "hostwright.yaml", stateDatabasePath: "/tmp/state.sqlite", confirmation: .dryRun)
         )
-        XCTAssertEqual(try CLICommand.parse(arguments: ["doctor"]), .doctor)
+        XCTAssertEqual(try CLICommand.parse(arguments: ["doctor"]), .doctor(output: .text))
+        XCTAssertEqual(try CLICommand.parse(arguments: ["doctor", "--output", "json"]), .doctor(output: .json))
+        XCTAssertThrowsError(try CLICommand.parse(arguments: ["doctor", "--output", "yaml"]))
     }
 
     func testApplyRequiresStateDBAndConfirmedPlanHash() {
@@ -55,6 +66,17 @@ final class HostwrightCLITests: XCTestCase {
         XCTAssertEqual(result.standardError, "")
     }
 
+    func testHelpDocumentsOutputModesAndExamples() {
+        let result = HostwrightCLI.run(arguments: ["--help"], environment: environment(files: FileBox()))
+
+        XCTAssertEqual(result.exitCode, 0)
+        XCTAssertEqual(result.standardError, "")
+        XCTAssertTrue(result.standardOutput.contains("hostwright plan [path] [--output text|json]"))
+        XCTAssertTrue(result.standardOutput.contains("hostwright status [path] [--state-db <path>] [--output text|json]"))
+        XCTAssertTrue(result.standardOutput.contains("JSON output is supported for plan, status, events, doctor"))
+        XCTAssertTrue(result.standardOutput.contains("hostwright doctor --output json"))
+    }
+
     func testInitCreatesStarterManifestWithoutOverwriting() {
         let initFiles = FileBox()
         let initResult = HostwrightCLI.run(arguments: ["init"], environment: environment(files: initFiles))
@@ -65,7 +87,7 @@ final class HostwrightCLITests: XCTestCase {
         let existingFiles = FileBox(files: [HostwrightIdentity.manifestFileName: "project: existing\nservices:\n"])
         let overwriteResult = HostwrightCLI.run(arguments: ["init"], environment: environment(files: existingFiles))
 
-        XCTAssertEqual(overwriteResult.exitCode, 1)
+        XCTAssertEqual(overwriteResult.exitCode, CLIExitCode.commandUsage.rawValue)
         XCTAssertTrue(overwriteResult.standardError.contains("HW-CLI-002"))
         XCTAssertEqual(existingFiles.files[HostwrightIdentity.manifestFileName], "project: existing\nservices:\n")
     }
@@ -116,11 +138,82 @@ final class HostwrightCLITests: XCTestCase {
         XCTAssertFalse(planResult.standardOutput.contains("super-secret"))
     }
 
+    func testPlanJSONOutputIncludesStableShapeAndRedactsSecrets() throws {
+        let files = FileBox(
+            files: [
+                HostwrightIdentity.manifestFileName: """
+                project: api-local
+                services:
+                  api:
+                    image: ghcr.io/example/api:latest
+                    env:
+                      API_TOKEN: token=\(fakeSecret)
+
+                """
+            ]
+        )
+
+        let result = HostwrightCLI.run(arguments: ["plan", "--output", "json"], environment: environment(files: files))
+
+        XCTAssertEqual(result.exitCode, 0)
+        XCTAssertEqual(result.standardError, "")
+        XCTAssertFalse(result.standardOutput.contains(fakeSecret))
+        let json = try jsonObject(result.standardOutput)
+        XCTAssertEqual(json["kind"] as? String, "plan")
+        XCTAssertEqual(json["project"] as? String, "api-local")
+        XCTAssertNotNil(json["planHash"])
+        let issues = try XCTUnwrap(json["issues"] as? [[String: Any]])
+        XCTAssertTrue(issues.contains { $0["kind"] as? String == "secretRedacted" })
+    }
+
     func testDoctorReportsMissingAppleContainerAsWarning() {
         let result = HostwrightCLI.run(arguments: ["doctor"], environment: environment(files: FileBox()))
 
         XCTAssertEqual(result.exitCode, 0)
         XCTAssertTrue(result.standardOutput.contains("[warning] appleContainerCLI"))
+    }
+
+    func testDoctorJSONOutputIncludesChecks() throws {
+        let result = HostwrightCLI.run(arguments: ["doctor", "--output", "json"], environment: environment(files: FileBox()))
+
+        XCTAssertEqual(result.exitCode, 0)
+        let json = try jsonObject(result.standardOutput)
+        XCTAssertEqual(json["kind"] as? String, "doctor")
+        XCTAssertEqual(json["hasFailures"] as? Bool, false)
+        let checks = try XCTUnwrap(json["checks"] as? [[String: Any]])
+        XCTAssertTrue(checks.contains { $0["identifier"] as? String == "appleContainerCLI" && $0["status"] as? String == "warning" })
+    }
+
+    func testDoctorCompatibilityFailureUsesValidationExitCode() throws {
+        let result = HostwrightCLI.run(
+            arguments: ["doctor", "--output", "json"],
+            environment: environment(files: FileBox(), platform: PlatformSnapshot(macOSMajorVersion: 25, architecture: "x86_64"))
+        )
+
+        XCTAssertEqual(result.exitCode, CLIExitCode.validation.rawValue)
+        let json = try jsonObject(result.standardOutput)
+        XCTAssertEqual(json["hasFailures"] as? Bool, true)
+    }
+
+    func testJSONErrorsUseStableExitCodesAndEnvelope() throws {
+        let usage = HostwrightCLI.run(arguments: ["unknown", "--output", "json"], environment: environment(files: FileBox()))
+
+        XCTAssertEqual(usage.exitCode, CLIExitCode.commandUsage.rawValue)
+        let usageJSON = try jsonObject(usage.standardError)
+        XCTAssertEqual(usageJSON["kind"] as? String, "error")
+        XCTAssertEqual(usageJSON["code"] as? String, HostwrightErrorCode.commandUsage.rawValue)
+        XCTAssertEqual(usageJSON["exitCode"] as? Int, Int(CLIExitCode.commandUsage.rawValue))
+
+        let invalidManifest = HostwrightCLI.run(
+            arguments: ["plan", "--output", "json"],
+            environment: environment(files: FileBox(files: [HostwrightIdentity.manifestFileName: "project: demo\nservices:\n  api:\n"]))
+        )
+
+        XCTAssertEqual(invalidManifest.exitCode, CLIExitCode.validation.rawValue)
+        let manifestJSON = try jsonObject(invalidManifest.standardError)
+        XCTAssertEqual(manifestJSON["kind"] as? String, "error")
+        let issues = try XCTUnwrap(manifestJSON["issues"] as? [[String: Any]])
+        XCTAssertTrue(issues.contains { $0["code"] as? String == HostwrightErrorCode.manifestValidationFailed.rawValue })
     }
 
     func testApplyRefusesWrongPlanHashBeforeMutation() throws {
@@ -133,7 +226,7 @@ final class HostwrightCLITests: XCTestCase {
                 environment: environment(files: files, runtimeAdapter: adapter)
             )
 
-            XCTAssertEqual(result.exitCode, 1)
+            XCTAssertEqual(result.exitCode, CLIExitCode.confirmationMismatch.rawValue)
             XCTAssertTrue(result.standardError.contains("Confirmed plan hash does not match"))
             XCTAssertEqual(adapter.executedActions.count, 0)
         }
@@ -271,6 +364,64 @@ final class HostwrightCLITests: XCTestCase {
         }
     }
 
+    func testStatusJSONOutputSupportsManifestOnlyAndObservedRuntimeShapes() throws {
+        let files = FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest])
+        let manifestOnly = HostwrightCLI.run(arguments: ["status", "--output", "json"], environment: environment(files: files))
+
+        XCTAssertEqual(manifestOnly.exitCode, 0)
+        let manifestOnlyJSON = try jsonObject(manifestOnly.standardOutput)
+        XCTAssertEqual(manifestOnlyJSON["kind"] as? String, "status")
+        let runtime = try XCTUnwrap(manifestOnlyJSON["runtime"] as? [String: Any])
+        XCTAssertEqual(runtime["observed"] as? Bool, false)
+
+        try withTemporaryDatabase { databasePath in
+            let observed = ObservedRuntimeState(
+                projectName: "demo",
+                services: [
+                    ObservedRuntimeService(
+                        identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"),
+                        image: "local/demo:latest",
+                        lifecycleState: .running,
+                        healthState: .healthy,
+                        ports: [RuntimePortMapping(hostPort: 8080, containerPort: 8080)]
+                    )
+                ],
+                adapterMetadata: fakeAdapterMetadata
+            )
+            let result = HostwrightCLI.run(
+                arguments: ["status", "--state-db", databasePath, "--output", "json"],
+                environment: environment(files: files, runtimeAdapter: FakeApplyRuntimeAdapter(observedState: observed))
+            )
+
+            XCTAssertEqual(result.exitCode, 0)
+            let json = try jsonObject(result.standardOutput)
+            XCTAssertEqual(json["kind"] as? String, "status")
+            XCTAssertNotNil(json["planHash"])
+            let observedRuntime = try XCTUnwrap(json["runtime"] as? [String: Any])
+            XCTAssertEqual(observedRuntime["observed"] as? Bool, true)
+            let services = try XCTUnwrap(json["services"] as? [[String: Any]])
+            XCTAssertEqual(services.first?["name"] as? String, "api")
+        }
+    }
+
+    func testStatusStateDatabaseFailureUsesStateExitCodeAndJSONEnvelope() throws {
+        try withTemporaryDirectory { directory in
+            let files = FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest])
+
+            let result = HostwrightCLI.run(
+                arguments: ["status", "--state-db", directory.path, "--output", "json"],
+                environment: environment(files: files)
+            )
+
+            XCTAssertEqual(result.exitCode, CLIExitCode.stateUnavailable.rawValue)
+            XCTAssertEqual(result.standardOutput, "")
+            let json = try jsonObject(result.standardError)
+            XCTAssertEqual(json["kind"] as? String, "error")
+            XCTAssertEqual(json["code"] as? String, HostwrightErrorCode.stateStoreUnavailable.rawValue)
+            XCTAssertEqual(json["exitCode"] as? Int, Int(CLIExitCode.stateUnavailable.rawValue))
+        }
+    }
+
     func testLogsUseRuntimeAdapterAndRedactOutput() throws {
         try withTemporaryDatabase { databasePath in
             let files = FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest])
@@ -296,6 +447,28 @@ final class HostwrightCLITests: XCTestCase {
         }
     }
 
+    func testLogsStateDatabaseFailureUsesStateExitCode() throws {
+        try withTemporaryDirectory { directory in
+            let files = FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest])
+            let observed = ObservedRuntimeState(
+                projectName: "demo",
+                services: [ObservedRuntimeService(identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"), lifecycleState: .running)],
+                adapterMetadata: fakeAdapterMetadata
+            )
+            let adapter = FakeApplyRuntimeAdapter(observedState: observed, logsText: "ready")
+
+            let result = HostwrightCLI.run(
+                arguments: ["logs", "api", "--state-db", directory.path],
+                environment: environment(files: files, runtimeAdapter: adapter)
+            )
+
+            XCTAssertEqual(result.exitCode, CLIExitCode.stateUnavailable.rawValue)
+            XCTAssertEqual(result.standardOutput, "")
+            XCTAssertTrue(result.standardError.contains(HostwrightErrorCode.stateStoreUnavailable.rawValue))
+            XCTAssertEqual(adapter.logRequests, [RuntimeServiceIdentity(projectName: "demo", serviceName: "api")])
+        }
+    }
+
     func testEventsCommandReadsStateLedgerDeterministically() throws {
         try withTemporaryDatabase { databasePath in
             let store = SQLiteStateStore(path: databasePath)
@@ -311,6 +484,28 @@ final class HostwrightCLITests: XCTestCase {
             XCTAssertEqual(result.exitCode, 0)
             XCTAssertLessThan(result.standardOutput.range(of: "status.observed")!.lowerBound, result.standardOutput.range(of: "logs.read")!.lowerBound)
             XCTAssertFalse(result.standardOutput.contains(fakeSecret))
+        }
+    }
+
+    func testEventsJSONOutputIsOrderedAndRedacted() throws {
+        try withTemporaryDatabase { databasePath in
+            let store = SQLiteStateStore(path: databasePath)
+            try store.migrate()
+            try saveDesiredManifest(store: store, manifestText: singleServiceManifest)
+            try store.events.append([
+                EventRecord(id: "event-2", timestamp: "2026-07-01T00:00:02Z", severity: .warning, type: "logs.read", source: "test", projectID: "project-demo", serviceName: "api", runtimeAdapter: nil, message: "token=\(fakeSecret)", payloadJSONRedacted: #"{"token":"\#(fakeSecret)"}"#),
+                EventRecord(id: "event-1", timestamp: "2026-07-01T00:00:01Z", severity: .info, type: "status.observed", source: "test", projectID: "project-demo", serviceName: nil, runtimeAdapter: nil, message: "ok", payloadJSONRedacted: "{}")
+            ])
+
+            let result = HostwrightCLI.run(arguments: ["events", "--state-db", databasePath, "--project", "demo", "--output", "json"], environment: environment(files: FileBox()))
+
+            XCTAssertEqual(result.exitCode, 0)
+            XCTAssertFalse(result.standardOutput.contains(fakeSecret))
+            let json = try jsonObject(result.standardOutput)
+            XCTAssertEqual(json["kind"] as? String, "events")
+            let events = try XCTUnwrap(json["events"] as? [[String: Any]])
+            XCTAssertEqual(events.map { $0["type"] as? String }, ["status.observed", "logs.read"])
+            XCTAssertEqual(events.last?["message"] as? String, "token=[REDACTED]")
         }
     }
 
@@ -353,6 +548,15 @@ final class HostwrightCLITests: XCTestCase {
                 .first { $0.hasPrefix("Confirmation token: ") }!
                 .replacingOccurrences(of: "Confirmation token: ", with: "")
 
+            let mismatch = HostwrightCLI.run(
+                arguments: ["cleanup", "--state-db", databasePath, "--confirm-cleanup", "wrong-token"],
+                environment: environment(files: files, runtimeAdapter: adapter)
+            )
+
+            XCTAssertEqual(mismatch.exitCode, CLIExitCode.confirmationMismatch.rawValue)
+            XCTAssertTrue(mismatch.standardError.contains(HostwrightErrorCode.confirmationMismatch.rawValue))
+            XCTAssertEqual(adapter.executedActions.count, 0)
+
             let confirmed = HostwrightCLI.run(
                 arguments: ["cleanup", "--state-db", databasePath, "--confirm-cleanup", token],
                 environment: environment(files: files, runtimeAdapter: adapter)
@@ -384,7 +588,7 @@ final class HostwrightCLITests: XCTestCase {
                 environment: environment(files: files, runtimeAdapter: adapter)
             )
 
-            XCTAssertEqual(result.exitCode, 1)
+            XCTAssertEqual(result.exitCode, CLIExitCode.runtimeUnavailable.rawValue)
             XCTAssertFalse(result.standardError.contains(fakeSecret))
 
             let store = SQLiteStateStore(path: databasePath)
@@ -449,7 +653,7 @@ final class HostwrightCLITests: XCTestCase {
             )
 
             XCTAssertEqual(first.exitCode, 0)
-            XCTAssertEqual(second.exitCode, 1)
+            XCTAssertEqual(second.exitCode, CLIExitCode.commandUsage.rawValue)
             XCTAssertTrue(second.standardError.contains("idempotency key"))
             XCTAssertEqual(adapter.executedActions.count, 1)
             XCTAssertEqual(try SQLiteStateStore(path: databasePath).operations.loadAll().map(\.status), [.recorded, .succeeded])
@@ -472,7 +676,7 @@ final class HostwrightCLITests: XCTestCase {
                 environment: environment(files: files, runtimeAdapter: retryAdapter)
             )
 
-            XCTAssertEqual(first.exitCode, 1)
+            XCTAssertEqual(first.exitCode, CLIExitCode.runtimeUnavailable.rawValue)
             XCTAssertEqual(second.exitCode, 0)
             XCTAssertEqual(failingAdapter.executedActions.count, 1)
             XCTAssertEqual(retryAdapter.executedActions.count, 1)
@@ -495,7 +699,7 @@ final class HostwrightCLITests: XCTestCase {
                 environment: environment(files: files, runtimeAdapter: adapter)
             )
 
-            XCTAssertEqual(result.exitCode, 1)
+            XCTAssertEqual(result.exitCode, CLIExitCode.runtimeUnavailable.rawValue)
             XCTAssertTrue(result.standardError.contains(HostwrightErrorCode.runtimeUnavailable.rawValue))
             XCTAssertFalse(result.standardError.contains(HostwrightErrorCode.stateStoreUnavailable.rawValue))
             XCTAssertFalse(result.standardError.contains(fakeSecret))
@@ -520,7 +724,7 @@ final class HostwrightCLITests: XCTestCase {
                 environment: environment(files: files, runtimeAdapter: adapter)
             )
 
-            XCTAssertEqual(result.exitCode, 1)
+            XCTAssertEqual(result.exitCode, CLIExitCode.runtimeUnavailable.rawValue)
             XCTAssertTrue(result.standardError.contains(HostwrightErrorCode.runtimeUnavailable.rawValue))
             XCTAssertTrue(result.standardError.contains("Failure state persistence also failed"))
             XCTAssertFalse(result.standardError.contains(HostwrightErrorCode.stateStoreUnavailable.rawValue))
@@ -581,10 +785,10 @@ final class HostwrightCLITests: XCTestCase {
                 environment: environment(files: files, runtimeAdapter: adapter)
             )
 
-            XCTAssertEqual(confirmed.exitCode, 1)
+            XCTAssertEqual(confirmed.exitCode, CLIExitCode.partialFailure.rawValue)
             XCTAssertTrue(confirmed.standardOutput.contains("- deleted hostwright-demo-api"))
             XCTAssertTrue(confirmed.standardOutput.contains("- failed hostwright-demo-worker"))
-            XCTAssertTrue(confirmed.standardError.contains(HostwrightErrorCode.runtimeUnavailable.rawValue))
+            XCTAssertTrue(confirmed.standardError.contains(HostwrightErrorCode.partialFailure.rawValue))
             XCTAssertFalse(confirmed.standardError.contains(HostwrightErrorCode.stateStoreUnavailable.rawValue))
             XCTAssertFalse(confirmed.standardOutput.contains(fakeSecret))
 
@@ -666,7 +870,12 @@ final class HostwrightCLITests: XCTestCase {
         )
     }
 
-    private func environment(files: FileBox, containerPath: String? = nil, runtimeAdapter: (any RuntimeAdapter)? = nil) -> CLIEnvironment {
+    private func environment(
+        files: FileBox,
+        containerPath: String? = nil,
+        runtimeAdapter: (any RuntimeAdapter)? = nil,
+        platform: PlatformSnapshot = PlatformSnapshot(macOSMajorVersion: 26, architecture: "arm64")
+    ) -> CLIEnvironment {
         CLIEnvironment(
             fileExists: { files.files[$0] != nil },
             readTextFile: { path in
@@ -681,7 +890,7 @@ final class HostwrightCLITests: XCTestCase {
             executablePath: { name in name == "container" ? containerPath : "/usr/bin/\(name)" },
             runtimeAdapter: { runtimeAdapter ?? FakeApplyRuntimeAdapter() },
             swiftVersion: { "Swift 6.3.2" },
-            platformSnapshot: { PlatformSnapshot(macOSMajorVersion: 26, architecture: "arm64") },
+            platformSnapshot: { platform },
             operatingSystemDescription: { "macOS 26.5" }
         )
     }
@@ -700,6 +909,15 @@ final class HostwrightCLITests: XCTestCase {
         try body(directory.appendingPathComponent("state.sqlite").path)
     }
 
+    private func withTemporaryDirectory(_ body: (URL) throws -> Void) throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("hostwright-cli-xctest-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: directory)
+        }
+        try body(directory)
+    }
+
     private func saveDesiredManifest(store: SQLiteStateStore, manifestText: String) throws {
         try store.desiredStates.saveManifestSnapshot(
             projectID: "project-demo",
@@ -709,6 +927,11 @@ final class HostwrightCLITests: XCTestCase {
             manifest: try ManifestValidator.validated(manifestText),
             timestamp: "2026-07-01T00:00:00Z"
         )
+    }
+
+    private func jsonObject(_ text: String) throws -> [String: Any] {
+        let data = try XCTUnwrap(text.data(using: .utf8))
+        return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
     }
 
     private final class FakeApplyRuntimeAdapter: RuntimeAdapter, @unchecked Sendable {

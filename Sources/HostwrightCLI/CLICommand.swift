@@ -1,5 +1,6 @@
 import Foundation
 import HostwrightCore
+import HostwrightState
 
 public enum CLICommand: Equatable, Sendable {
     case version
@@ -9,9 +10,10 @@ public enum CLICommand: Equatable, Sendable {
     case status(path: String, stateDatabasePath: String?, output: CLIOutputFormat)
     case apply(path: String, stateDatabasePath: String, confirmedPlanHash: String)
     case logs(serviceName: String, path: String, tail: Int, stateDatabasePath: String?)
-    case events(stateDatabasePath: String, projectName: String?, output: CLIOutputFormat)
+    case events(stateDatabasePath: String, projectName: String?, filters: EventFilters, output: CLIOutputFormat)
     case recovery(stateDatabasePath: String, projectName: String?, output: CLIOutputFormat)
     case cleanup(path: String, stateDatabasePath: String, confirmation: CleanupConfirmation)
+    case diagnostics(stateDatabasePath: String, bundlePath: String, projectName: String?, manifestPath: String?)
     case doctor(output: CLIOutputFormat)
     case help
 
@@ -46,6 +48,8 @@ public enum CLICommand: Equatable, Sendable {
             return try recoveryCommand(arguments: arguments)
         case "cleanup":
             return try cleanupCommand(arguments: arguments)
+        case "diagnostics":
+            return try diagnosticsCommand(arguments: arguments)
         case "doctor":
             return try doctorCommand(arguments: arguments)
         default:
@@ -213,6 +217,11 @@ public enum CLICommand: Equatable, Sendable {
     private static func eventsCommand(arguments: [String]) throws -> CLICommand {
         var stateDatabasePath: String?
         var projectName: String?
+        var eventType: String?
+        var serviceName: String?
+        var severity: StateEventSeverity?
+        var limit: Int?
+        var sort: EventSortOrder = .ascending
         var output: CLIOutputFormat = .text
         var index = 1
 
@@ -230,18 +239,53 @@ public enum CLICommand: Equatable, Sendable {
                 }
                 projectName = arguments[index + 1]
                 index += 2
+            case "--type":
+                guard index + 1 < arguments.count else {
+                    throw CLIUsageError("events requires a value after --type.")
+                }
+                eventType = arguments[index + 1]
+                index += 2
+            case "--service":
+                guard index + 1 < arguments.count else {
+                    throw CLIUsageError("events requires a value after --service.")
+                }
+                serviceName = arguments[index + 1]
+                index += 2
+            case "--severity":
+                guard index + 1 < arguments.count, let parsed = StateEventSeverity(rawValue: arguments[index + 1]) else {
+                    throw CLIUsageError("events --severity supports only 'info', 'warning', or 'error'.")
+                }
+                severity = parsed
+                index += 2
+            case "--limit":
+                guard index + 1 < arguments.count, let parsed = Int(arguments[index + 1]), parsed > 0 else {
+                    throw CLIUsageError("events requires a positive integer after --limit.")
+                }
+                limit = parsed
+                index += 2
+            case "--sort":
+                guard index + 1 < arguments.count, let parsed = EventSortOrder(rawValue: arguments[index + 1]) else {
+                    throw CLIUsageError("events --sort supports only 'asc' or 'desc'.")
+                }
+                sort = parsed
+                index += 2
             case "--output":
                 output = try parseOutputValue(arguments: arguments, index: index, commandName: "events")
                 index += 2
             default:
-                throw CLIUsageError("events supports only --state-db, --project, and --output.")
+                throw CLIUsageError("events supports only --state-db, --project, --type, --service, --severity, --limit, --sort, and --output.")
             }
         }
 
         guard let stateDatabasePath, !stateDatabasePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw CLIUsageError("events requires --state-db <path>.")
         }
-        return .events(stateDatabasePath: stateDatabasePath, projectName: projectName, output: output)
+        return .events(
+            stateDatabasePath: stateDatabasePath,
+            projectName: projectName,
+            filters: EventFilters(type: eventType, serviceName: serviceName, severity: severity, limit: limit, sort: sort),
+            output: output
+        )
     }
 
     private static func recoveryCommand(arguments: [String]) throws -> CLICommand {
@@ -377,6 +421,74 @@ public enum CLICommand: Equatable, Sendable {
             confirmation: dryRun ? .dryRun : .confirmed(token: confirmationToken ?? "")
         )
     }
+
+    private static func diagnosticsCommand(arguments: [String]) throws -> CLICommand {
+        var stateDatabasePath: String?
+        var bundlePath: String?
+        var projectName: String?
+        var manifestPath: String?
+        var index = 1
+
+        while index < arguments.count {
+            switch arguments[index] {
+            case "--state-db":
+                guard index + 1 < arguments.count else {
+                    throw CLIUsageError("diagnostics requires a value after --state-db.")
+                }
+                stateDatabasePath = arguments[index + 1]
+                index += 2
+            case "--bundle":
+                guard index + 1 < arguments.count else {
+                    throw CLIUsageError("diagnostics requires a value after --bundle.")
+                }
+                bundlePath = arguments[index + 1]
+                index += 2
+            case "--project":
+                guard index + 1 < arguments.count else {
+                    throw CLIUsageError("diagnostics requires a value after --project.")
+                }
+                projectName = arguments[index + 1]
+                index += 2
+            case "--manifest":
+                guard index + 1 < arguments.count else {
+                    throw CLIUsageError("diagnostics requires a value after --manifest.")
+                }
+                manifestPath = arguments[index + 1]
+                index += 2
+            default:
+                throw CLIUsageError("diagnostics supports only --state-db, --bundle, --project, and --manifest.")
+            }
+        }
+
+        guard let stateDatabasePath, !stateDatabasePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw CLIUsageError("diagnostics requires --state-db <path>.")
+        }
+        guard let bundlePath, !bundlePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw CLIUsageError("diagnostics requires --bundle <path>.")
+        }
+        return .diagnostics(stateDatabasePath: stateDatabasePath, bundlePath: bundlePath, projectName: projectName, manifestPath: manifestPath)
+    }
+}
+
+public enum EventSortOrder: String, Equatable, Sendable {
+    case ascending = "asc"
+    case descending = "desc"
+}
+
+public struct EventFilters: Equatable, Sendable {
+    public let type: String?
+    public let serviceName: String?
+    public let severity: StateEventSeverity?
+    public let limit: Int?
+    public let sort: EventSortOrder
+
+    public init(type: String? = nil, serviceName: String? = nil, severity: StateEventSeverity? = nil, limit: Int? = nil, sort: EventSortOrder = .ascending) {
+        self.type = type
+        self.serviceName = serviceName
+        self.severity = severity
+        self.limit = limit
+        self.sort = sort
+    }
 }
 
 public enum CleanupConfirmation: Equatable, Sendable {
@@ -401,7 +513,7 @@ public enum CLIExitCode: Int32, Equatable, Sendable {
 
     public static func mapped(from code: HostwrightErrorCode) -> CLIExitCode {
         switch code {
-        case .commandUsage, .fileAlreadyExists:
+        case .commandUsage, .fileAlreadyExists, .fileIOFailed:
             return .commandUsage
         case .confirmationMismatch:
             return .confirmationMismatch

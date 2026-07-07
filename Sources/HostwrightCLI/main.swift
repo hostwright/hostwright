@@ -80,10 +80,11 @@ public enum HostwrightCLI {
                 stateDatabasePath: stateDatabasePath,
                 environment: environment
             ).run()
-        case .events(let stateDatabasePath, let projectName, let output):
+        case .events(let stateDatabasePath, let projectName, let filters, let output):
             return EventsCommandRunner(
                 stateDatabasePath: stateDatabasePath,
                 projectName: projectName,
+                filters: filters,
                 output: output
             ).run()
         case .recovery(let stateDatabasePath, let projectName, let output):
@@ -97,6 +98,14 @@ public enum HostwrightCLI {
                 manifestPath: path,
                 stateDatabasePath: stateDatabasePath,
                 confirmation: confirmation,
+                environment: environment
+            ).run()
+        case .diagnostics(let stateDatabasePath, let bundlePath, let projectName, let manifestPath):
+            return DiagnosticsCommandRunner(
+                stateDatabasePath: stateDatabasePath,
+                bundlePath: bundlePath,
+                projectName: projectName,
+                manifestPath: manifestPath,
                 environment: environment
             ).run()
         case .doctor(let output):
@@ -115,16 +124,18 @@ public enum HostwrightCLI {
       hostwright status [path] [--state-db <path>] [--output text|json]
       hostwright apply [path] --state-db <path> --confirm-plan <hash>
       hostwright logs <service> [path] [--tail <n>] [--state-db <path>]
-      hostwright events --state-db <path> [--project <name>] [--output text|json]
+      hostwright events --state-db <path> [--project <name>] [--type <event>] [--service <name>] [--severity info|warning|error] [--limit <n>] [--sort asc|desc] [--output text|json]
       hostwright recovery --state-db <path> [--project <name>] [--output text|json]
       hostwright cleanup [path] --state-db <path> --dry-run
       hostwright cleanup [path] --state-db <path> --confirm-cleanup <token>
+      hostwright diagnostics --state-db <path> --bundle <path> [--project <name>] [--manifest <path>]
       hostwright doctor [--output text|json]
 
     Most commands are read-only. init writes hostwright.yaml only when absent.
     CLI plan output is deterministic but does not perform live runtime observation.
     Apply can execute exactly one confirmed createMissingService or restart-policy-allowed startManagedService action through RuntimeAdapter.
     Cleanup deletes only exact cleanup-eligible Hostwright-owned stopped/created/exited containers after dry-run token confirmation.
+    Diagnostics writes a local redacted JSON bundle only. It never uploads telemetry.
     JSON output is supported for plan, status, events, recovery, doctor, and errors when --output json is present.
 
     Examples:
@@ -132,6 +143,7 @@ public enum HostwrightCLI {
       hostwright status --state-db /tmp/hostwright.sqlite --output json
       hostwright events --state-db /tmp/hostwright.sqlite --project api-local --output json
       hostwright recovery --state-db /tmp/hostwright.sqlite --output json
+      hostwright diagnostics --state-db /tmp/hostwright.sqlite --bundle /tmp/hostwright-diagnostics.json
       hostwright doctor --output json
 
     """

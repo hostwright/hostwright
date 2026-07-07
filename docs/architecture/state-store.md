@@ -4,7 +4,7 @@ Hostwright's intended local state store is SQLite.
 
 ## Purpose
 
-The state store persists desired state, observed snapshots, events, operation records, ownership records, health results, restart policy state, managed restart recovery records, and operation recovery groups. Broader drift-specific records remain planned for later phases.
+The state store persists desired state, observed snapshots, events, operation records, ownership records, health results, restart policy state, managed restart recovery records, operation recovery groups, and redacted diagnostics export data. Broader drift-specific records remain planned for later phases.
 
 ## Current State
 
@@ -24,6 +24,7 @@ Implemented:
 - restart policy state records
 - restart recovery records
 - operation recovery groups and step records
+- local redacted diagnostics export from existing state rows
 - temp-database smoke checks
 - migration checksums and future-version refusal
 - actionable corrupt/locked database failures
@@ -39,7 +40,7 @@ Not implemented:
 - production durability claims
 - default user database path
 - automatic state repair
-- online backup/export commands
+- online backup/restore/repair commands
 - launch agent or background daemon service
 
 ## Requirements
@@ -95,7 +96,7 @@ Normalized columns hold identifiers, project names, service names, timestamps, l
 
 JSON blobs hold ports, mounts, environment snapshots, runtime capabilities, runtime identifiers, event payloads, operation payloads, ownership metadata, health command/output metadata, restart recovery completed-step metadata, and operation recovery metadata. Payload fields, runtime identifiers, failure messages, and manual recovery hints are redacted before persistence.
 
-## Backup, Restore, And Export
+## Backup, Restore, And Diagnostics Export
 
 State backup is a cold file operation today:
 
@@ -110,7 +111,15 @@ Restore is also a cold file operation:
 3. Copy the backup database and sidecars into place.
 4. Run a safe read command such as `hostwright events --state-db <path>` to verify the schema can be opened.
 
-Debug export is manual in this phase. Copy the database to a private support location only after reviewing it for sensitive local paths, hostnames, project names, and redacted-but-contextual metadata. Hostwright does not upload telemetry or state.
+Diagnostics export is a local read-only command:
+
+```bash
+hostwright diagnostics --state-db <path> --bundle <path> [--project <name>] [--manifest <path>]
+```
+
+The command validates the already-applied schema, reads existing rows, applies Hostwright redaction before JSON rendering, and refuses to overwrite an existing bundle file. It does not observe runtime state, mutate runtime state, create or migrate a missing database, repair state, or upload telemetry.
+
+The exported bundle can still contain sensitive local context such as project names, service names, paths, hostnames, resource identifiers, and redacted-but-contextual metadata. Review it before sharing.
 
 Corruption recovery is manual. If Hostwright reports a corrupt or non-SQLite database, keep the file for investigation, restore from a known-good cold backup, or choose a new explicit database path. Hostwright does not invent ownership records, repair rows, or erase state automatically.
 

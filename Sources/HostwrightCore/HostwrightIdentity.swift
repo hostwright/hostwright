@@ -16,6 +16,7 @@ public enum HostwrightErrorCode: String, Sendable {
     case fileAlreadyExists = "HW-CLI-002"
     case confirmationMismatch = "HW-CLI-003"
     case partialFailure = "HW-CLI-004"
+    case fileIOFailed = "HW-CLI-005"
     case unsupportedArchitecture = "HW-COMPAT-001"
     case unsupportedMacOSVersion = "HW-COMPAT-002"
     case runtimeUnavailable = "HW-RUNTIME-001"
@@ -28,7 +29,7 @@ public enum HostwrightErrorCode: String, Sendable {
     case unsafeExposure = "HW-SECURITY-001"
 }
 
-public struct HostwrightDiagnostic: Equatable, Sendable {
+public struct HostwrightDiagnostic: Error, Equatable, Sendable {
     public let code: HostwrightErrorCode
     public let message: String
 

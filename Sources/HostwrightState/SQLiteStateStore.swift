@@ -45,6 +45,10 @@ public struct SQLiteStateStore: StateStore {
         OwnershipRepository(store: self)
     }
 
+    public var diagnostics: DiagnosticsExportRepository {
+        DiagnosticsExportRepository(store: self)
+    }
+
     public init(path: String) {
         self.configuration = StateStoreConfiguration(explicitDatabasePath: path)
     }

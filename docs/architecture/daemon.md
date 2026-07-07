@@ -43,6 +43,8 @@ Successful iterations persist desired and observed snapshots. Failed iterations 
 
 The daemon records `daemon.started`, `daemon.reconcile.succeeded`, `daemon.reconcile.failed`, `daemon.backoff`, `daemon.sleep_wake_resumed`, `daemon.stopped`, `health.check.*`, and `restart.policy.state` events.
 
+Those events and daemon operation records are local forensic inputs for `hostwright events`, `hostwright recovery`, and `hostwright diagnostics`. The daemon does not export or upload them.
+
 ## Mutation Policy
 
 The foreground daemon uses the read-only local runtime adapter and does not call `RuntimeAdapter.execute`. It may observe, run bounded in-process loopback health checks, persist restart policy state, and plan actions, but it does not create, start, stop, restart, delete, repair, clean up, or otherwise mutate runtime resources.

@@ -12,8 +12,9 @@ hostwright plan [path] [--output text|json]
 hostwright status [path] [--state-db <path>] [--output text|json]
 hostwright apply [path] --state-db <path> --confirm-plan <hash>
 hostwright logs <service> [path] [--tail <n>] [--state-db <path>]
-hostwright events --state-db <path> [--project <name>] [--output text|json]
+hostwright events --state-db <path> [--project <name>] [--type <event>] [--service <name>] [--severity info|warning|error] [--limit <n>] [--sort asc|desc] [--output text|json]
 hostwright recovery --state-db <path> [--project <name>] [--output text|json]
+hostwright diagnostics --state-db <path> --bundle <path> [--project <name>] [--manifest <path>]
 hostwright cleanup [path] --state-db <path> --dry-run
 hostwright cleanup [path] --state-db <path> --confirm-cleanup <token>
 hostwright doctor [--output text|json]
@@ -184,11 +185,19 @@ Failure example:
 HW-RUNTIME-001: logs requires an observed Hostwright-managed service.
 ```
 
-## `hostwright events --state-db <path> [--project <name>] [--output text|json]`
+## `hostwright events --state-db <path> [--project <name>] [--type <event>] [--service <name>] [--severity info|warning|error] [--limit <n>] [--sort asc|desc] [--output text|json]`
 
 Reads the SQLite event ledger from an explicit, already-migrated state database path and renders events in deterministic timestamp/id order.
 
 It does not inspect runtime state and does not create or migrate the database as a read side effect.
+
+Filters are applied after project selection and before rendering:
+
+- `--type <event>` matches the event type, such as `cleanup.failed`.
+- `--service <name>` matches a service name on event rows that carry one.
+- `--severity info|warning|error` matches event severity.
+- `--limit <n>` returns the first `n` filtered records in the selected order.
+- `--sort asc|desc` defaults to `asc`.
 
 JSON shape:
 
@@ -196,6 +205,7 @@ JSON shape:
 {
   "kind": "events",
   "stateDatabasePath": "/tmp/hostwright.sqlite",
+  "filters": {"sort": "asc"},
   "events": []
 }
 ```
@@ -218,6 +228,27 @@ JSON shape:
   "stateDatabasePath": "/tmp/hostwright.sqlite",
   "operationGroups": []
 }
+```
+
+## `hostwright diagnostics --state-db <path> --bundle <path> [--project <name>] [--manifest <path>]`
+
+Writes a local redacted JSON diagnostics bundle to the exact `--bundle` path.
+
+The command reads only the explicit, already-migrated state database path and optional manifest path. If `--manifest` is omitted, the bundle is state-only; it does not discover `hostwright.yaml` from the current directory.
+
+The bundle includes:
+
+- telemetry policy: local-only, no upload;
+- state schema/version metadata;
+- optional manifest summary;
+- redacted events, operations, operation groups, operation group steps, health results, restart policy state, restart recovery records, ownership records, and observed snapshots.
+
+The command does not inspect Apple container, observe runtime state, mutate runtime state, create or migrate a missing database, overwrite an existing bundle path, or upload telemetry.
+
+Example:
+
+```bash
+hostwright diagnostics --state-db /tmp/hostwright.sqlite --bundle /tmp/hostwright-diagnostics.json --project api-local
 ```
 
 ## `hostwright cleanup [path] --state-db <path> --dry-run`
@@ -262,7 +293,9 @@ Runs safe local checks only:
 - architecture/macOS compatibility gate;
 - Swift toolchain version through a controlled `swift --version` process;
 - `container` executable lookup only;
-- `hostwright.yaml` presence.
+- `hostwright.yaml` presence;
+- explicit state-path policy;
+- local-only telemetry policy.
 
 `doctor` does not run Apple container commands.
 

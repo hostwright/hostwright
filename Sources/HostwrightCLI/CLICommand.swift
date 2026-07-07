@@ -10,6 +10,7 @@ public enum CLICommand: Equatable, Sendable {
     case apply(path: String, stateDatabasePath: String, confirmedPlanHash: String)
     case logs(serviceName: String, path: String, tail: Int, stateDatabasePath: String?)
     case events(stateDatabasePath: String, projectName: String?, output: CLIOutputFormat)
+    case recovery(stateDatabasePath: String, projectName: String?, output: CLIOutputFormat)
     case cleanup(path: String, stateDatabasePath: String, confirmation: CleanupConfirmation)
     case doctor(output: CLIOutputFormat)
     case help
@@ -41,6 +42,8 @@ public enum CLICommand: Equatable, Sendable {
             return try logsCommand(arguments: arguments)
         case "events":
             return try eventsCommand(arguments: arguments)
+        case "recovery":
+            return try recoveryCommand(arguments: arguments)
         case "cleanup":
             return try cleanupCommand(arguments: arguments)
         case "doctor":
@@ -239,6 +242,40 @@ public enum CLICommand: Equatable, Sendable {
             throw CLIUsageError("events requires --state-db <path>.")
         }
         return .events(stateDatabasePath: stateDatabasePath, projectName: projectName, output: output)
+    }
+
+    private static func recoveryCommand(arguments: [String]) throws -> CLICommand {
+        var stateDatabasePath: String?
+        var projectName: String?
+        var output: CLIOutputFormat = .text
+        var index = 1
+
+        while index < arguments.count {
+            switch arguments[index] {
+            case "--state-db":
+                guard index + 1 < arguments.count else {
+                    throw CLIUsageError("recovery requires a value after --state-db.")
+                }
+                stateDatabasePath = arguments[index + 1]
+                index += 2
+            case "--project":
+                guard index + 1 < arguments.count else {
+                    throw CLIUsageError("recovery requires a value after --project.")
+                }
+                projectName = arguments[index + 1]
+                index += 2
+            case "--output":
+                output = try parseOutputValue(arguments: arguments, index: index, commandName: "recovery")
+                index += 2
+            default:
+                throw CLIUsageError("recovery supports only --state-db, --project, and --output.")
+            }
+        }
+
+        guard let stateDatabasePath, !stateDatabasePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw CLIUsageError("recovery requires --state-db <path>.")
+        }
+        return .recovery(stateDatabasePath: stateDatabasePath, projectName: projectName, output: output)
     }
 
     private static func doctorCommand(arguments: [String]) throws -> CLICommand {

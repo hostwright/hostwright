@@ -8,9 +8,9 @@
 
 ## Verified On 2026-07-07
 
-- `swift build` succeeds after the Phase 17 managed restart changes.
-- `swift test list` lists 162 real XCTest cases across Hostwright test targets.
-- `swift test` executes 162 real XCTest test cases across CLI, core, daemon, health, manifest, networking, observability, reconciler, runtime, and state targets with 0 failures.
+- `swift build` succeeds after the Phase 18 recovery changes.
+- `swift test list` lists 170 real XCTest cases across Hostwright test targets.
+- `swift test` executes 170 real XCTest test cases across CLI, core, daemon, health, manifest, networking, observability, reconciler, runtime, and state targets with 0 failures.
 - `scripts/grep-orchard.sh .` succeeds and reports historical references only in `docs/source-material/` and `docs/naming/`.
 - `scripts/test.sh` succeeds and runs `swift build` plus `swift test`.
 - Apple container 1.0.0 is installed locally at `/usr/local/bin/container`.
@@ -48,12 +48,13 @@
 - Phase 15 adds `hostwrightd --foreground --config <path> --state-db <path>` for non-mutating daemon observation/planning with event and operation persistence, cadence, jitter, backoff, shutdown, lock, and sleep/wake test seams.
 - Phase 16 adds bounded host-side health check execution, append-only health result persistence, restart policy state with max attempts/backoff/operator hold/manual-disable/crash-loop blocking, redacted health/restart events, and apply/daemon planning gates that avoid aggressive restart loops.
 - Phase 17 adds one restart-policy-gated managed restart path for exact Hostwright-owned running/unhealthy services, using live runtime lifecycle observation, a fresh persisted unhealthy health result from the explicit state DB, status/apply plan-hash parity, internal stop-then-start runtime execution, operation ledger records, partial restart failure records, and redacted events.
+- Phase 18 adds operation recovery groups and steps, apply checkpoints, active-operation locking with expired-lock interruption, rollback-unavailable step records, redacted manual recovery hints, legacy managed-restart recovery rendering, and read-only `hostwright recovery` output for failed or interrupted apply inspection.
 - No Apple container command was called by Phase 6 or Phase 7.
 - `FoundationRuntimeProcessRunner` exists for policy-approved read-only command specs and supported mutation specs; automated tests still use fake process execution.
 - `AppleContainerReadOnlyAdapter` reports missing `container` as runtime unavailable and rejects mutation through the adapter contract.
 - `AppleContainerObservationParser` accepts the fixture-defined `hostwright.apple-container.observation.v1` schema, the verified real empty JSON array shape `[]`, Apple builder container list output, and the verified created/stopped proof container output.
 - `AppleContainerImageListParser` accepts the verified real object-based image list shape with `configuration.name`.
-- `SQLiteStateStore` uses system `SQLite3`, schema migrations, transactions, and repository APIs for desired services, observed snapshots, events, operations, ownership records, health results, restart policy state, and restart recovery records.
+- `SQLiteStateStore` uses system `SQLite3`, schema migrations, transactions, and repository APIs for desired services, observed snapshots, events, operations, ownership records, health results, restart policy state, restart recovery records, and operation recovery groups/steps.
 - Phase 6 state tests use explicit temporary database paths only.
 - Phase 7 planner tests use in-memory desired and observed runtime models only.
 - No default user database path, hidden global database write, unattended daemon mutation, launch agent, multi-action apply, user-facing stop/restart/remove command, image deletion, volume deletion, broad cleanup, aggressive restart loop, or CLI Apple container shell-out bypass was implemented.
@@ -82,7 +83,7 @@ Important diagnostic correction:
 - `swift -e 'import XCTest'` can still fail and is not the correct gate.
 - A minimal SwiftPM XCTest probe passed after Xcode was fixed.
 - `swift test list` is the local proof that Hostwright now exposes real XCTest cases.
-- `swift test` executes 162 XCTest cases after the Phase 17 managed restart update.
+- `swift test` executes 170 XCTest cases after the Phase 18 recovery update.
 
 The old top-level smoke/precondition posture has been replaced with XCTest assertions. Some test file names still include `Smoke.swift`, but the contents are XCTest cases.
 

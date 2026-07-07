@@ -13,7 +13,7 @@ Hostwright is not production ready.
 - Manifest `version: 1` support with versionless alpha manifests treated as legacy version 1 input.
 - Fail-closed unsupported-field, unsupported-version, unsafe env-key, and unsafe host-root or parent-traversal mount-source validation for untrusted manifests.
 - `hostwright plan` as non-mutating manifest-level dry-run output.
-- `--output json` for `plan`, `status`, `events`, `doctor`, and structured errors when JSON mode is requested.
+- `--output json` for `plan`, `status`, `events`, `recovery`, `doctor`, and structured errors when JSON mode is requested.
 - Stable process exit categories for usage, validation, state unavailable, runtime unavailable, confirmation mismatch, unsafe operation, and partial failure.
 - `hostwright status [path] --state-db <path>` with live RuntimeAdapter observation and event/snapshot persistence.
 - `hostwright logs <service>` with bounded tail output through RuntimeAdapter and redaction.
@@ -46,6 +46,7 @@ Hostwright is not production ready.
 - Health check result records.
 - Restart policy state records.
 - Restart recovery records for managed restart attempts.
+- Operation recovery groups and step records for apply checkpoints, partial failures, interruption diagnostics, and manual recovery hints.
 - Explicit-path state configuration only.
 - Manifest-to-runtime desired-state mapping outside the CLI.
 - Typed deterministic drift records, plan issues, planned actions, and plan hash.
@@ -71,6 +72,7 @@ Hostwright is not production ready.
 - JSON output for `validate`, `apply`, `logs`, and `cleanup` success paths.
 - Shell completion installation or shell profile mutation.
 - User-facing Apple container stop/restart commands, remove, broad cleanup, image deletion, volume deletion, log follow, attach, exec, or detailed inspect operations.
+- Automatic rollback or inverse runtime mutation after partial failure.
 - Runtime mutation beyond create-missing-service, managed start, managed restart, and exact cleanup-eligible container delete.
 - Container-exec or interactive health checks.
 - Aggressive restart loops or daemon-enforced restart mutation.
@@ -120,6 +122,8 @@ The runtime module contains Apple container observation infrastructure and narro
 The runtime parser accepts the fixture-defined `hostwright.apple-container.observation.v1` schema, the verified real empty JSON array shape returned by `container list --all --format json`, Apple builder container output that is ignored, and the verified `hostwright-proof-web` created/stopped output. Unsupported, malformed, or broader real Apple container JSON output fails closed with redacted errors.
 
 Apply is not general lifecycle management. It uses `container create` only after explicit plan confirmation, idempotency checks, operation intent persistence, local image confirmation, and safe-subset validation. Created port bindings are emitted as explicit `127.0.0.1:host:container` publishes. It uses `container start <id>` only for one observed Hostwright-owned stopped/created/exited service when restart policy allows a managed start. It uses an internal `container stop <id>` then `container start <id>` sequence only for one exact Hostwright-owned running service when restart policy allows managed restart, the explicit state database has a fresh unhealthy health result for the service, and recovery records are written. Cleanup uses `container delete <id>` only after dry-run token confirmation and ownership/live-state eligibility checks.
+
+Recovery is diagnostic and manual. `hostwright recovery` reads operation groups and steps from the explicit state database and reports whether an apply operation completed, failed, or was interrupted. It does not observe Apple container, retry mutation, stop/start/delete resources, or roll back changes automatically.
 
 ## State Truth
 

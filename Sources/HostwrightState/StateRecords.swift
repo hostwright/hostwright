@@ -256,6 +256,178 @@ public struct OperationRecord: Equatable, Sendable {
     }
 }
 
+public enum OperationGroupStatus: String, Equatable, Sendable {
+    case active
+    case succeeded
+    case failed
+    case interrupted
+}
+
+public struct OperationGroupRecord: Equatable, Sendable {
+    public let id: String
+    public let operationID: String
+    public let groupKind: String
+    public let projectID: String?
+    public let serviceName: String?
+    public let plannedActionType: String
+    public let status: OperationGroupStatus
+    public let groupIdempotencyKey: String
+    public let planHash: String
+    public let checkpoint: String
+    public let lockOwner: String?
+    public let lockExpiresAt: String?
+    public let rollbackAvailable: Bool
+    public let manualRecoveryHintRedacted: String
+    public let createdAt: String
+    public let updatedAt: String
+    public let metadataJSONRedacted: String
+
+    public init(
+        id: String,
+        operationID: String,
+        groupKind: String,
+        projectID: String?,
+        serviceName: String?,
+        plannedActionType: String,
+        status: OperationGroupStatus,
+        groupIdempotencyKey: String,
+        planHash: String,
+        checkpoint: String,
+        lockOwner: String?,
+        lockExpiresAt: String?,
+        rollbackAvailable: Bool,
+        manualRecoveryHintRedacted: String,
+        createdAt: String,
+        updatedAt: String,
+        metadataJSONRedacted: String
+    ) {
+        self.id = id
+        self.operationID = operationID
+        self.groupKind = groupKind
+        self.projectID = projectID
+        self.serviceName = serviceName
+        self.plannedActionType = plannedActionType
+        self.status = status
+        self.groupIdempotencyKey = groupIdempotencyKey
+        self.planHash = planHash
+        self.checkpoint = checkpoint
+        self.lockOwner = lockOwner
+        self.lockExpiresAt = lockExpiresAt
+        self.rollbackAvailable = rollbackAvailable
+        self.manualRecoveryHintRedacted = manualRecoveryHintRedacted
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.metadataJSONRedacted = metadataJSONRedacted
+    }
+
+    public func redacted(using policy: RuntimeRedactionPolicy = .default) -> OperationGroupRecord {
+        OperationGroupRecord(
+            id: id,
+            operationID: operationID,
+            groupKind: groupKind,
+            projectID: projectID,
+            serviceName: serviceName,
+            plannedActionType: plannedActionType,
+            status: status,
+            groupIdempotencyKey: groupIdempotencyKey,
+            planHash: planHash,
+            checkpoint: checkpoint,
+            lockOwner: lockOwner.map(policy.redact),
+            lockExpiresAt: lockExpiresAt,
+            rollbackAvailable: rollbackAvailable,
+            manualRecoveryHintRedacted: policy.redact(manualRecoveryHintRedacted),
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            metadataJSONRedacted: policy.redact(metadataJSONRedacted)
+        )
+    }
+}
+
+public enum OperationGroupStepDirection: String, Equatable, Sendable {
+    case forward
+    case rollback
+}
+
+public enum OperationGroupStepStatus: String, Equatable, Sendable {
+    case planned
+    case started
+    case succeeded
+    case failed
+    case unsupported
+}
+
+public struct OperationGroupStepRecord: Equatable, Sendable {
+    public let id: String
+    public let groupID: String
+    public let stepKey: String
+    public let direction: OperationGroupStepDirection
+    public let plannedActionType: String
+    public let serviceName: String?
+    public let resourceIdentifier: String?
+    public let stepIdempotencyKey: String
+    public let status: OperationGroupStepStatus
+    public let startedAt: String?
+    public let updatedAt: String
+    public let finishedAt: String?
+    public let lastErrorRedacted: String?
+    public let manualRecoveryHintRedacted: String
+    public let metadataJSONRedacted: String
+
+    public init(
+        id: String,
+        groupID: String,
+        stepKey: String,
+        direction: OperationGroupStepDirection,
+        plannedActionType: String,
+        serviceName: String?,
+        resourceIdentifier: String?,
+        stepIdempotencyKey: String,
+        status: OperationGroupStepStatus,
+        startedAt: String?,
+        updatedAt: String,
+        finishedAt: String?,
+        lastErrorRedacted: String?,
+        manualRecoveryHintRedacted: String,
+        metadataJSONRedacted: String
+    ) {
+        self.id = id
+        self.groupID = groupID
+        self.stepKey = stepKey
+        self.direction = direction
+        self.plannedActionType = plannedActionType
+        self.serviceName = serviceName
+        self.resourceIdentifier = resourceIdentifier
+        self.stepIdempotencyKey = stepIdempotencyKey
+        self.status = status
+        self.startedAt = startedAt
+        self.updatedAt = updatedAt
+        self.finishedAt = finishedAt
+        self.lastErrorRedacted = lastErrorRedacted
+        self.manualRecoveryHintRedacted = manualRecoveryHintRedacted
+        self.metadataJSONRedacted = metadataJSONRedacted
+    }
+
+    public func redacted(using policy: RuntimeRedactionPolicy = .default) -> OperationGroupStepRecord {
+        OperationGroupStepRecord(
+            id: id,
+            groupID: groupID,
+            stepKey: stepKey,
+            direction: direction,
+            plannedActionType: plannedActionType,
+            serviceName: serviceName,
+            resourceIdentifier: resourceIdentifier.map(policy.redact),
+            stepIdempotencyKey: stepIdempotencyKey,
+            status: status,
+            startedAt: startedAt,
+            updatedAt: updatedAt,
+            finishedAt: finishedAt,
+            lastErrorRedacted: lastErrorRedacted.map(policy.redact),
+            manualRecoveryHintRedacted: policy.redact(manualRecoveryHintRedacted),
+            metadataJSONRedacted: policy.redact(metadataJSONRedacted)
+        )
+    }
+}
+
 public struct HealthCheckResultRecord: Equatable, Sendable {
     public let id: String
     public let projectID: String?

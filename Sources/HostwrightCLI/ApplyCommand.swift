@@ -111,19 +111,86 @@ struct ApplyCommandRunner {
                 )
             }
             let operationID = hostwrightUniqueID(prefix: "operation-apply")
-
-            try persistPreMutationState(
-                store: store,
-                manifest: manifest,
-                manifestText: manifestText,
-                observed: observedForPlanning,
-                plan: plan,
-                action: action,
-                operationID: operationID,
-                idempotencyKey: idempotencyKey,
-                projectID: projectID,
-                timestamp: timestamp
+            let operationGroupID = hostwrightUniqueID(prefix: "operation-group")
+            let groupAcquire = try store.operationGroups.acquire(
+                operationGroup(
+                    id: operationGroupID,
+                    operationID: operationID,
+                    action: action,
+                    idempotencyKey: idempotencyKey,
+                    planHash: plan.planHash,
+                    projectID: projectID,
+                    timestamp: timestamp,
+                    status: .active,
+                    checkpoint: "prepared",
+                    lockOwner: "hostwright-cli:\(operationID)",
+                    lockExpiresAt: hostwrightTimestampAdding(seconds: 600, to: timestamp),
+                    manualRecoveryHint: manualRecoveryHint(
+                        status: .active,
+                        checkpoint: "prepared",
+                        action: action
+                    )
+                )
             )
+            if let existing = groupAcquire.existingActive {
+                return failure(
+                    code: .commandUsage,
+                    message: "Operation group with the same idempotency key is already active at checkpoint \(existing.checkpoint). No mutation was attempted. Run recovery --state-db <path> to inspect manual recovery guidance."
+                )
+            }
+            do {
+                try recordRollbackUnsupportedStep(
+                    store: store,
+                    groupID: operationGroupID,
+                    action: action,
+                    idempotencyKey: idempotencyKey,
+                    timestamp: timestamp
+                )
+
+                try persistPreMutationState(
+                    store: store,
+                    manifest: manifest,
+                    manifestText: manifestText,
+                    observed: observedForPlanning,
+                    plan: plan,
+                    action: action,
+                    operationID: operationID,
+                    idempotencyKey: idempotencyKey,
+                    projectID: projectID,
+                    timestamp: timestamp
+                )
+                try recordOperationGroupStep(
+                    store: store,
+                    groupID: operationGroupID,
+                    action: action,
+                    stepKey: "runtime-execute",
+                    direction: .forward,
+                    status: .started,
+                    idempotencyKey: idempotencyKey,
+                    timestamp: timestamp,
+                    resourceIdentifier: action.identity.managedResourceIdentifier,
+                    error: nil,
+                    hint: "Runtime mutation started for \(action.identity.displayName). If this process is interrupted, inspect the exact runtime resource and rerun apply only after confirming the current plan."
+                )
+            } catch {
+                try? finishOperationGroup(
+                    store: store,
+                    groupID: operationGroupID,
+                    status: .interrupted,
+                    checkpoint: "pre-runtime-state-incomplete",
+                    action: action,
+                    timestamp: timestamp,
+                    metadata: [
+                        "error": RuntimeRedactionPolicy.default.redact(String(describing: error)),
+                        "runtimeMutation": "not-attempted",
+                        "rollback": "unsupported"
+                    ]
+                )
+                return failure(
+                    code: .stateStoreUnavailable,
+                    message: "Apply operation group was recorded, but pre-runtime state persistence failed before mutation: \(RuntimeRedactionPolicy.default.redact(String(describing: error)))"
+                )
+            }
 
             let runtimeAction = runtimeAction(for: action, desiredService: desiredService)
 
@@ -143,6 +210,19 @@ struct ApplyCommandRunner {
                 let runtimeErrorDescription = RuntimeRedactionPolicy.default.redact(String(describing: error))
                 do {
                     if restartStopSucceededBeforeFailure(error) {
+                        try recordOperationGroupStep(
+                            store: store,
+                            groupID: operationGroupID,
+                            action: action,
+                            stepKey: "restart-stop",
+                            direction: .forward,
+                            status: .succeeded,
+                            idempotencyKey: idempotencyKey,
+                            timestamp: timestamp,
+                            resourceIdentifier: action.identity.managedResourceIdentifier,
+                            error: nil,
+                            hint: "Managed restart stop completed for \(action.identity.displayName); start did not complete."
+                        )
                         try recordRestartRecoveryIfNeeded(
                             store: store,
                             action: action,
@@ -153,6 +233,19 @@ struct ApplyCommandRunner {
                             status: .stopSucceeded
                         )
                     }
+                    try recordOperationGroupStep(
+                        store: store,
+                        groupID: operationGroupID,
+                        action: action,
+                        stepKey: "runtime-execute",
+                        direction: .forward,
+                        status: .failed,
+                        idempotencyKey: idempotencyKey,
+                        timestamp: timestamp,
+                        resourceIdentifier: action.identity.managedResourceIdentifier,
+                        error: runtimeErrorDescription,
+                        hint: manualRecoveryHint(status: .failed, checkpoint: "runtime-failed", action: action)
+                    )
                     try persistFailure(
                         store: store,
                         error: error,
@@ -171,7 +264,32 @@ struct ApplyCommandRunner {
                         timestamp: timestamp,
                         outcome: "failed"
                     )
+                    try finishOperationGroup(
+                        store: store,
+                        groupID: operationGroupID,
+                        status: .failed,
+                        checkpoint: "runtime-failed",
+                        action: action,
+                        timestamp: timestamp,
+                        metadata: [
+                            "error": runtimeErrorDescription,
+                            "rollback": "unsupported"
+                        ]
+                    )
                 } catch {
+                    try? finishOperationGroup(
+                        store: store,
+                        groupID: operationGroupID,
+                        status: .failed,
+                        checkpoint: "runtime-failed",
+                        action: action,
+                        timestamp: timestamp,
+                        metadata: [
+                            "error": runtimeErrorDescription,
+                            "persistenceError": RuntimeRedactionPolicy.default.redact(String(describing: error)),
+                            "rollback": "unsupported"
+                        ]
+                    )
                     return failure(
                         code: .runtimeUnavailable,
                         message: "Runtime mutation failed after operation intent was recorded: \(runtimeErrorDescription). Failure state persistence also failed: \(RuntimeRedactionPolicy.default.redact(String(describing: error)))"
@@ -181,6 +299,19 @@ struct ApplyCommandRunner {
             }
 
             do {
+                try recordOperationGroupStep(
+                    store: store,
+                    groupID: operationGroupID,
+                    action: action,
+                    stepKey: "runtime-execute",
+                    direction: .forward,
+                    status: .succeeded,
+                    idempotencyKey: idempotencyKey,
+                    timestamp: timestamp,
+                    resourceIdentifier: event.resourceIdentifier ?? action.identity.managedResourceIdentifier,
+                    error: nil,
+                    hint: "Runtime mutation completed for \(action.identity.displayName)."
+                )
                 try persistSuccess(
                     store: store,
                     event: event,
@@ -199,6 +330,18 @@ struct ApplyCommandRunner {
                     timestamp: timestamp,
                     outcome: "succeeded"
                 )
+                try finishOperationGroup(
+                    store: store,
+                    groupID: operationGroupID,
+                    status: .succeeded,
+                    checkpoint: "completed",
+                    action: action,
+                    timestamp: timestamp,
+                    metadata: [
+                        "rollback": "unsupported",
+                        "runtimeEventSeverity": event.severity.rawValue
+                    ]
+                )
 
                 return CLIRunResult(
                     standardOutput: """
@@ -211,6 +354,18 @@ struct ApplyCommandRunner {
                     """
                 )
             } catch {
+                try? finishOperationGroup(
+                    store: store,
+                    groupID: operationGroupID,
+                    status: .interrupted,
+                    checkpoint: "runtime-finished-state-incomplete",
+                    action: action,
+                    timestamp: timestamp,
+                    metadata: [
+                        "error": RuntimeRedactionPolicy.default.redact(String(describing: error)),
+                        "rollback": "unsupported"
+                    ]
+                )
                 return failure(
                     code: .stateStoreUnavailable,
                     message: "Runtime mutation succeeded but success state persistence failed: \(RuntimeRedactionPolicy.default.redact(String(describing: error)))"
@@ -679,6 +834,137 @@ struct ApplyCommandRunner {
             return "apply.restarted-service"
         case .unavailable:
             return "apply.succeeded"
+        }
+    }
+
+    private func operationGroup(
+        id: String,
+        operationID: String,
+        action: PlannedAction,
+        idempotencyKey: String,
+        planHash: String,
+        projectID: String,
+        timestamp: String,
+        status: OperationGroupStatus,
+        checkpoint: String,
+        lockOwner: String?,
+        lockExpiresAt: String?,
+        manualRecoveryHint: String
+    ) -> OperationGroupRecord {
+        OperationGroupRecord(
+            id: id,
+            operationID: operationID,
+            groupKind: "apply",
+            projectID: projectID,
+            serviceName: action.identity.serviceName,
+            plannedActionType: action.kind.rawValue,
+            status: status,
+            groupIdempotencyKey: idempotencyKey,
+            planHash: planHash,
+            checkpoint: checkpoint,
+            lockOwner: lockOwner,
+            lockExpiresAt: lockExpiresAt,
+            rollbackAvailable: false,
+            manualRecoveryHintRedacted: manualRecoveryHint,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            metadataJSONRedacted: jsonPayload([
+                "executionAvailability": action.executionAvailability.rawValue,
+                "identity": action.identity.displayName,
+                "rollback": "unsupported"
+            ])
+        )
+    }
+
+    private func finishOperationGroup(
+        store: SQLiteStateStore,
+        groupID: String,
+        status: OperationGroupStatus,
+        checkpoint: String,
+        action: PlannedAction,
+        timestamp: String,
+        metadata: [String: Any]
+    ) throws {
+        try store.operationGroups.finish(
+            groupID: groupID,
+            status: status,
+            checkpoint: checkpoint,
+            manualRecoveryHintRedacted: manualRecoveryHint(status: status, checkpoint: checkpoint, action: action),
+            updatedAt: timestamp,
+            metadataJSONRedacted: jsonPayload(metadata)
+        )
+    }
+
+    private func recordRollbackUnsupportedStep(
+        store: SQLiteStateStore,
+        groupID: String,
+        action: PlannedAction,
+        idempotencyKey: String,
+        timestamp: String
+    ) throws {
+        try recordOperationGroupStep(
+            store: store,
+            groupID: groupID,
+            action: action,
+            stepKey: "rollback",
+            direction: .rollback,
+            status: .unsupported,
+            idempotencyKey: idempotencyKey,
+            timestamp: timestamp,
+            resourceIdentifier: action.identity.managedResourceIdentifier,
+            error: nil,
+            hint: "Rollback is unavailable for \(action.identity.displayName) because no safe inverse operation is proven. Use status, events, logs, and manual inspection before retrying."
+        )
+    }
+
+    private func recordOperationGroupStep(
+        store: SQLiteStateStore,
+        groupID: String,
+        action: PlannedAction,
+        stepKey: String,
+        direction: OperationGroupStepDirection,
+        status: OperationGroupStepStatus,
+        idempotencyKey: String,
+        timestamp: String,
+        resourceIdentifier: String?,
+        error: String?,
+        hint: String
+    ) throws {
+        try store.operationGroupSteps.append(
+            OperationGroupStepRecord(
+                id: hostwrightUniqueID(prefix: "operation-step"),
+                groupID: groupID,
+                stepKey: stepKey,
+                direction: direction,
+                plannedActionType: action.kind.rawValue,
+                serviceName: action.identity.serviceName,
+                resourceIdentifier: resourceIdentifier,
+                stepIdempotencyKey: "\(idempotencyKey):\(direction.rawValue):\(stepKey)",
+                status: status,
+                startedAt: status == .started ? timestamp : nil,
+                updatedAt: timestamp,
+                finishedAt: status == .succeeded || status == .failed || status == .unsupported ? timestamp : nil,
+                lastErrorRedacted: error,
+                manualRecoveryHintRedacted: hint,
+                metadataJSONRedacted: jsonPayload([
+                    "identity": action.identity.displayName,
+                    "rollback": direction == .rollback ? "unsupported" : "not-attempted",
+                    "status": status.rawValue
+                ])
+            )
+        )
+    }
+
+    private func manualRecoveryHint(status: OperationGroupStatus, checkpoint: String, action: PlannedAction) -> String {
+        switch status {
+        case .active:
+            return "Apply operation for \(action.identity.displayName) is active at checkpoint \(checkpoint). If the process was interrupted, inspect the current runtime state before retrying."
+        case .succeeded:
+            return "Apply operation for \(action.identity.displayName) completed. No manual recovery is required. Rollback remains unavailable."
+        case .failed:
+            return "Apply operation for \(action.identity.displayName) failed at checkpoint \(checkpoint). Recovery is manual: inspect status, events, logs, and the exact Hostwright-owned resource before retrying with a fresh confirmed plan."
+        case .interrupted:
+            return "Apply operation for \(action.identity.displayName) reached checkpoint \(checkpoint), but state persistence did not complete. Recovery is manual; Hostwright will not roll back automatically."
         }
     }
 

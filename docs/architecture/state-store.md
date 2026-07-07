@@ -4,7 +4,7 @@ Hostwright's intended local state store is SQLite.
 
 ## Purpose
 
-The state store persists desired state, observed snapshots, events, operation records, ownership records, health results, restart policy state, and managed restart recovery records. Broader drift-specific records remain planned for later phases.
+The state store persists desired state, observed snapshots, events, operation records, ownership records, health results, restart policy state, managed restart recovery records, and operation recovery groups. Broader drift-specific records remain planned for later phases.
 
 ## Current State
 
@@ -23,6 +23,7 @@ Implemented:
 - health check result records
 - restart policy state records
 - restart recovery records
+- operation recovery groups and step records
 - temp-database smoke checks
 - migration checksums and future-version refusal
 - actionable corrupt/locked database failures
@@ -59,7 +60,7 @@ Tests use unique temporary database paths. Future CLI/dev commands may add an ex
 
 `SQLiteStateStore.migrate()` is the only explicit migration path. Repository reads and writes validate the already-applied schema before accessing tables; they do not create a missing database, create `schema_migrations`, or apply migrations as a side effect.
 
-Schema version 3 is the latest supported state schema. A database migrated by a newer Hostwright release fails closed with an incompatible-schema error. Hostwright does not downgrade state databases and does not attempt compatibility conversion.
+Schema version 4 is the latest supported state schema. A database migrated by a newer Hostwright release fails closed with an incompatible-schema error. Hostwright does not downgrade state databases and does not attempt compatibility conversion.
 
 Each migration records a checksum in `schema_migrations`. Current builds accept the historical Phase 6 checksum for schema version 1 and record an algorithmic checksum for fresh migrations. If a known migration version has an unexpected checksum, Hostwright fails before reading or writing application records.
 
@@ -85,9 +86,14 @@ Version 3 creates:
 
 - `restart_recovery_records`
 
-Normalized columns hold identifiers, project names, service names, timestamps, lifecycle states, operation status, event severity, restart status, and hashes.
+Version 4 creates:
 
-JSON blobs hold ports, mounts, environment snapshots, runtime capabilities, runtime identifiers, event payloads, operation payloads, ownership metadata, health command/output metadata, and restart recovery completed-step metadata. Payload fields and manual recovery hints are redacted before persistence.
+- `operation_groups`
+- `operation_group_steps`
+
+Normalized columns hold identifiers, project names, service names, timestamps, lifecycle states, operation status, event severity, restart status, recovery status, checkpoints, lock lease fields, rollback availability flags, and hashes.
+
+JSON blobs hold ports, mounts, environment snapshots, runtime capabilities, runtime identifiers, event payloads, operation payloads, ownership metadata, health command/output metadata, restart recovery completed-step metadata, and operation recovery metadata. Payload fields, runtime identifiers, failure messages, and manual recovery hints are redacted before persistence.
 
 ## Backup, Restore, And Export
 
@@ -124,6 +130,8 @@ Transactions wrap:
 - grouped event appends
 - operation record creation
 - operation success/failure updates
+- operation group acquisition and completion
+- operation group step appends
 - ownership record upserts
 
 No transaction performs runtime mutation. Apply and cleanup write intent first, leave the transaction, call `RuntimeAdapter`, then record success or failure.

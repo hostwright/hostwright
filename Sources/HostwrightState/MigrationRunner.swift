@@ -37,7 +37,7 @@ public struct SchemaMigration: Equatable, Sendable {
 }
 
 public struct MigrationRunner: Sendable {
-    public static let latestSchemaVersion = 3
+    public static let latestSchemaVersion = 4
 
     public init() {}
 
@@ -409,6 +409,59 @@ public struct MigrationRunner: Sendable {
                 """,
                 "CREATE INDEX IF NOT EXISTS restart_recovery_operation_idx ON restart_recovery_records(operation_id)",
                 "CREATE INDEX IF NOT EXISTS restart_recovery_project_idx ON restart_recovery_records(project_id, service_name)"
+            ]
+        ),
+        SchemaMigration(
+            version: 4,
+            description: "Operation recovery groups and checkpoints",
+            statements: [
+                """
+                CREATE TABLE IF NOT EXISTS operation_groups (
+                    id TEXT PRIMARY KEY,
+                    operation_id TEXT NOT NULL,
+                    group_kind TEXT NOT NULL,
+                    project_id TEXT,
+                    service_name TEXT,
+                    planned_action_type TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    group_idempotency_key TEXT NOT NULL,
+                    plan_hash TEXT NOT NULL,
+                    checkpoint TEXT NOT NULL,
+                    lock_owner TEXT,
+                    lock_expires_at TEXT,
+                    rollback_available INTEGER NOT NULL DEFAULT 0,
+                    manual_recovery_hint_redacted TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    metadata_json_redacted TEXT NOT NULL
+                )
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS operation_group_steps (
+                    id TEXT PRIMARY KEY,
+                    group_id TEXT NOT NULL,
+                    step_key TEXT NOT NULL,
+                    direction TEXT NOT NULL,
+                    planned_action_type TEXT NOT NULL,
+                    service_name TEXT,
+                    resource_identifier TEXT,
+                    step_idempotency_key TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    started_at TEXT,
+                    updated_at TEXT NOT NULL,
+                    finished_at TEXT,
+                    last_error_redacted TEXT,
+                    manual_recovery_hint_redacted TEXT NOT NULL,
+                    metadata_json_redacted TEXT NOT NULL
+                )
+                """,
+                "CREATE INDEX IF NOT EXISTS operation_groups_operation_idx ON operation_groups(operation_id)",
+                "CREATE INDEX IF NOT EXISTS operation_groups_project_idx ON operation_groups(project_id, service_name)",
+                "CREATE INDEX IF NOT EXISTS operation_groups_idempotency_idx ON operation_groups(group_idempotency_key)",
+                "CREATE UNIQUE INDEX IF NOT EXISTS operation_groups_active_idempotency_idx ON operation_groups(group_idempotency_key) WHERE status = 'active'",
+                "CREATE INDEX IF NOT EXISTS operation_groups_lock_idx ON operation_groups(lock_owner, lock_expires_at)",
+                "CREATE INDEX IF NOT EXISTS operation_group_steps_group_idx ON operation_group_steps(group_id)",
+                "CREATE INDEX IF NOT EXISTS operation_group_steps_idempotency_idx ON operation_group_steps(step_idempotency_key)"
             ]
         )
     ]

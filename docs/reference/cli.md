@@ -13,6 +13,7 @@ hostwright status [path] [--state-db <path>] [--output text|json]
 hostwright apply [path] --state-db <path> --confirm-plan <hash>
 hostwright logs <service> [path] [--tail <n>] [--state-db <path>]
 hostwright events --state-db <path> [--project <name>] [--output text|json]
+hostwright recovery --state-db <path> [--project <name>] [--output text|json]
 hostwright cleanup [path] --state-db <path> --dry-run
 hostwright cleanup [path] --state-db <path> --confirm-cleanup <token>
 hostwright doctor [--output text|json]
@@ -23,7 +24,7 @@ hostwrightd --foreground --config <hostwright.yaml> --state-db <path> [options]
 
 Text output is the default for every command.
 
-`plan`, `status`, `events`, and `doctor` also accept `--output json`. JSON output is intended for local scripts and tests. It does not change command behavior, state writes, runtime observation, or mutation gates.
+`plan`, `status`, `events`, `recovery`, and `doctor` also accept `--output json`. JSON output is intended for local scripts and tests. It does not change command behavior, state writes, runtime observation, or mutation gates.
 
 When JSON mode is requested and the CLI can classify the failure, stderr uses this envelope:
 
@@ -120,6 +121,7 @@ This command:
 - requires the supplied plan hash to match the current observed plan;
 - persists desired state, observed state, operation intent, and an apply-start event before mutation;
 - executes exactly one `createMissingService`, restart-policy-allowed `startManagedService`, or restart-policy-allowed `restartManagedService` action through `RuntimeAdapter`;
+- records operation recovery groups, forward runtime steps, rollback-unavailable steps, checkpoints, and redacted manual recovery hints;
 - records success or failure events and operation status.
 
 It refuses mutation when:
@@ -137,7 +139,7 @@ It refuses mutation when:
 
 Manifest-declared ports are published to `127.0.0.1` by default during Hostwright-created container creation. Sensitive environment values are passed to the runtime for execution, but plan output, state rows, events, logs, and errors use redacted values.
 
-It does not implement user-facing stop/restart commands, image replacement, port mutation, mount mutation, rollback, image pull, unattended daemon mutation, broad bind exposure, or multi-action apply.
+It does not implement user-facing stop/restart commands, image replacement, port mutation, mount mutation, automatic rollback, image pull, unattended daemon mutation, broad bind exposure, or multi-action apply.
 
 Failure example:
 
@@ -195,6 +197,26 @@ JSON shape:
   "kind": "events",
   "stateDatabasePath": "/tmp/hostwright.sqlite",
   "events": []
+}
+```
+
+## `hostwright recovery --state-db <path> [--project <name>] [--output text|json]`
+
+Reads operation recovery groups and steps from an explicit, already-migrated state database path. For older state databases that contain managed restart recovery records but no Phase 18 operation group for the same operation, the command renders those restart records as legacy recovery entries.
+
+It does not inspect runtime state, create or migrate the database as a read side effect, retry operations, or roll back runtime changes. Recovery output distinguishes:
+
+- no automatic recovery required;
+- manual inspection required after a failed or interrupted operation;
+- rollback unsupported because no safe inverse operation is proven.
+
+JSON shape:
+
+```json
+{
+  "kind": "recovery",
+  "stateDatabasePath": "/tmp/hostwright.sqlite",
+  "operationGroups": []
 }
 ```
 

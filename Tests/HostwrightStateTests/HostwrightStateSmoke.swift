@@ -351,6 +351,182 @@ final class HostwrightStateTests: XCTestCase {
         }
     }
 
+    func testOperationGroupsAcquireReleaseAndRedactRecoveryHints() throws {
+        try withTemporaryStore { store, _ in
+            try saveDesiredState(in: store)
+            let group = OperationGroupRecord(
+                id: "group-1",
+                operationID: "operation-1",
+                groupKind: "apply",
+                projectID: projectID,
+                serviceName: "api",
+                plannedActionType: "createMissingService",
+                status: .active,
+                groupIdempotencyKey: "plan-hash:create:api",
+                planHash: "plan-hash",
+                checkpoint: "prepared",
+                lockOwner: "hostwright-cli token=\(fakeSecret)",
+                lockExpiresAt: "2026-07-01T00:10:00Z",
+                rollbackAvailable: false,
+                manualRecoveryHintRedacted: "inspect token=\(fakeSecret)",
+                createdAt: timestamp,
+                updatedAt: timestamp,
+                metadataJSONRedacted: #"{"token":"\#(fakeSecret)"}"#
+            )
+
+            let first = try store.operationGroups.acquire(group, currentTimestamp: "2026-07-01T00:00:00Z")
+            XCTAssertNotNil(first.acquired)
+            let second = try store.operationGroups.acquire(group, currentTimestamp: "2026-07-01T00:00:00Z")
+            XCTAssertNil(second.acquired)
+            XCTAssertEqual(second.existingActive?.id, "group-1")
+
+            try store.operationGroups.finish(
+                groupID: "group-1",
+                status: .failed,
+                checkpoint: "runtime-failed",
+                manualRecoveryHintRedacted: "manual password=\(fakeSecret)",
+                updatedAt: "2026-07-01T00:00:01Z",
+                metadataJSONRedacted: #"{"password":"\#(fakeSecret)"}"#
+            )
+
+            let loaded = try XCTUnwrap(store.operationGroups.latest(groupIdempotencyKey: "plan-hash:create:api"))
+            XCTAssertEqual(loaded.status, .failed)
+            XCTAssertNil(loaded.lockOwner)
+            XCTAssertNil(loaded.lockExpiresAt)
+            XCTAssertFalse(loaded.manualRecoveryHintRedacted.contains(fakeSecret))
+            XCTAssertFalse(loaded.metadataJSONRedacted.contains(fakeSecret))
+        }
+    }
+
+    func testOperationGroupsExpireStaleActiveLeaseBeforeAcquire() throws {
+        try withTemporaryStore { store, _ in
+            try saveDesiredState(in: store)
+            let stale = OperationGroupRecord(
+                id: "group-stale",
+                operationID: "operation-stale",
+                groupKind: "apply",
+                projectID: projectID,
+                serviceName: "api",
+                plannedActionType: "createMissingService",
+                status: .active,
+                groupIdempotencyKey: "plan-hash:create:api:stale",
+                planHash: "plan-hash",
+                checkpoint: "runtime-started",
+                lockOwner: "hostwright-cli",
+                lockExpiresAt: "2026-07-01T00:00:10Z",
+                rollbackAvailable: false,
+                manualRecoveryHintRedacted: "inspect api",
+                createdAt: "2026-07-01T00:00:00Z",
+                updatedAt: "2026-07-01T00:00:00Z",
+                metadataJSONRedacted: "{}"
+            )
+            let fresh = OperationGroupRecord(
+                id: "group-fresh",
+                operationID: "operation-fresh",
+                groupKind: "apply",
+                projectID: projectID,
+                serviceName: "api",
+                plannedActionType: "createMissingService",
+                status: .active,
+                groupIdempotencyKey: stale.groupIdempotencyKey,
+                planHash: "plan-hash",
+                checkpoint: "prepared",
+                lockOwner: "hostwright-cli",
+                lockExpiresAt: "2026-07-01T00:10:00Z",
+                rollbackAvailable: false,
+                manualRecoveryHintRedacted: "inspect api",
+                createdAt: "2026-07-01T00:00:11Z",
+                updatedAt: "2026-07-01T00:00:11Z",
+                metadataJSONRedacted: "{}"
+            )
+
+            XCTAssertNotNil(try store.operationGroups.acquire(stale, currentTimestamp: "2026-07-01T00:00:00Z").acquired)
+            let reacquired = try store.operationGroups.acquire(fresh, currentTimestamp: "2026-07-01T00:00:11Z")
+
+            XCTAssertNotNil(reacquired.acquired)
+            XCTAssertNil(reacquired.existingActive)
+            let groups = try store.operationGroups.loadAll()
+            XCTAssertEqual(groups.map(\.id), ["group-stale", "group-fresh"])
+            XCTAssertEqual(groups.map(\.status), [.interrupted, .active])
+            XCTAssertEqual(groups[0].checkpoint, "lock-expired")
+            XCTAssertNil(groups[0].lockOwner)
+            XCTAssertNil(groups[0].lockExpiresAt)
+        }
+    }
+
+    func testOperationGroupStepsAppendAndRedactFailureState() throws {
+        try withTemporaryStore { store, _ in
+            try saveDesiredState(in: store)
+            _ = try store.operationGroups.acquire(
+                OperationGroupRecord(
+                    id: "group-steps",
+                    operationID: "operation-steps",
+                    groupKind: "apply",
+                    projectID: projectID,
+                    serviceName: "api",
+                    plannedActionType: "restartManagedService",
+                    status: .active,
+                    groupIdempotencyKey: "plan-hash:restart:api",
+                    planHash: "plan-hash",
+                    checkpoint: "runtime-started",
+                    lockOwner: "hostwright-cli",
+                    lockExpiresAt: "2026-07-01T00:10:00Z",
+                    rollbackAvailable: false,
+                    manualRecoveryHintRedacted: "inspect api",
+                    createdAt: timestamp,
+                    updatedAt: timestamp,
+                    metadataJSONRedacted: "{}"
+                )
+            )
+            try store.operationGroupSteps.append(
+                OperationGroupStepRecord(
+                    id: "step-1",
+                    groupID: "group-steps",
+                    stepKey: "runtime-execute",
+                    direction: .forward,
+                    plannedActionType: "restartManagedService",
+                    serviceName: "api",
+                    resourceIdentifier: "hostwright-api token=\(fakeSecret)",
+                    stepIdempotencyKey: "plan-hash:restart:api:forward:runtime-execute",
+                    status: .started,
+                    startedAt: timestamp,
+                    updatedAt: timestamp,
+                    finishedAt: nil,
+                    lastErrorRedacted: nil,
+                    manualRecoveryHintRedacted: "started token=\(fakeSecret)",
+                    metadataJSONRedacted: "{}"
+                )
+            )
+            try store.operationGroupSteps.append(
+                OperationGroupStepRecord(
+                    id: "step-2",
+                    groupID: "group-steps",
+                    stepKey: "runtime-execute",
+                    direction: .forward,
+                    plannedActionType: "restartManagedService",
+                    serviceName: "api",
+                    resourceIdentifier: "hostwright-api",
+                    stepIdempotencyKey: "plan-hash:restart:api:forward:runtime-execute",
+                    status: .failed,
+                    startedAt: timestamp,
+                    updatedAt: "2026-07-01T00:00:01Z",
+                    finishedAt: "2026-07-01T00:00:01Z",
+                    lastErrorRedacted: "password=\(fakeSecret)",
+                    manualRecoveryHintRedacted: "inspect password=\(fakeSecret)",
+                    metadataJSONRedacted: #"{"token":"\#(fakeSecret)"}"#
+                )
+            )
+
+            let steps = try store.operationGroupSteps.load(groupID: "group-steps")
+            XCTAssertEqual(steps.map(\.status), [.started, .failed])
+            XCTAssertEqual(try store.operationGroupSteps.latest(groupID: "group-steps", stepKey: "runtime-execute")?.status, .failed)
+            XCTAssertFalse(steps.map { $0.resourceIdentifier ?? "" }.joined().contains(fakeSecret))
+            XCTAssertFalse(steps.map { $0.lastErrorRedacted ?? "" }.joined().contains(fakeSecret))
+            XCTAssertFalse(steps.map(\.manualRecoveryHintRedacted).joined().contains(fakeSecret))
+            XCTAssertFalse(steps.map(\.metadataJSONRedacted).joined().contains(fakeSecret))
+        }
+    }
+
     func testHealthCheckResultsAppendInOrderAndRedactOutputs() throws {
         try withTemporaryStore { store, _ in
             try saveDesiredState(in: store)

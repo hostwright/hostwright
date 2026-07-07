@@ -262,6 +262,52 @@ enum CLIJSON {
         ].compactNilValues())
     }
 
+    static func recovery(stateDatabasePath: String, projectName: String?, records: [RecoveryRecord]) -> String {
+        render([
+            "kind": "recovery",
+            "stateDatabasePath": stateDatabasePath,
+            "project": projectName as Any,
+            "operationGroups": records.map { record in
+                let group = record.group
+                let mode = recoveryMode(for: group)
+                return [
+                    "id": group.id,
+                    "operationID": group.operationID,
+                    "groupKind": group.groupKind,
+                    "projectID": group.projectID as Any,
+                    "serviceName": group.serviceName as Any,
+                    "plannedActionType": group.plannedActionType,
+                    "status": group.status.rawValue,
+                    "checkpoint": group.checkpoint,
+                    "planHash": group.planHash,
+                    "rollbackAvailable": group.rollbackAvailable,
+                    "recovery": [
+                        "automatic": mode.automatic,
+                        "manual": mode.manual,
+                        "rollback": mode.rollback
+                    ],
+                    "manualRecoveryHint": RuntimeRedactionPolicy.default.redact(group.manualRecoveryHintRedacted),
+                    "steps": record.steps.map { step in
+                        [
+                            "id": step.id,
+                            "stepKey": step.stepKey,
+                            "direction": step.direction.rawValue,
+                            "plannedActionType": step.plannedActionType,
+                            "serviceName": step.serviceName as Any,
+                            "resourceIdentifier": step.resourceIdentifier as Any,
+                            "status": step.status.rawValue,
+                            "startedAt": step.startedAt as Any,
+                            "updatedAt": step.updatedAt,
+                            "finishedAt": step.finishedAt as Any,
+                            "lastErrorRedacted": step.lastErrorRedacted as Any,
+                            "manualRecoveryHint": RuntimeRedactionPolicy.default.redact(step.manualRecoveryHintRedacted)
+                        ].compactNilValues()
+                    }
+                ].compactNilValues()
+            }
+        ].compactNilValues())
+    }
+
     static func statusManifestMissing(manifestPath: String) -> String {
         render([
             "kind": "status",

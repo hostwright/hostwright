@@ -21,6 +21,14 @@ public struct SQLiteStateStore: StateStore {
         OperationLedger(store: self)
     }
 
+    public var operationGroups: OperationGroupRepository {
+        OperationGroupRepository(store: self)
+    }
+
+    public var operationGroupSteps: OperationGroupStepRepository {
+        OperationGroupStepRepository(store: self)
+    }
+
     public var healthResults: HealthCheckResultRepository {
         HealthCheckResultRepository(store: self)
     }

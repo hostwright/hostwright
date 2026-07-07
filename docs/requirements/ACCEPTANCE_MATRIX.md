@@ -159,3 +159,12 @@ Phase 8A is a required preflight before this mutation gate. It proves real read-
 | HW-RUNTIME-001, HW-RUNTIME-004, HW-RUNTIME-006 | Runtime executes managed restart only as an internal `stop <hostwright-id>` then `start <hostwright-id>` sequence through `RuntimeAdapter`; no public stop/restart command is added. | Automated + manual | Runtime command-policy XCTest cases, fake-runner sequencing test, and targeted runtime-boundary scans. |
 | HW-RECON-005, HW-STATE-003, HW-OBS-001 | Managed restart writes append-only operation records, restart recovery records, restart policy state, and redacted events for success, failure, and stop-success/start-failure reporting. | Automated | CLI, runtime, and state XCTest cases for success, failure hints, backoff, partial failure records, and redaction. |
 | HW-DOCS-002, HW-SAFE-001 | Docs describe managed restart without claiming broad lifecycle management, daemon restart loops, unmanaged cleanup, or image/volume cleanup. | Manual | Runtime adapter, CLI, limitations, security-safety, state-store, and README review. |
+
+## Phase 18 Gate: Rollback And Partial Failure Recovery
+
+| Requirement IDs | Acceptance criteria | Verification type | Verification command or review |
+| --- | --- | --- | --- |
+| HW-RECON-004, HW-RECON-005, HW-STATE-003 | Apply acquires an operation group before runtime mutation, records checkpoints and forward steps, and releases the group as succeeded, failed, or interrupted. | Automated | CLI XCTest cases for apply success, runtime failure, managed restart stop-success/start-failure, and success-persistence interruption. |
+| HW-RECON-005, HW-SAFE-004 | Recovery records include redacted manual recovery hints, completed/failed/unsupported steps, and no raw fake secrets. | Automated | State and CLI XCTest redaction assertions for operation groups, steps, and recovery JSON. |
+| HW-SAFE-001, HW-SAFE-002 | Recovery output distinguishes automatic, manual, and unsupported recovery without retrying or rolling back runtime changes. | Automated + manual | `hostwright recovery` XCTest JSON shape; CLI reference and limitations review. |
+| HW-RUNTIME-001, HW-RUNTIME-002, HW-STATE-001 | Phase 18 does not add direct Apple container shell-out, SQLite access outside `HostwrightState`, hidden default state paths, or new lifecycle commands. | Automated + manual | Full local gate plus targeted boundary scans and diff review. |

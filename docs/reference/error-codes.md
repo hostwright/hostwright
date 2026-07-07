@@ -16,7 +16,7 @@ Stable error codes are used for CLI and manifest diagnostics.
 | `HW-MANIFEST-002` | Manifest validation failed. | Implemented, including invalid version shape and unsafe env/volume values |
 | `HW-MANIFEST-003` | Unsupported manifest/YAML feature. | Implemented, including unsupported fields and explicit older/newer manifest versions |
 | `HW-MANIFEST-004` | Manifest file I/O failed. | Implemented |
-| `HW-STATE-001` | State store unavailable. | Modelled |
+| `HW-STATE-001` | State store unavailable. | Implemented for invalid paths, migration failure, incompatible/future schema, corrupt database, locked database, and read/write failures |
 | `HW-SECURITY-001` | Unsafe exposure. | Modelled |
 
 ## Process Exit Codes
@@ -26,7 +26,7 @@ Stable error codes are used for CLI and manifest diagnostics.
 | `0` | Success | Completed command. |
 | `64` | Usage | Invalid arguments, unsupported flags, missing required confirmation/state arguments, refused overwrite. |
 | `65` | Validation | Manifest parse or validation failure, unsupported manifest feature, compatibility validation failure. |
-| `66` | State unavailable | Explicit state database path failed validation, migration, or read/write. |
+| `66` | State unavailable | Explicit state database path failed validation, migration, schema compatibility, locking, corruption, or read/write. |
 | `69` | Runtime unavailable | Runtime observation, logs, or mutation failed through `RuntimeAdapter`. |
 | `70` | Confirmation mismatch | Confirmed plan hash or cleanup token does not match the current observed plan. |
 | `71` | Unsafe operation | Planner or apply safety policy blocked mutation. |

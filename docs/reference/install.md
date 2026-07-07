@@ -41,6 +41,10 @@ swift run hostwright events --state-db /tmp/hostwright.sqlite --output json
 swift run hostwright cleanup --state-db /tmp/hostwright.sqlite --dry-run
 ```
 
+State databases are never chosen implicitly. `status`, `logs --state-db`, `apply`, and `cleanup` can run explicit migrations before writing state. `events` reads an already-migrated state database and fails rather than creating or migrating one as a side effect.
+
+For backup or restore, stop Hostwright commands using the database and copy the explicit SQLite file plus sidecar files such as `state.sqlite-wal` and `state.sqlite-shm` if they exist. Hostwright does not provide online backup, restore, export, or repair commands in this phase.
+
 JSON output is also available for safe diagnostics:
 
 ```bash

@@ -39,7 +39,7 @@ Manifest failures use an `issues` array with stable Hostwright error codes. `doc
 | `0` | Success | All commands |
 | `64` | Usage | Unsupported flags, missing arguments, refused overwrite |
 | `65` | Validation | Manifest parse/validation and compatibility failures |
-| `66` | State unavailable | Explicit SQLite state path could not be opened, migrated, or read |
+| `66` | State unavailable | Explicit SQLite state path could not be opened, migrated, verified, locked, or read |
 | `69` | Runtime unavailable | Runtime observation, logs, or mutation failed through `RuntimeAdapter` |
 | `70` | Confirmation mismatch | `apply --confirm-plan` or `cleanup --confirm-cleanup` did not match the current observed plan |
 | `71` | Unsafe operation | Planner/apply safety policy blocked mutation |
@@ -182,9 +182,9 @@ HW-RUNTIME-001: logs requires an observed Hostwright-managed service.
 
 ## `hostwright events --state-db <path> [--project <name>] [--output text|json]`
 
-Reads the SQLite event ledger from an explicit state database path and renders events in deterministic timestamp/id order.
+Reads the SQLite event ledger from an explicit, already-migrated state database path and renders events in deterministic timestamp/id order.
 
-It does not inspect runtime state.
+It does not inspect runtime state and does not create or migrate the database as a read side effect.
 
 JSON shape:
 

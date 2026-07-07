@@ -510,6 +510,17 @@ final class HostwrightCLITests: XCTestCase {
         }
     }
 
+    func testEventsCommandDoesNotCreateOrMigrateMissingStateDatabase() throws {
+        try withTemporaryDatabase { databasePath in
+            let result = HostwrightCLI.run(arguments: ["events", "--state-db", databasePath], environment: environment(files: FileBox()))
+
+            XCTAssertEqual(result.exitCode, CLIExitCode.stateUnavailable.rawValue)
+            XCTAssertEqual(result.standardOutput, "")
+            XCTAssertTrue(result.standardError.contains(HostwrightErrorCode.stateStoreUnavailable.rawValue))
+            XCTAssertFalse(FileManager.default.fileExists(atPath: databasePath))
+        }
+    }
+
     func testCleanupDryRunAndConfirmedDeleteOnlyEligibleStoppedOwnedContainers() throws {
         try withTemporaryDatabase { databasePath in
             let files = FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest])

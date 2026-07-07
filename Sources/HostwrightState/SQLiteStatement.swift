@@ -40,7 +40,8 @@ final class SQLiteStatement {
         case SQLITE_DONE:
             return .done
         default:
-            throw StateStoreError.stepFailed(message: connection.lastErrorMessage)
+            let message = connection.lastErrorMessage
+            throw connection.classifySQLiteError(result: result, defaultError: .stepFailed(message: message))
         }
     }
 

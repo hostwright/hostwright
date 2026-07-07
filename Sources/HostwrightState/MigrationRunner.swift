@@ -2,13 +2,37 @@ public struct SchemaMigration: Equatable, Sendable {
     public let version: Int
     public let description: String
     public let checksum: String
+    public let legacyChecksums: [String]
     let statements: [String]
 
-    public init(version: Int, description: String, checksum: String, statements: [String]) {
+    public init(version: Int, description: String, legacyChecksums: [String] = [], statements: [String]) {
+        self.version = version
+        self.description = description
+        self.checksum = Self.computeChecksum(version: version, description: description, statements: statements)
+        self.legacyChecksums = legacyChecksums
+        self.statements = statements
+    }
+
+    public init(version: Int, description: String, checksum: String, legacyChecksums: [String] = [], statements: [String]) {
         self.version = version
         self.description = description
         self.checksum = checksum
+        self.legacyChecksums = legacyChecksums
         self.statements = statements
+    }
+
+    func accepts(recordedChecksum: String) -> Bool {
+        recordedChecksum == checksum || legacyChecksums.contains(recordedChecksum)
+    }
+
+    private static func computeChecksum(version: Int, description: String, statements: [String]) -> String {
+        var hash: UInt64 = 14_695_981_039_346_656_037
+        let input = ([String(version), description] + statements).joined(separator: "\u{1f}")
+        for byte in input.utf8 {
+            hash ^= UInt64(byte)
+            hash &*= 1_099_511_628_211
+        }
+        return "fnv1a64:\(String(hash, radix: 16))"
     }
 }
 
@@ -24,20 +48,29 @@ public struct MigrationRunner: Sendable {
     }
 
     public func appliedVersions(in store: SQLiteStateStore) throws -> [Int] {
-        try store.withConnection { connection in
-            try ensureMigrationTable(on: connection)
+        try store.withConnection(createIfNeeded: false, readOnly: true) { connection in
+            guard try migrationTableExists(on: connection) else {
+                return []
+            }
             return try appliedMigrations(on: connection).keys.sorted()
+        }
+    }
+
+    public func validateAppliedSchema(in store: SQLiteStateStore) throws {
+        try store.withConnection(createIfNeeded: false, readOnly: true) { connection in
+            try validateAppliedSchema(on: connection)
         }
     }
 
     func apply(on connection: SQLiteConnection) throws {
         try connection.transaction {
-            try ensureMigrationTable(on: connection)
+            try ensureDatabaseIsMigratable(on: connection)
             let applied = try appliedMigrations(on: connection)
+            try validateCompatibility(applied, requireLatest: false)
 
             for migration in Self.migrations {
                 if let checksum = applied[migration.version] {
-                    if checksum != migration.checksum {
+                    if !migration.accepts(recordedChecksum: checksum) {
                         throw StateStoreError.migrationFailed(
                             version: migration.version,
                             message: "Recorded checksum \(checksum) does not match expected checksum \(migration.checksum)."
@@ -65,6 +98,45 @@ public struct MigrationRunner: Sendable {
         }
     }
 
+    private func ensureDatabaseIsMigratable(on connection: SQLiteConnection) throws {
+        if try migrationTableExists(on: connection) {
+            return
+        }
+
+        let existingTables = try userTables(on: connection)
+        guard existingTables.isEmpty else {
+            throw StateStoreError.incompatibleSchema(
+                foundVersion: nil,
+                latestSupported: Self.latestSchemaVersion,
+                message: "Database has existing non-Hostwright tables without schema_migrations: \(existingTables.joined(separator: ", ")). Refusing implicit migration."
+            )
+        }
+
+        try ensureMigrationTable(on: connection)
+    }
+
+    func validateAppliedSchema(on connection: SQLiteConnection) throws {
+        guard try migrationTableExists(on: connection) else {
+            let existingTables = try userTables(on: connection)
+            if existingTables.isEmpty {
+                throw StateStoreError.incompatibleSchema(
+                    foundVersion: 0,
+                    latestSupported: Self.latestSchemaVersion,
+                    message: "State database has not been migrated. Run the explicit migration path before reading or writing state."
+                )
+            }
+
+            throw StateStoreError.incompatibleSchema(
+                foundVersion: nil,
+                latestSupported: Self.latestSchemaVersion,
+                message: "Database has existing non-Hostwright tables without schema_migrations: \(existingTables.joined(separator: ", "))."
+            )
+        }
+
+        let applied = try appliedMigrations(on: connection)
+        try validateCompatibility(applied, requireLatest: true)
+    }
+
     private func ensureMigrationTable(on connection: SQLiteConnection) throws {
         try connection.execute(
             """
@@ -76,6 +148,30 @@ public struct MigrationRunner: Sendable {
             )
             """
         )
+    }
+
+    private func migrationTableExists(on connection: SQLiteConnection) throws -> Bool {
+        let rows = try connection.query(
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'table' AND name = 'schema_migrations'
+            """
+        )
+        return !rows.isEmpty
+    }
+
+    private func userTables(on connection: SQLiteConnection) throws -> [String] {
+        let rows = try connection.query(
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'table'
+              AND name NOT LIKE 'sqlite_%'
+            ORDER BY name ASC
+            """
+        )
+        return rows.compactMap { $0.first ?? nil }
     }
 
     private func appliedMigrations(on connection: SQLiteConnection) throws -> [Int: String] {
@@ -101,11 +197,48 @@ public struct MigrationRunner: Sendable {
         return applied
     }
 
+    private func validateCompatibility(_ applied: [Int: String], requireLatest: Bool) throws {
+        let knownMigrations = Dictionary(uniqueKeysWithValues: Self.migrations.map { ($0.version, $0) })
+
+        for (version, checksum) in applied {
+            guard let migration = knownMigrations[version] else {
+                if version > Self.latestSchemaVersion {
+                    throw StateStoreError.incompatibleSchema(
+                        foundVersion: version,
+                        latestSupported: Self.latestSchemaVersion,
+                        message: "Database was migrated by a newer Hostwright release. Upgrade this binary before opening it."
+                    )
+                }
+
+                throw StateStoreError.incompatibleSchema(
+                    foundVersion: version,
+                    latestSupported: Self.latestSchemaVersion,
+                    message: "Database records an unknown migration version."
+                )
+            }
+
+            if !migration.accepts(recordedChecksum: checksum) {
+                throw StateStoreError.migrationFailed(
+                    version: version,
+                    message: "Recorded checksum \(checksum) does not match expected checksum \(migration.checksum)."
+                )
+            }
+        }
+
+        if requireLatest, (applied.keys.max() ?? 0) < Self.latestSchemaVersion {
+            throw StateStoreError.incompatibleSchema(
+                foundVersion: applied.keys.max() ?? 0,
+                latestSupported: Self.latestSchemaVersion,
+                message: "State database requires an explicit migration before this Hostwright release can read or write it."
+            )
+        }
+    }
+
     private static let migrations: [SchemaMigration] = [
         SchemaMigration(
             version: 1,
             description: "Initial Hostwright state ledger schema",
-            checksum: "state-ledger-v1",
+            legacyChecksums: ["state-ledger-v1"],
             statements: [
                 """
                 CREATE TABLE IF NOT EXISTS projects (

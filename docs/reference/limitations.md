@@ -33,6 +33,8 @@ Hostwright is not production ready.
 - Verified real object-based Apple container image list parsing by `configuration.name`.
 - SQLite state store using system `SQLite3`.
 - Explicit schema migrations.
+- State migration checksums, future-schema refusal, and actionable locked/corrupt database errors.
+- Repository state reads validate schema without implicitly creating or migrating databases.
 - Desired-state snapshot persistence.
 - Observed runtime snapshot persistence.
 - Event ledger persistence.
@@ -70,7 +72,8 @@ Hostwright is not production ready.
 - Broad cleanup, teardown, garbage collection, image deletion, volume deletion, or unmanaged deletion.
 - Default user database path.
 - Hidden global state writes.
-- Production durability, backup, or corruption-recovery guarantees.
+- Production durability or automatic corruption-recovery guarantees.
+- Online state backup, restore, export, or repair commands.
 - Launch agent or service installer.
 - DNS behavior.
 - Tunnel management.

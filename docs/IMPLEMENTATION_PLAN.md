@@ -22,7 +22,7 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 | 11 | Release Feedback and Alpha Stabilization | Complete | Address pre-alpha review blockers after external review. | Pipe draining, localhost publishing, redaction, cleanup failure handling, append-only ledgers, idempotency retry, command-token validation, and error preservation are covered by tests. |
 | 12 | CLI and Developer Workflow Hardening | Complete locally | Add stable CLI exit conventions, structured JSON output, better help/errors/examples, and command consistency. | CLI parsing, JSON success/error shapes, exit codes, redaction, help docs, and full local verification pass. |
 | 13 | Manifest Schema Maturity | Complete locally | Align parser, schema, examples, manifest version policy, and untrusted-manifest handling. | Parser, validator, schema, examples, and docs agree on accepted and rejected manifest shapes. |
-| 14 | State Migrations and Upgrade Safety | Planned | Harden state migrations, compatibility, corruption handling, and locking. | Fresh, existing, future-version, corrupt, locked, and repeated migration cases are tested. |
+| 14 | State Migrations and Upgrade Safety | Complete locally | Harden state migrations, compatibility, corruption handling, and locking. | Fresh, existing, future-version, corrupt, locked, checksum-mismatch, rollback, unrelated database, and repeated migration cases are tested. |
 | 15 | Local Daemon Reconciliation Loop | Planned | Turn `hostwrightd` into explicit foreground dev-mode reconciliation only. | Fake-clock loop, backoff, lock, shutdown, and sleep/wake behavior pass without unattended mutation. |
 | 16 | Health Checks and Restart Policy Expansion | Planned | Add bounded health execution and crash-loop-aware restart policy state. | Health results, max attempts, backoff, operator hold, manual disable, and redacted events are tested. |
 | 17 | Managed Restart | Planned | Add one narrow Hostwright-owned restart path as an explicit stop-then-start sequence. | Ownership, running observed state, plan hash, operation ledger, recovery record, fake-runner tests, and disposable live proof pass. |
@@ -39,6 +39,7 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 - No stop/restart command, image replacement, port mutation, mount mutation, image cleanup, volume cleanup, unmanaged cleanup, restart enforcement, DNS, tunnel, cloud, GPU/ANE, privileged helper, or installer behavior is implemented.
 - No daemon loop is implemented.
 - Phase 6 state writes require explicit database paths; no default user database path exists.
+- State repository reads validate schema without implicit migration; `SQLiteStateStore.migrate()` is the explicit migration path.
 - Planning is deterministic and non-mutating.
 - Apply executes at most one supported action and refuses every other planned action.
 - Manifest parsing remains a restricted Hostwright subset, not general YAML or Compose parity.
@@ -144,3 +145,14 @@ Phase 12 does not add runtime mutation, default state database paths, shell comp
 - XCTest coverage for version policy, unsupported fields, unsafe untrusted-manifest shapes, schema/example alignment, and starter manifest validity.
 
 Phase 13 does not add a YAML dependency, general YAML parsing, full Compose parity, registry/network validation, runtime mutation, default state paths, release tags, or GitHub Releases.
+
+## Phase 14 Outputs
+
+- Migration records use deterministic checksums while retaining compatibility with the historical Phase 6 v1 checksum.
+- Explicit migration refuses unrelated existing SQLite databases, future schema versions, and checksum mismatches.
+- Repository reads and writes validate already-applied schema instead of applying migrations implicitly.
+- SQLite errors classify locked and corrupt/non-SQLite databases as actionable state failures.
+- State docs define backup, restore, debug export, downgrade/future-version, corruption recovery, and locking policy.
+- XCTest coverage for repeated migrations with data, transaction rollback, read-side-effect prevention, future schemas, checksum mismatch, unrelated databases, corrupt databases, and lock contention.
+
+Phase 14 does not add hidden default state paths, destructive reset commands, automatic repair, online backup/export commands, runtime mutation, daemon behavior, release tags, or GitHub Releases.

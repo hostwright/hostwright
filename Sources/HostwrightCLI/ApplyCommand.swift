@@ -32,7 +32,7 @@ struct ApplyCommandRunner {
 
             guard plan.planHash == confirmedPlanHash else {
                 return failure(
-                    code: .commandUsage,
+                    code: .confirmationMismatch,
                     message: "Confirmed plan hash does not match current observed plan. expected=\(plan.planHash) provided=\(confirmedPlanHash)\n\n\(PlanRenderer.render(plan))"
                 )
             }
@@ -155,7 +155,7 @@ struct ApplyCommandRunner {
                 return failure(code: .runtimeUnavailable, message: "Runtime mutation failed after operation intent was recorded: \(runtimeErrorDescription)")
             }
         } catch let error as ManifestParseError {
-            return CLIRunResult(standardError: error.issues.map(\.rendered).joined(separator: "\n") + "\n", exitCode: 1)
+            return CLIRunResult(standardError: error.issues.map(\.rendered).joined(separator: "\n") + "\n", exitCode: CLIExitCode.validation.rawValue)
         } catch {
             return failure(code: .stateStoreUnavailable, message: RuntimeRedactionPolicy.default.redact(String(describing: error)))
         }
@@ -366,7 +366,8 @@ struct ApplyCommandRunner {
     }
 
     private func failure(code: HostwrightErrorCode, message: String) -> CLIRunResult {
-        CLIRunResult(standardError: "\(code.rawValue): \(message)\n", exitCode: 1)
+        let exitCode = CLIExitCode.mapped(from: code)
+        return CLIRunResult(standardError: "\(code.rawValue): \(message)\n", exitCode: exitCode.rawValue)
     }
 
     private func blockingOperation(store: SQLiteStateStore, idempotencyKey: String) throws -> OperationRecord? {

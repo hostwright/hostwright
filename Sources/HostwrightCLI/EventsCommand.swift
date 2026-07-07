@@ -5,6 +5,7 @@ import HostwrightState
 struct EventsCommandRunner {
     let stateDatabasePath: String
     let projectName: String?
+    let output: CLIOutputFormat
 
     func run() -> CLIRunResult {
         do {
@@ -16,6 +17,10 @@ struct EventsCommandRunner {
             let events = try store.events.loadAll()
                 .filter { event in projectID == nil || event.projectID == projectID }
                 .map { $0.redacted() }
+
+            if output == .json {
+                return CLIRunResult(standardOutput: CLIJSON.events(stateDatabasePath: stateDatabasePath, projectName: projectName, events: events))
+            }
 
             var lines = [
                 "Hostwright events",
@@ -36,7 +41,12 @@ struct EventsCommandRunner {
             lines.append("")
             return CLIRunResult(standardOutput: lines.joined(separator: "\n"))
         } catch {
-            return CLIRunResult(standardError: "\(HostwrightErrorCode.stateStoreUnavailable.rawValue): \(RuntimeRedactionPolicy.default.redact(String(describing: error)))\n", exitCode: 1)
+            let exitCode = CLIExitCode.stateUnavailable
+            let message = RuntimeRedactionPolicy.default.redact(String(describing: error))
+            if output == .json {
+                return CLIRunResult(standardError: CLIJSON.error(code: .stateStoreUnavailable, message: message, exitCode: exitCode), exitCode: exitCode.rawValue)
+            }
+            return CLIRunResult(standardError: "\(HostwrightErrorCode.stateStoreUnavailable.rawValue): \(message)\n", exitCode: exitCode.rawValue)
         }
     }
 }

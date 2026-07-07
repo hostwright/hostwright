@@ -27,15 +27,24 @@ swift run hostwright --version
 swift run hostwright doctor
 swift run hostwright validate
 swift run hostwright plan
+swift run hostwright plan --output json
 ```
 
 Runtime-backed commands require Apple container and explicit state paths:
 
 ```bash
 swift run hostwright status --state-db /tmp/hostwright.sqlite
+swift run hostwright status --state-db /tmp/hostwright.sqlite --output json
 swift run hostwright logs api --state-db /tmp/hostwright.sqlite
 swift run hostwright events --state-db /tmp/hostwright.sqlite
+swift run hostwright events --state-db /tmp/hostwright.sqlite --output json
 swift run hostwright cleanup --state-db /tmp/hostwright.sqlite --dry-run
+```
+
+JSON output is also available for safe diagnostics:
+
+```bash
+swift run hostwright doctor --output json
 ```
 
 ## Artifact Policy
@@ -52,4 +61,3 @@ Hostwright does not provide:
 - packaged launch agents or privileged helpers.
 
 Those require separate signing, notarization, checksum, SBOM, provenance, and installer decisions.
-

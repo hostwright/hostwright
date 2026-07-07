@@ -14,6 +14,8 @@ public enum HostwrightIdentity {
 public enum HostwrightErrorCode: String, Sendable {
     case commandUsage = "HW-CLI-001"
     case fileAlreadyExists = "HW-CLI-002"
+    case confirmationMismatch = "HW-CLI-003"
+    case partialFailure = "HW-CLI-004"
     case unsupportedArchitecture = "HW-COMPAT-001"
     case unsupportedMacOSVersion = "HW-COMPAT-002"
     case runtimeUnavailable = "HW-RUNTIME-001"

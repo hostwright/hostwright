@@ -1,4 +1,5 @@
 import Darwin
+import Foundation
 import HostwrightCore
 import HostwrightHealth
 import HostwrightManifest
@@ -28,15 +29,16 @@ public enum HostwrightCLI {
     """
 
     public static func run(arguments: [String], environment: CLIEnvironment = .live) -> CLIRunResult {
+        let outputHint = CLICommand.outputFormatHint(arguments: arguments) ?? .text
         do {
             let command = try CLICommand.parse(arguments: arguments)
             return try run(command: command, environment: environment)
         } catch let error as CLIUsageError {
-            return failure(code: .commandUsage, message: "\(error.message)\n\n\(helpText)")
+            return failure(code: .commandUsage, message: "\(error.message)\n\n\(helpText)", output: outputHint)
         } catch let error as ManifestParseError {
-            return failure(issues: error.issues)
+            return failure(issues: error.issues, output: outputHint)
         } catch {
-            return failure(code: .manifestFileIOFailed, message: String(describing: error))
+            return failure(code: .manifestFileIOFailed, message: String(describing: error), output: outputHint)
         }
     }
 
@@ -51,14 +53,15 @@ public enum HostwrightCLI {
         case .validate(let path):
             let manifest = try loadValidManifest(path: path, environment: environment)
             return CLIRunResult(standardOutput: "Valid hostwright manifest: \(path)\nProject: \(manifest.project ?? "<missing>")\nServices: \(manifest.services.count)\n")
-        case .plan(let path):
+        case .plan(let path, let output):
             let manifest = try loadValidManifest(path: path, environment: environment)
             let plan = ReconciliationPlanner().plan(manifest: manifest)
-            return CLIRunResult(standardOutput: PlanRenderer.render(plan))
-        case .status(let path, let stateDatabasePath):
+            return CLIRunResult(standardOutput: output == .json ? CLIJSON.plan(plan) : PlanRenderer.render(plan))
+        case .status(let path, let stateDatabasePath, let output):
             return StatusCommandRunner(
                 manifestPath: path,
                 stateDatabasePath: stateDatabasePath,
+                output: output,
                 environment: environment
             ).run()
         case .apply(let path, let stateDatabasePath, let confirmedPlanHash):
@@ -76,10 +79,11 @@ public enum HostwrightCLI {
                 stateDatabasePath: stateDatabasePath,
                 environment: environment
             ).run()
-        case .events(let stateDatabasePath, let projectName):
+        case .events(let stateDatabasePath, let projectName, let output):
             return EventsCommandRunner(
                 stateDatabasePath: stateDatabasePath,
-                projectName: projectName
+                projectName: projectName,
+                output: output
             ).run()
         case .cleanup(let path, let stateDatabasePath, let confirmation):
             return CleanupCommandRunner(
@@ -88,8 +92,8 @@ public enum HostwrightCLI {
                 confirmation: confirmation,
                 environment: environment
             ).run()
-        case .doctor:
-            return doctor(environment: environment)
+        case .doctor(let output):
+            return doctor(environment: environment, output: output)
         }
     }
 
@@ -100,19 +104,26 @@ public enum HostwrightCLI {
       hostwright --version
       hostwright init
       hostwright validate [path]
-      hostwright plan [path]
-      hostwright status [path] [--state-db <path>]
+      hostwright plan [path] [--output text|json]
+      hostwright status [path] [--state-db <path>] [--output text|json]
       hostwright apply [path] --state-db <path> --confirm-plan <hash>
       hostwright logs <service> [path] [--tail <n>] [--state-db <path>]
-      hostwright events --state-db <path> [--project <name>]
+      hostwright events --state-db <path> [--project <name>] [--output text|json]
       hostwright cleanup [path] --state-db <path> --dry-run
       hostwright cleanup [path] --state-db <path> --confirm-cleanup <token>
-      hostwright doctor
+      hostwright doctor [--output text|json]
 
     Most commands are read-only. init writes hostwright.yaml only when absent.
     CLI plan output is deterministic but does not perform live runtime observation.
     Apply can execute exactly one confirmed createMissingService or restart-policy-allowed startManagedService action through RuntimeAdapter.
     Cleanup deletes only exact cleanup-eligible Hostwright-owned stopped/created/exited containers after dry-run token confirmation.
+    JSON output is supported for plan, status, events, doctor, and errors when --output json is present.
+
+    Examples:
+      hostwright plan --output json
+      hostwright status --state-db /tmp/hostwright.sqlite --output json
+      hostwright events --state-db /tmp/hostwright.sqlite --project api-local --output json
+      hostwright doctor --output json
 
     """
 
@@ -126,7 +137,7 @@ public enum HostwrightCLI {
         return CLIRunResult(standardOutput: "Created \(path)\n")
     }
 
-    private static func doctor(environment: CLIEnvironment) -> CLIRunResult {
+    private static func doctor(environment: CLIEnvironment, output: CLIOutputFormat) -> CLIRunResult {
         let inputs = DoctorInputs(
             operatingSystemDescription: environment.operatingSystemDescription(),
             platform: environment.platformSnapshot(),
@@ -135,10 +146,14 @@ public enum HostwrightCLI {
             manifestExists: environment.fileExists(HostwrightIdentity.manifestFileName)
         )
         let report = HostwrightDoctor.report(inputs: inputs)
+        let exitCode = report.hasFailures ? CLIExitCode.validation.rawValue : CLIExitCode.success.rawValue
+        if output == .json {
+            return CLIRunResult(standardOutput: CLIJSON.doctor(report), exitCode: exitCode)
+        }
         let lines = report.checks.map { check in
             "[\(check.status.rawValue)] \(check.identifier.rawValue): \(check.message)"
         }
-        return CLIRunResult(standardOutput: "Hostwright doctor\n" + lines.joined(separator: "\n") + "\n")
+        return CLIRunResult(standardOutput: "Hostwright doctor\n" + lines.joined(separator: "\n") + "\n", exitCode: exitCode)
     }
 
     private static func loadValidManifest(path: String, environment: CLIEnvironment) throws -> HostwrightManifest {
@@ -146,16 +161,24 @@ public enum HostwrightCLI {
         return try ManifestValidator.validated(text)
     }
 
-    private static func failure(issues: [ManifestIssue]) -> CLIRunResult {
-        CLIRunResult(standardError: render(issues: issues), exitCode: 1)
+    private static func failure(issues: [ManifestIssue], output: CLIOutputFormat = .text) -> CLIRunResult {
+        let exitCode = CLIExitCode.validation
+        if output == .json {
+            return CLIRunResult(standardError: CLIJSON.manifestError(issues: issues, exitCode: exitCode), exitCode: exitCode.rawValue)
+        }
+        return CLIRunResult(standardError: render(issues: issues), exitCode: exitCode.rawValue)
     }
 
     private static func render(issues: [ManifestIssue]) -> String {
         issues.map(\.rendered).joined(separator: "\n") + "\n"
     }
 
-    private static func failure(code: HostwrightErrorCode, message: String) -> CLIRunResult {
-        CLIRunResult(standardError: "\(code.rawValue): \(message)\n", exitCode: 1)
+    private static func failure(code: HostwrightErrorCode, message: String, output: CLIOutputFormat = .text) -> CLIRunResult {
+        let exitCode = CLIExitCode.mapped(from: code)
+        if output == .json {
+            return CLIRunResult(standardError: CLIJSON.error(code: code, message: message, exitCode: exitCode), exitCode: exitCode.rawValue)
+        }
+        return CLIRunResult(standardError: "\(code.rawValue): \(message)\n", exitCode: exitCode.rawValue)
     }
 }
 

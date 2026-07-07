@@ -5,13 +5,13 @@ public enum CLICommand: Equatable, Sendable {
     case version
     case initManifest
     case validate(path: String)
-    case plan(path: String)
-    case status(path: String, stateDatabasePath: String?)
+    case plan(path: String, output: CLIOutputFormat)
+    case status(path: String, stateDatabasePath: String?, output: CLIOutputFormat)
     case apply(path: String, stateDatabasePath: String, confirmedPlanHash: String)
     case logs(serviceName: String, path: String, tail: Int, stateDatabasePath: String?)
-    case events(stateDatabasePath: String, projectName: String?)
+    case events(stateDatabasePath: String, projectName: String?, output: CLIOutputFormat)
     case cleanup(path: String, stateDatabasePath: String, confirmation: CleanupConfirmation)
-    case doctor
+    case doctor(output: CLIOutputFormat)
     case help
 
     public static func parse(arguments: [String]) throws -> CLICommand {
@@ -32,7 +32,7 @@ public enum CLICommand: Equatable, Sendable {
         case "validate":
             return try pathCommand(arguments: arguments, commandName: "validate", make: CLICommand.validate)
         case "plan":
-            return try pathCommand(arguments: arguments, commandName: "plan", make: CLICommand.plan)
+            return try planCommand(arguments: arguments)
         case "status":
             return try statusCommand(arguments: arguments)
         case "apply":
@@ -44,11 +44,19 @@ public enum CLICommand: Equatable, Sendable {
         case "cleanup":
             return try cleanupCommand(arguments: arguments)
         case "doctor":
-            guard arguments.count == 1 else { throw CLIUsageError("doctor does not accept arguments.") }
-            return .doctor
+            return try doctorCommand(arguments: arguments)
         default:
             throw CLIUsageError("Unknown command '\(first)'.")
         }
+    }
+
+    public static func outputFormatHint(arguments: [String]) -> CLIOutputFormat? {
+        guard let outputIndex = arguments.firstIndex(of: "--output"),
+              arguments.indices.contains(arguments.index(after: outputIndex))
+        else {
+            return nil
+        }
+        return CLIOutputFormat(rawValue: arguments[arguments.index(after: outputIndex)])
     }
 
     private static func pathCommand(arguments: [String], commandName: String, make: (String) -> CLICommand) throws -> CLICommand {
@@ -61,6 +69,11 @@ public enum CLICommand: Equatable, Sendable {
         }
 
         throw CLIUsageError("\(commandName) accepts at most one manifest path.")
+    }
+
+    private static func planCommand(arguments: [String]) throws -> CLICommand {
+        let parsed = try parsePathAndOutput(arguments: arguments, commandName: "plan")
+        return .plan(path: parsed.path ?? HostwrightIdentity.manifestFileName, output: parsed.output)
     }
 
     private static func applyCommand(arguments: [String]) throws -> CLICommand {
@@ -114,6 +127,7 @@ public enum CLICommand: Equatable, Sendable {
     private static func statusCommand(arguments: [String]) throws -> CLICommand {
         var path: String?
         var stateDatabasePath: String?
+        var output: CLIOutputFormat = .text
         var index = 1
 
         while index < arguments.count {
@@ -124,6 +138,9 @@ public enum CLICommand: Equatable, Sendable {
                     throw CLIUsageError("status requires a value after --state-db.")
                 }
                 stateDatabasePath = arguments[index + 1]
+                index += 2
+            case "--output":
+                output = try parseOutputValue(arguments: arguments, index: index, commandName: "status")
                 index += 2
             default:
                 guard !argument.hasPrefix("-") else {
@@ -137,7 +154,7 @@ public enum CLICommand: Equatable, Sendable {
             }
         }
 
-        return .status(path: path ?? HostwrightIdentity.manifestFileName, stateDatabasePath: stateDatabasePath)
+        return .status(path: path ?? HostwrightIdentity.manifestFileName, stateDatabasePath: stateDatabasePath, output: output)
     }
 
     private static func logsCommand(arguments: [String]) throws -> CLICommand {
@@ -193,6 +210,7 @@ public enum CLICommand: Equatable, Sendable {
     private static func eventsCommand(arguments: [String]) throws -> CLICommand {
         var stateDatabasePath: String?
         var projectName: String?
+        var output: CLIOutputFormat = .text
         var index = 1
 
         while index < arguments.count {
@@ -209,15 +227,67 @@ public enum CLICommand: Equatable, Sendable {
                 }
                 projectName = arguments[index + 1]
                 index += 2
+            case "--output":
+                output = try parseOutputValue(arguments: arguments, index: index, commandName: "events")
+                index += 2
             default:
-                throw CLIUsageError("events supports only --state-db and --project.")
+                throw CLIUsageError("events supports only --state-db, --project, and --output.")
             }
         }
 
         guard let stateDatabasePath, !stateDatabasePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw CLIUsageError("events requires --state-db <path>.")
         }
-        return .events(stateDatabasePath: stateDatabasePath, projectName: projectName)
+        return .events(stateDatabasePath: stateDatabasePath, projectName: projectName, output: output)
+    }
+
+    private static func doctorCommand(arguments: [String]) throws -> CLICommand {
+        var output: CLIOutputFormat = .text
+        var index = 1
+        while index < arguments.count {
+            switch arguments[index] {
+            case "--output":
+                output = try parseOutputValue(arguments: arguments, index: index, commandName: "doctor")
+                index += 2
+            default:
+                throw CLIUsageError("doctor supports only --output.")
+            }
+        }
+        return .doctor(output: output)
+    }
+
+    private static func parsePathAndOutput(arguments: [String], commandName: String) throws -> (path: String?, output: CLIOutputFormat) {
+        var path: String?
+        var output: CLIOutputFormat = .text
+        var index = 1
+        while index < arguments.count {
+            switch arguments[index] {
+            case "--output":
+                output = try parseOutputValue(arguments: arguments, index: index, commandName: commandName)
+                index += 2
+            default:
+                let argument = arguments[index]
+                guard !argument.hasPrefix("-") else {
+                    throw CLIUsageError("\(commandName) does not support flag '\(argument)'.")
+                }
+                guard path == nil else {
+                    throw CLIUsageError("\(commandName) accepts at most one manifest path.")
+                }
+                path = argument
+                index += 1
+            }
+        }
+        return (path, output)
+    }
+
+    private static func parseOutputValue(arguments: [String], index: Int, commandName: String) throws -> CLIOutputFormat {
+        guard index + 1 < arguments.count else {
+            throw CLIUsageError("\(commandName) requires a value after --output.")
+        }
+        guard let output = CLIOutputFormat(rawValue: arguments[index + 1]) else {
+            throw CLIUsageError("\(commandName) --output supports only 'text' or 'json'.")
+        }
+        return output
     }
 
     private static func cleanupCommand(arguments: [String]) throws -> CLICommand {
@@ -275,6 +345,43 @@ public enum CLICommand: Equatable, Sendable {
 public enum CleanupConfirmation: Equatable, Sendable {
     case dryRun
     case confirmed(token: String)
+}
+
+public enum CLIOutputFormat: String, Equatable, Sendable {
+    case text
+    case json
+}
+
+public enum CLIExitCode: Int32, Equatable, Sendable {
+    case success = 0
+    case commandUsage = 64
+    case validation = 65
+    case stateUnavailable = 66
+    case runtimeUnavailable = 69
+    case confirmationMismatch = 70
+    case unsafeOperation = 71
+    case partialFailure = 72
+
+    public static func mapped(from code: HostwrightErrorCode) -> CLIExitCode {
+        switch code {
+        case .commandUsage, .fileAlreadyExists:
+            return .commandUsage
+        case .confirmationMismatch:
+            return .confirmationMismatch
+        case .partialFailure:
+            return .partialFailure
+        case .manifestParseFailed, .manifestValidationFailed, .manifestUnsupportedFeature, .manifestFileIOFailed:
+            return .validation
+        case .stateStoreUnavailable:
+            return .stateUnavailable
+        case .runtimeUnavailable, .runtimeMutationNotImplemented:
+            return .runtimeUnavailable
+        case .unsafeExposure:
+            return .unsafeOperation
+        case .unsupportedArchitecture, .unsupportedMacOSVersion:
+            return .validation
+        }
+    }
 }
 
 public struct CLIUsageError: Error, Equatable, Sendable {

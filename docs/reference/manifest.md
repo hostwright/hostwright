@@ -5,6 +5,7 @@ The manifest filename is `hostwright.yaml`.
 ## Current Shape
 
 ```yaml
+version: 1
 project: api-local
 
 services:
@@ -23,12 +24,19 @@ services:
 
 Do not use Kubernetes-style `apiVersion`, `kind`, or `metadata` in canonical Hostwright manifests.
 
+## Version Policy
+
+`version: 1` is the current manifest version. New examples and generated starter manifests include it.
+
+Versionless manifests remain accepted during this alpha and are treated as legacy version 1 input. Explicit versions older than 1 or newer than 1 fail closed. Hostwright does not perform automatic manifest upgrade, downgrade, or compatibility conversion.
+
 ## Parser Limitation
 
 Hostwright uses a restricted manifest subset parser, not a general YAML parser.
 
 Supported forms are intentionally narrow:
 
+- optional top-level `version: 1`;
 - top-level `project:`;
 - top-level `services:`;
 - service maps indented with two spaces;
@@ -41,17 +49,22 @@ Supported forms are intentionally narrow:
 
 Unsupported YAML features fail closed, including anchors, aliases, tags, merge keys, block scalars, document markers, flow maps, tabs, and arbitrary indentation.
 
+Unsupported Kubernetes, Compose, or other orchestrator fields fail closed. This includes `apiVersion`, `kind`, `metadata`, `build`, `depends_on`, `deploy`, `networks`, `configs`, and `secrets`.
+
 ## Validation
 
 Validation currently checks:
 
+- if `version` is present, it is exactly `1`;
 - project name is present and DNS-like;
 - service names are DNS-like;
 - each service has an image;
 - image values do not contain whitespace and do not begin with `-`;
 - service-level `command` tokens do not begin with `-`;
+- service-level `command` tokens are not empty;
+- environment variable keys use shell-safe letters, numbers, and underscores and do not start with a number;
 - ports use `"host:container"` with values from 1 to 65535;
-- volumes use `source:/absolute/container/path[:ro|rw]`;
+- volumes use `source:/absolute/container/path[:ro|rw]` and do not use host-root or parent-traversal sources;
 - health command is non-empty when health is present;
 - health interval uses seconds like `10s`;
 - restart policy is `no`, `on-failure`, or `unless-stopped`.
@@ -61,3 +74,9 @@ Validation does not contact registries or Apple container.
 Manifest port syntax does not expose a bind-address field in this alpha. Hostwright-created runtime port publishes default to `127.0.0.1` when mapped to Apple container.
 
 Service-level command tokens beginning with `-` are blocked in the current conservative apply scope because Apple container parses image and command positions after its own flags. Health-check command flags are unaffected because Hostwright does not execute health checks in this alpha.
+
+## Untrusted Manifests
+
+Treat manifests from third parties as untrusted input. `hostwright validate` and `hostwright plan` are non-mutating gates, but an accepted manifest can still describe images, ports, environment values, and paths that an operator should review before any confirmed apply.
+
+Do not place real credentials in manifests. Hostwright redacts known sensitive values from output and state, but redaction is heuristic and not a secret manager.

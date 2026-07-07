@@ -1,10 +1,21 @@
 import HostwrightCore
 
 public struct HostwrightManifest: Equatable, Sendable {
+    public static let currentVersion = 1
+
+    public var version: Int?
     public var project: String?
     public var services: [HostwrightService]
+    public var effectiveVersion: Int {
+        version ?? Self.currentVersion
+    }
 
     public init(project: String?, services: [HostwrightService]) {
+        self.init(version: nil, project: project, services: services)
+    }
+
+    public init(version: Int?, project: String?, services: [HostwrightService]) {
+        self.version = version
         self.project = project
         self.services = services
     }
@@ -88,4 +99,3 @@ public enum ManifestParseError: Error, Equatable, Sendable {
         }
     }
 }
-

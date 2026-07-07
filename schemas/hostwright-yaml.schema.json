@@ -7,6 +7,11 @@
   "required": ["project", "services"],
   "additionalProperties": false,
   "properties": {
+    "version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Optional in legacy alpha manifests; when present, only manifest version 1 is supported."
+    },
     "project": {
       "type": "string",
       "pattern": "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"
@@ -39,6 +44,9 @@
         },
         "env": {
           "type": "object",
+          "propertyNames": {
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+          },
           "additionalProperties": {
             "type": "string"
           }
@@ -53,7 +61,8 @@
         "volumes": {
           "type": "array",
           "items": {
-            "type": "string"
+            "type": "string",
+            "pattern": "^(?!/+(?:\\./*)*:)(?![^:]*(?:^|/)\\.\\.(?:/|:)).+:/[^:]+(:ro|:rw)?$"
           }
         },
         "health": {

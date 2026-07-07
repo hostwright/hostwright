@@ -10,6 +10,8 @@ Hostwright is not production ready.
 - `hostwright --version`.
 - `hostwright init` without overwrite.
 - `hostwright validate` for a restricted Hostwright manifest subset.
+- Manifest `version: 1` support with versionless alpha manifests treated as legacy version 1 input.
+- Fail-closed unsupported-field, unsupported-version, unsafe env-key, and unsafe host-root or parent-traversal mount-source validation for untrusted manifests.
 - `hostwright plan` as non-mutating manifest-level dry-run output.
 - `--output json` for `plan`, `status`, `events`, `doctor`, and structured errors when JSON mode is requested.
 - Stable process exit categories for usage, validation, state unavailable, runtime unavailable, confirmation mismatch, unsafe operation, and partial failure.
@@ -39,7 +41,7 @@ Hostwright is not production ready.
 - Explicit-path state configuration only.
 - Manifest-to-runtime desired-state mapping outside the CLI.
 - Typed deterministic drift records, plan issues, planned actions, and plan hash.
-- Planning policy checks for duplicate host ports, unsafe broad bind addresses, privileged host ports, unsafe root mounts, ambiguous mounts, invalid identities, and secret-like environment values.
+- Planning policy checks for duplicate host ports, unsafe broad bind addresses, privileged host ports, unsafe host-root or parent-traversal mount sources, ambiguous mounts, invalid identities, and secret-like environment values.
 - Hostwright-created Apple container port publishes are explicitly localhost-scoped by default.
 - Drift detection for missing, unmanaged, stopped, exited, failed, image mismatch, port mismatch, mount mismatch, unhealthy, duplicate observed identity, unsupported observed state, and unavailable observation cases.
 - `hostwright apply [path] --state-db <path> --confirm-plan <hash>` for one create-missing-service action or one restart-policy-allowed managed start action.
@@ -52,6 +54,8 @@ Hostwright is not production ready.
 ## Not Implemented Today
 
 - General runtime mutation.
+- Automatic manifest upgrade, downgrade, or compatibility conversion.
+- General YAML parsing or full orchestrator schema compatibility.
 - Multi-action `hostwright apply`.
 - Guaranteed Apple container observation on every machine.
 - Broad non-empty Apple container JSON list parsing beyond the verified builder/proof shapes.
@@ -98,7 +102,7 @@ Hostwright is not production ready.
 
 ## Parser Limitation
 
-The manifest parser is not a general YAML parser. It accepts only the documented Hostwright manifest subset and fails closed for unsupported YAML features. Expanding beyond that subset requires a dependency/design decision before the manifest surface grows.
+The manifest parser is not a general YAML parser. It accepts only the documented Hostwright manifest subset and fails closed for unsupported YAML features, unsupported manifest versions, unknown Kubernetes/Compose-style fields, unsafe environment keys, and unsafe host-root or parent-traversal mount sources. Expanding beyond that subset requires a dependency/design decision before the manifest surface grows.
 
 ## Runtime Truth
 

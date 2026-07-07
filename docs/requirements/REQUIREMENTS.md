@@ -39,9 +39,9 @@ Status values:
 | ID | Requirement | Source document | Current status | Implementation file if any | Test coverage if any | Release phase |
 | --- | --- | --- | --- | --- | --- | --- |
 | HW-MANIFEST-001 | Manifest must be named `hostwright.yaml`. | Naming Convention Folder | Implemented | `HostwrightIdentity.manifestFileName` | CLI smoke tests | 2 |
-| HW-MANIFEST-002 | Manifest must define a local project and services. | Agent Engineering Manual | Implemented for Phase 2 shape | `Sources/HostwrightManifest/ManifestModel.swift` | Manifest smoke tests | 2 |
-| HW-MANIFEST-003 | Manifest parser must fail closed on unsupported Phase 2 shapes. | Phase 2 maintainer scope | Implemented | `Sources/HostwrightManifest/ManifestParser.swift` | Manifest smoke tests | 2 |
-| HW-MANIFEST-004 | Full YAML parser dependency decision must be made before expanding beyond the restricted subset. | Final Production Arsenal | Planned | None | None | 4 |
+| HW-MANIFEST-002 | Manifest must define a local project and services. | Agent Engineering Manual | Implemented with optional `version: 1` policy | `Sources/HostwrightManifest/ManifestModel.swift` | Manifest smoke tests | 2, 13 |
+| HW-MANIFEST-003 | Manifest parser must fail closed on unsupported Phase 2 shapes. | Phase 2 maintainer scope | Implemented with contextual unsupported-field errors | `Sources/HostwrightManifest/ManifestParser.swift` | Manifest smoke tests | 2, 13 |
+| HW-MANIFEST-004 | Full YAML parser dependency decision must be made before expanding beyond the restricted subset. | Final Production Arsenal | Satisfied for Phase 13: no YAML dependency added; parser remains restricted | `Sources/HostwrightManifest/ManifestParser.swift`, `docs/reference/manifest.md` | Manifest smoke tests and docs review | 4, 13 |
 | HW-MANIFEST-005 | Manifest must eventually support image digest and architecture policy. | Document 2 | Planned | None | None | 7 |
 
 ## Validation
@@ -51,9 +51,9 @@ Status values:
 | HW-VALID-001 | Validate project and service names. | Agent Engineering Manual | Implemented | `ManifestValidator.swift` | Manifest smoke tests | 2 |
 | HW-VALID-002 | Validate every service has an image. | Agent Engineering Manual | Implemented | `ManifestValidator.swift` | Manifest smoke tests | 2 |
 | HW-VALID-003 | Validate port syntax before any runtime action. | Agent Engineering Manual; Document 3 | Implemented for string ports | `ManifestValidator.swift`, `HostwrightNetworking/NetworkingModels.swift` | Manifest and networking smoke tests | 2 |
-| HW-VALID-004 | Validate volumes conservatively and block unsafe host mounts before mutation. | Document 2 | Implemented for Phase 7 planning policy | `ManifestValidator.swift`, `Sources/HostwrightReconciler/PlanningPolicy.swift` | Manifest and reconciler XCTest cases | 7 |
-| HW-VALID-005 | Validate secrets/env paths to prevent credential leakage. | Document 2 | Implemented for desired env planning/redaction; observed env drift remains deferred | `Sources/HostwrightReconciler/PlanningPolicy.swift`, `Sources/HostwrightReconciler/PlanRenderer.swift` | CLI and reconciler XCTest cases | 7 |
-| HW-VALID-006 | Validate unsupported runtime and networking features explicitly. | Agent Engineering Manual; Document 3 | Partially implemented | `docs/reference/limitations.md`, `ManifestParser.swift` | Docs review; manifest smoke tests | 3 |
+| HW-VALID-004 | Validate volumes conservatively and block unsafe host mounts before mutation. | Document 2 | Implemented for host-root and parent-traversal mount-source rejection plus planning policy | `ManifestValidator.swift`, `Sources/HostwrightReconciler/PlanningPolicy.swift` | Manifest and reconciler XCTest cases | 7, 13 |
+| HW-VALID-005 | Validate secrets/env paths to prevent credential leakage. | Document 2 | Implemented for env-key shape, desired env planning/redaction; observed env drift remains deferred | `ManifestValidator.swift`, `Sources/HostwrightReconciler/PlanningPolicy.swift`, `Sources/HostwrightReconciler/PlanRenderer.swift` | Manifest, CLI, and reconciler XCTest cases | 7, 13 |
+| HW-VALID-006 | Validate unsupported runtime and networking features explicitly. | Agent Engineering Manual; Document 3 | Implemented for restricted manifest parser, unsupported-field errors, and limitations docs | `docs/reference/limitations.md`, `ManifestParser.swift` | Docs review; manifest smoke tests | 3, 13 |
 
 ## RuntimeAdapter
 

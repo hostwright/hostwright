@@ -5,6 +5,8 @@ public enum ManifestValidator {
     public static func validate(_ manifest: HostwrightManifest) -> [ManifestIssue] {
         var issues: [ManifestIssue] = []
 
+        validateVersion(manifest.version, issues: &issues)
+
         if let project = manifest.project, !project.isEmpty {
             validateName(project, field: "project", issues: &issues)
         } else {
@@ -39,9 +41,7 @@ public enum ManifestValidator {
             }
 
             for key in service.env.keys {
-                if key.trimmingCharacters(in: .whitespaces).isEmpty {
-                    issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Service '\(service.name)' has an empty environment key."))
-                }
+                validateEnvironmentKey(key, serviceName: service.name, issues: &issues)
             }
 
             if let health = service.health {
@@ -63,6 +63,31 @@ public enum ManifestValidator {
             throw ManifestParseError.failed(issues)
         }
         return manifest
+    }
+
+    private static func validateVersion(_ version: Int?, issues: inout [ManifestIssue]) {
+        guard let version else { return }
+
+        if version == HostwrightManifest.currentVersion {
+            return
+        }
+
+        if version < HostwrightManifest.currentVersion {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestUnsupportedFeature,
+                    message: "Manifest version \(version) is older than supported version \(HostwrightManifest.currentVersion). Automatic downgrade or legacy conversion is unavailable."
+                )
+            )
+            return
+        }
+
+        issues.append(
+            ManifestIssue(
+                code: .manifestUnsupportedFeature,
+                message: "Manifest version \(version) is newer than supported version \(HostwrightManifest.currentVersion). Upgrade requires a newer Hostwright release."
+            )
+        )
     }
 
     private static func validateName(_ value: String, field: String, issues: inout [ManifestIssue]) {
@@ -87,7 +112,14 @@ public enum ManifestValidator {
     }
 
     private static func validateCommand(_ command: [String], serviceName: String, issues: inout [ManifestIssue]) {
-        for token in command where token.hasPrefix("-") {
+        for token in command {
+            if token.isEmpty {
+                issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Service '\(serviceName)' command tokens must not be empty."))
+            }
+
+            if !token.hasPrefix("-") {
+                continue
+            }
             issues.append(
                 ManifestIssue(
                     code: .manifestValidationFailed,
@@ -133,6 +165,27 @@ public enum ManifestValidator {
 
         if parts.count == 3 && parts[2] != "ro" && parts[2] != "rw" {
             issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Service '\(serviceName)' volume '\(volume)' mode must be ro or rw."))
+        }
+
+        let source = String(parts[0])
+        if HostwrightPathPolicy.isHostRootMountSource(source) {
+            issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Service '\(serviceName)' volume '\(volume)' must not mount the host root."))
+        }
+
+        if HostwrightPathPolicy.containsParentDirectoryTraversal(source) {
+            issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Service '\(serviceName)' volume '\(volume)' source must not contain parent-directory traversal."))
+        }
+    }
+
+    private static func validateEnvironmentKey(_ key: String, serviceName: String, issues: inout [ManifestIssue]) {
+        let pattern = #"^[A-Za-z_][A-Za-z0-9_]*$"#
+        if key.range(of: pattern, options: .regularExpression) == nil {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "Service '\(serviceName)' environment key '\(key)' must use shell-safe letters, numbers, and underscores, and must not start with a number."
+                )
+            )
         }
     }
 

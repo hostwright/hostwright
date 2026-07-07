@@ -172,17 +172,19 @@ final class HostwrightReconcilerTests: XCTestCase {
     }
 
     func testPolicyDetectsUnsafeVolumeReference() {
-        let desired = desiredState(
-            services: [
-                desiredService(mounts: [RuntimeMountReference(source: "/", target: "/host", access: .readOnly)])
-            ]
-        )
+        for source in ["/", "//", "/./", "/data/..", "../data"] {
+            let desired = desiredState(
+                services: [
+                    desiredService(mounts: [RuntimeMountReference(source: source, target: "/host", access: .readOnly)])
+                ]
+            )
 
-        let plan = ReconciliationPlanner().reconcile(
-            PlanningInput(desiredState: desired, observedState: nil)
-        )
+            let plan = ReconciliationPlanner().reconcile(
+                PlanningInput(desiredState: desired, observedState: nil)
+            )
 
-        XCTAssertTrue(plan.issues.contains { $0.kind == .unsafeVolumePath })
+            XCTAssertTrue(plan.issues.contains { $0.kind == .unsafeVolumePath }, source)
+        }
     }
 
     func testSecretLikeEnvValuesAreRedactedInPlanOutput() {

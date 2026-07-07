@@ -39,6 +39,12 @@ Hostwright keeps execution environment values separate from display and persiste
 
 Redaction is heuristic. Users should not place real credentials in manifests, logs, examples, fixtures, or issue reports.
 
+## Untrusted Manifest Input
+
+Treat `hostwright.yaml` files from third parties as untrusted input. Hostwright validates a restricted manifest subset and rejects unsupported YAML, Kubernetes-style fields, Compose-style fields, unknown service fields, unsupported manifest versions, unsafe host-root or parent-traversal mount sources, and unsafe environment keys before planning or mutation.
+
+`hostwright validate` and `hostwright plan` are non-mutating review gates. Operators should still inspect image names, port publishes, environment values, and volume paths before running any confirmed `apply`.
+
 ## Network Exposure
 
 Manifest ports use `"host:container"` syntax in this alpha and do not expose a bind-address field. Hostwright-created Apple container publishes use explicit `127.0.0.1:host:container` bindings by default. Broad bind addresses such as `0.0.0.0` and `::` remain blocked when represented in runtime desired state.

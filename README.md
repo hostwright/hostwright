@@ -102,6 +102,7 @@ More detail:
 The current canonical manifest shape is:
 
 ```yaml
+version: 1
 project: api-local
 
 services:
@@ -111,7 +112,7 @@ services:
       - "8080:8080"
 ```
 
-The current parser is a restricted Hostwright manifest subset parser, not a general YAML parser.
+The current parser is a restricted Hostwright manifest subset parser, not a general YAML parser. Versionless alpha manifests are accepted as legacy version 1 input, but new examples use `version: 1`.
 
 ## Runtime Boundary
 

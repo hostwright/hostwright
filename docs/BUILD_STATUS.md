@@ -8,9 +8,9 @@
 
 ## Verified On 2026-07-06
 
-- `swift build` succeeds after the Phase 12 CLI hardening changes.
-- `swift test list` lists 105 real XCTest cases across Hostwright test targets.
-- `swift test` executes 105 real XCTest assertions across CLI, core, health, manifest, networking, observability, reconciler, runtime, and state targets with 0 failures.
+- `swift build` succeeds after the Phase 13 manifest schema maturity changes.
+- `swift test list` lists 110 real XCTest cases across Hostwright test targets.
+- `swift test` executes 110 real XCTest test cases across CLI, core, health, manifest, networking, observability, reconciler, runtime, and state targets with 0 failures.
 - `scripts/grep-orchard.sh .` succeeds and reports historical references only in `docs/source-material/` and `docs/naming/`.
 - `scripts/test.sh` succeeds and runs `swift build` plus `swift test`.
 - Apple container 1.0.0 is installed locally at `/usr/local/bin/container`.
@@ -38,6 +38,7 @@
 - Phase 9 adds live `status --state-db`, bounded `logs`, event rendering, one restart-policy-allowed managed start action, and ownership-based cleanup for exact stopped/created/exited containers.
 - Phase 10 prepares the source-only `v0.1.0-alpha.1` pre-release docs, version output, compatibility matrix, install/build instructions, security/safety notes, release checklist, and release notes draft.
 - Phase 12 adds stable CLI exit categories, `--output text|json` for `plan`, `status`, `events`, and `doctor`, JSON error envelopes, and matching CLI XCTest coverage.
+- Phase 13 adds optional manifest `version: 1`, fail-closed explicit older/newer version policy, contextual unsupported-field errors, unsafe env-key and unsafe mount-source validation, versioned examples, and schema/example alignment tests.
 - No Apple container command was called by Phase 6 or Phase 7.
 - `FoundationRuntimeProcessRunner` exists for policy-approved read-only command specs and supported mutation specs; automated tests still use fake process execution.
 - `AppleContainerReadOnlyAdapter` reports missing `container` as runtime unavailable and rejects mutation through the adapter contract.
@@ -72,7 +73,7 @@ Important diagnostic correction:
 - `swift -e 'import XCTest'` can still fail and is not the correct gate.
 - A minimal SwiftPM XCTest probe passed after Xcode was fixed.
 - `swift test list` is the local proof that Hostwright now exposes real XCTest cases.
-- `swift test` executes 105 XCTest cases after the Phase 12 CLI hardening update.
+- `swift test` executes 110 XCTest cases after the Phase 13 manifest schema maturity update.
 
 The old top-level smoke/precondition posture has been replaced with XCTest assertions. Some test file names still include `Smoke.swift`, but the contents are XCTest cases.
 

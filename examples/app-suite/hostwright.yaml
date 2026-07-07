@@ -1,0 +1,24 @@
+version: 1
+project: app-suite
+
+services:
+  web:
+    image: ghcr.io/example/web:latest
+    command: ["serve"]
+    ports:
+      - "8080:8080"
+    env:
+      APP_ENV: development
+      API_BASE_URL: http://localhost:8081
+    health:
+      command: ["curl", "-f", "http://localhost:8080/health"]
+      interval: 15s
+    restart:
+      policy: on-failure
+
+  worker:
+    image: ghcr.io/example/worker:latest
+    env:
+      QUEUE_NAME: default
+    restart:
+      policy: no

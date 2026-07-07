@@ -17,6 +17,6 @@ Phase 17 does not add a user-facing stop command, user-facing restart command, d
 ## Verification
 
 - Managed restart planner gates are covered by reconciler XCTest cases.
-- Ownership refusal, fresh/stale persisted health handling, successful restart, failed restart recovery hints, backoff, and redaction are covered by CLI XCTest cases.
-- Internal stop-then-start command policy and fake-runner sequencing are covered by runtime XCTest cases.
+- Ownership refusal, fresh/stale persisted health handling, status/apply plan-hash parity, successful restart, failed restart recovery hints, backoff, partial stop-success/start-failure records, and redaction are covered by CLI XCTest cases.
+- Internal stop-then-start command policy, partial start-failure reporting, and fake-runner sequencing are covered by runtime XCTest cases.
 - Restart recovery persistence is covered by state XCTest cases.

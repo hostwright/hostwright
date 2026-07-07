@@ -605,6 +605,37 @@ final class HostwrightRuntimeTests: XCTestCase {
         XCTAssertFalse(event.message.contains("fake-token"))
     }
 
+    func testAppleContainerApplyAdapterReportsPartialManagedRestartWhenStartFailsAfterStop() async throws {
+        let runner = RoutingRuntimeProcessRunner { spec in
+            if spec.arguments == ["stop", "hostwright-demo-api"] {
+                return RuntimeCommandResult(spec: spec, exitStatus: 0, standardOutput: "stopped", standardError: "")
+            }
+            if spec.arguments == ["start", "hostwright-demo-api"] {
+                throw RuntimeAdapterError.commandFailed(exitStatus: 2, message: "start failed", standardError: "token=fake-token")
+            }
+            throw RuntimeAdapterError.commandRejected(classification: spec.classification, message: "unexpected command")
+        }
+        let adapter = AppleContainerApplyAdapter(executableResolver: resolvedContainer, processRunner: runner)
+
+        do {
+            _ = try await adapter.execute(
+                PlannedRuntimeAction(kind: .restart, identity: identity, isDestructive: true, summary: "restart"),
+                confirmation: RuntimeMutationConfirmation(confirmed: true, reason: "test", planHash: "plan-hash")
+            )
+            XCTFail("Expected partial restart failure.")
+        } catch let error as RuntimeAdapterError {
+            guard case .managedRestartStartFailedAfterStop(let message, let standardError) = error else {
+                return XCTFail("Expected managedRestartStartFailedAfterStop, got \(error).")
+            }
+            XCTAssertTrue(message.contains("start failed"))
+            XCTAssertTrue(standardError.contains("[REDACTED]"))
+            XCTAssertFalse(standardError.contains("fake-token"))
+            XCTAssertEqual(runner.calls.map(\.arguments), [["stop", "hostwright-demo-api"], ["start", "hostwright-demo-api"]])
+        } catch {
+            XCTFail("Unexpected error: \(error).")
+        }
+    }
+
     func testAppleContainerReadOnlyAdapterReadsTailLogsWithoutFollowAttachOrExec() async throws {
         let runner = RoutingRuntimeProcessRunner { spec in
             XCTAssertEqual(spec.arguments, ["logs", "-n", "25", "hostwright-demo-api"])

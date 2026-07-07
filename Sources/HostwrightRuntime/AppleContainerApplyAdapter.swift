@@ -154,8 +154,13 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
         let stopResult = try await processRunner.run(stopSpec)
 
         let startSpec = AppleContainerCommand.spec(kind: .startForManagedRestart(containerID: containerID), executable: executable)
-        try RuntimeCommandPolicy.validateRestartManagedServiceMutation(startSpec)
-        let startResult = try await processRunner.run(startSpec)
+        let startResult: RuntimeCommandResult
+        do {
+            try RuntimeCommandPolicy.validateRestartManagedServiceMutation(startSpec)
+            startResult = try await processRunner.run(startSpec)
+        } catch {
+            throw managedRestartStartFailedAfterStop(error)
+        }
 
         return RuntimeEvent(
             identity: action.identity,
@@ -163,6 +168,24 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
             message: "Restarted managed service \(action.identity.displayName). stop: \(redactionPolicy.redact(stopResult.standardOutput)) start: \(redactionPolicy.redact(startResult.standardOutput))",
             resourceIdentifier: containerID
         )
+    }
+
+    private func managedRestartStartFailedAfterStop(_ error: Error) -> RuntimeAdapterError {
+        let redacted = redactionPolicy.redact(String(describing: error))
+        if let runtimeError = error as? RuntimeAdapterError {
+            switch runtimeError.redacted(using: redactionPolicy) {
+            case .commandFailed(_, let message, let standardError):
+                return .managedRestartStartFailedAfterStop(message: message, standardError: standardError)
+            case .commandTimedOut(let command, let partialOutput, let partialError):
+                return .managedRestartStartFailedAfterStop(
+                    message: "Managed restart start timed out after stop succeeded: \(command) \(partialOutput)",
+                    standardError: partialError
+                )
+            default:
+                return .managedRestartStartFailedAfterStop(message: redactionPolicy.redact(String(describing: runtimeError)), standardError: "")
+            }
+        }
+        return .managedRestartStartFailedAfterStop(message: redacted, standardError: "")
     }
 
     private func executeDelete(_ action: PlannedRuntimeAction, executable: ResolvedRuntimeExecutable) async throws -> RuntimeEvent {

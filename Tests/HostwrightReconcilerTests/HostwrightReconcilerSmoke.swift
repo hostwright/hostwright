@@ -125,6 +125,17 @@ final class HostwrightReconcilerTests: XCTestCase {
         XCTAssertEqual(plan.drift.map(\.kind), [.unhealthyService])
     }
 
+    func testUnhealthyNonRunningServiceDoesNotPlanManagedRestart() {
+        let desired = desiredState(services: [desiredService(restartPolicy: .onFailure)])
+        let plan = ReconciliationPlanner().reconcile(
+            PlanningInput(desiredState: desired, observedState: observedState([observed(lifecycleState: .exited, healthState: .unhealthy)]))
+        )
+
+        XCTAssertEqual(plan.actions.map(\.kind), [.proposeStartStoppedService, .investigateUnhealthyService])
+        XCTAssertEqual(plan.actions[0].executionAvailability, .availableForStartManagedService)
+        XCTAssertFalse(plan.actions.contains { $0.kind == .restartManagedService })
+    }
+
     func testCrashLoopStateBlocksManagedRestartForUnhealthyRunningService() {
         let desired = desiredState(services: [desiredService(restartPolicy: .onFailure)])
         let plan = ReconciliationPlanner().reconcile(

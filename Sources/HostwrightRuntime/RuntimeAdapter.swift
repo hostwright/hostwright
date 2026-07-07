@@ -5,6 +5,7 @@ public enum RuntimeAdapterError: Error, Equatable, Sendable {
     case commandRejected(classification: RuntimeCommandClassification, message: String)
     case commandTimedOut(command: String, partialOutput: String, partialError: String)
     case commandFailed(exitStatus: Int32, message: String, standardError: String)
+    case managedRestartStartFailedAfterStop(message: String, standardError: String)
     case outputParseFailed(String)
     case permissionDenied(String)
     case redactionFailure(String)
@@ -30,6 +31,11 @@ public enum RuntimeAdapterError: Error, Equatable, Sendable {
         case .commandFailed(let exitStatus, let message, let standardError):
             return .commandFailed(
                 exitStatus: exitStatus,
+                message: policy.redact(message),
+                standardError: policy.redact(standardError)
+            )
+        case .managedRestartStartFailedAfterStop(let message, let standardError):
+            return .managedRestartStartFailedAfterStop(
                 message: policy.redact(message),
                 standardError: policy.redact(standardError)
             )

@@ -187,6 +187,6 @@ Phase 16 does not add a broad restart command, daemon-enforced restart loops, st
 - Runtime execution remains a narrow internal stop-then-start sequence for the exact Hostwright-managed container identifier; no public stop or restart command is added.
 - SQLite schema v3 adds append-only restart recovery records with redacted manual recovery hints and completed-step metadata.
 - Apply records operation intent before mutation, success/failure operation status after mutation, restart recovery records, restart policy state, and redacted events.
-- XCTest coverage covers planner gating, ownership refusal, fresh/stale persisted health handling, successful managed restart, failed managed restart recovery hints/backoff, runtime command policy, and fake-runner stop-then-start sequencing.
+- XCTest coverage covers planner gating, ownership refusal, fresh/stale persisted health handling, status/apply plan-hash parity, successful managed restart, failed managed restart recovery hints/backoff, partial stop-success/start-failure records, runtime command policy, and fake-runner stop-then-start sequencing.
 
 Phase 17 does not add broad lifecycle management, daemon-enforced restart loops, a public stop/restart command, image replacement, image cleanup, volume cleanup, unmanaged cleanup, release tags, or GitHub Releases.

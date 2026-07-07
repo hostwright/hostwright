@@ -21,10 +21,10 @@ struct ApplyCommandRunner {
             let mapping = ManifestRuntimeMapper.map(manifest)
             let store = SQLiteStateStore(path: configuration.databasePath)
             try store.migrate()
-            let timestamp = isoTimestamp()
+            let timestamp = hostwrightTimestamp()
             let projectName = mapping.desiredState.projectName
             let projectID = "project-\(projectName)"
-            let restartPolicyStates = try restartPolicyStateMap(store: store, projectID: projectID, projectName: projectName)
+            let restartPolicyStates = try hostwrightRestartPolicyStateMap(store: store, projectID: projectID, projectName: projectName)
             let adapter = environment.runtimeAdapter()
             let observed: ObservedRuntimeState
             do {
@@ -34,8 +34,8 @@ struct ApplyCommandRunner {
             } catch {
                 return failure(code: .runtimeUnavailable, message: "Runtime observation failed: \(RuntimeRedactionPolicy.default.redact(String(describing: error)))")
             }
-            let observedForPlanning = try observedStateForPlanning(
-                observed,
+            let observedForPlanning = try hostwrightPlanningObservedState(
+                observed: observed,
                 desiredState: mapping.desiredState,
                 store: store,
                 projectID: projectID,
@@ -96,7 +96,8 @@ struct ApplyCommandRunner {
                     desiredService: desiredService,
                     observed: observedForPlanning,
                     store: store,
-                    projectID: projectID
+                    projectID: projectID,
+                    currentTimestamp: timestamp
                 ) {
                     return failure(code: .unsafeExposure, message: "\(restartGateFailure) No mutation was attempted.")
                 }
@@ -141,6 +142,17 @@ struct ApplyCommandRunner {
             } catch {
                 let runtimeErrorDescription = RuntimeRedactionPolicy.default.redact(String(describing: error))
                 do {
+                    if restartStopSucceededBeforeFailure(error) {
+                        try recordRestartRecoveryIfNeeded(
+                            store: store,
+                            action: action,
+                            operationID: operationID,
+                            planHash: plan.planHash,
+                            projectID: projectID,
+                            timestamp: timestamp,
+                            status: .stopSucceeded
+                        )
+                    }
                     try persistFailure(
                         store: store,
                         error: error,
@@ -467,82 +479,6 @@ struct ApplyCommandRunner {
         }
     }
 
-    private func restartPolicyStateMap(
-        store: SQLiteStateStore,
-        projectID: String,
-        projectName: String
-    ) throws -> [RuntimeServiceIdentity: RestartPolicyStateRecord] {
-        let states = try store.restartPolicies.loadProject(projectID: projectID)
-        return Dictionary(states.map { state in
-            (
-                RuntimeServiceIdentity(projectName: projectName, serviceName: state.serviceName),
-                state
-            )
-        }, uniquingKeysWith: { first, _ in first })
-    }
-
-    private func observedStateForPlanning(
-        _ observed: ObservedRuntimeState,
-        desiredState: DesiredRuntimeState,
-        store: SQLiteStateStore,
-        projectID: String,
-        currentTimestamp: String
-    ) throws -> ObservedRuntimeState {
-        let desiredByIdentity = Dictionary(uniqueKeysWithValues: desiredState.services.map { ($0.identity, $0) })
-        let services = try observed.services.map { service in
-            guard service.healthState == .unknown,
-                  let desired = desiredByIdentity[service.identity],
-                  let healthCheck = desired.healthCheck,
-                  let latest = try store.healthResults.latest(projectID: projectID, serviceName: service.identity.serviceName),
-                  isFreshHealthResult(latest, intervalSeconds: healthCheck.intervalSeconds, currentTimestamp: currentTimestamp)
-            else {
-                return service
-            }
-
-            let healthState: RuntimeHealthState
-            switch latest.status {
-            case .healthy:
-                healthState = .healthy
-            case .unhealthy:
-                healthState = .unhealthy
-            case .unknown:
-                healthState = .unknown
-            case .skipped, .notConfigured:
-                healthState = service.healthState
-            }
-
-            return ObservedRuntimeService(
-                identity: service.identity,
-                image: service.image,
-                lifecycleState: service.lifecycleState,
-                healthState: healthState,
-                ports: service.ports,
-                mounts: service.mounts,
-                observedAt: service.observedAt
-            )
-        }
-
-        return ObservedRuntimeState(
-            projectName: observed.projectName,
-            services: services,
-            adapterMetadata: observed.adapterMetadata
-        )
-    }
-
-    private func isFreshHealthResult(
-        _ result: HealthCheckResultRecord,
-        intervalSeconds: Int,
-        currentTimestamp: String
-    ) -> Bool {
-        let formatter = ISO8601DateFormatter()
-        guard let checkedAt = formatter.date(from: result.checkedAt),
-              let current = formatter.date(from: currentTimestamp),
-              checkedAt <= current else {
-            return false
-        }
-        return checkedAt.addingTimeInterval(TimeInterval(intervalSeconds)) >= current
-    }
-
     private func recordManagedStartAttempt(
         store: SQLiteStateStore,
         action: PlannedAction,
@@ -599,7 +535,7 @@ struct ApplyCommandRunner {
         } else {
             status = .active
         }
-        let backoffUntil = status == .backingOff ? isoTimestampAdding(seconds: backoffSeconds, to: timestamp) : nil
+        let backoffUntil = status == .backingOff ? hostwrightTimestampAdding(seconds: backoffSeconds, to: timestamp) : nil
 
         try store.restartPolicies.upsert(
             RestartPolicyStateRecord(
@@ -675,7 +611,8 @@ struct ApplyCommandRunner {
         desiredService: DesiredRuntimeService,
         observed: ObservedRuntimeState,
         store: SQLiteStateStore,
-        projectID: String
+        projectID: String,
+        currentTimestamp: String
     ) throws -> String? {
         guard desiredService.restartPolicy.allowsManagedStart else {
             return "Managed restart requires a restart policy that allows Hostwright-managed recovery."
@@ -690,6 +627,19 @@ struct ApplyCommandRunner {
         }
         guard observedService.healthState == .unhealthy else {
             return "Managed restart is available only for unhealthy running services."
+        }
+        guard let healthCheck = desiredService.healthCheck else {
+            return "Managed restart requires a configured health check for \(action.identity.displayName)."
+        }
+        let freshHealth = try hostwrightFreshHealthResult(
+            store: store,
+            projectID: projectID,
+            serviceName: action.identity.serviceName,
+            healthCheck: healthCheck,
+            currentTimestamp: currentTimestamp
+        )
+        guard freshHealth?.status == .unhealthy else {
+            return "Managed restart requires a fresh persisted unhealthy health result for \(action.identity.displayName)."
         }
 
         let resourceIdentifier = action.identity.managedResourceIdentifier
@@ -793,6 +743,16 @@ struct ApplyCommandRunner {
     private func managedRestartSentenceLabel(for action: PlannedAction) -> String {
         action.executionAvailability == .availableForRestartManagedService ? "Managed restart" : "Managed start"
     }
+
+    private func restartStopSucceededBeforeFailure(_ error: Error) -> Bool {
+        guard let runtimeError = error as? RuntimeAdapterError else {
+            return false
+        }
+        if case .managedRestartStartFailedAfterStop = runtimeError {
+            return true
+        }
+        return false
+    }
 }
 
 private func waitForAsync<T: Sendable>(_ operation: @escaping @Sendable () async throws -> T) throws -> T {
@@ -823,16 +783,6 @@ private func stableHash(_ value: String) -> String {
         hash &*= 0x100000001b3
     }
     return String(format: "%016llx", hash)
-}
-
-private func isoTimestamp() -> String {
-    ISO8601DateFormatter().string(from: Date())
-}
-
-private func isoTimestampAdding(seconds: Int, to timestamp: String) -> String {
-    let formatter = ISO8601DateFormatter()
-    let date = formatter.date(from: timestamp) ?? Date()
-    return formatter.string(from: date.addingTimeInterval(TimeInterval(seconds)))
 }
 
 private func jsonPayload(_ object: [String: Any]) -> String {

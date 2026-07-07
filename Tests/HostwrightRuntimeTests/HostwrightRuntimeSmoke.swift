@@ -189,6 +189,42 @@ final class HostwrightRuntimeTests: XCTestCase {
         XCTAssertThrowsError(try RuntimeCommandPolicy.validateDeleteManagedContainerMutation(nonHostwrightDelete))
     }
 
+    func testManagedRestartPolicyAcceptsOnlyInternalStopThenStartSteps() {
+        let executable = ResolvedRuntimeExecutable(name: "container", path: "/usr/bin/container-fixture")
+        let stop = AppleContainerCommand.spec(kind: .stopForManagedRestart(containerID: "hostwright-demo-api"), executable: executable)
+        let start = AppleContainerCommand.spec(kind: .startForManagedRestart(containerID: "hostwright-demo-api"), executable: executable)
+
+        XCTAssertEqual(stop.arguments, ["stop", "hostwright-demo-api"])
+        XCTAssertEqual(start.arguments, ["start", "hostwright-demo-api"])
+        XCTAssertEqual(stop.mutationKind, .restartManagedService)
+        XCTAssertEqual(start.mutationKind, .restartManagedService)
+        XCTAssertNoThrow(try RuntimeCommandPolicy.validateRestartManagedServiceMutation(stop))
+        XCTAssertNoThrow(try RuntimeCommandPolicy.validateRestartManagedServiceMutation(start))
+
+        let broadRestart = RuntimeCommandSpec(
+            executablePath: "/usr/bin/container-fixture",
+            arguments: ["restart", "hostwright-demo-api"],
+            classification: .mutating,
+            executableResolution: .resolvedByRuntimeExecutableResolver,
+            mutationKind: .restartManagedService,
+            purpose: "fixture"
+        )
+        XCTAssertThrowsError(try RuntimeCommandPolicy.validateRestartManagedServiceMutation(broadRestart))
+
+        let nonHostwrightStop = AppleContainerCommand.spec(kind: .stopForManagedRestart(containerID: "manual-api"), executable: executable)
+        XCTAssertThrowsError(try RuntimeCommandPolicy.validateRestartManagedServiceMutation(nonHostwrightStop))
+
+        let wrongKindStop = RuntimeCommandSpec(
+            executablePath: "/usr/bin/container-fixture",
+            arguments: ["stop", "hostwright-demo-api"],
+            classification: .mutating,
+            executableResolution: .resolvedByRuntimeExecutableResolver,
+            mutationKind: .startManagedService,
+            purpose: "fixture"
+        )
+        XCTAssertThrowsError(try RuntimeCommandPolicy.validateStartManagedServiceMutation(wrongKindStop))
+    }
+
     func testReadOnlyExecutionRejectsUnresolvedExecutable() {
         let unresolvedReadOnly = RuntimeCommandSpec(
             executablePath: "/usr/bin/example",
@@ -544,6 +580,29 @@ final class HostwrightRuntimeTests: XCTestCase {
         } catch {
             XCTFail("Unexpected error: \(error).")
         }
+    }
+
+    func testAppleContainerApplyAdapterRestartsManagedServiceWithStopThenStartOnly() async throws {
+        let runner = RoutingRuntimeProcessRunner { spec in
+            if spec.arguments == ["stop", "hostwright-demo-api"] {
+                return RuntimeCommandResult(spec: spec, exitStatus: 0, standardOutput: "stopped token=fake-token", standardError: "")
+            }
+            if spec.arguments == ["start", "hostwright-demo-api"] {
+                return RuntimeCommandResult(spec: spec, exitStatus: 0, standardOutput: "started token=fake-token", standardError: "")
+            }
+            throw RuntimeAdapterError.commandRejected(classification: spec.classification, message: "unexpected command")
+        }
+        let adapter = AppleContainerApplyAdapter(executableResolver: resolvedContainer, processRunner: runner)
+
+        let event = try await adapter.execute(
+            PlannedRuntimeAction(kind: .restart, identity: identity, isDestructive: true, summary: "restart"),
+            confirmation: RuntimeMutationConfirmation(confirmed: true, reason: "test", planHash: "plan-hash")
+        )
+
+        XCTAssertEqual(runner.calls.map(\.arguments), [["stop", "hostwright-demo-api"], ["start", "hostwright-demo-api"]])
+        XCTAssertEqual(event.resourceIdentifier, "hostwright-demo-api")
+        XCTAssertTrue(event.message.contains("[REDACTED]"))
+        XCTAssertFalse(event.message.contains("fake-token"))
     }
 
     func testAppleContainerReadOnlyAdapterReadsTailLogsWithoutFollowAttachOrExec() async throws {

@@ -13,6 +13,7 @@ public enum RuntimeExecutableResolution: String, Equatable, Sendable {
 public enum RuntimeMutationCommandKind: String, Equatable, Sendable {
     case createMissingService
     case startManagedService
+    case restartManagedService
     case deleteManagedContainer
 }
 
@@ -191,6 +192,8 @@ public enum RuntimeCommandPolicy {
             try validateCreateMissingServiceMutation(spec)
         case .startManagedService:
             try validateStartManagedServiceMutation(spec)
+        case .restartManagedService:
+            try validateRestartManagedServiceMutation(spec)
         case .deleteManagedContainer:
             try validateDeleteManagedContainerMutation(spec)
         case nil:
@@ -215,6 +218,25 @@ public enum RuntimeCommandPolicy {
             throw RuntimeAdapterError.commandRejected(
                 classification: spec.classification,
                 message: "Start-managed-service mutation requires an exact Hostwright-owned container identifier."
+            )
+        }
+    }
+
+    public static func validateRestartManagedServiceMutation(_ spec: RuntimeCommandSpec) throws {
+        try validateResolvedMutatingSpecWithoutLifecycleVerbBlock(spec, expectedKind: .restartManagedService, commandName: "restart-managed-service")
+
+        guard spec.arguments.count == 2,
+              (spec.arguments.first == "stop" || spec.arguments.first == "start") else {
+            throw RuntimeAdapterError.commandRejected(
+                classification: spec.classification,
+                message: "Restart-managed-service mutation accepts only internal 'stop <hostwright-container-id>' or 'start <hostwright-container-id>' steps."
+            )
+        }
+
+        guard isHostwrightContainerIdentifier(spec.arguments[1]) else {
+            throw RuntimeAdapterError.commandRejected(
+                classification: spec.classification,
+                message: "Restart-managed-service mutation requires an exact Hostwright-owned container identifier."
             )
         }
     }
@@ -254,6 +276,36 @@ public enum RuntimeCommandPolicy {
         expectedKind: RuntimeMutationCommandKind,
         commandName: String
     ) throws {
+        try validateResolvedMutatingSpecWithoutLifecycleVerbBlock(spec, expectedKind: expectedKind, commandName: commandName)
+
+        let forbiddenArguments = [
+            "--all",
+            "--force",
+            "--attach",
+            "--interactive",
+            "stop",
+            "restart",
+            "remove",
+            "prune",
+            "pull",
+            "push",
+            "build",
+            "exec",
+            "run"
+        ]
+        if spec.arguments.contains(where: { forbiddenArguments.contains($0) }) {
+            throw RuntimeAdapterError.commandRejected(
+                classification: spec.classification,
+                message: "\(commandName) mutation command spec contains a forbidden argument."
+            )
+        }
+    }
+
+    private static func validateResolvedMutatingSpecWithoutLifecycleVerbBlock(
+        _ spec: RuntimeCommandSpec,
+        expectedKind: RuntimeMutationCommandKind,
+        commandName: String
+    ) throws {
         guard spec.executableResolution == .resolvedByRuntimeExecutableResolver else {
             throw RuntimeAdapterError.commandRejected(
                 classification: spec.classification,
@@ -280,7 +332,6 @@ public enum RuntimeCommandPolicy {
             "--force",
             "--attach",
             "--interactive",
-            "stop",
             "restart",
             "remove",
             "prune",

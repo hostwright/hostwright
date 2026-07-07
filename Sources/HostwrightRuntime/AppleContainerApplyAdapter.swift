@@ -89,6 +89,8 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
             return try await executeCreate(action, executable: executable)
         case .start:
             return try await executeStart(action, executable: executable)
+        case .restart:
+            return try await executeRestart(action, executable: executable)
         case .remove:
             return try await executeDelete(action, executable: executable)
         case .update, .stop, .noOp:
@@ -134,6 +136,31 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
             identity: action.identity,
             severity: .info,
             message: "Started managed service \(action.identity.displayName). \(redactionPolicy.redact(result.standardOutput))",
+            resourceIdentifier: containerID
+        )
+    }
+
+    private func executeRestart(_ action: PlannedRuntimeAction, executable: ResolvedRuntimeExecutable) async throws -> RuntimeEvent {
+        guard action.isDestructive else {
+            throw RuntimeAdapterError.commandRejected(
+                classification: .mutating,
+                message: "Restart-managed-service requires an explicitly destructive planned action."
+            )
+        }
+
+        let containerID = AppleContainerCommand.containerName(for: action.identity)
+        let stopSpec = AppleContainerCommand.spec(kind: .stopForManagedRestart(containerID: containerID), executable: executable)
+        try RuntimeCommandPolicy.validateRestartManagedServiceMutation(stopSpec)
+        let stopResult = try await processRunner.run(stopSpec)
+
+        let startSpec = AppleContainerCommand.spec(kind: .startForManagedRestart(containerID: containerID), executable: executable)
+        try RuntimeCommandPolicy.validateRestartManagedServiceMutation(startSpec)
+        let startResult = try await processRunner.run(startSpec)
+
+        return RuntimeEvent(
+            identity: action.identity,
+            severity: .info,
+            message: "Restarted managed service \(action.identity.displayName). stop: \(redactionPolicy.redact(stopResult.standardOutput)) start: \(redactionPolicy.redact(startResult.standardOutput))",
             resourceIdentifier: containerID
         )
     }

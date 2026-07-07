@@ -119,7 +119,7 @@ This command:
 - requires an explicit state database path;
 - requires the supplied plan hash to match the current observed plan;
 - persists desired state, observed state, operation intent, and an apply-start event before mutation;
-- executes exactly one `createMissingService` action or one restart-policy-allowed `startManagedService` action through `RuntimeAdapter`;
+- executes exactly one `createMissingService`, restart-policy-allowed `startManagedService`, or restart-policy-allowed `restartManagedService` action through `RuntimeAdapter`;
 - records success or failure events and operation status.
 
 It refuses mutation when:
@@ -132,11 +132,12 @@ It refuses mutation when:
 - more than one executable action exists;
 - a create action uses mounts, privileged host ports, broad bind addresses, flag-like image values, or service command tokens beginning with `-`;
 - a create action cannot confirm the local Apple container image;
-- a start action is not for an observed Hostwright-managed stopped, created, or exited service allowed by restart policy.
+- a start action is not for an observed Hostwright-managed stopped, created, or exited service allowed by restart policy;
+- a restart action is not for an exact Hostwright-owned running service with a fresh persisted unhealthy health result and a matching ownership record.
 
 Manifest-declared ports are published to `127.0.0.1` by default during Hostwright-created container creation. Sensitive environment values are passed to the runtime for execution, but plan output, state rows, events, logs, and errors use redacted values.
 
-It does not implement stop, restart, image replacement, port mutation, mount mutation, rollback, image pull, unattended daemon mutation, broad bind exposure, or multi-action apply.
+It does not implement user-facing stop/restart commands, image replacement, port mutation, mount mutation, rollback, image pull, unattended daemon mutation, broad bind exposure, or multi-action apply.
 
 Failure example:
 

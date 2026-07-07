@@ -261,6 +261,7 @@ public enum PlannedRuntimeActionKind: String, Equatable, Sendable {
     case update
     case start
     case stop
+    case restart
     case remove
     case noOp
 }

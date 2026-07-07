@@ -34,9 +34,16 @@ struct ApplyCommandRunner {
             } catch {
                 return failure(code: .runtimeUnavailable, message: "Runtime observation failed: \(RuntimeRedactionPolicy.default.redact(String(describing: error)))")
             }
+            let observedForPlanning = try observedStateForPlanning(
+                observed,
+                desiredState: mapping.desiredState,
+                store: store,
+                projectID: projectID,
+                currentTimestamp: timestamp
+            )
             let plan = ReconciliationPlanner().plan(
                 manifest: manifest,
-                observedState: observed,
+                observedState: observedForPlanning,
                 restartPolicyStates: restartPolicyStates,
                 currentTimestamp: timestamp
             )
@@ -57,12 +64,13 @@ struct ApplyCommandRunner {
 
             let executableActions = plan.actions.filter {
                 $0.executionAvailability == .availableForCreateMissingService ||
-                $0.executionAvailability == .availableForStartManagedService
+                $0.executionAvailability == .availableForStartManagedService ||
+                $0.executionAvailability == .availableForRestartManagedService
             }
             guard !executableActions.isEmpty else {
                 return failure(
                     code: .runtimeMutationNotImplemented,
-                    message: "No executable createMissingService or startManagedService action exists in the current plan. No mutation was attempted.\n\n\(PlanRenderer.render(plan))"
+                    message: "No executable createMissingService, startManagedService, or restartManagedService action exists in the current plan. No mutation was attempted.\n\n\(PlanRenderer.render(plan))"
                 )
             }
             guard executableActions.count == 1, let action = executableActions.first else {
@@ -82,6 +90,17 @@ struct ApplyCommandRunner {
                     return failure(code: .unsafeExposure, message: "\(safeSubsetFailure) No mutation was attempted.")
                 }
             }
+            if action.executionAvailability == .availableForRestartManagedService {
+                if let restartGateFailure = try validateManagedRestartGate(
+                    action: action,
+                    desiredService: desiredService,
+                    observed: observedForPlanning,
+                    store: store,
+                    projectID: projectID
+                ) {
+                    return failure(code: .unsafeExposure, message: "\(restartGateFailure) No mutation was attempted.")
+                }
+            }
 
             let idempotencyKey = "\(plan.planHash):\(action.kind.rawValue):\(action.identity.displayName)"
             if let existingOperation = try blockingOperation(store: store, idempotencyKey: idempotencyKey) {
@@ -96,7 +115,7 @@ struct ApplyCommandRunner {
                 store: store,
                 manifest: manifest,
                 manifestText: manifestText,
-                observed: observed,
+                observed: observedForPlanning,
                 plan: plan,
                 action: action,
                 operationID: operationID,
@@ -228,6 +247,13 @@ struct ApplyCommandRunner {
                 isDestructive: false,
                 summary: "Start managed service \(action.identity.displayName)."
             )
+        case .availableForRestartManagedService:
+            return PlannedRuntimeAction(
+                kind: .restart,
+                identity: action.identity,
+                isDestructive: true,
+                summary: "Restart unhealthy Hostwright-owned running service \(action.identity.displayName)."
+            )
         case .unavailable:
             return PlannedRuntimeAction(
                 kind: .noOp,
@@ -287,7 +313,7 @@ struct ApplyCommandRunner {
                 id: hostwrightUniqueID(prefix: "event-apply-started"),
                 timestamp: timestamp,
                 severity: .info,
-                type: action.executionAvailability == .availableForStartManagedService ? "apply.start-intent-recorded" : "apply.create-intent-recorded",
+                type: intentEventType(for: action),
                 source: "hostwright-cli",
                 projectID: projectID,
                 serviceName: action.identity.serviceName,
@@ -296,6 +322,15 @@ struct ApplyCommandRunner {
                 payloadJSONRedacted: #"{"planHash":"\#(plan.planHash)"}"#
             )
         ])
+        try recordRestartRecoveryIfNeeded(
+            store: store,
+            action: action,
+            operationID: operationID,
+            planHash: plan.planHash,
+            projectID: projectID,
+            timestamp: timestamp,
+            status: .prepared
+        )
     }
 
     private func persistSuccess(
@@ -327,7 +362,7 @@ struct ApplyCommandRunner {
                 id: hostwrightUniqueID(prefix: "event-apply-succeeded"),
                 timestamp: timestamp,
                 severity: .info,
-                type: action.executionAvailability == .availableForStartManagedService ? "apply.started-service" : "apply.created-service",
+                type: successEventType(for: action),
                 source: "hostwright-cli",
                 projectID: projectID,
                 serviceName: action.identity.serviceName,
@@ -353,6 +388,15 @@ struct ApplyCommandRunner {
                 )
             )
         }
+        try recordRestartRecoveryIfNeeded(
+            store: store,
+            action: action,
+            operationID: operationID,
+            planHash: planHash,
+            projectID: projectID,
+            timestamp: timestamp,
+            status: .succeeded
+        )
     }
 
     private func persistFailure(
@@ -394,6 +438,15 @@ struct ApplyCommandRunner {
                 payloadJSONRedacted: #"{"planHash":"\#(planHash)"}"#
             )
         ])
+        try recordRestartRecoveryIfNeeded(
+            store: store,
+            action: action,
+            operationID: operationID,
+            planHash: planHash,
+            projectID: projectID,
+            timestamp: timestamp,
+            status: .failed
+        )
     }
 
     private func failure(code: HostwrightErrorCode, message: String) -> CLIRunResult {
@@ -428,6 +481,68 @@ struct ApplyCommandRunner {
         }, uniquingKeysWith: { first, _ in first })
     }
 
+    private func observedStateForPlanning(
+        _ observed: ObservedRuntimeState,
+        desiredState: DesiredRuntimeState,
+        store: SQLiteStateStore,
+        projectID: String,
+        currentTimestamp: String
+    ) throws -> ObservedRuntimeState {
+        let desiredByIdentity = Dictionary(uniqueKeysWithValues: desiredState.services.map { ($0.identity, $0) })
+        let services = try observed.services.map { service in
+            guard service.healthState == .unknown,
+                  let desired = desiredByIdentity[service.identity],
+                  let healthCheck = desired.healthCheck,
+                  let latest = try store.healthResults.latest(projectID: projectID, serviceName: service.identity.serviceName),
+                  isFreshHealthResult(latest, intervalSeconds: healthCheck.intervalSeconds, currentTimestamp: currentTimestamp)
+            else {
+                return service
+            }
+
+            let healthState: RuntimeHealthState
+            switch latest.status {
+            case .healthy:
+                healthState = .healthy
+            case .unhealthy:
+                healthState = .unhealthy
+            case .unknown:
+                healthState = .unknown
+            case .skipped, .notConfigured:
+                healthState = service.healthState
+            }
+
+            return ObservedRuntimeService(
+                identity: service.identity,
+                image: service.image,
+                lifecycleState: service.lifecycleState,
+                healthState: healthState,
+                ports: service.ports,
+                mounts: service.mounts,
+                observedAt: service.observedAt
+            )
+        }
+
+        return ObservedRuntimeState(
+            projectName: observed.projectName,
+            services: services,
+            adapterMetadata: observed.adapterMetadata
+        )
+    }
+
+    private func isFreshHealthResult(
+        _ result: HealthCheckResultRecord,
+        intervalSeconds: Int,
+        currentTimestamp: String
+    ) -> Bool {
+        let formatter = ISO8601DateFormatter()
+        guard let checkedAt = formatter.date(from: result.checkedAt),
+              let current = formatter.date(from: currentTimestamp),
+              checkedAt <= current else {
+            return false
+        }
+        return checkedAt.addingTimeInterval(TimeInterval(intervalSeconds)) >= current
+    }
+
     private func recordManagedStartAttempt(
         store: SQLiteStateStore,
         action: PlannedAction,
@@ -437,6 +552,39 @@ struct ApplyCommandRunner {
         outcome: String
     ) throws {
         guard action.executionAvailability == .availableForStartManagedService else {
+            if action.executionAvailability != .availableForRestartManagedService {
+                return
+            }
+            return try recordManagedRecoveryAttempt(
+                store: store,
+                action: action,
+                desiredService: desiredService,
+                projectID: projectID,
+                timestamp: timestamp,
+                outcome: outcome
+            )
+        }
+
+        try recordManagedRecoveryAttempt(
+            store: store,
+            action: action,
+            desiredService: desiredService,
+            projectID: projectID,
+            timestamp: timestamp,
+            outcome: outcome
+        )
+    }
+
+    private func recordManagedRecoveryAttempt(
+        store: SQLiteStateStore,
+        action: PlannedAction,
+        desiredService: DesiredRuntimeService,
+        projectID: String,
+        timestamp: String,
+        outcome: String
+    ) throws {
+        guard action.executionAvailability == .availableForStartManagedService ||
+              action.executionAvailability == .availableForRestartManagedService else {
             return
         }
 
@@ -481,15 +629,15 @@ struct ApplyCommandRunner {
         case .active:
             eventType = "restart.policy.active"
             severity = .info
-            message = "Managed start succeeded for \(action.identity.displayName); restart attempt budget is reset."
+            message = "\(managedRestartSentenceLabel(for: action)) succeeded for \(action.identity.displayName); restart attempt budget is reset."
         case .crashLoopBlocked:
             eventType = "restart.policy.crash-loop-blocked"
             severity = .error
-            message = "Managed start attempts reached \(attemptCount)/\(maxAttempts); operator action is required before another start."
+            message = "\(managedRestartSentenceLabel(for: action)) attempts reached \(attemptCount)/\(maxAttempts); operator action is required before another attempt."
         case .backingOff:
             eventType = "restart.policy.backoff"
             severity = .warning
-            message = "Managed start attempt \(attemptCount)/\(maxAttempts) failed; restart backoff active until \(backoffUntil ?? "operator reset")."
+            message = "\(managedRestartSentenceLabel(for: action)) attempt \(attemptCount)/\(maxAttempts) failed; restart backoff active until \(backoffUntil ?? "operator reset")."
         case .operatorHold:
             eventType = "restart.policy.operator-hold"
             severity = .warning
@@ -520,6 +668,130 @@ struct ApplyCommandRunner {
                 ])
             )
         ])
+    }
+
+    private func validateManagedRestartGate(
+        action: PlannedAction,
+        desiredService: DesiredRuntimeService,
+        observed: ObservedRuntimeState,
+        store: SQLiteStateStore,
+        projectID: String
+    ) throws -> String? {
+        guard desiredService.restartPolicy.allowsManagedStart else {
+            return "Managed restart requires a restart policy that allows Hostwright-managed recovery."
+        }
+
+        let observedMatches = observed.services.filter { $0.identity == action.identity }
+        guard observedMatches.count == 1, let observedService = observedMatches.first else {
+            return "Managed restart requires exactly one observed service for \(action.identity.displayName)."
+        }
+        guard observedService.lifecycleState == .running else {
+            return "Managed restart requires observed running state for \(action.identity.displayName)."
+        }
+        guard observedService.healthState == .unhealthy else {
+            return "Managed restart is available only for unhealthy running services."
+        }
+
+        let resourceIdentifier = action.identity.managedResourceIdentifier
+        let ownership = try store.ownership.loadAll().first { record in
+            record.resourceType == "container" &&
+            record.resourceIdentifier == resourceIdentifier &&
+            record.projectID == projectID &&
+            record.serviceName == action.identity.serviceName
+        }
+        guard ownership != nil else {
+            return "Managed restart requires a Hostwright ownership record for exact container \(resourceIdentifier)."
+        }
+
+        return nil
+    }
+
+    private func intentEventType(for action: PlannedAction) -> String {
+        switch action.executionAvailability {
+        case .availableForCreateMissingService:
+            return "apply.create-intent-recorded"
+        case .availableForStartManagedService:
+            return "apply.start-intent-recorded"
+        case .availableForRestartManagedService:
+            return "apply.restart-intent-recorded"
+        case .unavailable:
+            return "apply.intent-recorded"
+        }
+    }
+
+    private func successEventType(for action: PlannedAction) -> String {
+        switch action.executionAvailability {
+        case .availableForCreateMissingService:
+            return "apply.created-service"
+        case .availableForStartManagedService:
+            return "apply.started-service"
+        case .availableForRestartManagedService:
+            return "apply.restarted-service"
+        case .unavailable:
+            return "apply.succeeded"
+        }
+    }
+
+    private func recordRestartRecoveryIfNeeded(
+        store: SQLiteStateStore,
+        action: PlannedAction,
+        operationID: String,
+        planHash: String,
+        projectID: String,
+        timestamp: String,
+        status: RestartRecoveryStatus
+    ) throws {
+        guard action.executionAvailability == .availableForRestartManagedService else {
+            return
+        }
+
+        try store.restartRecovery.append(
+            RestartRecoveryRecord(
+                id: hostwrightUniqueID(prefix: "restart-recovery"),
+                operationID: operationID,
+                projectID: projectID,
+                serviceName: action.identity.serviceName,
+                resourceIdentifier: action.identity.managedResourceIdentifier,
+                planHash: planHash,
+                status: status,
+                completedStepsJSONRedacted: completedStepsJSON(for: status),
+                manualRecoveryHintRedacted: manualRecoveryHint(for: status, identity: action.identity),
+                createdAt: timestamp,
+                updatedAt: timestamp,
+                metadataJSONRedacted: jsonPayload([
+                    "planAction": action.kind.rawValue,
+                    "status": status.rawValue
+                ])
+            )
+        )
+    }
+
+    private func completedStepsJSON(for status: RestartRecoveryStatus) -> String {
+        switch status {
+        case .prepared, .failed:
+            return #"[]"#
+        case .stopSucceeded:
+            return #"["stop"]"#
+        case .succeeded:
+            return #"["stop","start"]"#
+        }
+    }
+
+    private func manualRecoveryHint(for status: RestartRecoveryStatus, identity: RuntimeServiceIdentity) -> String {
+        switch status {
+        case .prepared:
+            return "Managed restart prepared for \(identity.displayName). If interrupted before runtime mutation, rerun apply with a fresh plan."
+        case .stopSucceeded:
+            return "Managed restart stopped \(identity.displayName). If start does not complete, inspect the exact Hostwright-owned container before retrying."
+        case .succeeded:
+            return "Managed restart completed for \(identity.displayName). No manual recovery is required."
+        case .failed:
+            return "Managed restart failed or was interrupted for \(identity.displayName). Inspect the exact Hostwright-owned container; if it is stopped, review logs and rerun apply only after confirming the current plan."
+        }
+    }
+
+    private func managedRestartSentenceLabel(for action: PlannedAction) -> String {
+        action.executionAvailability == .availableForRestartManagedService ? "Managed restart" : "Managed start"
     }
 }
 

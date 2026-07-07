@@ -113,6 +113,35 @@ final class HostwrightReconcilerTests: XCTestCase {
         XCTAssertEqual(plan.drift.map(\.kind), [.unhealthyService])
     }
 
+    func testUnhealthyRunningServiceCanPlanManagedRestartWhenPolicyAllowsIt() {
+        let desired = desiredState(services: [desiredService(restartPolicy: .onFailure)])
+        let plan = ReconciliationPlanner().reconcile(
+            PlanningInput(desiredState: desired, observedState: observedState([observed(healthState: .unhealthy)]))
+        )
+
+        XCTAssertEqual(plan.actions.map(\.kind), [.restartManagedService])
+        XCTAssertEqual(plan.actions[0].executionAvailability, .availableForRestartManagedService)
+        XCTAssertTrue(plan.actions[0].reason.contains("confirmed managed restart"))
+        XCTAssertEqual(plan.drift.map(\.kind), [.unhealthyService])
+    }
+
+    func testCrashLoopStateBlocksManagedRestartForUnhealthyRunningService() {
+        let desired = desiredState(services: [desiredService(restartPolicy: .onFailure)])
+        let plan = ReconciliationPlanner().reconcile(
+            PlanningInput(
+                desiredState: desired,
+                observedState: observedState([observed(healthState: .unhealthy)]),
+                restartPolicyStates: [identity(): restartState(status: .crashLoopBlocked, attemptCount: 3, maxAttempts: 3)],
+                currentTimestamp: "2026-07-01T00:00:00Z"
+            )
+        )
+
+        XCTAssertEqual(plan.actions.map(\.kind), [.restartManagedService])
+        XCTAssertEqual(plan.actions[0].executionAvailability, .unavailable)
+        XCTAssertTrue(plan.actions[0].reason.contains("crash-loop protection"))
+        XCTAssertTrue(plan.issues.contains { $0.kind == .restartPolicyBlocked })
+    }
+
     func testUnmanagedObservedServiceCreatesFlagAction() {
         let plan = ReconciliationPlanner().reconcile(
             PlanningInput(

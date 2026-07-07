@@ -92,6 +92,7 @@ public enum PlanActionKind: String, Equatable, Sendable {
     case reconcilePortDrift
     case reconcileMountDrift
     case investigateUnhealthyService
+    case restartManagedService
 
     public var sortIndex: Int {
         switch self {
@@ -102,7 +103,8 @@ public enum PlanActionKind: String, Equatable, Sendable {
         case .replaceForImageDrift: 7
         case .reconcilePortDrift: 8
         case .reconcileMountDrift: 9
-        case .investigateUnhealthyService: 10
+        case .restartManagedService: 10
+        case .investigateUnhealthyService: 11
         }
     }
 }
@@ -111,6 +113,7 @@ public enum PlanExecutionAvailability: String, Equatable, Sendable {
     case unavailable
     case availableForCreateMissingService
     case availableForStartManagedService
+    case availableForRestartManagedService
 }
 
 public struct PlannedAction: Equatable, Sendable {

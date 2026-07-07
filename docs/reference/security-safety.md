@@ -14,11 +14,12 @@ Supported mutation is intentionally narrow:
 
 - one create-missing-service action after explicit plan hash confirmation;
 - one restart-policy-allowed managed start action;
+- one restart-policy-allowed managed restart action for an exact Hostwright-owned running/unhealthy service;
 - exact cleanup-eligible managed container delete after dry-run token confirmation.
 
-Hostwright does not implement broad lifecycle management, stop commands, restart commands, image replacement, mount mutation, port mutation, rollback, or unattended daemon mutation.
+Hostwright does not implement broad lifecycle management, user-facing stop commands, user-facing restart commands, image replacement, mount mutation, port mutation, rollback, or unattended daemon mutation.
 
-Restart policy state can block the narrow managed-start path through backoff, preexisting operator hold state, manual-disable from `restart.policy: no`, and crash-loop protection. The foreground daemon records restart state but does not start or restart services by itself.
+Restart policy state can block the narrow managed-start and managed-restart paths through backoff, preexisting operator hold state, manual-disable from `restart.policy: no`, and crash-loop protection. Managed restart also requires exact Hostwright ownership, live observed running state, a fresh persisted unhealthy health result from the explicit state database, operation ledger entries, and restart recovery records. The foreground daemon records restart state but does not start or restart services by itself.
 
 ## Cleanup Safety
 

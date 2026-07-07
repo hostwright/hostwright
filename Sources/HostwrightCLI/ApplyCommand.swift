@@ -41,6 +41,14 @@ struct ApplyCommandRunner {
                 projectID: projectID,
                 currentTimestamp: timestamp
             )
+            guard let observedRuntimeAdapter = observedForPlanning.adapterMetadata?.adapterName,
+                  !observedRuntimeAdapter.isEmpty
+            else {
+                return failure(
+                    code: .runtimeUnavailable,
+                    message: "Runtime observation did not include adapter metadata. No mutation was attempted."
+                )
+            }
             let plan = ReconciliationPlanner().plan(
                 manifest: manifest,
                 observedState: observedForPlanning,
@@ -157,7 +165,8 @@ struct ApplyCommandRunner {
                     operationID: operationID,
                     idempotencyKey: idempotencyKey,
                     projectID: projectID,
-                    timestamp: timestamp
+                    timestamp: timestamp,
+                    runtimeAdapter: observedRuntimeAdapter
                 )
                 try recordOperationGroupStep(
                     store: store,
@@ -321,7 +330,7 @@ struct ApplyCommandRunner {
                     planHash: plan.planHash,
                     projectID: projectID,
                     timestamp: timestamp,
-                    runtimeAdapter: observed.adapterMetadata?.adapterName ?? "runtime-adapter"
+                    runtimeAdapter: observedRuntimeAdapter
                 )
                 try recordManagedStartAttempt(
                     store: store,
@@ -442,7 +451,8 @@ struct ApplyCommandRunner {
         operationID: String,
         idempotencyKey: String,
         projectID: String,
-        timestamp: String
+        timestamp: String,
+        runtimeAdapter: String
     ) throws {
         try store.desiredStates.saveManifestSnapshot(
             projectID: projectID,
@@ -456,7 +466,7 @@ struct ApplyCommandRunner {
             snapshotID: hostwrightUniqueID(prefix: "snapshot-apply"),
             projectID: projectID,
             observedState: observed,
-            runtimeAdapter: observed.adapterMetadata?.adapterName ?? "runtime-adapter",
+            runtimeAdapter: runtimeAdapter,
             parserVersion: "confirmed-apply-v1",
             rawOutputHash: nil,
             redactedSummary: PlanRenderer.render(plan, mode: .compact),
@@ -485,7 +495,7 @@ struct ApplyCommandRunner {
                 source: "hostwright-cli",
                 projectID: projectID,
                 serviceName: action.identity.serviceName,
-                runtimeAdapter: observed.adapterMetadata?.adapterName,
+                runtimeAdapter: runtimeAdapter,
                 message: "Apply intent recorded for \(action.identity.displayName).",
                 payloadJSONRedacted: #"{"planHash":"\#(plan.planHash)"}"#
             )

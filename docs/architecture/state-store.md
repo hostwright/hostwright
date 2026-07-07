@@ -61,7 +61,7 @@ Tests use unique temporary database paths. Future CLI/dev commands may add an ex
 
 `SQLiteStateStore.migrate()` is the only explicit migration path. Repository reads and writes validate the already-applied schema before accessing tables; they do not create a missing database, create `schema_migrations`, or apply migrations as a side effect.
 
-Schema version 4 is the latest supported state schema. A database migrated by a newer Hostwright release fails closed with an incompatible-schema error. Hostwright does not downgrade state databases and does not attempt compatibility conversion.
+Schema version 5 is the latest supported state schema. A database migrated by a newer Hostwright release fails closed with an incompatible-schema error. Hostwright does not downgrade state databases and does not attempt compatibility conversion.
 
 Each migration records a checksum in `schema_migrations`. Current builds accept the historical Phase 6 checksum for schema version 1 and record an algorithmic checksum for fresh migrations. If a known migration version has an unexpected checksum, Hostwright fails before reading or writing application records.
 
@@ -91,6 +91,8 @@ Version 4 creates:
 
 - `operation_groups`
 - `operation_group_steps`
+
+Version 5 backfills legacy ownership rows that used the pre-adapter-guard runtime adapter sentinel.
 
 Normalized columns hold identifiers, project names, service names, timestamps, lifecycle states, operation status, event severity, restart status, recovery status, checkpoints, lock lease fields, rollback availability flags, and hashes.
 

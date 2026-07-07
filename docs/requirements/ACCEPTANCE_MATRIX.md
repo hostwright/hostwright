@@ -168,3 +168,12 @@ Phase 8A is a required preflight before this mutation gate. It proves real read-
 | HW-RECON-005, HW-SAFE-004 | Recovery records include redacted manual recovery hints, completed/failed/unsupported steps, and no raw fake secrets. | Automated | State and CLI XCTest redaction assertions for operation groups, steps, and recovery JSON. |
 | HW-SAFE-001, HW-SAFE-002 | Recovery output distinguishes automatic, manual, and unsupported recovery without retrying or rolling back runtime changes. | Automated + manual | `hostwright recovery` XCTest JSON shape; CLI reference and limitations review. |
 | HW-RUNTIME-001, HW-RUNTIME-002, HW-STATE-001 | Phase 18 does not add direct Apple container shell-out, SQLite access outside `HostwrightState`, hidden default state paths, or new lifecycle commands. | Automated + manual | Full local gate plus targeted boundary scans and diff review. |
+
+## Phase 19 Gate: Cleanup Classification Maturity
+
+| Requirement IDs | Acceptance criteria | Verification type | Verification command or review |
+| --- | --- | --- | --- |
+| HW-SAFE-002, HW-SAFE-003, HW-STATE-005 | Cleanup dry-run classifies eligible, ambiguous, stale, running, unknown, blocked, and never-delete ownership-backed and observed-only resources. | Automated | CLI XCTest mixed cleanup classification and adapter-mismatch cases. |
+| HW-SAFE-002, HW-RUNTIME-006 | Confirmed cleanup deletes only exact eligible Hostwright-owned created/stopped/exited containers covered by the current token. | Automated + manual | CLI XCTest eligible-only execution assertions and runtime boundary scans. |
+| HW-STATE-003, HW-OBS-001 | Cleanup reports runtime partial failure and delete-success/state-persistence failure without hiding completed deletions. | Automated | CLI XCTest cases for partial runtime failure and state persistence failure after delete success. |
+| HW-DOCS-002, HW-SAFE-001 | Docs describe cleanup classification without claiming broad garbage collection, image cleanup, volume cleanup, unmanaged deletion, or automatic cleanup. | Manual | CLI, limitations, security-safety, requirements, and implementation-plan docs review. |

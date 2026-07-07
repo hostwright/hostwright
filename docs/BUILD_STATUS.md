@@ -49,6 +49,7 @@
 - Phase 16 adds bounded host-side health check execution, append-only health result persistence, restart policy state with max attempts/backoff/operator hold/manual-disable/crash-loop blocking, redacted health/restart events, and apply/daemon planning gates that avoid aggressive restart loops.
 - Phase 17 adds one restart-policy-gated managed restart path for exact Hostwright-owned running/unhealthy services, using live runtime lifecycle observation, a fresh persisted unhealthy health result from the explicit state DB, status/apply plan-hash parity, internal stop-then-start runtime execution, operation ledger records, partial restart failure records, and redacted events.
 - Phase 18 adds operation recovery groups and steps, apply checkpoints, active-operation locking with expired-lock interruption, rollback-unavailable step records, redacted manual recovery hints, legacy managed-restart recovery rendering, and read-only `hostwright recovery` output for failed or interrupted apply inspection.
+- Phase 19 adds cleanup dry-run classifications for eligible, ambiguous, stale, running, unknown, blocked, and never-delete ownership-backed and observed-only resources, keeps confirmed deletion limited to exact eligible Hostwright-owned non-running containers, hardens cleanup confirmation tokens against eligible-candidate drift, and reports delete-success/state-persistence failures as state failures.
 - No Apple container command was called by Phase 6 or Phase 7.
 - `FoundationRuntimeProcessRunner` exists for policy-approved read-only command specs and supported mutation specs; automated tests still use fake process execution.
 - `AppleContainerReadOnlyAdapter` reports missing `container` as runtime unavailable and rejects mutation through the adapter contract.
@@ -83,7 +84,7 @@ Important diagnostic correction:
 - `swift -e 'import XCTest'` can still fail and is not the correct gate.
 - A minimal SwiftPM XCTest probe passed after Xcode was fixed.
 - `swift test list` is the local proof that Hostwright now exposes real XCTest cases.
-- `swift test` executes 170 XCTest cases after the Phase 18 recovery update.
+- `swift test` executes 173 XCTest cases after the Phase 19 cleanup classification update.
 
 The old top-level smoke/precondition posture has been replaced with XCTest assertions. Some test file names still include `Smoke.swift`, but the contents are XCTest cases.
 

@@ -320,7 +320,8 @@ struct ApplyCommandRunner {
                     idempotencyKey: idempotencyKey,
                     planHash: plan.planHash,
                     projectID: projectID,
-                    timestamp: timestamp
+                    timestamp: timestamp,
+                    runtimeAdapter: observed.adapterMetadata?.adapterName ?? "runtime-adapter"
                 )
                 try recordManagedStartAttempt(
                     store: store,
@@ -508,7 +509,8 @@ struct ApplyCommandRunner {
         idempotencyKey: String,
         planHash: String,
         projectID: String,
-        timestamp: String
+        timestamp: String,
+        runtimeAdapter: String
     ) throws {
         try store.operations.record(
             OperationRecord(
@@ -547,7 +549,7 @@ struct ApplyCommandRunner {
                     resourceType: "container",
                     projectID: projectID,
                     serviceName: action.identity.serviceName,
-                    runtimeAdapter: "runtime-adapter",
+                    runtimeAdapter: runtimeAdapter,
                     createdAt: timestamp,
                     observedAt: timestamp,
                     cleanupEligible: action.executionAvailability == .availableForCreateMissingService,

@@ -1179,7 +1179,7 @@ final class HostwrightCLITests: XCTestCase {
                     resourceType: "container",
                     projectID: "project-demo",
                     serviceName: "api",
-                    runtimeAdapter: "fake",
+                    runtimeAdapter: "fake-apply-adapter",
                     createdAt: "2026-07-01T00:00:00Z",
                     observedAt: "2026-07-01T00:00:00Z",
                     cleanupEligible: true,
@@ -1200,6 +1200,7 @@ final class HostwrightCLITests: XCTestCase {
 
             XCTAssertEqual(dryRun.exitCode, 0)
             XCTAssertTrue(dryRun.standardOutput.contains("hostwright-demo-api"))
+            XCTAssertTrue(dryRun.standardOutput.contains("[eligible] hostwright-demo-api service=api lifecycle=stopped"))
             let token = dryRun.standardOutput
                 .split(separator: "\n")
                 .first { $0.hasPrefix("Confirmation token: ") }!
@@ -1231,6 +1232,232 @@ final class HostwrightCLITests: XCTestCase {
             let ownership = try SQLiteStateStore(path: databasePath).ownership.loadAll()
             XCTAssertEqual(ownership.count, 1)
             XCTAssertFalse(ownership[0].cleanupEligible)
+        }
+    }
+
+    func testCleanupDryRunClassifiesBlockedResourcesAndDeletesOnlyEligibleExactIDs() throws {
+        try withTemporaryDatabase { databasePath in
+            let files = FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest])
+            let store = SQLiteStateStore(path: databasePath)
+            try store.migrate()
+            try saveDesiredManifest(store: store, manifestText: singleServiceManifest)
+
+            func ownership(
+                _ id: String,
+                resourceIdentifier: String,
+                resourceType: String = "container",
+                serviceName: String,
+                runtimeAdapter: String = "fake-apply-adapter",
+                cleanupEligible: Bool = true
+            ) -> OwnershipRecord {
+                OwnershipRecord(
+                    id: id,
+                    resourceIdentifier: resourceIdentifier,
+                    resourceType: resourceType,
+                    projectID: "project-demo",
+                    serviceName: serviceName,
+                    runtimeAdapter: runtimeAdapter,
+                    createdAt: "2026-07-01T00:00:00Z",
+                    observedAt: "2026-07-01T00:00:00Z",
+                    cleanupEligible: cleanupEligible,
+                    metadataJSONRedacted: "{}"
+                )
+            }
+
+            let ownershipRecords = [
+                ownership("owner-api", resourceIdentifier: "hostwright-demo-api", serviceName: "api"),
+                ownership("owner-worker", resourceIdentifier: "hostwright-demo-worker", serviceName: "worker"),
+                ownership("owner-stale", resourceIdentifier: "hostwright-demo-stale", serviceName: "stale"),
+                ownership("owner-unknown", resourceIdentifier: "hostwright-demo-unknown", serviceName: "unknown"),
+                ownership("owner-dupe", resourceIdentifier: "hostwright-demo-dupe", serviceName: "dupe"),
+                ownership("owner-collide", resourceIdentifier: "hostwright-demo-collide", serviceName: "old-name"),
+                ownership("owner-adapter", resourceIdentifier: "hostwright-demo-adapter", serviceName: "adapter", runtimeAdapter: "other"),
+                ownership("owner-disabled", resourceIdentifier: "hostwright-demo-disabled", serviceName: "disabled", cleanupEligible: false),
+                ownership("owner-volume", resourceIdentifier: "hostwright-demo-volume", resourceType: "volume", serviceName: "volume"),
+                ownership("owner-external", resourceIdentifier: "external-container", serviceName: "external")
+            ]
+            for ownership in ownershipRecords {
+                try store.ownership.upsert(ownership)
+            }
+
+            let observed = ObservedRuntimeState(
+                projectName: "demo",
+                services: [
+                    ObservedRuntimeService(identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"), lifecycleState: .stopped),
+                    ObservedRuntimeService(identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "worker"), lifecycleState: .running),
+                    ObservedRuntimeService(identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "unknown"), lifecycleState: .unknown),
+                    ObservedRuntimeService(identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "dupe", instanceName: "one"), lifecycleState: .stopped),
+                    ObservedRuntimeService(identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "dupe", instanceName: "two"), lifecycleState: .exited),
+                    ObservedRuntimeService(identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "collide"), lifecycleState: .stopped),
+                    ObservedRuntimeService(identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "adapter"), lifecycleState: .stopped),
+                    ObservedRuntimeService(identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "disabled"), lifecycleState: .stopped),
+                    ObservedRuntimeService(identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "orphan"), lifecycleState: .stopped)
+                ],
+                adapterMetadata: fakeAdapterMetadata
+            )
+            let adapter = FakeApplyRuntimeAdapter(observedState: observed)
+
+            let dryRun = HostwrightCLI.run(
+                arguments: ["cleanup", "--state-db", databasePath, "--dry-run"],
+                environment: environment(files: files, runtimeAdapter: adapter)
+            )
+
+            XCTAssertEqual(dryRun.exitCode, 0)
+            XCTAssertTrue(dryRun.standardOutput.contains("[eligible] hostwright-demo-api"))
+            XCTAssertTrue(dryRun.standardOutput.contains("[running] hostwright-demo-worker"))
+            XCTAssertTrue(dryRun.standardOutput.contains("[stale] hostwright-demo-stale"))
+            XCTAssertTrue(dryRun.standardOutput.contains("[unknown] hostwright-demo-unknown"))
+            XCTAssertTrue(dryRun.standardOutput.contains("[ambiguous] hostwright-demo-dupe"))
+            XCTAssertTrue(dryRun.standardOutput.contains("[blocked] hostwright-demo-collide"))
+            XCTAssertTrue(dryRun.standardOutput.contains("[blocked] hostwright-demo-adapter"))
+            XCTAssertTrue(dryRun.standardOutput.contains("[never-delete] hostwright-demo-disabled"))
+            XCTAssertTrue(dryRun.standardOutput.contains("[never-delete] hostwright-demo-volume"))
+            XCTAssertTrue(dryRun.standardOutput.contains("[never-delete] external-container"))
+            XCTAssertTrue(dryRun.standardOutput.contains("[never-delete] hostwright-demo-orphan"))
+            XCTAssertTrue(dryRun.standardOutput.contains("observed container has no Hostwright ownership record"))
+
+            let token = dryRun.standardOutput
+                .split(separator: "\n")
+                .first { $0.hasPrefix("Confirmation token: ") }!
+                .replacingOccurrences(of: "Confirmation token: ", with: "")
+
+            let confirmed = HostwrightCLI.run(
+                arguments: ["cleanup", "--state-db", databasePath, "--confirm-cleanup", token],
+                environment: environment(files: files, runtimeAdapter: adapter)
+            )
+
+            XCTAssertEqual(confirmed.exitCode, 0)
+            XCTAssertEqual(adapter.executedActions.map(\.identity.serviceName), ["api"])
+            XCTAssertTrue(confirmed.standardOutput.contains("- deleted hostwright-demo-api"))
+            XCTAssertFalse(confirmed.standardOutput.contains("- deleted hostwright-demo-worker"))
+            XCTAssertFalse(confirmed.standardOutput.contains("- deleted hostwright-demo-dupe"))
+
+            let ownership = try store.ownership.loadAll()
+            XCTAssertFalse(try XCTUnwrap(ownership.first { $0.resourceIdentifier == "hostwright-demo-api" }).cleanupEligible)
+            XCTAssertTrue(try XCTUnwrap(ownership.first { $0.resourceIdentifier == "hostwright-demo-worker" }).cleanupEligible)
+            XCTAssertTrue(try XCTUnwrap(ownership.first { $0.resourceIdentifier == "hostwright-demo-dupe" }).cleanupEligible)
+        }
+    }
+
+    func testApplyOwnershipUsesObservedAdapterAndCleanupBlocksAdapterMismatch() throws {
+        try withTemporaryDatabase { databasePath in
+            let files = FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest])
+            let applyAdapter = FakeApplyRuntimeAdapter()
+            let expectedHash = try planHash(for: singleServiceManifest, observed: applyAdapter.observedState)
+
+            let apply = HostwrightCLI.run(
+                arguments: ["apply", "--state-db", databasePath, "--confirm-plan", expectedHash],
+                environment: environment(files: files, runtimeAdapter: applyAdapter)
+            )
+
+            XCTAssertEqual(apply.exitCode, 0)
+            let ownership = try SQLiteStateStore(path: databasePath).ownership.loadAll()
+            XCTAssertEqual(ownership.count, 1)
+            XCTAssertEqual(ownership[0].runtimeAdapter, "fake-apply-adapter")
+
+            let stoppedObserved = ObservedRuntimeState(
+                projectName: "demo",
+                services: [ObservedRuntimeService(identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"), lifecycleState: .stopped)],
+                adapterMetadata: fakeAdapterMetadata
+            )
+            let cleanupAdapter = FakeApplyRuntimeAdapter(observedState: stoppedObserved)
+            let eligibleDryRun = HostwrightCLI.run(
+                arguments: ["cleanup", "--state-db", databasePath, "--dry-run"],
+                environment: environment(files: files, runtimeAdapter: cleanupAdapter)
+            )
+            XCTAssertEqual(eligibleDryRun.exitCode, 0)
+            XCTAssertTrue(eligibleDryRun.standardOutput.contains("[eligible] hostwright-demo-api"))
+
+            let otherMetadata = RuntimeAdapterMetadata(
+                adapterName: "other-apply-adapter",
+                adapterVersion: "test",
+                runtimeName: "other-runtime",
+                runtimeVersion: nil,
+                supportsMutation: true,
+                capabilities: [.readOnlyObservation, .lifecycleMutation, .logStreaming, .cleanup]
+            )
+            let mismatchedObserved = ObservedRuntimeState(
+                projectName: "demo",
+                services: [ObservedRuntimeService(identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"), lifecycleState: .stopped)],
+                adapterMetadata: otherMetadata
+            )
+            let mismatchedAdapter = FakeApplyRuntimeAdapter(observedState: mismatchedObserved)
+            let blockedDryRun = HostwrightCLI.run(
+                arguments: ["cleanup", "--state-db", databasePath, "--dry-run"],
+                environment: environment(files: files, runtimeAdapter: mismatchedAdapter)
+            )
+
+            XCTAssertEqual(blockedDryRun.exitCode, 0)
+            XCTAssertTrue(blockedDryRun.standardOutput.contains("[blocked] hostwright-demo-api"))
+            XCTAssertTrue(blockedDryRun.standardOutput.contains("runtime adapter mismatch"))
+            let blockedToken = blockedDryRun.standardOutput
+                .split(separator: "\n")
+                .first { $0.hasPrefix("Confirmation token: ") }!
+                .replacingOccurrences(of: "Confirmation token: ", with: "")
+
+            let blockedConfirm = HostwrightCLI.run(
+                arguments: ["cleanup", "--state-db", databasePath, "--confirm-cleanup", blockedToken],
+                environment: environment(files: files, runtimeAdapter: mismatchedAdapter)
+            )
+
+            XCTAssertEqual(blockedConfirm.exitCode, CLIExitCode.commandUsage.rawValue)
+            XCTAssertEqual(mismatchedAdapter.executedActions.count, 0)
+        }
+    }
+
+    func testCleanupDeleteSuccessStatePersistenceFailureIsReportedAsStateUnavailable() throws {
+        try withTemporaryDatabase { databasePath in
+            let files = FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest])
+            let store = SQLiteStateStore(path: databasePath)
+            try store.migrate()
+            try saveDesiredManifest(store: store, manifestText: singleServiceManifest)
+            try store.ownership.upsert(
+                OwnershipRecord(
+                    id: "owner-api",
+                    resourceIdentifier: "hostwright-demo-api",
+                    resourceType: "container",
+                    projectID: "project-demo",
+                    serviceName: "api",
+                    runtimeAdapter: "fake-apply-adapter",
+                    createdAt: "2026-07-01T00:00:00Z",
+                    observedAt: "2026-07-01T00:00:00Z",
+                    cleanupEligible: true,
+                    metadataJSONRedacted: "{}"
+                )
+            )
+            let observed = ObservedRuntimeState(
+                projectName: "demo",
+                services: [ObservedRuntimeService(identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"), lifecycleState: .stopped)],
+                adapterMetadata: fakeAdapterMetadata
+            )
+            let adapter = FakeApplyRuntimeAdapter(
+                observedState: observed,
+                onExecute: { _ in
+                    try FileManager.default.removeItem(atPath: databasePath)
+                    try FileManager.default.createDirectory(atPath: databasePath, withIntermediateDirectories: false)
+                }
+            )
+
+            let dryRun = HostwrightCLI.run(
+                arguments: ["cleanup", "--state-db", databasePath, "--dry-run"],
+                environment: environment(files: files, runtimeAdapter: adapter)
+            )
+            let token = dryRun.standardOutput
+                .split(separator: "\n")
+                .first { $0.hasPrefix("Confirmation token: ") }!
+                .replacingOccurrences(of: "Confirmation token: ", with: "")
+
+            let confirmed = HostwrightCLI.run(
+                arguments: ["cleanup", "--state-db", databasePath, "--confirm-cleanup", token],
+                environment: environment(files: files, runtimeAdapter: adapter)
+            )
+
+            XCTAssertEqual(confirmed.exitCode, CLIExitCode.stateUnavailable.rawValue)
+            XCTAssertTrue(confirmed.standardOutput.contains("- deleted hostwright-demo-api"))
+            XCTAssertTrue(confirmed.standardOutput.contains("- state update failed hostwright-demo-api"))
+            XCTAssertTrue(confirmed.standardError.contains(HostwrightErrorCode.stateStoreUnavailable.rawValue))
+            XCTAssertFalse(confirmed.standardError.contains(HostwrightErrorCode.runtimeUnavailable.rawValue))
+            XCTAssertEqual(adapter.executedActions.map(\.kind), [.remove])
         }
     }
 
@@ -1447,7 +1674,7 @@ final class HostwrightCLITests: XCTestCase {
                         resourceType: "container",
                         projectID: "project-demo",
                         serviceName: service,
-                        runtimeAdapter: "fake",
+                        runtimeAdapter: "fake-apply-adapter",
                         createdAt: "2026-07-01T00:00:00Z",
                         observedAt: "2026-07-01T00:00:00Z",
                         cleanupEligible: true,

@@ -27,7 +27,7 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 | 16 | Health Checks and Restart Policy Expansion | Complete locally | Add bounded health execution and crash-loop-aware restart policy state. | Health results, max attempts, backoff, manual disable, preexisting operator hold blocking, crash-loop blocking, and redacted events are tested. |
 | 17 | Managed Restart | Complete locally | Add one narrow Hostwright-owned restart path as an explicit stop-then-start sequence. | Ownership, running observed state, plan hash, operation ledger, recovery record, and fake-runner tests pass. |
 | 18 | Rollback and Partial Failure Recovery | Complete locally | Model operation groups, locks, checkpoints, interruption recovery, and manual recovery hints. | Partial failure and crash/interruption records explain what changed and what remains manual. |
-| 19 | Cleanup and Garbage Collection Maturity | Planned | Improve cleanup classification, ownership mismatch handling, stale ID protection, and partial failure behavior. | Dry-run classifications and exact delete boundaries pass without image, volume, or unmanaged deletion. |
+| 19 | Cleanup and Garbage Collection Maturity | Complete locally | Improve cleanup classification, ownership mismatch handling, stale ID protection, and partial failure behavior. | Dry-run classifications and exact delete boundaries pass without image, volume, or unmanaged deletion. |
 | 20 | Observability and Diagnostics | Planned | Add redacted diagnostics, local-only telemetry policy, audit trail, event filtering, and improved doctor/status output. | Diagnostic bundles, redaction, event ordering/filtering, and local-only telemetry policy are tested. |
 
 ## Current Hard Boundaries
@@ -201,3 +201,14 @@ Phase 17 does not add broad lifecycle management, daemon-enforced restart loops,
 - XCTest coverage covers operation group acquire/release behavior, stale active lease expiration, step append/reload behavior, redaction, apply success/failure/interrupted state, pre-runtime persistence interruption, managed restart stop-success/start-failure recovery steps, read-only recovery behavior, legacy restart recovery rendering, and recovery JSON rendering.
 
 Phase 18 does not add automatic rollback, inverse runtime mutation, multi-action apply, unattended daemon mutation, broad lifecycle commands, image cleanup, volume cleanup, unmanaged cleanup, release tags, or GitHub Releases.
+
+## Phase 19 Outputs
+
+- `hostwright cleanup --dry-run` now classifies ownership-backed and observed-only cleanup assessments as eligible, ambiguous, stale, running, unknown, blocked, or never-delete.
+- Confirmation tokens are derived from eligible candidate identity, lifecycle, runtime adapter, and resource identifier so relevant drift invalidates stale cleanup confirmation.
+- Confirmed cleanup still deletes only eligible exact Hostwright-owned created/stopped/exited containers through `RuntimeAdapter`.
+- Ownership/service mismatches, duplicate observed identifiers, adapter mismatches, missing observations, observed-only resources, running containers, unknown lifecycle state, non-container records, disabled cleanup eligibility, and non-Hostwright identifiers are reported without deletion.
+- Cleanup delete success followed by state persistence failure is reported as state unavailable while preserving the actual deletion in command output.
+- XCTest coverage covers mixed dry-run classification, observed-only resources, adapter-mismatch blocking, exact eligible-only delete execution, cleanup token confirmation, runtime partial failure, and delete-success/state-failure reporting.
+
+Phase 19 does not add image cleanup, volume cleanup, unmanaged deletion, wildcard deletion, force flags, automatic cleanup, broad garbage collection, release tags, or GitHub Releases.

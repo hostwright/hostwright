@@ -230,7 +230,15 @@ Plans cleanup candidates only. A candidate is eligible only when all of these ar
 - the project/service match the manifest;
 - live observation shows the service is created, stopped, or exited, not running.
 
-The dry run prints an exact confirmation token.
+The dry run prints an exact confirmation token and classifies ownership-backed and observed-only resources:
+
+- `eligible`: exact Hostwright-owned created/stopped/exited container covered by the token.
+- `ambiguous`: duplicate observed runtime identities make the target unsafe.
+- `stale`: ownership exists but no matching live container is observed, or runtime reports it missing.
+- `running`: live container is running and is never deleted by cleanup.
+- `unknown`: runtime lifecycle is unknown.
+- `blocked`: ownership/service/adapter state does not safely match the live observation.
+- `never-delete`: cleanup eligibility is disabled, the record is not a container, belongs to another project, is not Hostwright-managed, or is observed without a Hostwright ownership record.
 
 Failure example:
 
@@ -240,11 +248,11 @@ HW-CLI-001: cleanup requires exactly one of --dry-run or --confirm-cleanup <toke
 
 ## `hostwright cleanup [path] --state-db <path> --confirm-cleanup <token>`
 
-Deletes only the exact eligible containers covered by the current cleanup token through `RuntimeAdapter`.
+Deletes only `eligible` containers covered by the current cleanup token through `RuntimeAdapter`.
 
 It never deletes images, volumes, networks, or unmanaged containers and never uses broad flags such as `--all` or `--force`.
 
-If one candidate fails after another succeeds, the process exits with code `72` and preserves successful deletions in the report.
+If one runtime delete fails after another succeeds, the process exits with code `72` and preserves successful deletions in the report. If a delete succeeds but success-state persistence fails, the process reports state unavailable and keeps the deletion visible in stdout.
 
 ## `hostwright doctor [--output text|json]`
 

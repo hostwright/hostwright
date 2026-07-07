@@ -295,6 +295,29 @@ final class HostwrightCLITests: XCTestCase {
         }
     }
 
+    func testApplyRejectsMissingRuntimeAdapterMetadataBeforeMutation() throws {
+        try withTemporaryDatabase { databasePath in
+            let files = FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest])
+            let observed = ObservedRuntimeState(projectName: "demo", services: [], adapterMetadata: nil)
+            let adapter = FakeApplyRuntimeAdapter(observedState: observed)
+            let expectedHash = try planHash(for: singleServiceManifest, observed: observed)
+
+            let result = HostwrightCLI.run(
+                arguments: ["apply", "--state-db", databasePath, "--confirm-plan", expectedHash],
+                environment: environment(files: files, runtimeAdapter: adapter)
+            )
+
+            XCTAssertEqual(result.exitCode, CLIExitCode.runtimeUnavailable.rawValue)
+            XCTAssertTrue(result.standardError.contains("adapter metadata"))
+            XCTAssertTrue(adapter.executedActions.isEmpty)
+
+            let store = SQLiteStateStore(path: databasePath)
+            XCTAssertTrue(try store.operations.loadAll().isEmpty)
+            XCTAssertTrue(try store.operationGroups.loadAll().isEmpty)
+            XCTAssertTrue(try store.ownership.loadAll().isEmpty)
+        }
+    }
+
     func testApplyCanStartStoppedServiceWhenRestartPolicyAllowsIt() throws {
         try withTemporaryDatabase { databasePath in
             let files = FileBox(files: [HostwrightIdentity.manifestFileName: restartableServiceManifest])
@@ -1567,6 +1590,54 @@ final class HostwrightCLITests: XCTestCase {
         }
     }
 
+    func testCleanupMigratesLegacyOwnershipRuntimeAdapterBeforeClassification() throws {
+        try withTemporaryDatabase { databasePath in
+            let files = FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest])
+            let store = SQLiteStateStore(path: databasePath)
+            try store.migrate()
+            try saveDesiredManifest(store: store, manifestText: singleServiceManifest)
+            let connection = try SQLiteConnection(path: databasePath)
+            try connection.run("DELETE FROM schema_migrations WHERE version = 5")
+            try connection.run(
+                """
+                INSERT INTO ownership_records (
+                    id, resource_identifier, resource_type, project_id, service_name, runtime_adapter,
+                    created_at, observed_at, cleanup_eligible, metadata_json_redacted
+                )
+                VALUES (
+                    'owner-legacy', 'hostwright-demo-api', 'container', 'project-demo', 'api',
+                    'runtime-adapter', '2026-07-01T00:00:00Z', '2026-07-01T00:00:00Z', 1, '{}'
+                )
+                """
+            )
+            let appleApplyMetadata = RuntimeAdapterMetadata(
+                adapterName: "AppleContainerApplyAdapter",
+                adapterVersion: "test",
+                runtimeName: "Apple container CLI",
+                runtimeVersion: nil,
+                supportsMutation: true,
+                capabilities: [.readOnlyObservation, .lifecycleMutation, .logStreaming, .cleanup]
+            )
+            let stoppedObserved = ObservedRuntimeState(
+                projectName: "demo",
+                services: [ObservedRuntimeService(identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"), lifecycleState: .stopped)],
+                adapterMetadata: appleApplyMetadata
+            )
+
+            let result = HostwrightCLI.run(
+                arguments: ["cleanup", "--state-db", databasePath, "--dry-run"],
+                environment: environment(files: files, runtimeAdapter: FakeApplyRuntimeAdapter(observedState: stoppedObserved))
+            )
+
+            XCTAssertEqual(result.exitCode, 0)
+            XCTAssertTrue(result.standardOutput.contains("[eligible] hostwright-demo-api"))
+            XCTAssertFalse(result.standardOutput.contains("runtime adapter mismatch"))
+            let ownership = try SQLiteStateStore(path: databasePath).ownership.loadAll()
+            XCTAssertEqual(ownership.count, 1)
+            XCTAssertEqual(ownership[0].runtimeAdapter, "AppleContainerApplyAdapter")
+        }
+    }
+
     func testCleanupDeleteSuccessStatePersistenceFailureIsReportedAsStateUnavailable() throws {
         try withTemporaryDatabase { databasePath in
             let files = FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest])
@@ -2053,7 +2124,7 @@ final class HostwrightCLITests: XCTestCase {
                 resourceType: "container",
                 projectID: "project-demo",
                 serviceName: "api",
-                runtimeAdapter: "runtime-adapter",
+                runtimeAdapter: fakeAdapterMetadata.adapterName,
                 createdAt: "2026-07-01T00:00:00Z",
                 observedAt: "2026-07-01T00:00:00Z",
                 cleanupEligible: true,

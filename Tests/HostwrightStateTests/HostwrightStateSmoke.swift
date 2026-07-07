@@ -33,6 +33,40 @@ final class HostwrightStateTests: XCTestCase {
         }
     }
 
+    func testMigrationBackfillsLegacyOwnershipRuntimeAdapter() throws {
+        try withTemporaryStore { store, databaseURL in
+            try store.migrate()
+            let connection = try SQLiteConnection(path: databaseURL.path)
+            try simulateDatabaseBeforeOwnershipAdapterBackfill(connection: connection)
+            try insertOwnershipRecord(connection: connection, id: "owner-legacy", runtimeAdapter: "runtime-adapter")
+
+            try store.migrate()
+
+            let ownership = try store.ownership.loadAll()
+            XCTAssertEqual(ownership.count, 1)
+            XCTAssertEqual(ownership[0].runtimeAdapter, "AppleContainerApplyAdapter")
+            XCTAssertEqual(try store.schemaVersion(), MigrationRunner.latestSchemaVersion)
+        }
+    }
+
+    func testMigrationDropsDuplicateLegacyOwnershipRuntimeAdapter() throws {
+        try withTemporaryStore { store, databaseURL in
+            try store.migrate()
+            let connection = try SQLiteConnection(path: databaseURL.path)
+            try simulateDatabaseBeforeOwnershipAdapterBackfill(connection: connection)
+            try insertOwnershipRecord(connection: connection, id: "owner-legacy", runtimeAdapter: "runtime-adapter")
+            try insertOwnershipRecord(connection: connection, id: "owner-canonical", runtimeAdapter: "AppleContainerApplyAdapter")
+
+            try store.migrate()
+
+            let ownership = try store.ownership.loadAll()
+            XCTAssertEqual(ownership.count, 1)
+            XCTAssertEqual(ownership[0].id, "owner-canonical")
+            XCTAssertEqual(ownership[0].runtimeAdapter, "AppleContainerApplyAdapter")
+            XCTAssertEqual(try store.schemaVersion(), MigrationRunner.latestSchemaVersion)
+        }
+    }
+
     func testRepositoryReadsDoNotCreateOrMigrateStateDatabase() throws {
         try withTemporaryDirectory { directory in
             let databaseURL = directory.appendingPathComponent("missing.sqlite")
@@ -890,6 +924,34 @@ final class HostwrightStateTests: XCTestCase {
             desiredGeneration: 1,
             manifest: manifest,
             timestamp: timestamp
+        )
+    }
+
+    private func simulateDatabaseBeforeOwnershipAdapterBackfill(connection: SQLiteConnection) throws {
+        try connection.run("DELETE FROM ownership_records")
+        try connection.run("DELETE FROM schema_migrations WHERE version = 5")
+    }
+
+    private func insertOwnershipRecord(
+        connection: SQLiteConnection,
+        id: String,
+        runtimeAdapter: String
+    ) throws {
+        try connection.run(
+            """
+            INSERT INTO ownership_records (
+                id, resource_identifier, resource_type, project_id, service_name, runtime_adapter,
+                created_at, observed_at, cleanup_eligible, metadata_json_redacted
+            )
+            VALUES (?, ?, 'container', NULL, 'api', ?, ?, ?, 1, '{}')
+            """,
+            bindings: [
+                .text(id),
+                .text("hostwright-api-local-api"),
+                .text(runtimeAdapter),
+                .text(timestamp),
+                .text(timestamp)
+            ]
         )
     }
 

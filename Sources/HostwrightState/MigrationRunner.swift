@@ -37,7 +37,7 @@ public struct SchemaMigration: Equatable, Sendable {
 }
 
 public struct MigrationRunner: Sendable {
-    public static let latestSchemaVersion = 4
+    public static let latestSchemaVersion = 5
 
     public init() {}
 
@@ -462,6 +462,27 @@ public struct MigrationRunner: Sendable {
                 "CREATE INDEX IF NOT EXISTS operation_groups_lock_idx ON operation_groups(lock_owner, lock_expires_at)",
                 "CREATE INDEX IF NOT EXISTS operation_group_steps_group_idx ON operation_group_steps(group_id)",
                 "CREATE INDEX IF NOT EXISTS operation_group_steps_idempotency_idx ON operation_group_steps(step_idempotency_key)"
+            ]
+        ),
+        SchemaMigration(
+            version: 5,
+            description: "Backfill legacy ownership runtime adapter names",
+            statements: [
+                """
+                DELETE FROM ownership_records
+                WHERE runtime_adapter = 'runtime-adapter'
+                  AND EXISTS (
+                    SELECT 1
+                    FROM ownership_records AS canonical
+                    WHERE canonical.resource_identifier = ownership_records.resource_identifier
+                      AND canonical.runtime_adapter = 'AppleContainerApplyAdapter'
+                  )
+                """,
+                """
+                UPDATE ownership_records
+                SET runtime_adapter = 'AppleContainerApplyAdapter'
+                WHERE runtime_adapter = 'runtime-adapter'
+                """
             ]
         )
     ]

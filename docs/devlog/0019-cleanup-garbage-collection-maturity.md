@@ -13,7 +13,7 @@
 - Ownership records remain the cleanup authority.
 - Observed containers without ownership records are reported for operator awareness but never become cleanup candidates.
 - Missing or ambiguous live observation is a refusal condition, not a reason to infer deletion.
-- Legacy ownership rows that use the previous runtime-adapter sentinel are blocked until ownership can be re-established through a current apply path.
+- Legacy ownership rows that use the previous runtime-adapter sentinel are upgraded by the state migration before cleanup classification.
 
 ## Rejected paths
 

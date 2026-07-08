@@ -35,6 +35,7 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 | 24 | Secrets, Credentials, And Keychain Boundary | Complete locally | Add local secret references, fake Keychain backend, unavailable live backend, and redaction hardening. | `secretEnv`, fake backend resolution, fail-closed unavailable backend, and redacted state/diagnostics/plans pass tests. |
 | 25 | Supply Chain And Image Trust | Complete for local digest policy | Add local image digest-reference policy and document trust-tool boundaries. | `imagePolicy: require-digest`, digest syntax validation, schema alignment, docs boundary, and overclaim tests pass without registry calls or scanner/signing dependencies. |
 | 26 | Apple Silicon Resource Intelligence | Complete locally | Add local resource reports and benchmark-methodology boundaries without scheduler or accelerator claims. | Doctor resource reports, fixture parsing, architecture warnings, unmeasured benchmark dimensions, and docs boundary tests pass. |
+| 27 | Apple Silicon Accelerator Boundary Research | Complete locally | Decide GPU, ANE, Metal, Core ML, MLX, PyTorch MPS, host-native accelerator, and scheduler boundaries before implementation. | Decision record rejects or defers every accelerator path and docs guard unsupported current-support claims. |
 
 ## Current Hard Boundaries
 
@@ -53,6 +54,7 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 - Networking remains local-first: Hostwright-created publishes use `127.0.0.1`, observed host-port conflicts block planning, and DNS/service discovery/reverse proxy/tunnel/cloud exposure remain unsupported.
 - Image trust remains local-first: `imagePolicy: require-digest` validates `@sha256` reference syntax only and does not resolve registries, pull images, verify signatures, scan vulnerabilities, generate SBOMs, or prove provenance.
 - Resource intelligence remains local and diagnostic: it reports host facts and explicit unmeasured dimensions without capacity guarantees, runtime mutation, image pulls, external telemetry, accelerator scheduling, or Apple container command execution from `doctor`.
+- Accelerator behavior remains unsupported: Hostwright does not expose Apple GPU, ANE, Metal, Core ML, MLX, PyTorch MPS, host-native accelerator helpers, or accelerator-aware scheduling in current core scope.
 
 ## Phase 3 Outputs
 
@@ -287,3 +289,14 @@ Phase 25 does not add registry lookup, image pull, registry credentials, signatu
 - Added a resource-intelligence methodology document with benchmark input requirements, blocked evidence, and rejected claims.
 
 Phase 26 does not add runtime density measurement, VM-overhead benchmarking, boot-latency benchmarking, polling-overhead benchmarking, battery measurement, sleep/wake live proofing, workload memory-pressure benchmarking, automatic placement, capacity guarantees, GPU/ANE/Metal/Core ML/MLX support, accelerator scheduling, image pulls, Apple container command execution from doctor, runtime mutation expansion, release tags, or GitHub Releases.
+
+## Phase 27 Outputs
+
+- `docs/architecture/accelerator-boundary-research.md` records research-only decisions for Apple container accelerator passthrough, PyTorch MPS, MLX, Core ML, ANE, host-native accelerator helpers, read-only host accelerator detection, and scheduler accelerator dimensions.
+- Current Apple-container accelerator claims are rejected until an official supported access path, versioned disposable proof, threat model, Phase 32 policy gate, and maintainer approval exist.
+- Host-native accelerator helpers are deferred to plugin or later prototype work because they expand local auth, IPC, lifecycle, redaction, audit, data exposure, and cleanup scope.
+- Scheduler accelerator dimensions remain blocked placeholders until an approved implementation proves accelerator access and measured capacity.
+- Public limitations, security/safety notes, requirements, and acceptance gates keep GPU, ANE, Metal, Core ML, MLX, PyTorch MPS, host-native accelerator helpers, and accelerator-aware placement listed as unsupported current behavior.
+- XCTest coverage guards the research decision and unsupported-current-support wording.
+
+Phase 27 does not add GPU, ANE, Metal, Core ML, MLX, PyTorch MPS support, host accelerator device exposure, host-native services, read-only accelerator probes, accelerator scheduling, runtime mutation, image pulls, dependencies, release tags, or GitHub Releases.

@@ -228,3 +228,11 @@ Phase 8A is a required preflight before this mutation gate. It proves real read-
 | HW-COMPAT-006, HW-MANIFEST-005 | Non-arm64 image architecture warnings are emitted only when explicit image architecture evidence exists and do not block workloads by themselves. | Automated | Health XCTest architecture-warning cases for arm64, amd64, x86_64, linux/amd64, nil evidence, and non-arm64 hosts. |
 | HW-COMPAT-004, HW-REL-004, HW-DOCS-002 | Docs describe benchmark methodology and blocked evidence without claiming production capacity, accelerator scheduling, GPU/ANE/Metal/Core ML/MLX support, telemetry upload, or automatic placement. | Automated + manual | Core docs XCTest and review of resource-intelligence, compatibility, limitations, and Apple silicon constraints docs. |
 | HW-RUNTIME-001, HW-RUNTIME-002, HW-STATE-001 | Resource intelligence does not add direct Apple container shell-out, runtime mutation, image pull, hidden state writes, or SQLite access outside `HostwrightState`. | Automated + manual | Full local gate plus targeted boundary scans and diff review. |
+
+## Phase 27 Gate: Apple Silicon Accelerator Boundary Research
+
+| Requirement IDs | Acceptance criteria | Verification type | Verification command or review |
+| --- | --- | --- | --- |
+| HW-COMPAT-004, HW-COMPAT-007 | Apple container accelerator passthrough, PyTorch MPS, MLX, Core ML, ANE, host-native accelerator helpers, read-only accelerator detection, and scheduler accelerator dimensions have explicit reject or defer decisions before implementation. | Automated + manual | Core docs XCTest and accelerator boundary decision-record review. |
+| HW-COMPAT-006, HW-REL-004, HW-DOCS-002 | Public docs still state that Hostwright does not currently implement GPU, ANE, Metal, Core ML, MLX, PyTorch MPS, host-native accelerator helpers, host accelerator device exposure, or accelerator-aware scheduling. | Automated + manual | Core docs XCTest; limitations, security-safety, resource-intelligence, and Apple silicon constraints review. |
+| HW-RUNTIME-001, HW-RUNTIME-002, HW-STATE-001 | Research does not add runtime mutation, Apple container command execution from doctor, image pulls, dependencies, hidden state paths, host-native services, or accelerator probes. | Manual | Diff review plus full local gate and targeted boundary scans. |

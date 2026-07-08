@@ -72,6 +72,12 @@ Operators should still decide which registries, image publishers, digests, and l
 
 Manifest ports use `"host:container"` syntax in this alpha and do not expose a bind-address field. Hostwright-created Apple container publishes use explicit `127.0.0.1:host:container` bindings by default. Broad bind addresses such as `0.0.0.0` and `::` remain blocked when represented in runtime desired state, and observed non-target services occupying the same host port block mutation planning when live observation is available.
 
+## Accelerator Boundary
+
+Apple GPU, ANE, Metal, Core ML, MLX, PyTorch MPS, host-native accelerator helpers, host accelerator device exposure, and accelerator-aware scheduling are not implemented in current core scope.
+
+Host-native accelerator helpers or services require a separate threat model, local auth design, IPC boundary, redaction and audit plan, cleanup model, policy gate, and maintainer approval before implementation. Private or undocumented accelerator interfaces are rejected.
+
 ## Unsupported Security-Sensitive Scope
 
 This alpha does not include:
@@ -82,6 +88,6 @@ This alpha does not include:
 - DNS or tunnel management;
 - cloud control plane;
 - Kubernetes, CRI, Docker API, or Docker Compose compatibility;
-- GPU/ANE scheduling or Metal/Core ML/MLX container support;
+- GPU/ANE scheduling, Metal/Core ML/MLX/PyTorch MPS container support, host-native accelerator helpers, or host accelerator device exposure;
 - signing, notarization, signature verification, SBOM generation/validation, vulnerability scanning, or binary provenance.
 - external telemetry, hosted diagnostics, or automatic diagnostic upload.

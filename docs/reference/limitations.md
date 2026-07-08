@@ -123,6 +123,7 @@ Hostwright is not production ready.
 - Attach, exec, log-follow, or port-forward compatibility.
 - External scheduler API compatibility.
 - Multi-Mac orchestration.
+- Remote host agents, membership service, peer discovery, state replication, remote mutation, remote placement, or scheduler API.
 - Local DNS resolver.
 - Cloudflare, Tailscale, WireGuard, or other tunnel integration.
 - Cloud control plane.
@@ -140,6 +141,8 @@ The manifest parser is not a general YAML parser. It accepts only the documented
 The stack-file importer is also not a general YAML or Compose parser. It converts only the reviewed import subset and fails closed for unsupported networking, discovery, build, deploy, secret, config, named-volume, shell-healthcheck, lifecycle, cloud, and tunnel semantics. Import output is text for operator review; it does not write manifests, observe runtime, pull images, inspect registries, or run compatibility shims.
 
 External orchestration compatibility remains research-only. Phase 29 rejects current-core CRI shims, Kubernetes node behavior, Docker API shims, Testcontainers target behavior, full Compose parity, attach, exec, log-follow, and port-forward compatibility because those contracts require protocol, stream, lifecycle, state-authority, identity, networking, logging, and scheduler behavior outside Hostwright's local `RuntimeAdapter` scope. Any prototype requires a separate maintainer-approved issue.
+
+Multi-host platform work remains research-only. Phase 30 keeps current core single-host and rejects current-core remote host agents, membership service, peer discovery, state replication, remote mutation, remote placement, cloud control plane, and scheduler API behavior because those contracts require host identity, transport trust, state authority, quorum or other replication semantics, failure recovery, audit, and scheduler policy outside the current local state model. Any prototype requires a separate maintainer-approved issue.
 
 Manifest image trust is limited to local reference policy. `imagePolicy: require-digest` rejects tag-only service images unless they include a `sha256` digest. Hostwright does not query registries, resolve tags, verify signatures, inspect SBOMs, scan vulnerabilities, or prove provenance.
 

@@ -8,9 +8,9 @@
 
 ## Verified On 2026-07-08
 
-- `swift build` succeeds after the Phase 29 external orchestration compatibility research changes.
-- `swift test list` lists 229 real XCTest cases across Hostwright test targets.
-- `swift test` executes 229 real XCTest test cases across CLI, core, daemon, health, import, manifest, networking, observability, policy, reconciler, runtime, and state targets with 0 failures.
+- `swift build` succeeds after the Phase 30 multi-host platform research changes.
+- `swift test list` lists 230 real XCTest cases across Hostwright test targets.
+- `swift test` executes 230 real XCTest test cases across CLI, core, daemon, health, import, manifest, networking, observability, policy, reconciler, runtime, and state targets with 0 failures.
 - `scripts/grep-orchard.sh .` succeeds and reports historical references only in `docs/source-material/` and `docs/naming/`.
 - `scripts/test.sh` succeeds and runs `swift build` plus `swift test`.
 - `scripts/lint.sh` succeeds.
@@ -22,6 +22,7 @@
 - Phase 32 added a local deterministic policy engine and policy docs without remote policy service, team workflow, silent bypass, Apple container command execution from policy, SQLite access from policy, runtime mutation, registry calls, image pulls, telemetry upload, or accelerator implementation.
 - Phase 28 adds import-only stack-file conversion and docs without Docker Compose parity, runtime compatibility claims, file writes, RuntimeAdapter calls, Apple container commands, SQLite access, registry calls, image pulls, DNS/tunnel/cloud behavior, or runtime mutation.
 - Phase 29 was research-only. It added an external orchestration compatibility decision record and docs guard test without adding CRI, Kubernetes node behavior, Docker API, Compose parity, Testcontainers behavior, attach, exec, log following, port forwarding, external scheduler integration, runtime mutation, state writes, network calls, image pulls, dependencies, release tags, or GitHub Releases.
+- Phase 30 was research-only. It added a multi-host platform decision record and docs guard test without adding multi-host orchestration, remote mutation, remote host agents, state replication, membership service, peer discovery, transport or certificate implementation, cloud control plane, DNS/tunnel behavior, scheduler API, remote placement, runtime mutation expansion, state writes, network calls, image pulls, dependencies, release tags, or GitHub Releases.
 - `container list --all --format json` returned the verified empty runtime shape `[]`.
 - A disposable local image `hostwright-proof-web:phase8b` was built from the Apple tutorial-style `python:alpine` flow.
 - `hostwright apply` created exactly one Apple container named `hostwright-proof-web` through `RuntimeAdapter`.
@@ -68,6 +69,7 @@
 - Phase 32 adds `HostwrightPolicy` with deterministic local policy decisions for planner checks, cleanup classification, image policy, env/secrets, lifecycle, untrusted manifests, secure exposure, and accelerator placeholders while preserving existing runtime/state boundaries.
 - Phase 28 adds `HostwrightImport` and `hostwright import-stack <path> [--output text|json]` for deterministic conversion of a narrow safe stack-file subset into reviewed `hostwright.yaml` text, with fail-closed unsupported-field diagnostics and normal manifest validation.
 - Phase 29 adds a research-only external orchestration compatibility decision record that rejects current-core CRI, Kubernetes node behavior, Docker API, Testcontainers target behavior, full Compose parity, attach, exec, log-follow, and port-forward compatibility claims while deferring any external scheduler API to a separate approved issue.
+- Phase 30 adds a research-only multi-host platform decision record that keeps current core single-host and defers remote host agents, membership, state replication, cloud control plane, scheduler API, and remote placement to a separate approved issue or project boundary.
 - No Apple container command was called by Phase 6 or Phase 7.
 - `FoundationRuntimeProcessRunner` exists for policy-approved read-only command specs and supported mutation specs; automated tests still use fake process execution.
 - `AppleContainerReadOnlyAdapter` reports missing `container` as runtime unavailable and rejects mutation through the adapter contract.
@@ -102,7 +104,7 @@ Important diagnostic correction:
 - `swift -e 'import XCTest'` can still fail and is not the correct gate.
 - A minimal SwiftPM XCTest probe passed after Xcode was fixed.
 - `swift test list` is the local proof that Hostwright now exposes real XCTest cases.
-- `swift test` executes 229 XCTest cases after the Phase 29 external orchestration compatibility research update.
+- `swift test` executes 230 XCTest cases after the Phase 30 multi-host platform research update.
 
 The old top-level smoke/precondition posture has been replaced with XCTest assertions. Some test file names still include `Smoke.swift`, but the contents are XCTest cases.
 

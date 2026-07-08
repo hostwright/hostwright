@@ -153,7 +153,10 @@ let package = Package(
         ),
         .testTarget(
             name: "HostwrightHealthTests",
-            dependencies: ["HostwrightHealth"]
+            dependencies: ["HostwrightHealth"],
+            resources: [
+                .process("Fixtures")
+            ]
         ),
         .testTarget(
             name: "HostwrightNetworkingTests",

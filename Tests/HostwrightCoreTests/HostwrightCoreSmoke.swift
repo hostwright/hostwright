@@ -121,6 +121,31 @@ final class HostwrightCoreTests: XCTestCase {
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright pulls images"))
     }
 
+    func testResourceIntelligenceDocsDescribeLocalReportingOnly() throws {
+        let root = try packageRoot()
+        let methodology = try read("docs/architecture/resource-intelligence.md", root: root)
+        let constraints = try read("docs/architecture/apple-silicon-constraints.md", root: root)
+        let compatibility = try read("docs/reference/compatibility.md", root: root)
+        let doctor = try read("docs/reference/doctor-checks.md", root: root)
+        let limitations = try read("docs/reference/limitations.md", root: root)
+        let publicDocs = [methodology, constraints, compatibility, doctor, limitations].joined(separator: "\n")
+
+        XCTAssertTrue(methodology.contains("Status: Phase 26 local reporting boundary."))
+        XCTAssertTrue(methodology.contains("If any dimension is not measured, the report must say `unmeasured` instead of inferring a value."))
+        XCTAssertTrue(doctor.contains("does not run Apple container commands"))
+        XCTAssertTrue(compatibility.contains("no capacity guarantee"))
+        XCTAssertTrue(limitations.contains("resource intelligence is also local and diagnostic"))
+
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright guarantees capacity"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright schedules GPU"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright supports ANE"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright supports Metal"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright supports Core ML"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright supports MLX"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("uploads telemetry"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("automatically places workloads"))
+    }
+
     private func read(_ relativePath: String, root: URL) throws -> String {
         try String(contentsOf: root.appendingPathComponent(relativePath), encoding: .utf8)
     }

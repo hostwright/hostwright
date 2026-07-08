@@ -219,3 +219,12 @@ Phase 8A is a required preflight before this mutation gate. It proves real read-
 | HW-MANIFEST-005, HW-VALID-002 | Manifest `imagePolicy: require-digest` rejects mutable tag-only images and accepts `@sha256:<64 lowercase hex characters>` references before planning or mutation. | Automated | Manifest XCTest cases and schema/example alignment tests. |
 | HW-REL-003, HW-DOCS-002 | Docs distinguish implemented local digest-reference validation from deferred signature verification, SBOM generation/validation, vulnerability scanning, registry resolution, and provenance. | Automated + manual | Core docs XCTest and supply-chain decision-record review. |
 | HW-RUNTIME-001, HW-SAFE-001 | Image trust work does not add registry calls, image pulls, runtime image mutation, scanner/signing dependencies, hidden state paths, or unsupported public claims. | Manual | Diff review plus full local gate and targeted boundary scans. |
+
+## Phase 26 Gate: Apple Silicon Resource Intelligence
+
+| Requirement IDs | Acceptance criteria | Verification type | Verification command or review |
+| --- | --- | --- | --- |
+| HW-COMPAT-006, HW-CLI-007 | Resource reports state measurement method, hardware, OS version, Apple container version evidence, workload profile, unmeasured benchmark dimensions, and limits. | Automated | Health XCTest report construction, fixture parser, and CLI doctor JSON tests. |
+| HW-COMPAT-006, HW-MANIFEST-005 | Non-arm64 image architecture warnings are emitted only when explicit image architecture evidence exists and do not block workloads by themselves. | Automated | Health XCTest architecture-warning cases for arm64, amd64, x86_64, linux/amd64, nil evidence, and non-arm64 hosts. |
+| HW-COMPAT-004, HW-REL-004, HW-DOCS-002 | Docs describe benchmark methodology and blocked evidence without claiming production capacity, accelerator scheduling, GPU/ANE/Metal/Core ML/MLX support, telemetry upload, or automatic placement. | Automated + manual | Core docs XCTest and review of resource-intelligence, compatibility, limitations, and Apple silicon constraints docs. |
+| HW-RUNTIME-001, HW-RUNTIME-002, HW-STATE-001 | Resource intelligence does not add direct Apple container shell-out, runtime mutation, image pull, hidden state writes, or SQLite access outside `HostwrightState`. | Automated + manual | Full local gate plus targeted boundary scans and diff review. |

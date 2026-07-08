@@ -37,6 +37,7 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 | 26 | Apple Silicon Resource Intelligence | Complete locally | Add local resource reports and benchmark-methodology boundaries without scheduler or accelerator claims. | Doctor resource reports, fixture parsing, architecture warnings, unmeasured benchmark dimensions, and docs boundary tests pass. |
 | 27 | Apple Silicon Accelerator Boundary Research | Complete locally | Decide GPU, ANE, Metal, Core ML, MLX, PyTorch MPS, host-native accelerator, and scheduler boundaries before implementation. | Decision record rejects or defers every accelerator path and docs guard unsupported current-support claims. |
 | 28 | Stack-File Import And Migration Tooling | Complete locally | Add import-only conversion for a narrow safe stack-file subset. | Golden conversion, unsupported-field, policy-reason, CLI JSON/text, and validation-gate tests pass without runtime/state mutation or Compose parity claims. |
+| 29 | External Orchestration Compatibility Research | Complete locally | Decide CRI, Kubernetes, Docker API, Compose, attach, forwarding, scheduler, lifecycle, networking, identity, and state compatibility boundaries before implementation. | Decision record rejects, defers, or splits every compatibility path and docs guard unsupported current-support claims. |
 | 32 | Policy Engine | Complete locally | Add deterministic local policy decisions before import, compatibility, multi-host, and scheduler work. | Policy evaluator tests cover ports, mounts, images, env/secrets, cleanup, lifecycle, exposure, untrusted manifests, accelerator placeholders, and planner migration. |
 
 ## Current Hard Boundaries
@@ -59,6 +60,7 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 - Accelerator behavior remains unsupported: Hostwright does not expose Apple GPU, ANE, Metal, Core ML, MLX, PyTorch MPS, host-native accelerator helpers, or accelerator-aware scheduling in current core scope.
 - Policy evaluation is local and deterministic: it explains decisions for existing planner checks, cleanup classification, images, env/secrets, lifecycle, exposure, untrusted manifests, and accelerator placeholders without remote policy service, team workflow, silent bypass, runtime mutation, SQLite access, or network calls.
 - Stack-file import is conversion-only: it prints reviewed `hostwright.yaml` text for a narrow safe subset and rejects unsupported networking, secrets, configs, build, deploy, named-volume, shell-healthcheck, cloud, tunnel, and lifecycle semantics without writing files, touching state, observing runtime, pulling images, or claiming Compose parity.
+- External orchestration compatibility remains research-only: no CRI shim, Kubernetes node behavior, Docker API shim, Testcontainers target, full Compose parity, attach/exec/log-follow/port-forward stream, or external scheduler API exists in current core scope.
 
 ## Phase 3 Outputs
 
@@ -315,6 +317,18 @@ Phase 27 does not add GPU, ANE, Metal, Core ML, MLX, PyTorch MPS support, host a
 - XCTest coverage covers golden conversion output, deterministic diagnostics, unsupported networking/secrets, named-volume and shell-healthcheck refusal, final manifest validation, CLI text output, CLI JSON output, and CLI JSON errors.
 
 Phase 28 does not add general YAML parsing, Docker Compose parity, runtime compatibility, state writes, file writes, RuntimeAdapter calls, Apple container commands, registry calls, image pulls, DNS, tunnel, cloud, secrets/configs conversion, named volumes, runtime mutation, release tags, or GitHub Releases.
+
+## Phase 29 Outputs
+
+- `docs/architecture/external-orchestration-compatibility-research.md` records research-only decisions for CRI, Kubernetes node behavior, Docker API, Testcontainers target behavior, full Compose parity, attach, exec, log following, port forwarding, scheduler integration, lifecycle, networking, identity, and state semantics.
+- CRI and Kubernetes node compatibility are rejected from current core scope because they require kubelet-facing runtime and image services, pod sandbox behavior, streaming setup, log semantics, node status, leases, scheduler accounting, and reconciliation contracts.
+- Docker API and Testcontainers compatibility are rejected from current core scope because they require daemon-shaped API versioning, attach/log stream behavior, event streams, broad lifecycle, image, network, volume, and inspect semantics.
+- Full Compose parity remains rejected from current core scope; Phase 28 remains an import-only reviewed subset with fail-closed unsupported-field behavior.
+- External scheduler integration is deferred; Phase 31 may add advisory local scheduling, not an external orchestrator API.
+- Public limitations, requirements, acceptance gates, and build status keep external orchestration compatibility listed as unsupported current behavior.
+- XCTest coverage guards the research decision and unsupported-current-support wording.
+
+Phase 29 does not add CRI, Kubernetes, Docker API, Compose parity, Testcontainers behavior, attach, exec, log following, port forwarding, external scheduler integration, runtime mutation, state writes, network calls, image pulls, dependencies, release tags, or GitHub Releases.
 
 ## Phase 32 Outputs
 

@@ -290,6 +290,57 @@ final class HostwrightCoreTests: XCTestCase {
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("import-stack configures networks"))
     }
 
+    func testExternalOrchestrationCompatibilityResearchKeepsCurrentSupportUnsupported() throws {
+        let root = try packageRoot()
+        let decision = try read("docs/architecture/external-orchestration-compatibility-research.md", root: root)
+        let limitations = try read("docs/reference/limitations.md", root: root)
+        let requirements = try read("docs/requirements/REQUIREMENTS.md", root: root)
+        let acceptance = try read("docs/requirements/ACCEPTANCE_MATRIX.md", root: root)
+        let implementationPlan = try read("docs/IMPLEMENTATION_PLAN.md", root: root)
+        let buildStatus = try read("docs/BUILD_STATUS.md", root: root)
+        let devlog = try read("docs/devlog/0029-external-orchestration-compatibility-research.md", root: root)
+        let publicDocs = [
+            decision,
+            limitations,
+            requirements,
+            acceptance,
+            implementationPlan,
+            buildStatus,
+            devlog
+        ].joined(separator: "\n")
+
+        XCTAssertTrue(decision.contains("Status: Phase 29 research-only decision record."))
+        XCTAssertTrue(decision.contains("| CRI runtime compatibility | Reject from current core |"))
+        XCTAssertTrue(decision.contains("| Kubernetes node or kubelet replacement | Reject from current core |"))
+        XCTAssertTrue(decision.contains("| Docker Engine API shim | Reject from current core |"))
+        XCTAssertTrue(decision.contains("| Testcontainers target compatibility | Reject from current core |"))
+        XCTAssertTrue(decision.contains("| Full Docker Compose parity | Reject from current core |"))
+        XCTAssertTrue(decision.contains("Prototype requires separate maintainer approval before any code implementation."))
+        XCTAssertTrue(limitations.contains("External orchestration compatibility remains research-only."))
+        XCTAssertTrue(requirements.contains("HW-COMPAT-005"))
+        XCTAssertTrue(acceptance.contains("Phase 29 Gate: External Orchestration Compatibility Research"))
+        XCTAssertTrue(implementationPlan.contains("## Phase 29 Outputs"))
+        XCTAssertTrue(buildStatus.contains("Phase 29 was research-only."))
+        XCTAssertTrue(devlog.contains("No CRI shim."))
+
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright supports Kubernetes"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright supports CRI"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright supports Docker API"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright supports Docker Compose"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright is Kubernetes-compatible"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright is Docker-compatible"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright implements CRI"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright implements Docker API"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright implements Compose parity"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Testcontainers-compatible"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("CRI shim is implemented"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Docker API shim is implemented"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("external scheduler API is implemented"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("port-forward compatibility is implemented"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("attach compatibility is implemented"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("exec compatibility is implemented"))
+    }
+
     private func read(_ relativePath: String, root: URL) throws -> String {
         try String(contentsOf: root.appendingPathComponent(relativePath), encoding: .utf8)
     }

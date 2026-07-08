@@ -245,6 +245,51 @@ final class HostwrightCoreTests: XCTestCase {
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("policy enables accelerators"))
     }
 
+    func testStackImportDocsDescribeConversionOnlyBoundary() throws {
+        let root = try packageRoot()
+        let cli = try read("docs/reference/cli.md", root: root)
+        let guide = try read("docs/guides/stack-import.md", root: root)
+        let manifest = try read("docs/reference/manifest.md", root: root)
+        let limitations = try read("docs/reference/limitations.md", root: root)
+        let policy = try read("docs/reference/policy.md", root: root)
+        let requirements = try read("docs/requirements/REQUIREMENTS.md", root: root)
+        let acceptance = try read("docs/requirements/ACCEPTANCE_MATRIX.md", root: root)
+        let implementationPlan = try read("docs/IMPLEMENTATION_PLAN.md", root: root)
+        let buildStatus = try read("docs/BUILD_STATUS.md", root: root)
+        let devlog = try read("docs/devlog/0028-stack-file-import.md", root: root)
+        let publicDocs = [
+            cli,
+            guide,
+            manifest,
+            limitations,
+            policy,
+            requirements,
+            acceptance,
+            implementationPlan,
+            buildStatus,
+            devlog
+        ].joined(separator: "\n")
+
+        XCTAssertTrue(cli.contains("hostwright import-stack <path> [--output text|json]"))
+        XCTAssertTrue(guide.contains("Status: Phase 28 import-only conversion."))
+        XCTAssertTrue(manifest.contains("`hostwright import-stack <path>` can convert a smaller stack-file subset"))
+        XCTAssertTrue(limitations.contains("The stack-file importer is also not a general YAML or Compose parser."))
+        XCTAssertTrue(policy.contains("Stack-file import uses local policy reason codes"))
+        XCTAssertTrue(requirements.contains("HW-COMPAT-008"))
+        XCTAssertTrue(acceptance.contains("Phase 28 Gate: Stack-File Import And Migration Tooling"))
+        XCTAssertTrue(implementationPlan.contains("## Phase 28 Outputs"))
+        XCTAssertTrue(buildStatus.contains("Phase 28 adds import-only stack-file conversion"))
+        XCTAssertTrue(devlog.contains("No Docker Compose parity."))
+
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright supports Docker Compose"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright is Compose-compatible"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("import-stack writes hostwright.yaml"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("import-stack applies"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("import-stack observes runtime"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("import-stack pulls images"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("import-stack configures networks"))
+    }
+
     private func read(_ relativePath: String, root: URL) throws -> String {
         try String(contentsOf: root.appendingPathComponent(relativePath), encoding: .utf8)
     }

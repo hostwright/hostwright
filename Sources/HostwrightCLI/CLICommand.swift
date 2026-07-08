@@ -5,6 +5,7 @@ import HostwrightState
 public enum CLICommand: Equatable, Sendable {
     case version
     case initManifest
+    case importStack(path: String, output: CLIOutputFormat)
     case validate(path: String)
     case plan(path: String, output: CLIOutputFormat)
     case status(path: String, stateDatabasePath: String?, output: CLIOutputFormat)
@@ -32,6 +33,8 @@ public enum CLICommand: Equatable, Sendable {
         case "init":
             guard arguments.count == 1 else { throw CLIUsageError("init does not support flags.") }
             return .initManifest
+        case "import-stack":
+            return try importStackCommand(arguments: arguments)
         case "validate":
             return try pathCommand(arguments: arguments, commandName: "validate", make: CLICommand.validate)
         case "plan":
@@ -81,6 +84,14 @@ public enum CLICommand: Equatable, Sendable {
     private static func planCommand(arguments: [String]) throws -> CLICommand {
         let parsed = try parsePathAndOutput(arguments: arguments, commandName: "plan")
         return .plan(path: parsed.path ?? HostwrightIdentity.manifestFileName, output: parsed.output)
+    }
+
+    private static func importStackCommand(arguments: [String]) throws -> CLICommand {
+        let parsed = try parsePathAndOutput(arguments: arguments, commandName: "import-stack")
+        guard let path = parsed.path, !path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw CLIUsageError("import-stack requires a stack file path.")
+        }
+        return .importStack(path: path, output: parsed.output)
     }
 
     private static func applyCommand(arguments: [String]) throws -> CLICommand {

@@ -36,6 +36,7 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 | 25 | Supply Chain And Image Trust | Complete for local digest policy | Add local image digest-reference policy and document trust-tool boundaries. | `imagePolicy: require-digest`, digest syntax validation, schema alignment, docs boundary, and overclaim tests pass without registry calls or scanner/signing dependencies. |
 | 26 | Apple Silicon Resource Intelligence | Complete locally | Add local resource reports and benchmark-methodology boundaries without scheduler or accelerator claims. | Doctor resource reports, fixture parsing, architecture warnings, unmeasured benchmark dimensions, and docs boundary tests pass. |
 | 27 | Apple Silicon Accelerator Boundary Research | Complete locally | Decide GPU, ANE, Metal, Core ML, MLX, PyTorch MPS, host-native accelerator, and scheduler boundaries before implementation. | Decision record rejects or defers every accelerator path and docs guard unsupported current-support claims. |
+| 28 | Stack-File Import And Migration Tooling | Complete locally | Add import-only conversion for a narrow safe stack-file subset. | Golden conversion, unsupported-field, policy-reason, CLI JSON/text, and validation-gate tests pass without runtime/state mutation or Compose parity claims. |
 | 32 | Policy Engine | Complete locally | Add deterministic local policy decisions before import, compatibility, multi-host, and scheduler work. | Policy evaluator tests cover ports, mounts, images, env/secrets, cleanup, lifecycle, exposure, untrusted manifests, accelerator placeholders, and planner migration. |
 
 ## Current Hard Boundaries
@@ -57,6 +58,7 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 - Resource intelligence remains local and diagnostic: it reports host facts and explicit unmeasured dimensions without capacity guarantees, runtime mutation, image pulls, external telemetry, accelerator scheduling, or Apple container command execution from `doctor`.
 - Accelerator behavior remains unsupported: Hostwright does not expose Apple GPU, ANE, Metal, Core ML, MLX, PyTorch MPS, host-native accelerator helpers, or accelerator-aware scheduling in current core scope.
 - Policy evaluation is local and deterministic: it explains decisions for existing planner checks, cleanup classification, images, env/secrets, lifecycle, exposure, untrusted manifests, and accelerator placeholders without remote policy service, team workflow, silent bypass, runtime mutation, SQLite access, or network calls.
+- Stack-file import is conversion-only: it prints reviewed `hostwright.yaml` text for a narrow safe subset and rejects unsupported networking, secrets, configs, build, deploy, named-volume, shell-healthcheck, cloud, tunnel, and lifecycle semantics without writing files, touching state, observing runtime, pulling images, or claiming Compose parity.
 
 ## Phase 3 Outputs
 
@@ -302,6 +304,17 @@ Phase 26 does not add runtime density measurement, VM-overhead benchmarking, boo
 - XCTest coverage guards the research decision and unsupported-current-support wording.
 
 Phase 27 does not add GPU, ANE, Metal, Core ML, MLX, PyTorch MPS support, host accelerator device exposure, host-native services, read-only accelerator probes, accelerator scheduling, runtime mutation, image pulls, dependencies, release tags, or GitHub Releases.
+
+## Phase 28 Outputs
+
+- Added `HostwrightImport` with `StackFileImporter`, deterministic import diagnostics, policy reason-code propagation, and `HostwrightManifestEmitter`.
+- Added `hostwright import-stack <path> [--output text|json]` as an import-only CLI command that prints converted `hostwright.yaml` text and never writes files.
+- Supported only a narrow stack-file subset: project/name, services, image, inline-array command, key-value environment maps, string ports, explicit host-path volumes, `healthcheck.test: ["CMD", ...]`, health interval, and restart policy.
+- Rejected unsupported or unsafe stack fields including `build`, `deploy`, `depends_on`, networking/discovery, secrets, configs, env files, named volumes, shell health checks, and cloud/tunnel semantics.
+- Routed unsupported import diagnostics through local policy reason codes where applicable and then ran the converted manifest through the normal Hostwright validator.
+- XCTest coverage covers golden conversion output, deterministic diagnostics, unsupported networking/secrets, named-volume and shell-healthcheck refusal, final manifest validation, CLI text output, CLI JSON output, and CLI JSON errors.
+
+Phase 28 does not add general YAML parsing, Docker Compose parity, runtime compatibility, state writes, file writes, RuntimeAdapter calls, Apple container commands, registry calls, image pulls, DNS, tunnel, cloud, secrets/configs conversion, named volumes, runtime mutation, release tags, or GitHub Releases.
 
 ## Phase 32 Outputs
 

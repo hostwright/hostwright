@@ -7,6 +7,7 @@ The current CLI provides a dependency-free `hostwright` command surface with nar
 ```bash
 hostwright --version
 hostwright init
+hostwright import-stack <path> [--output text|json]
 hostwright validate [path]
 hostwright plan [path] [--output text|json]
 hostwright status [path] [--state-db <path>] [--output text|json]
@@ -25,7 +26,7 @@ hostwrightd --foreground --config <hostwright.yaml> --state-db <path> [options]
 
 Text output is the default for every command.
 
-`plan`, `status`, `events`, `recovery`, and `doctor` also accept `--output json`. JSON output is intended for local scripts and tests. It does not change command behavior, state writes, runtime observation, or mutation gates.
+`import-stack`, `plan`, `status`, `events`, `recovery`, and `doctor` also accept `--output json`. JSON output is intended for local scripts and tests. It does not change command behavior, state writes, runtime observation, or mutation gates.
 
 When JSON mode is requested and the CLI can classify the failure, stderr uses this envelope:
 
@@ -69,6 +70,58 @@ Failure example:
 ```text
 HW-CLI-002: hostwright.yaml already exists. init will not overwrite it.
 ```
+
+## `hostwright import-stack <path> [--output text|json]`
+
+Reads a narrow safe stack-file subset and prints converted `hostwright.yaml` text to stdout. It does not write files, create `hostwright.yaml`, read or write state, observe Apple container, contact registries, pull images, or mutate runtime resources.
+
+Supported import input is intentionally small:
+
+- top-level `name` or `project`;
+- top-level `services`;
+- service `image`;
+- service `command` as an inline array;
+- service `environment` as a key-value map;
+- service `ports` as string list entries like `"8080:8080"`;
+- service `volumes` only when each source is an explicit host path such as `./data` or `/tmp/data`;
+- service `healthcheck.test` only as `["CMD", ...]`;
+- service `healthcheck.interval`;
+- service `restart` as a scalar policy or `restart.policy`.
+
+Unsupported, unknown, or high-risk stack-file fields fail closed with stable diagnostics. This includes build contexts, named volumes, `secrets`, `configs`, `env_file`, `depends_on`, `deploy`, `network_mode`, `networks`, DNS/service discovery fields, shell health checks, cloud/tunnel semantics, and lifecycle behavior that Hostwright cannot convert safely.
+
+Text success prints the converted manifest and warnings on stderr. JSON success uses:
+
+```json
+{
+  "kind": "stackImport",
+  "sourcePath": "compose.yaml",
+  "succeeded": true,
+  "manifest": "version: 1\nproject: demo\n...",
+  "warnings": []
+}
+```
+
+JSON import failures use the standard validation exit code `65` and include policy reason codes when the local policy layer classified the rejection:
+
+```json
+{
+  "kind": "error",
+  "code": "HW-MANIFEST-003",
+  "exitCode": 65,
+  "sourcePath": "compose.yaml",
+  "issues": [
+    {
+      "code": "HW-MANIFEST-003",
+      "severity": "error",
+      "policyReasonCode": "secureExposureUnsupported",
+      "message": "..."
+    }
+  ]
+}
+```
+
+Import is conversion-only. It does not imply Docker Compose compatibility or runtime compatibility. Review the converted manifest and run `hostwright validate` and `hostwright plan` before any confirmed apply.
 
 ## `hostwright validate [path]`
 

@@ -2,6 +2,7 @@ import Darwin
 import Foundation
 import HostwrightCore
 import HostwrightHealth
+import HostwrightImport
 import HostwrightManifest
 import HostwrightReconciler
 
@@ -51,6 +52,8 @@ public enum HostwrightCLI {
             return CLIRunResult(standardOutput: helpText)
         case .initManifest:
             return try initManifest(environment: environment)
+        case .importStack(let path, let output):
+            return try importStack(path: path, output: output, environment: environment)
         case .validate(let path):
             let manifest = try loadValidManifest(path: path, environment: environment)
             return CLIRunResult(standardOutput: "Valid hostwright manifest: \(path)\nProject: \(manifest.project ?? "<missing>")\nServices: \(manifest.services.count)\n")
@@ -119,6 +122,7 @@ public enum HostwrightCLI {
     Usage:
       hostwright --version
       hostwright init
+      hostwright import-stack <path> [--output text|json]
       hostwright validate [path]
       hostwright plan [path] [--output text|json]
       hostwright status [path] [--state-db <path>] [--output text|json]
@@ -132,14 +136,16 @@ public enum HostwrightCLI {
       hostwright doctor [--output text|json]
 
     Most commands are read-only. init writes hostwright.yaml only when absent.
+    import-stack reads a narrow safe stack-file subset and prints converted hostwright.yaml; it does not write files, observe runtime, or imply Compose parity.
     CLI plan output is deterministic but does not perform live runtime observation.
     Apply can execute exactly one confirmed createMissingService or restart-policy-allowed startManagedService action through RuntimeAdapter.
     Cleanup deletes only exact cleanup-eligible Hostwright-owned stopped/created/exited containers after dry-run token confirmation.
     Diagnostics writes a local redacted JSON bundle only. It never uploads telemetry.
-    JSON output is supported for plan, status, events, recovery, doctor, and errors when --output json is present.
+    JSON output is supported for import-stack, plan, status, events, recovery, doctor, and errors when --output json is present.
 
     Examples:
       hostwright plan --output json
+      hostwright import-stack compose.yaml --output json
       hostwright status --state-db /tmp/hostwright.sqlite --output json
       hostwright events --state-db /tmp/hostwright.sqlite --project api-local --output json
       hostwright recovery --state-db /tmp/hostwright.sqlite --output json
@@ -156,6 +162,29 @@ public enum HostwrightCLI {
 
         try environment.writeTextFile(path, starterManifest)
         return CLIRunResult(standardOutput: "Created \(path)\n")
+    }
+
+    private static func importStack(path: String, output: CLIOutputFormat, environment: CLIEnvironment) throws -> CLIRunResult {
+        let text = try environment.readTextFile(path)
+        let result = StackFileImporter.convert(text)
+        let exitCode: CLIExitCode = result.succeeded ? .success : .validation
+
+        if output == .json {
+            if result.succeeded {
+                return CLIRunResult(standardOutput: CLIJSON.stackImport(path: path, result: result), exitCode: exitCode.rawValue)
+            }
+            return CLIRunResult(standardError: CLIJSON.stackImportError(path: path, result: result, exitCode: exitCode), exitCode: exitCode.rawValue)
+        }
+
+        if result.succeeded, let manifestText = result.manifestText {
+            let warningText = result.warnings.isEmpty ? "" : result.warnings.map(\.rendered).joined(separator: "\n") + "\n"
+            return CLIRunResult(standardOutput: manifestText, standardError: warningText, exitCode: exitCode.rawValue)
+        }
+
+        return CLIRunResult(
+            standardError: result.errors.map(\.rendered).joined(separator: "\n") + "\n",
+            exitCode: exitCode.rawValue
+        )
     }
 
     private static func doctor(environment: CLIEnvironment, output: CLIOutputFormat) -> CLIRunResult {

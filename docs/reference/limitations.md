@@ -14,8 +14,9 @@ Hostwright is not production ready.
 - Manifest `imagePolicy: require-digest` support for local `@sha256:<64 lowercase hex characters>` image reference validation before planning or mutation.
 - Manifest `secretEnv` support for local `keychain://<service>/<account>` secret references, with fake backend tests and no live Keychain default.
 - Fail-closed unsupported-field, unsupported-version, unsupported DNS/discovery/networking-field, unsafe env-key, and unsafe host-root or parent-traversal mount-source validation for untrusted manifests.
+- `hostwright import-stack <path>` conversion for a narrow safe stack-file subset, printing converted `hostwright.yaml` text without writing files, observing runtime, touching state, or claiming Compose compatibility.
 - `hostwright plan` as non-mutating manifest-level dry-run output.
-- `--output json` for `plan`, `status`, `events`, `recovery`, `doctor`, and structured errors when JSON mode is requested.
+- `--output json` for `import-stack`, `plan`, `status`, `events`, `recovery`, `doctor`, and structured errors when JSON mode is requested.
 - Stable process exit categories for usage, validation, state unavailable, runtime unavailable, confirmation mismatch, unsafe operation, and partial failure.
 - Local deterministic policy decisions for planner safety, cleanup classification, image policy, env/secret boundaries, lifecycle blockers, untrusted manifests, secure exposure blockers, and accelerator placeholders.
 - `hostwright status [path] --state-db <path>` with live RuntimeAdapter observation and event/snapshot persistence.
@@ -70,8 +71,8 @@ Hostwright is not production ready.
 ## Not Implemented Today
 
 - General runtime mutation.
-- Automatic manifest upgrade, downgrade, or compatibility conversion.
-- General YAML parsing or full orchestrator schema compatibility.
+- Automatic manifest upgrade, downgrade, or runtime compatibility conversion.
+- General YAML parsing, broad stack-file import, or full orchestrator schema compatibility.
 - Live macOS Keychain access, Keychain prompts, Keychain access groups, synchronizable Keychain items, registry credential storage, credential sync, credential upload, or cloud identity integration.
 - Registry image resolution, tag-to-digest lookup, automatic image pulls, signature verification, OCI referrer inspection, SBOM generation/validation, vulnerability scanning, dependency provenance, or source-build integrity automation.
 - Runtime density measurement, VM-per-container overhead measurement, boot-latency benchmarking, polling-overhead benchmarking, battery-impact measurement, sleep/wake runtime proofing, or workload memory-pressure benchmarking as automatic product behavior.
@@ -133,6 +134,8 @@ Hostwright is not production ready.
 ## Parser Limitation
 
 The manifest parser is not a general YAML parser. It accepts only the documented Hostwright manifest subset and fails closed for unsupported YAML features, unsupported manifest versions, unknown Kubernetes/Compose-style fields, unsafe environment keys, and unsafe host-root or parent-traversal mount sources. Expanding beyond that subset requires a dependency/design decision before the manifest surface grows.
+
+The stack-file importer is also not a general YAML or Compose parser. It converts only the reviewed import subset and fails closed for unsupported networking, discovery, build, deploy, secret, config, named-volume, shell-healthcheck, lifecycle, cloud, and tunnel semantics. Import output is text for operator review; it does not write manifests, observe runtime, pull images, inspect registries, or run compatibility shims.
 
 Manifest image trust is limited to local reference policy. `imagePolicy: require-digest` rejects tag-only service images unless they include a `sha256` digest. Hostwright does not query registries, resolve tags, verify signatures, inspect SBOMs, scan vulnerabilities, or prove provenance.
 

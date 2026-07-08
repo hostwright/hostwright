@@ -1,6 +1,7 @@
 import Foundation
 import HostwrightCore
 import HostwrightHealth
+import HostwrightImport
 import HostwrightManifest
 import HostwrightReconciler
 import HostwrightRuntime
@@ -191,6 +192,26 @@ enum CLIJSON {
         ])
     }
 
+    static func stackImport(path: String, result: StackImportResult) -> String {
+        render([
+            "kind": "stackImport",
+            "sourcePath": path,
+            "succeeded": result.succeeded,
+            "manifest": result.manifestText as Any,
+            "warnings": result.warnings.map(stackImportDiagnostic)
+        ])
+    }
+
+    static func stackImportError(path: String, result: StackImportResult, exitCode: CLIExitCode) -> String {
+        render([
+            "kind": "error",
+            "code": (result.errors.first?.code ?? .manifestUnsupportedFeature).rawValue,
+            "exitCode": Int(exitCode.rawValue),
+            "sourcePath": path,
+            "issues": result.errors.map(stackImportDiagnostic)
+        ])
+    }
+
     static func plan(_ plan: ReconciliationPlan) -> String {
         render([
             "kind": "plan",
@@ -224,6 +245,16 @@ enum CLIJSON {
                 ]
             }
         ])
+    }
+
+    private static func stackImportDiagnostic(_ diagnostic: StackImportDiagnostic) -> [String: Any] {
+        [
+            "code": diagnostic.code.rawValue,
+            "severity": diagnostic.severity.rawValue,
+            "message": RuntimeRedactionPolicy.default.redact(diagnostic.message),
+            "line": diagnostic.line as Any,
+            "policyReasonCode": diagnostic.policyReasonCode as Any
+        ].compactNilValues()
     }
 
     static func doctor(_ report: DoctorReport) -> String {

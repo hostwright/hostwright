@@ -40,6 +40,31 @@ final class HostwrightManifestTests: XCTestCase {
         XCTAssertEqual(reference.account, "api-token")
     }
 
+    func testQuotedScalarsAndInlineArraysPreserveCommasAndEscapes() throws {
+        let manifest = try ManifestValidator.validated(
+            #"""
+            version: 1
+            project: api-local
+            services:
+              api:
+                image: ghcr.io/example/api:latest
+                command: ["python", "print(a,b)"]
+                env:
+                  JSON_DOC: '{"a":1}'
+                  NOTE: "a\\b\"c"
+                health:
+                  command: ["curl", "http://localhost:8080/a,b"]
+                  interval: 10s
+            """#
+        )
+
+        let service = manifest.services[0]
+        XCTAssertEqual(service.command, ["python", "print(a,b)"])
+        XCTAssertEqual(service.env["JSON_DOC"], #"{"a":1}"#)
+        XCTAssertEqual(service.env["NOTE"], #"a\b"c"#)
+        XCTAssertEqual(service.health?.command, ["curl", "http://localhost:8080/a,b"])
+    }
+
     func testVersionlessManifestRemainsLegacyCurrentVersion() throws {
         let manifest = try ManifestValidator.validated(
             """

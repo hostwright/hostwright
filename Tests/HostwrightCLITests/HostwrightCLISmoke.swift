@@ -12,6 +12,8 @@ final class HostwrightCLITests: XCTestCase {
     func testCommandParserRecognizesSupportedCommands() throws {
         XCTAssertEqual(try CLICommand.parse(arguments: ["--version"]), .version)
         XCTAssertEqual(try CLICommand.parse(arguments: ["init"]), .initManifest)
+        XCTAssertEqual(try CLICommand.parse(arguments: ["import-stack", "compose.yaml"]), .importStack(path: "compose.yaml", output: .text))
+        XCTAssertEqual(try CLICommand.parse(arguments: ["import-stack", "compose.yaml", "--output", "json"]), .importStack(path: "compose.yaml", output: .json))
         XCTAssertEqual(try CLICommand.parse(arguments: ["validate"]), .validate(path: "hostwright.yaml"))
         XCTAssertEqual(try CLICommand.parse(arguments: ["validate", "custom.yaml"]), .validate(path: "custom.yaml"))
         XCTAssertEqual(try CLICommand.parse(arguments: ["plan"]), .plan(path: "hostwright.yaml", output: .text))
@@ -69,6 +71,8 @@ final class HostwrightCLITests: XCTestCase {
         XCTAssertEqual(try CLICommand.parse(arguments: ["doctor"]), .doctor(output: .text))
         XCTAssertEqual(try CLICommand.parse(arguments: ["doctor", "--output", "json"]), .doctor(output: .json))
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["doctor", "--output", "yaml"]))
+        XCTAssertThrowsError(try CLICommand.parse(arguments: ["import-stack"]))
+        XCTAssertThrowsError(try CLICommand.parse(arguments: ["import-stack", "compose.yaml", "--write"]))
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["events", "--state-db", "/tmp/state.sqlite", "--sort", "newest"]))
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["diagnostics", "--state-db", "/tmp/state.sqlite"]))
     }
@@ -93,11 +97,14 @@ final class HostwrightCLITests: XCTestCase {
         XCTAssertEqual(result.exitCode, 0)
         XCTAssertEqual(result.standardError, "")
         XCTAssertTrue(result.standardOutput.contains("hostwright plan [path] [--output text|json]"))
+        XCTAssertTrue(result.standardOutput.contains("hostwright import-stack <path> [--output text|json]"))
         XCTAssertTrue(result.standardOutput.contains("hostwright status [path] [--state-db <path>] [--output text|json]"))
         XCTAssertTrue(result.standardOutput.contains("hostwright recovery --state-db <path> [--project <name>] [--output text|json]"))
         XCTAssertTrue(result.standardOutput.contains("hostwright diagnostics --state-db <path> --bundle <path>"))
-        XCTAssertTrue(result.standardOutput.contains("JSON output is supported for plan, status, events, recovery, doctor"))
+        XCTAssertTrue(result.standardOutput.contains("JSON output is supported for import-stack, plan, status, events, recovery, doctor"))
+        XCTAssertTrue(result.standardOutput.contains("import-stack reads a narrow safe stack-file subset"))
         XCTAssertTrue(result.standardOutput.contains("Diagnostics writes a local redacted JSON bundle only"))
+        XCTAssertTrue(result.standardOutput.contains("hostwright import-stack compose.yaml --output json"))
         XCTAssertTrue(result.standardOutput.contains("hostwright doctor --output json"))
     }
 
@@ -115,6 +122,68 @@ final class HostwrightCLITests: XCTestCase {
         XCTAssertEqual(overwriteResult.exitCode, CLIExitCode.commandUsage.rawValue)
         XCTAssertTrue(overwriteResult.standardError.contains("HW-CLI-002"))
         XCTAssertEqual(existingFiles.files[HostwrightIdentity.manifestFileName], "project: existing\nservices:\n")
+    }
+
+    func testImportStackPrintsConvertedManifestWithoutWritingFiles() throws {
+        let files = FileBox(files: ["compose.yaml": safeStackFile])
+
+        let result = HostwrightCLI.run(arguments: ["import-stack", "compose.yaml"], environment: environment(files: files))
+
+        XCTAssertEqual(result.exitCode, 0)
+        XCTAssertEqual(result.standardError, "")
+        XCTAssertTrue(result.standardOutput.contains("version: 1\nproject: demo"))
+        XCTAssertTrue(result.standardOutput.contains("image: ghcr.io/example/api:latest"))
+        XCTAssertTrue(result.standardOutput.contains("env:\n      APP_ENV: development"))
+        XCTAssertNil(files.files[HostwrightIdentity.manifestFileName])
+        XCTAssertNoThrow(try ManifestValidator.validated(result.standardOutput))
+    }
+
+    func testImportStackJSONOutputIncludesManifestAndWarnings() throws {
+        let stack = """
+        version: "3.9"
+        name: demo
+        services:
+          api:
+            image: ghcr.io/example/api:latest
+
+        """
+        let files = FileBox(files: ["compose.yaml": stack])
+
+        let result = HostwrightCLI.run(arguments: ["import-stack", "compose.yaml", "--output", "json"], environment: environment(files: files))
+
+        XCTAssertEqual(result.exitCode, 0)
+        XCTAssertEqual(result.standardError, "")
+        let object = try jsonObject(result.standardOutput)
+        XCTAssertEqual(object["kind"] as? String, "stackImport")
+        XCTAssertEqual(object["sourcePath"] as? String, "compose.yaml")
+        XCTAssertEqual(object["succeeded"] as? Bool, true)
+        XCTAssertTrue((object["manifest"] as? String)?.contains("project: demo") == true)
+        let warnings = try XCTUnwrap(object["warnings"] as? [[String: Any]])
+        XCTAssertEqual(warnings.count, 1)
+        XCTAssertEqual(warnings.first?["severity"] as? String, "warning")
+    }
+
+    func testImportStackJSONErrorsFailClosedForUnsupportedFields() throws {
+        let stack = """
+        name: demo
+        services:
+          api:
+            image: ghcr.io/example/api:latest
+            network_mode: host
+
+        """
+        let files = FileBox(files: ["compose.yaml": stack])
+
+        let result = HostwrightCLI.run(arguments: ["import-stack", "compose.yaml", "--output", "json"], environment: environment(files: files))
+
+        XCTAssertEqual(result.exitCode, CLIExitCode.validation.rawValue)
+        XCTAssertEqual(result.standardOutput, "")
+        let object = try jsonObject(result.standardError)
+        XCTAssertEqual(object["kind"] as? String, "error")
+        XCTAssertEqual(object["exitCode"] as? Int, Int(CLIExitCode.validation.rawValue))
+        let issues = try XCTUnwrap(object["issues"] as? [[String: Any]])
+        XCTAssertEqual(issues.first?["policyReasonCode"] as? String, "secureExposureUnsupported")
+        XCTAssertTrue((issues.first?["message"] as? String)?.contains("network_mode") == true)
     }
 
     func testValidatePlanAndStatusAreNonMutating() {
@@ -2092,6 +2161,21 @@ final class HostwrightCLITests: XCTestCase {
     }
 
     private let fakeSecret = "plain-secret-token"
+
+    private var safeStackFile: String {
+        """
+        name: demo
+        services:
+          api:
+            image: ghcr.io/example/api:latest
+            command: ["serve"]
+            ports:
+              - "8080:8080"
+            environment:
+              APP_ENV: development
+
+        """
+    }
 
     private var singleServiceManifest: String {
         """

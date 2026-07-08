@@ -56,6 +56,10 @@ Unsupported YAML features fail closed, including anchors, aliases, tags, merge k
 
 Unsupported Kubernetes, Compose, or other orchestrator fields fail closed. This includes `apiVersion`, `kind`, `metadata`, `build`, `depends_on`, `deploy`, `networks`, `network_mode`, `dns`, `dns_search`, `domainname`, `hostname`, `extra_hosts`, `aliases`, `expose`, `configs`, and `secrets`.
 
+`hostwright import-stack <path>` can convert a smaller stack-file subset into this manifest shape. It accepts only project/name, services, service images, inline-array commands, key-value environment maps with plain or quoted scalar values, string ports, explicit host-path volumes, `healthcheck.test: ["CMD", ...]`, health intervals, and restart policy values that Hostwright already supports. It rejects unsupported stack fields instead of silently dropping them, then runs the normal Hostwright manifest validator on the converted output.
+
+Imported stack files do not become Hostwright manifests automatically. The command prints converted text only; it does not write `hostwright.yaml`, observe runtime, touch state, contact registries, pull images, or imply Docker Compose compatibility.
+
 ## Validation
 
 Validation currently checks:

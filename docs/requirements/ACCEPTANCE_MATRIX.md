@@ -211,3 +211,11 @@ Phase 8A is a required preflight before this mutation gate. It proves real read-
 | HW-VALID-005, HW-SAFE-004, HW-SAFE-007 | Manifests accept `secretEnv` keychain references, reject plaintext credential-like `env` values, reject malformed references, and keep Compose/Kubernetes `secrets:` unsupported. | Automated | Manifest and schema XCTest cases. |
 | HW-SAFE-004, HW-STATE-004, HW-OBS-003 | Plans, state rows, events, diagnostics, errors, and observability redaction do not expose fake secret values or raw keychain reference labels. | Automated | Secrets, CLI, state, runtime, reconciler, and observability XCTest cases. |
 | HW-SAFE-007, HW-RUNTIME-001 | Apply resolves secret references only through an injected backend immediately before `RuntimeAdapter.execute`; unavailable backends and unresolved runtime references fail before mutation. | Automated + manual | CLI fake backend/unavailable backend tests; runtime unresolved-reference guard; diff review. |
+
+## Phase 25 Gate: Supply Chain And Image Trust
+
+| Requirement IDs | Acceptance criteria | Verification type | Verification command or review |
+| --- | --- | --- | --- |
+| HW-MANIFEST-005, HW-VALID-002 | Manifest `imagePolicy: require-digest` rejects mutable tag-only images and accepts `@sha256:<64 lowercase hex characters>` references before planning or mutation. | Automated | Manifest XCTest cases and schema/example alignment tests. |
+| HW-REL-003, HW-DOCS-002 | Docs distinguish implemented local digest-reference validation from deferred signature verification, SBOM generation/validation, vulnerability scanning, registry resolution, and provenance. | Automated + manual | Core docs XCTest and supply-chain decision-record review. |
+| HW-RUNTIME-001, HW-SAFE-001 | Image trust work does not add registry calls, image pulls, runtime image mutation, scanner/signing dependencies, hidden state paths, or unsupported public claims. | Manual | Diff review plus full local gate and targeted boundary scans. |

@@ -6,20 +6,34 @@ public struct HostwrightManifest: Equatable, Sendable {
 
     public var version: Int?
     public var project: String?
+    public var imagePolicy: HostwrightImagePolicy?
     public var services: [HostwrightService]
     public var effectiveVersion: Int {
         version ?? Self.currentVersion
     }
+    public var effectiveImagePolicy: HostwrightImagePolicy {
+        imagePolicy ?? .allowTags
+    }
 
     public init(project: String?, services: [HostwrightService]) {
-        self.init(version: nil, project: project, services: services)
+        self.init(version: nil, project: project, imagePolicy: nil, services: services)
     }
 
     public init(version: Int?, project: String?, services: [HostwrightService]) {
+        self.init(version: version, project: project, imagePolicy: nil, services: services)
+    }
+
+    public init(version: Int?, project: String?, imagePolicy: HostwrightImagePolicy?, services: [HostwrightService]) {
         self.version = version
         self.project = project
+        self.imagePolicy = imagePolicy
         self.services = services
     }
+}
+
+public enum HostwrightImagePolicy: String, Equatable, Sendable {
+    case allowTags = "allow-tags"
+    case requireDigest = "require-digest"
 }
 
 public struct HostwrightService: Equatable, Sendable {

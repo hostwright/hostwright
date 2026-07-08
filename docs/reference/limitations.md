@@ -11,6 +11,7 @@ Hostwright is not production ready.
 - `hostwright init` without overwrite.
 - `hostwright validate` for a restricted Hostwright manifest subset.
 - Manifest `version: 1` support with versionless alpha manifests treated as legacy version 1 input.
+- Manifest `imagePolicy: require-digest` support for local `@sha256:<64 lowercase hex characters>` image reference validation before planning or mutation.
 - Manifest `secretEnv` support for local `keychain://<service>/<account>` secret references, with fake backend tests and no live Keychain default.
 - Fail-closed unsupported-field, unsupported-version, unsupported DNS/discovery/networking-field, unsafe env-key, and unsafe host-root or parent-traversal mount-source validation for untrusted manifests.
 - `hostwright plan` as non-mutating manifest-level dry-run output.
@@ -70,6 +71,7 @@ Hostwright is not production ready.
 - Automatic manifest upgrade, downgrade, or compatibility conversion.
 - General YAML parsing or full orchestrator schema compatibility.
 - Live macOS Keychain access, Keychain prompts, Keychain access groups, synchronizable Keychain items, registry credential storage, credential sync, credential upload, or cloud identity integration.
+- Registry image resolution, tag-to-digest lookup, automatic image pulls, signature verification, OCI referrer inspection, SBOM generation/validation, vulnerability scanning, dependency provenance, or source-build integrity automation.
 - Multi-action `hostwright apply`.
 - Guaranteed Apple container observation on every machine.
 - Broad non-empty Apple container JSON list parsing beyond the verified builder/proof shapes.
@@ -97,7 +99,7 @@ Hostwright is not production ready.
 - Cloud control plane.
 - Web dashboard.
 - Production readiness.
-- Binary downloads, installer packages, Homebrew formulae, signing, notarization, SBOM, or binary provenance.
+- Binary downloads, installer packages, Homebrew formulae, signing, notarization, SBOM, vulnerability scanning, or binary provenance.
 
 ## Explicitly Out Of Scope For The First Supported Release
 
@@ -123,6 +125,8 @@ Hostwright is not production ready.
 ## Parser Limitation
 
 The manifest parser is not a general YAML parser. It accepts only the documented Hostwright manifest subset and fails closed for unsupported YAML features, unsupported manifest versions, unknown Kubernetes/Compose-style fields, unsafe environment keys, and unsafe host-root or parent-traversal mount sources. Expanding beyond that subset requires a dependency/design decision before the manifest surface grows.
+
+Manifest image trust is limited to local reference policy. `imagePolicy: require-digest` rejects tag-only service images unless they include a `sha256` digest. Hostwright does not query registries, resolve tags, verify signatures, inspect SBOMs, scan vulnerabilities, or prove provenance.
 
 ## Runtime Truth
 

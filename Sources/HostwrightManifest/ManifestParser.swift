@@ -63,6 +63,29 @@ public enum ManifestParser {
                     }
                 } else if trimmed.hasPrefix("project:") {
                     manifest.project = value(after: "project:", in: trimmed)
+                } else if trimmed.hasPrefix("imagePolicy:") {
+                    if manifest.imagePolicy != nil {
+                        issues.append(
+                            ManifestIssue(
+                                code: .manifestValidationFailed,
+                                message: "Manifest imagePolicy must be declared at most once.",
+                                line: lineNumber
+                            )
+                        )
+                    } else {
+                        let rawPolicy = value(after: "imagePolicy:", in: trimmed)
+                        if let policy = HostwrightImagePolicy(rawValue: rawPolicy) {
+                            manifest.imagePolicy = policy
+                        } else {
+                            issues.append(
+                                ManifestIssue(
+                                    code: .manifestValidationFailed,
+                                    message: "Manifest imagePolicy must be one of: allow-tags, require-digest.",
+                                    line: lineNumber
+                                )
+                            )
+                        }
+                    }
                 } else if trimmed == "services:" {
                     seenServices = true
                 } else {

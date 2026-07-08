@@ -33,6 +33,7 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 | 22 | Networking and Service Discovery | Complete locally | Harden local networking policy and document unsupported discovery/exposure boundaries. | Localhost publish defaults, duplicate/observed port conflicts, unsupported discovery fields, and fixture-only network metadata are tested. |
 | 23 | Secure Exposure Research | Complete locally | Decide tunnel, VPN, mTLS, reverse proxy, DNS, and cloud exposure boundaries before any implementation. | Decision record rejects or defers every secure exposure path and tests guard unsupported current-support claims. |
 | 24 | Secrets, Credentials, And Keychain Boundary | Complete locally | Add local secret references, fake Keychain backend, unavailable live backend, and redaction hardening. | `secretEnv`, fake backend resolution, fail-closed unavailable backend, and redacted state/diagnostics/plans pass tests. |
+| 25 | Supply Chain And Image Trust | Complete locally | Add local image digest-reference policy and document trust-tool boundaries. | `imagePolicy: require-digest`, digest syntax validation, schema alignment, docs boundary, and overclaim tests pass without registry calls or scanner/signing dependencies. |
 
 ## Current Hard Boundaries
 
@@ -49,6 +50,7 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 - Manifest parsing remains a restricted Hostwright subset, not general YAML or Compose parity.
 - Explicit `version: 1` manifests are supported; omitted version is legacy v1 input; explicit older/newer versions fail closed with no automatic conversion.
 - Networking remains local-first: Hostwright-created publishes use `127.0.0.1`, observed host-port conflicts block planning, and DNS/service discovery/reverse proxy/tunnel/cloud exposure remain unsupported.
+- Image trust remains local-first: `imagePolicy: require-digest` validates `@sha256` reference syntax only and does not resolve registries, pull images, verify signatures, scan vulnerabilities, generate SBOMs, or prove provenance.
 
 ## Phase 3 Outputs
 
@@ -261,3 +263,14 @@ Phase 23 does not add provider integration, provider credentials, tunnels, DNS b
 - XCTest coverage covers secret reference parsing, fake backend behavior, manifest validation, mapper redaction, apply resolution/failure, runtime guard, state redaction, observability redaction, and schema alignment.
 
 Phase 24 does not add live Keychain access, Keychain prompts, access groups, synchronizable items, credential upload/sync, cloud identity, registry credential storage, mounted secret files, provider integration, runtime mutation expansion, release tags, or GitHub Releases.
+
+## Phase 25 Outputs
+
+- Added optional top-level manifest `imagePolicy: allow-tags|require-digest`.
+- Preserved `allow-tags` as the default for existing alpha manifests.
+- Added local `@sha256:<64 lowercase hex characters>` image reference validation.
+- `imagePolicy: require-digest` rejects mutable tag-only image references before planning or mutation.
+- Schema and manifest tests cover the accepted and rejected image-policy shapes.
+- Added a supply-chain image trust decision record covering OCI digest semantics, Sigstore/cosign, SBOM standards, vulnerability scanning, provenance, and source-build integrity boundaries.
+
+Phase 25 does not add registry lookup, image pull, registry credentials, signature verification, SBOM generation/validation, vulnerability scanning, provenance verification, source-build automation, image replacement, image cleanup, runtime mutation expansion, release tags, or GitHub Releases.

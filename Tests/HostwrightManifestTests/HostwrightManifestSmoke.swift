@@ -9,6 +9,8 @@ final class HostwrightManifestTests: XCTestCase {
 
         XCTAssertEqual(manifest.version, 1)
         XCTAssertEqual(manifest.effectiveVersion, 1)
+        XCTAssertNil(manifest.imagePolicy)
+        XCTAssertEqual(manifest.effectiveImagePolicy, .allowTags)
         XCTAssertEqual(manifest.project, "api-local")
         XCTAssertEqual(manifest.services.count, 1)
         XCTAssertEqual(manifest.services[0].name, "api")
@@ -75,6 +77,109 @@ final class HostwrightManifestTests: XCTestCase {
             """,
             code: "HW-MANIFEST-003",
             contains: "newer than supported version 1"
+        )
+    }
+
+    func testImagePolicyRequiresDigestPinnedImagesWhenConfigured() throws {
+        let digest = String(repeating: "a", count: 64)
+        let manifest = try ManifestValidator.validated(
+            """
+            version: 1
+            project: api-local
+            imagePolicy: require-digest
+            services:
+              api:
+                image: ghcr.io/example/api@sha256:\(digest)
+            """
+        )
+
+        XCTAssertEqual(manifest.imagePolicy, .requireDigest)
+        XCTAssertEqual(manifest.effectiveImagePolicy, .requireDigest)
+        XCTAssertEqual(manifest.services[0].image, "ghcr.io/example/api@sha256:\(digest)")
+
+        XCTAssertNoThrow(
+            try ManifestValidator.validated(
+                """
+                version: 1
+                project: api-local
+                imagePolicy: allow-tags
+                services:
+                  api:
+                    image: ghcr.io/example/api:latest
+                """
+            )
+        )
+
+        assertManifestFailure(
+            """
+            version: 1
+            project: api-local
+            imagePolicy: require-digest
+            services:
+              api:
+                image: ghcr.io/example/api:latest
+            """,
+            contains: "requires image 'ghcr.io/example/api:latest' to be digest-pinned"
+        )
+    }
+
+    func testImageDigestSyntaxFailsClosedWithoutRegistryLookup() {
+        assertManifestFailure(
+            """
+            version: 1
+            project: api-local
+            services:
+              api:
+                image: ghcr.io/example/api@sha512:abcdef
+            """,
+            contains: "image digest must use @sha256:<64 lowercase hex characters>"
+        )
+
+        assertManifestFailure(
+            """
+            version: 1
+            project: api-local
+            services:
+              api:
+                image: ghcr.io/example/api@sha256:ABCDEF
+            """,
+            contains: "image digest must use @sha256:<64 lowercase hex characters>"
+        )
+
+        assertManifestFailure(
+            """
+            version: 1
+            project: api-local
+            services:
+              api:
+                image: https://ghcr.io/example/api:latest
+            """,
+            contains: "must be an OCI-style image reference"
+        )
+
+        assertManifestFailure(
+            """
+            version: 1
+            project: api-local
+            imagePolicy: content-trust
+            services:
+              api:
+                image: ghcr.io/example/api:latest
+            """,
+            contains: "imagePolicy must be one of"
+        )
+
+        assertManifestFailure(
+            """
+            version: 1
+            project: api-local
+            imagePolicy: require-digest
+            imagePolicy: allow-tags
+            services:
+              api:
+                image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+            """,
+            contains: "imagePolicy must be declared at most once"
         )
     }
 
@@ -401,13 +506,15 @@ final class HostwrightManifestTests: XCTestCase {
 
         XCTAssertFalse(schema.contains(#""apiVersion""#))
         let properties = try XCTUnwrap(schemaJSON["properties"] as? [String: Any])
-        XCTAssertEqual(Set(properties.keys), ["version", "project", "services"])
+        XCTAssertEqual(Set(properties.keys), ["version", "project", "imagePolicy", "services"])
         let required = try XCTUnwrap(schemaJSON["required"] as? [String])
         XCTAssertEqual(required, ["project", "services"])
         let version = try XCTUnwrap(properties["version"] as? [String: Any])
         XCTAssertEqual(version["const"] as? Int, HostwrightManifest.currentVersion)
         let project = try XCTUnwrap(properties["project"] as? [String: Any])
         XCTAssertEqual(project["pattern"] as? String, #"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"#)
+        let imagePolicy = try XCTUnwrap(properties["imagePolicy"] as? [String: Any])
+        XCTAssertEqual(imagePolicy["enum"] as? [String], ["allow-tags", "require-digest"])
         let services = try XCTUnwrap(properties["services"] as? [String: Any])
         XCTAssertEqual(services["minProperties"] as? Int, 1)
 

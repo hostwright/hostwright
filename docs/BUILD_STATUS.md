@@ -59,9 +59,6 @@
 - Phase 19 adds cleanup dry-run classifications for eligible, ambiguous, stale, running, unknown, blocked, and never-delete ownership-backed and observed-only resources, keeps confirmed deletion limited to exact eligible Hostwright-owned non-running containers, hardens cleanup confirmation tokens against eligible-candidate drift, and reports delete-success/state-persistence failures as state failures.
 - Phase 20 adds read-only event filters, local redacted diagnostics bundles from explicit state DB paths, local-only telemetry policy reporting in status/doctor/diagnostics output, and XCTest coverage for diagnostics redaction and no runtime observation during export.
 - Phase 22 adds local bind-address policy helpers, observed host-port conflict blockers, unsupported DNS/discovery/networking-field errors, versioned network attachment fixture parsing, and fail-closed handling for non-empty real Apple container network output.
-- Phase 23 records secure-exposure research decisions and keeps tunnel, DNS, reverse proxy, VPN, and cloud exposure behavior out of current core.
-- Phase 24 adds local secret references, fake Keychain backend coverage, unavailable live backend behavior, and redaction across planning/state/diagnostics/errors.
-- Phase 25 adds local digest-reference image policy and documents that registry lookup, image pull, signature verification, SBOM, vulnerability scanning, and provenance remain unsupported.
 - Phase 26 adds ProcessInfo-backed resource intelligence reports in doctor JSON, fixture-backed parser coverage, evidence-based non-arm64 image architecture warnings, and docs that keep benchmark dimensions explicit as unmeasured without capacity or accelerator claims.
 - No Apple container command was called by Phase 6 or Phase 7.
 - `FoundationRuntimeProcessRunner` exists for policy-approved read-only command specs and supported mutation specs; automated tests still use fake process execution.

@@ -28,6 +28,34 @@ final class HostwrightHealthTests: XCTestCase {
         XCTAssertFalse(report.hasFailures)
     }
 
+    func testDoctorResourceIntelligenceWarnsOnSeriousThermalState() {
+        let snapshot = ResourceIntelligenceSnapshot(
+            method: .fixture,
+            operatingSystemDescription: "macOS 26.5",
+            platform: PlatformSnapshot(macOSMajorVersion: 26, architecture: "arm64"),
+            physicalMemoryBytes: 68_719_476_736,
+            activeProcessorCount: 12,
+            thermalState: .serious,
+            appleContainerExecutablePath: "/usr/local/bin/container",
+            appleContainerVersion: "container 1.0.0",
+            workloadProfile: .localContainersGeneral
+        )
+
+        let report = HostwrightDoctor.report(
+            inputs: DoctorInputs(
+                operatingSystemDescription: "macOS 26.5",
+                platform: PlatformSnapshot(macOSMajorVersion: 26, architecture: "arm64"),
+                swiftVersion: "Swift 6.3.3",
+                containerExecutablePath: "/usr/local/bin/container",
+                manifestExists: true,
+                resourceSnapshot: snapshot
+            )
+        )
+
+        XCTAssertTrue(report.checks.contains { $0.identifier == .resourceIntelligence && $0.status == .warning })
+        XCTAssertFalse(report.hasFailures)
+    }
+
     func testResourceReportCapturesMeasurementMethodHardwareLimitsAndUnknowns() {
         let snapshot = ResourceIntelligenceSnapshot(
             method: .fixture,

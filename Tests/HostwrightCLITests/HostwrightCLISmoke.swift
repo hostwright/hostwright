@@ -249,6 +249,13 @@ final class HostwrightCLITests: XCTestCase {
         let limits = try XCTUnwrap(report["limits"] as? [String])
         XCTAssertTrue(limits.contains("No production density or capacity guarantee."))
         XCTAssertTrue(limits.contains("No telemetry upload; reports are local diagnostics only."))
+
+        let reportData = try JSONSerialization.data(withJSONObject: report, options: [.sortedKeys])
+        let reportText = try XCTUnwrap(String(data: reportData, encoding: .utf8))
+        let decodedReport = try ResourceIntelligenceReportParser.parseReport(reportText)
+        XCTAssertEqual(decodedReport.measurementMethod, .fixture)
+        XCTAssertEqual(decodedReport.appleContainer.version, "container 1.0.0")
+        XCTAssertEqual(decodedReport.architectureWarnings.first?.reportedArchitecture, "linux/amd64")
     }
 
     func testDoctorCompatibilityFailureUsesValidationExitCode() throws {

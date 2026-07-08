@@ -263,6 +263,15 @@ Phase 8A is a required preflight before this mutation gate. It proves real read-
 | HW-DOCS-002 | Core repository docs still state that Hostwright does not currently implement multi-host orchestration, remote host agents, membership service, peer discovery, state replication, remote mutation, remote placement, cloud control plane, or scheduler APIs. | Automated + manual | Core docs XCTest; limitations, requirements, implementation-plan, and build-status review. |
 | HW-RUNTIME-001, HW-RUNTIME-002, HW-STATE-001, HW-SAFE-008 | Research does not add runtime mutation, RuntimeAdapter calls, direct Apple container shell-out, SQLite access outside `HostwrightState`, state writes, remote policy, dependencies, network calls, image pulls, release tags, or GitHub Releases. | Manual | Diff review plus full local gate and targeted boundary scans. |
 
+## Phase 31 Gate: Scheduler And Placement Engine
+
+| Requirement IDs | Acceptance criteria | Verification type | Verification command or review |
+| --- | --- | --- | --- |
+| HW-COMPAT-010, HW-SAFE-008, HW-RECON-002 | Scheduler reports are deterministic, explainable, local, advisory-only, and derived from declared inputs plus local policy decisions. | Automated | Reconciler XCTest cases for deterministic recommendations, policy/port blockers, scores, and stable reason codes. |
+| HW-COMPAT-006, HW-COMPAT-010 | Memory and overcommit behavior uses explicit declared memory requests and resource-report host facts without capacity guarantees or inferred workload memory pressure. | Automated + manual | Reconciler overcommit/missing-memory XCTest cases and advisory-scheduler docs review. |
+| HW-COMPAT-007, HW-COMPAT-009, HW-DOCS-002 | Accelerator and remote-placement dimensions block with explanations; docs still state no accelerator-aware scheduling, scheduler API, remote placement, multi-host scheduling, or automatic placement exists. | Automated + manual | Reconciler accelerator/remote-placement XCTest cases plus core docs guard. |
+| HW-RUNTIME-001, HW-RUNTIME-002, HW-STATE-001 | Scheduler work does not add RuntimeAdapter methods, direct Apple container shell-out, SQLite access outside `HostwrightState`, state writes, daemon scheduling, network calls, registry calls, image pulls, dependencies, release tags, or GitHub Releases. | Automated + manual | Full local gate plus targeted boundary scans and diff review. |
+
 ## Phase 32 Gate: Policy Engine
 
 | Requirement IDs | Acceptance criteria | Verification type | Verification command or review |

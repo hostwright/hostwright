@@ -1,4 +1,6 @@
 import XCTest
+@testable import HostwrightCore
+@testable import HostwrightHealth
 @testable import HostwrightManifest
 @testable import HostwrightPolicy
 @testable import HostwrightRuntime
@@ -422,6 +424,211 @@ final class HostwrightReconcilerTests: XCTestCase {
         XCTAssertFalse(plan.includesDestructiveAction)
     }
 
+    func testAdvisorySchedulerProducesDeterministicLocalRecommendations() {
+        let desired = desiredState(
+            services: [
+                desiredService(name: "api"),
+                desiredService(name: "worker")
+            ]
+        )
+        let input = AdvisorySchedulingInput(
+            desiredState: desired,
+            observedState: observedState([]),
+            resourceReport: resourceReport(physicalMemoryBytes: gibibytes(16)),
+            resourceRequests: [
+                identity(serviceName: "api"): advisoryRequest(memoryGiB: 1, workloadClass: .interactiveService),
+                identity(serviceName: "worker"): advisoryRequest(memoryGiB: 2, workloadClass: .backgroundWorker)
+            ]
+        )
+
+        let first = AdvisoryScheduler().evaluate(input)
+        let second = AdvisoryScheduler().evaluate(input)
+
+        XCTAssertEqual(first, second)
+        XCTAssertTrue(first.advisoryOnly)
+        XCTAssertFalse(first.hasBlockers)
+        XCTAssertEqual(first.recommendations.map { $0.identity.serviceName }, ["api", "worker"])
+        XCTAssertTrue(first.recommendations.allSatisfy { $0.status == .recommended })
+        XCTAssertTrue(first.recommendations.allSatisfy { recommendation in
+            recommendation.reasons.contains { $0.reasonCode == .memoryWithinAdvisoryBudget }
+        })
+    }
+
+    func testAdvisorySchedulerBlocksPolicyPortConflicts() throws {
+        let desired = desiredState(
+            services: [
+                desiredService(
+                    name: "api",
+                    ports: [RuntimePortMapping(hostPort: 8080, containerPort: 8080, bindAddress: "127.0.0.1")]
+                )
+            ]
+        )
+        let observed = observedState([
+            observed(
+                serviceName: "other",
+                ports: [RuntimePortMapping(hostPort: 8080, containerPort: 8080, bindAddress: "0.0.0.0")]
+            )
+        ])
+
+        let report = AdvisoryScheduler().evaluate(
+            AdvisorySchedulingInput(
+                desiredState: desired,
+                observedState: observed,
+                resourceReport: resourceReport(physicalMemoryBytes: gibibytes(16)),
+                resourceRequests: [identity(serviceName: "api"): advisoryRequest(memoryGiB: 1)]
+            )
+        )
+
+        let recommendation = try XCTUnwrap(report.recommendations.first)
+        XCTAssertEqual(recommendation.status, .blocked)
+        XCTAssertTrue(recommendation.reasons.contains {
+            $0.reasonCode == .policyBlocker &&
+                $0.policyReasonCode == .observedHostPortConflict
+        })
+    }
+
+    func testAdvisorySchedulerBlocksOvercommitAndUnsupportedAccelerators() {
+        let desired = desiredState(
+            services: [
+                desiredService(name: "api"),
+                desiredService(name: "worker")
+            ]
+        )
+        let configuration = AdvisorySchedulingConfiguration(advisoryMemoryBudgetPercent: 50)
+
+        let report = AdvisoryScheduler().evaluate(
+            AdvisorySchedulingInput(
+                desiredState: desired,
+                observedState: observedState([]),
+                resourceReport: resourceReport(physicalMemoryBytes: gibibytes(8)),
+                resourceRequests: [
+                    identity(serviceName: "api"): advisoryRequest(memoryGiB: 3, workloadClass: .interactiveService),
+                    identity(serviceName: "worker"): advisoryRequest(memoryGiB: 3, workloadClass: .localAI, acceleratorRequirements: ["Apple GPU"])
+                ],
+                configuration: configuration
+            )
+        )
+
+        XCTAssertTrue(report.hasBlockers)
+        XCTAssertEqual(report.recommendations.map(\.status), [.blocked, .blocked])
+        XCTAssertTrue(recommendation(named: "api", in: report).reasons.contains { $0.reasonCode == .memoryOvercommit })
+        let worker = recommendation(named: "worker", in: report)
+        XCTAssertTrue(worker.reasons.contains { $0.reasonCode == .memoryOvercommit })
+        XCTAssertTrue(worker.reasons.contains { $0.reasonCode == .acceleratorUnsupported })
+    }
+
+    func testAdvisorySchedulerIgnoresStaleResourceRequestsOutsideDesiredStateForOvercommit() {
+        let desired = desiredState(services: [desiredService(name: "api")])
+
+        let report = AdvisoryScheduler().evaluate(
+            AdvisorySchedulingInput(
+                desiredState: desired,
+                observedState: observedState([]),
+                resourceReport: resourceReport(physicalMemoryBytes: gibibytes(8)),
+                resourceRequests: [
+                    identity(serviceName: "api"): advisoryRequest(memoryGiB: 1, workloadClass: .interactiveService),
+                    identity(serviceName: "stale"): advisoryRequest(memoryGiB: 7, workloadClass: .batchJob)
+                ],
+                configuration: AdvisorySchedulingConfiguration(advisoryMemoryBudgetPercent: 50)
+            )
+        )
+
+        let recommendation = recommendation(named: "api", in: report)
+        XCTAssertEqual(report.totalDeclaredMemoryBytes, gibibytes(1))
+        XCTAssertEqual(recommendation.status, .recommended)
+        XCTAssertFalse(recommendation.reasons.contains { $0.reasonCode == .memoryOvercommit })
+    }
+
+    func testAdvisorySchedulerBlocksInvalidMemoryRequests() {
+        let desired = desiredState(
+            services: [
+                desiredService(name: "zero"),
+                desiredService(name: "negative")
+            ]
+        )
+
+        let report = AdvisoryScheduler().evaluate(
+            AdvisorySchedulingInput(
+                desiredState: desired,
+                observedState: observedState([]),
+                resourceReport: resourceReport(physicalMemoryBytes: gibibytes(8)),
+                resourceRequests: [
+                    identity(serviceName: "zero"): AdvisoryResourceRequest(
+                        memoryBytes: 0,
+                        workloadClass: .interactiveService
+                    ),
+                    identity(serviceName: "negative"): AdvisoryResourceRequest(
+                        memoryBytes: -1,
+                        workloadClass: .backgroundWorker
+                    )
+                ]
+            )
+        )
+
+        XCTAssertEqual(report.totalDeclaredMemoryBytes, 0)
+        XCTAssertEqual(report.recommendations.map(\.status), [.blocked, .blocked])
+        XCTAssertTrue(recommendation(named: "zero", in: report).reasons.contains { $0.reasonCode == .memoryRequestInvalid })
+        XCTAssertTrue(recommendation(named: "negative", in: report).reasons.contains { $0.reasonCode == .memoryRequestInvalid })
+    }
+
+    func testAdvisorySchedulerScoresFairnessWarningsDeterministically() {
+        let desired = desiredState(
+            services: [
+                desiredService(name: "api"),
+                desiredService(name: "batch-a"),
+                desiredService(name: "batch-b"),
+                desiredService(name: "batch-c")
+            ]
+        )
+        let configuration = AdvisorySchedulingConfiguration(fairnessWarningThresholdPerClass: 1)
+
+        let report = AdvisoryScheduler().evaluate(
+            AdvisorySchedulingInput(
+                desiredState: desired,
+                observedState: observedState([]),
+                resourceReport: resourceReport(physicalMemoryBytes: gibibytes(32)),
+                resourceRequests: [
+                    identity(serviceName: "api"): advisoryRequest(memoryGiB: 1, workloadClass: .interactiveService),
+                    identity(serviceName: "batch-a"): advisoryRequest(memoryGiB: 1, workloadClass: .batchJob),
+                    identity(serviceName: "batch-b"): advisoryRequest(memoryGiB: 1, workloadClass: .batchJob),
+                    identity(serviceName: "batch-c"): advisoryRequest(memoryGiB: 1, workloadClass: .batchJob)
+                ],
+                configuration: configuration
+            )
+        )
+
+        XCTAssertFalse(report.hasBlockers)
+        XCTAssertEqual(report.recommendations.first?.identity.serviceName, "api")
+        let batch = recommendation(named: "batch-a", in: report)
+        XCTAssertEqual(batch.status, .recommended)
+        XCTAssertLessThan(batch.score, recommendation(named: "api", in: report).score)
+        XCTAssertTrue(batch.reasons.contains { $0.reasonCode == .workloadClassFairnessPenalty })
+    }
+
+    func testAdvisorySchedulerFailsClosedForRemotePlacementAndMissingMemoryFacts() {
+        let desired = desiredState(services: [desiredService(name: "api")])
+
+        let report = AdvisoryScheduler().evaluate(
+            AdvisorySchedulingInput(
+                desiredState: desired,
+                observedState: observedState([]),
+                resourceReport: resourceReport(physicalMemoryBytes: nil),
+                resourceRequests: [
+                    identity(serviceName: "api"): advisoryRequest(
+                        memoryGiB: 1,
+                        workloadClass: .interactiveService,
+                        requiresRemotePlacement: true
+                    )
+                ]
+            )
+        )
+
+        let recommendation = recommendation(named: "api", in: report)
+        XCTAssertEqual(recommendation.status, .blocked)
+        XCTAssertTrue(recommendation.reasons.contains { $0.reasonCode == .memoryBudgetUnavailable })
+        XCTAssertTrue(recommendation.reasons.contains { $0.reasonCode == .remotePlacementUnsupported })
+    }
+
     private func identity(projectName: String = "demo", serviceName: String = "web") -> RuntimeServiceIdentity {
         RuntimeServiceIdentity(projectName: projectName, serviceName: serviceName)
     }
@@ -489,6 +696,51 @@ final class HostwrightReconcilerTests: XCTestCase {
             updatedAt: "2026-07-01T00:00:00Z",
             metadataJSONRedacted: "{}"
         )
+    }
+
+    private func advisoryRequest(
+        memoryGiB: Int?,
+        workloadClass: AdvisoryWorkloadClass = .unknown,
+        acceleratorRequirements: [String] = [],
+        requiresRemotePlacement: Bool = false
+    ) -> AdvisoryResourceRequest {
+        AdvisoryResourceRequest(
+            memoryBytes: memoryGiB.map(gibibytes),
+            workloadClass: workloadClass,
+            acceleratorRequirements: acceleratorRequirements,
+            requiresRemotePlacement: requiresRemotePlacement
+        )
+    }
+
+    private func resourceReport(
+        physicalMemoryBytes: Int?,
+        thermalState: ResourcePressureLevel = .nominal
+    ) -> ResourceIntelligenceReport {
+        ResourceIntelligenceReport(
+            snapshot: ResourceIntelligenceSnapshot(
+                method: .fixture,
+                operatingSystemDescription: "macOS 26.5",
+                platform: PlatformSnapshot(macOSMajorVersion: 26, architecture: "arm64"),
+                physicalMemoryBytes: physicalMemoryBytes,
+                activeProcessorCount: 12,
+                thermalState: thermalState,
+                appleContainerExecutablePath: "/usr/local/bin/container",
+                appleContainerVersion: "container 1.0.0",
+                workloadProfile: .localContainersGeneral
+            )
+        )
+    }
+
+    private func recommendation(named serviceName: String, in report: AdvisorySchedulingReport) -> AdvisorySchedulingRecommendation {
+        guard let recommendation = report.recommendations.first(where: { $0.identity.serviceName == serviceName }) else {
+            XCTFail("Missing recommendation for \(serviceName)")
+            return report.recommendations[0]
+        }
+        return recommendation
+    }
+
+    private func gibibytes(_ value: Int) -> Int {
+        value * 1_073_741_824
     }
 
     private func planIssueFingerprint(_ issue: PlanIssue) -> String {

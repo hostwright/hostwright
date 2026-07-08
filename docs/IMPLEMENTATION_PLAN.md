@@ -39,6 +39,7 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 | 28 | Stack-File Import And Migration Tooling | Complete locally | Add import-only conversion for a narrow safe stack-file subset. | Golden conversion, unsupported-field, policy-reason, CLI JSON/text, and validation-gate tests pass without runtime/state mutation or Compose parity claims. |
 | 29 | External Orchestration Compatibility Research | Complete locally | Decide CRI, Kubernetes, Docker API, Compose, attach, forwarding, scheduler, lifecycle, networking, identity, and state compatibility boundaries before implementation. | Decision record rejects, defers, or splits every compatibility path and docs guard unsupported current-support claims. |
 | 30 | Multi-Host Apple Silicon Platform Research | Complete locally | Decide multi-host identity, membership, trust, state authority, transport, failure recovery, cloud boundary, and scheduler implications before implementation. | Decision record keeps current core single-host and docs guard unsupported current-support claims. |
+| 31 | Scheduler And Placement Engine | Complete locally | Add deterministic local advisory scheduling without automatic placement or capacity guarantees. | Advisory scheduler tests cover policy blockers, memory overcommit, fairness scoring, accelerator blockers, remote-placement blockers, and unsupported current-support claims. |
 | 32 | Policy Engine | Complete locally | Add deterministic local policy decisions before import, compatibility, multi-host, and scheduler work. | Policy evaluator tests cover ports, mounts, images, env/secrets, cleanup, lifecycle, exposure, untrusted manifests, accelerator placeholders, and planner migration. |
 
 ## Current Hard Boundaries
@@ -63,6 +64,7 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 - Stack-file import is conversion-only: it prints reviewed `hostwright.yaml` text for a narrow safe subset and rejects unsupported networking, secrets, configs, build, deploy, named-volume, shell-healthcheck, cloud, tunnel, and lifecycle semantics without writing files, touching state, observing runtime, pulling images, or claiming Compose parity.
 - External orchestration compatibility remains research-only: no CRI shim, Kubernetes node behavior, Docker API shim, Testcontainers target, full Compose parity, attach/exec/log-follow/port-forward stream, or external scheduler API exists in current core scope.
 - Multi-host platform work remains research-only: current core has no remote host agent, membership service, peer discovery, state replication, remote mutation, cloud control plane, scheduler API, or remote placement behavior.
+- Scheduler behavior is local and advisory: it scores explicit local recommendations from declared inputs and existing policy decisions, but it does not mutate runtime, write state, reserve capacity, perform automatic placement, expose a scheduler API, schedule accelerators, or place work on remote hosts.
 
 ## Phase 3 Outputs
 
@@ -342,6 +344,19 @@ Phase 29 does not add CRI, Kubernetes, Docker API, Compose parity, Testcontainer
 - XCTest coverage guards the research decision and unsupported-current-support wording.
 
 Phase 30 does not add multi-host orchestration, remote mutation, remote host agents, state replication, membership service, peer discovery, transport or certificate implementation, cloud control plane, DNS, tunnels, scheduler API, remote placement, runtime mutation expansion, state writes, network calls, image pulls, dependencies, release tags, or GitHub Releases.
+
+## Phase 31 Outputs
+
+- `Sources/HostwrightReconciler/AdvisoryScheduler.swift` and `AdvisorySchedulingModels.swift` add a deterministic in-memory advisory scheduler.
+- Scheduler inputs include desired runtime state, optional observed runtime state, local resource report facts, explicit memory/workload-class/accelerator/remote-placement requests, and the local policy evaluator.
+- Scheduler output is an `AdvisorySchedulingReport` with sorted recommendations, stable reason codes, blockers, warnings, remediations, scores, memory budget summary, and `advisoryOnly = true`.
+- Policy integration carries existing local planner blockers and warnings into scheduler explanations without changing `ReconciliationPlan`, plan hashes, CLI output, RuntimeAdapter behavior, or state.
+- Memory and overcommit checks use declared memory requests and local physical-memory facts only; missing facts block and missing service memory requests warn instead of inferring capacity.
+- Workload class fairness lowers advisory scores when one declared class exceeds the local threshold, but does not enforce operating-system QoS, preemption, or fair share.
+- Accelerator and remote-placement requirements are blockers.
+- XCTest coverage proves deterministic recommendations, policy/port blockers, memory overcommit, accelerator blockers, fairness scoring, remote-placement blockers, and fail-closed missing memory evidence.
+
+Phase 31 does not add automatic placement, capacity reservation, runtime mutation, RuntimeAdapter changes, SQLite access, state writes, daemon scheduling, scheduler API, external scheduler compatibility, Kubernetes scheduler behavior, multi-host scheduling, remote placement, DNS, tunnels, cloud behavior, registry calls, image pulls, telemetry upload, accelerator-aware scheduling, GPU/ANE/Metal/Core ML/MLX/PyTorch MPS support, third-party dependencies, release tags, or GitHub Releases.
 
 ## Phase 32 Outputs
 

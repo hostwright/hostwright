@@ -76,6 +76,7 @@ let package = Package(
             name: "HostwrightReconciler",
             dependencies: [
                 "HostwrightCore",
+                "HostwrightHealth",
                 "HostwrightManifest",
                 "HostwrightNetworking",
                 "HostwrightPolicy",
@@ -152,6 +153,7 @@ let package = Package(
         .testTarget(
             name: "HostwrightReconcilerTests",
             dependencies: [
+                "HostwrightHealth",
                 "HostwrightPolicy",
                 "HostwrightReconciler"
             ]

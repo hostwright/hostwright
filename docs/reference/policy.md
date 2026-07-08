@@ -25,6 +25,7 @@ Policy decisions include:
 - Cleanup deletes only resources classified as exact Hostwright-owned non-running eligible containers after dry-run token confirmation.
 - Unsupported manifest fields, secure exposure, broad lifecycle actions, and accelerator requests fail closed.
 - Stack-file import uses local policy reason codes when unsupported fields map to untrusted manifest, secure exposure, lifecycle, or mount-safety blockers.
+- Advisory scheduling consumes local policy decisions for placement explanations and scores without changing the underlying policy gates.
 
 ## What Policy Does Not Do
 
@@ -40,6 +41,7 @@ Policy evaluation does not:
 - install DNS, tunnels, reverse proxies, or cloud integration;
 - convert broad Docker Compose or orchestrator semantics into runtime behavior;
 - expose Apple GPU, ANE, Metal, Core ML, MLX, PyTorch MPS, or host-native accelerator helpers.
+- place workloads, reserve capacity, expose a scheduler API, or perform remote placement.
 
 ## Override Boundary
 

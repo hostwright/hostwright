@@ -397,6 +397,59 @@ final class HostwrightCoreTests: XCTestCase {
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("scheduler API is implemented"))
     }
 
+    func testAdvisorySchedulerDocsDescribeLocalAdvisoryBoundary() throws {
+        let root = try packageRoot()
+        let architecture = try read("docs/architecture/advisory-scheduler.md", root: root)
+        let limitations = try read("docs/reference/limitations.md", root: root)
+        let policy = try read("docs/reference/policy.md", root: root)
+        let resourceIntelligence = try read("docs/architecture/resource-intelligence.md", root: root)
+        let requirements = try read("docs/requirements/REQUIREMENTS.md", root: root)
+        let acceptance = try read("docs/requirements/ACCEPTANCE_MATRIX.md", root: root)
+        let traceability = try read("docs/requirements/SOURCE_TRACEABILITY.md", root: root)
+        let implementationPlan = try read("docs/IMPLEMENTATION_PLAN.md", root: root)
+        let buildStatus = try read("docs/BUILD_STATUS.md", root: root)
+        let devlog = try read("docs/devlog/0031-scheduler-placement-engine.md", root: root)
+        let publicDocs = [
+            architecture,
+            limitations,
+            policy,
+            resourceIntelligence,
+            requirements,
+            acceptance,
+            traceability,
+            implementationPlan,
+            buildStatus,
+            devlog
+        ].joined(separator: "\n")
+
+        XCTAssertTrue(architecture.contains("Status: Phase 31 local advisory model."))
+        XCTAssertTrue(architecture.contains("advisoryOnly = true"))
+        XCTAssertTrue(architecture.contains("requested accelerator dimensions are blockers"))
+        XCTAssertTrue(limitations.contains("Local advisory scheduler reports"))
+        XCTAssertTrue(limitations.contains("Advisory scheduling is local and diagnostic."))
+        XCTAssertTrue(policy.contains("Advisory scheduling consumes local policy decisions"))
+        XCTAssertTrue(resourceIntelligence.contains("Phase 31 advisory scheduling may consume resource reports"))
+        XCTAssertTrue(requirements.contains("HW-COMPAT-010"))
+        XCTAssertTrue(acceptance.contains("Phase 31 Gate: Scheduler And Placement Engine"))
+        XCTAssertTrue(traceability.contains("HW-COMPAT-010"))
+        XCTAssertTrue(implementationPlan.contains("## Phase 31 Outputs"))
+        XCTAssertTrue(buildStatus.contains("Phase 31 adds a local advisory scheduler model"))
+        XCTAssertTrue(devlog.contains("No automatic placement."))
+
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright automatically places workloads"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright reserves capacity"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright supports scheduler API"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright implements scheduler API"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright supports remote placement"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright schedules accelerators"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("automatic placement is implemented"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("resource reservation is implemented"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("remote placement is implemented"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("scheduler API is implemented"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("accelerator-aware scheduling is implemented"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Kubernetes scheduler behavior is implemented"))
+    }
+
     private func read(_ relativePath: String, root: URL) throws -> String {
         try String(contentsOf: root.appendingPathComponent(relativePath), encoding: .utf8)
     }

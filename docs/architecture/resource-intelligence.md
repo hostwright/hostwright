@@ -2,7 +2,7 @@
 
 Status: Phase 26 local reporting boundary.
 
-Phase 26 adds resource intelligence as local diagnostic reporting, not scheduling or capacity management. The report model records the measurement method, host facts, Apple container version evidence, workload profile, unmeasured dimensions, architecture warnings, and limits.
+Phase 26 adds resource intelligence as local diagnostic reporting, not capacity management. The report model records the measurement method, host facts, Apple container version evidence, workload profile, unmeasured dimensions, architecture warnings, and limits.
 
 ## Implemented Report Fields
 
@@ -46,6 +46,8 @@ The current implementation does not measure runtime density, VM-per-container ov
 
 Apple container version drift monitoring remains a reporting input, not a live command in `doctor`. A future implementation can add a RuntimeAdapter-backed version probe or a separate benchmark command only after the command shape, timeout, redaction, and no-mutation boundary are reviewed.
 
+Phase 31 advisory scheduling may consume resource reports as coarse local host facts, but it must keep capacity, memory pressure, density, and placement claims advisory. It does not turn resource intelligence into reservation, automatic placement, or production capacity planning.
+
 Accelerator evidence remains separate from resource intelligence. See [Accelerator Boundary Research](accelerator-boundary-research.md) for the Phase 27 decision record covering Apple GPU, ANE, Metal, Core ML, MLX, PyTorch MPS, host-native accelerator helpers, and scheduler placeholders.
 
 ## Rejected Claims
@@ -53,7 +55,7 @@ Accelerator evidence remains separate from resource intelligence. See [Accelerat
 Resource intelligence is not:
 
 - production capacity planning;
-- automatic placement;
+- automatic placement or resource reservation;
 - accelerator-aware scheduling;
 - GPU, ANE, Metal, Core ML, or MLX support;
 - external telemetry;

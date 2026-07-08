@@ -13,6 +13,7 @@ Hostwright now has a local policy module, `HostwrightPolicy`, for deterministic 
 - Image policy decisions explain local digest-policy failures without registry calls.
 - Secret-reference decisions fail closed without carrying raw keychain labels in messages or stable keys.
 - Untrusted-manifest, secure-exposure, lifecycle, and accelerator requests have fail-closed policy decisions for current unsupported scope.
+- Advisory scheduling consumes local policy decisions as explanation and scoring inputs without changing policy semantics.
 
 ## Categories
 
@@ -28,6 +29,7 @@ Hostwright now has a local policy module, `HostwrightPolicy`, for deterministic 
 | Lifecycle | Only existing narrow create, managed-start, managed-restart, and cleanup gates are allowed. Broad lifecycle actions are blockers. |
 | Untrusted manifests | Unsupported fields are blockers. |
 | Accelerators | Apple GPU, ANE, Metal, Core ML, MLX, PyTorch MPS, host-native helpers, and accelerator scheduler dimensions are blockers in current core scope. |
+| Scheduling | Local advisory scheduler reports can reuse policy blockers and warnings, but policy does not place workloads or reserve capacity. |
 
 ## Defaults And Overrides
 
@@ -42,3 +44,4 @@ There is no remote policy service, team workflow, central policy distribution, s
 - Cleanup remains destructive only after dry-run, exact ownership, live observation, eligible lifecycle, token confirmation, and exact identifiers.
 - Secret values and keychain reference labels are redacted from display, state, diagnostics, and policy-facing error surfaces.
 - Policy decisions are diagnostic and gating data. They do not perform remediation automatically.
+- Advisory scheduling remains in memory and non-mutating; it does not change `ReconciliationPlan` hashes, execute runtime actions, or write scheduler state.

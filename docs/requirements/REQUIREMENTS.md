@@ -126,7 +126,7 @@ Status values:
 | HW-SAFE-003 | Named volumes must not be deleted by default. | Document 2 | Implemented by omission: no volume delete command path exists | `Sources/HostwrightRuntime/AppleContainerCommand.swift`, `Sources/HostwrightRuntime/RuntimeCommand.swift` | Runtime command-policy XCTest cases; code review | 9 |
 | HW-SAFE-004 | Secret values must not appear in logs, events, status, reports, fixtures, or docs examples; execution env values must not be mutated into redaction placeholders. | Document 2 | Partially implemented for runtime command output, plan rendering, logs, state payloads, apply errors, and execution/display env separation | `Sources/HostwrightRuntime/RuntimeRedaction.swift`, `Sources/HostwrightState/StateJSON.swift`, `Sources/HostwrightCLI/ApplyCommand.swift`, `Sources/HostwrightCLI/LogsCommand.swift` | Runtime, state, CLI, and reconciler XCTest cases with fake secret values | 6, 8, 9, 11 |
 | HW-SAFE-005 | Privileged helpers are rejected unless a future threat model proves necessity. | Document 2 | Rejected for first release | Docs only | Docs review | Rejected |
-| HW-SAFE-006 | Public/LAN/tunnel exposure must require explicit policy and review. | Document 3 | Deferred for first release | Docs and networking scaffold | Docs review | Deferred |
+| HW-SAFE-006 | Public/LAN/tunnel exposure must require explicit policy and review. | Document 3 | Research decision recorded; implementation remains deferred behind policy, secrets, auth, DNS, audit, and revocation gates | `docs/architecture/secure-exposure-research.md`, `docs/architecture/networking-boundary.md` | Core docs XCTest and docs review | 23, deferred |
 
 ## Observability
 

@@ -91,6 +91,7 @@ Hostwright is not production ready.
 - DNS behavior.
 - Service discovery, network alias, reverse proxy, or public exposure management.
 - Tunnel management.
+- Cloudflare Tunnel, Tailscale Serve/Funnel, WireGuard, mTLS provisioning, or reverse proxy setup.
 - Cloud control plane.
 - Web dashboard.
 - Production readiness.

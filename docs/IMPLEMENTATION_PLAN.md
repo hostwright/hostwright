@@ -31,6 +31,7 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 | 20 | Observability and Diagnostics | Complete locally | Add redacted diagnostics, local-only telemetry policy, audit trail, event filtering, and improved doctor/status output. | Diagnostic bundles, redaction, event ordering/filtering, and local-only telemetry policy are tested. |
 | 21 | API and GUI Readiness Gate | Deferred | Revisit after core contracts for networking, policy, import, compatibility, multi-host research, and scheduling are in place. | No Phase 21 work starts until the maintainer explicitly opens it. |
 | 22 | Networking and Service Discovery | Complete locally | Harden local networking policy and document unsupported discovery/exposure boundaries. | Localhost publish defaults, duplicate/observed port conflicts, unsupported discovery fields, and fixture-only network metadata are tested. |
+| 23 | Secure Exposure Research | Complete locally | Decide tunnel, VPN, mTLS, reverse proxy, DNS, and cloud exposure boundaries before any implementation. | Decision record rejects or defers every secure exposure path and tests guard unsupported current-support claims. |
 
 ## Current Hard Boundaries
 
@@ -237,3 +238,13 @@ Phase 20 does not add external telemetry, hosted diagnostics, automatic upload, 
 - XCTest coverage covers bind normalization, broad-bind conflict behavior, unsupported discovery fields, observed port conflicts, network fixture parsing, and non-empty real network-output refusal.
 
 Phase 22 does not add DNS behavior, service discovery, local reverse proxy mutation, tunnel integration, cloud exposure, public exposure defaults, network cleanup, runtime network mutation, release tags, or GitHub Releases.
+
+## Phase 23 Outputs
+
+- `docs/architecture/secure-exposure-research.md` records research-only decisions for Cloudflare Tunnel, Cloudflare Access/mTLS, Tailscale Serve/Funnel, WireGuard, local reverse proxying, mTLS, DNS, and cloud control plane scope.
+- Cloudflare and Tailscale provider paths are rejected from current core scope and deferred only to explicit plugin or later prototype work behind policy, secret, DNS, auth, audit, and revocation gates.
+- WireGuard and DNS/cloud-control-plane work are rejected from current core scope.
+- Public docs continue to state that Hostwright does not currently support tunnels, cloud exposure, DNS management, reverse proxy setup, provider integration, or a cloud control plane.
+- XCTest coverage guards the research record and unsupported-current-support wording.
+
+Phase 23 does not add provider integration, provider credentials, tunnels, DNS behavior, reverse proxy mutation, cloud resources, product network calls, runtime mutation, release tags, or GitHub Releases.

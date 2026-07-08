@@ -51,6 +51,33 @@ final class HostwrightCoreTests: XCTestCase {
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("supports ANE"))
     }
 
+    func testSecureExposureResearchKeepsCurrentSupportUnsupported() throws {
+        let root = try packageRoot()
+        let decision = try read("docs/architecture/secure-exposure-research.md", root: root)
+        let networking = try read("docs/architecture/networking-boundary.md", root: root)
+        let limitations = try read("docs/reference/limitations.md", root: root)
+        let securityReference = try read("docs/reference/security-safety.md", root: root)
+        let securityPolicy = try read("SECURITY.md", root: root)
+        let publicDocs = [decision, networking, limitations, securityReference, securityPolicy].joined(separator: "\n")
+
+        XCTAssertTrue(decision.contains("Status: research-only decision record for Phase 23."))
+        XCTAssertTrue(decision.contains("| Cloudflare Tunnel public application | Reject from core; defer only to plugin or later prototype |"))
+        XCTAssertTrue(decision.contains("| Tailscale Serve | Reject from core; defer only to plugin or later prototype |"))
+        XCTAssertTrue(decision.contains("| WireGuard | Reject from core for now |"))
+        XCTAssertTrue(decision.contains("| Cloud control plane | Reject for current core |"))
+        XCTAssertTrue(decision.contains("No provider integration is implemented by this research phase."))
+        XCTAssertTrue(networking.contains("See [Secure Exposure Research](secure-exposure-research.md)"))
+        XCTAssertTrue(limitations.contains("Cloudflare Tunnel, Tailscale Serve/Funnel, WireGuard, mTLS provisioning, or reverse proxy setup."))
+
+        XCTAssertTrue(securityPolicy.contains("No tunnel, DNS, cloud, CRI, Kubernetes, or Docker API behavior exists."))
+        XCTAssertTrue(securityPolicy.contains("Destructive mutation is limited to ownership-scoped cleanup delete"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright supports tunnels"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright supports cloud exposure"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright supports Cloudflare"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright supports Tailscale"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright supports WireGuard"))
+    }
+
     private func read(_ relativePath: String, root: URL) throws -> String {
         try String(contentsOf: root.appendingPathComponent(relativePath), encoding: .utf8)
     }

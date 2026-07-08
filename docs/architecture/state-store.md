@@ -98,6 +98,8 @@ Normalized columns hold identifiers, project names, service names, timestamps, l
 
 JSON blobs hold ports, mounts, environment snapshots, runtime capabilities, runtime identifiers, event payloads, operation payloads, ownership metadata, health command/output metadata, restart recovery completed-step metadata, and operation recovery metadata. Payload fields, runtime identifiers, failure messages, and manual recovery hints are redacted before persistence.
 
+Desired environment snapshots never store resolved secret values. `secretEnv` entries persist only redacted markers in `env_json_redacted`; raw `keychain://<service>/<account>` labels and resolved values are not stored in desired-state rows.
+
 ## Backup, Restore, And Diagnostics Export
 
 State backup is a cold file operation today:

@@ -39,7 +39,7 @@ Any future secure-exposure implementation must have a separate issue and must pr
 
 - explicit user action, dry-run preview, and confirmation for every exposure;
 - local policy evaluation from the Phase 32 policy engine;
-- Phase 24 secret-reference and Keychain boundary for all provider credentials, private keys, certificates, and tokens;
+- Phase 24 [secret-reference and Keychain boundary](secrets-keychain-boundary.md) for all provider credentials, private keys, certificates, and tokens;
 - no default public exposure and no background connectivity by default;
 - exact service, port, hostname, provider, credential reference, and revocation target in the plan;
 - local audit events for create, update, disable, revoke, and failure;

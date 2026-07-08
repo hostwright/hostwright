@@ -203,3 +203,11 @@ Phase 8A is a required preflight before this mutation gate. It proves real read-
 | HW-NET-004, HW-SAFE-006 | Cloudflare Tunnel, Tailscale Serve/Funnel, WireGuard, mTLS, reverse proxy, DNS, and cloud-control-plane paths have explicit reject, defer, plugin, or later-prototype decisions before implementation. | Automated + manual | Core docs XCTest and secure exposure decision-record review. |
 | HW-DOCS-002, HW-DOCS-003 | Public docs still state that Hostwright does not currently support tunnels, cloud exposure, DNS management, reverse proxy setup, provider integration, or a cloud control plane. | Automated + manual | Core docs XCTest; limitations, networking-boundary, and security docs review. |
 | HW-SAFE-004, HW-STATE-001 | Research does not add credentials, provider dependencies, product network calls, hidden state paths, or runtime mutation. | Manual | Diff review plus full local gate. |
+
+## Phase 24 Gate: Secrets Credentials And Keychain Boundary
+
+| Requirement IDs | Acceptance criteria | Verification type | Verification command or review |
+| --- | --- | --- | --- |
+| HW-VALID-005, HW-SAFE-004, HW-SAFE-007 | Manifests accept `secretEnv` keychain references, reject plaintext credential-like `env` values, reject malformed references, and keep Compose/Kubernetes `secrets:` unsupported. | Automated | Manifest and schema XCTest cases. |
+| HW-SAFE-004, HW-STATE-004, HW-OBS-003 | Plans, state rows, events, diagnostics, errors, and observability redaction do not expose fake secret values or raw keychain reference labels. | Automated | Secrets, CLI, state, runtime, reconciler, and observability XCTest cases. |
+| HW-SAFE-007, HW-RUNTIME-001 | Apply resolves secret references only through an injected backend immediately before `RuntimeAdapter.execute`; unavailable backends and unresolved runtime references fail before mutation. | Automated + manual | CLI fake backend/unavailable backend tests; runtime unresolved-reference guard; diff review. |

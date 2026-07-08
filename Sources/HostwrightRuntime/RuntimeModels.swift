@@ -1,3 +1,5 @@
+import HostwrightSecrets
+
 public struct RuntimeServiceIdentity: Equatable, Hashable, Sendable {
     public let projectName: String
     public let serviceName: String
@@ -163,18 +165,26 @@ public struct RuntimeEnvironmentValue: Equatable, Sendable {
     public let name: String
     public let value: String
     public let isSensitive: Bool
+    public let secretReference: HostwrightSecretReference?
 
-    public init(name: String, value: String, isSensitive: Bool = false) {
+    public init(
+        name: String,
+        value: String,
+        isSensitive: Bool = false,
+        secretReference: HostwrightSecretReference? = nil
+    ) {
         self.name = name
         self.value = value
         self.isSensitive = isSensitive
+        self.secretReference = secretReference
     }
 
     public func redacted(using policy: RuntimeRedactionPolicy = .default) -> RuntimeEnvironmentValue {
         RuntimeEnvironmentValue(
             name: name,
-            value: isSensitive || policy.isSensitiveKey(name) ? policy.replacement : policy.redact(value),
-            isSensitive: isSensitive
+            value: isSensitive || secretReference != nil || policy.isSensitiveKey(name) ? policy.replacement : policy.redact(value),
+            isSensitive: isSensitive,
+            secretReference: secretReference
         )
     }
 }

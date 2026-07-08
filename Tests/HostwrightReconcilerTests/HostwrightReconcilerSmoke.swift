@@ -2,6 +2,7 @@ import XCTest
 @testable import HostwrightManifest
 @testable import HostwrightRuntime
 @testable import HostwrightReconciler
+@testable import HostwrightSecrets
 @testable import HostwrightState
 
 final class HostwrightReconcilerTests: XCTestCase {
@@ -326,7 +327,7 @@ final class HostwrightReconcilerTests: XCTestCase {
         XCTAssertFalse(rendered.contains("super-secret"))
     }
 
-    func testManifestMappingIncludesSupportedSubsetAndPolicyIssues() {
+    func testManifestMappingIncludesSupportedSubsetAndPolicyIssues() throws {
         let manifest = HostwrightManifest(
             project: "demo",
             services: [
@@ -334,7 +335,8 @@ final class HostwrightReconcilerTests: XCTestCase {
                     name: "web",
                     image: "ghcr.io/example/web:latest",
                     command: ["serve"],
-                    env: ["API_TOKEN": "token=raw-value"],
+                    env: ["APP_ENV": "development"],
+                    secretEnv: ["API_TOKEN": try HostwrightSecretReference.parse("keychain://hostwright.api/api-token")],
                     ports: ["8080:8080"],
                     volumes: ["./data:/data:rw"]
                 )
@@ -342,14 +344,20 @@ final class HostwrightReconcilerTests: XCTestCase {
         )
 
         let mapping = ManifestRuntimeMapper.map(manifest)
-        XCTAssertEqual(mapping.desiredState.services[0].environment[0].value, "token=raw-value")
+        let environment = mapping.desiredState.services[0].environment
+        XCTAssertEqual(environment.first { $0.name == "APP_ENV" }?.value, "development")
+        let secret = try XCTUnwrap(environment.first { $0.name == "API_TOKEN" })
+        XCTAssertTrue(secret.isSensitive)
+        XCTAssertEqual(secret.secretReference?.rawValue, "keychain://hostwright.api/api-token")
+        XCTAssertEqual(secret.value, "keychain://[REDACTED]")
         XCTAssertEqual(mapping.desiredState.services[0].ports[0].bindAddress, "127.0.0.1")
 
         let plan = ReconciliationPlanner().plan(manifest: manifest)
 
         XCTAssertEqual(plan.projectName, "demo")
         XCTAssertTrue(plan.issues.contains { $0.kind == .secretRedacted })
-        XCTAssertFalse(PlanRenderer.render(plan).contains("raw-value"))
+        XCTAssertFalse(PlanRenderer.render(plan).contains("hostwright.api"))
+        XCTAssertFalse(PlanRenderer.render(plan).contains("api-token"))
     }
 
     func testDeterministicPlanHashAndOrdering() {

@@ -11,7 +11,8 @@ No general lifecycle mutation, user-facing stop/restart command, broad cleanup, 
 ## Requirements
 
 - User-space first.
-- No secrets in manifests, logs, status output, events, fixtures, or support bundles.
+- No plaintext secrets in manifests, logs, status output, events, fixtures, or support bundles.
+- Secret references must stay local, explicit, redacted, and unresolved unless a confirmed mutation uses an approved secret backend.
 - Dry-run before runtime mutation.
 - Persist operation intent before runtime mutation.
 - Explicit confirmation design before destructive operations.

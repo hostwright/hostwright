@@ -1,4 +1,5 @@
 import HostwrightCore
+import HostwrightSecrets
 
 public struct HostwrightManifest: Equatable, Sendable {
     public static let currentVersion = 1
@@ -26,6 +27,7 @@ public struct HostwrightService: Equatable, Sendable {
     public var image: String?
     public var command: [String]
     public var env: [String: String]
+    public var secretEnv: [String: HostwrightSecretReference]
     public var ports: [String]
     public var volumes: [String]
     public var health: HostwrightHealthCheck?
@@ -36,6 +38,7 @@ public struct HostwrightService: Equatable, Sendable {
         image: String?,
         command: [String] = [],
         env: [String: String] = [:],
+        secretEnv: [String: HostwrightSecretReference] = [:],
         ports: [String] = [],
         volumes: [String] = [],
         health: HostwrightHealthCheck? = nil,
@@ -45,6 +48,7 @@ public struct HostwrightService: Equatable, Sendable {
         self.image = image
         self.command = command
         self.env = env
+        self.secretEnv = secretEnv
         self.ports = ports
         self.volumes = volumes
         self.health = health

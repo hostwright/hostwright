@@ -3,6 +3,7 @@ import XCTest
 @testable import HostwrightCore
 @testable import HostwrightManifest
 @testable import HostwrightRuntime
+@testable import HostwrightSecrets
 @testable import HostwrightState
 
 final class HostwrightStateTests: XCTestCase {
@@ -240,6 +241,8 @@ final class HostwrightStateTests: XCTestCase {
             XCTAssertEqual(desiredServices[0].serviceName, "api")
             XCTAssertTrue(desiredServices[0].environmentJSONRedacted.contains("[REDACTED]"))
             XCTAssertFalse(desiredServices[0].environmentJSONRedacted.contains(fakeSecret))
+            XCTAssertFalse(desiredServices[0].environmentJSONRedacted.contains("hostwright.api"))
+            XCTAssertFalse(desiredServices[0].environmentJSONRedacted.contains("api-token"))
         }
     }
 
@@ -997,7 +1000,8 @@ final class HostwrightStateTests: XCTestCase {
                     name: "api",
                     image: "ghcr.io/example/api:latest",
                     command: ["serve"],
-                    env: ["API_TOKEN": fakeSecret],
+                    env: ["APP_ENV": "test"],
+                    secretEnv: ["API_TOKEN": try! HostwrightSecretReference.parse("keychain://hostwright.api/api-token")],
                     ports: ["8080:8080"]
                 )
             ]

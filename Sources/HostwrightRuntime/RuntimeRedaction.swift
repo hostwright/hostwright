@@ -1,4 +1,5 @@
 import Foundation
+import HostwrightSecrets
 
 public struct RuntimeRedactionPolicy: Equatable, Sendable {
     public let replacement: String
@@ -22,20 +23,34 @@ public struct RuntimeRedactionPolicy: Equatable, Sendable {
     )
 
     public func isSensitiveKey(_ key: String) -> Bool {
+        if SecretNamePolicy.isSensitiveEnvironmentKey(key) {
+            return true
+        }
         let uppercased = key.uppercased()
         return sensitiveKeyFragments.contains { uppercased.contains($0) }
     }
 
     public func redact(_ text: String) -> String {
+        redact(text, exactValues: [])
+    }
+
+    public func redact(_ text: String, exactValues: [String]) -> String {
         var redacted = text
+        for value in exactValues where !value.isEmpty {
+            redacted = redacted.replacingOccurrences(of: value, with: replacement)
+        }
+
         let patterns = [
+            #"(?i)keychain://[A-Za-z0-9._:@/-]+"#,
             #"(?i)(password|passwd|token|secret|credential|authorization|auth)[=:]\s*([^\s,;]+)"#,
             #"(?i)("(?:password|passwd|token|secret|credential|authorization|auth)"\s*:\s*")([^"]+)(")"#,
             #"(?i)(bearer)\s+([A-Za-z0-9._~+/=-]+)"#
         ]
 
         for pattern in patterns {
-            if pattern.contains(#""\s*:\s*""#) {
+            if pattern.hasPrefix(#"(?i)keychain://"#) {
+                redacted = redacted.replacing(pattern: pattern, with: "keychain://[REDACTED]")
+            } else if pattern.contains(#""\s*:\s*""#) {
                 redacted = redacted.replacing(pattern: pattern, with: "$1\(replacement)$3")
             } else {
                 redacted = redacted.replacing(pattern: pattern, with: "$1=\(replacement)")
@@ -46,13 +61,21 @@ public struct RuntimeRedactionPolicy: Equatable, Sendable {
     }
 
     public func redact(arguments: [String]) -> [String] {
-        arguments.map { redact($0) }
+        redact(arguments: arguments, exactValues: [])
+    }
+
+    public func redact(arguments: [String], exactValues: [String]) -> [String] {
+        arguments.map { redact($0, exactValues: exactValues) }
     }
 
     public func redact(environment: [String: String]) -> [String: String] {
+        redact(environment: environment, exactValues: [])
+    }
+
+    public func redact(environment: [String: String], exactValues: [String]) -> [String: String] {
         var result: [String: String] = [:]
         for (key, value) in environment {
-            result[key] = isSensitiveKey(key) ? replacement : redact(value)
+            result[key] = isSensitiveKey(key) ? replacement : redact(value, exactValues: exactValues)
         }
         return result
     }

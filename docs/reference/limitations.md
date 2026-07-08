@@ -11,6 +11,7 @@ Hostwright is not production ready.
 - `hostwright init` without overwrite.
 - `hostwright validate` for a restricted Hostwright manifest subset.
 - Manifest `version: 1` support with versionless alpha manifests treated as legacy version 1 input.
+- Manifest `secretEnv` support for local `keychain://<service>/<account>` secret references, with fake backend tests and no live Keychain default.
 - Fail-closed unsupported-field, unsupported-version, unsupported DNS/discovery/networking-field, unsafe env-key, and unsafe host-root or parent-traversal mount-source validation for untrusted manifests.
 - `hostwright plan` as non-mutating manifest-level dry-run output.
 - `--output json` for `plan`, `status`, `events`, `recovery`, `doctor`, and structured errors when JSON mode is requested.
@@ -68,6 +69,7 @@ Hostwright is not production ready.
 - General runtime mutation.
 - Automatic manifest upgrade, downgrade, or compatibility conversion.
 - General YAML parsing or full orchestrator schema compatibility.
+- Live macOS Keychain access, Keychain prompts, Keychain access groups, synchronizable Keychain items, registry credential storage, credential sync, credential upload, or cloud identity integration.
 - Multi-action `hostwright apply`.
 - Guaranteed Apple container observation on every machine.
 - Broad non-empty Apple container JSON list parsing beyond the verified builder/proof shapes.

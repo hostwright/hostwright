@@ -40,6 +40,7 @@ public enum AppleContainerCommand {
         RuntimeCommandSpec(
             executablePath: executable.path,
             arguments: arguments(for: kind, desiredService: desiredService),
+            sensitiveValues: desiredService.environment.filter(\.isSensitive).map(\.value),
             timeout: timeout,
             classification: .mutating,
             executableResolution: .resolvedByRuntimeExecutableResolver,

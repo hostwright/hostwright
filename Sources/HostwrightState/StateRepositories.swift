@@ -94,7 +94,10 @@ public struct DesiredStateRepository: Sendable {
             throw StateStoreError.invalidRecord("Desired service \(service.name) requires an image.")
         }
 
-        let redactedEnvironment = RuntimeRedactionPolicy.default.redact(environment: service.env)
+        var redactedEnvironment = RuntimeRedactionPolicy.default.redact(environment: service.env)
+        for key in service.secretEnv.keys {
+            redactedEnvironment[key] = RuntimeRedactionPolicy.default.replacement
+        }
 
         return DesiredServiceRecord(
             id: "\(projectID):\(service.name):\(desiredGeneration)",

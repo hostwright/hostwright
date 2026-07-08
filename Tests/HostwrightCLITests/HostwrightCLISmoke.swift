@@ -4,6 +4,7 @@ import XCTest
 @testable import HostwrightManifest
 @testable import HostwrightReconciler
 @testable import HostwrightRuntime
+@testable import HostwrightSecrets
 @testable import HostwrightState
 
 final class HostwrightCLITests: XCTestCase {
@@ -146,8 +147,8 @@ final class HostwrightCLITests: XCTestCase {
                 services:
                   api:
                     image: ghcr.io/example/api:latest
-                    env:
-                      API_TOKEN: token=super-secret
+                    secretEnv:
+                      API_TOKEN: keychain://hostwright.api/api-token
 
                 """
             ]
@@ -158,7 +159,8 @@ final class HostwrightCLITests: XCTestCase {
         XCTAssertEqual(planResult.exitCode, 0)
         XCTAssertTrue(planResult.standardOutput.contains("secretRedacted"))
         XCTAssertTrue(planResult.standardOutput.contains("API_TOKEN"))
-        XCTAssertFalse(planResult.standardOutput.contains("super-secret"))
+        XCTAssertFalse(planResult.standardOutput.contains("hostwright.api"))
+        XCTAssertFalse(planResult.standardOutput.contains("api-token"))
     }
 
     func testPlanJSONOutputIncludesStableShapeAndRedactsSecrets() throws {
@@ -169,8 +171,8 @@ final class HostwrightCLITests: XCTestCase {
                 services:
                   api:
                     image: ghcr.io/example/api:latest
-                    env:
-                      API_TOKEN: token=\(fakeSecret)
+                    secretEnv:
+                      API_TOKEN: keychain://hostwright.api/api-token
 
                 """
             ]
@@ -181,6 +183,8 @@ final class HostwrightCLITests: XCTestCase {
         XCTAssertEqual(result.exitCode, 0)
         XCTAssertEqual(result.standardError, "")
         XCTAssertFalse(result.standardOutput.contains(fakeSecret))
+        XCTAssertFalse(result.standardOutput.contains("hostwright.api"))
+        XCTAssertFalse(result.standardOutput.contains("api-token"))
         let json = try jsonObject(result.standardOutput)
         XCTAssertEqual(json["kind"] as? String, "plan")
         XCTAssertEqual(json["project"] as? String, "api-local")
@@ -1731,32 +1735,35 @@ final class HostwrightCLITests: XCTestCase {
             services:
               api:
                 image: local/demo:latest
-                env:
-                  API_TOKEN: token=\(fakeSecret)
+                secretEnv:
+                  SESSION: keychain://hostwright.api/session
                 ports:
                   - "8080:8080"
 
             """
             let files = FileBox(files: [HostwrightIdentity.manifestFileName: manifest])
             let adapter = FakeApplyRuntimeAdapter()
+            let opaqueSecret = "opaque-session-value"
+            let secretStore = try FakeKeychainSecretStore(rawValues: ["keychain://hostwright.api/session": opaqueSecret])
             let expectedHash = try planHash(for: manifest, observed: adapter.observedState)
 
             let result = HostwrightCLI.run(
                 arguments: ["apply", "--state-db", databasePath, "--confirm-plan", expectedHash],
-                environment: environment(files: files, runtimeAdapter: adapter)
+                environment: environment(files: files, runtimeAdapter: adapter, secretStore: secretStore)
             )
 
             XCTAssertEqual(result.exitCode, 0)
-            XCTAssertFalse(result.standardOutput.contains(fakeSecret))
+            XCTAssertFalse(result.standardOutput.contains(opaqueSecret))
             let executedService = try XCTUnwrap(adapter.executedActions.first?.desiredService)
-            XCTAssertEqual(executedService.environment.first?.value, "token=\(fakeSecret)")
+            XCTAssertEqual(executedService.environment.first?.value, opaqueSecret)
 
             let store = SQLiteStateStore(path: databasePath)
             let desired = try store.desiredStates.loadDesiredServices(projectID: "project-demo")
             XCTAssertTrue(desired[0].environmentJSONRedacted.contains("[REDACTED]"))
-            XCTAssertFalse(desired[0].environmentJSONRedacted.contains(fakeSecret))
+            XCTAssertFalse(desired[0].environmentJSONRedacted.contains(opaqueSecret))
+            XCTAssertFalse(desired[0].environmentJSONRedacted.contains("hostwright.api"))
             let events = try store.events.loadAll()
-            XCTAssertFalse(events.map(\.message).joined(separator: "\n").contains(fakeSecret))
+            XCTAssertFalse(events.map(\.message).joined(separator: "\n").contains(opaqueSecret))
         }
     }
 
@@ -1780,6 +1787,72 @@ final class HostwrightCLITests: XCTestCase {
             XCTAssertTrue(second.standardError.contains("idempotency key"))
             XCTAssertEqual(adapter.executedActions.count, 1)
             XCTAssertEqual(try SQLiteStateStore(path: databasePath).operations.loadAll().map(\.status), [.recorded, .succeeded])
+        }
+    }
+
+    func testApplyIdempotencyBlocksDuplicateSecretPlanBeforeSecretResolution() throws {
+        try withTemporaryDatabase { databasePath in
+            let manifest = """
+            project: demo
+            services:
+              api:
+                image: local/demo:latest
+                secretEnv:
+                  API_TOKEN: keychain://hostwright.api/api-token
+                ports:
+                  - "8080:8080"
+
+            """
+            let files = FileBox(files: [HostwrightIdentity.manifestFileName: manifest])
+            let adapter = FakeApplyRuntimeAdapter()
+            let secretStore = try FakeKeychainSecretStore(rawValues: ["keychain://hostwright.api/api-token": "token=\(fakeSecret)"])
+            let expectedHash = try planHash(for: manifest, observed: adapter.observedState)
+
+            let first = HostwrightCLI.run(
+                arguments: ["apply", "--state-db", databasePath, "--confirm-plan", expectedHash],
+                environment: environment(files: files, runtimeAdapter: adapter, secretStore: secretStore)
+            )
+            let second = HostwrightCLI.run(
+                arguments: ["apply", "--state-db", databasePath, "--confirm-plan", expectedHash],
+                environment: environment(files: files, runtimeAdapter: adapter)
+            )
+
+            XCTAssertEqual(first.exitCode, 0)
+            XCTAssertEqual(second.exitCode, CLIExitCode.commandUsage.rawValue)
+            XCTAssertTrue(second.standardError.contains("idempotency key"))
+            XCTAssertFalse(second.standardError.contains("Secret reference resolution failed"))
+            XCTAssertEqual(adapter.executedActions.count, 1)
+        }
+    }
+
+    func testApplyFailsClosedWhenSecretReferenceBackendIsUnavailable() throws {
+        try withTemporaryDatabase { databasePath in
+            let manifest = """
+            project: demo
+            services:
+              api:
+                image: local/demo:latest
+                secretEnv:
+                  API_TOKEN: keychain://hostwright.api/api-token
+                ports:
+                  - "8080:8080"
+
+            """
+            let files = FileBox(files: [HostwrightIdentity.manifestFileName: manifest])
+            let adapter = FakeApplyRuntimeAdapter()
+            let expectedHash = try planHash(for: manifest, observed: adapter.observedState)
+
+            let result = HostwrightCLI.run(
+                arguments: ["apply", "--state-db", databasePath, "--confirm-plan", expectedHash],
+                environment: environment(files: files, runtimeAdapter: adapter)
+            )
+
+            XCTAssertEqual(result.exitCode, CLIExitCode.unsafeOperation.rawValue)
+            XCTAssertTrue(result.standardError.contains(HostwrightErrorCode.unsafeExposure.rawValue))
+            XCTAssertTrue(result.standardError.contains("Secret reference resolution failed"))
+            XCTAssertFalse(result.standardError.contains("hostwright.api"))
+            XCTAssertFalse(result.standardError.contains("api-token"))
+            XCTAssertTrue(adapter.executedActions.isEmpty)
         }
     }
 
@@ -2052,6 +2125,7 @@ final class HostwrightCLITests: XCTestCase {
         files: FileBox,
         containerPath: String? = nil,
         runtimeAdapter: (any RuntimeAdapter)? = nil,
+        secretStore: (any SecretStore)? = nil,
         platform: PlatformSnapshot = PlatformSnapshot(macOSMajorVersion: 26, architecture: "arm64"),
         writeError: Error? = nil
     ) -> CLIEnvironment {
@@ -2071,6 +2145,7 @@ final class HostwrightCLITests: XCTestCase {
             },
             executablePath: { name in name == "container" ? containerPath : "/usr/bin/\(name)" },
             runtimeAdapter: { runtimeAdapter ?? FakeApplyRuntimeAdapter() },
+            secretStore: { secretStore ?? UnavailableKeychainSecretStore() },
             swiftVersion: { "Swift 6.3.2" },
             platformSnapshot: { platform },
             operatingSystemDescription: { "macOS 26.5" }

@@ -193,9 +193,13 @@ public enum ManifestParser {
             .contains(field)
             ? " Hostwright is not a Kubernetes or Compose parser."
             : ""
+        let networkingHint = ["dns", "dns_search", "domainname", "hostname", "extra_hosts", "aliases", "expose", "network_mode", "networks"]
+            .contains(field)
+            ? " DNS, service discovery, network aliases, and broad exposure settings are unsupported in this release."
+            : ""
         return ManifestIssue(
             code: .manifestUnsupportedFeature,
-            message: "\(limitation) Unsupported \(context) field '\(field)'.\(orchestratorHint)",
+            message: "\(limitation) Unsupported \(context) field '\(field)'.\(orchestratorHint)\(networkingHint)",
             line: lineNumber
         )
     }

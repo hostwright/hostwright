@@ -29,6 +29,8 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 | 18 | Rollback and Partial Failure Recovery | Complete locally | Model operation groups, locks, checkpoints, interruption recovery, and manual recovery hints. | Partial failure and crash/interruption records explain what changed and what remains manual. |
 | 19 | Cleanup and Garbage Collection Maturity | Complete locally | Improve cleanup classification, ownership mismatch handling, stale ID protection, and partial failure behavior. | Dry-run classifications and exact delete boundaries pass without image, volume, or unmanaged deletion. |
 | 20 | Observability and Diagnostics | Complete locally | Add redacted diagnostics, local-only telemetry policy, audit trail, event filtering, and improved doctor/status output. | Diagnostic bundles, redaction, event ordering/filtering, and local-only telemetry policy are tested. |
+| 21 | API and GUI Readiness Gate | Deferred | Revisit after core contracts for networking, policy, import, compatibility, multi-host research, and scheduling are in place. | No Phase 21 work starts until the maintainer explicitly opens it. |
+| 22 | Networking and Service Discovery | Complete locally | Harden local networking policy and document unsupported discovery/exposure boundaries. | Localhost publish defaults, duplicate/observed port conflicts, unsupported discovery fields, and fixture-only network metadata are tested. |
 
 ## Current Hard Boundaries
 
@@ -44,6 +46,7 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 - Apply executes at most one supported action and refuses every other planned action.
 - Manifest parsing remains a restricted Hostwright subset, not general YAML or Compose parity.
 - Explicit `version: 1` manifests are supported; omitted version is legacy v1 input; explicit older/newer versions fail closed with no automatic conversion.
+- Networking remains local-first: Hostwright-created publishes use `127.0.0.1`, observed host-port conflicts block planning, and DNS/service discovery/reverse proxy/tunnel/cloud exposure remain unsupported.
 
 ## Phase 3 Outputs
 
@@ -222,3 +225,15 @@ Phase 19 does not add image cleanup, volume cleanup, unmanaged deletion, wildcar
 - XCTest coverage covers event filtering/sorting/limit behavior, diagnostics redaction, no runtime observation during export, missing-state refusal without migration, doctor/status policy output, and state diagnostics export shape.
 
 Phase 20 does not add external telemetry, hosted diagnostics, automatic upload, OSLog integration, production support-bundle workflows, hidden default state paths, runtime mutation, release tags, or GitHub Releases.
+
+## Phase 22 Outputs
+
+- Shared local bind-address policy normalizes localhost, recognizes broad bind addresses, and detects host-port conflicts involving wildcard binds.
+- Manifest parsing now reports DNS, service discovery, network alias, network mode, and `expose` fields as unsupported networking scope.
+- Planning blocks desired host ports that conflict with observed non-target runtime services when live observation is supplied.
+- Manifest-to-runtime mapping continues to emit explicit `127.0.0.1` publish bindings for Hostwright-created Apple containers.
+- Observed runtime services can carry versioned fixture network attachment metadata: name, kind, address, gateway, and interface.
+- The Apple container observation parser continues to accept reviewed fixtures and verified empty/builder/proof real shapes; non-empty real network output fails closed until reviewed.
+- XCTest coverage covers bind normalization, broad-bind conflict behavior, unsupported discovery fields, observed port conflicts, network fixture parsing, and non-empty real network-output refusal.
+
+Phase 22 does not add DNS behavior, service discovery, local reverse proxy mutation, tunnel integration, cloud exposure, public exposure defaults, network cleanup, runtime network mutation, release tags, or GitHub Releases.

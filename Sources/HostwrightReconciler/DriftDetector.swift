@@ -3,7 +3,7 @@ import HostwrightState
 
 public enum DriftDetector {
     public static func detect(_ input: PlanningInput) -> ReconciliationPlan {
-        var issues = input.additionalIssues + input.policy.evaluate(desiredState: input.desiredState)
+        var issues = input.additionalIssues + input.policy.evaluate(desiredState: input.desiredState, observedState: input.observedState)
         var drift: [DriftRecord] = []
         var actions: [PlannedAction] = []
 

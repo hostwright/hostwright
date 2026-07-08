@@ -49,7 +49,7 @@ Supported forms are intentionally narrow:
 
 Unsupported YAML features fail closed, including anchors, aliases, tags, merge keys, block scalars, document markers, flow maps, tabs, and arbitrary indentation.
 
-Unsupported Kubernetes, Compose, or other orchestrator fields fail closed. This includes `apiVersion`, `kind`, `metadata`, `build`, `depends_on`, `deploy`, `networks`, `configs`, and `secrets`.
+Unsupported Kubernetes, Compose, or other orchestrator fields fail closed. This includes `apiVersion`, `kind`, `metadata`, `build`, `depends_on`, `deploy`, `networks`, `network_mode`, `dns`, `dns_search`, `domainname`, `hostname`, `extra_hosts`, `aliases`, `expose`, `configs`, and `secrets`.
 
 ## Validation
 
@@ -71,7 +71,7 @@ Validation currently checks:
 
 Validation does not contact registries or Apple container.
 
-Manifest port syntax does not expose a bind-address field in this alpha. Hostwright-created runtime port publishes default to `127.0.0.1` when mapped to Apple container.
+Manifest port syntax does not expose a bind-address field in this alpha. Hostwright-created runtime port publishes default to `127.0.0.1` when mapped to Apple container. DNS, service discovery, network aliases, and reverse proxy settings are not manifest features in this release.
 
 Service-level command tokens beginning with `-` are blocked in the current conservative apply scope because Apple container parses image and command positions after its own flags. Health-check command flags are allowed only after the health command name and arguments are accepted by the bounded health-check policy. Health checks are not shell commands and are not container `exec`; Hostwright does not execute host `curl` or `wget` binaries. Current bounded probes parse `curl`, `wget`, `true`, and `false` shaped commands. `curl` is limited to no-output status flags plus one loopback HTTP(S) URL. `wget` is limited to quiet spider mode plus one loopback HTTP(S) URL. Both URL-shaped probes run through Hostwright's in-process URL fetcher. `true` and `false` accept no arguments and are evaluated directly.
 

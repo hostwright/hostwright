@@ -112,10 +112,10 @@ Status values:
 
 | ID | Requirement | Source document | Current status | Implementation file if any | Test coverage if any | Release phase |
 | --- | --- | --- | --- | --- | --- | --- |
-| HW-NET-001 | Networking must be declared state, not incidental shell output. | Document 3 | Implemented for manifest/runtime port planning models | `Sources/HostwrightNetworking/NetworkingModels.swift`, `Sources/HostwrightReconciler/ManifestRuntimeMapper.swift` | Networking and reconciler XCTest cases | 7 |
-| HW-NET-002 | Port conflicts must fail during planning before mutation. | Document 3 | Implemented for duplicate desired host ports | `Sources/HostwrightReconciler/PlanningPolicy.swift` | Reconciler XCTest cases | 7 |
-| HW-NET-003 | Project and localhost exposure may be considered first; LAN, tunnel, and public exposure are blocked by default. | Document 3 | Partially implemented; broad bind addresses blocked in planning policy where representable | `NetworkingModels.swift`, `docs/architecture/networking-boundary.md`, `Sources/HostwrightReconciler/PlanningPolicy.swift` | Networking and reconciler XCTest cases | 7 |
-| HW-NET-004 | DNS, tunnel, and cloud connector behavior require separate research gates. | Document 3 | Deferred | Docs only | Docs review | Deferred |
+| HW-NET-001 | Networking must be declared state, not incidental shell output. | Document 3 | Implemented for manifest/runtime port planning models and versioned observation fixture network metadata | `Sources/HostwrightNetworking/NetworkingModels.swift`, `Sources/HostwrightRuntime/RuntimeModels.swift`, `Sources/HostwrightReconciler/ManifestRuntimeMapper.swift` | Networking, runtime, and reconciler XCTest cases | 7, 22 |
+| HW-NET-002 | Port conflicts must fail during planning before mutation. | Document 3 | Implemented for duplicate desired host ports and live observed host-port conflicts | `Sources/HostwrightReconciler/PlanningPolicy.swift` | Reconciler XCTest cases | 7, 22 |
+| HW-NET-003 | Project and localhost exposure may be considered first; LAN, tunnel, and public exposure are blocked by default. | Document 3 | Implemented for localhost publish defaults, broad-bind blocking, unsupported discovery fields, and blocked non-target observed port occupancy | `NetworkingModels.swift`, `docs/architecture/networking-boundary.md`, `Sources/HostwrightManifest/ManifestParser.swift`, `Sources/HostwrightReconciler/PlanningPolicy.swift` | Manifest, networking, runtime, and reconciler XCTest cases | 7, 22 |
+| HW-NET-004 | DNS, tunnel, and cloud connector behavior require separate research gates. | Document 3 | DNS/service discovery fails closed; tunnel/cloud remain deferred to research gates | Docs and manifest parser | Manifest XCTest and docs review | 22, deferred |
 
 ## Safety / Security
 

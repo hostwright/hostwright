@@ -18,6 +18,15 @@
           "bind": "127.0.0.1"
         }
       ],
+      "networks": [
+        {
+          "name": "hostwright-project-demo",
+          "kind": "vmnet",
+          "address": "192.168.64.2",
+          "gateway": "192.168.64.1",
+          "interface": "vmenet0"
+        }
+      ],
       "mounts": [
         {
           "source": "/tmp/hostwright-fixture",
@@ -28,4 +37,3 @@
     }
   ]
 }
-

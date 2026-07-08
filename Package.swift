@@ -65,6 +65,7 @@ let package = Package(
             dependencies: [
                 "HostwrightCore",
                 "HostwrightManifest",
+                "HostwrightNetworking",
                 "HostwrightRuntime",
                 "HostwrightState"
             ]

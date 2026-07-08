@@ -1,5 +1,6 @@
 import Foundation
 import HostwrightCore
+import HostwrightNetworking
 import HostwrightRuntime
 
 public struct PlanningPolicy: Equatable, Sendable {
@@ -25,11 +26,11 @@ public struct PlanningPolicy: Equatable, Sendable {
 
     public static let `default` = PlanningPolicy()
 
-    public func evaluate(desiredState: DesiredRuntimeState) -> [PlanIssue] {
+    public func evaluate(desiredState: DesiredRuntimeState, observedState: ObservedRuntimeState? = nil) -> [PlanIssue] {
         var issues: [PlanIssue] = []
 
         issues.append(contentsOf: validateDesiredIdentities(desiredState))
-        issues.append(contentsOf: validatePorts(desiredState))
+        issues.append(contentsOf: validatePorts(desiredState, observedState: observedState))
         issues.append(contentsOf: validateMounts(desiredState))
         issues.append(contentsOf: validateEnvironment(desiredState))
 
@@ -50,7 +51,7 @@ public struct PlanningPolicy: Equatable, Sendable {
         }
     }
 
-    private func validatePorts(_ desiredState: DesiredRuntimeState) -> [PlanIssue] {
+    private func validatePorts(_ desiredState: DesiredRuntimeState, observedState: ObservedRuntimeState?) -> [PlanIssue] {
         var issues: [PlanIssue] = []
         var hostPortOwners: [String: RuntimeServiceIdentity] = [:]
 
@@ -60,7 +61,11 @@ public struct PlanningPolicy: Equatable, Sendable {
                     continue
                 }
 
-                let key = "\(port.bindAddress ?? "localhost"):\(hostPort)/\(port.protocolName.rawValue)"
+                let key = NetworkBindAddressPolicy.hostPortKey(
+                    bindAddress: port.bindAddress,
+                    hostPort: hostPort,
+                    protocolName: port.protocolName.rawValue
+                )
                 if let owner = hostPortOwners[key], owner != service.identity {
                     issues.append(
                         PlanIssue(
@@ -87,7 +92,7 @@ public struct PlanningPolicy: Equatable, Sendable {
                     )
                 }
 
-                if let bindAddress = port.bindAddress, blockedBindAddresses.contains(bindAddress) {
+                if blockedBindAddresses.contains(NetworkBindAddressPolicy.normalizedBindAddress(port.bindAddress)) {
                     issues.append(
                         PlanIssue(
                             kind: .unsafeExposure,
@@ -95,6 +100,59 @@ public struct PlanningPolicy: Equatable, Sendable {
                             identity: service.identity,
                             message: "Desired bind address is broader than the first-release policy allows.",
                             stableDetailKey: key
+                        )
+                    )
+                }
+            }
+        }
+
+        if let observedState {
+            issues.append(contentsOf: validateObservedHostPortConflicts(desiredState: desiredState, observedState: observedState))
+        }
+
+        return issues
+    }
+
+    private func validateObservedHostPortConflicts(
+        desiredState: DesiredRuntimeState,
+        observedState: ObservedRuntimeState
+    ) -> [PlanIssue] {
+        var issues: [PlanIssue] = []
+
+        for desired in desiredState.services {
+            for desiredPort in desired.ports {
+                guard desiredPort.hostPort != nil else {
+                    continue
+                }
+
+                for observed in observedState.services where observed.identity != desired.identity {
+                    guard let conflictingPort = observed.ports.first(where: { observedPort in
+                        NetworkBindAddressPolicy.hostPortsConflict(
+                            lhsBindAddress: desiredPort.bindAddress,
+                            lhsHostPort: desiredPort.hostPort,
+                            lhsProtocolName: desiredPort.protocolName.rawValue,
+                            rhsBindAddress: observedPort.bindAddress,
+                            rhsHostPort: observedPort.hostPort,
+                            rhsProtocolName: observedPort.protocolName.rawValue
+                        )
+                    }) else {
+                        continue
+                    }
+
+                    let desiredHostPort = desiredPort.hostPort ?? 0
+                    let detail = NetworkBindAddressPolicy.hostPortKey(
+                        bindAddress: desiredPort.bindAddress,
+                        hostPort: desiredHostPort,
+                        protocolName: desiredPort.protocolName.rawValue
+                    )
+                    let observedBind = NetworkBindAddressPolicy.normalizedBindAddress(conflictingPort.bindAddress)
+                    issues.append(
+                        PlanIssue(
+                            kind: .hostPortConflict,
+                            severity: .blocker,
+                            identity: desired.identity,
+                            message: "Desired host port \(desiredHostPort) conflicts with observed \(observed.identity.displayName) on \(observedBind).",
+                            stableDetailKey: "\(detail)<-\(observed.identity.displayName)"
                         )
                     )
                 }

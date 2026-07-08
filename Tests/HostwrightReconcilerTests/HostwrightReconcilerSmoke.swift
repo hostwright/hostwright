@@ -252,6 +252,32 @@ final class HostwrightReconcilerTests: XCTestCase {
         XCTAssertTrue(plan.issues.contains { $0.kind == .duplicateDesiredHostPort })
     }
 
+    func testPolicyDetectsObservedHostPortConflictBeforeMutation() {
+        let desired = desiredState(
+            services: [
+                desiredService(name: "api", ports: [RuntimePortMapping(hostPort: 8080, containerPort: 8080, bindAddress: "127.0.0.1")])
+            ]
+        )
+        let observed = observedState([
+            observed(
+                serviceName: "api",
+                ports: [RuntimePortMapping(hostPort: 8081, containerPort: 8080, bindAddress: "127.0.0.1")]
+            ),
+            observed(
+                serviceName: "admin",
+                ports: [RuntimePortMapping(hostPort: 8080, containerPort: 8080, bindAddress: "0.0.0.0")]
+            )
+        ])
+
+        let plan = ReconciliationPlanner().reconcile(
+            PlanningInput(desiredState: desired, observedState: observed)
+        )
+
+        XCTAssertTrue(plan.includesBlockers)
+        XCTAssertTrue(plan.issues.contains { $0.kind == .hostPortConflict && $0.severity == .blocker })
+        XCTAssertFalse(plan.mutatesRuntime)
+    }
+
     func testPolicyDetectsUnsafeExposureAndPrivilegedPort() {
         let desired = desiredState(
             services: [

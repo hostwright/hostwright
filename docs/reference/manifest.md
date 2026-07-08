@@ -7,6 +7,7 @@ The manifest filename is `hostwright.yaml`.
 ```yaml
 version: 1
 project: api-local
+imagePolicy: allow-tags
 
 services:
   api:
@@ -40,6 +41,7 @@ Supported forms are intentionally narrow:
 
 - optional top-level `version: 1`;
 - top-level `project:`;
+- optional top-level `imagePolicy: allow-tags` or `imagePolicy: require-digest`;
 - top-level `services:`;
 - service maps indented with two spaces;
 - scalar `image`;
@@ -63,6 +65,8 @@ Validation currently checks:
 - service names are DNS-like;
 - each service has an image;
 - image values do not contain whitespace and do not begin with `-`;
+- image values with a digest use `@sha256:<64 lowercase hex characters>`;
+- when `imagePolicy: require-digest` is set, every service image uses a digest-pinned reference;
 - service-level `command` tokens do not begin with `-`;
 - service-level `command` tokens are not empty;
 - environment variable keys use shell-safe letters, numbers, and underscores and do not start with a number;
@@ -76,6 +80,20 @@ Validation currently checks:
 - restart policy is `no`, `on-failure`, or `unless-stopped`.
 
 Validation does not contact registries or Apple container.
+
+`imagePolicy` is a local manifest validation policy only. The default is `allow-tags`, which accepts tag-based alpha manifests such as `ghcr.io/example/api:latest`. `require-digest` rejects mutable tag-only image references and accepts digest-pinned references:
+
+```yaml
+version: 1
+project: api-local
+imagePolicy: require-digest
+
+services:
+  api:
+    image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+```
+
+Digest pinning gives Hostwright a stable content identifier string to require before planning. Hostwright does not verify that a digest exists in a registry, does not resolve tags to digests, does not pull images, does not verify signatures or SBOMs, and does not scan vulnerabilities.
 
 Manifest port syntax does not expose a bind-address field in this alpha. Hostwright-created runtime port publishes default to `127.0.0.1` when mapped to Apple container. DNS, service discovery, network aliases, and reverse proxy settings are not manifest features in this release.
 

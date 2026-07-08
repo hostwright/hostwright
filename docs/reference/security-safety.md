@@ -62,6 +62,12 @@ Treat `hostwright.yaml` files from third parties as untrusted input. Hostwright 
 
 Secret references do not make third-party manifests trusted. A manifest can still point at local secret labels, images, paths, and ports that the operator must review before confirmed mutation.
 
+## Image Trust Boundary
+
+Manifest `imagePolicy: require-digest` can require service image references to use `@sha256:<64 lowercase hex characters>` before planning or mutation. This is local string validation only. It does not contact registries, resolve mutable tags, pull images, verify cosign/Sigstore signatures, inspect OCI referrers, generate or validate SBOMs, run vulnerability scanners, or prove build provenance.
+
+Operators should still decide which registries, image publishers, digests, and local images they trust. A digest-pinned reference is a content identifier input to Hostwright, not a complete supply-chain trust guarantee.
+
 ## Network Exposure
 
 Manifest ports use `"host:container"` syntax in this alpha and do not expose a bind-address field. Hostwright-created Apple container publishes use explicit `127.0.0.1:host:container` bindings by default. Broad bind addresses such as `0.0.0.0` and `::` remain blocked when represented in runtime desired state, and observed non-target services occupying the same host port block mutation planning when live observation is available.
@@ -77,5 +83,5 @@ This alpha does not include:
 - cloud control plane;
 - Kubernetes, CRI, Docker API, or Docker Compose compatibility;
 - GPU/ANE scheduling or Metal/Core ML/MLX container support;
-- signing, notarization, SBOM, or binary provenance.
+- signing, notarization, signature verification, SBOM generation/validation, vulnerability scanning, or binary provenance.
 - external telemetry, hosted diagnostics, or automatic diagnostic upload.

@@ -42,7 +42,7 @@ Status values:
 | HW-MANIFEST-002 | Manifest must define a local project and services. | Agent Engineering Manual | Implemented with optional `version: 1` policy | `Sources/HostwrightManifest/ManifestModel.swift` | Manifest smoke tests | 2, 13 |
 | HW-MANIFEST-003 | Manifest parser must fail closed on unsupported Phase 2 shapes. | Phase 2 maintainer scope | Implemented with contextual unsupported-field errors | `Sources/HostwrightManifest/ManifestParser.swift` | Manifest smoke tests | 2, 13 |
 | HW-MANIFEST-004 | Full YAML parser dependency decision must be made before expanding beyond the restricted subset. | Final Production Arsenal | Satisfied for Phase 13: no YAML dependency added; parser remains restricted | `Sources/HostwrightManifest/ManifestParser.swift`, `docs/reference/manifest.md` | Manifest smoke tests and docs review | 4, 13 |
-| HW-MANIFEST-005 | Manifest must eventually support image digest and architecture policy. | Document 2 | Planned | None | None | 7 |
+| HW-MANIFEST-005 | Manifest must eventually support image digest and architecture policy. | Document 2 | Partially implemented for local digest-reference policy; architecture policy remains planned | `Sources/HostwrightManifest/ImageReferencePolicy.swift`, `Sources/HostwrightManifest/ManifestModel.swift`, `schemas/hostwright-yaml.schema.json`, `docs/architecture/supply-chain-image-trust.md` | Manifest smoke tests and schema alignment tests | 7, 25 |
 
 ## Validation
 

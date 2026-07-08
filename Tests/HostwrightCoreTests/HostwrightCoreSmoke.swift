@@ -100,6 +100,27 @@ final class HostwrightCoreTests: XCTestCase {
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("supports Compose secrets"))
     }
 
+    func testSupplyChainImageTrustDocsDescribeLocalPolicyOnly() throws {
+        let root = try packageRoot()
+        let boundary = try read("docs/architecture/supply-chain-image-trust.md", root: root)
+        let manifest = try read("docs/reference/manifest.md", root: root)
+        let security = try read("docs/reference/security-safety.md", root: root)
+        let limitations = try read("docs/reference/limitations.md", root: root)
+        let publicDocs = [boundary, manifest, security, limitations].joined(separator: "\n")
+
+        XCTAssertTrue(boundary.contains("Status: Phase 25 local policy and research boundary."))
+        XCTAssertTrue(boundary.contains("imagePolicy: require-digest"))
+        XCTAssertTrue(manifest.contains("Digest pinning gives Hostwright a stable content identifier string"))
+        XCTAssertTrue(security.contains("local string validation only"))
+        XCTAssertTrue(limitations.contains("Hostwright does not query registries, resolve tags, verify signatures, inspect SBOMs, scan vulnerabilities, or prove provenance."))
+
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright verifies signatures"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright scans vulnerabilities"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright generates SBOM"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright proves provenance"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright pulls images"))
+    }
+
     private func read(_ relativePath: String, root: URL) throws -> String {
         try String(contentsOf: root.appendingPathComponent(relativePath), encoding: .utf8)
     }

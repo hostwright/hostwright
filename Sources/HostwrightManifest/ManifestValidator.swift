@@ -26,7 +26,7 @@ public enum ManifestValidator {
             }
 
             if let image = service.image, !image.trimmingCharacters(in: .whitespaces).isEmpty {
-                validateImage(image, serviceName: service.name, issues: &issues)
+                validateImage(image, serviceName: service.name, imagePolicy: manifest.effectiveImagePolicy, issues: &issues)
             } else {
                 issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Service '\(service.name)' must define a non-empty image."))
             }
@@ -117,13 +117,19 @@ public enum ManifestValidator {
         }
     }
 
-    private static func validateImage(_ image: String, serviceName: String, issues: inout [ManifestIssue]) {
+    private static func validateImage(
+        _ image: String,
+        serviceName: String,
+        imagePolicy: HostwrightImagePolicy,
+        issues: inout [ManifestIssue]
+    ) {
         if image.rangeOfCharacter(from: .whitespacesAndNewlines) != nil {
             issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Service '\(serviceName)' image must not contain whitespace."))
         }
         if image.hasPrefix("-") {
             issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Service '\(serviceName)' image must not begin with '-'."))
         }
+        issues.append(contentsOf: ImageReferencePolicy.validate(image, serviceName: serviceName, policy: imagePolicy))
     }
 
     private static func validateCommand(_ command: [String], serviceName: String, issues: inout [ManifestIssue]) {

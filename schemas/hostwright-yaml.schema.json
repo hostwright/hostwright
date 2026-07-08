@@ -16,6 +16,10 @@
       "type": "string",
       "pattern": "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"
     },
+    "imagePolicy": {
+      "enum": ["allow-tags", "require-digest"],
+      "description": "Optional image-reference policy. The default allow-tags preserves tag-based alpha manifests; require-digest rejects mutable tag-only image references."
+    },
     "services": {
       "type": "object",
       "minProperties": 1,

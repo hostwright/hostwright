@@ -81,7 +81,7 @@ Supported import input is intentionally small:
 - top-level `services`;
 - service `image`;
 - service `command` as an inline array;
-- service `environment` as a key-value map;
+- service `environment` as a key-value map with plain or quoted scalar values;
 - service `ports` as string list entries like `"8080:8080"`;
 - service `volumes` only when each source is an explicit host path such as `./data` or `/tmp/data`;
 - service `healthcheck.test` only as `["CMD", ...]`;

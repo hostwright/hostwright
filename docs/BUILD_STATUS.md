@@ -9,8 +9,8 @@
 ## Verified On 2026-07-08
 
 - `swift build` succeeds after the Phase 28 stack-file import changes.
-- `swift test list` lists 225 real XCTest cases across Hostwright test targets.
-- `swift test` executes 225 real XCTest test cases across CLI, core, daemon, health, import, manifest, networking, observability, policy, reconciler, runtime, and state targets with 0 failures.
+- `swift test list` lists 228 real XCTest cases across Hostwright test targets.
+- `swift test` executes 228 real XCTest test cases across CLI, core, daemon, health, import, manifest, networking, observability, policy, reconciler, runtime, and state targets with 0 failures.
 - `scripts/grep-orchard.sh .` succeeds and reports historical references only in `docs/source-material/` and `docs/naming/`.
 - `scripts/test.sh` succeeds and runs `swift build` plus `swift test`.
 - `scripts/lint.sh` succeeds.
@@ -100,7 +100,7 @@ Important diagnostic correction:
 - `swift -e 'import XCTest'` can still fail and is not the correct gate.
 - A minimal SwiftPM XCTest probe passed after Xcode was fixed.
 - `swift test list` is the local proof that Hostwright now exposes real XCTest cases.
-- `swift test` executes 225 XCTest cases after the Phase 28 stack-file import update.
+- `swift test` executes 228 XCTest cases after the Phase 28 stack-file import update.
 
 The old top-level smoke/precondition posture has been replaced with XCTest assertions. Some test file names still include `Smoke.swift`, but the contents are XCTest cases.
 

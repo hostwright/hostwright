@@ -153,12 +153,19 @@ public enum StackFileImporter {
                 currentSection = nil
                 if trimmed.hasPrefix("name:") || trimmed.hasPrefix("project:") {
                     let source = fieldName(trimmed)
-                    let value = value(after: "\(source):", in: trimmed)
-                    if let projectDeclaredFrom, manifest.project != value {
+                    guard let parsedValue = parseScalar(
+                        value(after: "\(source):", in: trimmed),
+                        lineNumber: lineNumber,
+                        fieldName: source,
+                        diagnostics: &diagnostics
+                    ) else {
+                        continue
+                    }
+                    if let projectDeclaredFrom, manifest.project != parsedValue {
                         diagnostics.append(error("Stack file declares both \(projectDeclaredFrom) and \(source) with different project values.", line: lineNumber))
                     } else {
                         projectDeclaredFrom = source
-                        manifest.project = value
+                        manifest.project = parsedValue
                     }
                 } else if trimmed.hasPrefix("version:") {
                     diagnostics.append(
@@ -247,6 +254,31 @@ public enum StackFileImporter {
         }
 
         let manifestText = HostwrightManifestEmitter.render(manifest)
+        do {
+            _ = try ManifestValidator.validated(manifestText)
+        } catch let error as ManifestParseError {
+            diagnostics.append(contentsOf: error.issues.map { issue in
+                StackImportDiagnostic(
+                    code: issue.code,
+                    severity: .error,
+                    message: issue.message,
+                    line: issue.line
+                )
+            })
+        } catch {
+            diagnostics.append(
+                StackImportDiagnostic(
+                    code: .manifestParseFailed,
+                    severity: .error,
+                    message: "Rendered import output could not be parsed as a Hostwright manifest."
+                )
+            )
+        }
+
+        guard !diagnostics.contains(where: { $0.severity == .error }) else {
+            return StackImportResult(manifest: nil, manifestText: nil, diagnostics: sortedDiagnostics(diagnostics))
+        }
+
         return StackImportResult(
             manifest: manifest,
             manifestText: manifestText,
@@ -283,7 +315,12 @@ public enum StackFileImporter {
         } else if trimmed == "restart:" {
             currentSection = .restart
         } else if trimmed.hasPrefix("image:") {
-            manifest.services[serviceIndex].image = value(after: "image:", in: trimmed)
+            manifest.services[serviceIndex].image = parseScalar(
+                value(after: "image:", in: trimmed),
+                lineNumber: lineNumber,
+                fieldName: "image",
+                diagnostics: &diagnostics
+            )
             currentSection = nil
         } else if trimmed.hasPrefix("command:") {
             manifest.services[serviceIndex].command = parseRequiredInlineArray(
@@ -294,7 +331,14 @@ public enum StackFileImporter {
             )
             currentSection = nil
         } else if trimmed.hasPrefix("restart:") {
-            manifest.services[serviceIndex].restart = HostwrightRestart(policy: value(after: "restart:", in: trimmed))
+            if let policy = parseScalar(
+                value(after: "restart:", in: trimmed),
+                lineNumber: lineNumber,
+                fieldName: "restart",
+                diagnostics: &diagnostics
+            ) {
+                manifest.services[serviceIndex].restart = HostwrightRestart(policy: policy)
+            }
             currentSection = nil
         } else {
             diagnostics.append(unsupportedField(trimmed, context: "service", line: lineNumber))
@@ -316,7 +360,14 @@ public enum StackFileImporter {
         switch section {
         case .environment:
             if let (key, value) = keyValue(trimmed) {
-                manifest.services[serviceIndex].env[key] = unquote(value)
+                if let parsedValue = parseScalar(
+                    value,
+                    lineNumber: lineNumber,
+                    fieldName: "environment.\(key)",
+                    diagnostics: &diagnostics
+                ) {
+                    manifest.services[serviceIndex].env[key] = parsedValue
+                }
             } else {
                 diagnostics.append(error("Imported environment must be a key-value map, not list or interpolated syntax.", line: lineNumber))
             }
@@ -325,13 +376,17 @@ public enum StackFileImporter {
                 diagnostics.append(error("Imported ports must be string list items like - \"8080:8080\".", line: lineNumber))
                 return
             }
-            manifest.services[serviceIndex].ports.append(unquote(item))
+            if let port = parseScalar(item, lineNumber: lineNumber, fieldName: "ports", diagnostics: &diagnostics) {
+                manifest.services[serviceIndex].ports.append(port)
+            }
         case .volumes:
             guard let item = listItem(from: trimmed) else {
                 diagnostics.append(error("Imported volumes must be string list items like - \"./data:/data:rw\".", line: lineNumber))
                 return
             }
-            let volume = unquote(item)
+            guard let volume = parseScalar(item, lineNumber: lineNumber, fieldName: "volumes", diagnostics: &diagnostics) else {
+                return
+            }
             if let volumeError = explicitHostPathVolumeError(volume) {
                 diagnostics.append(volumeError(lineNumber))
                 return
@@ -360,13 +415,25 @@ public enum StackFileImporter {
                 }
             } else if trimmed.hasPrefix("interval:") {
                 manifest.services[serviceIndex].health = manifest.services[serviceIndex].health ?? HostwrightHealthCheck()
-                manifest.services[serviceIndex].health?.interval = value(after: "interval:", in: trimmed)
+                manifest.services[serviceIndex].health?.interval = parseScalar(
+                    value(after: "interval:", in: trimmed),
+                    lineNumber: lineNumber,
+                    fieldName: "healthcheck.interval",
+                    diagnostics: &diagnostics
+                )
             } else {
                 diagnostics.append(unsupportedField(trimmed, context: "healthcheck", line: lineNumber))
             }
         case .restart:
             if trimmed.hasPrefix("policy:") {
-                manifest.services[serviceIndex].restart = HostwrightRestart(policy: value(after: "policy:", in: trimmed))
+                if let policy = parseScalar(
+                    value(after: "policy:", in: trimmed),
+                    lineNumber: lineNumber,
+                    fieldName: "restart.policy",
+                    diagnostics: &diagnostics
+                ) {
+                    manifest.services[serviceIndex].restart = HostwrightRestart(policy: policy)
+                }
             } else {
                 diagnostics.append(unsupportedField(trimmed, context: "restart", line: lineNumber))
             }
@@ -411,7 +478,15 @@ public enum StackFileImporter {
 
         let inner = String(value.dropFirst().dropLast()).trimmingCharacters(in: .whitespaces)
         guard !inner.isEmpty else { return [] }
-        return inner.split(separator: ",").map { unquote(String($0).trimmingCharacters(in: .whitespaces)) }
+
+        let parsed = RestrictedYAMLSubsetParser.parseInlineArray(
+            rawValue,
+            lineNumber: lineNumber,
+            subject: "Imported \(fieldName) inline array",
+            limitation: limitation
+        )
+        diagnostics.append(contentsOf: parsed.issues.map(importParseIssue))
+        return parsed.issues.isEmpty ? parsed.values : []
     }
 
     private static func unsupportedField(_ trimmed: String, context: String, line: Int) -> StackImportDiagnostic {
@@ -438,16 +513,7 @@ public enum StackFileImporter {
     }
 
     private static func containsUnsupportedSyntax(_ trimmed: String) -> Bool {
-        trimmed == "---" ||
-        trimmed == "..." ||
-        trimmed.contains("&") ||
-        trimmed.contains("*") ||
-        trimmed.contains("<<") ||
-        trimmed.hasPrefix("!") ||
-        trimmed.contains("{") ||
-        trimmed.contains("}") ||
-        trimmed.hasSuffix("|") ||
-        trimmed.hasSuffix(">")
+        RestrictedYAMLSubsetParser.containsUnsupportedSyntax(trimmed)
     }
 
     private static func warning(_ message: String, line: Int? = nil) -> StackImportDiagnostic {
@@ -486,7 +552,7 @@ public enum StackFileImporter {
     }
 
     private static func value(after prefix: String, in line: String) -> String {
-        unquote(String(line.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces))
+        String(line.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces)
     }
 
     private static func listItem(from line: String) -> String? {
@@ -502,12 +568,28 @@ public enum StackFileImporter {
         return (key, rawValue)
     }
 
-    private static func unquote(_ value: String) -> String {
-        var result = value.trimmingCharacters(in: .whitespaces)
-        if result.count >= 2, result.first == "\"", result.last == "\"" {
-            result = String(result.dropFirst().dropLast())
-        }
-        return result
+    private static func parseScalar(
+        _ rawValue: String,
+        lineNumber: Int,
+        fieldName: String,
+        diagnostics: inout [StackImportDiagnostic]
+    ) -> String? {
+        let parsed = RestrictedYAMLSubsetParser.parseScalar(
+            rawValue,
+            lineNumber: lineNumber,
+            subject: "imported \(fieldName)",
+            limitation: limitation
+        )
+        diagnostics.append(contentsOf: parsed.issues.map(importParseIssue))
+        return parsed.value
+    }
+
+    private static func importParseIssue(_ issue: RestrictedYAMLParseIssue) -> StackImportDiagnostic {
+        error(
+            issue.message,
+            line: issue.line,
+            policyReasonCode: PolicyReasonCode.untrustedManifestUnsupportedField.rawValue
+        )
     }
 }
 

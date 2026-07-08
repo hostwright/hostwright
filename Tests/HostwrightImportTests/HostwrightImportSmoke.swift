@@ -81,6 +81,52 @@ final class HostwrightImportTests: XCTestCase {
         XCTAssertEqual(first.errors.map(\.rendered), second.errors.map(\.rendered))
     }
 
+    func testInlineArraysRespectQuotedCommas() throws {
+        let result = StackFileImporter.convert(
+            """
+            name: demo
+            services:
+              api:
+                image: ghcr.io/example/api:latest
+                command: ["python", "print(a,b)"]
+                healthcheck:
+                  test: ["CMD", "curl", "http://localhost:8080/a,b"]
+
+            """
+        )
+
+        XCTAssertTrue(result.succeeded)
+        let service = try XCTUnwrap(result.manifest?.services.first)
+        XCTAssertEqual(service.command, ["python", "print(a,b)"])
+        XCTAssertEqual(service.health?.command, ["curl", "http://localhost:8080/a,b"])
+        XCTAssertTrue(result.manifestText?.contains(#"command: ["python", "print(a,b)"]"#) == true)
+        XCTAssertTrue(result.manifestText?.contains(#"command: ["curl", "http://localhost:8080/a,b"]"#) == true)
+        XCTAssertNoThrow(try ManifestValidator.validated(try XCTUnwrap(result.manifestText)))
+    }
+
+    func testQuotedEnvironmentScalarsDecodeAndRenderedManifestRoundTrips() throws {
+        let result = StackFileImporter.convert(
+            #"""
+            name: demo
+            services:
+              api:
+                image: ghcr.io/example/api:latest
+                environment:
+                  JSON_DOC: '{"a":1}'
+                  NOTE: "a\\b\"c"
+
+            """#
+        )
+
+        XCTAssertTrue(result.succeeded)
+        let service = try XCTUnwrap(result.manifest?.services.first)
+        XCTAssertEqual(service.env["JSON_DOC"], #"{"a":1}"#)
+        XCTAssertEqual(service.env["NOTE"], #"a\b"c"#)
+        let roundTripped = try ManifestValidator.validated(try XCTUnwrap(result.manifestText))
+        XCTAssertEqual(roundTripped.services.first?.env["JSON_DOC"], #"{"a":1}"#)
+        XCTAssertEqual(roundTripped.services.first?.env["NOTE"], #"a\b"c"#)
+    }
+
     func testUnsupportedNetworkingAndSecretFieldsFailClosedWithPolicyReasons() {
         let result = StackFileImporter.convert(
             """

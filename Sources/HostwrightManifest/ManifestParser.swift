@@ -63,7 +63,7 @@ public enum ManifestParser {
                         }
                     }
                 } else if trimmed.hasPrefix("project:") {
-                    manifest.project = value(after: "project:", in: trimmed)
+                    manifest.project = parseScalar(value(after: "project:", in: trimmed), lineNumber: lineNumber, fieldName: "project", issues: &issues)
                 } else if trimmed.hasPrefix("imagePolicy:") {
                     if imagePolicyDeclared {
                         issues.append(
@@ -75,7 +75,7 @@ public enum ManifestParser {
                         )
                     } else {
                         imagePolicyDeclared = true
-                        let rawPolicy = value(after: "imagePolicy:", in: trimmed)
+                        let rawPolicy = parseScalar(value(after: "imagePolicy:", in: trimmed), lineNumber: lineNumber, fieldName: "imagePolicy", issues: &issues)
                         if let policy = HostwrightImagePolicy(rawValue: rawPolicy) {
                             manifest.imagePolicy = policy
                         } else {
@@ -128,7 +128,7 @@ public enum ManifestParser {
                 } else if trimmed == "restart:" {
                     currentSection = .restart
                 } else if trimmed.hasPrefix("image:") {
-                    manifest.services[serviceIndex].image = value(after: "image:", in: trimmed)
+                    manifest.services[serviceIndex].image = parseScalar(value(after: "image:", in: trimmed), lineNumber: lineNumber, fieldName: "image", issues: &issues)
                     currentSection = nil
                 } else if trimmed.hasPrefix("command:") {
                     manifest.services[serviceIndex].command = parseInlineArray(value(after: "command:", in: trimmed), lineNumber: lineNumber, issues: &issues)
@@ -145,26 +145,26 @@ public enum ManifestParser {
                 switch section {
                 case .ports:
                     if let item = listItem(from: trimmed) {
-                        manifest.services[serviceIndex].ports.append(unquote(item))
+                        manifest.services[serviceIndex].ports.append(parseScalar(item, lineNumber: lineNumber, fieldName: "ports", issues: &issues))
                     } else {
                         issues.append(ManifestIssue(code: .manifestParseFailed, message: "Ports must be list items like - \"8080:8080\".", line: lineNumber))
                     }
                 case .volumes:
                     if let item = listItem(from: trimmed) {
-                        manifest.services[serviceIndex].volumes.append(unquote(item))
+                        manifest.services[serviceIndex].volumes.append(parseScalar(item, lineNumber: lineNumber, fieldName: "volumes", issues: &issues))
                     } else {
                         issues.append(ManifestIssue(code: .manifestParseFailed, message: "Volumes must be list items like - \"./data:/data:rw\".", line: lineNumber))
                     }
                 case .env:
                     if let (key, value) = keyValue(trimmed) {
-                        manifest.services[serviceIndex].env[key] = unquote(value)
+                        manifest.services[serviceIndex].env[key] = parseScalar(value, lineNumber: lineNumber, fieldName: "env.\(key)", issues: &issues)
                     } else {
                         issues.append(ManifestIssue(code: .manifestParseFailed, message: "Environment values must be key-value entries.", line: lineNumber))
                     }
                 case .secretEnv:
                     if let (key, value) = keyValue(trimmed) {
                         do {
-                            manifest.services[serviceIndex].secretEnv[key] = try HostwrightSecretReference.parse(unquote(value))
+                            manifest.services[serviceIndex].secretEnv[key] = try HostwrightSecretReference.parse(parseScalar(value, lineNumber: lineNumber, fieldName: "secretEnv.\(key)", issues: &issues))
                         } catch {
                             issues.append(
                                 ManifestIssue(
@@ -181,13 +181,13 @@ public enum ManifestParser {
                     if trimmed.hasPrefix("command:") {
                         manifest.services[serviceIndex].health?.command = parseInlineArray(value(after: "command:", in: trimmed), lineNumber: lineNumber, issues: &issues)
                     } else if trimmed.hasPrefix("interval:") {
-                        manifest.services[serviceIndex].health?.interval = value(after: "interval:", in: trimmed)
+                        manifest.services[serviceIndex].health?.interval = parseScalar(value(after: "interval:", in: trimmed), lineNumber: lineNumber, fieldName: "health.interval", issues: &issues)
                     } else {
                         issues.append(unsupportedKey(trimmed, lineNumber: lineNumber, context: "health"))
                     }
                 case .restart:
                     if trimmed.hasPrefix("policy:") {
-                        manifest.services[serviceIndex].restart = HostwrightRestart(policy: value(after: "policy:", in: trimmed))
+                        manifest.services[serviceIndex].restart = HostwrightRestart(policy: parseScalar(value(after: "policy:", in: trimmed), lineNumber: lineNumber, fieldName: "restart.policy", issues: &issues))
                     } else {
                         issues.append(unsupportedKey(trimmed, lineNumber: lineNumber, context: "restart"))
                     }
@@ -220,16 +220,7 @@ public enum ManifestParser {
     }
 
     private static func containsUnsupportedSyntax(_ trimmed: String) -> Bool {
-        trimmed == "---" ||
-        trimmed == "..." ||
-        trimmed.contains("&") ||
-        trimmed.contains("*") ||
-        trimmed.contains("<<") ||
-        trimmed.hasPrefix("!") ||
-        trimmed.contains("{") ||
-        trimmed.contains("}") ||
-        trimmed.hasSuffix("|") ||
-        trimmed.hasSuffix(">")
+        RestrictedYAMLSubsetParser.containsUnsupportedSyntax(trimmed)
     }
 
     private static func unsupportedKey(_ trimmed: String, lineNumber: Int, context: String) -> ManifestIssue {
@@ -255,7 +246,7 @@ public enum ManifestParser {
     }
 
     private static func value(after prefix: String, in line: String) -> String {
-        unquote(String(line.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces))
+        String(line.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces)
     }
 
     private static func listItem(from line: String) -> String? {
@@ -272,30 +263,34 @@ public enum ManifestParser {
     }
 
     private static func parseInlineArray(_ rawValue: String, lineNumber: Int, issues: inout [ManifestIssue]) -> [String] {
-        let value = rawValue.trimmingCharacters(in: .whitespaces)
-        guard value.hasPrefix("[") && value.hasSuffix("]") else {
-            issues.append(
-                ManifestIssue(
-                    code: .manifestUnsupportedFeature,
-                    message: "\(limitation) Command arrays must use inline syntax like [\"curl\", \"-f\"].",
-                    line: lineNumber
-                )
-            )
-            return []
-        }
-
-        let inner = String(value.dropFirst().dropLast()).trimmingCharacters(in: .whitespaces)
-        guard !inner.isEmpty else { return [] }
-
-        return inner.split(separator: ",").map { unquote(String($0).trimmingCharacters(in: .whitespaces)) }
+        let parsed = RestrictedYAMLSubsetParser.parseInlineArray(
+            rawValue,
+            lineNumber: lineNumber,
+            subject: "Command arrays",
+            limitation: limitation
+        )
+        issues.append(contentsOf: parsed.issues.map(manifestIssue))
+        return parsed.issues.isEmpty ? parsed.values : []
     }
 
-    private static func unquote(_ value: String) -> String {
-        var result = value.trimmingCharacters(in: .whitespaces)
-        if result.count >= 2, result.first == "\"", result.last == "\"" {
-            result = String(result.dropFirst().dropLast())
-        }
-        return result
+    private static func parseScalar(
+        _ rawValue: String,
+        lineNumber: Int,
+        fieldName: String,
+        issues: inout [ManifestIssue]
+    ) -> String {
+        let parsed = RestrictedYAMLSubsetParser.parseScalar(
+            rawValue,
+            lineNumber: lineNumber,
+            subject: fieldName,
+            limitation: limitation
+        )
+        issues.append(contentsOf: parsed.issues.map(manifestIssue))
+        return parsed.value ?? ""
+    }
+
+    private static func manifestIssue(_ issue: RestrictedYAMLParseIssue) -> ManifestIssue {
+        ManifestIssue(code: .manifestUnsupportedFeature, message: issue.message, line: issue.line)
     }
 }
 

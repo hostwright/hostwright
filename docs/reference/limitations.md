@@ -17,6 +17,7 @@ Hostwright is not production ready.
 - `hostwright plan` as non-mutating manifest-level dry-run output.
 - `--output json` for `plan`, `status`, `events`, `recovery`, `doctor`, and structured errors when JSON mode is requested.
 - Stable process exit categories for usage, validation, state unavailable, runtime unavailable, confirmation mismatch, unsafe operation, and partial failure.
+- Local deterministic policy decisions for planner safety, cleanup classification, image policy, env/secret boundaries, lifecycle blockers, untrusted manifests, secure exposure blockers, and accelerator placeholders.
 - `hostwright status [path] --state-db <path>` with live RuntimeAdapter observation and event/snapshot persistence.
 - `hostwright logs <service>` with bounded tail output through RuntimeAdapter and redaction.
 - `hostwright events --state-db <path>` for persisted event ledger records, with project/type/service/severity/limit/sort filtering.
@@ -55,7 +56,7 @@ Hostwright is not production ready.
 - Explicit-path state configuration only.
 - Manifest-to-runtime desired-state mapping outside the CLI.
 - Typed deterministic drift records, plan issues, planned actions, and plan hash.
-- Planning policy checks for duplicate desired host ports, observed host-port conflicts, unsafe broad bind addresses, privileged host ports, unsafe host-root or parent-traversal mount sources, ambiguous mounts, invalid identities, and secret-like environment values.
+- Planning policy checks for duplicate desired host ports, observed host-port conflicts, unsafe broad bind addresses, privileged host ports, unsafe host-root or parent-traversal mount sources, ambiguous mounts, invalid identities, and secret-like environment values through the local policy evaluator.
 - Hostwright-created Apple container port publishes are explicitly localhost-scoped by default.
 - Drift detection for missing, unmanaged, stopped, exited, failed, image mismatch, port mismatch, mount mismatch, unhealthy, duplicate observed identity, unsupported observed state, and unavailable observation cases.
 - `hostwright apply [path] --state-db <path> --confirm-plan <hash>` for one create-missing-service action, one restart-policy-allowed managed start action, or one restart-policy-allowed managed restart action.
@@ -93,6 +94,7 @@ Hostwright is not production ready.
 - Default user database path.
 - Hidden global state writes.
 - Production durability or automatic corruption-recovery guarantees.
+- Remote policy service, team policy workflow, central policy distribution, silent policy bypass, policy-driven runtime mutation, or automatic policy remediation.
 - Online state backup, restore, or repair commands.
 - External telemetry, hosted diagnostics, automatic bundle upload, OSLog integration, or production support-bundle workflows.
 - Launch agent or service installer.
@@ -147,6 +149,8 @@ Recovery is diagnostic and manual. `hostwright recovery` reads operation groups 
 Diagnostics are local and manual. `hostwright diagnostics` reads existing state rows from the explicit state database and writes a redacted JSON bundle to an explicit file path. It does not observe Apple container, run health checks, create or migrate a missing database, overwrite existing bundle files, upload telemetry, or prove service reachability.
 
 `hostwright doctor` resource intelligence is also local and diagnostic. It records host facts and explicit `unmeasured` observations for benchmark dimensions that were not measured. It does not run Apple container commands, create proof containers, pull images, write state, upload telemetry, or prove runtime density, VM overhead, boot latency, battery behavior, sleep/wake behavior, workload memory pressure, or production capacity.
+
+Policy evaluation is local and diagnostic. It produces deterministic decisions, reason codes, and remediation text for current gates, but it does not execute Apple container commands, write state, contact registries, resolve DNS, configure tunnels, distribute team policy, or apply overrides automatically.
 
 Accelerator work is research-only. Current Hostwright core does not expose Apple GPU, ANE, Metal, Core ML, MLX, PyTorch MPS, host-native accelerator helpers, host accelerator devices, or accelerator-aware scheduler behavior. Any future change requires a separate implementation issue, official supported access path or host-native design, versioned disposable proof, threat model, Phase 32 policy gate, and maintainer approval.
 

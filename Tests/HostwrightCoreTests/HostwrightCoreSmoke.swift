@@ -200,6 +200,51 @@ final class HostwrightCoreTests: XCTestCase {
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright passes through GPU"))
     }
 
+    func testPolicyEngineDocsDescribeLocalNonMutatingBoundary() throws {
+        let root = try packageRoot()
+        let architecture = try read("docs/architecture/policy-engine.md", root: root)
+        let reference = try read("docs/reference/policy.md", root: root)
+        let manifest = try read("docs/reference/manifest.md", root: root)
+        let limitations = try read("docs/reference/limitations.md", root: root)
+        let security = try read("docs/reference/security-safety.md", root: root)
+        let requirements = try read("docs/requirements/REQUIREMENTS.md", root: root)
+        let acceptance = try read("docs/requirements/ACCEPTANCE_MATRIX.md", root: root)
+        let implementationPlan = try read("docs/IMPLEMENTATION_PLAN.md", root: root)
+        let buildStatus = try read("docs/BUILD_STATUS.md", root: root)
+        let devlog = try read("docs/devlog/0032-policy-engine.md", root: root)
+        let publicDocs = [
+            architecture,
+            reference,
+            manifest,
+            limitations,
+            security,
+            requirements,
+            acceptance,
+            implementationPlan,
+            buildStatus,
+            devlog
+        ].joined(separator: "\n")
+
+        XCTAssertTrue(architecture.contains("Status: Phase 32 local policy boundary."))
+        XCTAssertTrue(reference.contains("Hostwright policy is local and deterministic."))
+        XCTAssertTrue(manifest.contains("Policy evaluation is local and non-mutating"))
+        XCTAssertTrue(limitations.contains("Policy evaluation is local and diagnostic."))
+        XCTAssertTrue(security.contains("Policy evaluation is local, deterministic, and non-mutating."))
+        XCTAssertTrue(requirements.contains("HW-SAFE-008"))
+        XCTAssertTrue(acceptance.contains("Phase 32 Gate: Policy Engine"))
+        XCTAssertTrue(implementationPlan.contains("## Phase 32 Outputs"))
+        XCTAssertTrue(buildStatus.contains("Phase 32 added a local deterministic policy engine"))
+        XCTAssertTrue(devlog.contains("No remote policy service."))
+
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("remote policy service is implemented"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("team policy workflow is implemented"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("silent bypass is allowed"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("policy mutates runtime"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("policy uploads telemetry"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("policy configures tunnels"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("policy enables accelerators"))
+    }
+
     private func read(_ relativePath: String, root: URL) throws -> String {
         try String(contentsOf: root.appendingPathComponent(relativePath), encoding: .utf8)
     }

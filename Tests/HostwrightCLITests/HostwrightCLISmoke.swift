@@ -1,6 +1,7 @@
 import XCTest
 @testable import HostwrightCLI
 @testable import HostwrightCore
+@testable import HostwrightHealth
 @testable import HostwrightManifest
 @testable import HostwrightReconciler
 @testable import HostwrightRuntime
@@ -211,6 +212,50 @@ final class HostwrightCLITests: XCTestCase {
         XCTAssertTrue(checks.contains { $0["identifier"] as? String == "appleContainerCLI" && $0["status"] as? String == "warning" })
         XCTAssertTrue(checks.contains { $0["identifier"] as? String == "telemetryPolicy" && $0["status"] as? String == "pass" })
         XCTAssertTrue(checks.contains { $0["identifier"] as? String == "statePathPolicy" && $0["status"] as? String == "pass" })
+        XCTAssertTrue(checks.contains { $0["identifier"] as? String == "resourceIntelligence" && $0["status"] as? String == "warning" })
+        XCTAssertNil(json["resourceReport"])
+    }
+
+    func testDoctorJSONOutputIncludesResourceReportWithoutRuntimeObservation() throws {
+        let adapter = FakeApplyRuntimeAdapter(observeError: .runtimeUnavailable("doctor should not observe runtime"))
+        let result = HostwrightCLI.run(
+            arguments: ["doctor", "--output", "json"],
+            environment: environment(
+                files: FileBox(),
+                containerPath: "/usr/local/bin/container",
+                runtimeAdapter: adapter,
+                resourceSnapshot: phase26ResourceSnapshot()
+            )
+        )
+
+        XCTAssertEqual(result.exitCode, 0)
+        let json = try jsonObject(result.standardOutput)
+        let checks = try XCTUnwrap(json["checks"] as? [[String: Any]])
+        XCTAssertTrue(checks.contains { $0["identifier"] as? String == "resourceIntelligence" && $0["status"] as? String == "pass" })
+        let report = try XCTUnwrap(json["resourceReport"] as? [String: Any])
+        XCTAssertEqual(report["measurementMethod"] as? String, "fixture")
+        let hardware = try XCTUnwrap(report["hardware"] as? [String: Any])
+        XCTAssertEqual(hardware["architecture"] as? String, "arm64")
+        XCTAssertEqual(hardware["physicalMemoryBytes"] as? Int, 68_719_476_736)
+        let appleContainer = try XCTUnwrap(report["appleContainer"] as? [String: Any])
+        XCTAssertEqual(appleContainer["version"] as? String, "container 1.0.0")
+        let memoryPressure = try XCTUnwrap(report["memoryPressure"] as? [String: Any])
+        XCTAssertEqual(memoryPressure["status"] as? String, "unmeasured")
+        let bootLatency = try XCTUnwrap(report["bootLatency"] as? [String: Any])
+        XCTAssertEqual(bootLatency["status"] as? String, "unmeasured")
+        let warnings = try XCTUnwrap(report["architectureWarnings"] as? [[String: Any]])
+        XCTAssertEqual(warnings.first?["reportedArchitecture"] as? String, "linux/amd64")
+        XCTAssertTrue((warnings.first?["message"] as? String ?? "").contains("Rosetta"))
+        let limits = try XCTUnwrap(report["limits"] as? [String])
+        XCTAssertTrue(limits.contains("No production density or capacity guarantee."))
+        XCTAssertTrue(limits.contains("No telemetry upload; reports are local diagnostics only."))
+
+        let reportData = try JSONSerialization.data(withJSONObject: report, options: [.sortedKeys])
+        let reportText = try XCTUnwrap(String(data: reportData, encoding: .utf8))
+        let decodedReport = try ResourceIntelligenceReportParser.parseReport(reportText)
+        XCTAssertEqual(decodedReport.measurementMethod, .fixture)
+        XCTAssertEqual(decodedReport.appleContainer.version, "container 1.0.0")
+        XCTAssertEqual(decodedReport.architectureWarnings.first?.reportedArchitecture, "linux/amd64")
     }
 
     func testDoctorCompatibilityFailureUsesValidationExitCode() throws {
@@ -2127,7 +2172,8 @@ final class HostwrightCLITests: XCTestCase {
         runtimeAdapter: (any RuntimeAdapter)? = nil,
         secretStore: (any SecretStore)? = nil,
         platform: PlatformSnapshot = PlatformSnapshot(macOSMajorVersion: 26, architecture: "arm64"),
-        writeError: Error? = nil
+        writeError: Error? = nil,
+        resourceSnapshot: ResourceIntelligenceSnapshot? = nil
     ) -> CLIEnvironment {
         CLIEnvironment(
             fileExists: { files.files[$0] != nil },
@@ -2146,9 +2192,30 @@ final class HostwrightCLITests: XCTestCase {
             executablePath: { name in name == "container" ? containerPath : "/usr/bin/\(name)" },
             runtimeAdapter: { runtimeAdapter ?? FakeApplyRuntimeAdapter() },
             secretStore: { secretStore ?? UnavailableKeychainSecretStore() },
-            swiftVersion: { "Swift 6.3.2" },
+            swiftVersion: { "Swift 6.3.3" },
             platformSnapshot: { platform },
-            operatingSystemDescription: { "macOS 26.5" }
+            operatingSystemDescription: { "macOS 26.5" },
+            resourceSnapshot: { resourceSnapshot }
+        )
+    }
+
+    private func phase26ResourceSnapshot() -> ResourceIntelligenceSnapshot {
+        ResourceIntelligenceSnapshot(
+            method: .fixture,
+            operatingSystemDescription: "macOS 26.5",
+            platform: PlatformSnapshot(macOSMajorVersion: 26, architecture: "arm64"),
+            physicalMemoryBytes: 68_719_476_736,
+            activeProcessorCount: 12,
+            thermalState: .nominal,
+            appleContainerExecutablePath: "/usr/local/bin/container",
+            appleContainerVersion: "container 1.0.0",
+            workloadProfile: .localAIModelMemoryPressure,
+            imageArchitectures: [
+                ResourceImageArchitectureEvidence(
+                    imageReference: "example.local/worker@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    reportedArchitecture: "linux/amd64"
+                )
+            ]
         )
     }
 

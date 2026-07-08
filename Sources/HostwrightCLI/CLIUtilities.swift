@@ -227,7 +227,7 @@ enum CLIJSON {
     }
 
     static func doctor(_ report: DoctorReport) -> String {
-        render([
+        var object: [String: Any] = [
             "kind": "doctor",
             "hasFailures": report.hasFailures,
             "checks": report.checks.map { check in
@@ -237,7 +237,61 @@ enum CLIJSON {
                     "message": RuntimeRedactionPolicy.default.redact(check.message)
                 ]
             }
-        ])
+        ]
+        if let resourceReport = report.resourceReport {
+            object["resourceReport"] = Self.resourceReport(resourceReport)
+        }
+        return render(object)
+    }
+
+    private static func resourceReport(_ report: ResourceIntelligenceReport) -> [String: Any] {
+        [
+            "measurementMethod": report.measurementMethod.rawValue,
+            "hardware": [
+                "architecture": report.hardware.architecture,
+                "activeProcessorCount": report.hardware.activeProcessorCount as Any,
+                "physicalMemoryBytes": report.hardware.physicalMemoryBytes as Any,
+                "unifiedMemoryNote": report.hardware.unifiedMemoryNote
+            ].compactNilValues(),
+            "operatingSystem": [
+                "description": report.operatingSystem.description,
+                "macOSMajorVersion": report.operatingSystem.macOSMajorVersion
+            ],
+            "appleContainer": [
+                "executablePath": report.appleContainer.executablePath as Any,
+                "version": report.appleContainer.version as Any,
+                "versionObservation": resourceObservation(report.appleContainer.versionObservation)
+            ].compactNilValues(),
+            "workloadProfile": [
+                "identifier": report.workloadProfile.identifier,
+                "name": report.workloadProfile.name,
+                "notes": report.workloadProfile.notes
+            ],
+            "memoryPressure": resourceObservation(report.memoryPressure),
+            "bootLatency": resourceObservation(report.bootLatency),
+            "pollingOverhead": resourceObservation(report.pollingOverhead),
+            "sleepWake": resourceObservation(report.sleepWake),
+            "battery": resourceObservation(report.battery),
+            "thermal": resourceObservation(report.thermal),
+            "architectureWarnings": report.architectureWarnings.map { warning in
+                [
+                    "imageReference": warning.imageReference,
+                    "reportedArchitecture": warning.reportedArchitecture,
+                    "message": RuntimeRedactionPolicy.default.redact(warning.message)
+                ]
+            },
+            "limits": report.limits
+        ]
+    }
+
+    private static func resourceObservation(_ observation: ResourceObservation) -> [String: Any] {
+        [
+            "status": observation.status.rawValue,
+            "value": observation.value as Any,
+            "unit": observation.unit as Any,
+            "method": observation.method.rawValue,
+            "note": observation.note
+        ].compactNilValues()
     }
 
     static func events(stateDatabasePath: String, projectName: String?, filters: EventFilters, events: [EventRecord]) -> String {

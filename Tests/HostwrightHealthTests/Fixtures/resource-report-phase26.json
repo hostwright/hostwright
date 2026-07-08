@@ -1,0 +1,75 @@
+{
+  "measurementMethod": "fixture",
+  "hardware": {
+    "architecture": "arm64",
+    "activeProcessorCount": 12,
+    "physicalMemoryBytes": 68719476736,
+    "unifiedMemoryNote": "Apple silicon uses unified memory; this report records host memory facts, not workload capacity."
+  },
+  "operatingSystem": {
+    "description": "macOS 26.5",
+    "macOSMajorVersion": 26
+  },
+  "appleContainer": {
+    "executablePath": "/usr/local/bin/container",
+    "version": "container 1.0.0",
+    "versionObservation": {
+      "status": "observed",
+      "value": "container 1.0.0",
+      "method": "fixture",
+      "note": "Apple container version came from an injected report snapshot."
+    }
+  },
+  "workloadProfile": {
+    "identifier": "local-ai-model-memory-pressure",
+    "name": "Local AI workload memory-pressure study",
+    "notes": [
+      "Describes future measurement inputs for unified-memory pressure.",
+      "Does not enable GPU, ANE, Metal, Core ML, MLX, or accelerator scheduling."
+    ]
+  },
+  "memoryPressure": {
+    "status": "unmeasured",
+    "method": "fixture",
+    "note": "Host physical memory is recorded; per-workload memory pressure requires a bounded benchmark run."
+  },
+  "bootLatency": {
+    "status": "unmeasured",
+    "method": "fixture",
+    "note": "Container boot latency is not measured by doctor because doctor does not create or start containers."
+  },
+  "pollingOverhead": {
+    "status": "unmeasured",
+    "method": "fixture",
+    "note": "Polling overhead requires a timed observation loop and is not inferred from a single snapshot."
+  },
+  "sleepWake": {
+    "status": "unmeasured",
+    "method": "fixture",
+    "note": "Sleep/wake behavior requires a controlled long-running runtime proof and is not inferred from local facts."
+  },
+  "battery": {
+    "status": "unmeasured",
+    "method": "fixture",
+    "note": "Battery behavior requires a controlled battery run and is not inferred from local facts."
+  },
+  "thermal": {
+    "status": "observed",
+    "value": "nominal",
+    "method": "fixture",
+    "note": "Thermal state is the current host process snapshot and is not a workload capacity guarantee."
+  },
+  "architectureWarnings": [
+    {
+      "imageReference": "example.local/worker@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reportedArchitecture": "linux/amd64",
+      "message": "Image architecture linux/amd64 may require Rosetta translation on Apple silicon; verify performance before relying on it."
+    }
+  ],
+  "limits": [
+    "No production density or capacity guarantee.",
+    "No GPU, ANE, Metal, Core ML, MLX, or accelerator scheduling support.",
+    "No telemetry upload; reports are local diagnostics only.",
+    "No runtime mutation, image pull, or container lifecycle action."
+  ]
+}

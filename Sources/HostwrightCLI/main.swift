@@ -164,7 +164,8 @@ public enum HostwrightCLI {
             platform: environment.platformSnapshot(),
             swiftVersion: environment.swiftVersion(),
             containerExecutablePath: environment.executablePath("container"),
-            manifestExists: environment.fileExists(HostwrightIdentity.manifestFileName)
+            manifestExists: environment.fileExists(HostwrightIdentity.manifestFileName),
+            resourceSnapshot: environment.resourceSnapshot()
         )
         let report = HostwrightDoctor.report(inputs: inputs)
         let exitCode = report.hasFailures ? CLIExitCode.validation.rawValue : CLIExitCode.success.rawValue

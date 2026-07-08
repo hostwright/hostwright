@@ -1,5 +1,6 @@
 import Foundation
 import HostwrightCore
+import HostwrightHealth
 import HostwrightRuntime
 import HostwrightSecrets
 
@@ -13,6 +14,7 @@ public struct CLIEnvironment: @unchecked Sendable {
     public var swiftVersion: () -> String?
     public var platformSnapshot: () -> PlatformSnapshot
     public var operatingSystemDescription: () -> String
+    public var resourceSnapshot: () -> ResourceIntelligenceSnapshot?
 
     public init(
         fileExists: @escaping (String) -> Bool,
@@ -23,7 +25,8 @@ public struct CLIEnvironment: @unchecked Sendable {
         secretStore: @escaping () -> any SecretStore = { UnavailableKeychainSecretStore() },
         swiftVersion: @escaping () -> String?,
         platformSnapshot: @escaping () -> PlatformSnapshot,
-        operatingSystemDescription: @escaping () -> String
+        operatingSystemDescription: @escaping () -> String,
+        resourceSnapshot: @escaping () -> ResourceIntelligenceSnapshot? = { nil }
     ) {
         self.fileExists = fileExists
         self.readTextFile = readTextFile
@@ -34,6 +37,7 @@ public struct CLIEnvironment: @unchecked Sendable {
         self.swiftVersion = swiftVersion
         self.platformSnapshot = platformSnapshot
         self.operatingSystemDescription = operatingSystemDescription
+        self.resourceSnapshot = resourceSnapshot
     }
 
     public static let live = CLIEnvironment(
@@ -45,6 +49,15 @@ public struct CLIEnvironment: @unchecked Sendable {
         secretStore: { UnavailableKeychainSecretStore() },
         swiftVersion: { ProcessLookup.swiftVersionSummary() },
         platformSnapshot: { PlatformSnapshot.current },
-        operatingSystemDescription: { ProcessInfo.processInfo.operatingSystemVersionString }
+        operatingSystemDescription: { ProcessInfo.processInfo.operatingSystemVersionString },
+        resourceSnapshot: {
+            let platform = PlatformSnapshot.current
+            let operatingSystemDescription = ProcessInfo.processInfo.operatingSystemVersionString
+            return ResourceIntelligenceSnapshot.current(
+                operatingSystemDescription: operatingSystemDescription,
+                platform: platform,
+                appleContainerExecutablePath: ProcessLookup.executablePath(named: "container")
+            )
+        }
     )
 }

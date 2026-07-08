@@ -295,9 +295,10 @@ Runs safe local checks only:
 - `container` executable lookup only;
 - `hostwright.yaml` presence;
 - explicit state-path policy;
-- local-only telemetry policy.
+- local-only telemetry policy;
+- resource intelligence with local host facts and explicit unmeasured benchmark dimensions.
 
-`doctor` does not run Apple container commands.
+`doctor` does not run Apple container commands. In live output, Apple container version remains unavailable unless an injected or fixture-backed resource report supplies it.
 
 JSON shape:
 
@@ -305,6 +306,15 @@ JSON shape:
 {
   "kind": "doctor",
   "hasFailures": false,
+  "resourceReport": {
+    "measurementMethod": "localProcessInfoSnapshot",
+    "memoryPressure": {
+      "status": "unmeasured"
+    },
+    "limits": [
+      "No production density or capacity guarantee."
+    ]
+  },
   "checks": []
 }
 ```

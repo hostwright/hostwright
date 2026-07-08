@@ -4,18 +4,20 @@
 
 - macOS 26.5
 - Apple silicon (`arm64`)
-- Swift 6.3.2 through full Xcode developer tools
+- Swift 6.3.3 through full Xcode developer tools
 
 ## Verified On 2026-07-08
 
-- `swift build` succeeds after the Phase 22 networking and service discovery changes.
-- `swift test list` lists 187 real XCTest cases across Hostwright test targets.
-- `swift test` executes 187 real XCTest test cases across CLI, core, daemon, health, manifest, networking, observability, reconciler, runtime, and state targets with 0 failures.
+- `swift build` succeeds after the Phase 26 Apple silicon resource intelligence changes.
+- `swift test list` lists 206 real XCTest cases across Hostwright test targets.
+- `swift test` executes 206 real XCTest test cases across CLI, core, daemon, health, manifest, networking, observability, reconciler, runtime, and state targets with 0 failures.
 - `scripts/grep-orchard.sh .` succeeds and reports historical references only in `docs/source-material/` and `docs/naming/`.
 - `scripts/test.sh` succeeds and runs `swift build` plus `swift test`.
 - `scripts/lint.sh` succeeds.
 - Apple container 1.0.0 is installed locally at `/usr/local/bin/container`.
 - `container system status` reports the container system service as running.
+- Phase 26 read-only resource proof ran `swift run hostwright doctor --output json` and reported `localProcessInfoSnapshot`, `physicalMemoryBytes=25769803776`, `activeProcessorCount=12`, thermal state `nominal`, Apple container executable `/usr/local/bin/container`, Apple container version `unavailable` in doctor because doctor does not run Apple container commands, and no capacity guarantee.
+- Phase 26 read-only Apple container checks reported `container CLI version 1.0.0` and an existing local `docker.io/library/python:alpine` image with an `arm64` variant. No Phase 26 image pull was performed.
 - `container list --all --format json` returned the verified empty runtime shape `[]`.
 - A disposable local image `hostwright-proof-web:phase8b` was built from the Apple tutorial-style `python:alpine` flow.
 - `hostwright apply` created exactly one Apple container named `hostwright-proof-web` through `RuntimeAdapter`.
@@ -57,6 +59,7 @@
 - Phase 19 adds cleanup dry-run classifications for eligible, ambiguous, stale, running, unknown, blocked, and never-delete ownership-backed and observed-only resources, keeps confirmed deletion limited to exact eligible Hostwright-owned non-running containers, hardens cleanup confirmation tokens against eligible-candidate drift, and reports delete-success/state-persistence failures as state failures.
 - Phase 20 adds read-only event filters, local redacted diagnostics bundles from explicit state DB paths, local-only telemetry policy reporting in status/doctor/diagnostics output, and XCTest coverage for diagnostics redaction and no runtime observation during export.
 - Phase 22 adds local bind-address policy helpers, observed host-port conflict blockers, unsupported DNS/discovery/networking-field errors, versioned network attachment fixture parsing, and fail-closed handling for non-empty real Apple container network output.
+- Phase 26 adds ProcessInfo-backed resource intelligence reports in doctor JSON, fixture-backed parser coverage, evidence-based non-arm64 image architecture warnings, and docs that keep benchmark dimensions explicit as unmeasured without capacity or accelerator claims.
 - No Apple container command was called by Phase 6 or Phase 7.
 - `FoundationRuntimeProcessRunner` exists for policy-approved read-only command specs and supported mutation specs; automated tests still use fake process execution.
 - `AppleContainerReadOnlyAdapter` reports missing `container` as runtime unavailable and rejects mutation through the adapter contract.
@@ -91,7 +94,7 @@ Important diagnostic correction:
 - `swift -e 'import XCTest'` can still fail and is not the correct gate.
 - A minimal SwiftPM XCTest probe passed after Xcode was fixed.
 - `swift test list` is the local proof that Hostwright now exposes real XCTest cases.
-- `swift test` executes 178 XCTest cases after the Phase 20 observability and diagnostics update.
+- `swift test` executes 206 XCTest cases after the Phase 26 Apple silicon resource intelligence update.
 
 The old top-level smoke/precondition posture has been replaced with XCTest assertions. Some test file names still include `Smoke.swift`, but the contents are XCTest cases.
 

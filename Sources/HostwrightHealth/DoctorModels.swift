@@ -9,6 +9,7 @@ public enum DoctorCheckIdentifier: String, Equatable, Sendable {
     case manifestPresence
     case statePathPolicy
     case telemetryPolicy
+    case resourceIntelligence
 }
 
 public enum DoctorCheckStatus: String, Equatable, Sendable {
@@ -31,9 +32,11 @@ public struct DoctorCheck: Equatable, Sendable {
 
 public struct DoctorReport: Equatable, Sendable {
     public let checks: [DoctorCheck]
+    public let resourceReport: ResourceIntelligenceReport?
 
-    public init(checks: [DoctorCheck]) {
+    public init(checks: [DoctorCheck], resourceReport: ResourceIntelligenceReport? = nil) {
         self.checks = checks
+        self.resourceReport = resourceReport
     }
 
     public var hasFailures: Bool {
@@ -55,19 +58,22 @@ public struct DoctorInputs: Equatable, Sendable {
     public let swiftVersion: String?
     public let containerExecutablePath: String?
     public let manifestExists: Bool
+    public let resourceSnapshot: ResourceIntelligenceSnapshot?
 
     public init(
         operatingSystemDescription: String,
         platform: PlatformSnapshot,
         swiftVersion: String?,
         containerExecutablePath: String?,
-        manifestExists: Bool
+        manifestExists: Bool,
+        resourceSnapshot: ResourceIntelligenceSnapshot? = nil
     ) {
         self.operatingSystemDescription = operatingSystemDescription
         self.platform = platform
         self.swiftVersion = swiftVersion
         self.containerExecutablePath = containerExecutablePath
         self.manifestExists = manifestExists
+        self.resourceSnapshot = resourceSnapshot
     }
 }
 
@@ -107,6 +113,31 @@ public enum HostwrightDoctor {
         checks.append(DoctorCheck(identifier: .statePathPolicy, status: .pass, message: "State database paths are explicit; Hostwright does not choose a default user database path."))
         checks.append(DoctorCheck(identifier: .telemetryPolicy, status: .pass, message: "Telemetry is local-only. Hostwright does not upload diagnostics or events."))
 
-        return DoctorReport(checks: checks)
+        let resourceReport = inputs.resourceSnapshot.map(ResourceIntelligenceReport.init(snapshot:))
+        if let resourceReport {
+            checks.append(
+                DoctorCheck(
+                    identifier: .resourceIntelligence,
+                    status: resourceReport.hasThermalWarning ? .warning : .pass,
+                    message: resourceIntelligenceMessage(for: resourceReport)
+                )
+            )
+        } else {
+            checks.append(
+                DoctorCheck(
+                    identifier: .resourceIntelligence,
+                    status: .warning,
+                    message: "Resource intelligence snapshot was not available; doctor did not infer capacity."
+                )
+            )
+        }
+
+        return DoctorReport(checks: checks, resourceReport: resourceReport)
+    }
+
+    private static func resourceIntelligenceMessage(for report: ResourceIntelligenceReport) -> String {
+        let memoryText = report.hardware.physicalMemoryBytes.map(String.init) ?? "unknown"
+        let appleContainerVersion = report.appleContainer.version ?? "unavailable"
+        return "Resource report method \(report.measurementMethod.rawValue); physicalMemoryBytes=\(memoryText); Apple container version=\(appleContainerVersion); no capacity guarantee."
     }
 }

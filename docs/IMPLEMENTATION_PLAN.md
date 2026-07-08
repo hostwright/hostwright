@@ -33,7 +33,7 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 | 22 | Networking and Service Discovery | Complete locally | Harden local networking policy and document unsupported discovery/exposure boundaries. | Localhost publish defaults, duplicate/observed port conflicts, unsupported discovery fields, and fixture-only network metadata are tested. |
 | 23 | Secure Exposure Research | Complete locally | Decide tunnel, VPN, mTLS, reverse proxy, DNS, and cloud exposure boundaries before any implementation. | Decision record rejects or defers every secure exposure path and tests guard unsupported current-support claims. |
 | 24 | Secrets, Credentials, And Keychain Boundary | Complete locally | Add local secret references, fake Keychain backend, unavailable live backend, and redaction hardening. | `secretEnv`, fake backend resolution, fail-closed unavailable backend, and redacted state/diagnostics/plans pass tests. |
-| 25 | Supply Chain And Image Trust | Complete locally | Add local image digest-reference policy and document trust-tool boundaries. | `imagePolicy: require-digest`, digest syntax validation, schema alignment, docs boundary, and overclaim tests pass without registry calls or scanner/signing dependencies. |
+| 25 | Supply Chain And Image Trust | Complete for local digest policy | Add local image digest-reference policy and document trust-tool boundaries. | `imagePolicy: require-digest`, digest syntax validation, schema alignment, docs boundary, and overclaim tests pass without registry calls or scanner/signing dependencies. |
 
 ## Current Hard Boundaries
 

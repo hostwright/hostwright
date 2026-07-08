@@ -1,5 +1,6 @@
 import HostwrightCore
 import HostwrightManifest
+import HostwrightPolicy
 import HostwrightReconciler
 import HostwrightRuntime
 import HostwrightState
@@ -107,55 +108,23 @@ struct CleanupCommandRunner {
         observedAdapterName: String?
     ) -> CleanupAssessment {
         let serviceName = ownership.serviceName ?? "unknown"
-
-        func assessment(
-            _ classification: CleanupClassification,
-            reason: String,
-            observedService: ObservedRuntimeService? = nil
-        ) -> CleanupAssessment {
-            CleanupAssessment(
-                classification: classification,
+        let policyDecision = LocalPolicyEvaluator.default.evaluateCleanupOwnership(
+            CleanupOwnershipPolicyInput(
+                cleanupEligible: ownership.cleanupEligible,
+                resourceType: ownership.resourceType,
+                ownershipProjectID: ownership.projectID,
+                expectedProjectID: projectID,
                 resourceIdentifier: ownership.resourceIdentifier,
-                serviceName: serviceName,
-                lifecycleState: observedService?.lifecycleState,
-                reason: reason,
-                candidate: nil
+                serviceName: ownership.serviceName,
+                ownershipRuntimeAdapter: ownership.runtimeAdapter,
+                observedAdapterName: observedAdapterName,
+                observedServices: observedServices
             )
-        }
+        )
+        let classification = CleanupClassification(policyDecision.classification)
+        let observedService = observedServices.count == 1 ? observedServices.first : nil
 
-        guard ownership.cleanupEligible else {
-            return assessment(.neverDelete, reason: "ownership record is not cleanup-eligible")
-        }
-        guard ownership.resourceType == "container" else {
-            return assessment(.neverDelete, reason: "resource type '\(ownership.resourceType)' is outside cleanup scope")
-        }
-        guard ownership.projectID == projectID else {
-            return assessment(.neverDelete, reason: "ownership record belongs to a different project")
-        }
-        guard ownership.resourceIdentifier.hasPrefix("hostwright-") else {
-            return assessment(.neverDelete, reason: "resource identifier is not Hostwright-managed")
-        }
-        guard let expectedServiceName = ownership.serviceName else {
-            return assessment(.blocked, reason: "ownership record has no service name")
-        }
-        guard let observedAdapterName else {
-            return assessment(.blocked, reason: "runtime adapter metadata is unavailable")
-        }
-        guard ownership.runtimeAdapter == observedAdapterName else {
-            return assessment(.blocked, reason: "runtime adapter mismatch: ownership=\(ownership.runtimeAdapter) observed=\(observedAdapterName)")
-        }
-        guard !observedServices.isEmpty else {
-            return assessment(.stale, reason: "ownership record has no matching observed container")
-        }
-        guard observedServices.count == 1, let observedService = observedServices.first else {
-            return assessment(.ambiguous, reason: "multiple observed containers match this resource identifier")
-        }
-        guard observedService.identity.serviceName == expectedServiceName else {
-            return assessment(.blocked, reason: "observed service name does not match ownership record", observedService: observedService)
-        }
-
-        switch observedService.lifecycleState {
-        case .created, .stopped, .exited:
+        if classification == .eligible, let expectedServiceName = ownership.serviceName, let observedService {
             let candidate = CleanupCandidate(
                 identity: observedService.identity,
                 resourceIdentifier: ownership.resourceIdentifier,
@@ -167,41 +136,48 @@ struct CleanupCommandRunner {
                 resourceIdentifier: ownership.resourceIdentifier,
                 serviceName: expectedServiceName,
                 lifecycleState: observedService.lifecycleState,
-                reason: "exact Hostwright-owned non-running container",
+                reason: policyDecision.reason,
                 candidate: candidate
             )
-        case .running:
-            return assessment(.running, reason: "running containers are never deleted by cleanup", observedService: observedService)
-        case .unknown:
-            return assessment(.unknown, reason: "runtime lifecycle is unknown", observedService: observedService)
-        case .missing:
-            return assessment(.stale, reason: "runtime reports the resource as missing", observedService: observedService)
-        case .failed:
-            return assessment(.blocked, reason: "failed lifecycle is not cleanup-eligible until observed stopped or exited", observedService: observedService)
         }
+
+        return CleanupAssessment(
+            classification: classification,
+            resourceIdentifier: ownership.resourceIdentifier,
+            serviceName: serviceName,
+            lifecycleState: observedService?.lifecycleState,
+            reason: policyDecision.reason,
+            candidate: nil
+        )
     }
 
     private func observedOnlyAssessment(
         resourceIdentifier: String,
         observedServices: [ObservedRuntimeService]
     ) -> CleanupAssessment {
+        let policyDecision = LocalPolicyEvaluator.default.evaluateObservedOnlyCleanup(
+            resourceIdentifier: resourceIdentifier,
+            observedServices: observedServices
+        )
+        let classification = CleanupClassification(policyDecision.classification)
+
         guard observedServices.count == 1, let observedService = observedServices.first else {
             return CleanupAssessment(
-                classification: .ambiguous,
+                classification: classification,
                 resourceIdentifier: resourceIdentifier,
                 serviceName: "unknown",
                 lifecycleState: nil,
-                reason: "multiple observed containers share this resource identifier without a Hostwright ownership record",
+                reason: policyDecision.reason,
                 candidate: nil
             )
         }
 
         return CleanupAssessment(
-            classification: .neverDelete,
+            classification: classification,
             resourceIdentifier: resourceIdentifier,
             serviceName: observedService.identity.serviceName,
             lifecycleState: observedService.lifecycleState,
-            reason: "observed container has no Hostwright ownership record",
+            reason: policyDecision.reason,
             candidate: nil
         )
     }
@@ -456,6 +432,27 @@ private enum CleanupClassification: String, Equatable {
         case .unknown: 4
         case .blocked: 5
         case .neverDelete: 6
+        }
+    }
+}
+
+private extension CleanupClassification {
+    init(_ policyClassification: CleanupPolicyClassification) {
+        switch policyClassification {
+        case .eligible:
+            self = .eligible
+        case .ambiguous:
+            self = .ambiguous
+        case .stale:
+            self = .stale
+        case .running:
+            self = .running
+        case .unknown:
+            self = .unknown
+        case .blocked:
+            self = .blocked
+        case .neverDelete:
+            self = .neverDelete
         }
     }
 }

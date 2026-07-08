@@ -19,6 +19,7 @@ let package = Package(
         .library(name: "HostwrightHealth", targets: ["HostwrightHealth"]),
         .library(name: "HostwrightNetworking", targets: ["HostwrightNetworking"]),
         .library(name: "HostwrightObservability", targets: ["HostwrightObservability"]),
+        .library(name: "HostwrightPolicy", targets: ["HostwrightPolicy"]),
         .library(name: "HostwrightSecrets", targets: ["HostwrightSecrets"])
     ],
     targets: [
@@ -28,6 +29,7 @@ let package = Package(
                 "HostwrightCore",
                 "HostwrightHealth",
                 "HostwrightManifest",
+                "HostwrightPolicy",
                 "HostwrightReconciler",
                 "HostwrightRuntime",
                 "HostwrightSecrets",
@@ -74,6 +76,7 @@ let package = Package(
                 "HostwrightCore",
                 "HostwrightManifest",
                 "HostwrightNetworking",
+                "HostwrightPolicy",
                 "HostwrightRuntime",
                 "HostwrightSecrets",
                 "HostwrightState"
@@ -100,6 +103,15 @@ let package = Package(
         .target(
             name: "HostwrightObservability",
             dependencies: ["HostwrightCore"]
+        ),
+        .target(
+            name: "HostwrightPolicy",
+            dependencies: [
+                "HostwrightCore",
+                "HostwrightManifest",
+                "HostwrightNetworking",
+                "HostwrightRuntime"
+            ]
         ),
         .target(
             name: "HostwrightSecrets"
@@ -129,7 +141,10 @@ let package = Package(
         ),
         .testTarget(
             name: "HostwrightReconcilerTests",
-            dependencies: ["HostwrightReconciler"]
+            dependencies: [
+                "HostwrightPolicy",
+                "HostwrightReconciler"
+            ]
         ),
         .testTarget(
             name: "HostwrightDaemonTests",
@@ -165,6 +180,14 @@ let package = Package(
         .testTarget(
             name: "HostwrightObservabilityTests",
             dependencies: ["HostwrightObservability"]
+        ),
+        .testTarget(
+            name: "HostwrightPolicyTests",
+            dependencies: [
+                "HostwrightManifest",
+                "HostwrightPolicy",
+                "HostwrightRuntime"
+            ]
         ),
         .testTarget(
             name: "HostwrightSecretsTests",

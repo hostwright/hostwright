@@ -36,6 +36,7 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 | 25 | Supply Chain And Image Trust | Complete for local digest policy | Add local image digest-reference policy and document trust-tool boundaries. | `imagePolicy: require-digest`, digest syntax validation, schema alignment, docs boundary, and overclaim tests pass without registry calls or scanner/signing dependencies. |
 | 26 | Apple Silicon Resource Intelligence | Complete locally | Add local resource reports and benchmark-methodology boundaries without scheduler or accelerator claims. | Doctor resource reports, fixture parsing, architecture warnings, unmeasured benchmark dimensions, and docs boundary tests pass. |
 | 27 | Apple Silicon Accelerator Boundary Research | Complete locally | Decide GPU, ANE, Metal, Core ML, MLX, PyTorch MPS, host-native accelerator, and scheduler boundaries before implementation. | Decision record rejects or defers every accelerator path and docs guard unsupported current-support claims. |
+| 32 | Policy Engine | Complete locally | Add deterministic local policy decisions before import, compatibility, multi-host, and scheduler work. | Policy evaluator tests cover ports, mounts, images, env/secrets, cleanup, lifecycle, exposure, untrusted manifests, accelerator placeholders, and planner migration. |
 
 ## Current Hard Boundaries
 
@@ -55,6 +56,7 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 - Image trust remains local-first: `imagePolicy: require-digest` validates `@sha256` reference syntax only and does not resolve registries, pull images, verify signatures, scan vulnerabilities, generate SBOMs, or prove provenance.
 - Resource intelligence remains local and diagnostic: it reports host facts and explicit unmeasured dimensions without capacity guarantees, runtime mutation, image pulls, external telemetry, accelerator scheduling, or Apple container command execution from `doctor`.
 - Accelerator behavior remains unsupported: Hostwright does not expose Apple GPU, ANE, Metal, Core ML, MLX, PyTorch MPS, host-native accelerator helpers, or accelerator-aware scheduling in current core scope.
+- Policy evaluation is local and deterministic: it explains decisions for existing planner checks, cleanup classification, images, env/secrets, lifecycle, exposure, untrusted manifests, and accelerator placeholders without remote policy service, team workflow, silent bypass, runtime mutation, SQLite access, or network calls.
 
 ## Phase 3 Outputs
 
@@ -300,3 +302,13 @@ Phase 26 does not add runtime density measurement, VM-overhead benchmarking, boo
 - XCTest coverage guards the research decision and unsupported-current-support wording.
 
 Phase 27 does not add GPU, ANE, Metal, Core ML, MLX, PyTorch MPS support, host accelerator device exposure, host-native services, read-only accelerator probes, accelerator scheduling, runtime mutation, image pulls, dependencies, release tags, or GitHub Releases.
+
+## Phase 32 Outputs
+
+- Added `HostwrightPolicy` with `LocalPolicyEvaluator`, `PolicyDecision`, categories, stable reason codes, severities, remediation text, and deterministic detail keys.
+- Planner safety checks for desired identities, ports, exposure, mounts, and secret-like environment values now route through the policy evaluator before becoming reconciler `PlanIssue` values.
+- Cleanup dry-run classification reasons now route through policy decisions while preserving exact ownership, adapter, service, lifecycle, dry-run, token, and confirmation gates.
+- Policy APIs explain local image-policy failures, unresolved secret references, unsupported lifecycle requests, unsupported untrusted-manifest fields, secure exposure blockers, and accelerator blockers.
+- XCTest coverage covers policy evaluation, redaction, cleanup classifications, image digest policy, unsupported exposure/lifecycle/accelerator decisions, and planner policy migration.
+
+Phase 32 does not add remote policy service, team workflow, central policy distribution, silent bypass, runtime mutation from policy, Apple container shell-out from policy, SQLite access from policy, registry calls, image pulls, telemetry upload, DNS, tunnel, cloud, GUI, Kubernetes, CRI, Docker API, Compose parity, GPU/ANE/Metal/Core ML/MLX support, accelerator scheduling, release tags, or GitHub Releases.

@@ -1,5 +1,6 @@
 import XCTest
 @testable import HostwrightManifest
+@testable import HostwrightPolicy
 @testable import HostwrightRuntime
 @testable import HostwrightReconciler
 @testable import HostwrightSecrets
@@ -327,6 +328,39 @@ final class HostwrightReconcilerTests: XCTestCase {
         XCTAssertFalse(rendered.contains("super-secret"))
     }
 
+    func testPlanningPolicyBridgesLocalPolicyEvaluatorWithoutChangingIssues() {
+        let policy = PlanningPolicy.default
+        let desired = desiredState(
+            services: [
+                desiredService(
+                    name: "api",
+                    environment: [RuntimeEnvironmentValue(name: "API_TOKEN", value: "token=super-secret", isSensitive: true)],
+                    ports: [RuntimePortMapping(hostPort: 80, containerPort: 8080, bindAddress: "0.0.0.0")],
+                    mounts: [RuntimeMountReference(source: "/", target: "/host", access: .readOnly)]
+                ),
+                desiredService(
+                    name: "admin",
+                    ports: [RuntimePortMapping(hostPort: 80, containerPort: 8080, bindAddress: "0.0.0.0")]
+                )
+            ]
+        )
+        let observed = observedState([
+            observed(
+                serviceName: "worker",
+                ports: [RuntimePortMapping(hostPort: 80, containerPort: 8080, bindAddress: "127.0.0.1")]
+            )
+        ])
+
+        let directPolicyFingerprints = LocalPolicyEvaluator(configuration: policy.localPolicyConfiguration)
+            .evaluate(desiredState: desired, observedState: observed)
+            .compactMap(policyIssueFingerprint)
+        let planningPolicyFingerprints = policy
+            .evaluate(desiredState: desired, observedState: observed)
+            .map(planIssueFingerprint)
+
+        XCTAssertEqual(planningPolicyFingerprints.sorted(), directPolicyFingerprints.sorted())
+    }
+
     func testManifestMappingIncludesSupportedSubsetAndPolicyIssues() throws {
         let manifest = HostwrightManifest(
             project: "demo",
@@ -455,5 +489,88 @@ final class HostwrightReconcilerTests: XCTestCase {
             updatedAt: "2026-07-01T00:00:00Z",
             metadataJSONRedacted: "{}"
         )
+    }
+
+    private func planIssueFingerprint(_ issue: PlanIssue) -> String {
+        [
+            issue.kind.rawValue,
+            issue.severity.rawValue,
+            issue.identity?.displayName ?? "",
+            issue.message,
+            issue.stableDetailKey
+        ].joined(separator: "|")
+    }
+
+    private func policyIssueFingerprint(_ decision: PolicyDecision) -> String? {
+        guard let kind = planIssueKind(for: decision.reasonCode),
+              let severity = planSeverity(for: decision.severity) else {
+            return nil
+        }
+
+        return [
+            kind.rawValue,
+            severity.rawValue,
+            decision.identity?.displayName ?? "",
+            decision.message,
+            decision.stableDetailKey
+        ].joined(separator: "|")
+    }
+
+    private func planIssueKind(for reasonCode: PolicyReasonCode) -> PlanIssueKind? {
+        switch reasonCode {
+        case .invalidDesiredIdentity:
+            return .invalidDesiredIdentity
+        case .duplicateDesiredHostPort:
+            return .duplicateDesiredHostPort
+        case .observedHostPortConflict:
+            return .hostPortConflict
+        case .unsafeExposure:
+            return .unsafeExposure
+        case .privilegedHostPort:
+            return .privilegedHostPort
+        case .ambiguousMountReference:
+            return .ambiguousVolumeReference
+        case .unsafeMountSource:
+            return .unsafeVolumePath
+        case .secretValueRedacted:
+            return .secretRedacted
+        case .imageReferenceURLUnsupported,
+             .imageDigestRequired,
+             .imageDigestInvalid,
+             .secretReferenceUnavailable,
+             .cleanupEligible,
+             .cleanupNotEligible,
+             .cleanupWrongResourceType,
+             .cleanupWrongProject,
+             .cleanupUnmanagedIdentifier,
+             .cleanupMissingServiceName,
+             .cleanupRuntimeAdapterUnavailable,
+             .cleanupRuntimeAdapterMismatch,
+             .cleanupStale,
+             .cleanupAmbiguous,
+             .cleanupObservedServiceMismatch,
+             .cleanupRunning,
+             .cleanupUnknownLifecycle,
+             .cleanupMissingRuntimeResource,
+             .cleanupFailedLifecycle,
+             .cleanupUnownedObservedResource,
+             .lifecycleSupported,
+             .lifecycleUnsupported,
+             .untrustedManifestUnsupportedField,
+             .secureExposureUnsupported,
+             .acceleratorUnsupported:
+            return nil
+        }
+    }
+
+    private func planSeverity(for severity: PolicyDecisionSeverity) -> DriftSeverity? {
+        switch severity {
+        case .blocker:
+            return .blocker
+        case .warning:
+            return .warning
+        case .allow:
+            return nil
+        }
     }
 }

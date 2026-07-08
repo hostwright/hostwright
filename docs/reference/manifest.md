@@ -81,6 +81,8 @@ Validation currently checks:
 
 Validation does not contact registries or Apple container.
 
+After validation, Hostwright maps accepted manifests into runtime desired state and evaluates local policy decisions for planner safety. Current planner policy decisions explain port conflicts, broad bind blockers, privileged-port warnings, unsafe mounts, and secret redaction. Separate local policy APIs can also explain image-policy failures, unsupported untrusted-manifest fields, secure-exposure blockers, and accelerator blockers without adding runtime side effects. Policy evaluation is local and non-mutating; it does not expand the manifest into Compose parity.
+
 `imagePolicy` is a local manifest validation policy only. The default is `allow-tags`, which accepts tag-based alpha manifests such as `ghcr.io/example/api:latest`. `require-digest` rejects mutable tag-only image references and accepts digest-pinned references:
 
 ```yaml

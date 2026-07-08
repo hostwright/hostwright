@@ -255,6 +255,14 @@ Phase 8A is a required preflight before this mutation gate. It proves real read-
 | HW-DOCS-002 | Core repository docs still state that Hostwright does not currently implement CRI shims, Kubernetes node behavior, Docker API shims, Testcontainers target behavior, full Compose parity, attach, exec, log following, port forwarding, or external scheduler APIs. | Automated + manual | Core docs XCTest; limitations, requirements, implementation-plan, and build-status review. |
 | HW-RUNTIME-001, HW-RUNTIME-002, HW-STATE-001 | Research does not add runtime mutation, RuntimeAdapter calls, direct Apple container shell-out, SQLite access outside `HostwrightState`, state writes, dependencies, network calls, image pulls, release tags, or GitHub Releases. | Manual | Diff review plus full local gate and targeted boundary scans. |
 
+## Phase 30 Gate: Multi-Host Apple Silicon Platform Research
+
+| Requirement IDs | Acceptance criteria | Verification type | Verification command or review |
+| --- | --- | --- | --- |
+| HW-COMPAT-009 | Multi-host identity, membership, local-network discovery, peer trust, transport security, state authority, replication, failure recovery, cloud boundary, remote control, and scheduler implications have explicit reject, defer, prototype, plugin, control-plane, or separate-project decisions before implementation. | Automated + manual | Core docs XCTest and multi-host platform decision-record review. |
+| HW-DOCS-002 | Core repository docs still state that Hostwright does not currently implement multi-host orchestration, remote host agents, membership service, peer discovery, state replication, remote mutation, remote placement, cloud control plane, or scheduler APIs. | Automated + manual | Core docs XCTest; limitations, requirements, implementation-plan, and build-status review. |
+| HW-RUNTIME-001, HW-RUNTIME-002, HW-STATE-001, HW-SAFE-008 | Research does not add runtime mutation, RuntimeAdapter calls, direct Apple container shell-out, SQLite access outside `HostwrightState`, state writes, remote policy, dependencies, network calls, image pulls, release tags, or GitHub Releases. | Manual | Diff review plus full local gate and targeted boundary scans. |
+
 ## Phase 32 Gate: Policy Engine
 
 | Requirement IDs | Acceptance criteria | Verification type | Verification command or review |

@@ -341,6 +341,62 @@ final class HostwrightCoreTests: XCTestCase {
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("exec compatibility is implemented"))
     }
 
+    func testMultiHostPlatformResearchKeepsCurrentSupportSingleHost() throws {
+        let root = try packageRoot()
+        let decision = try read("docs/architecture/multi-host-platform-research.md", root: root)
+        let limitations = try read("docs/reference/limitations.md", root: root)
+        let requirements = try read("docs/requirements/REQUIREMENTS.md", root: root)
+        let acceptance = try read("docs/requirements/ACCEPTANCE_MATRIX.md", root: root)
+        let traceability = try read("docs/requirements/SOURCE_TRACEABILITY.md", root: root)
+        let implementationPlan = try read("docs/IMPLEMENTATION_PLAN.md", root: root)
+        let buildStatus = try read("docs/BUILD_STATUS.md", root: root)
+        let devlog = try read("docs/devlog/0030-multi-host-platform-research.md", root: root)
+        let publicDocs = [
+            decision,
+            limitations,
+            requirements,
+            acceptance,
+            traceability,
+            implementationPlan,
+            buildStatus,
+            devlog
+        ].joined(separator: "\n")
+
+        XCTAssertTrue(decision.contains("Status: Phase 30 research-only decision record."))
+        XCTAssertTrue(decision.contains("Hostwright core stays single-host."))
+        XCTAssertTrue(decision.contains("| Keep current core single-host | Accept |"))
+        XCTAssertTrue(decision.contains("| Peer-to-peer multi-host control | Reject from current core |"))
+        XCTAssertTrue(decision.contains("| Replicated state database | Reject from current core |"))
+        XCTAssertTrue(decision.contains("| Remote control plane | Reject from current core |"))
+        XCTAssertTrue(decision.contains("Prototype requires separate maintainer approval before any code implementation."))
+        XCTAssertTrue(limitations.contains("Multi-host platform work remains research-only."))
+        XCTAssertTrue(requirements.contains("HW-COMPAT-009"))
+        XCTAssertTrue(acceptance.contains("Phase 30 Gate: Multi-Host Apple Silicon Platform Research"))
+        XCTAssertTrue(traceability.contains("HW-COMPAT-009"))
+        XCTAssertTrue(traceability.contains("current core single-host"))
+        XCTAssertTrue(implementationPlan.contains("## Phase 30 Outputs"))
+        XCTAssertTrue(buildStatus.contains("Phase 30 was research-only."))
+        XCTAssertTrue(devlog.contains("No multi-host orchestration."))
+
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright supports multi-host"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright supports multi-Mac"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright supports remote hosts"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright supports remote placement"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright supports cloud control plane"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright implements multi-host"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright implements remote host agents"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright implements state replication"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright implements scheduler API"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("multi-host orchestration is implemented"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("remote mutation is implemented"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("state replication is implemented"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("membership service is implemented"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("peer discovery is implemented"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("remote placement is implemented"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("cloud control plane is implemented"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("scheduler API is implemented"))
+    }
+
     private func read(_ relativePath: String, root: URL) throws -> String {
         try String(contentsOf: root.appendingPathComponent(relativePath), encoding: .utf8)
     }

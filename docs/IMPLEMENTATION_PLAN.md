@@ -38,6 +38,7 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 | 27 | Apple Silicon Accelerator Boundary Research | Complete locally | Decide GPU, ANE, Metal, Core ML, MLX, PyTorch MPS, host-native accelerator, and scheduler boundaries before implementation. | Decision record rejects or defers every accelerator path and docs guard unsupported current-support claims. |
 | 28 | Stack-File Import And Migration Tooling | Complete locally | Add import-only conversion for a narrow safe stack-file subset. | Golden conversion, unsupported-field, policy-reason, CLI JSON/text, and validation-gate tests pass without runtime/state mutation or Compose parity claims. |
 | 29 | External Orchestration Compatibility Research | Complete locally | Decide CRI, Kubernetes, Docker API, Compose, attach, forwarding, scheduler, lifecycle, networking, identity, and state compatibility boundaries before implementation. | Decision record rejects, defers, or splits every compatibility path and docs guard unsupported current-support claims. |
+| 30 | Multi-Host Apple Silicon Platform Research | Complete locally | Decide multi-host identity, membership, trust, state authority, transport, failure recovery, cloud boundary, and scheduler implications before implementation. | Decision record keeps current core single-host and docs guard unsupported current-support claims. |
 | 32 | Policy Engine | Complete locally | Add deterministic local policy decisions before import, compatibility, multi-host, and scheduler work. | Policy evaluator tests cover ports, mounts, images, env/secrets, cleanup, lifecycle, exposure, untrusted manifests, accelerator placeholders, and planner migration. |
 
 ## Current Hard Boundaries
@@ -61,6 +62,7 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 - Policy evaluation is local and deterministic: it explains decisions for existing planner checks, cleanup classification, images, env/secrets, lifecycle, exposure, untrusted manifests, and accelerator placeholders without remote policy service, team workflow, silent bypass, runtime mutation, SQLite access, or network calls.
 - Stack-file import is conversion-only: it prints reviewed `hostwright.yaml` text for a narrow safe subset and rejects unsupported networking, secrets, configs, build, deploy, named-volume, shell-healthcheck, cloud, tunnel, and lifecycle semantics without writing files, touching state, observing runtime, pulling images, or claiming Compose parity.
 - External orchestration compatibility remains research-only: no CRI shim, Kubernetes node behavior, Docker API shim, Testcontainers target, full Compose parity, attach/exec/log-follow/port-forward stream, or external scheduler API exists in current core scope.
+- Multi-host platform work remains research-only: current core has no remote host agent, membership service, peer discovery, state replication, remote mutation, cloud control plane, scheduler API, or remote placement behavior.
 
 ## Phase 3 Outputs
 
@@ -329,6 +331,17 @@ Phase 28 does not add general YAML parsing, Docker Compose parity, runtime compa
 - XCTest coverage guards the research decision and unsupported-current-support wording.
 
 Phase 29 does not add CRI, Kubernetes, Docker API, Compose parity, Testcontainers behavior, attach, exec, log following, port forwarding, external scheduler integration, runtime mutation, state writes, network calls, image pulls, dependencies, release tags, or GitHub Releases.
+
+## Phase 30 Outputs
+
+- `docs/architecture/multi-host-platform-research.md` records research-only decisions for multi-host Apple silicon identity, membership, local-network discovery, peer trust, transport security, state authority, replication, failure recovery, cloud boundary, and scheduler implications.
+- Current core remains single-host because existing safety depends on one local permission envelope, explicit local state paths, local RuntimeAdapter behavior, local deterministic policy, and explicit mutation confirmation.
+- Peer-to-peer control, LAN discovery, replicated state, remote control plane, and multi-host scheduler behavior are rejected from current core scope.
+- Plugin, control-plane, or separate-project exploration is deferred and requires a separate maintainer-approved issue, threat model, and disposable proof.
+- Public limitations, requirements, acceptance gates, and build status keep multi-host orchestration listed as unsupported current behavior.
+- XCTest coverage guards the research decision and unsupported-current-support wording.
+
+Phase 30 does not add multi-host orchestration, remote mutation, remote host agents, state replication, membership service, peer discovery, transport or certificate implementation, cloud control plane, DNS, tunnels, scheduler API, remote placement, runtime mutation expansion, state writes, network calls, image pulls, dependencies, release tags, or GitHub Releases.
 
 ## Phase 32 Outputs
 

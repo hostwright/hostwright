@@ -2,12 +2,14 @@ import XCTest
 @testable import HostwrightNetworking
 
 final class HostwrightNetworkingTests: XCTestCase {
-    func testTunnelExposureIsRejectedForFirstRelease() {
-        let tunnelBinding = PortBinding(target: 443, published: 443, protocolName: .tcp, scope: .tunnel)
-        let diagnostics = tunnelBinding.validate()
+    func testNonLocalExposureScopesAreRejectedForFirstRelease() {
+        for scope in [NetworkExposureScope.lan, .tunnel, .public] {
+            let binding = PortBinding(target: 443, published: 443, protocolName: .tcp, scope: scope)
+            let diagnostics = binding.validate()
 
-        XCTAssertEqual(diagnostics.count, 1)
-        XCTAssertFalse(NetworkExposureScope.tunnel.isAllowedInFirstRelease)
+            XCTAssertEqual(diagnostics.count, 1, scope.rawValue)
+            XCTAssertFalse(scope.isAllowedInFirstRelease, scope.rawValue)
+        }
     }
 
     func testLocalhostExposureWithValidPortsPasses() {

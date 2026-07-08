@@ -195,3 +195,11 @@ Phase 8A is a required preflight before this mutation gate. It proves real read-
 | HW-NET-002 | Duplicate desired host ports and live observed non-target host-port conflicts produce blocker plan issues before mutation. | Automated | Reconciler XCTest cases for duplicate desired ports and observed host-port conflict. |
 | HW-NET-004, HW-VALID-006 | DNS, service discovery, network aliases, network modes, `expose`, tunnel, and cloud exposure settings fail closed or remain documented research-only. | Automated + manual | Manifest XCTest unsupported networking fields; limitations, manifest, and networking-boundary docs review. |
 | HW-RUNTIME-005, HW-SAFE-001 | Apple container networking facts are recorded only through reviewed versioned fixtures; non-empty real network output fails closed until reviewed. | Automated | Runtime XCTest fixture parsing and unsupported real network output test. |
+
+## Phase 23 Gate: Secure Exposure Research
+
+| Requirement IDs | Acceptance criteria | Verification type | Verification command or review |
+| --- | --- | --- | --- |
+| HW-NET-004, HW-SAFE-006 | Cloudflare Tunnel, Tailscale Serve/Funnel, WireGuard, mTLS, reverse proxy, DNS, and cloud-control-plane paths have explicit reject, defer, plugin, or later-prototype decisions before implementation. | Automated + manual | Core docs XCTest and secure exposure decision-record review. |
+| HW-DOCS-002, HW-DOCS-003 | Public docs still state that Hostwright does not currently support tunnels, cloud exposure, DNS management, reverse proxy setup, provider integration, or a cloud control plane. | Automated + manual | Core docs XCTest; limitations, networking-boundary, and security docs review. |
+| HW-SAFE-004, HW-STATE-001 | Research does not add credentials, provider dependencies, product network calls, hidden state paths, or runtime mutation. | Manual | Diff review plus full local gate. |

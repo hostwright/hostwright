@@ -22,6 +22,7 @@ Hostwright currently controls or rejects these local facts:
 - Validate ports conservatively.
 - Treat LAN, tunnel, and public exposure as blocked until separate design and review.
 - Keep local reverse proxying research-only until a separate threat model proves routing, auth, audit, and rollback behavior.
+- Treat the Phase 23 secure exposure decision record as the current boundary for Cloudflare Tunnel, Tailscale, WireGuard, mTLS, reverse proxy, DNS, and cloud exposure research.
 
 ## Non-Goals
 
@@ -30,3 +31,5 @@ Hostwright currently controls or rejects these local facts:
 - No local reverse proxy mutation.
 - No Cloudflare, Tailscale, WireGuard, or tunnel integration.
 - No cloud control plane.
+
+See [Secure Exposure Research](secure-exposure-research.md) for the current research decisions.

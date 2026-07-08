@@ -6,6 +6,38 @@
   "type": "object",
   "required": ["project", "services"],
   "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "required": ["imagePolicy"],
+        "properties": {
+          "imagePolicy": {
+            "const": "require-digest"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "services": {
+            "additionalProperties": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/service"
+                },
+                {
+                  "properties": {
+                    "image": {
+                      "pattern": "^(?!-)(?!.*://)[^@\\s]+@sha256:[a-f0-9]{64}$"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  ],
   "properties": {
     "version": {
       "type": "integer",
@@ -37,7 +69,7 @@
         "image": {
           "type": "string",
           "minLength": 1,
-          "pattern": "^[^-\\s][^\\s]*$"
+          "pattern": "^(?!-)(?!.*://)(?:[^@\\s]+|[^@\\s]+@sha256:[a-f0-9]{64})$"
         },
         "command": {
           "type": "array",

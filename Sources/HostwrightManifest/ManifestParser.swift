@@ -12,6 +12,7 @@ public enum ManifestParser {
         var currentServiceIndex: Int?
         var currentSection: NestedSection?
         var seenServices = false
+        var imagePolicyDeclared = false
 
         for (zeroBasedIndex, originalLine) in lines.enumerated() {
             let lineNumber = zeroBasedIndex + 1
@@ -64,7 +65,7 @@ public enum ManifestParser {
                 } else if trimmed.hasPrefix("project:") {
                     manifest.project = value(after: "project:", in: trimmed)
                 } else if trimmed.hasPrefix("imagePolicy:") {
-                    if manifest.imagePolicy != nil {
+                    if imagePolicyDeclared {
                         issues.append(
                             ManifestIssue(
                                 code: .manifestValidationFailed,
@@ -73,6 +74,7 @@ public enum ManifestParser {
                             )
                         )
                     } else {
+                        imagePolicyDeclared = true
                         let rawPolicy = value(after: "imagePolicy:", in: trimmed)
                         if let policy = HostwrightImagePolicy(rawValue: rawPolicy) {
                             manifest.imagePolicy = policy

@@ -181,6 +181,19 @@ final class HostwrightManifestTests: XCTestCase {
             """,
             contains: "imagePolicy must be declared at most once"
         )
+
+        assertManifestFailure(
+            """
+            version: 1
+            project: api-local
+            imagePolicy: content-trust
+            imagePolicy: require-digest
+            services:
+              api:
+                image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+            """,
+            contains: "imagePolicy must be declared at most once"
+        )
     }
 
     func testInvalidManifestVersionShapeFailsValidation() {
@@ -494,6 +507,7 @@ final class HostwrightManifestTests: XCTestCase {
         ]
         let schema = try read("schemas/hostwright-yaml.schema.json", root: root)
         let schemaJSON = try jsonObject(schema)
+        let digest = String(repeating: "a", count: 64)
 
         for examplePath in examplePaths {
             let manifestText = try read(examplePath, root: root)
@@ -505,6 +519,28 @@ final class HostwrightManifestTests: XCTestCase {
         }
 
         XCTAssertFalse(schema.contains(#""apiVersion""#))
+        let allOf = try XCTUnwrap(schemaJSON["allOf"] as? [[String: Any]])
+        XCTAssertEqual(allOf.count, 1)
+        let imagePolicyRule = try XCTUnwrap(allOf.first)
+        let ruleCondition = try XCTUnwrap(imagePolicyRule["if"] as? [String: Any])
+        XCTAssertEqual(ruleCondition["required"] as? [String], ["imagePolicy"])
+        let conditionProperties = try XCTUnwrap(ruleCondition["properties"] as? [String: Any])
+        let conditionImagePolicy = try XCTUnwrap(conditionProperties["imagePolicy"] as? [String: Any])
+        XCTAssertEqual(conditionImagePolicy["const"] as? String, "require-digest")
+        let ruleThen = try XCTUnwrap(imagePolicyRule["then"] as? [String: Any])
+        let thenProperties = try XCTUnwrap(ruleThen["properties"] as? [String: Any])
+        let thenServices = try XCTUnwrap(thenProperties["services"] as? [String: Any])
+        let thenAdditionalProperties = try XCTUnwrap(thenServices["additionalProperties"] as? [String: Any])
+        let thenAllOf = try XCTUnwrap(thenAdditionalProperties["allOf"] as? [[String: Any]])
+        XCTAssertEqual(thenAllOf.first?["$ref"] as? String, "#/$defs/service")
+        let digestServiceOverlay = try XCTUnwrap(thenAllOf.last)
+        let digestServiceProperties = try XCTUnwrap(digestServiceOverlay["properties"] as? [String: Any])
+        let digestImage = try XCTUnwrap(digestServiceProperties["image"] as? [String: Any])
+        let requireDigestPattern = try XCTUnwrap(digestImage["pattern"] as? String)
+        XCTAssertTrue(matches("ghcr.io/example/api@sha256:\(digest)", pattern: requireDigestPattern))
+        XCTAssertFalse(matches("ghcr.io/example/api:latest", pattern: requireDigestPattern))
+        XCTAssertFalse(matches("ghcr.io/example/api@sha512:\(digest)", pattern: requireDigestPattern))
+
         let properties = try XCTUnwrap(schemaJSON["properties"] as? [String: Any])
         XCTAssertEqual(Set(properties.keys), ["version", "project", "imagePolicy", "services"])
         let required = try XCTUnwrap(schemaJSON["required"] as? [String])
@@ -526,7 +562,13 @@ final class HostwrightManifestTests: XCTestCase {
         XCTAssertEqual(Set(serviceProperties.keys), ["image", "command", "env", "secretEnv", "ports", "volumes", "health", "restart"])
         let image = try XCTUnwrap(serviceProperties["image"] as? [String: Any])
         XCTAssertEqual(image["minLength"] as? Int, 1)
-        XCTAssertEqual(image["pattern"] as? String, #"^[^-\s][^\s]*$"#)
+        let imagePattern = try XCTUnwrap(image["pattern"] as? String)
+        XCTAssertEqual(imagePattern, #"^(?!-)(?!.*://)(?:[^@\s]+|[^@\s]+@sha256:[a-f0-9]{64})$"#)
+        XCTAssertTrue(matches("ghcr.io/example/api:latest", pattern: imagePattern))
+        XCTAssertTrue(matches("ghcr.io/example/api@sha256:\(digest)", pattern: imagePattern))
+        XCTAssertFalse(matches("ghcr.io/example/api@sha512:\(digest)", pattern: imagePattern))
+        XCTAssertFalse(matches("https://ghcr.io/example/api:latest", pattern: imagePattern))
+        XCTAssertFalse(matches("-bad", pattern: imagePattern))
         let command = try XCTUnwrap(serviceProperties["command"] as? [String: Any])
         let commandItems = try XCTUnwrap(command["items"] as? [String: Any])
         XCTAssertEqual(commandItems["pattern"] as? String, #"^[^-].*$"#)
@@ -604,6 +646,10 @@ final class HostwrightManifestTests: XCTestCase {
     private func jsonObject(_ text: String) throws -> [String: Any] {
         let data = try XCTUnwrap(text.data(using: .utf8))
         return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    }
+
+    private func matches(_ value: String, pattern: String) -> Bool {
+        value.range(of: pattern, options: .regularExpression) != nil
     }
 
     private func packageRoot() throws -> URL {

@@ -32,6 +32,7 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 | 21 | API and GUI Readiness Gate | Deferred | Revisit after core contracts for networking, policy, import, compatibility, multi-host research, and scheduling are in place. | No Phase 21 work starts until the maintainer explicitly opens it. |
 | 22 | Networking and Service Discovery | Complete locally | Harden local networking policy and document unsupported discovery/exposure boundaries. | Localhost publish defaults, duplicate/observed port conflicts, unsupported discovery fields, and fixture-only network metadata are tested. |
 | 23 | Secure Exposure Research | Complete locally | Decide tunnel, VPN, mTLS, reverse proxy, DNS, and cloud exposure boundaries before any implementation. | Decision record rejects or defers every secure exposure path and tests guard unsupported current-support claims. |
+| 24 | Secrets, Credentials, And Keychain Boundary | Complete locally | Add local secret references, fake Keychain backend, unavailable live backend, and redaction hardening. | `secretEnv`, fake backend resolution, fail-closed unavailable backend, and redacted state/diagnostics/plans pass tests. |
 
 ## Current Hard Boundaries
 
@@ -248,3 +249,15 @@ Phase 22 does not add DNS behavior, service discovery, local reverse proxy mutat
 - XCTest coverage guards the research record and unsupported-current-support wording.
 
 Phase 23 does not add provider integration, provider credentials, tunnels, DNS behavior, reverse proxy mutation, cloud resources, product network calls, runtime mutation, release tags, or GitHub Releases.
+
+## Phase 24 Outputs
+
+- Added `HostwrightSecrets` with `HostwrightSecretReference`, `SecretStore`, `FakeKeychainSecretStore`, and an unavailable default Keychain backend.
+- Added service-level `secretEnv` for `keychain://<service>/<account>` references while keeping Compose/Kubernetes `secrets:` unsupported.
+- Manifest validation rejects plaintext credential-like keys in `env`, malformed secret references, duplicate keys across `env` and `secretEnv`, and secret references placed under `env`.
+- Apply resolves secret references through the injected backend immediately before confirmed create execution; the default unavailable backend fails before mutation.
+- Runtime mutation rejects unresolved secret references as a final guard.
+- Desired-state persistence, plans, errors, diagnostics, and observability redaction do not store or print resolved fake secret values or raw keychain reference labels.
+- XCTest coverage covers secret reference parsing, fake backend behavior, manifest validation, mapper redaction, apply resolution/failure, runtime guard, state redaction, observability redaction, and schema alignment.
+
+Phase 24 does not add live Keychain access, Keychain prompts, access groups, synchronizable items, credential upload/sync, cloud identity, registry credential storage, mounted secret files, provider integration, runtime mutation expansion, release tags, or GitHub Releases.

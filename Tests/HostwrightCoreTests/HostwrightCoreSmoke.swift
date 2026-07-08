@@ -78,6 +78,28 @@ final class HostwrightCoreTests: XCTestCase {
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright supports WireGuard"))
     }
 
+    func testSecretsKeychainDocsDescribeLocalBoundaryOnly() throws {
+        let root = try packageRoot()
+        let boundary = try read("docs/architecture/secrets-keychain-boundary.md", root: root)
+        let manifest = try read("docs/reference/manifest.md", root: root)
+        let security = try read("docs/reference/security-safety.md", root: root)
+        let limitations = try read("docs/reference/limitations.md", root: root)
+        let publicDocs = [boundary, manifest, security, limitations].joined(separator: "\n")
+
+        XCTAssertTrue(boundary.contains("Status: Phase 24 local boundary."))
+        XCTAssertTrue(boundary.contains("secretEnv:"))
+        XCTAssertTrue(boundary.contains("Live macOS Keychain access is not enabled by default in Phase 24."))
+        XCTAssertTrue(manifest.contains("secretEnv"))
+        XCTAssertTrue(security.contains("tests use a fake Keychain backend"))
+        XCTAssertTrue(limitations.contains("no live Keychain default"))
+
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("live macOS Keychain access is enabled"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("supports cloud secret"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("supports registry credential"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("supports Kubernetes secrets"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("supports Compose secrets"))
+    }
+
     private func read(_ relativePath: String, root: URL) throws -> String {
         try String(contentsOf: root.appendingPathComponent(relativePath), encoding: .utf8)
     }

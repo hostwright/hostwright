@@ -44,7 +44,11 @@ Cleanup does not delete images, volumes, networks, Apple builder resources, base
 
 Hostwright keeps execution environment values separate from display and persistence values. Runtime command construction receives the manifest value, while command output, logs, state payloads, events, plan output, and failure messages use redacted values.
 
-Redaction is heuristic. Users should not place real credentials in manifests, logs, examples, fixtures, or issue reports.
+Plaintext credential-like environment keys in `env` are rejected. Use `secretEnv` with `keychain://<service>/<account>` references for local secret values. The reference is not a secret value, but Hostwright still redacts keychain reference labels from state, diagnostics, plans, and errors because labels can reveal local account context.
+
+Hostwright does not use the live macOS Keychain by default in this phase. The default CLI secret store fails closed before mutation, and tests use a fake Keychain backend. A future live Keychain backend must be separately approved, noninteractive, and fail cleanly instead of presenting authentication UI.
+
+Redaction is heuristic. Users should not place plaintext credentials in manifests, logs, examples, fixtures, or issue reports.
 
 Health check stdout, stderr, command payloads, events, operation recovery hints, operation recovery metadata, and persisted result metadata are redacted before display or storage.
 
@@ -55,6 +59,8 @@ Diagnostic bundles are local-only JSON exports. They redact known secret-like va
 Treat `hostwright.yaml` files from third parties as untrusted input. Hostwright validates a restricted manifest subset and rejects unsupported YAML, Kubernetes-style fields, Compose-style fields, unknown service fields, unsupported manifest versions, unsafe host-root or parent-traversal mount sources, and unsafe environment keys before planning or mutation.
 
 `hostwright validate` and `hostwright plan` are non-mutating review gates. Operators should still inspect image names, port publishes, environment values, volume paths, and loopback health probe commands before running any confirmed `apply` or daemon loop.
+
+Secret references do not make third-party manifests trusted. A manifest can still point at local secret labels, images, paths, and ports that the operator must review before confirmed mutation.
 
 ## Network Exposure
 

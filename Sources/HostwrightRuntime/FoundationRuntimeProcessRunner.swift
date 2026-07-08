@@ -92,8 +92,8 @@ public struct FoundationRuntimeProcessRunner: RuntimeProcessRunning {
 
             throw RuntimeAdapterError.commandTimedOut(
                 command: spec.redacted(using: redactionPolicy).purpose,
-                partialOutput: redactionPolicy.redact(partialOutput),
-                partialError: redactionPolicy.redact(partialError)
+                partialOutput: redactionPolicy.redact(partialOutput, exactValues: spec.sensitiveValues),
+                partialError: redactionPolicy.redact(partialError, exactValues: spec.sensitiveValues)
             )
         }
 

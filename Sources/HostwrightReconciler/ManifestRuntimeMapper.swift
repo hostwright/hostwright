@@ -1,6 +1,7 @@
 import HostwrightManifest
 import HostwrightNetworking
 import HostwrightRuntime
+import HostwrightSecrets
 
 public struct ManifestRuntimeMappingResult: Equatable, Sendable {
     public let desiredState: DesiredRuntimeState
@@ -36,7 +37,7 @@ public enum ManifestRuntimeMapper {
         let identity = RuntimeServiceIdentity(projectName: projectName, serviceName: service.name)
         let ports = service.ports.compactMap { parsePort($0, identity: identity, issues: &issues) }
         let mounts = service.volumes.compactMap { parseMount($0, identity: identity, issues: &issues) }
-        let environment = service.env
+        let literalEnvironment = service.env
             .sorted { $0.key < $1.key }
             .map { key, value in
                 RuntimeEnvironmentValue(
@@ -45,12 +46,35 @@ public enum ManifestRuntimeMapper {
                     isSensitive: policy.redactionPolicy.isSensitiveKey(key)
                 )
             }
+        let secretEnvironment = service.secretEnv
+            .sorted { $0.key < $1.key }
+            .map { key, reference in
+                RuntimeEnvironmentValue(
+                    name: key,
+                    value: reference.redactedDescription,
+                    isSensitive: true,
+                    secretReference: reference
+                )
+            }
+
+        let duplicateEnvironmentKeys = Set(service.env.keys).intersection(Set(service.secretEnv.keys)).sorted()
+        for key in duplicateEnvironmentKeys {
+            issues.append(
+                PlanIssue(
+                    kind: .unsupportedFeature,
+                    severity: .blocker,
+                    identity: identity,
+                    message: "Environment key \(key) appears in both env and secretEnv.",
+                    stableDetailKey: key
+                )
+            )
+        }
 
         return DesiredRuntimeService(
             identity: identity,
             image: service.image ?? "",
             command: service.command,
-            environment: environment,
+            environment: (literalEnvironment + secretEnvironment).sorted { $0.name < $1.name },
             ports: ports,
             mounts: mounts,
             healthCheck: mapHealthCheck(service.health),

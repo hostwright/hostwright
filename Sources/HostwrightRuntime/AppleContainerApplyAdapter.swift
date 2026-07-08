@@ -116,13 +116,13 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
             desiredService: desiredService
         )
         try RuntimeCommandPolicy.validateCreateMissingServiceMutation(createSpec)
-        let result = try await processRunner.run(createSpec)
+        let result = try await runRedacted(createSpec)
         let resourceIdentifier = AppleContainerCommand.containerName(for: desiredService.identity)
 
         return RuntimeEvent(
             identity: desiredService.identity,
             severity: .info,
-            message: "Created missing service \(desiredService.identity.displayName). \(redactionPolicy.redact(result.standardOutput))",
+            message: "Created missing service \(desiredService.identity.displayName). \(result.standardOutput)",
             resourceIdentifier: resourceIdentifier
         )
     }
@@ -131,11 +131,11 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
         let containerID = AppleContainerCommand.containerName(for: action.identity)
         let spec = AppleContainerCommand.spec(kind: .startContainer(containerID: containerID), executable: executable)
         try RuntimeCommandPolicy.validateStartManagedServiceMutation(spec)
-        let result = try await processRunner.run(spec)
+        let result = try await runRedacted(spec)
         return RuntimeEvent(
             identity: action.identity,
             severity: .info,
-            message: "Started managed service \(action.identity.displayName). \(redactionPolicy.redact(result.standardOutput))",
+            message: "Started managed service \(action.identity.displayName). \(result.standardOutput)",
             resourceIdentifier: containerID
         )
     }
@@ -151,13 +151,13 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
         let containerID = AppleContainerCommand.containerName(for: action.identity)
         let stopSpec = AppleContainerCommand.spec(kind: .stopForManagedRestart(containerID: containerID), executable: executable)
         try RuntimeCommandPolicy.validateRestartManagedServiceMutation(stopSpec)
-        let stopResult = try await processRunner.run(stopSpec)
+        let stopResult = try await runRedacted(stopSpec)
 
         let startSpec = AppleContainerCommand.spec(kind: .startForManagedRestart(containerID: containerID), executable: executable)
         let startResult: RuntimeCommandResult
         do {
             try RuntimeCommandPolicy.validateRestartManagedServiceMutation(startSpec)
-            startResult = try await processRunner.run(startSpec)
+            startResult = try await runRedacted(startSpec)
         } catch {
             throw managedRestartStartFailedAfterStop(error)
         }
@@ -165,7 +165,7 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
         return RuntimeEvent(
             identity: action.identity,
             severity: .info,
-            message: "Restarted managed service \(action.identity.displayName). stop: \(redactionPolicy.redact(stopResult.standardOutput)) start: \(redactionPolicy.redact(startResult.standardOutput))",
+            message: "Restarted managed service \(action.identity.displayName). stop: \(stopResult.standardOutput) start: \(startResult.standardOutput)",
             resourceIdentifier: containerID
         )
     }
@@ -198,13 +198,21 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
         let containerID = AppleContainerCommand.containerName(for: action.identity)
         let spec = AppleContainerCommand.spec(kind: .deleteContainer(containerID: containerID), executable: executable)
         try RuntimeCommandPolicy.validateDeleteManagedContainerMutation(spec)
-        let result = try await processRunner.run(spec)
+        let result = try await runRedacted(spec)
         return RuntimeEvent(
             identity: action.identity,
             severity: .info,
-            message: "Deleted managed container \(action.identity.displayName). \(redactionPolicy.redact(result.standardOutput))",
+            message: "Deleted managed container \(action.identity.displayName). \(result.standardOutput)",
             resourceIdentifier: containerID
         )
+    }
+
+    private func runRedacted(_ spec: RuntimeCommandSpec) async throws -> RuntimeCommandResult {
+        do {
+            return try await processRunner.run(spec).redacted(using: redactionPolicy)
+        } catch let error as RuntimeAdapterError {
+            throw error.redacted(using: redactionPolicy, exactValues: spec.sensitiveValues)
+        }
     }
 
     private func validateCreateSubset(_ service: DesiredRuntimeService) throws {
@@ -222,6 +230,9 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
         }
         guard service.command.allSatisfy({ !$0.hasPrefix("-") }) else {
             throw RuntimeAdapterError.commandRejected(classification: .mutating, message: "Create-only apply rejects command tokens beginning with '-'.")
+        }
+        guard service.environment.allSatisfy({ $0.secretReference == nil }) else {
+            throw RuntimeAdapterError.commandRejected(classification: .mutating, message: "Create-only apply rejects unresolved secret references.")
         }
     }
 }

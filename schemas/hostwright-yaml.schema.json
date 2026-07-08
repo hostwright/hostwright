@@ -51,6 +51,16 @@
             "type": "string"
           }
         },
+        "secretEnv": {
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+          },
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^keychain://[A-Za-z0-9._:@-]+/[A-Za-z0-9._:@-]+$"
+          }
+        },
         "ports": {
           "type": "array",
           "items": {

@@ -1,6 +1,7 @@
 import Foundation
 import XCTest
 @testable import HostwrightRuntime
+@testable import HostwrightSecrets
 
 final class HostwrightRuntimeTests: XCTestCase {
     func testRuntimePlanReportsMutationAndDestructiveFlags() {
@@ -21,6 +22,7 @@ final class HostwrightRuntimeTests: XCTestCase {
             executablePath: "/usr/bin/example",
             arguments: ["list", "token=fake-token-123"],
             environment: ["PASSWORD": "fake-password"],
+            sensitiveValues: ["opaque-session-value"],
             timeout: RuntimeCommandTimeout(seconds: 999),
             classification: .readOnly,
             executableResolution: .resolvedByRuntimeExecutableResolver,
@@ -31,6 +33,16 @@ final class HostwrightRuntimeTests: XCTestCase {
         XCTAssertTrue(readOnly.redacted().arguments[1].contains("[REDACTED]"))
         XCTAssertEqual(readOnly.redacted().environment["PASSWORD"], "[REDACTED]")
         XCTAssertFalse(RuntimeRedactionPolicy.default.redact(#""token":"fake-token-123""#).contains("fake-token-123"))
+
+        let redactedResult = RuntimeCommandResult(
+            spec: readOnly,
+            exitStatus: 0,
+            standardOutput: "SESSION=opaque-session-value",
+            standardError: "opaque-session-value"
+        ).redacted()
+        XCTAssertFalse(redactedResult.standardOutput.contains("opaque-session-value"))
+        XCTAssertFalse(redactedResult.standardError.contains("opaque-session-value"))
+        XCTAssertTrue(redactedResult.spec.sensitiveValues.isEmpty)
     }
 
     func testRuntimeCommandPolicyAcceptsReadOnlyResolvedSpecs() {
@@ -506,11 +518,11 @@ final class HostwrightRuntimeTests: XCTestCase {
 
     func testAppleContainerApplyAdapterUsesOriginalEnvironmentValuesInCreateSpec() async throws {
         let imageListFixture = try fixture("apple-container-image-list-real-json.txt")
-        let fakeSecret = "fake-secret-token"
+        let opaqueSecret = "opaque-session-value"
         let service = DesiredRuntimeService(
             identity: proofIdentity,
             image: "hostwright-proof-web:create-only",
-            environment: [RuntimeEnvironmentValue(name: "API_TOKEN", value: fakeSecret, isSensitive: true)],
+            environment: [RuntimeEnvironmentValue(name: "SESSION", value: opaqueSecret, isSensitive: true)],
             ports: [RuntimePortMapping(hostPort: 18080, containerPort: 80, bindAddress: "127.0.0.1")]
         )
         let runner = RoutingRuntimeProcessRunner { spec in
@@ -518,7 +530,7 @@ final class HostwrightRuntimeTests: XCTestCase {
                 return RuntimeCommandResult(spec: spec, exitStatus: 0, standardOutput: imageListFixture, standardError: "")
             }
             if spec.arguments.first == "create" {
-                return RuntimeCommandResult(spec: spec, exitStatus: 0, standardOutput: "created token=\(fakeSecret)", standardError: "")
+                return RuntimeCommandResult(spec: spec, exitStatus: 0, standardOutput: "created \(opaqueSecret)", standardError: "")
             }
             throw RuntimeAdapterError.commandRejected(classification: spec.classification, message: "unexpected command")
         }
@@ -530,10 +542,36 @@ final class HostwrightRuntimeTests: XCTestCase {
         )
 
         let createArguments = try XCTUnwrap(runner.calls.first { $0.arguments.first == "create" }?.arguments)
-        XCTAssertTrue(createArguments.contains("API_TOKEN=\(fakeSecret)"))
+        XCTAssertTrue(createArguments.contains("SESSION=\(opaqueSecret)"))
         XCTAssertTrue(createArguments.contains("127.0.0.1:18080:80"))
-        XCTAssertFalse(event.message.contains(fakeSecret))
+        XCTAssertFalse(event.message.contains(opaqueSecret))
         XCTAssertTrue(event.message.contains("[REDACTED]"))
+    }
+
+    func testAppleContainerApplyAdapterRejectsUnresolvedSecretReferences() async throws {
+        let reference = try HostwrightSecretReference.parse("keychain://hostwright.api/api-token")
+        let service = DesiredRuntimeService(
+            identity: proofIdentity,
+            image: "hostwright-proof-web:create-only",
+            environment: [RuntimeEnvironmentValue(name: "API_TOKEN", value: reference.redactedDescription, isSensitive: true, secretReference: reference)],
+            ports: [RuntimePortMapping(hostPort: 18080, containerPort: 80, bindAddress: "127.0.0.1")]
+        )
+        let adapter = AppleContainerApplyAdapter(executableResolver: resolvedContainer, processRunner: RoutingRuntimeProcessRunner { spec in
+            XCTFail("Unresolved secret refs must fail before runtime command execution, got \(spec.arguments).")
+            return RuntimeCommandResult(spec: spec, exitStatus: 1, standardOutput: "", standardError: "")
+        })
+
+        do {
+            _ = try await adapter.execute(
+                PlannedRuntimeAction(kind: .create, identity: proofIdentity, isDestructive: false, summary: "create", desiredService: service),
+                confirmation: RuntimeMutationConfirmation(confirmed: true, reason: "test", planHash: "plan-hash")
+            )
+            XCTFail("Expected unresolved secret reference rejection.")
+        } catch {
+            XCTAssertTrue(String(describing: error).contains("unresolved secret references"))
+            XCTAssertFalse(String(describing: error).contains("hostwright.api"))
+            XCTAssertFalse(String(describing: error).contains("api-token"))
+        }
     }
 
     func testAppleContainerApplyAdapterStartsManagedServiceOnly() async throws {

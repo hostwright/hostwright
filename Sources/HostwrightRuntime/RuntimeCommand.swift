@@ -32,6 +32,7 @@ public struct RuntimeCommandSpec: Equatable, Sendable {
     public let executablePath: String
     public let arguments: [String]
     public let environment: [String: String]
+    public let sensitiveValues: [String]
     public let workingDirectory: String?
     public let timeout: RuntimeCommandTimeout
     public let classification: RuntimeCommandClassification
@@ -43,6 +44,7 @@ public struct RuntimeCommandSpec: Equatable, Sendable {
         executablePath: String,
         arguments: [String],
         environment: [String: String] = [:],
+        sensitiveValues: [String] = [],
         workingDirectory: String? = nil,
         timeout: RuntimeCommandTimeout = RuntimeCommandTimeout(),
         classification: RuntimeCommandClassification,
@@ -53,6 +55,7 @@ public struct RuntimeCommandSpec: Equatable, Sendable {
         self.executablePath = executablePath
         self.arguments = arguments
         self.environment = environment
+        self.sensitiveValues = sensitiveValues.filter { !$0.isEmpty }
         self.workingDirectory = workingDirectory
         self.timeout = timeout
         self.classification = classification
@@ -64,8 +67,9 @@ public struct RuntimeCommandSpec: Equatable, Sendable {
     public func redacted(using policy: RuntimeRedactionPolicy = .default) -> RuntimeCommandSpec {
         RuntimeCommandSpec(
             executablePath: executablePath,
-            arguments: policy.redact(arguments: arguments),
-            environment: policy.redact(environment: environment),
+            arguments: policy.redact(arguments: arguments, exactValues: sensitiveValues),
+            environment: policy.redact(environment: environment, exactValues: sensitiveValues),
+            sensitiveValues: [],
             workingDirectory: workingDirectory,
             timeout: timeout,
             classification: classification,
@@ -101,11 +105,12 @@ public struct RuntimeCommandResult: Equatable, Sendable {
     }
 
     public func redacted(using policy: RuntimeRedactionPolicy = .default) -> RuntimeCommandResult {
-        RuntimeCommandResult(
+        let exactValues = spec.sensitiveValues
+        return RuntimeCommandResult(
             spec: spec.redacted(using: policy),
             exitStatus: exitStatus,
-            standardOutput: policy.redact(standardOutput),
-            standardError: policy.redact(standardError),
+            standardOutput: policy.redact(standardOutput, exactValues: exactValues),
+            standardError: policy.redact(standardError, exactValues: exactValues),
             timedOut: timedOut,
             wasCancelled: wasCancelled
         )

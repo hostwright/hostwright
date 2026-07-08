@@ -3,6 +3,7 @@ import HostwrightCore
 import HostwrightManifest
 import HostwrightReconciler
 import HostwrightRuntime
+import HostwrightSecrets
 import HostwrightState
 
 struct ApplyCommandRunner {
@@ -93,15 +94,35 @@ struct ApplyCommandRunner {
             guard let desiredService else {
                 return failure(code: .runtimeMutationNotImplemented, message: "Could not find desired service for \(action.identity.displayName). No mutation was attempted.")
             }
+
+            let idempotencyKey = "\(plan.planHash):\(action.kind.rawValue):\(action.identity.displayName)"
+            if let existingOperation = try blockingOperation(store: store, idempotencyKey: idempotencyKey) {
+                return failure(
+                    code: .commandUsage,
+                    message: "Operation with the same idempotency key is already \(existingOperation.status.rawValue). No mutation was attempted."
+                )
+            }
+
+            let executionDesiredService: DesiredRuntimeService
             if action.executionAvailability == .availableForCreateMissingService {
-                if let safeSubsetFailure = validateCreateOnlyApplySubset(desiredService) {
+                do {
+                    executionDesiredService = try resolveSecretReferences(in: desiredService)
+                } catch {
+                    return failure(
+                        code: .unsafeExposure,
+                        message: "Secret reference resolution failed before mutation: \(RuntimeRedactionPolicy.default.redact(String(describing: error))). No mutation was attempted."
+                    )
+                }
+                if let safeSubsetFailure = validateCreateOnlyApplySubset(executionDesiredService) {
                     return failure(code: .unsafeExposure, message: "\(safeSubsetFailure) No mutation was attempted.")
                 }
+            } else {
+                executionDesiredService = desiredService
             }
             if action.executionAvailability == .availableForRestartManagedService {
                 if let restartGateFailure = try validateManagedRestartGate(
                     action: action,
-                    desiredService: desiredService,
+                    desiredService: executionDesiredService,
                     observed: observedForPlanning,
                     store: store,
                     projectID: projectID,
@@ -111,13 +132,6 @@ struct ApplyCommandRunner {
                 }
             }
 
-            let idempotencyKey = "\(plan.planHash):\(action.kind.rawValue):\(action.identity.displayName)"
-            if let existingOperation = try blockingOperation(store: store, idempotencyKey: idempotencyKey) {
-                return failure(
-                    code: .commandUsage,
-                    message: "Operation with the same idempotency key is already \(existingOperation.status.rawValue). No mutation was attempted."
-                )
-            }
             let operationID = hostwrightUniqueID(prefix: "operation-apply")
             let operationGroupID = hostwrightUniqueID(prefix: "operation-group")
             let groupAcquire = try store.operationGroups.acquire(
@@ -201,7 +215,7 @@ struct ApplyCommandRunner {
                 )
             }
 
-            let runtimeAction = runtimeAction(for: action, desiredService: desiredService)
+            let runtimeAction = runtimeAction(for: action, desiredService: executionDesiredService)
 
             let event: RuntimeEvent
             do {
@@ -404,7 +418,40 @@ struct ApplyCommandRunner {
         if service.command.contains(where: { $0.hasPrefix("-") }) {
             return "Create-only apply rejects command tokens beginning with '-'."
         }
+        if service.environment.contains(where: { $0.secretReference != nil }) {
+            return "Create-only apply rejects unresolved secret references."
+        }
         return nil
+    }
+
+    private func resolveSecretReferences(in service: DesiredRuntimeService) throws -> DesiredRuntimeService {
+        guard service.environment.contains(where: { $0.secretReference != nil }) else {
+            return service
+        }
+
+        let store = environment.secretStore()
+        let resolvedEnvironment = try service.environment.map { value in
+            guard let reference = value.secretReference else {
+                return value
+            }
+
+            return RuntimeEnvironmentValue(
+                name: value.name,
+                value: try store.readString(reference: reference),
+                isSensitive: true
+            )
+        }
+
+        return DesiredRuntimeService(
+            identity: service.identity,
+            image: service.image,
+            command: service.command,
+            environment: resolvedEnvironment,
+            ports: service.ports,
+            mounts: service.mounts,
+            healthCheck: service.healthCheck,
+            restartPolicy: service.restartPolicy
+        )
     }
 
     private func runtimeAction(for action: PlannedAction, desiredService: DesiredRuntimeService?) -> PlannedRuntimeAction {

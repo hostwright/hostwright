@@ -19,4 +19,13 @@ final class HostwrightObservabilityTests: XCTestCase {
 
         XCTAssertEqual(redacted, "token=abc123")
     }
+
+    func testKeychainSecretReferenceIsRedactedWithoutExactSecretList() {
+        let redacted = SecretRedactor.redact(
+            value: "using keychain://hostwright.api/api-token",
+            secretKeys: []
+        )
+
+        XCTAssertEqual(redacted, "using keychain://[REDACTED]")
+    }
 }

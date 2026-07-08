@@ -1,5 +1,6 @@
 import Foundation
 import HostwrightCore
+import HostwrightSecrets
 
 public enum ManifestValidator {
     public static func validate(_ manifest: HostwrightManifest) -> [ManifestIssue] {
@@ -40,8 +41,22 @@ public enum ManifestValidator {
                 validateVolume(volume, serviceName: service.name, issues: &issues)
             }
 
-            for key in service.env.keys {
+            for (key, value) in service.env {
                 validateEnvironmentKey(key, serviceName: service.name, issues: &issues)
+                validateLiteralEnvironmentValue(key: key, value: value, serviceName: service.name, issues: &issues)
+            }
+
+            for (key, reference) in service.secretEnv {
+                validateEnvironmentKey(key, serviceName: service.name, issues: &issues)
+                validateSecretEnvironmentReference(key: key, reference: reference, serviceName: service.name, issues: &issues)
+                if service.env.keys.contains(key) {
+                    issues.append(
+                        ManifestIssue(
+                            code: .manifestValidationFailed,
+                            message: "Service '\(service.name)' environment key '\(key)' must not appear in both env and secretEnv."
+                        )
+                    )
+                }
             }
 
             if let health = service.health {
@@ -184,6 +199,44 @@ public enum ManifestValidator {
                 ManifestIssue(
                     code: .manifestValidationFailed,
                     message: "Service '\(serviceName)' environment key '\(key)' must use shell-safe letters, numbers, and underscores, and must not start with a number."
+                )
+            )
+        }
+    }
+
+    private static func validateLiteralEnvironmentValue(key: String, value: String, serviceName: String, issues: inout [ManifestIssue]) {
+        if value.hasPrefix("\(HostwrightSecretReference.supportedScheme)://") {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "Service '\(serviceName)' environment key '\(key)' uses a secret reference in env; move it to secretEnv."
+                )
+            )
+        }
+
+        if SecretNamePolicy.requiresSecretReferenceEnvironmentKey(key) {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "Service '\(serviceName)' environment key '\(key)' looks sensitive; plaintext sensitive values must use secretEnv."
+                )
+            )
+        }
+    }
+
+    private static func validateSecretEnvironmentReference(
+        key: String,
+        reference: HostwrightSecretReference,
+        serviceName: String,
+        issues: inout [ManifestIssue]
+    ) {
+        do {
+            _ = try HostwrightSecretReference.parse(reference.rawValue)
+        } catch {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "Service '\(serviceName)' secretEnv key '\(key)' must use keychain://<service>/<account>."
                 )
             )
         }

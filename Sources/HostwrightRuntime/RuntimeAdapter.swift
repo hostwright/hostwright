@@ -13,42 +13,46 @@ public enum RuntimeAdapterError: Error, Equatable, Sendable {
     case mutationUnavailableByPolicy(String)
 
     public func redacted(using policy: RuntimeRedactionPolicy = .default) -> RuntimeAdapterError {
+        redacted(using: policy, exactValues: [])
+    }
+
+    public func redacted(using policy: RuntimeRedactionPolicy = .default, exactValues: [String]) -> RuntimeAdapterError {
         switch self {
         case .runtimeUnavailable(let message):
-            return .runtimeUnavailable(policy.redact(message))
+            return .runtimeUnavailable(policy.redact(message, exactValues: exactValues))
         case .executableNotFound(let path):
-            return .executableNotFound(policy.redact(path))
+            return .executableNotFound(policy.redact(path, exactValues: exactValues))
         case .unsupportedRuntime(let message):
-            return .unsupportedRuntime(policy.redact(message))
+            return .unsupportedRuntime(policy.redact(message, exactValues: exactValues))
         case .commandRejected(let classification, let message):
-            return .commandRejected(classification: classification, message: policy.redact(message))
+            return .commandRejected(classification: classification, message: policy.redact(message, exactValues: exactValues))
         case .commandTimedOut(let command, let partialOutput, let partialError):
             return .commandTimedOut(
-                command: policy.redact(command),
-                partialOutput: policy.redact(partialOutput),
-                partialError: policy.redact(partialError)
+                command: policy.redact(command, exactValues: exactValues),
+                partialOutput: policy.redact(partialOutput, exactValues: exactValues),
+                partialError: policy.redact(partialError, exactValues: exactValues)
             )
         case .commandFailed(let exitStatus, let message, let standardError):
             return .commandFailed(
                 exitStatus: exitStatus,
-                message: policy.redact(message),
-                standardError: policy.redact(standardError)
+                message: policy.redact(message, exactValues: exactValues),
+                standardError: policy.redact(standardError, exactValues: exactValues)
             )
         case .managedRestartStartFailedAfterStop(let message, let standardError):
             return .managedRestartStartFailedAfterStop(
-                message: policy.redact(message),
-                standardError: policy.redact(standardError)
+                message: policy.redact(message, exactValues: exactValues),
+                standardError: policy.redact(standardError, exactValues: exactValues)
             )
         case .outputParseFailed(let message):
-            return .outputParseFailed(policy.redact(message))
+            return .outputParseFailed(policy.redact(message, exactValues: exactValues))
         case .permissionDenied(let message):
-            return .permissionDenied(policy.redact(message))
+            return .permissionDenied(policy.redact(message, exactValues: exactValues))
         case .redactionFailure(let message):
-            return .redactionFailure(policy.redact(message))
+            return .redactionFailure(policy.redact(message, exactValues: exactValues))
         case .capabilityUnavailable(let capability):
             return .capabilityUnavailable(capability)
         case .mutationUnavailableByPolicy(let message):
-            return .mutationUnavailableByPolicy(policy.redact(message))
+            return .mutationUnavailableByPolicy(policy.redact(message, exactValues: exactValues))
         }
     }
 }

@@ -1,5 +1,6 @@
 import Foundation
 import HostwrightCore
+import HostwrightSecrets
 
 public enum ManifestParser {
     public static let limitation = "Hostwright uses a restricted manifest subset parser, not a general YAML parser."
@@ -92,6 +93,8 @@ public enum ManifestParser {
                     currentSection = .volumes
                 } else if trimmed == "env:" {
                     currentSection = .env
+                } else if trimmed == "secretEnv:" {
+                    currentSection = .secretEnv
                 } else if trimmed == "health:" {
                     currentSection = .health
                     if manifest.services[serviceIndex].health == nil {
@@ -133,6 +136,22 @@ public enum ManifestParser {
                     } else {
                         issues.append(ManifestIssue(code: .manifestParseFailed, message: "Environment values must be key-value entries.", line: lineNumber))
                     }
+                case .secretEnv:
+                    if let (key, value) = keyValue(trimmed) {
+                        do {
+                            manifest.services[serviceIndex].secretEnv[key] = try HostwrightSecretReference.parse(unquote(value))
+                        } catch {
+                            issues.append(
+                                ManifestIssue(
+                                    code: .manifestValidationFailed,
+                                    message: "Secret environment reference for '\(key)' is invalid: \(String(describing: error))",
+                                    line: lineNumber
+                                )
+                            )
+                        }
+                    } else {
+                        issues.append(ManifestIssue(code: .manifestParseFailed, message: "Secret environment values must be key-value entries.", line: lineNumber))
+                    }
                 case .health:
                     if trimmed.hasPrefix("command:") {
                         manifest.services[serviceIndex].health?.command = parseInlineArray(value(after: "command:", in: trimmed), lineNumber: lineNumber, issues: &issues)
@@ -170,6 +189,7 @@ public enum ManifestParser {
         case ports
         case volumes
         case env
+        case secretEnv
         case health
         case restart
     }

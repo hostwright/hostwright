@@ -15,6 +15,8 @@ services:
       - "8080:8080"
     env:
       APP_ENV: development
+    secretEnv:
+      API_TOKEN: keychain://hostwright.api/api-token
     health:
       command: ["curl", "-f", "http://localhost:8080/health"]
       interval: 10s
@@ -44,6 +46,7 @@ Supported forms are intentionally narrow:
 - inline `command` arrays;
 - string-list `ports` and `volumes`;
 - string-map `env`;
+- string-map `secretEnv` using `keychain://<service>/<account>` references;
 - nested `health.command`, `health.interval`;
 - nested `restart.policy`.
 
@@ -63,6 +66,9 @@ Validation currently checks:
 - service-level `command` tokens do not begin with `-`;
 - service-level `command` tokens are not empty;
 - environment variable keys use shell-safe letters, numbers, and underscores and do not start with a number;
+- plaintext credential-like environment keys in `env` are rejected and must move to `secretEnv`;
+- `secretEnv` values must use `keychain://<service>/<account>`;
+- the same environment key must not appear in both `env` and `secretEnv`;
 - ports use `"host:container"` with values from 1 to 65535;
 - volumes use `source:/absolute/container/path[:ro|rw]` and do not use host-root or parent-traversal sources;
 - health command is non-empty when health is present;
@@ -79,4 +85,4 @@ Service-level command tokens beginning with `-` are blocked in the current conse
 
 Treat manifests from third parties as untrusted input. `hostwright validate` and `hostwright plan` are non-mutating gates, but an accepted manifest can still describe images, ports, environment values, paths, and loopback health probe commands that an operator should review before any confirmed apply or daemon run.
 
-Do not place real credentials in manifests. Hostwright redacts known sensitive values from output and state, but redaction is heuristic and not a secret manager.
+Do not place plaintext credentials in manifests. `secretEnv` stores a local reference such as `keychain://hostwright.api/api-token`, not the secret value. Hostwright does not use the live macOS Keychain by default in this phase; apply resolves references only through an injected backend and otherwise fails before mutation. State, events, diagnostics, and plan output redact both resolved values and keychain reference labels.

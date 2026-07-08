@@ -1,6 +1,7 @@
 import Foundation
 import HostwrightCore
 import HostwrightRuntime
+import HostwrightSecrets
 
 public struct CLIEnvironment: @unchecked Sendable {
     public var fileExists: (String) -> Bool
@@ -8,6 +9,7 @@ public struct CLIEnvironment: @unchecked Sendable {
     public var writeTextFile: (String, String) throws -> Void
     public var executablePath: (String) -> String?
     public var runtimeAdapter: () -> any RuntimeAdapter
+    public var secretStore: () -> any SecretStore
     public var swiftVersion: () -> String?
     public var platformSnapshot: () -> PlatformSnapshot
     public var operatingSystemDescription: () -> String
@@ -18,6 +20,7 @@ public struct CLIEnvironment: @unchecked Sendable {
         writeTextFile: @escaping (String, String) throws -> Void,
         executablePath: @escaping (String) -> String?,
         runtimeAdapter: @escaping () -> any RuntimeAdapter = { RuntimeAdapterFactory.defaultLocal() },
+        secretStore: @escaping () -> any SecretStore = { UnavailableKeychainSecretStore() },
         swiftVersion: @escaping () -> String?,
         platformSnapshot: @escaping () -> PlatformSnapshot,
         operatingSystemDescription: @escaping () -> String
@@ -27,6 +30,7 @@ public struct CLIEnvironment: @unchecked Sendable {
         self.writeTextFile = writeTextFile
         self.executablePath = executablePath
         self.runtimeAdapter = runtimeAdapter
+        self.secretStore = secretStore
         self.swiftVersion = swiftVersion
         self.platformSnapshot = platformSnapshot
         self.operatingSystemDescription = operatingSystemDescription
@@ -38,6 +42,7 @@ public struct CLIEnvironment: @unchecked Sendable {
         writeTextFile: { path, text in try text.write(toFile: path, atomically: true, encoding: .utf8) },
         executablePath: { ProcessLookup.executablePath(named: $0) },
         runtimeAdapter: { RuntimeAdapterFactory.defaultLocal() },
+        secretStore: { UnavailableKeychainSecretStore() },
         swiftVersion: { ProcessLookup.swiftVersionSummary() },
         platformSnapshot: { PlatformSnapshot.current },
         operatingSystemDescription: { ProcessInfo.processInfo.operatingSystemVersionString }

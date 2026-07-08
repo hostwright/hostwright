@@ -1,6 +1,7 @@
 import Foundation
 import XCTest
 @testable import HostwrightManifest
+@testable import HostwrightSecrets
 
 final class HostwrightManifestTests: XCTestCase {
     func testValidManifestParsesAndValidates() throws {
@@ -14,6 +15,27 @@ final class HostwrightManifestTests: XCTestCase {
         XCTAssertEqual(manifest.services[0].ports, ["8080:8080"])
         XCTAssertEqual(manifest.services[0].health?.interval, "10s")
         XCTAssertEqual(manifest.services[0].restart?.policy, "on-failure")
+    }
+
+    func testSecretEnvironmentReferencesParseAndValidate() throws {
+        let manifest = try ManifestValidator.validated(
+            """
+            version: 1
+            project: api-local
+            services:
+              api:
+                image: ghcr.io/example/api:latest
+                env:
+                  APP_ENV: development
+                secretEnv:
+                  API_TOKEN: keychain://hostwright.api/api-token
+            """
+        )
+
+        XCTAssertEqual(manifest.services[0].env["APP_ENV"], "development")
+        let reference = try XCTUnwrap(manifest.services[0].secretEnv["API_TOKEN"])
+        XCTAssertEqual(reference.service, "hostwright.api")
+        XCTAssertEqual(reference.account, "api-token")
     }
 
     func testVersionlessManifestRemainsLegacyCurrentVersion() throws {
@@ -142,6 +164,23 @@ final class HostwrightManifestTests: XCTestCase {
     }
 
     func testEnvironmentKeysAndUnsafeVolumesFailValidation() {
+        XCTAssertNoThrow(
+            try ManifestValidator.validated(
+                """
+                version: 1
+                project: api-local
+                services:
+                  api:
+                    image: ghcr.io/example/api:latest
+                    env:
+                      AUTH_MODE: local
+                      KEYCLOAK_URL: http://localhost:8080
+                      PUBLIC_KEY_PATH: ./public.pem
+                      MONKEY_PATCH: disabled
+                """
+            )
+        )
+
         assertManifestFailure(
             """
             version: 1
@@ -166,6 +205,60 @@ final class HostwrightManifestTests: XCTestCase {
                   API-TOKEN: value
             """,
             contains: "environment key"
+        )
+
+        assertManifestFailure(
+            """
+            version: 1
+            project: api-local
+            services:
+              api:
+                image: ghcr.io/example/api:latest
+                env:
+                  API_TOKEN: token=plaintext
+            """,
+            contains: "plaintext sensitive values must use secretEnv"
+        )
+
+        assertManifestFailure(
+            """
+            version: 1
+            project: api-local
+            services:
+              api:
+                image: ghcr.io/example/api:latest
+                env:
+                  API_TOKEN: keychain://hostwright.api/api-token
+            """,
+            contains: "move it to secretEnv"
+        )
+
+        assertManifestFailure(
+            """
+            version: 1
+            project: api-local
+            services:
+              api:
+                image: ghcr.io/example/api:latest
+                env:
+                  API_TOKEN: literal
+                secretEnv:
+                  API_TOKEN: keychain://hostwright.api/api-token
+            """,
+            contains: "must not appear in both env and secretEnv"
+        )
+
+        assertManifestFailure(
+            """
+            version: 1
+            project: api-local
+            services:
+              api:
+                image: ghcr.io/example/api:latest
+                secretEnv:
+                  API_TOKEN: env://hostwright.api/api-token
+            """,
+            contains: "keychain://<service>/<account>"
         )
 
         for rootEquivalent in ["/:/host:ro", "//:/host:ro", "/./:/host:ro", "/data/..:/host:ro"] {
@@ -323,7 +416,7 @@ final class HostwrightManifestTests: XCTestCase {
         XCTAssertEqual(service["required"] as? [String], ["image"])
         XCTAssertEqual(service["additionalProperties"] as? Bool, false)
         let serviceProperties = try XCTUnwrap(service["properties"] as? [String: Any])
-        XCTAssertEqual(Set(serviceProperties.keys), ["image", "command", "env", "ports", "volumes", "health", "restart"])
+        XCTAssertEqual(Set(serviceProperties.keys), ["image", "command", "env", "secretEnv", "ports", "volumes", "health", "restart"])
         let image = try XCTUnwrap(serviceProperties["image"] as? [String: Any])
         XCTAssertEqual(image["minLength"] as? Int, 1)
         XCTAssertEqual(image["pattern"] as? String, #"^[^-\s][^\s]*$"#)
@@ -333,6 +426,11 @@ final class HostwrightManifestTests: XCTestCase {
         let env = try XCTUnwrap(serviceProperties["env"] as? [String: Any])
         let envPropertyNames = try XCTUnwrap(env["propertyNames"] as? [String: Any])
         XCTAssertEqual(envPropertyNames["pattern"] as? String, #"^[A-Za-z_][A-Za-z0-9_]*$"#)
+        let secretEnv = try XCTUnwrap(serviceProperties["secretEnv"] as? [String: Any])
+        let secretEnvPropertyNames = try XCTUnwrap(secretEnv["propertyNames"] as? [String: Any])
+        XCTAssertEqual(secretEnvPropertyNames["pattern"] as? String, #"^[A-Za-z_][A-Za-z0-9_]*$"#)
+        let secretEnvValues = try XCTUnwrap(secretEnv["additionalProperties"] as? [String: Any])
+        XCTAssertEqual(secretEnvValues["pattern"] as? String, #"^keychain://[A-Za-z0-9._:@-]+/[A-Za-z0-9._:@-]+$"#)
         let ports = try XCTUnwrap(serviceProperties["ports"] as? [String: Any])
         let portItems = try XCTUnwrap(ports["items"] as? [String: Any])
         XCTAssertEqual(portItems["pattern"] as? String, #"^[0-9]{1,5}:[0-9]{1,5}$"#)

@@ -270,6 +270,23 @@ final class HostwrightManifestTests: XCTestCase {
         )
     }
 
+    func testUnsupportedNetworkingAndDiscoveryFieldsFailClosed() {
+        for field in ["dns", "hostname", "network_mode", "expose", "extra_hosts"] {
+            assertManifestFailure(
+                """
+                version: 1
+                project: api-local
+                services:
+                  api:
+                    image: ghcr.io/example/api:latest
+                    \(field): unsupported
+                """,
+                code: "HW-MANIFEST-003",
+                contains: "DNS, service discovery"
+            )
+        }
+    }
+
     func testExamplesAndSchemaStayAlignedWithSupportedManifestSubset() throws {
         let root = try packageRoot()
         let examplePaths = [

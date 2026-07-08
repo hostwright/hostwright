@@ -1,4 +1,5 @@
 import HostwrightManifest
+import HostwrightNetworking
 import HostwrightRuntime
 
 public struct ManifestRuntimeMappingResult: Equatable, Sendable {
@@ -97,7 +98,11 @@ public enum ManifestRuntimeMapper {
             return nil
         }
 
-        return RuntimePortMapping(hostPort: hostPort, containerPort: containerPort, bindAddress: "127.0.0.1")
+        return RuntimePortMapping(
+            hostPort: hostPort,
+            containerPort: containerPort,
+            bindAddress: NetworkBindAddressPolicy.localhostBindAddress
+        )
     }
 
     private static func parseMount(_ value: String, identity: RuntimeServiceIdentity, issues: inout [PlanIssue]) -> RuntimeMountReference? {

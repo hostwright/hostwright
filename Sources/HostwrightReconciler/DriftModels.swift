@@ -152,6 +152,7 @@ public struct PlannedAction: Equatable, Sendable {
 
 public enum PlanIssueKind: String, Equatable, Sendable {
     case duplicateDesiredHostPort
+    case hostPortConflict
     case unsafeExposure
     case privilegedHostPort
     case ambiguousVolumeReference
@@ -167,17 +168,18 @@ public enum PlanIssueKind: String, Equatable, Sendable {
     public var sortIndex: Int {
         switch self {
         case .duplicateDesiredHostPort: 0
-        case .unsafeExposure: 1
-        case .privilegedHostPort: 2
-        case .ambiguousVolumeReference: 3
-        case .unsafeVolumePath: 4
-        case .unsupportedFeature: 5
-        case .secretRedacted: 6
-        case .invalidDesiredIdentity: 7
-        case .duplicateObservedIdentity: 8
-        case .unsupportedObservedState: 9
-        case .observationUnavailable: 10
-        case .restartPolicyBlocked: 11
+        case .hostPortConflict: 1
+        case .unsafeExposure: 2
+        case .privilegedHostPort: 3
+        case .ambiguousVolumeReference: 4
+        case .unsafeVolumePath: 5
+        case .unsupportedFeature: 6
+        case .secretRedacted: 7
+        case .invalidDesiredIdentity: 8
+        case .duplicateObservedIdentity: 9
+        case .unsupportedObservedState: 10
+        case .observationUnavailable: 11
+        case .restartPolicyBlocked: 12
         }
     }
 }

@@ -125,6 +125,22 @@ public struct RuntimePortMapping: Equatable, Sendable {
     }
 }
 
+public struct RuntimeNetworkAttachment: Equatable, Sendable {
+    public let name: String
+    public let kind: String?
+    public let address: String?
+    public let gateway: String?
+    public let interfaceName: String?
+
+    public init(name: String, kind: String? = nil, address: String? = nil, gateway: String? = nil, interfaceName: String? = nil) {
+        self.name = name
+        self.kind = kind
+        self.address = address
+        self.gateway = gateway
+        self.interfaceName = interfaceName
+    }
+}
+
 public enum RuntimeMountAccess: String, Equatable, Sendable {
     case readOnly
     case readWrite
@@ -212,6 +228,7 @@ public struct ObservedRuntimeService: Equatable, Sendable {
     public let lifecycleState: RuntimeLifecycleState
     public let healthState: RuntimeHealthState
     public let ports: [RuntimePortMapping]
+    public let networks: [RuntimeNetworkAttachment]
     public let mounts: [RuntimeMountReference]
     public let observedAt: String?
 
@@ -221,6 +238,7 @@ public struct ObservedRuntimeService: Equatable, Sendable {
         lifecycleState: RuntimeLifecycleState = .unknown,
         healthState: RuntimeHealthState = .unknown,
         ports: [RuntimePortMapping] = [],
+        networks: [RuntimeNetworkAttachment] = [],
         mounts: [RuntimeMountReference] = [],
         observedAt: String? = nil
     ) {
@@ -229,6 +247,7 @@ public struct ObservedRuntimeService: Equatable, Sendable {
         self.lifecycleState = lifecycleState
         self.healthState = healthState
         self.ports = ports
+        self.networks = networks
         self.mounts = mounts
         self.observedAt = observedAt
     }

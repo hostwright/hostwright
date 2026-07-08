@@ -71,12 +71,16 @@ public enum AppleContainerObservationParser {
         for service in services {
             try rejectUnknownKeys(
                 Set(service.keys),
-                allowed: ["name", "instance", "image", "lifecycle", "health", "observedAt", "ports", "mounts"],
+                allowed: ["name", "instance", "image", "lifecycle", "health", "observedAt", "ports", "networks", "mounts"],
                 context: "service"
             )
 
             for port in service["ports"] as? [[String: Any]] ?? [] {
                 try rejectUnknownKeys(Set(port.keys), allowed: ["host", "container", "protocol", "bind"], context: "port")
+            }
+
+            for network in service["networks"] as? [[String: Any]] ?? [] {
+                try rejectUnknownKeys(Set(network.keys), allowed: ["name", "kind", "address", "gateway", "interface"], context: "network")
             }
 
             for mount in service["mounts"] as? [[String: Any]] ?? [] {
@@ -139,6 +143,7 @@ public enum AppleContainerObservationParser {
             let image = (configuration["image"] as? [String: Any])?["reference"] as? String
             let observedAt = status["startedDate"] as? String ?? configuration["creationDate"] as? String
             let ports = try parsePublishedPorts(configuration["publishedPorts"] as? [[String: Any]] ?? [])
+            let networks = try parseRealNetworks(status["networks"] as? [Any] ?? [])
 
             services.append(
                 ObservedRuntimeService(
@@ -147,6 +152,7 @@ public enum AppleContainerObservationParser {
                     lifecycleState: lifecycleState,
                     healthState: .unknown,
                     ports: ports,
+                    networks: networks,
                     mounts: [],
                     observedAt: observedAt
                 )
@@ -187,6 +193,16 @@ public enum AppleContainerObservationParser {
             )
         }
     }
+
+    private static func parseRealNetworks(_ networks: [Any]) throws -> [RuntimeNetworkAttachment] {
+        guard networks.isEmpty else {
+            throw RuntimeAdapterError.outputParseFailed(
+                "Non-empty real Apple container network output is unsupported until a reviewed versioned fixture defines its schema."
+            )
+        }
+
+        return []
+    }
 }
 
 private struct ObservationFixture: Decodable {
@@ -204,6 +220,7 @@ private struct ServiceFixture: Decodable {
     let health: String?
     let observedAt: String?
     let ports: [PortFixture]?
+    let networks: [NetworkFixture]?
     let mounts: [MountFixture]?
 
     func observedRuntimeService(projectName: String) throws -> ObservedRuntimeService {
@@ -227,6 +244,7 @@ private struct ServiceFixture: Decodable {
             lifecycleState: lifecycleState,
             healthState: healthState,
             ports: try (ports ?? []).map { try $0.runtimePortMapping() },
+            networks: try (networks ?? []).map { try $0.runtimeNetworkAttachment() },
             mounts: try (mounts ?? []).map { try $0.runtimeMountReference() },
             observedAt: observedAt
         )
@@ -255,6 +273,28 @@ private struct PortFixture: Decodable {
             containerPort: container,
             protocolName: protocolName,
             bindAddress: bind
+        )
+    }
+}
+
+private struct NetworkFixture: Decodable {
+    let name: String
+    let kind: String?
+    let address: String?
+    let gateway: String?
+    let `interface`: String?
+
+    func runtimeNetworkAttachment() throws -> RuntimeNetworkAttachment {
+        guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw RuntimeAdapterError.outputParseFailed("Network attachment name must not be empty.")
+        }
+
+        return RuntimeNetworkAttachment(
+            name: name,
+            kind: kind,
+            address: address,
+            gateway: gateway,
+            interfaceName: `interface`
         )
     }
 }

@@ -1,3 +1,4 @@
+import Foundation
 import HostwrightCore
 
 public enum NetworkExposureScope: String, Equatable, Sendable {
@@ -20,6 +21,61 @@ public enum NetworkExposureScope: String, Equatable, Sendable {
 public enum PortProtocol: String, Equatable, Sendable {
     case tcp
     case udp
+}
+
+public enum NetworkBindAddressPolicy {
+    public static let localhostBindAddress = "127.0.0.1"
+    public static let localhostAliases: Set<String> = ["127.0.0.1", "::1", "localhost"]
+    public static let broadBindAddresses: Set<String> = ["0.0.0.0", "::"]
+
+    public static func normalizedBindAddress(_ address: String?) -> String {
+        guard let address else {
+            return localhostBindAddress
+        }
+
+        let trimmed = address.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return localhostBindAddress
+        }
+
+        return trimmed.lowercased()
+    }
+
+    public static func isLocalhost(_ address: String?) -> Bool {
+        localhostAliases.contains(normalizedBindAddress(address))
+    }
+
+    public static func isBroadBindAddress(_ address: String?) -> Bool {
+        broadBindAddresses.contains(normalizedBindAddress(address))
+    }
+
+    public static func hostPortKey(bindAddress: String?, hostPort: Int, protocolName: String) -> String {
+        "\(normalizedBindAddress(bindAddress)):\(hostPort)/\(protocolName.lowercased())"
+    }
+
+    public static func hostPortsConflict(
+        lhsBindAddress: String?,
+        lhsHostPort: Int?,
+        lhsProtocolName: String,
+        rhsBindAddress: String?,
+        rhsHostPort: Int?,
+        rhsProtocolName: String
+    ) -> Bool {
+        guard let lhsHostPort,
+              let rhsHostPort,
+              lhsHostPort == rhsHostPort,
+              lhsProtocolName.lowercased() == rhsProtocolName.lowercased()
+        else {
+            return false
+        }
+
+        let lhsBind = normalizedBindAddress(lhsBindAddress)
+        let rhsBind = normalizedBindAddress(rhsBindAddress)
+
+        return lhsBind == rhsBind ||
+            broadBindAddresses.contains(lhsBind) ||
+            broadBindAddresses.contains(rhsBind)
+    }
 }
 
 public struct PortBinding: Equatable, Sendable {
@@ -53,4 +109,3 @@ public struct PortBinding: Equatable, Sendable {
         return diagnostics
     }
 }
-

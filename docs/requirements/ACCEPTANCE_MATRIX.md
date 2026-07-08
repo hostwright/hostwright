@@ -186,3 +186,12 @@ Phase 8A is a required preflight before this mutation gate. It proves real read-
 | HW-OBS-006, HW-OBS-001 | `hostwright events` supports project, type, service, severity, limit, and ascending/descending sort filters while preserving deterministic read-only event rendering. | Automated | CLI XCTest event filtering/sorting/limit cases. |
 | HW-OBS-002, HW-CLI-007 | `hostwright status` and `hostwright doctor` report parser/state-path/telemetry policy metadata without claiming service reachability or external telemetry. | Automated + manual | CLI and health XCTest cases; doctor, status, limitations, and security docs review. |
 | HW-DOCS-002, HW-SAFE-004 | Docs describe local-only diagnostics and forensic records without claiming hosted diagnostics, upload, OSLog integration, production monitoring, or support-bundle workflows. | Manual | CLI, limitations, security-safety, state-store, daemon, requirements, and implementation-plan docs review. |
+
+## Phase 22 Gate: Networking And Service Discovery
+
+| Requirement IDs | Acceptance criteria | Verification type | Verification command or review |
+| --- | --- | --- | --- |
+| HW-NET-001, HW-NET-003 | Hostwright-created publishes remain explicit localhost bindings, manifest bind addresses remain unsupported, and broad bind addresses are blocked when represented in runtime desired state. | Automated + manual | Networking, runtime, and reconciler XCTest cases; networking-boundary and security docs review. |
+| HW-NET-002 | Duplicate desired host ports and live observed non-target host-port conflicts produce blocker plan issues before mutation. | Automated | Reconciler XCTest cases for duplicate desired ports and observed host-port conflict. |
+| HW-NET-004, HW-VALID-006 | DNS, service discovery, network aliases, network modes, `expose`, tunnel, and cloud exposure settings fail closed or remain documented research-only. | Automated + manual | Manifest XCTest unsupported networking fields; limitations, manifest, and networking-boundary docs review. |
+| HW-RUNTIME-005, HW-SAFE-001 | Apple container networking facts are recorded only through reviewed versioned fixtures; non-empty real network output fails closed until reviewed. | Automated | Runtime XCTest fixture parsing and unsupported real network output test. |

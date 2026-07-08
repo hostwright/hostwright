@@ -11,7 +11,7 @@ Hostwright is not production ready.
 - `hostwright init` without overwrite.
 - `hostwright validate` for a restricted Hostwright manifest subset.
 - Manifest `version: 1` support with versionless alpha manifests treated as legacy version 1 input.
-- Fail-closed unsupported-field, unsupported-version, unsafe env-key, and unsafe host-root or parent-traversal mount-source validation for untrusted manifests.
+- Fail-closed unsupported-field, unsupported-version, unsupported DNS/discovery/networking-field, unsafe env-key, and unsafe host-root or parent-traversal mount-source validation for untrusted manifests.
 - `hostwright plan` as non-mutating manifest-level dry-run output.
 - `--output json` for `plan`, `status`, `events`, `recovery`, `doctor`, and structured errors when JSON mode is requested.
 - Stable process exit categories for usage, validation, state unavailable, runtime unavailable, confirmation mismatch, unsafe operation, and partial failure.
@@ -30,7 +30,7 @@ Hostwright is not production ready.
 - `MockRuntimeAdapter` and fake runtime process runner for tests only.
 - `AppleContainerReadOnlyAdapter` for read-only observation attempts through `RuntimeAdapter`.
 - `FoundationRuntimeProcessRunner` guarded by read-only command classification, executable resolution, timeouts, and redaction.
-- Fixture-defined Apple container observation parser for empty and running snapshots.
+- Fixture-defined Apple container observation parser for empty and running snapshots, including reviewed network attachment metadata in the versioned fixture schema.
 - Verified real empty Apple container JSON list parsing for `container list --all --format json` output of `[]`.
 - Verified real Apple builder-container list parsing as ignored non-Hostwright runtime state.
 - Verified real created/stopped Hostwright proof container parsing.
@@ -52,7 +52,7 @@ Hostwright is not production ready.
 - Explicit-path state configuration only.
 - Manifest-to-runtime desired-state mapping outside the CLI.
 - Typed deterministic drift records, plan issues, planned actions, and plan hash.
-- Planning policy checks for duplicate host ports, unsafe broad bind addresses, privileged host ports, unsafe host-root or parent-traversal mount sources, ambiguous mounts, invalid identities, and secret-like environment values.
+- Planning policy checks for duplicate desired host ports, observed host-port conflicts, unsafe broad bind addresses, privileged host ports, unsafe host-root or parent-traversal mount sources, ambiguous mounts, invalid identities, and secret-like environment values.
 - Hostwright-created Apple container port publishes are explicitly localhost-scoped by default.
 - Drift detection for missing, unmanaged, stopped, exited, failed, image mismatch, port mismatch, mount mismatch, unhealthy, duplicate observed identity, unsupported observed state, and unavailable observation cases.
 - `hostwright apply [path] --state-db <path> --confirm-plan <hash>` for one create-missing-service action, one restart-policy-allowed managed start action, or one restart-policy-allowed managed restart action.
@@ -71,6 +71,7 @@ Hostwright is not production ready.
 - Multi-action `hostwright apply`.
 - Guaranteed Apple container observation on every machine.
 - Broad non-empty Apple container JSON list parsing beyond the verified builder/proof shapes.
+- Non-empty real Apple container network attachment parsing until a reviewed fixture defines the schema.
 - Broad non-empty Apple container image list parsing beyond the verified object shape.
 - JSON output for `validate`, `apply`, `logs`, and `cleanup` success paths.
 - Shell completion installation or shell profile mutation.
@@ -88,6 +89,7 @@ Hostwright is not production ready.
 - External telemetry, hosted diagnostics, automatic bundle upload, OSLog integration, or production support-bundle workflows.
 - Launch agent or service installer.
 - DNS behavior.
+- Service discovery, network alias, reverse proxy, or public exposure management.
 - Tunnel management.
 - Cloud control plane.
 - Web dashboard.

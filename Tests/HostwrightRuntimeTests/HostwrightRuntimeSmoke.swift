@@ -849,7 +849,44 @@ final class HostwrightRuntimeTests: XCTestCase {
         XCTAssertEqual(observed.services[0].lifecycleState, .running)
         XCTAssertEqual(observed.services[0].healthState, .healthy)
         XCTAssertEqual(observed.services[0].ports.first?.hostPort, 8080)
+        XCTAssertEqual(observed.services[0].networks.first?.name, "hostwright-project-demo")
+        XCTAssertEqual(observed.services[0].networks.first?.kind, "vmnet")
+        XCTAssertEqual(observed.services[0].networks.first?.interfaceName, "vmenet0")
         XCTAssertEqual(observed.services[0].mounts.first?.access, .readOnly)
+    }
+
+    func testAppleContainerParserFailsClosedForNonEmptyRealNetworkOutput() {
+        let output = """
+        [
+          {
+            "configuration": {
+              "id": "hostwright-proof-web",
+              "image": { "reference": "hostwright-proof-web:create-only" },
+              "publishedPorts": []
+            },
+            "id": "hostwright-proof-web",
+            "status": {
+              "state": "running",
+              "networks": [
+                { "name": "vmnet" }
+              ]
+            }
+          }
+        ]
+        """
+
+        XCTAssertThrowsError(
+            try AppleContainerObservationParser.parse(
+                output,
+                desiredState: proofDesiredState,
+                metadata: MockRuntimeAdapter.defaultMetadata
+            )
+        ) { error in
+            guard case RuntimeAdapterError.outputParseFailed(let message) = error else {
+                return XCTFail("Expected outputParseFailed, got \(error).")
+            }
+            XCTAssertTrue(message.contains("Non-empty real Apple container network output is unsupported"))
+        }
     }
 
     func testAppleContainerParserFailsClosedForMalformedOutputWithRedaction() {

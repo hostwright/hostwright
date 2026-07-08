@@ -6,13 +6,14 @@
 - Apple silicon (`arm64`)
 - Swift 6.3.2 through full Xcode developer tools
 
-## Verified On 2026-07-07
+## Verified On 2026-07-08
 
-- `swift build` succeeds after the Phase 20 observability and diagnostics changes.
-- `swift test list` lists 178 real XCTest cases across Hostwright test targets.
-- `swift test` executes 178 real XCTest test cases across CLI, core, daemon, health, manifest, networking, observability, reconciler, runtime, and state targets with 0 failures.
+- `swift build` succeeds after the Phase 22 networking and service discovery changes.
+- `swift test list` lists 187 real XCTest cases across Hostwright test targets.
+- `swift test` executes 187 real XCTest test cases across CLI, core, daemon, health, manifest, networking, observability, reconciler, runtime, and state targets with 0 failures.
 - `scripts/grep-orchard.sh .` succeeds and reports historical references only in `docs/source-material/` and `docs/naming/`.
 - `scripts/test.sh` succeeds and runs `swift build` plus `swift test`.
+- `scripts/lint.sh` succeeds.
 - Apple container 1.0.0 is installed locally at `/usr/local/bin/container`.
 - `container system status` reports the container system service as running.
 - `container list --all --format json` returned the verified empty runtime shape `[]`.
@@ -32,6 +33,10 @@
 - `hostwrightd --foreground --max-iterations 1` recorded an unhealthy direct `false` health check without runtime mutation.
 - `hostwright apply` restarted `hostwright-phase17proof-api` through `restartManagedService`, implemented as internal stop-then-start through `RuntimeAdapter`.
 - The exact proof container was stopped and then deleted through `hostwright cleanup --dry-run` plus token confirmation; `container list --all` after cleanup showed only Apple builder runtime state.
+- Phase 22 live proof used existing local image `docker.io/library/python:alpine` without pulling images.
+- `hostwright apply` created exactly one disposable Apple container named `hostwright-phase22proof-netproof`.
+- `container list --all --format json` reported the proof publish as `127.0.0.1:19022:80/tcp`.
+- `hostwright cleanup --dry-run` plus token confirmation deleted exactly `hostwright-phase22proof-netproof`.
 
 ## Current Implementation Truth
 
@@ -51,10 +56,11 @@
 - Phase 18 adds operation recovery groups and steps, apply checkpoints, active-operation locking with expired-lock interruption, rollback-unavailable step records, redacted manual recovery hints, legacy managed-restart recovery rendering, and read-only `hostwright recovery` output for failed or interrupted apply inspection.
 - Phase 19 adds cleanup dry-run classifications for eligible, ambiguous, stale, running, unknown, blocked, and never-delete ownership-backed and observed-only resources, keeps confirmed deletion limited to exact eligible Hostwright-owned non-running containers, hardens cleanup confirmation tokens against eligible-candidate drift, and reports delete-success/state-persistence failures as state failures.
 - Phase 20 adds read-only event filters, local redacted diagnostics bundles from explicit state DB paths, local-only telemetry policy reporting in status/doctor/diagnostics output, and XCTest coverage for diagnostics redaction and no runtime observation during export.
+- Phase 22 adds local bind-address policy helpers, observed host-port conflict blockers, unsupported DNS/discovery/networking-field errors, versioned network attachment fixture parsing, and fail-closed handling for non-empty real Apple container network output.
 - No Apple container command was called by Phase 6 or Phase 7.
 - `FoundationRuntimeProcessRunner` exists for policy-approved read-only command specs and supported mutation specs; automated tests still use fake process execution.
 - `AppleContainerReadOnlyAdapter` reports missing `container` as runtime unavailable and rejects mutation through the adapter contract.
-- `AppleContainerObservationParser` accepts the fixture-defined `hostwright.apple-container.observation.v1` schema, the verified real empty JSON array shape `[]`, Apple builder container list output, and the verified created/stopped proof container output.
+- `AppleContainerObservationParser` accepts the fixture-defined `hostwright.apple-container.observation.v1` schema with reviewed network attachment metadata, the verified real empty JSON array shape `[]`, Apple builder container list output, and the verified created/stopped proof container output. Non-empty real Apple container network output fails closed until reviewed.
 - `AppleContainerImageListParser` accepts the verified real object-based image list shape with `configuration.name`.
 - `SQLiteStateStore` uses system `SQLite3`, schema migrations, transactions, and repository APIs for desired services, observed snapshots, events, operations, ownership records, health results, restart policy state, restart recovery records, operation recovery groups/steps, and diagnostics export.
 - Phase 6 state tests use explicit temporary database paths only.

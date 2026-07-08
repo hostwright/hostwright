@@ -75,6 +75,7 @@ Hostwright is not production ready.
 - Registry image resolution, tag-to-digest lookup, automatic image pulls, signature verification, OCI referrer inspection, SBOM generation/validation, vulnerability scanning, dependency provenance, or source-build integrity automation.
 - Runtime density measurement, VM-per-container overhead measurement, boot-latency benchmarking, polling-overhead benchmarking, battery-impact measurement, sleep/wake runtime proofing, or workload memory-pressure benchmarking as automatic product behavior.
 - Production capacity planning, automatic placement decisions, or resource reservations from the Phase 26 resource report.
+- Apple GPU, ANE, Metal, Core ML, MLX, PyTorch MPS, host-native accelerator helpers, host accelerator device exposure, or accelerator-aware scheduling.
 - Multi-action `hostwright apply`.
 - Guaranteed Apple container observation on every machine.
 - Broad non-empty Apple container JSON list parsing beyond the verified builder/proof shapes.
@@ -122,6 +123,7 @@ Hostwright is not production ready.
 - Cloud control plane.
 - GPU/ANE scheduling.
 - Metal, Core ML, or MLX container support promises.
+- PyTorch MPS container support, host-native accelerator helpers, or accelerator device exposure.
 - Accelerator-aware placement from resource intelligence.
 - Automatic destructive garbage collection.
 - Privileged helper unless a future design record and threat model prove it is necessary.
@@ -145,6 +147,8 @@ Recovery is diagnostic and manual. `hostwright recovery` reads operation groups 
 Diagnostics are local and manual. `hostwright diagnostics` reads existing state rows from the explicit state database and writes a redacted JSON bundle to an explicit file path. It does not observe Apple container, run health checks, create or migrate a missing database, overwrite existing bundle files, upload telemetry, or prove service reachability.
 
 `hostwright doctor` resource intelligence is also local and diagnostic. It records host facts and explicit `unmeasured` observations for benchmark dimensions that were not measured. It does not run Apple container commands, create proof containers, pull images, write state, upload telemetry, or prove runtime density, VM overhead, boot latency, battery behavior, sleep/wake behavior, workload memory pressure, or production capacity.
+
+Accelerator work is research-only. Current Hostwright core does not expose Apple GPU, ANE, Metal, Core ML, MLX, PyTorch MPS, host-native accelerator helpers, host accelerator devices, or accelerator-aware scheduler behavior. Any future change requires a separate implementation issue, official supported access path or host-native design, versioned disposable proof, threat model, Phase 32 policy gate, and maintainer approval.
 
 ## State Truth
 

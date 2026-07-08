@@ -146,6 +146,60 @@ final class HostwrightCoreTests: XCTestCase {
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("automatically places workloads"))
     }
 
+    func testAcceleratorBoundaryResearchKeepsCurrentSupportUnsupported() throws {
+        let root = try packageRoot()
+        let decision = try read("docs/architecture/accelerator-boundary-research.md", root: root)
+        let constraints = try read("docs/architecture/apple-silicon-constraints.md", root: root)
+        let resourceIntelligence = try read("docs/architecture/resource-intelligence.md", root: root)
+        let limitations = try read("docs/reference/limitations.md", root: root)
+        let security = try read("docs/reference/security-safety.md", root: root)
+        let requirements = try read("docs/requirements/REQUIREMENTS.md", root: root)
+        let acceptance = try read("docs/requirements/ACCEPTANCE_MATRIX.md", root: root)
+        let implementationPlan = try read("docs/IMPLEMENTATION_PLAN.md", root: root)
+        let buildStatus = try read("docs/BUILD_STATUS.md", root: root)
+        let devlog = try read("docs/devlog/0027-accelerator-boundary-research.md", root: root)
+        let publicDocs = [
+            decision,
+            constraints,
+            resourceIntelligence,
+            limitations,
+            security,
+            requirements,
+            acceptance,
+            implementationPlan,
+            buildStatus,
+            devlog
+        ].joined(separator: "\n")
+
+        XCTAssertTrue(decision.contains("Status: Phase 27 research-only decision record."))
+        XCTAssertTrue(decision.contains("| Apple container GPU or Metal passthrough | Reject from current core |"))
+        XCTAssertTrue(decision.contains("| PyTorch MPS inside Apple container Linux workloads | Reject from current core |"))
+        XCTAssertTrue(decision.contains("| MLX inside Apple container Linux workloads | Reject from current core |"))
+        XCTAssertTrue(decision.contains("| Core ML or ANE inside Apple container Linux workloads | Reject from current core |"))
+        XCTAssertTrue(decision.contains("| Host-native accelerator helper or service | Defer to plugin or later prototype |"))
+        XCTAssertTrue(decision.contains("| Scheduler accelerator dimensions | Defer and block |"))
+        XCTAssertTrue(limitations.contains("Current Hostwright core does not expose Apple GPU, ANE, Metal, Core ML, MLX, PyTorch MPS"))
+        XCTAssertTrue(security.contains("Host-native accelerator helpers or services require a separate threat model"))
+        XCTAssertTrue(requirements.contains("HW-COMPAT-007"))
+        XCTAssertTrue(resourceIntelligence.contains("See [Accelerator Boundary Research](accelerator-boundary-research.md)"))
+        XCTAssertTrue(acceptance.contains("Phase 27 Gate: Apple Silicon Accelerator Boundary Research"))
+        XCTAssertTrue(implementationPlan.contains("## Phase 27 Outputs"))
+        XCTAssertTrue(buildStatus.contains("Phase 27 was research-only."))
+        XCTAssertTrue(devlog.contains("No GPU, ANE, Metal, Core ML, MLX, or PyTorch MPS implementation."))
+
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright supports GPU"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright supports ANE"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright supports Metal"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright supports Core ML"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright supports MLX"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright supports PyTorch MPS"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright exposes host GPU"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright schedules accelerators"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright runs host-native accelerator services"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright uses private ANE"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright passes through GPU"))
+    }
+
     private func read(_ relativePath: String, root: URL) throws -> String {
         try String(contentsOf: root.appendingPathComponent(relativePath), encoding: .utf8)
     }

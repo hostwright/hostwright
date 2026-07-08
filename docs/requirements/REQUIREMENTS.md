@@ -150,6 +150,7 @@ Status values:
 | HW-COMPAT-004 | GPU/ANE/Metal/Core ML/MLX support inside containers must not be claimed without proof. | Document 2 | Rejected for first release | Docs only | Docs review | Rejected |
 | HW-COMPAT-005 | CRI, Kubernetes, Docker API, and full Compose parity must not be claimed. | Agent Engineering Manual; Final Production Arsenal | Rejected for first release | Docs and ADRs | Docs review | Rejected |
 | HW-COMPAT-006 | Apple silicon resource intelligence must report measurement method, host facts, workload profile, unmeasured dimensions, and limits without implying scheduler or accelerator support. | Phase 26 maintainer scope; Document 2 | Implemented for local ProcessInfo-backed doctor reports and fixture-backed parser coverage | `Sources/HostwrightHealth/ResourceIntelligenceModels.swift`, `Sources/HostwrightHealth/DoctorModels.swift`, `docs/architecture/resource-intelligence.md` | Health and CLI XCTest cases; docs review | 26 |
+| HW-COMPAT-007 | Apple GPU, ANE, Metal, Core ML, MLX, PyTorch MPS, host-native accelerator helpers, device exposure, and accelerator-aware scheduling must stay unsupported until a proved access path, threat model, policy gate, and maintainer approval exist. | Phase 27 maintainer scope; Document 2 | Research decision recorded; implementation rejected or deferred | `docs/architecture/accelerator-boundary-research.md` | Core docs XCTest and docs review | 27 |
 
 ## Docs / Site
 

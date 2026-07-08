@@ -46,6 +46,8 @@ The current implementation does not measure runtime density, VM-per-container ov
 
 Apple container version drift monitoring remains a reporting input, not a live command in `doctor`. A future implementation can add a RuntimeAdapter-backed version probe or a separate benchmark command only after the command shape, timeout, redaction, and no-mutation boundary are reviewed.
 
+Accelerator evidence remains separate from resource intelligence. See [Accelerator Boundary Research](accelerator-boundary-research.md) for the Phase 27 decision record covering Apple GPU, ANE, Metal, Core ML, MLX, PyTorch MPS, host-native accelerator helpers, and scheduler placeholders.
+
 ## Rejected Claims
 
 Resource intelligence is not:

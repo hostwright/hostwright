@@ -450,6 +450,71 @@ final class HostwrightCoreTests: XCTestCase {
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Kubernetes scheduler behavior is implemented"))
     }
 
+    func testGovernanceDocsDescribeReviewAndSupportBoundaries() throws {
+        let root = try packageRoot()
+        let governance = try read("GOVERNANCE.md", root: root)
+        let contributing = try read("CONTRIBUTING.md", root: root)
+        let securityPolicy = try read("SECURITY.md", root: root)
+        let pullRequestTemplate = try read(".github/PULL_REQUEST_TEMPLATE.md", root: root)
+        let issueTemplate = try read(".github/ISSUE_TEMPLATE/engineering-task.md", root: root)
+        let releaseProcess = try read("docs/release/RELEASE_PROCESS.md", root: root)
+        let limitations = try read("docs/reference/limitations.md", root: root)
+        let securityReference = try read("docs/reference/security-safety.md", root: root)
+        let requirements = try read("docs/requirements/REQUIREMENTS.md", root: root)
+        let acceptance = try read("docs/requirements/ACCEPTANCE_MATRIX.md", root: root)
+        let traceability = try read("docs/requirements/SOURCE_TRACEABILITY.md", root: root)
+        let implementationPlan = try read("docs/IMPLEMENTATION_PLAN.md", root: root)
+        let buildStatus = try read("docs/BUILD_STATUS.md", root: root)
+        let devlog = try read("docs/devlog/0038-governance-contributor-model.md", root: root)
+        let publicDocs = [
+            governance,
+            contributing,
+            securityPolicy,
+            pullRequestTemplate,
+            issueTemplate,
+            releaseProcess,
+            limitations,
+            securityReference,
+            requirements,
+            acceptance,
+            traceability,
+            implementationPlan,
+            buildStatus,
+            devlog
+        ].joined(separator: "\n")
+
+        XCTAssertTrue(governance.contains("Risky areas require explicit maintainer review"))
+        XCTAssertTrue(governance.contains("Hostwright does not currently enforce CODEOWNERS."))
+        XCTAssertTrue(contributing.contains("Ask for maintainer review before changing"))
+        XCTAssertTrue(securityPolicy.contains("request a private maintainer contact first"))
+        XCTAssertTrue(pullRequestTemplate.contains("Risky areas from `GOVERNANCE.md` and `SECURITY.md`"))
+        XCTAssertTrue(issueTemplate.contains("Security/governance review triggers"))
+        XCTAssertTrue(releaseProcess.contains("## Governance Gate"))
+        XCTAssertTrue(limitations.contains("Governance, contribution, security reporting"))
+        XCTAssertTrue(securityReference.contains("## Governance Boundary"))
+        XCTAssertTrue(requirements.contains("HW-GOV-001"))
+        XCTAssertTrue(requirements.contains("HW-GOV-002"))
+        XCTAssertTrue(requirements.contains("HW-GOV-003"))
+        XCTAssertTrue(acceptance.contains("Phase 38 Gate: Governance And Contributor Model"))
+        XCTAssertTrue(traceability.contains("HW-GOV-001, HW-GOV-002, HW-GOV-003"))
+        XCTAssertTrue(implementationPlan.contains("## Phase 38 Outputs"))
+        XCTAssertTrue(buildStatus.contains("Phase 38 adds governance"))
+        XCTAssertTrue(devlog.contains("No CODEOWNERS enforcement."))
+
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("CODEOWNERS enforcement is enabled"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("branch protection is enabled"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright provides a support SLA"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("hosted diagnostics are implemented"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("telemetry upload is enabled"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("cloud service is implemented"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("binary downloads are provided"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("installer packages are provided"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("signing is provided"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("notarization is provided"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("SBOM is provided"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("provenance is provided"))
+    }
+
     private func read(_ relativePath: String, root: URL) throws -> String {
         try String(contentsOf: root.appendingPathComponent(relativePath), encoding: .utf8)
     }

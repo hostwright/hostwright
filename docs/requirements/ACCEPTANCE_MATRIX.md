@@ -281,3 +281,12 @@ Phase 8A is a required preflight before this mutation gate. It proves real read-
 | HW-SAFE-002, HW-SAFE-008 | Cleanup classification remains fail-closed and confirmed deletion still requires existing ownership, adapter, service, lifecycle, dry-run, token, and exact identifier gates. | Automated + manual | Policy cleanup classification tests, CLI cleanup tests, and diff review. |
 | HW-SAFE-008, HW-DOCS-002 | Docs describe local deterministic policy without claiming remote policy service, team workflow, silent bypass, runtime mutation from policy, DNS/tunnel/cloud behavior, or accelerator support. | Automated + manual | Core docs XCTest and policy/security/limitations review. |
 | HW-RUNTIME-001, HW-RUNTIME-002, HW-STATE-001 | Policy work does not add direct Apple container shell-out, SQLite access outside `HostwrightState`, hidden default state paths, registry calls, image pulls, telemetry upload, or runtime mutation. | Automated + manual | Full local gate plus targeted boundary scans and diff review. |
+
+## Phase 38 Gate: Governance And Contributor Model
+
+| Requirement IDs | Acceptance criteria | Verification type | Verification command or review |
+| --- | --- | --- | --- |
+| HW-GOV-001 | Governance and contributor docs define issue-to-PR-to-release flow, risky-area review triggers, verification gates, and scoped-change expectations. | Automated + manual | Core docs guard plus review of `GOVERNANCE.md`, `CONTRIBUTING.md`, issue template, and PR template. |
+| HW-GOV-002 | Security reporting guidance tells reporters not to put secrets, private host details, diagnostic bundles, or exploit details in public trackers before a private contact path exists. | Automated + manual | Core docs guard plus review of `SECURITY.md` and security/safety docs. |
+| HW-GOV-003 | Release governance keeps release tags, GitHub Releases, binaries, installers, signing, notarization, SBOM, provenance, support SLA, hosted diagnostics, and cloud service claims behind explicit maintainer approval and matching docs. | Automated + manual | Core docs guard plus release-process review. |
+| HW-DOCS-002, HW-RUNTIME-001, HW-STATE-001 | Governance work does not add product code, RuntimeAdapter changes, SQLite access, dependencies, release artifacts, website implementation, GUI code, branch protection, CODEOWNERS enforcement, or unsupported current-support claims. | Automated + manual | Full local gate, targeted boundary scans, and diff review. |

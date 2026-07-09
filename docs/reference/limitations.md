@@ -68,6 +68,7 @@ Hostwright is not production ready.
 - Disposable live create/start/logs/cleanup proofs for Hostwright-owned proof containers, including stale-hash refusal and exact proof cleanup.
 - Cleanup dry-run classifications for eligible, ambiguous, stale, running, unknown, blocked, and never-delete ownership-backed and observed-only resources.
 - Source-material preservation and Hostwright naming controls.
+- Governance, contribution, security reporting, review-trigger, and pull request template guidance for maintainer-reviewed changes.
 
 ## Not Implemented Today
 
@@ -108,6 +109,7 @@ Hostwright is not production ready.
 - Web dashboard.
 - Production readiness.
 - Binary downloads, installer packages, Homebrew formulae, signing, notarization, SBOM, vulnerability scanning, or binary provenance.
+- Enforced CODEOWNERS, branch protection, support SLA, enterprise support workflow, hosted diagnostics, telemetry upload, or cloud support service.
 
 ## Explicitly Out Of Scope For The First Supported Release
 

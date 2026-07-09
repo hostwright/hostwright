@@ -23,3 +23,20 @@ Hostwright is not yet production ready. Security-sensitive behavior must be desi
 ## Reporting
 
 This repository is local-only at the moment. Do not publish sensitive reports in public trackers until the project has a published security contact and disclosure process.
+
+If a report includes secrets, credentials, private hostnames, private file paths, diagnostic bundles, exploit details, or live-resource identifiers, request a private maintainer contact first instead of opening a public issue.
+
+## Security Review Triggers
+
+Maintainer security review is required before changes that affect:
+
+- runtime command construction, command allowlists, lifecycle mutation, cleanup deletion, or live proof scope;
+- SQLite migrations, operation ledgers, ownership records, diagnostics export, or recovery records;
+- secret references, Keychain behavior, redaction, credential storage, or support-bundle content;
+- policy decisions, policy override behavior, untrusted manifest handling, stack import, or compatibility claims;
+- networking exposure, DNS, tunnels, cloud control, provider integrations, multi-host trust, or accelerator behavior;
+- release artifacts, signing, notarization, SBOM, provenance, installers, or package channels.
+
+## Support Boundary
+
+Hostwright has no production support SLA, hosted diagnostics, telemetry upload, cloud control plane, or enterprise support workflow in the current core project.

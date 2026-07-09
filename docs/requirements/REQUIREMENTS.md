@@ -174,3 +174,11 @@ Status values:
 | HW-REL-002 | Public release requires build, tests, docs, examples, compatibility matrix, and limitations review. | Agent Engineering Manual | Implemented for `v0.1.0-alpha.1` release candidate prep | `README.md`, `docs/reference/`, `docs/release/` | Core and manifest XCTest cases; release checklist | 10 |
 | HW-REL-003 | Signing, notarization, SBOM, checksums, and provenance are considered before public artifacts. | Final Production Arsenal; Document 2 | Implemented as source-only alpha decision with no binary artifacts | `docs/release/RELEASE_PROCESS.md`, `docs/reference/install.md`, `docs/reference/security-safety.md` | Core release-doc XCTest case | 10 |
 | HW-REL-004 | Benchmarks begin before claims about Apple silicon performance. | Document 2; Final Production Arsenal | Implemented by release policy: no performance claims are made in `v0.1.0-alpha.1` | `docs/release/v0.1.0-alpha.1-notes.md`, `docs/reference/limitations.md` | Docs review | 10 |
+
+## Governance
+
+| ID | Requirement | Source document | Current status | Implementation file if any | Test coverage if any | Release phase |
+| --- | --- | --- | --- | --- | --- | --- |
+| HW-GOV-001 | Roadmap work must move through scoped issues, scoped PRs, documented verification, and maintainer review for risky areas. | Phase 38 maintainer scope | Implemented as governance docs and templates | `GOVERNANCE.md`, `CONTRIBUTING.md`, `.github/ISSUE_TEMPLATE/engineering-task.md`, `.github/PULL_REQUEST_TEMPLATE.md` | Core docs guard | 38 |
+| HW-GOV-002 | Security reporting must avoid public disclosure of secrets, private host details, diagnostic bundles, and exploit details until a private contact path exists. | Phase 38 maintainer scope; Document 2 | Implemented as security policy guidance | `SECURITY.md`, `docs/reference/security-safety.md` | Core docs guard | 38 |
+| HW-GOV-003 | Release, distribution, support, and public artifact claims require explicit maintainer approval and matching release docs. | Phase 38 maintainer scope; Final document | Implemented as release governance policy | `GOVERNANCE.md`, `docs/release/RELEASE_PROCESS.md`, `docs/reference/limitations.md` | Core docs guard | 38 |

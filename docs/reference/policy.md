@@ -28,6 +28,8 @@ Policy decisions include:
 - Advisory scheduling consumes local policy decisions for placement explanations and scores without changing the underlying policy gates.
 - Extension declarations can be evaluated as local data. Built-in or reviewed-local non-mutating declarations can receive allow decisions only when required RuntimeAdapter, HostwrightState, local policy, redaction, audit, explicit-state-path, local-only, ownership, confirmation, and no-runtime-mutation boundaries are declared.
 - Third-party, untrusted, unsupported-version, empty, missing-boundary, runtime-mutation, state-write, networking-provider, tunnel-provider, secret-resolution, and accelerator extension declarations fail closed.
+- Team policy profiles can be evaluated as local data. Profiles must be explicit opt-in, versioned, auditable, and preserve required runtime, state, policy, redaction, audit, confirmation, ownership, local-only, and no-telemetry gates.
+- Team overrides that weaken required gates require approved local review records, and some overrides remain forbidden even with approval.
 
 ## What Policy Does Not Do
 
@@ -47,7 +49,8 @@ Policy evaluation does not:
 - load, install, distribute, or execute plugins;
 - contact a plugin registry;
 - allow extension declarations to bypass RuntimeAdapter, HostwrightState, local policy, redaction, audit, confirmation, or ownership gates.
+- provide a cloud team service, hosted audit log, central remote control, user tracking, enterprise support workflow, or remote policy distribution.
 
 ## Override Boundary
 
-There is no remote policy service, team policy workflow, silent bypass, or runtime-mutating policy action in this phase. Future policy profiles or team defaults require a separate issue and must preserve local deterministic evaluation first.
+There is no remote policy service, silent bypass, or runtime-mutating policy action in this phase. Team policy profiles are local, explicit opt-in, and advisory/review data only; they cannot bypass hard-coded Hostwright safety gates.

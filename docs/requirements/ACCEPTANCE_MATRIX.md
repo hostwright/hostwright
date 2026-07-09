@@ -300,6 +300,16 @@ Phase 8A is a required preflight before this mutation gate. It proves real read-
 | HW-EXT-003, HW-RUNTIME-001, HW-STATE-001 | Extension architecture does not add a plugin loader, remote registry, binary distribution, untrusted code execution, RuntimeAdapter bypass, direct Apple container shell-out, SQLite access outside `HostwrightState`, state writes, or runtime mutation. | Automated + manual | Full local gate, targeted boundary scans, and diff review. |
 | HW-EXT-003, HW-DOCS-002 | Docs distinguish extension declaration policy from unsupported plugin runtime, provider networking, tunnels, secret backends, accelerators, GUI, cloud, and distribution behavior. | Automated + manual | Core docs guard plus plugin-extension architecture, policy, security, and limitations review. |
 
+## Phase 34 Gate: Enterprise And Team Workflow
+
+| Requirement IDs | Acceptance criteria | Verification type | Verification command or review |
+| --- | --- | --- | --- |
+| HW-TEAM-001, HW-SAFE-008 | Team profiles are local, explicit opt-in, versioned, auditable, and preserve required runtime, state, policy, redaction, audit, confirmation, ownership, local-only, and no-telemetry gates. | Automated | HostwrightPolicy XCTest cases for accepted and rejected team profiles. |
+| HW-TEAM-002, HW-SAFE-008 | Overrides that weaken required gates require approved local review records; hard safety-gate bypasses remain forbidden even with approval. | Automated | HostwrightPolicy XCTest cases for missing approval, approved review records, and forbidden overrides. |
+| HW-TEAM-003, HW-OBS-001, HW-SAFE-004 | Team workflow audit events persist through the existing event ledger with redacted payloads and explicit state paths. | Automated | HostwrightState XCTest audit event persistence test. |
+| HW-TEAM-004, HW-DOCS-002 | Docs describe local team workflow without claiming cloud team service, central remote control, hosted audit log, user tracking, enterprise support workflow, remote policy distribution, macOS user/group/ACL management, or shared-secret management. | Automated + manual | Core docs guard plus team workflow, governance, security, limitations, requirements, and acceptance review. |
+| HW-RUNTIME-001, HW-RUNTIME-002, HW-STATE-001 | Team workflow work does not add runtime mutation, direct Apple container shell-out, SQLite access outside `HostwrightState`, hidden default state paths, cloud services, remote policy, telemetry upload, dependencies, release tags, or GitHub Releases. | Automated + manual | Full local gate, targeted boundary scans, and diff review. |
+
 ## Phase 38 Gate: Governance And Contributor Model
 
 | Requirement IDs | Acceptance criteria | Verification type | Verification command or review |

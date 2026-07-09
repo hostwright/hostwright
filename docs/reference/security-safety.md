@@ -29,6 +29,12 @@ Policy evaluation is local, deterministic, and non-mutating. `HostwrightPolicy` 
 
 Policy decisions do not execute Apple container, write SQLite, contact registries, upload telemetry, configure DNS, create tunnels, distribute team policy, or apply automatic overrides. Unknown, ambiguous, or high-risk settings remain blocked unless a later reviewed implementation adds a narrower explicit gate.
 
+## Team Workflow Boundary
+
+Team workflow support is local profile and approval data only. Hostwright can evaluate explicit opt-in team profiles, required safety gates, local approval records, and policy override declarations, but it does not provide a cloud team service, central remote control, hosted audit log, user tracking, enterprise support workflow, or remote policy distribution.
+
+Team profiles cannot bypass plan-hash confirmation, cleanup tokens, ownership checks, redaction, explicit state paths, local-only diagnostics, or `RuntimeAdapter`. Approval records document local review; they do not override hard-coded safety gates.
+
 ## Extension Boundary
 
 Extension architecture is declaration-only in current core scope. Hostwright can evaluate typed extension declarations for identity, declaration API version, trust level, capabilities, and required boundaries, but it does not load, install, distribute, or execute plugins.
@@ -116,6 +122,7 @@ This alpha does not include:
 - Kubernetes, CRI, Docker API, or Docker Compose compatibility;
 - GPU/ANE scheduling, Metal/Core ML/MLX/PyTorch MPS container support, host-native accelerator helpers, or host accelerator device exposure;
 - plugin loader, remote plugin registry, binary plugin distribution, or untrusted extension execution;
+- cloud team service, central remote control, hosted audit log, user tracking, enterprise support workflow, or remote policy distribution;
 - signing, notarization, signature verification, SBOM generation/validation, vulnerability scanning, or binary provenance.
 - external telemetry, hosted diagnostics, or automatic diagnostic upload.
 - support SLA, enterprise support workflow, enforced CODEOWNERS, or branch-protection policy.

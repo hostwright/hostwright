@@ -300,6 +300,47 @@ final class HostwrightStateTests: XCTestCase {
         }
     }
 
+    func testTeamWorkflowAuditEventsPersistAndRedactPayloads() throws {
+        try withTemporaryStore { store, _ in
+            try saveDesiredState(in: store)
+            try store.events.append([
+                EventRecord(
+                    id: "team-approval-1",
+                    timestamp: "2026-07-09T00:00:00Z",
+                    severity: .info,
+                    type: "team.approval.recorded",
+                    source: "team-workflow",
+                    projectID: projectID,
+                    serviceName: nil,
+                    runtimeAdapter: nil,
+                    message: "team approval recorded token=\(fakeSecret)",
+                    payloadJSONRedacted: #"{"profile":"dev.hostwright.team.local","approvalID":"approval-1","token":"\#(fakeSecret)"}"#
+                ),
+                EventRecord(
+                    id: "team-policy-1",
+                    timestamp: "2026-07-09T00:00:01Z",
+                    severity: .warning,
+                    type: "team.policy.override.reviewed",
+                    source: "team-workflow",
+                    projectID: projectID,
+                    serviceName: nil,
+                    runtimeAdapter: nil,
+                    message: "team policy override reviewed",
+                    payloadJSONRedacted: #"{"profile":"dev.hostwright.team.local","override":"allowPrivilegedPortWarning"}"#
+                )
+            ])
+
+            let events = try store.events.loadAll()
+            let teamEvents = events.filter { $0.type.hasPrefix("team.") }
+
+            XCTAssertEqual(teamEvents.map(\.id), ["team-approval-1", "team-policy-1"])
+            XCTAssertEqual(teamEvents.map(\.source), ["team-workflow", "team-workflow"])
+            XCTAssertEqual(teamEvents.map(\.projectID), [projectID, projectID])
+            XCTAssertTrue(teamEvents[0].message.contains("[REDACTED]"))
+            XCTAssertFalse(teamEvents.map(\.payloadJSONRedacted).joined().contains(fakeSecret))
+        }
+    }
+
     func testDiagnosticsExportCollectsRedactedStateWithoutCreatingRuntimeArtifacts() throws {
         try withTemporaryStore { store, _ in
             try saveDesiredState(in: store)

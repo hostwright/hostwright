@@ -26,6 +26,7 @@ Risky areas require explicit maintainer review:
 | Cleanup and destructive actions | Ownership, dry-run classification, exact confirmation, no image/volume/unmanaged deletion. |
 | Secrets and diagnostics | No raw secret persistence or output, redacted bundles, no credential sync or upload. |
 | Policy and import | Fail-closed decisions, no silent override, no unsupported compatibility claims. |
+| Team workflow | Local-only profile data, approval records, audit events, no cloud team service or silent safety-gate weakening. |
 | Release and distribution | Source/binary artifact truth, tag discipline, signing/notarization/provenance wording. |
 | Public docs and roadmap | Current support vs planned/research behavior, no website work in the core repo. |
 

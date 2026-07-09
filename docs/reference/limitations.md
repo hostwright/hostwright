@@ -20,6 +20,7 @@ Hostwright is not production ready.
 - Stable process exit categories for usage, validation, state unavailable, runtime unavailable, confirmation mismatch, unsafe operation, and partial failure.
 - Local deterministic policy decisions for planner safety, cleanup classification, image policy, env/secret boundaries, lifecycle blockers, untrusted manifests, secure exposure blockers, and accelerator placeholders.
 - Local advisory scheduler reports for declared memory requests, workload class, port/policy blockers, fairness scoring, overcommit blockers, accelerator blockers, and remote-placement blockers. Reports are in-memory recommendations only and are not CLI placement commands.
+- Local control-surface requirements and API boundary documentation for a future separate GUI/design owner.
 - `hostwright status [path] --state-db <path>` with live RuntimeAdapter observation and event/snapshot persistence.
 - `hostwright logs <service>` with bounded tail output through RuntimeAdapter and redaction.
 - `hostwright events --state-db <path>` for persisted event ledger records, with project/type/service/severity/limit/sort filtering.
@@ -107,6 +108,7 @@ Hostwright is not production ready.
 - Cloudflare Tunnel, Tailscale Serve/Funnel, WireGuard, mTLS provisioning, or reverse proxy setup.
 - Cloud control plane.
 - Web dashboard.
+- GUI implementation, daemon API, or local control-surface runtime.
 - Production readiness.
 - Binary downloads, installer packages, Homebrew formulae, signing, notarization, SBOM, vulnerability scanning, or binary provenance.
 - Enforced CODEOWNERS, branch protection, support SLA, enterprise support workflow, hosted diagnostics, telemetry upload, or cloud support service.

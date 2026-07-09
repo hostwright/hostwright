@@ -187,6 +187,15 @@ Phase 8A is a required preflight before this mutation gate. It proves real read-
 | HW-OBS-002, HW-CLI-007 | `hostwright status` and `hostwright doctor` report parser/state-path/telemetry policy metadata without claiming service reachability or external telemetry. | Automated + manual | CLI and health XCTest cases; doctor, status, limitations, and security docs review. |
 | HW-DOCS-002, HW-SAFE-004 | Docs describe local-only diagnostics and forensic records without claiming hosted diagnostics, upload, OSLog integration, production monitoring, or support-bundle workflows. | Manual | CLI, limitations, security-safety, state-store, daemon, requirements, and implementation-plan docs review. |
 
+## Phase 21 Gate: GUI Control Surface Requirements And API Boundary
+
+| Requirement IDs | Acceptance criteria | Verification type | Verification command or review |
+| --- | --- | --- | --- |
+| HW-GUI-001, HW-GUI-002 | Control-surface docs define approved local data surfaces for projects, services, plans, apply confirmation, status, logs, events, recovery, cleanup previews, diagnostics, doctor reports, and errors. | Automated + manual | Core docs guard plus review of `docs/architecture/control-surface-api-boundary.md`. |
+| HW-GUI-001, HW-SAFE-001, HW-SAFE-002, HW-SAFE-004 | Control surfaces cannot bypass manifest validation, local policy, redaction, plan-hash confirmation, cleanup tokens, ownership records, explicit state paths, or RuntimeAdapter gates. | Automated + manual | Core docs guard plus security/safety review. |
+| HW-GUI-003 | Accessibility requirements cover keyboard navigation, focus, screen-reader status/error states, non-color-only severity, selectable confirmation hashes/tokens, and diagnostics-sharing warnings. | Automated + manual | Core docs guard plus control-surface requirements review. |
+| HW-GUI-004, HW-DOCS-002 | Phase 21 does not add GUI code, website implementation, web dashboard, cloud dashboard, daemon API, direct Apple container execution, direct SQLite access, RuntimeAdapter bypass, telemetry upload, hosted diagnostics, release tags, or GitHub Releases. | Automated + manual | Full local gate, targeted boundary scans, and diff review. |
+
 ## Phase 22 Gate: Networking And Service Discovery
 
 | Requirement IDs | Acceptance criteria | Verification type | Verification command or review |

@@ -8,9 +8,9 @@
 
 ## Verified On 2026-07-09
 
-- `swift build` succeeds after the Phase 38 governance and contributor model changes.
-- `swift test list` lists 239 real XCTest cases across Hostwright test targets.
-- `swift test` executes 239 real XCTest test cases across CLI, core, daemon, health, import, manifest, networking, observability, policy, reconciler, runtime, and state targets with 0 failures.
+- `swift build` succeeds after the Phase 21 GUI control surface requirements and API boundary changes.
+- `swift test list` lists 240 real XCTest cases across Hostwright test targets.
+- `swift test` executes 240 real XCTest test cases across CLI, core, daemon, health, import, manifest, networking, observability, policy, reconciler, runtime, and state targets with 0 failures.
 - `scripts/grep-orchard.sh .` succeeds and reports historical references only in `docs/source-material/` and `docs/naming/`.
 - `scripts/test.sh` succeeds and runs `swift build` plus `swift test`.
 - `scripts/lint.sh` succeeds.
@@ -25,6 +25,7 @@
 - Phase 30 was research-only. It added a multi-host platform decision record and docs guard test without adding multi-host orchestration, remote mutation, remote host agents, state replication, membership service, peer discovery, transport or certificate implementation, cloud control plane, DNS/tunnel behavior, scheduler API, remote placement, runtime mutation expansion, state writes, network calls, image pulls, dependencies, release tags, or GitHub Releases.
 - Phase 31 adds a local advisory scheduler model and docs guard test without adding automatic placement, resource reservation, runtime mutation, RuntimeAdapter changes, SQLite access, state writes, daemon scheduling, scheduler API, external scheduler compatibility, Kubernetes scheduler behavior, multi-host scheduling, remote placement, DNS/tunnel/cloud behavior, registry calls, image pulls, telemetry upload, third-party dependencies, accelerator-aware scheduling, release tags, or GitHub Releases.
 - Phase 38 adds governance, contributor, security-reporting, review-trigger, issue-template, pull-request-template, release-governance, and docs guard coverage without adding CODEOWNERS enforcement, branch protection, new maintainers, product code, runtime mutation, dependencies, website implementation, GUI code, support SLA, cloud service, release tags, GitHub Releases, binary artifacts, signing, notarization, SBOM, or provenance claims.
+- Phase 21 adds local control-surface requirements, API boundary, accessibility requirements, handoff criteria, and docs guard coverage without adding GUI code, website implementation, web dashboard, cloud dashboard, daemon API, direct Apple container execution, direct SQLite access, RuntimeAdapter bypass, runtime mutation expansion, telemetry upload, hosted diagnostics, release tags, or GitHub Releases.
 - `container list --all --format json` returned the verified empty runtime shape `[]`.
 - A disposable local image `hostwright-proof-web:phase8b` was built from the Apple tutorial-style `python:alpine` flow.
 - `hostwright apply` created exactly one Apple container named `hostwright-proof-web` through `RuntimeAdapter`.
@@ -65,6 +66,7 @@
 - Phase 18 adds operation recovery groups and steps, apply checkpoints, active-operation locking with expired-lock interruption, rollback-unavailable step records, redacted manual recovery hints, legacy managed-restart recovery rendering, and read-only `hostwright recovery` output for failed or interrupted apply inspection.
 - Phase 19 adds cleanup dry-run classifications for eligible, ambiguous, stale, running, unknown, blocked, and never-delete ownership-backed and observed-only resources, keeps confirmed deletion limited to exact eligible Hostwright-owned non-running containers, hardens cleanup confirmation tokens against eligible-candidate drift, and reports delete-success/state-persistence failures as state failures.
 - Phase 20 adds read-only event filters, local redacted diagnostics bundles from explicit state DB paths, local-only telemetry policy reporting in status/doctor/diagnostics output, and XCTest coverage for diagnostics redaction and no runtime observation during export.
+- Phase 21 documents local control-surface data contracts and safety boundaries for a future separate design/frontend owner; it does not add a control surface or new API runtime.
 - Phase 22 adds local bind-address policy helpers, observed host-port conflict blockers, unsupported DNS/discovery/networking-field errors, versioned network attachment fixture parsing, and fail-closed handling for non-empty real Apple container network output.
 - Phase 26 adds ProcessInfo-backed resource intelligence reports in doctor JSON, fixture-backed parser coverage, evidence-based non-arm64 image architecture warnings, and docs that keep benchmark dimensions explicit as unmeasured without capacity or accelerator claims.
 - Phase 27 adds a research-only accelerator boundary decision record and docs guard for Apple GPU, ANE, Metal, Core ML, MLX, PyTorch MPS, host-native accelerator helpers, and scheduler accelerator dimensions.
@@ -108,7 +110,7 @@ Important diagnostic correction:
 - `swift -e 'import XCTest'` can still fail and is not the correct gate.
 - A minimal SwiftPM XCTest probe passed after Xcode was fixed.
 - `swift test list` is the local proof that Hostwright now exposes real XCTest cases.
-- `swift test` executes 239 XCTest cases after the Phase 38 governance and contributor model update.
+- `swift test` executes 240 XCTest cases after the Phase 21 GUI control surface requirements and API boundary update.
 
 The old top-level smoke/precondition posture has been replaced with XCTest assertions. Some test file names still include `Smoke.swift`, but the contents are XCTest cases.
 

@@ -41,6 +41,14 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 | 30 | Multi-Host Apple Silicon Platform Research | Complete locally | Decide multi-host identity, membership, trust, state authority, transport, failure recovery, cloud boundary, and scheduler implications before implementation. | Decision record keeps current core single-host and docs guard unsupported current-support claims. |
 | 31 | Scheduler And Placement Engine | Complete locally | Add deterministic local advisory scheduling without automatic placement or capacity guarantees. | Advisory scheduler tests cover policy blockers, memory overcommit, fairness scoring, accelerator blockers, remote-placement blockers, and unsupported current-support claims. |
 | 32 | Policy Engine | Complete locally | Add deterministic local policy decisions before import, compatibility, multi-host, and scheduler work. | Policy evaluator tests cover ports, mounts, images, env/secrets, cleanup, lifecycle, exposure, untrusted manifests, accelerator placeholders, and planner migration. |
+| 33 | Plugin And Extension Architecture | Planned | Define safe extension types, trust model, versioning, capability declarations, and non-mutating prototype boundaries. | Extension design has a threat model and no extension can bypass runtime, state, policy, redaction, audit, or confirmation gates. |
+| 34 | Enterprise And Team Workflow | Planned | Define local team profiles, approval records, audit events, and shared policy profiles without cloud dependency. | Team workflow is local, auditable, opt-in, and unable to weaken required safety gates silently. |
+| 35 | Packaging Signing Notarization And Distribution | Planned | Define or implement release artifacts, installer/uninstaller, upgrade path, checksums, SBOM/provenance policy, and package-channel evaluation. | Release artifacts can be reproduced and verified before any public binary or installer claim. |
+| 36 | CI Benchmarking And Performance Lab | Planned | Add repeatable CI and local benchmark methodology for supported macOS and Apple container evidence. | Benchmarks use disposable resources, record environment facts, and do not create performance marketing claims. |
+| 37 | Documentation Site And Public Education | Planned | Define documentation-site information architecture and source-of-truth boundaries for the separate website repository. | Core repo owns source reference docs; website work stays outside this repository unless separately approved. |
+| 38 | Governance And Contributor Model | Complete locally | Mature OSS governance, contributor workflow, security reporting, review triggers, roadmap process, and release ownership. | Governance docs and templates define issue-to-PR-to-release flow, risky-area review, private-report guidance, and support boundaries. |
+| 39 | Beta Readiness | Planned | Define beta criteria, blockers, deferrals, install/upgrade/docs/security/support gates, and public-claim audit. | Maintainer-approved beta checklist exists and release/limitations docs match code and tests. |
+| 40 | Apple Silicon Control-Plane Direction Decision | Planned | Decide whether Hostwright remains single-host, expands core, or splits experimental platform work. | Public docs reflect the accepted direction without claiming unbuilt support. |
 
 ## Current Hard Boundaries
 
@@ -367,3 +375,13 @@ Phase 31 does not add automatic placement, capacity reservation, runtime mutatio
 - XCTest coverage covers policy evaluation, redaction, cleanup classifications, image digest policy, unsupported exposure/lifecycle/accelerator decisions, and planner policy migration.
 
 Phase 32 does not add remote policy service, team workflow, central policy distribution, silent bypass, runtime mutation from policy, Apple container shell-out from policy, SQLite access from policy, registry calls, image pulls, telemetry upload, DNS, tunnel, cloud, GUI, Kubernetes, CRI, Docker API, Compose parity, GPU/ANE/Metal/Core ML/MLX support, accelerator scheduling, release tags, or GitHub Releases.
+
+## Phase 38 Outputs
+
+- `GOVERNANCE.md` now defines maintainer authority, risky-area review ownership, decision-record triggers, issue/PR flow, release discipline, and support boundaries.
+- `CONTRIBUTING.md`, `SECURITY.md`, the engineering issue template, and the pull request template now point contributors at the same verification and security-review expectations.
+- Release docs now require governance and security-review checks before binary/distribution claims.
+- Requirements and acceptance gates track governance as explicit release infrastructure instead of implicit maintainer knowledge.
+- XCTest coverage guards the governance docs against unsupported support, telemetry, cloud, release-artifact, or bypass claims.
+
+Phase 38 does not add CODEOWNERS enforcement, branch protection, new maintainers, product code, runtime mutation, dependencies, website implementation, GUI code, support SLA, cloud service, release tags, GitHub Releases, binary artifacts, signing, notarization, SBOM, or provenance claims.

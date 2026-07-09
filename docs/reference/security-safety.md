@@ -29,6 +29,12 @@ Policy evaluation is local, deterministic, and non-mutating. `HostwrightPolicy` 
 
 Policy decisions do not execute Apple container, write SQLite, contact registries, upload telemetry, configure DNS, create tunnels, distribute team policy, or apply automatic overrides. Unknown, ambiguous, or high-risk settings remain blocked unless a later reviewed implementation adds a narrower explicit gate.
 
+## Governance Boundary
+
+`GOVERNANCE.md`, `CONTRIBUTING.md`, and `SECURITY.md` define maintainer review triggers for dependencies, release artifacts, runtime mutation, state migrations, cleanup, secret handling, diagnostics, policy, networking, external compatibility, multi-host, accelerator, GUI, website, and public support claims.
+
+These documents are process controls only. They do not add branch protection, CODEOWNERS enforcement, support SLAs, hosted diagnostics, telemetry upload, cloud services, or release artifacts.
+
 ## Cleanup Safety
 
 Cleanup is destructive and requires all of these:
@@ -97,3 +103,4 @@ This alpha does not include:
 - GPU/ANE scheduling, Metal/Core ML/MLX/PyTorch MPS container support, host-native accelerator helpers, or host accelerator device exposure;
 - signing, notarization, signature verification, SBOM generation/validation, vulnerability scanning, or binary provenance.
 - external telemetry, hosted diagnostics, or automatic diagnostic upload.
+- support SLA, enterprise support workflow, enforced CODEOWNERS, or branch-protection policy.

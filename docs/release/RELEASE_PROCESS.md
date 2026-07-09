@@ -52,10 +52,20 @@ Review and record:
 
 - GitHub CI passes on the release-hardening pull request.
 - `README.md`, CLI docs, install docs, compatibility docs, limitations, release notes, and security/safety notes agree.
+- `GOVERNANCE.md`, `CONTRIBUTING.md`, `SECURITY.md`, issue templates, and the pull request template agree on review triggers and verification gates.
 - No public docs claim production readiness.
 - No docs claim binaries, installers, Homebrew, signing, or notarization.
 - No docs claim Kubernetes, CRI, Docker API, Compose parity, tunnels, cloud, DNS, GPU/ANE, background daemon service, unattended daemon mutation, broad lifecycle, image cleanup, or volume cleanup support.
 - `git ls-files` contains no `.DS_Store`, `.build`, `site/`, `.env`, keys, local source archives outside preserved paths, or other local-only files.
+
+## Governance Gate
+
+Before any beta, stable, binary, installer, signing, notarization, SBOM, provenance, package-channel, or support-policy claim:
+
+- confirm the change has a scoped issue and PR;
+- confirm risky-area review from `GOVERNANCE.md` and `SECURITY.md` has happened;
+- confirm release notes, limitations, install docs, and security docs use current-support language only;
+- confirm no release tag or GitHub Release is created before final verification and maintainer approval.
 
 ## Tag And Release Steps
 

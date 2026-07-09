@@ -29,7 +29,7 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 | 18 | Rollback and Partial Failure Recovery | Complete locally | Model operation groups, locks, checkpoints, interruption recovery, and manual recovery hints. | Partial failure and crash/interruption records explain what changed and what remains manual. |
 | 19 | Cleanup and Garbage Collection Maturity | Complete locally | Improve cleanup classification, ownership mismatch handling, stale ID protection, and partial failure behavior. | Dry-run classifications and exact delete boundaries pass without image, volume, or unmanaged deletion. |
 | 20 | Observability and Diagnostics | Complete locally | Add redacted diagnostics, local-only telemetry policy, audit trail, event filtering, and improved doctor/status output. | Diagnostic bundles, redaction, event ordering/filtering, and local-only telemetry policy are tested. |
-| 21 | API and GUI Readiness Gate | Deferred | Revisit after core contracts for networking, policy, import, compatibility, multi-host research, and scheduling are in place. | No Phase 21 work starts until the maintainer explicitly opens it. |
+| 21 | API and GUI Readiness Gate | Complete locally | Define local GUI/control-surface requirements, data contracts, accessibility expectations, command/API boundaries, safety rules, and handoff criteria. | Control-surface requirements are documented without GUI code or API bypass. |
 | 22 | Networking and Service Discovery | Complete locally | Harden local networking policy and document unsupported discovery/exposure boundaries. | Localhost publish defaults, duplicate/observed port conflicts, unsupported discovery fields, and fixture-only network metadata are tested. |
 | 23 | Secure Exposure Research | Complete locally | Decide tunnel, VPN, mTLS, reverse proxy, DNS, and cloud exposure boundaries before any implementation. | Decision record rejects or defers every secure exposure path and tests guard unsupported current-support claims. |
 | 24 | Secrets, Credentials, And Keychain Boundary | Complete locally | Add local secret references, fake Keychain backend, unavailable live backend, and redaction hardening. | `secretEnv`, fake backend resolution, fail-closed unavailable backend, and redacted state/diagnostics/plans pass tests. |
@@ -58,6 +58,7 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 - `hostwright cleanup` requires explicit `--state-db`, dry-run planning, a matching cleanup token, ownership records, live observation, exact resource identifiers, and a non-running lifecycle.
 - No user-facing stop/restart command, image replacement, port mutation, mount mutation, image cleanup, volume cleanup, unmanaged cleanup, aggressive restart loop, DNS, tunnel, cloud, GPU/ANE, privileged helper, launch agent, or installer behavior is implemented.
 - `hostwrightd --foreground` can observe, run bounded health checks, plan, and record daemon loop events only; it does not perform unattended runtime mutation.
+- Control-surface work is requirements-only: no GUI, web dashboard, daemon API, direct runtime execution, direct SQLite access, telemetry upload, hosted diagnostics, or bypass around existing Hostwright command gates exists.
 - Phase 6 state writes require explicit database paths; no default user database path exists.
 - State repository reads validate schema without implicit migration; `SQLiteStateStore.migrate()` is the explicit migration path.
 - Planning is deterministic and non-mutating.
@@ -251,6 +252,17 @@ Phase 19 does not add image cleanup, volume cleanup, unmanaged deletion, wildcar
 - XCTest coverage covers event filtering/sorting/limit behavior, diagnostics redaction, no runtime observation during export, missing-state refusal without migration, doctor/status policy output, and state diagnostics export shape.
 
 Phase 20 does not add external telemetry, hosted diagnostics, automatic upload, OSLog integration, production support-bundle workflows, hidden default state paths, runtime mutation, release tags, or GitHub Releases.
+
+## Phase 21 Outputs
+
+- `docs/architecture/control-surface-api-boundary.md` defines the local control-surface requirements and API boundary.
+- Approved data surfaces are current Hostwright command contracts for validate/plan/apply/status/logs/events/recovery/cleanup/diagnostics/doctor/errors.
+- Control surfaces must not call Apple container, SQLite, `RuntimeAdapter`, state migrations, cleanup deletion, or health execution directly.
+- Accessibility requirements cover keyboard navigation, focus, screen-reader status/error states, non-color-only state, long-running operation results, and selectable confirmation hashes/tokens.
+- Handoff criteria require fixtures, accessibility acceptance criteria, threat-model review for mutation/export flows, and maintainer approval before design/frontend work starts.
+- XCTest coverage guards the boundary and unsupported-current-support wording.
+
+Phase 21 does not add GUI code, website implementation, web dashboard, cloud dashboard, daemon API, direct Apple container execution, direct SQLite access, RuntimeAdapter bypass, new runtime mutation, telemetry upload, hosted diagnostics, release tags, or GitHub Releases.
 
 ## Phase 22 Outputs
 

@@ -166,6 +166,15 @@ Status values:
 | HW-DOCS-003 | Public website copy must not claim unimplemented behavior as current support. | Agent Engineering Manual; Final Production Arsenal | Planned for separate website repository | Not committed in core repo; website belongs in `hostwright.dev` | Website repo review | 3 |
 | HW-DOCS-004 | Source material must remain preserved and traceable. | Final Production Arsenal; Naming Convention Folder | Implemented | `docs/source-material/README.md` | Preservation log review | 0 |
 
+## Control Surface
+
+| ID | Requirement | Source document | Current status | Implementation file if any | Test coverage if any | Release phase |
+| --- | --- | --- | --- | --- | --- | --- |
+| HW-GUI-001 | Local control surfaces must use Hostwright command contracts or future explicit Hostwright APIs that preserve validation, redaction, confirmation, ownership, state-path, and RuntimeAdapter gates. | Phase 21 maintainer scope | Implemented as requirements documentation | `docs/architecture/control-surface-api-boundary.md`, `docs/reference/security-safety.md` | Core docs guard | 21 |
+| HW-GUI-002 | Control-surface data contracts must cover projects, services, plans, status, logs, events, cleanup previews, diagnostics, doctor reports, recovery records, and errors. | Phase 21 maintainer scope | Implemented as requirements documentation | `docs/architecture/control-surface-api-boundary.md`, `docs/reference/cli.md` | Core docs guard | 21 |
+| HW-GUI-003 | Control-surface handoff requires accessibility requirements for keyboard navigation, focus, screen-reader state, non-color-only state, confirmation review, and diagnostics-sharing warnings. | Phase 21 maintainer scope | Implemented as requirements documentation | `docs/architecture/control-surface-api-boundary.md` | Core docs guard | 21 |
+| HW-GUI-004 | The core repository must not implement GUI, website, web dashboard, cloud dashboard, daemon API, direct Apple container execution, direct SQLite access, or RuntimeAdapter bypass as part of the control-surface gate. | Phase 21 maintainer scope | Implemented by omission and docs guard | `docs/architecture/control-surface-api-boundary.md`, `docs/reference/limitations.md` | Core docs guard | 21 |
+
 ## Release
 
 | ID | Requirement | Source document | Current status | Implementation file if any | Test coverage if any | Release phase |

@@ -35,6 +35,12 @@ Policy decisions do not execute Apple container, write SQLite, contact registrie
 
 These documents are process controls only. They do not add branch protection, CODEOWNERS enforcement, support SLAs, hosted diagnostics, telemetry upload, cloud services, or release artifacts.
 
+## Control Surface Boundary
+
+Future GUI or local control surfaces must use Hostwright command contracts or a future explicit Hostwright API that preserves the same validation, redaction, plan-hash confirmation, cleanup token, ownership, explicit-state-path, and RuntimeAdapter gates.
+
+They must not call Apple container, SQLite, `RuntimeAdapter`, state migrations, cleanup deletion, health execution, or diagnostics upload directly. Phase 21 documents this boundary only; it does not add GUI code, a daemon API, a web dashboard, hosted diagnostics, telemetry upload, or remote control.
+
 ## Cleanup Safety
 
 Cleanup is destructive and requires all of these:

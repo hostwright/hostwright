@@ -515,6 +515,61 @@ final class HostwrightCoreTests: XCTestCase {
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("provenance is provided"))
     }
 
+    func testControlSurfaceDocsDescribeBoundaryWithoutImplementation() throws {
+        let root = try packageRoot()
+        let boundary = try read("docs/architecture/control-surface-api-boundary.md", root: root)
+        let cli = try read("docs/reference/cli.md", root: root)
+        let limitations = try read("docs/reference/limitations.md", root: root)
+        let security = try read("docs/reference/security-safety.md", root: root)
+        let requirements = try read("docs/requirements/REQUIREMENTS.md", root: root)
+        let acceptance = try read("docs/requirements/ACCEPTANCE_MATRIX.md", root: root)
+        let traceability = try read("docs/requirements/SOURCE_TRACEABILITY.md", root: root)
+        let implementationPlan = try read("docs/IMPLEMENTATION_PLAN.md", root: root)
+        let buildStatus = try read("docs/BUILD_STATUS.md", root: root)
+        let devlog = try read("docs/devlog/0021-control-surface-api-boundary.md", root: root)
+        let publicDocs = [
+            boundary,
+            cli,
+            limitations,
+            security,
+            requirements,
+            acceptance,
+            traceability,
+            implementationPlan,
+            buildStatus,
+            devlog
+        ].joined(separator: "\n")
+
+        XCTAssertTrue(boundary.contains("Status: Phase 21 requirements and API boundary only."))
+        XCTAssertTrue(boundary.contains("A control surface must not call Apple container, SQLite, `RuntimeAdapter`, state migrations, cleanup deletion, or health execution directly."))
+        XCTAssertTrue(boundary.contains("| Cleanup preview | `hostwright cleanup --state-db <path> --dry-run` |"))
+        XCTAssertTrue(boundary.contains("Full keyboard navigation"))
+        XCTAssertTrue(boundary.contains("Screen-reader labels"))
+        XCTAssertTrue(boundary.contains("maintainer approval for any new API wrapper"))
+        XCTAssertTrue(cli.contains("hostwright diagnostics --state-db <path> --bundle <path>"))
+        XCTAssertTrue(limitations.contains("Local control-surface requirements and API boundary documentation"))
+        XCTAssertTrue(security.contains("## Control Surface Boundary"))
+        XCTAssertTrue(requirements.contains("HW-GUI-001"))
+        XCTAssertTrue(requirements.contains("HW-GUI-004"))
+        XCTAssertTrue(acceptance.contains("Phase 21 Gate: GUI Control Surface Requirements And API Boundary"))
+        XCTAssertTrue(traceability.contains("HW-GUI-001, HW-GUI-002, HW-GUI-003, HW-GUI-004"))
+        XCTAssertTrue(implementationPlan.contains("## Phase 21 Outputs"))
+        XCTAssertTrue(buildStatus.contains("Phase 21 adds local control-surface requirements"))
+        XCTAssertTrue(devlog.contains("No GUI code."))
+
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("GUI is implemented"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("web dashboard is implemented"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("cloud dashboard is implemented"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("daemon API is implemented"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("control surface may call Apple container directly"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("control surface may access SQLite directly"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("RuntimeAdapter bypass is allowed"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("hosted diagnostics are implemented"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("telemetry upload is enabled"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("cleanup tokens can be bypassed"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("plan hashes can be bypassed"))
+    }
+
     private func read(_ relativePath: String, root: URL) throws -> String {
         try String(contentsOf: root.appendingPathComponent(relativePath), encoding: .utf8)
     }

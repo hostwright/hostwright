@@ -45,7 +45,7 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 | 34 | Enterprise And Team Workflow | Complete locally | Define local team profiles, approval records, audit events, and shared policy profiles without cloud dependency. | Team workflow is local, auditable, opt-in, and unable to weaken required safety gates silently. |
 | 35 | Packaging Signing Notarization And Distribution | Complete locally | Define the fail-closed distribution readiness gate for release artifacts, installer/uninstaller, upgrade path, checksums, SBOM/provenance policy, and package-channel evaluation. | Release artifact claims remain blocked until clean-tag signing, notarization, verification, install, upgrade, downgrade, uninstall, and package-channel evidence exists. |
 | 36 | CI Benchmarking And Performance Lab | Complete locally | Add repeatable CI and local benchmark methodology for supported macOS and Apple container evidence. | Benchmark reports use dry-run or fixture data, record environment facts, fail closed on unsafe resource policy, and do not create performance marketing claims. |
-| 37 | Documentation Site And Public Education | Planned | Define documentation-site information architecture and source-of-truth boundaries for the separate website repository. | Core repo owns source reference docs; website work stays outside this repository unless separately approved. |
+| 37 | Documentation Site And Public Education | Complete locally | Define documentation-site information architecture and source-of-truth boundaries for the separate website repository. | Core repo owns source reference docs; website presentation and implementation stay outside this repository unless separately approved. |
 | 38 | Governance And Contributor Model | Complete locally | Mature OSS governance, contributor workflow, security reporting, review triggers, roadmap process, and release ownership. | Governance docs and templates define issue-to-PR-to-release flow, risky-area review, private-report guidance, and support boundaries. |
 | 39 | Beta Readiness | Planned | Define beta criteria, blockers, deferrals, install/upgrade/docs/security/support gates, and public-claim audit. | Maintainer-approved beta checklist exists and release/limitations docs match code and tests. |
 | 40 | Apple Silicon Control-Plane Direction Decision | Planned | Decide whether Hostwright remains single-host, expands core, or splits experimental platform work. | Public docs reflect the accepted direction without claiming unbuilt support. |
@@ -76,6 +76,7 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 - External orchestration compatibility remains research-only: no CRI shim, Kubernetes node behavior, Docker API shim, Testcontainers target, full Compose parity, attach/exec/log-follow/port-forward stream, or external scheduler API exists in current core scope.
 - Multi-host platform work remains research-only: current core has no remote host agent, membership service, peer discovery, state replication, remote mutation, cloud control plane, scheduler API, or remote placement behavior.
 - Scheduler behavior is local and advisory: it scores explicit local recommendations from declared inputs and existing policy decisions, but it does not mutate runtime, write state, reserve capacity, perform automatic placement, expose a scheduler API, schedule accelerators, or place work on remote hosts.
+- Documentation-site work is source-of-truth planning only: current support claims stay grounded in this repository, while website frontend, hosted docs deployment, analytics, search, and presentation work belong outside the core repository.
 
 ## Phase 3 Outputs
 
@@ -429,6 +430,14 @@ Phase 35 does not produce binary archives, installer packages, install scripts, 
 - Added `scripts/lint.sh` to hosted CI after build and test.
 
 Phase 36 does not add live benchmark command execution, Apple container commands, image pulls, runtime mutation, broad cleanup, state writes, cloud telemetry, hosted performance monitoring, benchmark number publication, performance marketing claims, dependencies, release tags, GitHub Releases, website work, or GUI code.
+
+## Phase 37 Outputs
+
+- Added `docs/architecture/documentation-site-public-education.md` with documentation-site information architecture, source-of-truth ownership, tutorial/task outlines, copy rules, release/limitations rules, blocked evidence, and rejected paths.
+- Linked the source-of-truth plan from the README, limitations, release process, requirements, acceptance matrix, source traceability, build status, and devlog docs.
+- Added core docs guard coverage so site planning cannot quietly become website implementation, hosted docs, analytics, search, or unsupported current-support claims.
+
+Phase 37 does not add website frontend code, hosted docs deployment, website analytics, search, generated site content pipeline, product behavior, runtime mutation, RuntimeAdapter changes, SQLite access, dependencies, release tags, GitHub Releases, or GUI code.
 
 ## Phase 38 Outputs
 

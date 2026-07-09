@@ -327,6 +327,14 @@ Phase 8A is a required preflight before this mutation gate. It proves real read-
 | HW-COMPAT-012, HW-DOCS-002 | Docs explain that hosted CI runs build/test/lint/naming only, Apple container benchmarks are fixture/dry-run only, and current core does not publish benchmark numbers, live version-drift probes, capacity claims, or hosted performance monitoring. | Automated + manual | Core docs guard plus benchmark lab, resource intelligence, limitations, release process, and compatibility review. |
 | HW-RUNTIME-001, HW-RUNTIME-002, HW-STATE-001 | Phase 36 does not add live Apple container commands, image pulls, runtime mutation, broad cleanup, state writes, cloud telemetry, dependencies, release tags, GitHub Releases, website work, or GUI code. | Automated + manual | Full local gate, targeted boundary scans, and diff review. |
 
+## Phase 37 Gate: Documentation Site And Public Education
+
+| Requirement IDs | Acceptance criteria | Verification type | Verification command or review |
+| --- | --- | --- | --- |
+| HW-DOCS-003, HW-DOCS-005 | Core repository docs define the documentation-site information architecture and source-of-truth boundary while keeping website presentation in the separate `hostwright.dev` repository. | Automated + manual | Core docs guard plus review of `docs/architecture/documentation-site-public-education.md`. |
+| HW-DOCS-001, HW-DOCS-002 | Tutorial and task outlines are tied to tested commands, checked-in examples, source-only install truth, and searchable limitations for unsupported behavior. | Automated + manual | Core docs guard plus README, CLI reference, limitations, release process, and examples review. |
+| HW-RUNTIME-001, HW-RUNTIME-002, HW-STATE-001 | Phase 37 does not add product code, runtime mutation, RuntimeAdapter changes, SQLite access, dependencies, release tags, GitHub Releases, website frontend, hosted docs deployment, analytics, search, or GUI code. | Automated + manual | Full local gate, targeted boundary scans, and diff review. |
+
 ## Phase 38 Gate: Governance And Contributor Model
 
 | Requirement IDs | Acceptance criteria | Verification type | Verification command or review |

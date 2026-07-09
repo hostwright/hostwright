@@ -8,9 +8,9 @@
 
 ## Verified On 2026-07-09
 
-- `swift build` succeeds after the Phase 21 GUI control surface requirements and API boundary changes.
-- `swift test list` lists 252 real XCTest cases across Hostwright test targets.
-- `swift test` executes 252 real XCTest test cases across CLI, core, daemon, health, import, manifest, networking, observability, policy, reconciler, runtime, and state targets with 0 failures.
+- `swift build` succeeds after the Phase 37 documentation site and public education update.
+- `swift test list` lists 255 real XCTest cases across Hostwright test targets.
+- `swift test` executes 255 real XCTest test cases across CLI, core, daemon, health, import, manifest, networking, observability, policy, reconciler, runtime, and state targets with 0 failures.
 - `scripts/grep-orchard.sh .` succeeds and reports historical references only in `docs/source-material/` and `docs/naming/`.
 - `scripts/test.sh` succeeds and runs `swift build` plus `swift test`.
 - `scripts/lint.sh` succeeds.
@@ -30,6 +30,7 @@
 - Phase 34 adds local team workflow profile, approval, override, and audit policy models without adding a cloud team service, central remote control, hosted audit log, user tracking, enterprise support workflow, remote policy distribution, macOS user/group/ACL management, shared-secret management, runtime mutation expansion, dependencies, release tags, or GitHub Releases.
 - Phase 35 adds a fail-closed distribution readiness gate for future signed and notarized artifacts without producing binaries, installers, install scripts, launch agents, SBOMs, provenance statements, package-channel support, release tags, or GitHub Releases.
 - Phase 36 adds dry-run and fixture-backed benchmark lab report contracts plus CI lint without adding live Apple container benchmark commands, image pulls, runtime mutation, state writes, telemetry upload, benchmark numbers, dependencies, release tags, or GitHub Releases.
+- Phase 37 adds documentation-site source-of-truth and public education boundaries without adding website frontend code, hosted docs deployment, analytics, search, product behavior, runtime mutation, dependencies, release tags, GitHub Releases, or GUI code.
 - `container list --all --format json` returned the verified empty runtime shape `[]`.
 - A disposable local image `hostwright-proof-web:phase8b` was built from the Apple tutorial-style `python:alpine` flow.
 - `hostwright apply` created exactly one Apple container named `hostwright-proof-web` through `RuntimeAdapter`.
@@ -79,6 +80,7 @@
 - Phase 34 adds `TeamWorkflowPolicyEvaluator` for deterministic local team profile decisions and uses existing event ledger records for redacted team audit events without adding new schema or remote behavior.
 - Phase 35 adds release distribution readiness docs and release-doc guard tests for signed binary, notarized installer, checksum, SBOM, provenance, install, upgrade, downgrade, uninstall, rollback, and package-channel evidence before any public artifact claim.
 - Phase 36 adds `BenchmarkLabReport` models, parser validation, and fixture tests for environment facts, disposable-resource policy, benchmark observations, and no-mutation/no-telemetry limits.
+- Phase 37 adds documentation-site information architecture and source-of-truth rules for the separate `hostwright.dev` repository while keeping website presentation out of this core repo.
 - Phase 28 adds `HostwrightImport` and `hostwright import-stack <path> [--output text|json]` for deterministic conversion of a narrow safe stack-file subset into reviewed `hostwright.yaml` text, with fail-closed unsupported-field diagnostics and normal manifest validation.
 - Phase 29 adds a research-only external orchestration compatibility decision record that rejects current-core CRI, Kubernetes node behavior, Docker API, Testcontainers target behavior, full Compose parity, attach, exec, log-follow, and port-forward compatibility claims while deferring any external scheduler API to a separate approved issue.
 - Phase 30 adds a research-only multi-host platform decision record that keeps current core single-host and defers remote host agents, membership, state replication, cloud control plane, scheduler API, and remote placement to a separate approved issue or project boundary.
@@ -118,7 +120,7 @@ Important diagnostic correction:
 - `swift -e 'import XCTest'` can still fail and is not the correct gate.
 - A minimal SwiftPM XCTest probe passed after Xcode was fixed.
 - `swift test list` is the local proof that Hostwright now exposes real XCTest cases.
-- `swift test` executes 254 XCTest cases after the Phase 36 CI benchmarking and performance lab update.
+- `swift test` executes 255 XCTest cases after the Phase 37 documentation site and public education update.
 
 The old top-level smoke/precondition posture has been replaced with XCTest assertions. Some test file names still include `Smoke.swift`, but the contents are XCTest cases.
 

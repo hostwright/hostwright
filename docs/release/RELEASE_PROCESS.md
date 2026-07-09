@@ -79,6 +79,12 @@ Phase 36 defines benchmark report contracts in `docs/architecture/benchmark-lab.
 
 No release notes, docs, or public artifacts may claim performance numbers, production capacity, Apple container version compatibility, or battery/thermal behavior until a reviewed benchmark report records environment facts, disposable-resource policy, exact measured dimensions, cleanup evidence, and maintainer approval.
 
+## Public Education Gate
+
+Phase 37 defines documentation-site source-of-truth boundaries in `docs/architecture/documentation-site-public-education.md`.
+
+Website, tutorial, and release copy must cite current core reference docs for current support claims, link limitations near unsupported behavior, and keep planned, deferred, rejected, and research-only work visibly separate from implemented behavior. The core repository does not publish the website or own presentation-layer implementation.
+
 ## Tag And Release Steps
 
 Only after the Phase 10 branch is merged to `main` and final verification passes:

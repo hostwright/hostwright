@@ -49,6 +49,12 @@ Third-party, untrusted, unsupported-version, empty, missing-boundary, runtime-mu
 
 These documents are process controls only. They do not add branch protection, CODEOWNERS enforcement, support SLAs, hosted diagnostics, telemetry upload, cloud services, or release artifacts.
 
+## Release Distribution Boundary
+
+Phase 35 defines a fail-closed distribution readiness gate. It records the artifact matrix, signing and notarization evidence, checksum, SBOM, provenance, installer, uninstaller, upgrade, downgrade, rollback, and package-channel requirements that must exist before binary or installer publication.
+
+Current Hostwright releases remain source-only. The distribution gate does not create signed binaries, notarized artifacts, installer packages, launch agents, install scripts, SBOMs, provenance statements, Homebrew formulae, or package-channel support.
+
 ## Control Surface Boundary
 
 Future GUI or local control surfaces must use Hostwright command contracts or a future explicit Hostwright API that preserves the same validation, redaction, plan-hash confirmation, cleanup token, ownership, explicit-state-path, and RuntimeAdapter gates.

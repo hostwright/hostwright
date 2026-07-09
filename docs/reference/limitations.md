@@ -34,6 +34,7 @@ Hostwright is not production ready.
 - `hostwright doctor` safe local checks.
 - `hostwright doctor --output json` resource intelligence reports with local ProcessInfo-backed hardware and thermal facts, fixture-backed parser coverage, explicit unmeasured benchmark dimensions, architecture warnings only when evidence exists, and local-only/no-capacity limits.
 - Source-only release candidate packaging for `v0.1.0-alpha.1`.
+- Release distribution readiness documentation for future signed and notarized artifacts, with current binary and installer publication still blocked.
 - Swift Package Manager module boundaries.
 - RuntimeAdapter contract infrastructure, state scaffolds, reconciler scaffolds, health models, networking scaffolds, and observability scaffolds.
 - `MockRuntimeAdapter` and fake runtime process runner for tests only.
@@ -115,6 +116,7 @@ Hostwright is not production ready.
 - GUI implementation, daemon API, or local control-surface runtime.
 - Production readiness.
 - Binary downloads, installer packages, Homebrew formulae, signing, notarization, SBOM, vulnerability scanning, or binary provenance.
+- Install scripts, uninstaller behavior, upgrade/downgrade smoke tests, rollback proof, package-channel support, Developer ID signing proof, notarization submission proof, stapling proof, Gatekeeper verification proof, or binary release publication.
 - Enforced CODEOWNERS, branch protection, support SLA, enterprise support workflow, hosted diagnostics, telemetry upload, or cloud support service.
 
 ## Explicitly Out Of Scope For The First Supported Release

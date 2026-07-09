@@ -69,3 +69,5 @@ Hostwright does not provide:
 - packaged launch agents or privileged helpers.
 
 Those require separate signing, notarization, checksum, SBOM, provenance, and installer decisions.
+
+Phase 35 defines the future distribution readiness gate in `docs/release/distribution-readiness.md`. That gate is documentation and review policy only in the current tree; it does not publish binaries, create installers, install launch agents, add an install script, or approve a package channel.

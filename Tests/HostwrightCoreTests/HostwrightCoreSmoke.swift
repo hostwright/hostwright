@@ -23,24 +23,66 @@ final class HostwrightCoreTests: XCTestCase {
     func testReleaseDocsDescribeAlphaSourceOnlyTruth() throws {
         let root = try packageRoot()
         let releaseProcess = try read("docs/release/RELEASE_PROCESS.md", root: root)
+        let distributionReadiness = try read("docs/release/distribution-readiness.md", root: root)
         let releaseNotes = try read("docs/release/v0.1.0-alpha.1-notes.md", root: root)
         let install = try read("docs/reference/install.md", root: root)
         let security = try read("docs/reference/security-safety.md", root: root)
         let limitations = try read("docs/reference/limitations.md", root: root)
-        let publicDocs = [releaseProcess, releaseNotes, install, security, limitations].joined(separator: "\n")
+        let requirements = try read("docs/requirements/REQUIREMENTS.md", root: root)
+        let acceptance = try read("docs/requirements/ACCEPTANCE_MATRIX.md", root: root)
+        let traceability = try read("docs/requirements/SOURCE_TRACEABILITY.md", root: root)
+        let implementationPlan = try read("docs/IMPLEMENTATION_PLAN.md", root: root)
+        let buildStatus = try read("docs/BUILD_STATUS.md", root: root)
+        let devlog = try read("docs/devlog/0035-packaging-signing-notarization.md", root: root)
+        let publicDocs = [
+            releaseProcess,
+            distributionReadiness,
+            releaseNotes,
+            install,
+            security,
+            limitations,
+            requirements,
+            acceptance,
+            traceability,
+            implementationPlan,
+            buildStatus,
+            devlog
+        ].joined(separator: "\n")
 
         XCTAssertTrue(releaseProcess.contains("v0.1.0-alpha.1"))
         XCTAssertTrue(releaseProcess.contains("GitHub Releases are created only for `v*` tags."))
         XCTAssertTrue(releaseProcess.contains("Artifact policy: source-only"))
+        XCTAssertTrue(releaseProcess.contains("## Distribution Readiness Gate"))
+        XCTAssertTrue(distributionReadiness.contains("Status: Phase 35 fail-closed distribution readiness gate."))
+        XCTAssertTrue(distributionReadiness.contains("No binary artifacts are produced by Phase 35."))
+        XCTAssertTrue(distributionReadiness.contains("| `.pkg` installer | Blocked |"))
+        XCTAssertTrue(distributionReadiness.contains("Developer ID Application signing proof"))
+        XCTAssertTrue(distributionReadiness.contains("package-channel approval"))
         XCTAssertTrue(releaseNotes.localizedCaseInsensitiveContains("not production ready"))
         XCTAssertTrue(install.localizedCaseInsensitiveContains("source-only alpha"))
+        XCTAssertTrue(install.contains("Phase 35 defines the future distribution readiness gate"))
         XCTAssertTrue(security.localizedCaseInsensitiveContains("not production ready"))
+        XCTAssertTrue(security.contains("## Release Distribution Boundary"))
+        XCTAssertTrue(limitations.contains("Release distribution readiness documentation"))
+        XCTAssertTrue(requirements.contains("HW-REL-005"))
+        XCTAssertTrue(requirements.contains("HW-REL-006"))
+        XCTAssertTrue(acceptance.contains("Phase 35 Gate: Packaging Signing Notarization And Distribution"))
+        XCTAssertTrue(traceability.contains("HW-REL-005, HW-REL-006, HW-GOV-003"))
+        XCTAssertTrue(implementationPlan.contains("## Phase 35 Outputs"))
+        XCTAssertTrue(buildStatus.contains("Phase 35 adds a fail-closed distribution readiness gate"))
+        XCTAssertTrue(devlog.contains("No binary artifacts."))
 
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("brew install"))
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("installer package is provided"))
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("binary downloads are provided"))
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("signed binary is provided"))
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("notarized binary is provided"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Homebrew formula is provided"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("install script is provided"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("SBOM is provided"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("provenance is provided"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("package-channel support is implemented"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("launch agent installer is implemented"))
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("is production ready"))
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("supports Kubernetes"))
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("supports CRI"))

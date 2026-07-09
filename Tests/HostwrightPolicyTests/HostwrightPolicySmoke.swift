@@ -198,6 +198,138 @@ final class HostwrightPolicySmoke: XCTestCase {
         XCTAssertEqual(accelerator.severity, .blocker)
     }
 
+    func testExtensionPolicyAllowsReviewedNonMutatingPolicyPackDeclaration() {
+        let declaration = HostwrightExtensionDeclaration(
+            identifier: "dev.hostwright.policy.local",
+            kind: .policyPack,
+            trust: .reviewedLocal,
+            capabilities: [
+                HostwrightExtensionCapabilityDeclaration(
+                    capability: .policyEvaluation,
+                    purpose: "explain local development policy",
+                    boundaries: [.localPolicy, .redaction, .auditTrail, .noRuntimeMutation]
+                )
+            ]
+        )
+
+        let decisions = ExtensionPolicyEvaluator.default.evaluate(declaration)
+
+        XCTAssertEqual(decisions.map(\.reasonCode), [.extensionDeclared])
+        XCTAssertEqual(decisions.first?.severity, .allow)
+        XCTAssertEqual(decisions.first?.category, .extension)
+        XCTAssertTrue(decisions.first?.message.contains("non-mutating policyPack path") == true)
+        XCTAssertTrue(decisions.first?.remediation.contains("does not load or run extension code") == true)
+    }
+
+    func testExtensionPolicyBlocksMutationAndMissingBoundaries() {
+        let declaration = HostwrightExtensionDeclaration(
+            identifier: "dev.hostwright.runtime.mutator",
+            kind: .runtimeAdapter,
+            trust: .reviewedLocal,
+            capabilities: [
+                HostwrightExtensionCapabilityDeclaration(
+                    capability: .runtimeMutation,
+                    purpose: "mutate runtime directly",
+                    boundaries: [.runtimeAdapter, .localPolicy]
+                )
+            ]
+        )
+
+        let decisions = ExtensionPolicyEvaluator.default.evaluate(declaration)
+        let reasonCodes = decisions.map(\.reasonCode)
+
+        XCTAssertTrue(reasonCodes.contains(.extensionRuntimeMutationUnsupported))
+        XCTAssertTrue(reasonCodes.contains(.extensionBoundaryMissing))
+        XCTAssertTrue(decisions.allSatisfy { $0.severity == .blocker })
+        XCTAssertTrue(decisions.contains { $0.message.contains("confirmationGate") })
+        XCTAssertTrue(decisions.contains { $0.message.contains("ownershipGate") })
+    }
+
+    func testExtensionPolicyBlocksUntrustedTunnelAndSecretCapabilities() {
+        let declaration = HostwrightExtensionDeclaration(
+            identifier: "example.remote.tunnel",
+            kind: .tunnelProvider,
+            trust: .thirdParty,
+            capabilities: [
+                HostwrightExtensionCapabilityDeclaration(
+                    capability: .tunnelExposure,
+                    purpose: "create public tunnel",
+                    boundaries: [.localPolicy, .redaction, .auditTrail, .confirmationGate, .localOnlyNoUpload]
+                ),
+                HostwrightExtensionCapabilityDeclaration(
+                    capability: .secretResolution,
+                    purpose: "resolve provider credential",
+                    boundaries: [.localPolicy, .redaction, .auditTrail, .confirmationGate]
+                )
+            ]
+        )
+
+        let decisions = ExtensionPolicyEvaluator.default.evaluate(declaration)
+        let reasonCodes = decisions.map(\.reasonCode)
+
+        XCTAssertTrue(reasonCodes.contains(.extensionUntrusted))
+        XCTAssertTrue(reasonCodes.contains(.extensionTunnelUnsupported))
+        XCTAssertTrue(reasonCodes.contains(.extensionSecretResolutionUnsupported))
+        XCTAssertFalse(reasonCodes.contains(.extensionDeclared))
+        XCTAssertFalse(decisions.map(\.message).joined(separator: "\n").localizedCaseInsensitiveContains("tunnel is supported"))
+    }
+
+    func testExtensionPolicyFailsClosedForEmptyOrUnsupportedDeclarations() {
+        let declaration = HostwrightExtensionDeclaration(
+            identifier: "",
+            kind: .future,
+            apiVersion: 2,
+            trust: .untrusted,
+            capabilities: []
+        )
+
+        let decisions = ExtensionPolicyEvaluator.default.evaluate(declaration)
+        let reasonCodes = decisions.map(\.reasonCode)
+
+        XCTAssertEqual(
+            Set(reasonCodes),
+            Set([
+                .extensionMissingIdentity,
+                .extensionNoCapabilities,
+                .extensionUnsupportedAPIVersion,
+                .extensionUntrusted
+            ])
+        )
+        XCTAssertTrue(decisions.allSatisfy { $0.severity == .blocker })
+    }
+
+    func testExtensionPolicyEvaluationIsDeterministic() {
+        let declaration = HostwrightExtensionDeclaration(
+            identifier: "dev.hostwright.control.surface",
+            kind: .controlSurfaceIntegration,
+            trust: .builtIn,
+            capabilities: [
+                HostwrightExtensionCapabilityDeclaration(
+                    capability: .controlSurfaceRead,
+                    purpose: "read command output",
+                    boundaries: [.localPolicy, .redaction, .auditTrail, .explicitStatePath, .noRuntimeMutation]
+                ),
+                HostwrightExtensionCapabilityDeclaration(
+                    capability: .stateRead,
+                    purpose: "read explicit state",
+                    boundaries: [.stateStore, .explicitStatePath, .redaction, .auditTrail, .noRuntimeMutation]
+                ),
+                HostwrightExtensionCapabilityDeclaration(
+                    capability: .stateWrite,
+                    purpose: "write direct state",
+                    boundaries: [.stateStore, .localPolicy, .redaction, .auditTrail, .explicitStatePath]
+                )
+            ]
+        )
+
+        let first = ExtensionPolicyEvaluator.default.evaluate(declaration)
+        let second = ExtensionPolicyEvaluator.default.evaluate(declaration)
+
+        XCTAssertEqual(first, second)
+        XCTAssertEqual(first.map(\.orderingKey), second.map(\.orderingKey))
+        XCTAssertEqual(first.map(\.reasonCode), [.extensionStateWriteUnsupported, .extensionDeclared, .extensionDeclared])
+    }
+
     private func identity(_ serviceName: String = "api") -> RuntimeServiceIdentity {
         RuntimeServiceIdentity(projectName: "demo", serviceName: serviceName)
     }

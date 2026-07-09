@@ -41,7 +41,7 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 | 30 | Multi-Host Apple Silicon Platform Research | Complete locally | Decide multi-host identity, membership, trust, state authority, transport, failure recovery, cloud boundary, and scheduler implications before implementation. | Decision record keeps current core single-host and docs guard unsupported current-support claims. |
 | 31 | Scheduler And Placement Engine | Complete locally | Add deterministic local advisory scheduling without automatic placement or capacity guarantees. | Advisory scheduler tests cover policy blockers, memory overcommit, fairness scoring, accelerator blockers, remote-placement blockers, and unsupported current-support claims. |
 | 32 | Policy Engine | Complete locally | Add deterministic local policy decisions before import, compatibility, multi-host, and scheduler work. | Policy evaluator tests cover ports, mounts, images, env/secrets, cleanup, lifecycle, exposure, untrusted manifests, accelerator placeholders, and planner migration. |
-| 33 | Plugin And Extension Architecture | Planned | Define safe extension types, trust model, versioning, capability declarations, and non-mutating prototype boundaries. | Extension design has a threat model and no extension can bypass runtime, state, policy, redaction, audit, or confirmation gates. |
+| 33 | Plugin And Extension Architecture | Complete locally | Define safe extension types, trust model, versioning, capability declarations, and non-mutating prototype boundaries. | Extension design has a threat model and no extension can bypass runtime, state, policy, redaction, audit, or confirmation gates. |
 | 34 | Enterprise And Team Workflow | Planned | Define local team profiles, approval records, audit events, and shared policy profiles without cloud dependency. | Team workflow is local, auditable, opt-in, and unable to weaken required safety gates silently. |
 | 35 | Packaging Signing Notarization And Distribution | Planned | Define or implement release artifacts, installer/uninstaller, upgrade path, checksums, SBOM/provenance policy, and package-channel evaluation. | Release artifacts can be reproduced and verified before any public binary or installer claim. |
 | 36 | CI Benchmarking And Performance Lab | Planned | Add repeatable CI and local benchmark methodology for supported macOS and Apple container evidence. | Benchmarks use disposable resources, record environment facts, and do not create performance marketing claims. |
@@ -70,6 +70,7 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 - Resource intelligence remains local and diagnostic: it reports host facts and explicit unmeasured dimensions without capacity guarantees, runtime mutation, image pulls, external telemetry, accelerator scheduling, or Apple container command execution from `doctor`.
 - Accelerator behavior remains unsupported: Hostwright does not expose Apple GPU, ANE, Metal, Core ML, MLX, PyTorch MPS, host-native accelerator helpers, or accelerator-aware scheduling in current core scope.
 - Policy evaluation is local and deterministic: it explains decisions for existing planner checks, cleanup classification, images, env/secrets, lifecycle, exposure, untrusted manifests, and accelerator placeholders without remote policy service, team workflow, silent bypass, runtime mutation, SQLite access, or network calls.
+- Extension architecture is declaration-only: `HostwrightPolicy` can evaluate typed capability declarations for built-in or reviewed-local non-mutating paths, but current core has no plugin loader, remote registry, untrusted code execution, runtime-mutation extension, state-write extension, networking provider, tunnel provider, secret backend extension, or accelerator extension.
 - Stack-file import is conversion-only: it prints reviewed `hostwright.yaml` text for a narrow safe subset and rejects unsupported networking, secrets, configs, build, deploy, named-volume, shell-healthcheck, cloud, tunnel, and lifecycle semantics without writing files, touching state, observing runtime, pulling images, or claiming Compose parity.
 - External orchestration compatibility remains research-only: no CRI shim, Kubernetes node behavior, Docker API shim, Testcontainers target, full Compose parity, attach/exec/log-follow/port-forward stream, or external scheduler API exists in current core scope.
 - Multi-host platform work remains research-only: current core has no remote host agent, membership service, peer discovery, state replication, remote mutation, cloud control plane, scheduler API, or remote placement behavior.
@@ -387,6 +388,17 @@ Phase 31 does not add automatic placement, capacity reservation, runtime mutatio
 - XCTest coverage covers policy evaluation, redaction, cleanup classifications, image digest policy, unsupported exposure/lifecycle/accelerator decisions, and planner policy migration.
 
 Phase 32 does not add remote policy service, team workflow, central policy distribution, silent bypass, runtime mutation from policy, Apple container shell-out from policy, SQLite access from policy, registry calls, image pulls, telemetry upload, DNS, tunnel, cloud, GUI, Kubernetes, CRI, Docker API, Compose parity, GPU/ANE/Metal/Core ML/MLX support, accelerator scheduling, release tags, or GitHub Releases.
+
+## Phase 33 Outputs
+
+- Added typed extension declaration models in `HostwrightPolicy` for extension kind, trust level, declaration API version, requested capabilities, purposes, and declared boundaries.
+- Added `ExtensionPolicyEvaluator` for deterministic local `PolicyDecision` output.
+- Built-in and reviewed-local non-mutating declarations can receive allow decisions only when required boundaries are declared.
+- Third-party, untrusted, unsupported-version, empty, missing-boundary, runtime-mutation, state-write, networking-provider, tunnel-provider, secret-resolution, and accelerator declarations fail closed.
+- `docs/architecture/plugin-extension-architecture.md` records the threat model, supported declaration-only scope, blocked capabilities, and future review requirements.
+- XCTest coverage verifies allowed reviewed-local declarations, mutation blockers, untrusted tunnel/secret blockers, fail-closed empty declarations, and deterministic ordering.
+
+Phase 33 does not add a plugin loader, remote plugin registry, binary plugin distribution, untrusted code execution, runtime mutation extension path, state-write extension path, networking provider behavior, tunnel/DNS/reverse proxy/cloud behavior, secret backend extension, accelerator extension, GUI code, direct Apple container shell-out, SQLite access outside `HostwrightState`, dependencies, release tags, or GitHub Releases.
 
 ## Phase 38 Outputs
 

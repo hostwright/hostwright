@@ -570,6 +570,59 @@ final class HostwrightCoreTests: XCTestCase {
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("plan hashes can be bypassed"))
     }
 
+    func testExtensionArchitectureDocsDescribeDeclarationPolicyOnly() throws {
+        let root = try packageRoot()
+        let architecture = try read("docs/architecture/plugin-extension-architecture.md", root: root)
+        let policy = try read("docs/reference/policy.md", root: root)
+        let limitations = try read("docs/reference/limitations.md", root: root)
+        let security = try read("docs/reference/security-safety.md", root: root)
+        let requirements = try read("docs/requirements/REQUIREMENTS.md", root: root)
+        let acceptance = try read("docs/requirements/ACCEPTANCE_MATRIX.md", root: root)
+        let traceability = try read("docs/requirements/SOURCE_TRACEABILITY.md", root: root)
+        let implementationPlan = try read("docs/IMPLEMENTATION_PLAN.md", root: root)
+        let buildStatus = try read("docs/BUILD_STATUS.md", root: root)
+        let devlog = try read("docs/devlog/0033-plugin-extension-architecture.md", root: root)
+        let publicDocs = [
+            architecture,
+            policy,
+            limitations,
+            security,
+            requirements,
+            acceptance,
+            traceability,
+            implementationPlan,
+            buildStatus,
+            devlog
+        ].joined(separator: "\n")
+
+        XCTAssertTrue(architecture.contains("Status: Phase 33 declaration policy and architecture boundary."))
+        XCTAssertTrue(architecture.contains("This is a non-mutating prototype. It does not run extension code."))
+        XCTAssertTrue(architecture.contains("| Tunnel provider | Current core blocks tunnels, DNS, reverse proxy setup, and public exposure. |"))
+        XCTAssertTrue(policy.contains("Extension declarations can be evaluated as local data."))
+        XCTAssertTrue(limitations.contains("Local extension declaration policy decisions"))
+        XCTAssertTrue(security.contains("## Extension Boundary"))
+        XCTAssertTrue(requirements.contains("HW-EXT-001"))
+        XCTAssertTrue(requirements.contains("HW-EXT-003"))
+        XCTAssertTrue(acceptance.contains("Phase 33 Gate: Plugin And Extension Architecture"))
+        XCTAssertTrue(traceability.contains("HW-EXT-001, HW-EXT-002, HW-EXT-003"))
+        XCTAssertTrue(implementationPlan.contains("## Phase 33 Outputs"))
+        XCTAssertTrue(buildStatus.contains("Phase 33 adds typed extension declarations"))
+        XCTAssertTrue(devlog.contains("No plugin loader."))
+
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright loads plugins"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright executes plugins"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("remote plugin registry is implemented"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("untrusted extension execution is supported"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("runtime mutation extension is implemented"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("state-write extension is implemented"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("networking provider is implemented"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("tunnel provider is implemented"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("secret backend extension is implemented"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("accelerator extension is implemented"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("extension may bypass RuntimeAdapter"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("extension may access SQLite directly"))
+    }
+
     private func read(_ relativePath: String, root: URL) throws -> String {
         try String(contentsOf: root.appendingPathComponent(relativePath), encoding: .utf8)
     }

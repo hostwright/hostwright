@@ -26,6 +26,8 @@ Policy decisions include:
 - Unsupported manifest fields, secure exposure, broad lifecycle actions, and accelerator requests fail closed.
 - Stack-file import uses local policy reason codes when unsupported fields map to untrusted manifest, secure exposure, lifecycle, or mount-safety blockers.
 - Advisory scheduling consumes local policy decisions for placement explanations and scores without changing the underlying policy gates.
+- Extension declarations can be evaluated as local data. Built-in or reviewed-local non-mutating declarations can receive allow decisions only when required RuntimeAdapter, HostwrightState, local policy, redaction, audit, explicit-state-path, local-only, ownership, confirmation, and no-runtime-mutation boundaries are declared.
+- Third-party, untrusted, unsupported-version, empty, missing-boundary, runtime-mutation, state-write, networking-provider, tunnel-provider, secret-resolution, and accelerator extension declarations fail closed.
 
 ## What Policy Does Not Do
 
@@ -42,6 +44,9 @@ Policy evaluation does not:
 - convert broad Docker Compose or orchestrator semantics into runtime behavior;
 - expose Apple GPU, ANE, Metal, Core ML, MLX, PyTorch MPS, or host-native accelerator helpers.
 - place workloads, reserve capacity, expose a scheduler API, or perform remote placement.
+- load, install, distribute, or execute plugins;
+- contact a plugin registry;
+- allow extension declarations to bypass RuntimeAdapter, HostwrightState, local policy, redaction, audit, confirmation, or ownership gates.
 
 ## Override Boundary
 

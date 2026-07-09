@@ -19,6 +19,7 @@ Hostwright is not production ready.
 - `--output json` for `import-stack`, `plan`, `status`, `events`, `recovery`, `doctor`, and structured errors when JSON mode is requested.
 - Stable process exit categories for usage, validation, state unavailable, runtime unavailable, confirmation mismatch, unsafe operation, and partial failure.
 - Local deterministic policy decisions for planner safety, cleanup classification, image policy, env/secret boundaries, lifecycle blockers, untrusted manifests, secure exposure blockers, and accelerator placeholders.
+- Local extension declaration policy decisions for built-in or reviewed-local non-mutating capability declarations, with fail-closed trust, version, boundary, runtime-mutation, state-write, networking, tunnel, secret-resolution, and accelerator decisions.
 - Local advisory scheduler reports for declared memory requests, workload class, port/policy blockers, fairness scoring, overcommit blockers, accelerator blockers, and remote-placement blockers. Reports are in-memory recommendations only and are not CLI placement commands.
 - Local control-surface requirements and API boundary documentation for a future separate GUI/design owner.
 - `hostwright status [path] --state-db <path>` with live RuntimeAdapter observation and event/snapshot persistence.
@@ -99,6 +100,7 @@ Hostwright is not production ready.
 - Hidden global state writes.
 - Production durability or automatic corruption-recovery guarantees.
 - Remote policy service, team policy workflow, central policy distribution, silent policy bypass, policy-driven runtime mutation, or automatic policy remediation.
+- Plugin loader, remote plugin registry, binary plugin distribution, untrusted extension execution, runtime-mutation extensions, state-write extensions, networking-provider extensions, tunnel-provider extensions, secret-backend extensions, or accelerator extensions.
 - Online state backup, restore, or repair commands.
 - External telemetry, hosted diagnostics, automatic bundle upload, OSLog integration, or production support-bundle workflows.
 - Launch agent or service installer.
@@ -165,7 +167,7 @@ Diagnostics are local and manual. `hostwright diagnostics` reads existing state 
 
 `hostwright doctor` resource intelligence is also local and diagnostic. It records host facts and explicit `unmeasured` observations for benchmark dimensions that were not measured. It does not run Apple container commands, create proof containers, pull images, write state, upload telemetry, or prove runtime density, VM overhead, boot latency, battery behavior, sleep/wake behavior, workload memory pressure, or production capacity.
 
-Policy evaluation is local and diagnostic. It produces deterministic decisions, reason codes, and remediation text for current gates, but it does not execute Apple container commands, write state, contact registries, resolve DNS, configure tunnels, distribute team policy, or apply overrides automatically.
+Policy evaluation is local and diagnostic. It produces deterministic decisions, reason codes, and remediation text for current gates and extension declarations, but it does not execute Apple container commands, write state, contact registries, resolve DNS, configure tunnels, distribute team policy, load plugins, run extension code, or apply overrides automatically.
 
 Advisory scheduling is local and diagnostic. It produces deterministic in-memory recommendations, scores, reason codes, and remediation text from declared inputs and existing policy decisions, but it does not execute Apple container commands, write state, reserve capacity, mutate manifests, update runtime placement, expose a scheduler API, place workloads remotely, or schedule accelerators.
 

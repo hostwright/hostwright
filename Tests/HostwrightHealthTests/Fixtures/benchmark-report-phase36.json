@@ -1,0 +1,123 @@
+{
+  "schemaVersion": 1,
+  "profileID": "phase36-dry-run",
+  "recordedAt": "2026-07-09T00:00:00Z",
+  "environment": {
+    "hardware": {
+      "architecture": "arm64",
+      "activeProcessorCount": 12,
+      "physicalMemoryBytes": 25769803776,
+      "unifiedMemoryNote": "Apple silicon uses unified memory; this report records host memory facts, not workload capacity."
+    },
+    "operatingSystem": {
+      "description": "macOS 26.5",
+      "macOSMajorVersion": 26
+    },
+    "appleContainer": {
+      "executablePath": "/usr/local/bin/container",
+      "version": "container 1.0.0",
+      "versionObservation": {
+        "status": "observed",
+        "value": "container 1.0.0",
+        "unit": null,
+        "method": "fixture",
+        "note": "Apple container version came from a reviewed benchmark fixture."
+      }
+    },
+    "workloadProfile": {
+      "identifier": "local-containers-general",
+      "name": "Local containers, general development",
+      "notes": [
+        "Reports host facts only; it does not estimate production density.",
+        "Does not schedule or reserve resources."
+      ]
+    }
+  },
+  "resourcePolicy": {
+    "disposableResourceNamePrefix": "hostwright-benchmark-",
+    "requiresHostwrightOwnedResources": true,
+    "allowsImagePull": false,
+    "allowsRuntimeMutation": false,
+    "allowsBroadCleanup": false,
+    "cleanupInstructions": "Dry-run reports do not create resources. Future live runs must clean up exact Hostwright-owned resource identifiers only."
+  },
+  "observations": [
+    {
+      "dimension": "memoryPressure",
+      "observation": {
+        "status": "unmeasured",
+        "value": null,
+        "unit": null,
+        "method": "fixture",
+        "note": "Dry-run fixture records methodology only; memory pressure was not measured."
+      }
+    },
+    {
+      "dimension": "bootLatency",
+      "observation": {
+        "status": "unmeasured",
+        "value": null,
+        "unit": null,
+        "method": "fixture",
+        "note": "Dry-run fixture records methodology only; boot latency was not measured."
+      }
+    },
+    {
+      "dimension": "pollingOverhead",
+      "observation": {
+        "status": "unmeasured",
+        "value": null,
+        "unit": null,
+        "method": "fixture",
+        "note": "Dry-run fixture records methodology only; polling overhead was not measured."
+      }
+    },
+    {
+      "dimension": "battery",
+      "observation": {
+        "status": "unmeasured",
+        "value": null,
+        "unit": null,
+        "method": "fixture",
+        "note": "Dry-run fixture records methodology only; battery behavior was not measured."
+      }
+    },
+    {
+      "dimension": "thermal",
+      "observation": {
+        "status": "observed",
+        "value": "nominal",
+        "unit": null,
+        "method": "fixture",
+        "note": "Thermal state came from the reviewed fixture."
+      }
+    },
+    {
+      "dimension": "sleepWake",
+      "observation": {
+        "status": "unmeasured",
+        "value": null,
+        "unit": null,
+        "method": "fixture",
+        "note": "Dry-run fixture records methodology only; sleep/wake behavior was not measured."
+      }
+    },
+    {
+      "dimension": "appleContainerVersionDrift",
+      "observation": {
+        "status": "observed",
+        "value": "container 1.0.0",
+        "unit": null,
+        "method": "fixture",
+        "note": "Version drift requires comparing future reviewed fixtures; no live command ran."
+      }
+    }
+  ],
+  "limits": [
+    "No runtime mutation.",
+    "No image pull.",
+    "No broad cleanup.",
+    "No cloud telemetry.",
+    "No performance marketing claim."
+  ]
+}

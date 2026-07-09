@@ -44,7 +44,7 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 | 33 | Plugin And Extension Architecture | Complete locally | Define safe extension types, trust model, versioning, capability declarations, and non-mutating prototype boundaries. | Extension design has a threat model and no extension can bypass runtime, state, policy, redaction, audit, or confirmation gates. |
 | 34 | Enterprise And Team Workflow | Complete locally | Define local team profiles, approval records, audit events, and shared policy profiles without cloud dependency. | Team workflow is local, auditable, opt-in, and unable to weaken required safety gates silently. |
 | 35 | Packaging Signing Notarization And Distribution | Complete locally | Define the fail-closed distribution readiness gate for release artifacts, installer/uninstaller, upgrade path, checksums, SBOM/provenance policy, and package-channel evaluation. | Release artifact claims remain blocked until clean-tag signing, notarization, verification, install, upgrade, downgrade, uninstall, and package-channel evidence exists. |
-| 36 | CI Benchmarking And Performance Lab | Planned | Add repeatable CI and local benchmark methodology for supported macOS and Apple container evidence. | Benchmarks use disposable resources, record environment facts, and do not create performance marketing claims. |
+| 36 | CI Benchmarking And Performance Lab | Complete locally | Add repeatable CI and local benchmark methodology for supported macOS and Apple container evidence. | Benchmark reports use dry-run or fixture data, record environment facts, fail closed on unsafe resource policy, and do not create performance marketing claims. |
 | 37 | Documentation Site And Public Education | Planned | Define documentation-site information architecture and source-of-truth boundaries for the separate website repository. | Core repo owns source reference docs; website work stays outside this repository unless separately approved. |
 | 38 | Governance And Contributor Model | Complete locally | Mature OSS governance, contributor workflow, security reporting, review triggers, roadmap process, and release ownership. | Governance docs and templates define issue-to-PR-to-release flow, risky-area review, private-report guidance, and support boundaries. |
 | 39 | Beta Readiness | Planned | Define beta criteria, blockers, deferrals, install/upgrade/docs/security/support gates, and public-claim audit. | Maintainer-approved beta checklist exists and release/limitations docs match code and tests. |
@@ -420,6 +420,15 @@ Phase 34 does not add a cloud team service, central remote control, hosted audit
 - Added release-doc XCTest coverage that guards source-only current truth and blocks unsupported artifact claims.
 
 Phase 35 does not produce binary archives, installer packages, install scripts, signed artifacts, notarized artifacts, SBOMs, provenance statements, Homebrew formulae, package-channel support, launch agents, release tags, GitHub Releases, dependencies, runtime mutation, direct Apple container shell-out, SQLite access outside `HostwrightState`, website work, or GUI code.
+
+## Phase 36 Outputs
+
+- Added `BenchmarkLabReport` models and parser validation for dry-run and fixture-backed benchmark reports.
+- Added benchmark fixture coverage for environment facts, disposable-resource policy, measured/unmeasured dimensions, and unsafe policy rejection.
+- Added `docs/architecture/benchmark-lab.md` and linked it from resource intelligence, compatibility, limitations, release process, requirements, acceptance, traceability, build status, and devlog docs.
+- Added `scripts/lint.sh` to hosted CI after build and test.
+
+Phase 36 does not add live benchmark command execution, Apple container commands, image pulls, runtime mutation, broad cleanup, state writes, cloud telemetry, hosted performance monitoring, benchmark number publication, performance marketing claims, dependencies, release tags, GitHub Releases, website work, or GUI code.
 
 ## Phase 38 Outputs
 

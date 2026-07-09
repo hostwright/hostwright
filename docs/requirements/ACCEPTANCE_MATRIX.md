@@ -319,6 +319,14 @@ Phase 8A is a required preflight before this mutation gate. It proves real read-
 | HW-GOV-003 | Release artifact claims remain behind maintainer approval and matching evidence; Phase 35 does not create tags, GitHub Releases, or public artifacts. | Automated + manual | Diff review, PR review, and local git status review. |
 | HW-RUNTIME-001, HW-RUNTIME-002, HW-STATE-001 | Phase 35 does not add runtime mutation, direct Apple container shell-out, SQLite access outside `HostwrightState`, dependencies, release tags, GitHub Releases, website work, GUI code, or package-channel implementation. | Automated + manual | Full local gate, targeted boundary scans, and diff review. |
 
+## Phase 36 Gate: CI Benchmarking And Performance Lab
+
+| Requirement IDs | Acceptance criteria | Verification type | Verification command or review |
+| --- | --- | --- | --- |
+| HW-COMPAT-011, HW-REL-004 | Benchmark lab reports record environment facts, disposable-resource policy, observations for every benchmark dimension, and explicit limits before any performance claim. | Automated | Health XCTest dry-run report and fixture parser cases. |
+| HW-COMPAT-012, HW-DOCS-002 | Docs explain that hosted CI runs build/test/lint/naming only, Apple container benchmarks are fixture/dry-run only, and current core does not publish benchmark numbers, live version-drift probes, capacity claims, or hosted performance monitoring. | Automated + manual | Core docs guard plus benchmark lab, resource intelligence, limitations, release process, and compatibility review. |
+| HW-RUNTIME-001, HW-RUNTIME-002, HW-STATE-001 | Phase 36 does not add live Apple container commands, image pulls, runtime mutation, broad cleanup, state writes, cloud telemetry, dependencies, release tags, GitHub Releases, website work, or GUI code. | Automated + manual | Full local gate, targeted boundary scans, and diff review. |
+
 ## Phase 38 Gate: Governance And Contributor Model
 
 | Requirement IDs | Acceptance criteria | Verification type | Verification command or review |

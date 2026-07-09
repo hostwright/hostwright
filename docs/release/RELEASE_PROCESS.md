@@ -73,6 +73,12 @@ Phase 35 defines the fail-closed distribution gate in `docs/release/distribution
 
 No binary archive, installer package, install script, Homebrew formula, signed artifact, notarized artifact, SBOM, provenance statement, or package-channel claim may be published until that gate has matching evidence from a clean public `v*` tag.
 
+## Benchmark Gate
+
+Phase 36 defines benchmark report contracts in `docs/architecture/benchmark-lab.md`.
+
+No release notes, docs, or public artifacts may claim performance numbers, production capacity, Apple container version compatibility, or battery/thermal behavior until a reviewed benchmark report records environment facts, disposable-resource policy, exact measured dimensions, cleanup evidence, and maintainer approval.
+
 ## Tag And Release Steps
 
 Only after the Phase 10 branch is merged to `main` and final verification passes:

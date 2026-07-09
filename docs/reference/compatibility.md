@@ -11,7 +11,7 @@ Hostwright `v0.1.0-alpha.1` is a source-only alpha and is not production ready.
 | Build system | Swift Package Manager | `Package.swift` declares macOS 26. |
 | Swift tools | Swift 6.2+ expected | Local verification used Swift 6.3.3 through full Xcode developer tools. |
 | Runtime | Apple container CLI | Required for runtime observation, apply, logs, status, and cleanup. |
-| Resource intelligence | Local host facts and fixture-backed reports | Doctor reports ProcessInfo-backed hardware/thermal facts and unmeasured benchmark dimensions; no capacity guarantee. |
+| Resource intelligence and benchmark lab | Local host facts plus fixture-backed benchmark report contracts | Doctor reports ProcessInfo-backed hardware/thermal facts and unmeasured benchmark dimensions; Phase 36 benchmark lab parses dry-run/fixture reports only; no capacity guarantee. |
 | State | Explicit SQLite database path | No default state path is provided. |
 | Artifact | Source only | No binaries, installer packages, Homebrew formula, signing, or notarization. |
 

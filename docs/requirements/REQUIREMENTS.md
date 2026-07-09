@@ -165,8 +165,9 @@ Status values:
 | --- | --- | --- | --- | --- | --- | --- |
 | HW-DOCS-001 | Every supported command must have reference docs. | Agent Engineering Manual | Partially implemented | `docs/reference/cli.md` | Docs review | 2 |
 | HW-DOCS-002 | Unsupported behavior must be explicit and searchable. | Agent Engineering Manual | Partially implemented | `docs/reference/limitations.md`, site limitations page | `scripts/grep-orchard.sh .`; docs review | 3 |
-| HW-DOCS-003 | Public website copy must not claim unimplemented behavior as current support. | Agent Engineering Manual; Final Production Arsenal | Planned for separate website repository | Not committed in core repo; website belongs in `hostwright.dev` | Website repo review | 3 |
+| HW-DOCS-003 | Public website copy must not claim unimplemented behavior as current support. | Agent Engineering Manual; Final Production Arsenal | Implemented as core source-of-truth boundary; separate website copy remains outside this repo | `docs/architecture/documentation-site-public-education.md`, `docs/reference/limitations.md` | Core docs guard; website repo review remains separate | 3, 37 |
 | HW-DOCS-004 | Source material must remain preserved and traceable. | Final Production Arsenal; Naming Convention Folder | Implemented | `docs/source-material/README.md` | Preservation log review | 0 |
+| HW-DOCS-005 | Documentation-site information architecture must keep source truth in this core repository while website presentation stays in the separate `hostwright.dev` repository. | Phase 37 maintainer scope | Implemented as documentation-site boundary and tutorial-outline policy only | `docs/architecture/documentation-site-public-education.md`, `README.md`, `docs/release/RELEASE_PROCESS.md` | Core docs guard | 37 |
 
 ## Control Surface
 

@@ -36,6 +36,7 @@ Hostwright is not production ready.
 - Phase 36 benchmark lab report models and fixture parser for dry-run methodology records, disposable-resource policy, environment facts, and unmeasured dimensions.
 - Source-only release candidate packaging for `v0.1.0-alpha.1`.
 - Release distribution readiness documentation for future signed and notarized artifacts, with current binary and installer publication still blocked.
+- Documentation-site information architecture and source-of-truth boundaries for a separate `hostwright.dev` repository.
 - Swift Package Manager module boundaries.
 - RuntimeAdapter contract infrastructure, state scaffolds, reconciler scaffolds, health models, networking scaffolds, and observability scaffolds.
 - `MockRuntimeAdapter` and fake runtime process runner for tests only.
@@ -85,6 +86,7 @@ Hostwright is not production ready.
 - Runtime density measurement, VM-per-container overhead measurement, boot-latency benchmarking, polling-overhead benchmarking, battery-impact measurement, sleep/wake runtime proofing, or workload memory-pressure benchmarking as automatic product behavior.
 - Live benchmark command execution, CI Apple container benchmark execution, benchmark number publication, Apple container version drift live probing, performance comparison claims, production capacity claims, or hosted performance monitoring.
 - Production capacity planning, automatic placement decisions, daemon-enforced scheduling, or resource reservations.
+- Documentation-site frontend, hosted docs deployment, website search, website analytics, generated site content pipeline, marketing campaign, or website repository implementation in this core repository.
 - Apple GPU, ANE, Metal, Core ML, MLX, PyTorch MPS, host-native accelerator helpers, host accelerator device exposure, or accelerator-aware scheduling.
 - Multi-action `hostwright apply`.
 - Guaranteed Apple container observation on every machine.

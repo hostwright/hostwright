@@ -763,6 +763,66 @@ final class HostwrightCoreTests: XCTestCase {
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("team workflow manages shared secrets"))
     }
 
+    func testDocumentationSiteDocsDescribeSourceOfTruthBoundary() throws {
+        let root = try packageRoot()
+        let sitePlan = try read("docs/architecture/documentation-site-public-education.md", root: root)
+        let readme = try read("README.md", root: root)
+        let cli = try read("docs/reference/cli.md", root: root)
+        let limitations = try read("docs/reference/limitations.md", root: root)
+        let releaseProcess = try read("docs/release/RELEASE_PROCESS.md", root: root)
+        let requirements = try read("docs/requirements/REQUIREMENTS.md", root: root)
+        let acceptance = try read("docs/requirements/ACCEPTANCE_MATRIX.md", root: root)
+        let traceability = try read("docs/requirements/SOURCE_TRACEABILITY.md", root: root)
+        let implementationPlan = try read("docs/IMPLEMENTATION_PLAN.md", root: root)
+        let buildStatus = try read("docs/BUILD_STATUS.md", root: root)
+        let devlog = try read("docs/devlog/0037-documentation-site-public-education.md", root: root)
+        let publicDocs = [
+            sitePlan,
+            readme,
+            cli,
+            limitations,
+            releaseProcess,
+            requirements,
+            acceptance,
+            traceability,
+            implementationPlan,
+            buildStatus,
+            devlog
+        ].joined(separator: "\n")
+
+        XCTAssertTrue(sitePlan.contains("Status: Phase 37 source-of-truth and information architecture boundary."))
+        XCTAssertTrue(sitePlan.contains("Core repository owns source reference truth"))
+        XCTAssertTrue(sitePlan.contains("The separate `hostwright.dev` repository owns presentation"))
+        XCTAssertTrue(sitePlan.contains("Website copy must link back to the source docs when it describes current behavior."))
+        XCTAssertTrue(sitePlan.contains("examples/single-service/hostwright.yaml"))
+        XCTAssertTrue(sitePlan.contains("examples/app-suite/hostwright.yaml"))
+        XCTAssertTrue(sitePlan.contains("Run `hostwright validate` and `hostwright plan`."))
+        XCTAssertTrue(sitePlan.contains("current `apply` executes at most one supported action"))
+        XCTAssertTrue(sitePlan.contains("cleanup deletes only exact eligible Hostwright-owned non-running containers"))
+        XCTAssertTrue(readme.contains("Documentation-site source-of-truth plan"))
+        XCTAssertTrue(limitations.contains("Documentation-site information architecture"))
+        XCTAssertTrue(releaseProcess.contains("## Public Education Gate"))
+        XCTAssertTrue(requirements.contains("HW-DOCS-005"))
+        XCTAssertTrue(acceptance.contains("Phase 37 Gate: Documentation Site And Public Education"))
+        XCTAssertTrue(traceability.contains("HW-DOCS-001, HW-DOCS-002, HW-DOCS-003, HW-DOCS-005"))
+        XCTAssertTrue(implementationPlan.contains("## Phase 37 Outputs"))
+        XCTAssertTrue(buildStatus.contains("Phase 37 adds documentation-site source-of-truth"))
+        XCTAssertTrue(devlog.contains("No website frontend."))
+
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("hostwright.dev is deployed from this repository"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("hosted docs are implemented"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("documentation-site frontend is implemented"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("website analytics are enabled"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("website search is implemented"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("website owns source truth"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("marketing claims can override limitations"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("tutorials may skip limitations"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("public docs may claim Kubernetes support"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("public docs may claim Docker API support"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("public docs may claim tunnel support"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("public docs may claim GPU support"))
+    }
+
     private func read(_ relativePath: String, root: URL) throws -> String {
         try String(contentsOf: root.appendingPathComponent(relativePath), encoding: .utf8)
     }

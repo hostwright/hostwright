@@ -96,6 +96,7 @@ More detail:
 - Compatibility matrix: `docs/reference/compatibility.md`.
 - Security and safety notes: `docs/reference/security-safety.md`.
 - Release process: `docs/release/RELEASE_PROCESS.md`.
+- Documentation-site source-of-truth plan: `docs/architecture/documentation-site-public-education.md`.
 
 ## Manifest
 

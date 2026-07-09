@@ -48,7 +48,7 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 | 37 | Documentation Site And Public Education | Complete locally | Define documentation-site information architecture and source-of-truth boundaries for the separate website repository. | Core repo owns source reference docs; website presentation and implementation stay outside this repository unless separately approved. |
 | 38 | Governance And Contributor Model | Complete locally | Mature OSS governance, contributor workflow, security reporting, review triggers, roadmap process, and release ownership. | Governance docs and templates define issue-to-PR-to-release flow, risky-area review, private-report guidance, and support boundaries. |
 | 39 | Beta Readiness | Complete locally | Define beta criteria, blockers, deferrals, install/upgrade/docs/security/support gates, and public-claim audit. | Beta readiness checklist exists, blocks beta tags until evidence and maintainer approval, and keeps release/limitations docs aligned with code and tests. |
-| 40 | Apple Silicon Control-Plane Direction Decision | Planned | Decide whether Hostwright remains single-host, expands core, or splits experimental platform work. | Public docs reflect the accepted direction without claiming unbuilt support. |
+| 40 | Apple Silicon Control-Plane Direction Decision | Complete locally | Decide whether Hostwright remains single-host, expands core, or splits experimental platform work. | Public docs keep current core single-host and reject platform expansion from current core without claiming unbuilt support. |
 
 ## Current Hard Boundaries
 
@@ -78,6 +78,7 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 - Scheduler behavior is local and advisory: it scores explicit local recommendations from declared inputs and existing policy decisions, but it does not mutate runtime, write state, reserve capacity, perform automatic placement, expose a scheduler API, schedule accelerators, or place work on remote hosts.
 - Documentation-site work is source-of-truth planning only: current support claims stay grounded in this repository, while website frontend, hosted docs deployment, analytics, search, and presentation work belong outside the core repository.
 - Beta readiness work is checklist and claim-gating only: no beta tag, GitHub Release, version bump, binary artifact, installer, support promise, or production-readiness claim exists until separate maintainer approval and matching evidence.
+- Control-plane direction work keeps Hostwright core single-host for beta and first supported release work; Kubernetes-class, CRI, Docker API, full Compose, cloud, multi-host, remote-placement, and accelerator-aware scheduling work require a separate approved track.
 
 ## Phase 3 Outputs
 
@@ -457,3 +458,13 @@ Phase 38 does not add CODEOWNERS enforcement, branch protection, new maintainers
 - Added core docs guard coverage so beta planning cannot become a beta tag, production claim, binary distribution claim, support SLA, compatibility expansion, telemetry upload, or unsupported current-support claim.
 
 Phase 39 does not add beta tags, GitHub Releases, version bumps, binary artifacts, installers, Homebrew, signing, notarization, SBOM, provenance, production readiness, support SLA, product code, runtime mutation, RuntimeAdapter changes, SQLite access, dependencies, website/frontend work, telemetry upload, or GUI code.
+
+## Phase 40 Outputs
+
+- Added `docs/architecture/control-plane-direction.md` with the accepted direction: current core remains a single-host Apple silicon control plane through beta and first supported release work.
+- Consolidated evidence from accelerator, external compatibility, multi-host, scheduler, benchmark, and beta-readiness phases.
+- Rejected Kubernetes-class, CRI, Docker API, full Compose, cloud, multi-host, remote-placement, and accelerator-aware scheduling work from current core.
+- Linked the direction from the README, charter, limitations, requirements, acceptance matrix, traceability, build status, and devlog docs.
+- Added core docs guard coverage so direction planning cannot become current support or compatibility claims.
+
+Phase 40 does not add cluster behavior, CRI, Kubernetes behavior, Docker API behavior, Compose parity, cloud control, remote host agents, state replication, membership, peer discovery, remote placement, accelerator access, accelerator-aware scheduling, product code, runtime mutation, RuntimeAdapter changes, SQLite changes, dependencies, release tags, GitHub Releases, website work, or GUI code.

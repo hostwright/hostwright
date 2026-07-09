@@ -534,6 +534,67 @@ final class HostwrightCoreTests: XCTestCase {
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Kubernetes scheduler behavior is implemented"))
     }
 
+    func testControlPlaneDirectionKeepsCurrentCoreSingleHost() throws {
+        let root = try packageRoot()
+        let direction = try read("docs/architecture/control-plane-direction.md", root: root)
+        let charter = try read("docs/PROJECT_CHARTER.md", root: root)
+        let readme = try read("README.md", root: root)
+        let limitations = try read("docs/reference/limitations.md", root: root)
+        let requirements = try read("docs/requirements/REQUIREMENTS.md", root: root)
+        let acceptance = try read("docs/requirements/ACCEPTANCE_MATRIX.md", root: root)
+        let traceability = try read("docs/requirements/SOURCE_TRACEABILITY.md", root: root)
+        let implementationPlan = try read("docs/IMPLEMENTATION_PLAN.md", root: root)
+        let buildStatus = try read("docs/BUILD_STATUS.md", root: root)
+        let devlog = try read("docs/devlog/0040-control-plane-direction.md", root: root)
+        let publicDocs = [
+            direction,
+            charter,
+            readme,
+            limitations,
+            requirements,
+            acceptance,
+            traceability,
+            implementationPlan,
+            buildStatus,
+            devlog
+        ].joined(separator: "\n")
+
+        XCTAssertTrue(direction.contains("Status: Phase 40 direction decision."))
+        XCTAssertTrue(direction.contains("Hostwright core remains a single-host Apple silicon control plane"))
+        XCTAssertTrue(direction.contains("| Single-host core | Accept |"))
+        XCTAssertTrue(direction.contains("| Kubernetes-class Apple silicon control plane in current core | Reject |"))
+        XCTAssertTrue(direction.contains("| Multi-host inside current core | Reject |"))
+        XCTAssertTrue(direction.contains("| CRI compatibility in current core | Reject |"))
+        XCTAssertTrue(direction.contains("| Cloud control plane in current core | Reject |"))
+        XCTAssertTrue(direction.contains("| Accelerator-aware scheduling | Reject for current core |"))
+        XCTAssertTrue(direction.contains("Follow-up issues may be opened only for evidence-backed work in the chosen direction."))
+        XCTAssertTrue(charter.contains("Phase 40 keeps current core on the single-host path"))
+        XCTAssertTrue(readme.contains("Control-plane direction"))
+        XCTAssertTrue(limitations.contains("Apple silicon control-plane direction documentation"))
+        XCTAssertTrue(requirements.contains("HW-COMPAT-013"))
+        XCTAssertTrue(acceptance.contains("Phase 40 Gate: Apple Silicon Control-Plane Direction Decision"))
+        XCTAssertTrue(traceability.contains("HW-COMPAT-013"))
+        XCTAssertTrue(implementationPlan.contains("## Phase 40 Outputs"))
+        XCTAssertTrue(buildStatus.contains("Phase 40 adds an Apple silicon control-plane direction decision"))
+        XCTAssertTrue(devlog.contains("No cluster implementation."))
+
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright supports Kubernetes"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright supports CRI"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright supports Docker API"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright supports Docker Compose"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright supports multi-host"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright supports cloud control plane"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright supports remote placement"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright schedules accelerators"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Kubernetes-class control plane is implemented"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("CRI shim is implemented"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Docker API shim is implemented"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("multi-host orchestration is implemented"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("remote placement is implemented"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("cloud control plane is implemented"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("accelerator-aware scheduling is implemented"))
+    }
+
     func testGovernanceDocsDescribeReviewAndSupportBoundaries() throws {
         let root = try packageRoot()
         let governance = try read("GOVERNANCE.md", root: root)

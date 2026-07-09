@@ -37,6 +37,7 @@ Hostwright is not production ready.
 - Source-only release candidate packaging for `v0.1.0-alpha.1`.
 - Release distribution readiness documentation for future signed and notarized artifacts, with current binary and installer publication still blocked.
 - Beta readiness checklist documentation for future beta tag approval, with current beta release publication still blocked.
+- Apple silicon control-plane direction documentation that keeps current core single-host and blocks platform-expansion claims until separate evidence and maintainer approval exist.
 - Documentation-site information architecture and source-of-truth boundaries for a separate `hostwright.dev` repository.
 - Swift Package Manager module boundaries.
 - RuntimeAdapter contract infrastructure, state scaffolds, reconciler scaffolds, health models, networking scaffolds, and observability scaffolds.
@@ -117,6 +118,7 @@ Hostwright is not production ready.
 - Tunnel management.
 - Cloudflare Tunnel, Tailscale Serve/Funnel, WireGuard, mTLS provisioning, or reverse proxy setup.
 - Cloud control plane.
+- Kubernetes-class Apple silicon control plane.
 - Web dashboard.
 - GUI implementation, daemon API, or local control-surface runtime.
 - Production readiness.
@@ -148,6 +150,7 @@ Hostwright is not production ready.
 - Metal, Core ML, or MLX container support promises.
 - PyTorch MPS container support, host-native accelerator helpers, or accelerator device exposure.
 - Accelerator-aware placement from resource intelligence.
+- Platform expansion inside current core without a separate threat model, conformance plan, state-authority design, disposable proof path, and maintainer approval.
 - Automatic destructive garbage collection.
 - Privileged helper unless a future design record and threat model prove it is necessary.
 

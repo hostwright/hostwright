@@ -150,4 +150,75 @@ final class HostwrightHealthTests: XCTestCase {
         XCTAssertEqual(report.architectureWarnings.first?.reportedArchitecture, "linux/amd64")
         XCTAssertTrue(report.limits.contains("No runtime mutation, image pull, or container lifecycle action."))
     }
+
+    func testBenchmarkLabDryRunReportRecordsEnvironmentAndNoMutationPolicy() {
+        let resourceReport = ResourceIntelligenceReport(
+            snapshot: ResourceIntelligenceSnapshot(
+                method: .fixture,
+                operatingSystemDescription: "macOS 26.5",
+                platform: PlatformSnapshot(macOSMajorVersion: 26, architecture: "arm64"),
+                physicalMemoryBytes: 25_769_803_776,
+                activeProcessorCount: 12,
+                thermalState: .nominal,
+                appleContainerExecutablePath: "/usr/local/bin/container",
+                appleContainerVersion: "container 1.0.0",
+                workloadProfile: .localContainersGeneral
+            )
+        )
+
+        let report = BenchmarkLabReport.dryRun(
+            profileID: "phase36-dry-run",
+            recordedAt: "2026-07-09T00:00:00Z",
+            resourceReport: resourceReport
+        )
+
+        XCTAssertEqual(report.schemaVersion, 1)
+        XCTAssertEqual(report.environment.hardware.architecture, "arm64")
+        XCTAssertEqual(report.environment.appleContainer.version, "container 1.0.0")
+        XCTAssertEqual(report.resourcePolicy.disposableResourceNamePrefix, "hostwright-benchmark-")
+        XCTAssertTrue(report.resourcePolicy.requiresHostwrightOwnedResources)
+        XCTAssertFalse(report.resourcePolicy.allowsImagePull)
+        XCTAssertFalse(report.resourcePolicy.allowsRuntimeMutation)
+        XCTAssertFalse(report.resourcePolicy.allowsBroadCleanup)
+        XCTAssertEqual(Set(report.observations.map(\.dimension)), Set(BenchmarkMeasurementDimension.allCases))
+        XCTAssertTrue(report.observations.allSatisfy { $0.observation.status == .unmeasured })
+        XCTAssertTrue(report.limits.contains("No performance marketing claim."))
+    }
+
+    func testBenchmarkLabParserLoadsFixtureAndRejectsUnsafePolicies() throws {
+        let url = try XCTUnwrap(Bundle.module.url(forResource: "benchmark-report-phase36", withExtension: "json"))
+        let text = try String(contentsOf: url, encoding: .utf8)
+
+        let report = try BenchmarkLabReportParser.parseReport(text)
+
+        XCTAssertEqual(report.profileID, "phase36-dry-run")
+        XCTAssertEqual(report.resourcePolicy.disposableResourceNamePrefix, "hostwright-benchmark-")
+        XCTAssertEqual(report.observations.count, BenchmarkMeasurementDimension.allCases.count)
+        XCTAssertTrue(report.limits.contains("No cloud telemetry."))
+
+        var unsafe = report
+        unsafe = BenchmarkLabReport(
+            schemaVersion: unsafe.schemaVersion,
+            profileID: unsafe.profileID,
+            recordedAt: unsafe.recordedAt,
+            environment: unsafe.environment,
+            resourcePolicy: BenchmarkResourcePolicy(
+                disposableResourceNamePrefix: "benchmark-",
+                requiresHostwrightOwnedResources: true,
+                allowsImagePull: false,
+                allowsRuntimeMutation: false,
+                allowsBroadCleanup: false,
+                cleanupInstructions: unsafe.resourcePolicy.cleanupInstructions
+            ),
+            observations: unsafe.observations,
+            limits: unsafe.limits
+        )
+
+        XCTAssertThrowsError(try BenchmarkLabReportParser.validate(unsafe)) { error in
+            XCTAssertEqual(
+                error as? BenchmarkLabReportValidationError,
+                .unsafeResourcePolicy("disposable resource prefix must start with hostwright-")
+            )
+        }
+    }
 }

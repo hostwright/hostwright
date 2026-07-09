@@ -1,6 +1,6 @@
 # Resource Intelligence Methodology
 
-Status: Phase 26 local reporting boundary.
+Status: Phase 26 local reporting boundary, extended by the Phase 36 benchmark lab.
 
 Phase 26 adds resource intelligence as local diagnostic reporting, not capacity management. The report model records the measurement method, host facts, Apple container version evidence, workload profile, unmeasured dimensions, architecture warnings, and limits.
 
@@ -39,6 +39,8 @@ Future benchmark runs must record:
 - Whether the run used a disposable Hostwright-owned resource.
 
 If any dimension is not measured, the report must say `unmeasured` instead of inferring a value.
+
+Phase 36 adds a separate [Benchmark Lab](benchmark-lab.md) report contract for dry-run and fixture-backed benchmark records. The benchmark lab preserves the same no-mutation, no-telemetry, no-capacity-claim boundary unless a later approved live benchmark command supplies disposable-resource proof.
 
 ## Blocked Evidence
 

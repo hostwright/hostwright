@@ -33,6 +33,7 @@ Hostwright is not production ready.
 - Restart policy state with max attempts, backoff, manual-disable from `restart.policy: no`, preexisting operator hold state, and crash-loop blocking before managed start or managed restart is exposed as executable.
 - `hostwright doctor` safe local checks.
 - `hostwright doctor --output json` resource intelligence reports with local ProcessInfo-backed hardware and thermal facts, fixture-backed parser coverage, explicit unmeasured benchmark dimensions, architecture warnings only when evidence exists, and local-only/no-capacity limits.
+- Phase 36 benchmark lab report models and fixture parser for dry-run methodology records, disposable-resource policy, environment facts, and unmeasured dimensions.
 - Source-only release candidate packaging for `v0.1.0-alpha.1`.
 - Release distribution readiness documentation for future signed and notarized artifacts, with current binary and installer publication still blocked.
 - Swift Package Manager module boundaries.
@@ -82,6 +83,7 @@ Hostwright is not production ready.
 - Live macOS Keychain access, Keychain prompts, Keychain access groups, synchronizable Keychain items, registry credential storage, credential sync, credential upload, or cloud identity integration.
 - Registry image resolution, tag-to-digest lookup, automatic image pulls, signature verification, OCI referrer inspection, SBOM generation/validation, vulnerability scanning, dependency provenance, or source-build integrity automation.
 - Runtime density measurement, VM-per-container overhead measurement, boot-latency benchmarking, polling-overhead benchmarking, battery-impact measurement, sleep/wake runtime proofing, or workload memory-pressure benchmarking as automatic product behavior.
+- Live benchmark command execution, CI Apple container benchmark execution, benchmark number publication, Apple container version drift live probing, performance comparison claims, production capacity claims, or hosted performance monitoring.
 - Production capacity planning, automatic placement decisions, daemon-enforced scheduling, or resource reservations.
 - Apple GPU, ANE, Metal, Core ML, MLX, PyTorch MPS, host-native accelerator helpers, host accelerator device exposure, or accelerator-aware scheduling.
 - Multi-action `hostwright apply`.

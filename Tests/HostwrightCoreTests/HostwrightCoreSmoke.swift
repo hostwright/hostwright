@@ -166,19 +166,61 @@ final class HostwrightCoreTests: XCTestCase {
     func testResourceIntelligenceDocsDescribeLocalReportingOnly() throws {
         let root = try packageRoot()
         let methodology = try read("docs/architecture/resource-intelligence.md", root: root)
+        let benchmarkLab = try read("docs/architecture/benchmark-lab.md", root: root)
         let constraints = try read("docs/architecture/apple-silicon-constraints.md", root: root)
         let compatibility = try read("docs/reference/compatibility.md", root: root)
         let doctor = try read("docs/reference/doctor-checks.md", root: root)
         let limitations = try read("docs/reference/limitations.md", root: root)
-        let publicDocs = [methodology, constraints, compatibility, doctor, limitations].joined(separator: "\n")
+        let releaseProcess = try read("docs/release/RELEASE_PROCESS.md", root: root)
+        let requirements = try read("docs/requirements/REQUIREMENTS.md", root: root)
+        let acceptance = try read("docs/requirements/ACCEPTANCE_MATRIX.md", root: root)
+        let traceability = try read("docs/requirements/SOURCE_TRACEABILITY.md", root: root)
+        let implementationPlan = try read("docs/IMPLEMENTATION_PLAN.md", root: root)
+        let buildStatus = try read("docs/BUILD_STATUS.md", root: root)
+        let devlog = try read("docs/devlog/0036-ci-benchmarking-performance-lab.md", root: root)
+        let ci = try read(".github/workflows/ci.yml", root: root)
+        let publicDocs = [
+            methodology,
+            benchmarkLab,
+            constraints,
+            compatibility,
+            doctor,
+            limitations,
+            releaseProcess,
+            requirements,
+            acceptance,
+            traceability,
+            implementationPlan,
+            buildStatus,
+            devlog,
+            ci
+        ].joined(separator: "\n")
 
-        XCTAssertTrue(methodology.contains("Status: Phase 26 local reporting boundary."))
+        XCTAssertTrue(methodology.contains("Status: Phase 26 local reporting boundary, extended by the Phase 36 benchmark lab."))
+        XCTAssertTrue(methodology.contains("Phase 36 adds a separate [Benchmark Lab](benchmark-lab.md) report contract"))
+        XCTAssertTrue(benchmarkLab.contains("Status: Phase 36 local dry-run and fixture-backed benchmark lab."))
+        XCTAssertTrue(benchmarkLab.contains("Every benchmark dimension must be present."))
+        XCTAssertTrue(benchmarkLab.contains("disposable resource names use a `hostwright-` prefix"))
         XCTAssertTrue(methodology.contains("If any dimension is not measured, the report must say `unmeasured` instead of inferring a value."))
         XCTAssertTrue(doctor.contains("does not run Apple container commands"))
-        XCTAssertTrue(compatibility.contains("no capacity guarantee"))
+        XCTAssertTrue(compatibility.contains("Phase 36 benchmark lab parses dry-run/fixture reports only"))
         XCTAssertTrue(limitations.contains("resource intelligence is also local and diagnostic"))
+        XCTAssertTrue(limitations.contains("Phase 36 benchmark lab report models"))
+        XCTAssertTrue(releaseProcess.contains("## Benchmark Gate"))
+        XCTAssertTrue(requirements.contains("HW-COMPAT-011"))
+        XCTAssertTrue(requirements.contains("HW-COMPAT-012"))
+        XCTAssertTrue(acceptance.contains("Phase 36 Gate: CI Benchmarking And Performance Lab"))
+        XCTAssertTrue(traceability.contains("HW-COMPAT-011, HW-COMPAT-012, HW-REL-004"))
+        XCTAssertTrue(implementationPlan.contains("## Phase 36 Outputs"))
+        XCTAssertTrue(buildStatus.contains("Phase 36 adds dry-run and fixture-backed benchmark lab"))
+        XCTAssertTrue(devlog.contains("No benchmark numbers or performance marketing claims."))
+        XCTAssertTrue(ci.contains("scripts/lint.sh"))
 
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright guarantees capacity"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright publishes benchmark numbers"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright monitors performance"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright runs live benchmarks in CI"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Apple container version compatibility is guaranteed"))
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright schedules GPU"))
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright supports ANE"))
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright supports Metal"))

@@ -35,6 +35,7 @@ public enum PolicyDecisionCategory: String, Equatable, Sendable {
     case untrustedManifest
     case accelerator
     case `extension`
+    case team
 }
 
 public enum PolicyReasonCode: String, Equatable, Sendable {
@@ -83,6 +84,14 @@ public enum PolicyReasonCode: String, Equatable, Sendable {
     case extensionTunnelUnsupported
     case extensionSecretResolutionUnsupported
     case extensionAcceleratorUnsupported
+    case teamProfileDeclared
+    case teamProfileMissingIdentity
+    case teamProfileNotOptIn
+    case teamProfileUnsupportedVersion
+    case teamProfileMissingRequiredGate
+    case teamOverrideRequiresApproval
+    case teamOverrideForbidden
+    case teamApprovalRecorded
 }
 
 public struct PolicyDecision: Equatable, Sendable {

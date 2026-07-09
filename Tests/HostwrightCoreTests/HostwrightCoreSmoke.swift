@@ -623,6 +623,62 @@ final class HostwrightCoreTests: XCTestCase {
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("extension may access SQLite directly"))
     }
 
+    func testTeamWorkflowDocsDescribeLocalOptInBoundary() throws {
+        let root = try packageRoot()
+        let teamWorkflow = try read("docs/reference/team-workflow.md", root: root)
+        let governance = try read("GOVERNANCE.md", root: root)
+        let policy = try read("docs/reference/policy.md", root: root)
+        let limitations = try read("docs/reference/limitations.md", root: root)
+        let security = try read("docs/reference/security-safety.md", root: root)
+        let requirements = try read("docs/requirements/REQUIREMENTS.md", root: root)
+        let acceptance = try read("docs/requirements/ACCEPTANCE_MATRIX.md", root: root)
+        let traceability = try read("docs/requirements/SOURCE_TRACEABILITY.md", root: root)
+        let implementationPlan = try read("docs/IMPLEMENTATION_PLAN.md", root: root)
+        let buildStatus = try read("docs/BUILD_STATUS.md", root: root)
+        let devlog = try read("docs/devlog/0034-enterprise-team-workflow.md", root: root)
+        let publicDocs = [
+            teamWorkflow,
+            governance,
+            policy,
+            limitations,
+            security,
+            requirements,
+            acceptance,
+            traceability,
+            implementationPlan,
+            buildStatus,
+            devlog
+        ].joined(separator: "\n")
+
+        XCTAssertTrue(teamWorkflow.contains("Status: Phase 34 local profile and approval model."))
+        XCTAssertTrue(teamWorkflow.contains("A team profile is local data."))
+        XCTAssertTrue(teamWorkflow.contains("Approval records do not bypass hard-coded Hostwright safety gates."))
+        XCTAssertTrue(teamWorkflow.contains("Team workflow audit records use the existing event ledger"))
+        XCTAssertTrue(governance.contains("Team workflow"))
+        XCTAssertTrue(policy.contains("Team policy profiles can be evaluated as local data."))
+        XCTAssertTrue(limitations.contains("Local team policy profile decisions"))
+        XCTAssertTrue(security.contains("## Team Workflow Boundary"))
+        XCTAssertTrue(requirements.contains("HW-TEAM-001"))
+        XCTAssertTrue(requirements.contains("HW-TEAM-004"))
+        XCTAssertTrue(acceptance.contains("Phase 34 Gate: Enterprise And Team Workflow"))
+        XCTAssertTrue(traceability.contains("HW-TEAM-001, HW-TEAM-002, HW-TEAM-003, HW-TEAM-004"))
+        XCTAssertTrue(implementationPlan.contains("## Phase 34 Outputs"))
+        XCTAssertTrue(buildStatus.contains("Phase 34 adds local team workflow"))
+        XCTAssertTrue(devlog.contains("No cloud team service."))
+
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("cloud team service is implemented"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("central remote control is implemented"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("hosted audit log is implemented"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("user tracking is implemented"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("enterprise support workflow is implemented"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("remote policy distribution is implemented"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("team profiles bypass plan hashes"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("team profiles bypass cleanup tokens"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("team profiles bypass ownership checks"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("team workflow manages macOS users"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("team workflow manages shared secrets"))
+    }
+
     private func read(_ relativePath: String, root: URL) throws -> String {
         try String(contentsOf: root.appendingPathComponent(relativePath), encoding: .utf8)
     }

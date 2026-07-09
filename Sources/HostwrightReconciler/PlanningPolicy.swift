@@ -114,7 +114,15 @@ private extension PlanIssueKind {
              .extensionNetworkingUnsupported,
              .extensionTunnelUnsupported,
              .extensionSecretResolutionUnsupported,
-             .extensionAcceleratorUnsupported:
+             .extensionAcceleratorUnsupported,
+             .teamProfileDeclared,
+             .teamProfileMissingIdentity,
+             .teamProfileNotOptIn,
+             .teamProfileUnsupportedVersion,
+             .teamProfileMissingRequiredGate,
+             .teamOverrideRequiresApproval,
+             .teamOverrideForbidden,
+             .teamApprovalRecorded:
             return nil
         }
     }

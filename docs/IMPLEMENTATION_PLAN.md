@@ -43,7 +43,7 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 | 32 | Policy Engine | Complete locally | Add deterministic local policy decisions before import, compatibility, multi-host, and scheduler work. | Policy evaluator tests cover ports, mounts, images, env/secrets, cleanup, lifecycle, exposure, untrusted manifests, accelerator placeholders, and planner migration. |
 | 33 | Plugin And Extension Architecture | Complete locally | Define safe extension types, trust model, versioning, capability declarations, and non-mutating prototype boundaries. | Extension design has a threat model and no extension can bypass runtime, state, policy, redaction, audit, or confirmation gates. |
 | 34 | Enterprise And Team Workflow | Complete locally | Define local team profiles, approval records, audit events, and shared policy profiles without cloud dependency. | Team workflow is local, auditable, opt-in, and unable to weaken required safety gates silently. |
-| 35 | Packaging Signing Notarization And Distribution | Planned | Define or implement release artifacts, installer/uninstaller, upgrade path, checksums, SBOM/provenance policy, and package-channel evaluation. | Release artifacts can be reproduced and verified before any public binary or installer claim. |
+| 35 | Packaging Signing Notarization And Distribution | Complete locally | Define the fail-closed distribution readiness gate for release artifacts, installer/uninstaller, upgrade path, checksums, SBOM/provenance policy, and package-channel evaluation. | Release artifact claims remain blocked until clean-tag signing, notarization, verification, install, upgrade, downgrade, uninstall, and package-channel evidence exists. |
 | 36 | CI Benchmarking And Performance Lab | Planned | Add repeatable CI and local benchmark methodology for supported macOS and Apple container evidence. | Benchmarks use disposable resources, record environment facts, and do not create performance marketing claims. |
 | 37 | Documentation Site And Public Education | Planned | Define documentation-site information architecture and source-of-truth boundaries for the separate website repository. | Core repo owns source reference docs; website work stays outside this repository unless separately approved. |
 | 38 | Governance And Contributor Model | Complete locally | Mature OSS governance, contributor workflow, security reporting, review triggers, roadmap process, and release ownership. | Governance docs and templates define issue-to-PR-to-release flow, risky-area review, private-report guidance, and support boundaries. |
@@ -411,6 +411,15 @@ Phase 33 does not add a plugin loader, remote plugin registry, binary plugin dis
 - `docs/reference/team-workflow.md` documents local profiles, approval records, override policy, audit events, shared-machine expectations, and non-goals.
 
 Phase 34 does not add a cloud team service, central remote control, hosted audit log, user tracking, enterprise support workflow, remote policy distribution, macOS user/group/ACL/keychain access group/MDM management, shared-secret management, runtime mutation expansion, direct Apple container shell-out, SQLite access outside `HostwrightState`, dependencies, release tags, or GitHub Releases.
+
+## Phase 35 Outputs
+
+- Added `docs/release/distribution-readiness.md` as the fail-closed artifact matrix and clean-tag checklist for future binary and installer releases.
+- Documented signing, notarization, checksums, SBOM, provenance, installer, uninstaller, upgrade, downgrade, rollback, and package-channel evidence required before publication.
+- Updated release process, install, security, limitations, requirements, acceptance, traceability, build status, and devlog docs.
+- Added release-doc XCTest coverage that guards source-only current truth and blocks unsupported artifact claims.
+
+Phase 35 does not produce binary archives, installer packages, install scripts, signed artifacts, notarized artifacts, SBOMs, provenance statements, Homebrew formulae, package-channel support, launch agents, release tags, GitHub Releases, dependencies, runtime mutation, direct Apple container shell-out, SQLite access outside `HostwrightState`, website work, or GUI code.
 
 ## Phase 38 Outputs
 

@@ -67,6 +67,12 @@ Before any beta, stable, binary, installer, signing, notarization, SBOM, provena
 - confirm release notes, limitations, install docs, and security docs use current-support language only;
 - confirm no release tag or GitHub Release is created before final verification and maintainer approval.
 
+## Distribution Readiness Gate
+
+Phase 35 defines the fail-closed distribution gate in `docs/release/distribution-readiness.md`.
+
+No binary archive, installer package, install script, Homebrew formula, signed artifact, notarized artifact, SBOM, provenance statement, or package-channel claim may be published until that gate has matching evidence from a clean public `v*` tag.
+
 ## Tag And Release Steps
 
 Only after the Phase 10 branch is merged to `main` and final verification passes:

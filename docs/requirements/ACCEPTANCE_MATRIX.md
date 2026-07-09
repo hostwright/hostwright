@@ -310,6 +310,15 @@ Phase 8A is a required preflight before this mutation gate. It proves real read-
 | HW-TEAM-004, HW-DOCS-002 | Docs describe local team workflow without claiming cloud team service, central remote control, hosted audit log, user tracking, enterprise support workflow, remote policy distribution, macOS user/group/ACL management, or shared-secret management. | Automated + manual | Core docs guard plus team workflow, governance, security, limitations, requirements, and acceptance review. |
 | HW-RUNTIME-001, HW-RUNTIME-002, HW-STATE-001 | Team workflow work does not add runtime mutation, direct Apple container shell-out, SQLite access outside `HostwrightState`, hidden default state paths, cloud services, remote policy, telemetry upload, dependencies, release tags, or GitHub Releases. | Automated + manual | Full local gate, targeted boundary scans, and diff review. |
 
+## Phase 35 Gate: Packaging Signing Notarization And Distribution
+
+| Requirement IDs | Acceptance criteria | Verification type | Verification command or review |
+| --- | --- | --- | --- |
+| HW-REL-005 | Distribution readiness docs define the artifact matrix, clean-tag checklist, signing, notarization, checksum, SBOM, provenance, installer, uninstaller, upgrade, downgrade, rollback, and package-channel evidence required before publishing binaries or installers. | Automated + manual | Core release-doc XCTest case plus review of `docs/release/distribution-readiness.md`. |
+| HW-REL-006, HW-DOCS-002 | Current public docs still state source-only release truth and do not claim binary downloads, installer packages, Homebrew formulae, signing, notarization, SBOM, provenance, install scripts, package channels, or launch agent installation. | Automated + manual | Core release-doc XCTest case plus install, limitations, release-process, and security docs review. |
+| HW-GOV-003 | Release artifact claims remain behind maintainer approval and matching evidence; Phase 35 does not create tags, GitHub Releases, or public artifacts. | Automated + manual | Diff review, PR review, and local git status review. |
+| HW-RUNTIME-001, HW-RUNTIME-002, HW-STATE-001 | Phase 35 does not add runtime mutation, direct Apple container shell-out, SQLite access outside `HostwrightState`, dependencies, release tags, GitHub Releases, website work, GUI code, or package-channel implementation. | Automated + manual | Full local gate, targeted boundary scans, and diff review. |
+
 ## Phase 38 Gate: Governance And Contributor Model
 
 | Requirement IDs | Acceptance criteria | Verification type | Verification command or review |

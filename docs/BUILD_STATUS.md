@@ -28,6 +28,7 @@
 - Phase 21 adds local control-surface requirements, API boundary, accessibility requirements, handoff criteria, and docs guard coverage without adding GUI code, website implementation, web dashboard, cloud dashboard, daemon API, direct Apple container execution, direct SQLite access, RuntimeAdapter bypass, runtime mutation expansion, telemetry upload, hosted diagnostics, release tags, or GitHub Releases.
 - Phase 33 adds typed extension declarations and local extension policy decisions without adding a plugin loader, remote plugin registry, binary plugin distribution, untrusted code execution, runtime mutation extension path, state-write extension path, networking provider behavior, tunnel/DNS/reverse proxy/cloud behavior, secret backend extension, accelerator extension, GUI code, dependencies, release tags, or GitHub Releases.
 - Phase 34 adds local team workflow profile, approval, override, and audit policy models without adding a cloud team service, central remote control, hosted audit log, user tracking, enterprise support workflow, remote policy distribution, macOS user/group/ACL management, shared-secret management, runtime mutation expansion, dependencies, release tags, or GitHub Releases.
+- Phase 35 adds a fail-closed distribution readiness gate for future signed and notarized artifacts without producing binaries, installers, install scripts, launch agents, SBOMs, provenance statements, package-channel support, release tags, or GitHub Releases.
 - `container list --all --format json` returned the verified empty runtime shape `[]`.
 - A disposable local image `hostwright-proof-web:phase8b` was built from the Apple tutorial-style `python:alpine` flow.
 - `hostwright apply` created exactly one Apple container named `hostwright-proof-web` through `RuntimeAdapter`.
@@ -75,6 +76,7 @@
 - Phase 32 adds `HostwrightPolicy` with deterministic local policy decisions for planner checks, cleanup classification, image policy, env/secrets, lifecycle, untrusted manifests, secure exposure, and accelerator placeholders while preserving existing runtime/state boundaries.
 - Phase 33 adds `ExtensionPolicyEvaluator` for deterministic local extension declaration decisions while preserving no runtime execution, no state writes, no plugin loading, and no external integration behavior.
 - Phase 34 adds `TeamWorkflowPolicyEvaluator` for deterministic local team profile decisions and uses existing event ledger records for redacted team audit events without adding new schema or remote behavior.
+- Phase 35 adds release distribution readiness docs and release-doc guard tests for signed binary, notarized installer, checksum, SBOM, provenance, install, upgrade, downgrade, uninstall, rollback, and package-channel evidence before any public artifact claim.
 - Phase 28 adds `HostwrightImport` and `hostwright import-stack <path> [--output text|json]` for deterministic conversion of a narrow safe stack-file subset into reviewed `hostwright.yaml` text, with fail-closed unsupported-field diagnostics and normal manifest validation.
 - Phase 29 adds a research-only external orchestration compatibility decision record that rejects current-core CRI, Kubernetes node behavior, Docker API, Testcontainers target behavior, full Compose parity, attach, exec, log-follow, and port-forward compatibility claims while deferring any external scheduler API to a separate approved issue.
 - Phase 30 adds a research-only multi-host platform decision record that keeps current core single-host and defers remote host agents, membership, state replication, cloud control plane, scheduler API, and remote placement to a separate approved issue or project boundary.
@@ -114,7 +116,7 @@ Important diagnostic correction:
 - `swift -e 'import XCTest'` can still fail and is not the correct gate.
 - A minimal SwiftPM XCTest probe passed after Xcode was fixed.
 - `swift test list` is the local proof that Hostwright now exposes real XCTest cases.
-- `swift test` executes 252 XCTest cases after the Phase 34 enterprise and team workflow update.
+- `swift test` executes 252 XCTest cases after the Phase 35 packaging signing notarization and distribution readiness update.
 
 The old top-level smoke/precondition posture has been replaced with XCTest assertions. Some test file names still include `Smoke.swift`, but the contents are XCTest cases.
 

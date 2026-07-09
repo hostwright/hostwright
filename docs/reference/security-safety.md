@@ -25,9 +25,17 @@ Operation recovery records are audit and recovery guidance only. They record che
 
 ## Policy Boundary
 
-Policy evaluation is local, deterministic, and non-mutating. `HostwrightPolicy` explains allow/warning/blocker decisions for planner safety checks, cleanup classification, image policy, env/secrets, lifecycle requests, secure exposure requests, untrusted manifests, and accelerator placeholders.
+Policy evaluation is local, deterministic, and non-mutating. `HostwrightPolicy` explains allow/warning/blocker decisions for planner safety checks, cleanup classification, image policy, env/secrets, lifecycle requests, secure exposure requests, untrusted manifests, accelerator placeholders, and extension declarations.
 
 Policy decisions do not execute Apple container, write SQLite, contact registries, upload telemetry, configure DNS, create tunnels, distribute team policy, or apply automatic overrides. Unknown, ambiguous, or high-risk settings remain blocked unless a later reviewed implementation adds a narrower explicit gate.
+
+## Extension Boundary
+
+Extension architecture is declaration-only in current core scope. Hostwright can evaluate typed extension declarations for identity, declaration API version, trust level, capabilities, and required boundaries, but it does not load, install, distribute, or execute plugins.
+
+Built-in and reviewed-local non-mutating declarations can receive allow decisions only when they declare the required RuntimeAdapter, HostwrightState, local policy, redaction, audit, explicit-state-path, local-only/no-upload, confirmation, ownership, and no-runtime-mutation boundaries for the requested capability.
+
+Third-party, untrusted, unsupported-version, empty, missing-boundary, runtime-mutation, state-write, networking-provider, tunnel-provider, secret-resolution, and accelerator extension declarations fail closed. Future extension implementations require a separate issue, threat model, tests, and maintainer approval.
 
 ## Governance Boundary
 
@@ -107,6 +115,7 @@ This alpha does not include:
 - cloud control plane;
 - Kubernetes, CRI, Docker API, or Docker Compose compatibility;
 - GPU/ANE scheduling, Metal/Core ML/MLX/PyTorch MPS container support, host-native accelerator helpers, or host accelerator device exposure;
+- plugin loader, remote plugin registry, binary plugin distribution, or untrusted extension execution;
 - signing, notarization, signature verification, SBOM generation/validation, vulnerability scanning, or binary provenance.
 - external telemetry, hosted diagnostics, or automatic diagnostic upload.
 - support SLA, enterprise support workflow, enforced CODEOWNERS, or branch-protection policy.

@@ -291,6 +291,15 @@ Phase 8A is a required preflight before this mutation gate. It proves real read-
 | HW-SAFE-008, HW-DOCS-002 | Docs describe local deterministic policy without claiming remote policy service, team workflow, silent bypass, runtime mutation from policy, DNS/tunnel/cloud behavior, or accelerator support. | Automated + manual | Core docs XCTest and policy/security/limitations review. |
 | HW-RUNTIME-001, HW-RUNTIME-002, HW-STATE-001 | Policy work does not add direct Apple container shell-out, SQLite access outside `HostwrightState`, hidden default state paths, registry calls, image pulls, telemetry upload, or runtime mutation. | Automated + manual | Full local gate plus targeted boundary scans and diff review. |
 
+## Phase 33 Gate: Plugin And Extension Architecture
+
+| Requirement IDs | Acceptance criteria | Verification type | Verification command or review |
+| --- | --- | --- | --- |
+| HW-EXT-001, HW-SAFE-008 | Extension declarations are typed, versioned, trust-scoped, capability-scoped, and evaluated locally with deterministic `PolicyDecision` output. | Automated | HostwrightPolicy XCTest cases for allowed reviewed-local declarations and deterministic ordering. |
+| HW-EXT-002, HW-SAFE-008 | Untrusted, unsupported-version, empty, missing-boundary, runtime-mutation, state-write, networking-provider, tunnel-provider, secret-resolution, and accelerator declarations fail closed. | Automated | HostwrightPolicy XCTest cases for fake extension declarations. |
+| HW-EXT-003, HW-RUNTIME-001, HW-STATE-001 | Extension architecture does not add a plugin loader, remote registry, binary distribution, untrusted code execution, RuntimeAdapter bypass, direct Apple container shell-out, SQLite access outside `HostwrightState`, state writes, or runtime mutation. | Automated + manual | Full local gate, targeted boundary scans, and diff review. |
+| HW-EXT-003, HW-DOCS-002 | Docs distinguish extension declaration policy from unsupported plugin runtime, provider networking, tunnels, secret backends, accelerators, GUI, cloud, and distribution behavior. | Automated + manual | Core docs guard plus plugin-extension architecture, policy, security, and limitations review. |
+
 ## Phase 38 Gate: Governance And Contributor Model
 
 | Requirement IDs | Acceptance criteria | Verification type | Verification command or review |

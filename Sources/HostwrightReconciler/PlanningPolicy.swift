@@ -102,7 +102,19 @@ private extension PlanIssueKind {
              .lifecycleUnsupported,
              .untrustedManifestUnsupportedField,
              .secureExposureUnsupported,
-             .acceleratorUnsupported:
+             .acceleratorUnsupported,
+             .extensionDeclared,
+             .extensionMissingIdentity,
+             .extensionNoCapabilities,
+             .extensionUnsupportedAPIVersion,
+             .extensionUntrusted,
+             .extensionBoundaryMissing,
+             .extensionRuntimeMutationUnsupported,
+             .extensionStateWriteUnsupported,
+             .extensionNetworkingUnsupported,
+             .extensionTunnelUnsupported,
+             .extensionSecretResolutionUnsupported,
+             .extensionAcceleratorUnsupported:
             return nil
         }
     }

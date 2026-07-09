@@ -2,6 +2,8 @@
 
 Hostwright `v0.1.0-alpha.1` is a source-only alpha and is not production ready.
 
+Phase 39 defines beta readiness criteria, but no beta compatibility claim exists until a beta tag is approved and release notes are published.
+
 ## Compatibility Matrix
 
 | Area | Supported for `v0.1.0-alpha.1` | Notes |
@@ -14,6 +16,7 @@ Hostwright `v0.1.0-alpha.1` is a source-only alpha and is not production ready.
 | Resource intelligence and benchmark lab | Local host facts plus fixture-backed benchmark report contracts | Doctor reports ProcessInfo-backed hardware/thermal facts and unmeasured benchmark dimensions; Phase 36 benchmark lab parses dry-run/fixture reports only; no capacity guarantee. |
 | State | Explicit SQLite database path | No default state path is provided. |
 | Artifact | Source only | No binaries, installer packages, Homebrew formula, signing, or notarization. |
+| Beta readiness | Checklist only | `docs/release/beta-readiness.md` defines required evidence before any beta tag; it does not create beta support by itself. |
 
 ## SwiftPM Platform
 

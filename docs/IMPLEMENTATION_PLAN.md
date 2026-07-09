@@ -47,7 +47,7 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 | 36 | CI Benchmarking And Performance Lab | Complete locally | Add repeatable CI and local benchmark methodology for supported macOS and Apple container evidence. | Benchmark reports use dry-run or fixture data, record environment facts, fail closed on unsafe resource policy, and do not create performance marketing claims. |
 | 37 | Documentation Site And Public Education | Complete locally | Define documentation-site information architecture and source-of-truth boundaries for the separate website repository. | Core repo owns source reference docs; website presentation and implementation stay outside this repository unless separately approved. |
 | 38 | Governance And Contributor Model | Complete locally | Mature OSS governance, contributor workflow, security reporting, review triggers, roadmap process, and release ownership. | Governance docs and templates define issue-to-PR-to-release flow, risky-area review, private-report guidance, and support boundaries. |
-| 39 | Beta Readiness | Planned | Define beta criteria, blockers, deferrals, install/upgrade/docs/security/support gates, and public-claim audit. | Maintainer-approved beta checklist exists and release/limitations docs match code and tests. |
+| 39 | Beta Readiness | Complete locally | Define beta criteria, blockers, deferrals, install/upgrade/docs/security/support gates, and public-claim audit. | Beta readiness checklist exists, blocks beta tags until evidence and maintainer approval, and keeps release/limitations docs aligned with code and tests. |
 | 40 | Apple Silicon Control-Plane Direction Decision | Planned | Decide whether Hostwright remains single-host, expands core, or splits experimental platform work. | Public docs reflect the accepted direction without claiming unbuilt support. |
 
 ## Current Hard Boundaries
@@ -77,6 +77,7 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 - Multi-host platform work remains research-only: current core has no remote host agent, membership service, peer discovery, state replication, remote mutation, cloud control plane, scheduler API, or remote placement behavior.
 - Scheduler behavior is local and advisory: it scores explicit local recommendations from declared inputs and existing policy decisions, but it does not mutate runtime, write state, reserve capacity, perform automatic placement, expose a scheduler API, schedule accelerators, or place work on remote hosts.
 - Documentation-site work is source-of-truth planning only: current support claims stay grounded in this repository, while website frontend, hosted docs deployment, analytics, search, and presentation work belong outside the core repository.
+- Beta readiness work is checklist and claim-gating only: no beta tag, GitHub Release, version bump, binary artifact, installer, support promise, or production-readiness claim exists until separate maintainer approval and matching evidence.
 
 ## Phase 3 Outputs
 
@@ -448,3 +449,11 @@ Phase 37 does not add website frontend code, hosted docs deployment, website ana
 - XCTest coverage guards the governance docs against unsupported support, telemetry, cloud, release-artifact, or bypass claims.
 
 Phase 38 does not add CODEOWNERS enforcement, branch protection, new maintainers, product code, runtime mutation, dependencies, website implementation, GUI code, support SLA, cloud service, release tags, GitHub Releases, binary artifacts, signing, notarization, SBOM, or provenance claims.
+
+## Phase 39 Outputs
+
+- Added `docs/release/beta-readiness.md` with beta scope, required evidence, blockers, deferrals, release-note claim rules, clean-checkout smoke commands, state upgrade/downgrade policy, and maintainer decision checklist.
+- Linked beta readiness from README, install, compatibility, limitations, release process, requirements, acceptance, traceability, build status, and devlog docs.
+- Added core docs guard coverage so beta planning cannot become a beta tag, production claim, binary distribution claim, support SLA, compatibility expansion, telemetry upload, or unsupported current-support claim.
+
+Phase 39 does not add beta tags, GitHub Releases, version bumps, binary artifacts, installers, Homebrew, signing, notarization, SBOM, provenance, production readiness, support SLA, product code, runtime mutation, RuntimeAdapter changes, SQLite access, dependencies, website/frontend work, telemetry upload, or GUI code.

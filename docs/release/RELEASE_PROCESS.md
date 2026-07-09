@@ -85,6 +85,12 @@ Phase 37 defines documentation-site source-of-truth boundaries in `docs/architec
 
 Website, tutorial, and release copy must cite current core reference docs for current support claims, link limitations near unsupported behavior, and keep planned, deferred, rejected, and research-only work visibly separate from implemented behavior. The core repository does not publish the website or own presentation-layer implementation.
 
+## Beta Readiness Gate
+
+Phase 39 defines beta criteria in `docs/release/beta-readiness.md`.
+
+No beta tag, GitHub Release, beta compatibility claim, support promise, binary artifact, installer, or production-readiness language may be created until the beta readiness checklist has matching clean-checkout source install proof, full local gate results, hosted CI, docs/limitations alignment, state upgrade evidence, telemetry/support policy review, and maintainer approval.
+
 ## Tag And Release Steps
 
 Only after the Phase 10 branch is merged to `main` and final verification passes:

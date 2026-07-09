@@ -36,6 +36,7 @@ Hostwright is not production ready.
 - Phase 36 benchmark lab report models and fixture parser for dry-run methodology records, disposable-resource policy, environment facts, and unmeasured dimensions.
 - Source-only release candidate packaging for `v0.1.0-alpha.1`.
 - Release distribution readiness documentation for future signed and notarized artifacts, with current binary and installer publication still blocked.
+- Beta readiness checklist documentation for future beta tag approval, with current beta release publication still blocked.
 - Documentation-site information architecture and source-of-truth boundaries for a separate `hostwright.dev` repository.
 - Swift Package Manager module boundaries.
 - RuntimeAdapter contract infrastructure, state scaffolds, reconciler scaffolds, health models, networking scaffolds, and observability scaffolds.
@@ -119,6 +120,7 @@ Hostwright is not production ready.
 - Web dashboard.
 - GUI implementation, daemon API, or local control-surface runtime.
 - Production readiness.
+- Beta release tag, beta GitHub Release, beta compatibility claim, or maintainer-approved beta support boundary.
 - Binary downloads, installer packages, Homebrew formulae, signing, notarization, SBOM, vulnerability scanning, or binary provenance.
 - Install scripts, uninstaller behavior, upgrade/downgrade smoke tests, rollback proof, package-channel support, Developer ID signing proof, notarization submission proof, stapling proof, Gatekeeper verification proof, or binary release publication.
 - Enforced CODEOWNERS, branch protection, support SLA, enterprise support workflow, hosted diagnostics, telemetry upload, or cloud support service.

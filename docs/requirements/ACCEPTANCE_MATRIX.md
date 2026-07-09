@@ -343,3 +343,11 @@ Phase 8A is a required preflight before this mutation gate. It proves real read-
 | HW-GOV-002 | Security reporting guidance tells reporters not to put secrets, private host details, diagnostic bundles, or exploit details in public trackers before a private contact path exists. | Automated + manual | Core docs guard plus review of `SECURITY.md` and security/safety docs. |
 | HW-GOV-003 | Release governance keeps release tags, GitHub Releases, binaries, installers, signing, notarization, SBOM, provenance, support SLA, hosted diagnostics, and cloud service claims behind explicit maintainer approval and matching docs. | Automated + manual | Core docs guard plus release-process review. |
 | HW-DOCS-002, HW-RUNTIME-001, HW-STATE-001 | Governance work does not add product code, RuntimeAdapter changes, SQLite access, dependencies, release artifacts, website implementation, GUI code, branch protection, CODEOWNERS enforcement, or unsupported current-support claims. | Automated + manual | Full local gate, targeted boundary scans, and diff review. |
+
+## Phase 39 Gate: Beta Readiness
+
+| Requirement IDs | Acceptance criteria | Verification type | Verification command or review |
+| --- | --- | --- | --- |
+| HW-REL-007 | Beta readiness docs require clean-checkout source install proof, full local gate, hosted CI, docs alignment, example validation/planning, state upgrade evidence, telemetry/support policy review, and maintainer approval before any beta tag. | Automated + manual | Core docs guard plus review of `docs/release/beta-readiness.md`. |
+| HW-REL-008, HW-DOCS-002 | Public docs keep beta, production readiness, binary distribution, support SLA, compatibility expansion, benchmark/capacity, cloud/tunnel/DNS, accelerator, Kubernetes/CRI/Docker API/Compose, multi-host, and GUI claims blocked until evidence exists. | Automated + manual | Core docs guard plus limitations, compatibility, install, release-process, and beta-readiness review. |
+| HW-RUNTIME-001, HW-RUNTIME-002, HW-STATE-001 | Phase 39 does not add product code, runtime mutation, RuntimeAdapter changes, SQLite access, dependencies, release tags, GitHub Releases, binary artifacts, installers, website/frontend work, telemetry upload, or GUI code. | Automated + manual | Full local gate, clean-checkout smoke where practical, targeted boundary scans, and diff review. |

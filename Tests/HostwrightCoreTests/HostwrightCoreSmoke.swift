@@ -823,6 +823,68 @@ final class HostwrightCoreTests: XCTestCase {
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("public docs may claim GPU support"))
     }
 
+    func testBetaReadinessDocsKeepBetaBlockedUntilEvidence() throws {
+        let root = try packageRoot()
+        let betaReadiness = try read("docs/release/beta-readiness.md", root: root)
+        let readme = try read("README.md", root: root)
+        let install = try read("docs/reference/install.md", root: root)
+        let compatibility = try read("docs/reference/compatibility.md", root: root)
+        let limitations = try read("docs/reference/limitations.md", root: root)
+        let releaseProcess = try read("docs/release/RELEASE_PROCESS.md", root: root)
+        let requirements = try read("docs/requirements/REQUIREMENTS.md", root: root)
+        let acceptance = try read("docs/requirements/ACCEPTANCE_MATRIX.md", root: root)
+        let traceability = try read("docs/requirements/SOURCE_TRACEABILITY.md", root: root)
+        let implementationPlan = try read("docs/IMPLEMENTATION_PLAN.md", root: root)
+        let buildStatus = try read("docs/BUILD_STATUS.md", root: root)
+        let devlog = try read("docs/devlog/0039-beta-readiness.md", root: root)
+        let publicDocs = [
+            betaReadiness,
+            readme,
+            install,
+            compatibility,
+            limitations,
+            releaseProcess,
+            requirements,
+            acceptance,
+            traceability,
+            implementationPlan,
+            buildStatus,
+            devlog
+        ].joined(separator: "\n")
+
+        XCTAssertTrue(betaReadiness.contains("Status: Phase 39 beta readiness gate."))
+        XCTAssertTrue(betaReadiness.contains("No beta tag, GitHub Release, binary artifact, installer, support promise, production-readiness claim, or version bump is approved by this document."))
+        XCTAssertTrue(betaReadiness.contains("The next beta can remain source-only"))
+        XCTAssertTrue(betaReadiness.contains("| Source install | Clean checkout from the intended `v*` tag builds"))
+        XCTAssertTrue(betaReadiness.contains("## Blockers Before Beta"))
+        XCTAssertTrue(betaReadiness.contains("## Deferrable Past Beta"))
+        XCTAssertTrue(betaReadiness.contains("## Clean-Checkout Smoke"))
+        XCTAssertTrue(readme.contains("Beta readiness gate"))
+        XCTAssertTrue(install.contains("Phase 39 defines the beta readiness gate"))
+        XCTAssertTrue(compatibility.contains("no beta compatibility claim exists"))
+        XCTAssertTrue(limitations.contains("Beta readiness checklist documentation"))
+        XCTAssertTrue(releaseProcess.contains("## Beta Readiness Gate"))
+        XCTAssertTrue(requirements.contains("HW-REL-007"))
+        XCTAssertTrue(requirements.contains("HW-REL-008"))
+        XCTAssertTrue(acceptance.contains("Phase 39 Gate: Beta Readiness"))
+        XCTAssertTrue(traceability.contains("HW-REL-007, HW-REL-008, HW-DOCS-002, HW-GOV-003"))
+        XCTAssertTrue(implementationPlan.contains("## Phase 39 Outputs"))
+        XCTAssertTrue(buildStatus.contains("Phase 39 adds beta readiness"))
+        XCTAssertTrue(devlog.contains("No beta tag."))
+
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright is beta ready"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("v0.1.0-beta.1 is released"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright is production ready"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("binary downloads are provided"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("installer packages are provided"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("support SLA is provided"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("beta compatibility is guaranteed"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("beta support is active"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("clean checkout proof exists"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("hosted telemetry is enabled"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("external telemetry is enabled"))
+    }
+
     private func read(_ relativePath: String, root: URL) throws -> String {
         try String(contentsOf: root.appendingPathComponent(relativePath), encoding: .utf8)
     }

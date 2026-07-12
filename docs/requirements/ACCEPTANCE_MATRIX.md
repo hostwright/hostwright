@@ -124,10 +124,11 @@ Phase 8A is a required preflight before this mutation gate. It proves real read-
 | --- | --- | --- | --- |
 | HW-STATE-001, HW-STATE-002, HW-STATE-006 | Fresh and repeated explicit migrations record schema version and checksums, and rerunning migrations preserves existing rows. | Automated | State XCTest migration idempotency and row-count tests. |
 | HW-STATE-002 | Transaction failures roll back partial state writes. | Automated | State XCTest transaction rollback test. |
-| HW-STATE-002, HW-STATE-006 | Future-version and checksum-mismatched databases fail closed before state reads or writes. | Automated | State XCTest future-schema and checksum-mismatch tests. |
+| HW-STATE-002, HW-STATE-006 | Future-version, checksum-mismatched, and non-contiguous migration histories fail closed before state reads, schema-version queries, writes, or migration. | Automated | State XCTest future-schema, checksum-mismatch, and migration-gap integration tests. |
 | HW-STATE-001, HW-STATE-006 | Corrupt and locked databases produce actionable state errors rather than generic SQLite failures or hangs. | Automated | State XCTest corrupt-file and lock-contention tests. |
+| HW-STATE-002, HW-STATE-003 | Real connections preserve transaction isolation, expose committed rows across connections and reopen, and allow exactly one concurrent operation-group acquisition per idempotency key. | Automated | State multi-connection and 20-round concurrent-acquisition integration tests. |
 | HW-STATE-001, HW-STATE-002 | Repository reads validate already-applied schema without creating databases or applying migrations as a side effect. | Automated + manual | State XCTest read-side-effect tests; review that repository reads use validated read-only connections. |
-| HW-STATE-007, HW-SAFE-002, HW-SAFE-004 | Backup, restore, debug export, downgrade, and locking policy preserve ownership/event records and avoid automatic repair or telemetry claims. | Manual | State-store architecture, install, limitations, and requirements docs review. |
+| HW-STATE-007, HW-SAFE-002, HW-SAFE-004 | Cold backup/restore and debug-export policy preserve committed records and avoid online-copy, automatic-repair, or telemetry claims. | Automated + manual | Real cold-copy backup/restore integration test; state-store architecture, install, limitations, and requirements docs review. |
 | HW-RUNTIME-001, HW-RUNTIME-002, HW-STATE-001 | State upgrade safety does not add runtime mutation, hidden default state paths, daemon behavior, destructive reset commands, or repair tooling. | Automated + manual | Full local gate plus targeted boundary scans and diff review. |
 
 ## Phase 15 Gate: Local Daemon Reconciliation Loop

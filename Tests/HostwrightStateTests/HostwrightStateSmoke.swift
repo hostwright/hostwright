@@ -115,6 +115,8 @@ final class HostwrightStateTests: XCTestCase {
 
             for action in [
                 { try store.validateSchema() },
+                { _ = try store.schemaVersion() },
+                { _ = try store.events.loadAll() },
                 { try store.migrate() }
             ] {
                 XCTAssertThrowsError(try action()) { error in
@@ -135,12 +137,20 @@ final class HostwrightStateTests: XCTestCase {
             let connection = try SQLiteConnection(path: databaseURL.path)
             try connection.run("UPDATE schema_migrations SET checksum = 'tampered' WHERE version = 1")
 
-            XCTAssertThrowsError(try store.validateSchema()) { error in
-                guard case .migrationFailed(let version, let message) = error as? StateStoreError else {
-                    return XCTFail("Expected migrationFailed, got \(error).")
+            let actions: [() throws -> Void] = [
+                { try store.validateSchema() },
+                { _ = try store.schemaVersion() },
+                { _ = try store.events.loadAll() },
+                { try store.migrate() }
+            ]
+            for action in actions {
+                XCTAssertThrowsError(try action()) { error in
+                    guard case .migrationFailed(let version, let message) = error as? StateStoreError else {
+                        return XCTFail("Expected migrationFailed, got \(error).")
+                    }
+                    XCTAssertEqual(version, 1)
+                    XCTAssertTrue(message.contains("Recorded checksum tampered"))
                 }
-                XCTAssertEqual(version, 1)
-                XCTAssertTrue(message.contains("Recorded checksum tampered"))
             }
         }
     }
@@ -158,74 +168,6 @@ final class HostwrightStateTests: XCTestCase {
                 XCTAssertEqual(latestSupported, MigrationRunner.latestSchemaVersion)
                 XCTAssertTrue(message.contains("non-Hostwright tables"))
             }
-        }
-    }
-
-    func testCorruptDatabaseFailsWithActionableError() throws {
-        try withTemporaryDirectory { directory in
-            let databaseURL = directory.appendingPathComponent("state.sqlite")
-            try Data("not a sqlite database".utf8).write(to: databaseURL)
-            let store = SQLiteStateStore(path: databaseURL.path)
-
-            XCTAssertThrowsError(try store.validateSchema()) { error in
-                guard case .corruptDatabase(let path, let message) = error as? StateStoreError else {
-                    return XCTFail("Expected corruptDatabase, got \(error).")
-                }
-                XCTAssertEqual(path, databaseURL.path)
-                XCTAssertFalse(message.isEmpty)
-            }
-        }
-    }
-
-    func testLockedDatabaseFailsWithActionableError() throws {
-        try withTemporaryStore { store, databaseURL in
-            try store.migrate()
-            let lockedConnection = try SQLiteConnection(path: databaseURL.path)
-            try lockedConnection.execute("BEGIN EXCLUSIVE TRANSACTION")
-            defer {
-                try? lockedConnection.execute("ROLLBACK")
-            }
-
-            XCTAssertThrowsError(try store.migrate()) { error in
-                guard case .databaseLocked(let path, let message) = error as? StateStoreError else {
-                    return XCTFail("Expected databaseLocked, got \(error).")
-                }
-                XCTAssertEqual(path, databaseURL.path)
-                XCTAssertFalse(message.isEmpty)
-            }
-        }
-    }
-
-    func testTransactionFailureRollsBackPartialWrites() throws {
-        try withTemporaryStore { store, databaseURL in
-            try store.migrate()
-            let connection = try SQLiteConnection(path: databaseURL.path)
-
-            XCTAssertThrowsError(try connection.transaction {
-                try connection.run(
-                    """
-                    INSERT INTO event_ledger (
-                        id, timestamp, severity, type, source, project_id, service_name,
-                        runtime_adapter, message, payload_json_redacted
-                    )
-                    VALUES ('rollback-event', '2026-07-01T00:00:00Z', 'info', 'test', 'state-test',
-                            NULL, NULL, NULL, 'before failure', '{}')
-                    """
-                )
-                try connection.run(
-                    """
-                    INSERT INTO event_ledger (
-                        id, timestamp, severity, type, source, project_id, service_name,
-                        runtime_adapter, message, payload_json_redacted
-                    )
-                    VALUES ('rollback-event', '2026-07-01T00:00:01Z', 'info', 'test', 'state-test',
-                            NULL, NULL, NULL, 'duplicate failure', '{}')
-                    """
-                )
-            })
-
-            let countRows = try connection.query("SELECT COUNT(*) FROM event_ledger WHERE id = 'rollback-event'")
-            XCTAssertEqual(countRows.first?.first.flatMap { $0 }.flatMap(Int.init), 0)
         }
     }
 

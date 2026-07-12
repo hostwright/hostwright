@@ -9,8 +9,8 @@
 ## Verified On 2026-07-12
 
 - `swift build` succeeds after the Phase 40 control-plane direction update.
-- `swift test list` lists 261 XCTest cases across Hostwright test targets.
-- `swift test` executes 261 XCTest cases across CLI, core, daemon, health, import, manifest, networking, observability, policy, reconciler, runtime, secrets, and state targets with 0 failures.
+- `swift test list` lists 266 XCTest cases across Hostwright test targets.
+- `swift test` executes 266 XCTest cases across CLI, core, daemon, health, import, manifest, networking, observability, policy, reconciler, runtime, secrets, and state targets with 0 failures.
 - XCTest count is unit/contract and local-integration coverage, not a live-runtime, hardware-benchmark, or distribution-artifact success rate. Evidence classes are defined in `docs/reference/testing-evidence.md`.
 - `scripts/grep-orchard.sh .` succeeds and reports historical references only in `docs/source-material/` and `docs/naming/`.
 - `scripts/test.sh` succeeds and runs `swift build`, `swift test`, and the built-CLI local integration gate.
@@ -71,7 +71,7 @@
 - Phase 10 prepares the source-only `v0.1.0-alpha.1` pre-release docs, version output, compatibility matrix, install/build instructions, security/safety notes, release checklist, and release notes draft.
 - Phase 12 adds stable CLI exit categories, `--output text|json` for `plan`, `status`, `events`, and `doctor`, JSON error envelopes, and matching CLI XCTest coverage.
 - Phase 13 adds optional manifest `version: 1`, fail-closed explicit older/newer version policy, contextual unsupported-field errors, unsafe env-key and unsafe mount-source validation, versioned examples, and schema/example alignment tests.
-- Phase 14 adds migration checksums, future-schema refusal, corrupt/locked state error classification, explicit read-vs-migrate boundaries, and state backup/restore/export policy docs.
+- Phase 14 adds migration checksums, contiguous-history validation, future-schema refusal, corrupt/locked state error classification, explicit read-vs-migrate boundaries, and real multi-connection, concurrent acquisition, reopen, rollback, and cold backup/restore evidence.
 - Phase 15 adds `hostwrightd --foreground --config <path> --state-db <path>` for non-mutating daemon observation/planning with event and operation persistence, cadence, jitter, backoff, shutdown, lock, and sleep/wake test seams.
 - Phase 16 adds bounded host-side health check execution, append-only health result persistence, restart policy state with max attempts/backoff/operator hold/manual-disable/crash-loop blocking, redacted health/restart events, and apply/daemon planning gates that avoid aggressive restart loops.
 - Phase 17 adds one restart-policy-gated managed restart path for exact Hostwright-owned running/unhealthy services, using live runtime lifecycle observation, a fresh persisted unhealthy health result from the explicit state DB, status/apply plan-hash parity, internal stop-then-start runtime execution, operation ledger records, partial restart failure records, and redacted events.
@@ -129,7 +129,7 @@ Important diagnostic correction:
 - `swift -e 'import XCTest'` can still fail and is not the correct gate.
 - A minimal SwiftPM XCTest probe passed after Xcode was fixed.
 - `swift test list` is the local proof that Hostwright now exposes real XCTest cases.
-- `swift test` executes 261 XCTest cases after the evidence-contract, production-source boundary, real loopback HTTP, and real file-lock tests were added.
+- `swift test` executes 266 XCTest cases after the evidence-contract, production-source boundary, real loopback HTTP/file-lock tests, and real SQLite integration suite were added.
 
 The old top-level smoke/precondition posture has been replaced with XCTest assertions. Some test file names still include `Smoke.swift`, but the contents are XCTest cases.
 

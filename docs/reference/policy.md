@@ -29,7 +29,7 @@ Policy decisions include:
 - Extension declarations can be evaluated as local data. Built-in or reviewed-local non-mutating declarations can receive allow decisions only when required RuntimeAdapter, HostwrightState, local policy, redaction, audit, explicit-state-path, local-only, ownership, confirmation, and no-runtime-mutation boundaries are declared.
 - Third-party, untrusted, unsupported-version, empty, missing-boundary, runtime-mutation, state-write, networking-provider, tunnel-provider, secret-resolution, and accelerator extension declarations fail closed.
 - Team policy profiles can be evaluated as local data. Profiles must be explicit opt-in, versioned, auditable, and preserve required runtime, state, policy, redaction, audit, confirmation, ownership, local-only, and no-telemetry gates.
-- Team overrides that weaken required gates require approved local review records, and some overrides remain forbidden even with approval.
+- Operational team profiles can only add stricter digest or manifest-review requirements. Approval records authorize one exact bound mutation; they never weaken or override required gates.
 
 ## What Policy Does Not Do
 
@@ -51,6 +51,6 @@ Policy evaluation does not:
 - allow extension declarations to bypass RuntimeAdapter, HostwrightState, local policy, redaction, audit, confirmation, or ownership gates.
 - provide a cloud team service, hosted audit log, central remote control, user tracking, enterprise support workflow, or remote policy distribution.
 
-## Override Boundary
+## Team Policy Boundary
 
-There is no remote policy service, silent bypass, or runtime-mutating policy action in this phase. Team policy profiles are local, explicit opt-in, and advisory/review data only; they cannot bypass hard-coded Hostwright safety gates.
+There is no remote policy service, silent bypass, or runtime-mutating policy action. Team profiles are local, explicit opt-in, and enforced by the command layer only when an operator supplies their path. Exact approval records authorize a reviewed operation without bypassing hard-coded Hostwright safety gates.

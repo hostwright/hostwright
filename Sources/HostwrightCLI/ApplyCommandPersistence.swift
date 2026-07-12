@@ -1,4 +1,5 @@
 import HostwrightManifest
+import HostwrightPolicy
 import HostwrightReconciler
 import HostwrightRuntime
 import HostwrightState
@@ -15,7 +16,8 @@ extension ApplyCommandRunner {
         idempotencyKey: String,
         projectID: String,
         timestamp: String,
-        runtimeAdapter: String
+        runtimeAdapter: String,
+        teamBinding: TeamWorkflowBinding?
     ) throws {
         try store.desiredStates.saveManifestSnapshot(
             projectID: projectID,
@@ -50,10 +52,10 @@ extension ApplyCommandRunner {
                     "action": action.kind.rawValue,
                     "identity": action.identity.displayName,
                     "resourceIdentifier": action.resourceIdentifier
-                ])
+                ].merging(hostwrightTeamBindingPayload(teamBinding)) { current, _ in current })
             )
         )
-        try store.events.append([
+        var events = [
             EventRecord(
                 id: hostwrightUniqueID(prefix: "event-apply-started"),
                 timestamp: timestamp,
@@ -64,9 +66,28 @@ extension ApplyCommandRunner {
                 serviceName: action.identity.serviceName,
                 runtimeAdapter: runtimeAdapter,
                 message: "Apply intent recorded for \(action.identity.displayName).",
-                payloadJSONRedacted: #"{"planHash":"\#(plan.planHash)"}"#
+                payloadJSONRedacted: jsonPayload(
+                    ["planHash": plan.planHash].merging(hostwrightTeamBindingPayload(teamBinding)) { current, _ in current }
+                )
             )
-        ])
+        ]
+        if let teamBinding {
+            events.append(
+                EventRecord(
+                    id: hostwrightUniqueID(prefix: "event-team-approval-recorded"),
+                    timestamp: timestamp,
+                    severity: .info,
+                    type: "team.approval.recorded",
+                    source: "hostwright-cli",
+                    projectID: projectID,
+                    serviceName: action.identity.serviceName,
+                    runtimeAdapter: runtimeAdapter,
+                    message: "Local team approval \(teamBinding.approvalID ?? "unknown") recorded for apply.",
+                    payloadJSONRedacted: jsonPayload(hostwrightTeamBindingPayload(teamBinding))
+                )
+            )
+        }
+        try store.events.append(events)
         try recordRestartRecoveryIfNeeded(
             store: store,
             action: action,
@@ -87,7 +108,8 @@ extension ApplyCommandRunner {
         planHash: String,
         projectID: String,
         timestamp: String,
-        runtimeAdapter: String
+        runtimeAdapter: String,
+        teamBinding: TeamWorkflowBinding?
     ) throws {
         try store.operations.record(
             OperationRecord(
@@ -100,7 +122,9 @@ extension ApplyCommandRunner {
                 status: .succeeded,
                 idempotencyKey: idempotencyKey,
                 planHash: planHash,
-                payloadJSONRedacted: #"{"result":"succeeded"}"#
+                payloadJSONRedacted: jsonPayload(
+                    ["result": "succeeded"].merging(hostwrightTeamBindingPayload(teamBinding)) { current, _ in current }
+                )
             )
         )
         try store.events.append([
@@ -114,7 +138,9 @@ extension ApplyCommandRunner {
                 serviceName: action.identity.serviceName,
                 runtimeAdapter: nil,
                 message: event.message,
-                payloadJSONRedacted: #"{"planHash":"\#(planHash)"}"#
+                payloadJSONRedacted: jsonPayload(
+                    ["planHash": planHash].merging(hostwrightTeamBindingPayload(teamBinding)) { current, _ in current }
+                )
             )
         ])
 
@@ -135,7 +161,9 @@ extension ApplyCommandRunner {
                     createdAt: timestamp,
                     observedAt: timestamp,
                     cleanupEligible: action.executionAvailability == .availableForCreateMissingService,
-                    metadataJSONRedacted: #"{"planHash":"\#(planHash)"}"#,
+                    metadataJSONRedacted: jsonPayload(
+                        ["planHash": planHash].merging(hostwrightTeamBindingPayload(teamBinding)) { current, _ in current }
+                    ),
                     identityVersion: RuntimeManagedResourceIdentity.currentVersion
                 )
             )
@@ -159,7 +187,8 @@ extension ApplyCommandRunner {
         idempotencyKey: String,
         planHash: String,
         projectID: String,
-        timestamp: String
+        timestamp: String,
+        teamBinding: TeamWorkflowBinding?
     ) throws {
         let redactedError = RuntimeRedactionPolicy.default.redact(String(describing: error))
         try store.operations.record(
@@ -173,7 +202,9 @@ extension ApplyCommandRunner {
                 status: .failed,
                 idempotencyKey: idempotencyKey,
                 planHash: planHash,
-                payloadJSONRedacted: #"{"error":"\#(redactedError)"}"#
+                payloadJSONRedacted: jsonPayload(
+                    ["error": redactedError].merging(hostwrightTeamBindingPayload(teamBinding)) { current, _ in current }
+                )
             )
         )
         try store.events.append([
@@ -187,7 +218,9 @@ extension ApplyCommandRunner {
                 serviceName: action.identity.serviceName,
                 runtimeAdapter: nil,
                 message: "Apply failed for \(action.identity.displayName): \(redactedError)",
-                payloadJSONRedacted: #"{"planHash":"\#(planHash)"}"#
+                payloadJSONRedacted: jsonPayload(
+                    ["planHash": planHash].merging(hostwrightTeamBindingPayload(teamBinding)) { current, _ in current }
+                )
             )
         ])
         try recordRestartRecoveryIfNeeded(

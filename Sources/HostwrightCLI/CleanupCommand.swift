@@ -9,12 +9,55 @@ struct CleanupCommandRunner {
     let manifestPath: String
     let stateDatabasePath: String
     let confirmation: CleanupConfirmation
+    let teamProfilePath: String?
+    let approvalRecordPath: String?
     let environment: CLIEnvironment
 
+    init(
+        manifestPath: String,
+        stateDatabasePath: String,
+        confirmation: CleanupConfirmation,
+        teamProfilePath: String? = nil,
+        approvalRecordPath: String? = nil,
+        environment: CLIEnvironment
+    ) {
+        self.manifestPath = manifestPath
+        self.stateDatabasePath = stateDatabasePath
+        self.confirmation = confirmation
+        self.teamProfilePath = teamProfilePath
+        self.approvalRecordPath = approvalRecordPath
+        self.environment = environment
+    }
+
     func run() -> CLIRunResult {
+        if approvalRecordPath != nil, teamProfilePath == nil {
+            return failure(
+                code: .commandUsage,
+                message: "Cleanup requires --team-profile when --approval-record is present. No file, state, or runtime operation was attempted."
+            )
+        }
+        switch confirmation {
+        case .dryRun where approvalRecordPath != nil:
+            return failure(
+                code: .commandUsage,
+                message: "Cleanup dry-run does not accept an approval record. No file, state, or runtime operation was attempted."
+            )
+        case .confirmed where teamProfilePath != nil && approvalRecordPath == nil:
+            return failure(
+                code: .commandUsage,
+                message: "Profile-aware confirmed cleanup requires --approval-record. No file, state, or runtime operation was attempted."
+            )
+        default:
+            break
+        }
         do {
-            let manifest = try ManifestValidator.validated(hostwrightReadManifestText(path: manifestPath, environment: environment))
-            let mapping = ManifestRuntimeMapper.map(manifest)
+            let manifestText = try hostwrightReadManifestText(path: manifestPath, environment: environment)
+            let validatedManifest = try hostwrightValidatedManifest(
+                text: manifestText,
+                teamProfilePath: teamProfilePath,
+                environment: environment
+            )
+            let mapping = ManifestRuntimeMapper.map(validatedManifest.manifest)
             let configuration = StateStoreConfiguration(explicitDatabasePath: stateDatabasePath)
             try configuration.validate()
             let store = SQLiteStateStore(configuration: configuration)
@@ -41,7 +84,8 @@ struct CleanupCommandRunner {
                 observed: observed
             )
             let candidates = assessments.compactMap(\.candidate)
-            let token = cleanupToken(for: candidates)
+            let token = cleanupToken(for: candidates, validatedManifest: validatedManifest)
+            let previewBinding = validatedManifest.previewBinding(planHash: token)
 
             switch confirmation {
             case .dryRun:
@@ -50,9 +94,12 @@ struct CleanupCommandRunner {
                     projectName: mapping.desiredState.projectName,
                     assessments: assessments,
                     token: token,
-                    observed: observed
+                    observed: observed,
+                    teamBinding: previewBinding
                 )
-                return CLIRunResult(standardOutput: renderDryRun(assessments: assessments, token: token))
+                return CLIRunResult(
+                    standardOutput: renderDryRun(assessments: assessments, token: token, teamBinding: previewBinding)
+                )
             case .confirmed(let providedToken):
                 guard providedToken == token else {
                     return failure(code: .confirmationMismatch, message: "cleanup confirmation token does not match current cleanup plan. Expected token: \(token)")
@@ -60,7 +107,33 @@ struct CleanupCommandRunner {
                 guard !candidates.isEmpty else {
                     return failure(code: .commandUsage, message: "cleanup has no eligible Hostwright-owned stopped/created/exited containers.")
                 }
-                return try executeCleanup(candidates: candidates, token: token, adapter: adapter, observed: observed, store: store, projectName: mapping.desiredState.projectName)
+                let teamBinding: TeamWorkflowBinding?
+                if validatedManifest.profileArtifact != nil {
+                    guard let approvalRecordPath else {
+                        return failure(
+                            code: .teamApprovalInvalid,
+                            message: "Profile-aware confirmed cleanup requires an explicit approval record. No mutation was attempted."
+                        )
+                    }
+                    teamBinding = try hostwrightApprovedBinding(
+                        approvalRecordPath: approvalRecordPath,
+                        scope: .cleanup,
+                        validatedManifest: validatedManifest,
+                        planHash: token,
+                        environment: environment
+                    )
+                } else {
+                    teamBinding = nil
+                }
+                return try executeCleanup(
+                    candidates: candidates,
+                    token: token,
+                    adapter: adapter,
+                    observed: observed,
+                    store: store,
+                    projectName: mapping.desiredState.projectName,
+                    teamBinding: teamBinding
+                )
             }
         } catch let error as HostwrightDiagnostic {
             return failure(code: error.code, message: error.message)
@@ -197,7 +270,8 @@ struct CleanupCommandRunner {
         adapter: any RuntimeAdapter,
         observed: ObservedRuntimeState,
         store: SQLiteStateStore,
-        projectName: String
+        projectName: String,
+        teamBinding: TeamWorkflowBinding?
     ) throws -> CLIRunResult {
         let timestamp = hostwrightTimestamp()
         let projectID = "project-\(projectName)"
@@ -209,6 +283,25 @@ struct CleanupCommandRunner {
             "Confirmation token: \(token)",
             ""
         ]
+        if let teamBinding {
+            try store.events.append([
+                EventRecord(
+                    id: hostwrightUniqueID(prefix: "event-team-approval-recorded"),
+                    timestamp: timestamp,
+                    severity: .info,
+                    type: "team.approval.recorded",
+                    source: "hostwright-cli",
+                    projectID: projectID,
+                    serviceName: nil,
+                    runtimeAdapter: runtimeAdapter,
+                    message: "Local team approval \(teamBinding.approvalID ?? "unknown") recorded for cleanup.",
+                    payloadJSONRedacted: jsonPayload(hostwrightTeamBindingPayload(teamBinding))
+                )
+            ])
+            lines.insert("Approval hash: \(teamBinding.approvalHash ?? "")", at: 3)
+            lines.insert("Manifest hash: \(teamBinding.manifestHash)", at: 3)
+            lines.insert("Profile hash: \(teamBinding.profileHash)", at: 3)
+        }
 
         for candidate in candidates {
             let idempotencyKey = "\(token):\(candidate.resourceIdentifier)"
@@ -230,7 +323,10 @@ struct CleanupCommandRunner {
                     status: .recorded,
                     idempotencyKey: idempotencyKey,
                     planHash: token,
-                    payloadJSONRedacted: #"{"resourceIdentifier":"\#(candidate.resourceIdentifier)"}"#
+                    payloadJSONRedacted: jsonPayload(
+                        ["resourceIdentifier": candidate.resourceIdentifier]
+                            .merging(hostwrightTeamBindingPayload(teamBinding)) { current, _ in current }
+                    )
                 )
             )
 
@@ -247,7 +343,10 @@ struct CleanupCommandRunner {
                         confirmation: RuntimeMutationConfirmation(
                             confirmed: true,
                             reason: "Confirmed Hostwright cleanup \(token)",
-                            planHash: token
+                            planHash: token,
+                            manifestHash: teamBinding?.manifestHash,
+                            profileHash: teamBinding?.profileHash,
+                            approvalHash: teamBinding?.approvalHash
                         )
                     )
                 }
@@ -265,7 +364,9 @@ struct CleanupCommandRunner {
                             status: .succeeded,
                             idempotencyKey: idempotencyKey,
                             planHash: token,
-                            payloadJSONRedacted: #"{"result":"deleted"}"#
+                            payloadJSONRedacted: jsonPayload(
+                                ["result": "deleted"].merging(hostwrightTeamBindingPayload(teamBinding)) { current, _ in current }
+                            )
                         )
                     )
                     try store.events.append([
@@ -279,14 +380,20 @@ struct CleanupCommandRunner {
                             serviceName: candidate.identity.serviceName,
                             runtimeAdapter: runtimeAdapter,
                             message: event.message,
-                            payloadJSONRedacted: #"{"resourceIdentifier":"\#(candidate.resourceIdentifier)"}"#
+                            payloadJSONRedacted: jsonPayload(
+                                ["resourceIdentifier": candidate.resourceIdentifier]
+                                    .merging(hostwrightTeamBindingPayload(teamBinding)) { current, _ in current }
+                            )
                         )
                     ])
                     try store.ownership.markCleanupCompleted(
                         resourceIdentifier: candidate.resourceIdentifier,
                         runtimeAdapter: candidate.runtimeAdapter,
                         observedAt: successTimestamp,
-                        metadataJSONRedacted: #"{"cleanupToken":"\#(token)","cleanupStatus":"deleted"}"#
+                        metadataJSONRedacted: jsonPayload(
+                            ["cleanupToken": token, "cleanupStatus": "deleted"]
+                                .merging(hostwrightTeamBindingPayload(teamBinding)) { current, _ in current }
+                        )
                     )
                     lines.append("- deleted \(candidate.resourceIdentifier)")
                 } catch {
@@ -315,7 +422,9 @@ struct CleanupCommandRunner {
                             status: .failed,
                             idempotencyKey: idempotencyKey,
                             planHash: token,
-                            payloadJSONRedacted: #"{"error":"\#(redactedError)"}"#
+                            payloadJSONRedacted: jsonPayload(
+                                ["error": redactedError].merging(hostwrightTeamBindingPayload(teamBinding)) { current, _ in current }
+                            )
                         )
                     )
                     try store.events.append([
@@ -329,7 +438,10 @@ struct CleanupCommandRunner {
                             serviceName: candidate.identity.serviceName,
                             runtimeAdapter: runtimeAdapter,
                             message: "Cleanup failed for \(candidate.resourceIdentifier): \(redactedError)",
-                            payloadJSONRedacted: #"{"resourceIdentifier":"\#(candidate.resourceIdentifier)"}"#
+                            payloadJSONRedacted: jsonPayload(
+                                ["resourceIdentifier": candidate.resourceIdentifier]
+                                    .merging(hostwrightTeamBindingPayload(teamBinding)) { current, _ in current }
+                            )
                         )
                     ])
                 } catch {
@@ -361,11 +473,12 @@ struct CleanupCommandRunner {
         projectName: String,
         assessments: [CleanupAssessment],
         token: String,
-        observed: ObservedRuntimeState
+        observed: ObservedRuntimeState,
+        teamBinding: TeamWorkflowBinding?
     ) throws {
         let timestamp = hostwrightTimestamp()
         let eligibleCount = assessments.filter { $0.classification == .eligible }.count
-        try store.events.append([
+        var events = [
             EventRecord(
                 id: hostwrightUniqueID(prefix: "event-cleanup-planned"),
                 timestamp: timestamp,
@@ -376,18 +489,47 @@ struct CleanupCommandRunner {
                 serviceName: nil,
                 runtimeAdapter: observed.adapterMetadata?.adapterName,
                 message: "Cleanup planned \(eligibleCount) eligible Hostwright-owned container(s).",
-                payloadJSONRedacted: #"{"token":"\#(token)","eligible":\#(eligibleCount),"total":\#(assessments.count)}"#
+                payloadJSONRedacted: jsonPayload(
+                    ["token": token, "eligible": eligibleCount, "total": assessments.count]
+                        .merging(hostwrightTeamBindingPayload(teamBinding)) { current, _ in current }
+                )
             )
-        ])
+        ]
+        if let teamBinding {
+            events.append(
+                EventRecord(
+                    id: hostwrightUniqueID(prefix: "event-team-profile-selected"),
+                    timestamp: timestamp,
+                    severity: .info,
+                    type: "team.profile.selected",
+                    source: "hostwright-cli",
+                    projectID: "project-\(projectName)",
+                    serviceName: nil,
+                    runtimeAdapter: observed.adapterMetadata?.adapterName,
+                    message: "Local team profile \(teamBinding.profileIdentifier) selected for cleanup dry-run.",
+                    payloadJSONRedacted: jsonPayload(hostwrightTeamBindingPayload(teamBinding))
+                )
+            )
+        }
+        try store.events.append(events)
     }
 
-    private func renderDryRun(assessments: [CleanupAssessment], token: String) -> String {
+    private func renderDryRun(
+        assessments: [CleanupAssessment],
+        token: String,
+        teamBinding: TeamWorkflowBinding?
+    ) -> String {
         var lines = [
             "Hostwright cleanup (dry run)",
             "State DB: \(stateDatabasePath)",
             "Confirmation token: \(token)",
             ""
         ]
+        if let teamBinding {
+            lines.insert("Approval required for confirmed cleanup: yes", at: 3)
+            lines.insert("Manifest hash: \(teamBinding.manifestHash)", at: 3)
+            lines.insert("Profile hash: \(teamBinding.profileHash)", at: 3)
+        }
         if assessments.isEmpty {
             lines.append("- [blocked] no ownership records found for cleanup assessment")
         } else {
@@ -399,7 +541,7 @@ struct CleanupCommandRunner {
         return lines.joined(separator: "\n")
     }
 
-    private func cleanupToken(for candidates: [CleanupCandidate]) -> String {
+    private func cleanupToken(for candidates: [CleanupCandidate], validatedManifest: TeamValidatedManifest) -> String {
         let joined = candidates.map { candidate in
             [
                 candidate.resourceIdentifier,
@@ -408,12 +550,19 @@ struct CleanupCommandRunner {
                 candidate.runtimeAdapter
             ].joined(separator: ":")
         }.joined(separator: "|")
-        return "cleanup-\(hostwrightStableHash(joined))"
+        let baseToken = "cleanup-\(hostwrightStableHash(joined))"
+        guard let profileHash = validatedManifest.profileHash,
+              let manifestHash = validatedManifest.manifestHash
+        else {
+            return baseToken
+        }
+        return "cleanup-\(hostwrightStableHash("\(baseToken)|\(profileHash)|\(manifestHash)"))"
     }
 
     private func failure(code: HostwrightErrorCode, message: String) -> CLIRunResult {
         let exitCode = CLIExitCode.mapped(from: code)
-        return CLIRunResult(standardError: "\(code.rawValue): \(message)\n", exitCode: exitCode.rawValue)
+        let redactedMessage = RuntimeRedactionPolicy.default.redact(message)
+        return CLIRunResult(standardError: "\(code.rawValue): \(redactedMessage)\n", exitCode: exitCode.rawValue)
     }
 }
 

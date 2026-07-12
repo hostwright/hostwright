@@ -35,7 +35,7 @@ Hostwright now has a local policy module, `HostwrightPolicy`, for deterministic 
 
 The default policy is local, deterministic, and fail-closed. Current overrides are code-level test/configuration inputs only: privileged-port warning threshold, broad-bind block list, redaction policy, and image digest policy.
 
-There is no remote policy service, team workflow, central policy distribution, silent bypass, runtime mutation from policy, or automatic override path. Any future profile or team-default work must keep local policy evaluation deterministic first and must be reviewed in a separate issue.
+There is no remote policy service, central policy distribution, silent bypass, runtime mutation from policy, or automatic override path. Phase 34 consumes deterministic decisions through explicit local profile and approval files; policy evaluation remains non-mutating and strict-only.
 
 ## Boundaries Preserved
 

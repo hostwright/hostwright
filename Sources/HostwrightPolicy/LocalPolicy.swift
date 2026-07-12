@@ -89,9 +89,19 @@ public enum PolicyReasonCode: String, Equatable, Sendable {
     case teamProfileMissingIdentity
     case teamProfileNotOptIn
     case teamProfileUnsupportedVersion
+    case teamProfileInvalidKind
+    case teamProfileInvalidDisplayName
     case teamProfileMissingRequiredGate
-    case teamOverrideRequiresApproval
-    case teamOverrideForbidden
+    case teamProfileDuplicateGate
+    case teamProfileDuplicateRequirement
+    case teamRequirementDeclared
+    case teamApprovalMissingIdentity
+    case teamApprovalUnsupportedVersion
+    case teamApprovalInvalidKind
+    case teamApprovalRejected
+    case teamApprovalScopeMismatch
+    case teamApprovalInvalidTimestamp
+    case teamApprovalBindingMismatch
     case teamApprovalRecorded
 }
 

@@ -1,6 +1,6 @@
 import Foundation
 
-public enum TeamWorkflowGate: String, CaseIterable, Equatable, Sendable {
+public enum TeamWorkflowGate: String, CaseIterable, Codable, Equatable, Sendable {
     case runtimeAdapter
     case explicitStatePath
     case localPolicy
@@ -13,96 +13,107 @@ public enum TeamWorkflowGate: String, CaseIterable, Equatable, Sendable {
     case noTelemetryUpload
 }
 
-public enum TeamPolicyOverrideKind: String, Equatable, Sendable {
+public enum TeamPolicyRequirement: String, CaseIterable, Codable, Equatable, Sendable {
     case requireImageDigest
     case requireManifestReview
-    case allowPrivilegedPortWarning
-    case allowBroadBindAddress
-    case bypassPlanConfirmation
-    case bypassCleanupConfirmation
-    case bypassOwnershipChecks
-    case defaultStatePath
-    case telemetryUpload
-    case runtimeMutationExpansion
 }
 
-public enum TeamPolicyOverrideEffect: String, Equatable, Sendable {
-    case stricter
-    case documentedException
-    case weakensRequiredGate
-}
+public struct TeamPolicyProfile: Codable, Equatable, Sendable {
+    public static let currentAPIVersion = 1
+    public static let kind = "HostwrightTeamProfile"
 
-public struct TeamPolicyOverride: Equatable, Sendable {
-    public let kind: TeamPolicyOverrideKind
-    public let effect: TeamPolicyOverrideEffect
-    public let justification: String
-    public let approvalID: String?
+    public let kind: String
+    public let apiVersion: Int
+    public let identifier: String
+    public let displayName: String
+    public let optIn: Bool
+    public let requiredGates: [TeamWorkflowGate]
+    public let requirements: [TeamPolicyRequirement]
 
     public init(
-        kind: TeamPolicyOverrideKind,
-        effect: TeamPolicyOverrideEffect,
-        justification: String,
-        approvalID: String? = nil
+        kind: String = Self.kind,
+        apiVersion: Int = Self.currentAPIVersion,
+        identifier: String,
+        displayName: String,
+        optIn: Bool,
+        requiredGates: [TeamWorkflowGate],
+        requirements: [TeamPolicyRequirement] = []
     ) {
         self.kind = kind
-        self.effect = effect
-        self.justification = justification
-        self.approvalID = approvalID
+        self.apiVersion = apiVersion
+        self.identifier = identifier
+        self.displayName = displayName
+        self.optIn = optIn
+        self.requiredGates = requiredGates
+        self.requirements = requirements
+    }
+
+    public var requiresImageDigest: Bool {
+        requirements.contains(.requireImageDigest)
     }
 }
 
-public enum TeamApprovalDecision: String, Equatable, Sendable {
+public enum TeamApprovalDecision: String, Codable, Equatable, Sendable {
     case approved
     case rejected
 }
 
-public struct TeamApprovalRecord: Equatable, Sendable {
+public enum TeamApprovalScope: String, Codable, Equatable, Sendable {
+    case apply
+    case cleanup
+}
+
+public struct TeamApprovalRecord: Codable, Equatable, Sendable {
+    public static let currentAPIVersion = 1
+    public static let kind = "HostwrightApprovalRecord"
+
+    public let kind: String
+    public let apiVersion: Int
     public let id: String
     public let reviewer: String
     public let decision: TeamApprovalDecision
-    public let scope: String
+    public let scope: TeamApprovalScope
     public let recordedAt: String
+    public let profileHash: String
+    public let manifestHash: String
+    public let planHash: String
 
     public init(
+        kind: String = Self.kind,
+        apiVersion: Int = Self.currentAPIVersion,
         id: String,
         reviewer: String,
         decision: TeamApprovalDecision,
-        scope: String,
-        recordedAt: String
+        scope: TeamApprovalScope,
+        recordedAt: String,
+        profileHash: String,
+        manifestHash: String,
+        planHash: String
     ) {
+        self.kind = kind
+        self.apiVersion = apiVersion
         self.id = id
         self.reviewer = reviewer
         self.decision = decision
         self.scope = scope
         self.recordedAt = recordedAt
+        self.profileHash = profileHash
+        self.manifestHash = manifestHash
+        self.planHash = planHash
     }
 }
 
-public struct TeamPolicyProfile: Equatable, Sendable {
-    public let identifier: String
-    public let version: Int
-    public let displayName: String
-    public let optIn: Bool
-    public let requiredGates: [TeamWorkflowGate]
-    public let overrides: [TeamPolicyOverride]
-    public let approvals: [TeamApprovalRecord]
+public struct TeamApprovalExpectation: Equatable, Sendable {
+    public let scope: TeamApprovalScope
+    public let profileHash: String
+    public let manifestHash: String
+    public let planHash: String
 
-    public init(
-        identifier: String,
-        version: Int = 1,
-        displayName: String,
-        optIn: Bool,
-        requiredGates: [TeamWorkflowGate],
-        overrides: [TeamPolicyOverride] = [],
-        approvals: [TeamApprovalRecord] = []
-    ) {
-        self.identifier = identifier
-        self.version = version
-        self.displayName = displayName
-        self.optIn = optIn
-        self.requiredGates = requiredGates
-        self.overrides = overrides
-        self.approvals = approvals
+    public init(scope: TeamApprovalScope, profileHash: String, manifestHash: String, planHash: String) {
+        self.scope = scope
+        self.profileHash = profileHash
+        self.manifestHash = manifestHash
+        self.planHash = planHash
     }
 }
 
@@ -115,28 +126,54 @@ public struct TeamWorkflowPolicyEvaluator: Equatable, Sendable {
         var decisions: [PolicyDecision] = []
         let identifier = profile.identifier.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        if identifier.isEmpty {
+        if identifier.isEmpty || identifier.range(of: #"^[a-z0-9]([a-z0-9.-]{0,126}[a-z0-9])?$"#, options: .regularExpression) == nil {
             decisions.append(
                 decision(
                     profile: profile,
                     reasonCode: .teamProfileMissingIdentity,
                     severity: .blocker,
                     subject: "identity",
-                    message: "Team policy profiles must include a stable identifier.",
-                    remediation: "Declare a stable local team profile identifier before applying team defaults."
+                    message: "Team policy profiles must include a stable lowercase identifier.",
+                    remediation: "Use lowercase letters, numbers, dots, or hyphens without leading or trailing punctuation."
                 )
             )
         }
 
-        if profile.version != 1 {
+        if profile.kind != TeamPolicyProfile.kind {
+            decisions.append(
+                decision(
+                    profile: profile,
+                    reasonCode: .teamProfileInvalidKind,
+                    severity: .blocker,
+                    subject: "kind",
+                    message: "Team policy profile kind '\(profile.kind)' is not supported.",
+                    remediation: "Use kind '\(TeamPolicyProfile.kind)'."
+                )
+            )
+        }
+
+        if profile.apiVersion != TeamPolicyProfile.currentAPIVersion {
             decisions.append(
                 decision(
                     profile: profile,
                     reasonCode: .teamProfileUnsupportedVersion,
                     severity: .blocker,
-                    subject: "version",
-                    message: "Team policy profile version \(profile.version) is not supported.",
-                    remediation: "Use team policy profile version 1 until a later compatibility policy is approved."
+                    subject: "apiVersion",
+                    message: "Team policy profile API version \(profile.apiVersion) is not supported.",
+                    remediation: "Use API version \(TeamPolicyProfile.currentAPIVersion) until a later compatibility policy is approved."
+                )
+            )
+        }
+
+        if profile.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            decisions.append(
+                decision(
+                    profile: profile,
+                    reasonCode: .teamProfileInvalidDisplayName,
+                    severity: .blocker,
+                    subject: "displayName",
+                    message: "Team policy profiles must include a non-empty display name.",
+                    remediation: "Declare a local display name for operator review."
                 )
             )
         }
@@ -149,12 +186,13 @@ public struct TeamWorkflowPolicyEvaluator: Equatable, Sendable {
                     severity: .blocker,
                     subject: "optIn",
                     message: "Team policy profiles must be explicitly opted in.",
-                    remediation: "Set opt-in explicitly in the local workflow; Hostwright does not apply team defaults silently."
+                    remediation: "Set optIn to true in the explicitly selected local profile."
                 )
             )
         }
 
-        for gate in TeamWorkflowGate.allCases where !profile.requiredGates.contains(gate) {
+        let gateCounts = Dictionary(grouping: profile.requiredGates, by: { $0 }).mapValues(\.count)
+        for gate in TeamWorkflowGate.allCases where gateCounts[gate] == nil {
             decisions.append(
                 decision(
                     profile: profile,
@@ -162,94 +200,112 @@ public struct TeamWorkflowPolicyEvaluator: Equatable, Sendable {
                     severity: .blocker,
                     subject: gate.rawValue,
                     message: "Team policy profile is missing required gate '\(gate.rawValue)'.",
-                    remediation: "Keep required Hostwright gates declared; team defaults cannot remove runtime, state, redaction, audit, confirmation, ownership, or local-only boundaries."
+                    remediation: "Declare every required Hostwright safety gate; team policy cannot remove core boundaries."
                 )
             )
         }
-
-        for override in profile.overrides {
-            decisions.append(contentsOf: evaluateOverride(override, profile: profile))
-        }
-
-        if decisions.isEmpty {
+        for (gate, count) in gateCounts where count > 1 {
             decisions.append(
                 decision(
                     profile: profile,
-                    reasonCode: .teamProfileDeclared,
-                    severity: .allow,
-                    subject: identifier,
-                    message: "Team policy profile '\(identifier)' is local, opt-in, auditable, and preserves required Hostwright gates.",
-                    remediation: "Record approvals and audit events before using the profile in team review workflows."
+                    reasonCode: .teamProfileDuplicateGate,
+                    severity: .blocker,
+                    subject: gate.rawValue,
+                    message: "Team policy profile repeats required gate '\(gate.rawValue)'.",
+                    remediation: "Declare each required gate exactly once."
                 )
             )
+        }
+
+        let requirementCounts = Dictionary(grouping: profile.requirements, by: { $0 }).mapValues(\.count)
+        for (requirement, count) in requirementCounts where count > 1 {
+            decisions.append(
+                decision(
+                    profile: profile,
+                    reasonCode: .teamProfileDuplicateRequirement,
+                    severity: .blocker,
+                    subject: requirement.rawValue,
+                    message: "Team policy profile repeats stricter requirement '\(requirement.rawValue)'.",
+                    remediation: "Declare each stricter requirement at most once."
+                )
+            )
+        }
+
+        if decisions.isEmpty {
+            if profile.requirements.isEmpty {
+                decisions.append(
+                    decision(
+                        profile: profile,
+                        reasonCode: .teamProfileDeclared,
+                        severity: .allow,
+                        subject: identifier,
+                        message: "Team policy profile '\(identifier)' is local, opt-in, and preserves required Hostwright gates.",
+                        remediation: "Use explicit profile and approval paths for reviewed team operations."
+                    )
+                )
+            } else {
+                decisions.append(contentsOf: profile.requirements.map { requirement in
+                    decision(
+                        profile: profile,
+                        reasonCode: .teamRequirementDeclared,
+                        severity: .allow,
+                        subject: requirement.rawValue,
+                        message: "Team policy profile requires stricter policy '\(requirement.rawValue)'.",
+                        remediation: "Keep the stricter requirement in force for every command using this profile."
+                    )
+                })
+            }
         }
 
         return decisions.sorted { $0.orderingKey < $1.orderingKey }
     }
 
-    private func evaluateOverride(_ override: TeamPolicyOverride, profile: TeamPolicyProfile) -> [PolicyDecision] {
-        if forbiddenOverrideKinds.contains(override.kind) {
-            return [
-                decision(
-                    profile: profile,
-                    reasonCode: .teamOverrideForbidden,
-                    severity: .blocker,
-                    subject: override.kind.rawValue,
-                    message: "Team policy override '\(override.kind.rawValue)' cannot bypass required Hostwright safety gates.",
-                    remediation: "Remove the override; hard-coded runtime, state, redaction, confirmation, ownership, local-only, and telemetry boundaries remain mandatory."
-                )
-            ]
+    public func evaluate(_ approval: TeamApprovalRecord, expected: TeamApprovalExpectation) -> [PolicyDecision] {
+        var decisions: [PolicyDecision] = []
+
+        if approval.id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+            approval.reviewer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            decisions.append(approvalDecision(.teamApprovalMissingIdentity, "identity", "Approval records require non-empty id and reviewer fields."))
+        }
+        if approval.kind != TeamApprovalRecord.kind {
+            decisions.append(approvalDecision(.teamApprovalInvalidKind, "kind", "Approval record kind '\(approval.kind)' is not supported."))
+        }
+        if approval.apiVersion != TeamApprovalRecord.currentAPIVersion {
+            decisions.append(approvalDecision(.teamApprovalUnsupportedVersion, "apiVersion", "Approval record API version \(approval.apiVersion) is not supported."))
+        }
+        if approval.decision != .approved {
+            decisions.append(approvalDecision(.teamApprovalRejected, "decision", "Only an approved local review record can authorize a profile-aware mutation."))
+        }
+        if approval.scope != expected.scope {
+            decisions.append(approvalDecision(.teamApprovalScopeMismatch, "scope", "Approval scope '\(approval.scope.rawValue)' does not match '\(expected.scope.rawValue)'."))
+        }
+        if ISO8601DateFormatter().date(from: approval.recordedAt) == nil {
+            decisions.append(approvalDecision(.teamApprovalInvalidTimestamp, "recordedAt", "Approval recordedAt must be an ISO-8601 timestamp."))
         }
 
-        if override.effect == .weakensRequiredGate && !hasApprovedRecord(id: override.approvalID, in: profile.approvals) {
-            return [
-                decision(
-                    profile: profile,
-                    reasonCode: .teamOverrideRequiresApproval,
-                    severity: .blocker,
-                    subject: override.kind.rawValue,
-                    message: "Team policy override '\(override.kind.rawValue)' requires an approved local review record.",
-                    remediation: "Record a local approval for the exact override or remove it from the profile."
-                )
-            ]
-        }
-
-        if let approvalID = override.approvalID, hasApprovedRecord(id: approvalID, in: profile.approvals) {
-            return [
-                decision(
-                    profile: profile,
-                    reasonCode: .teamApprovalRecorded,
-                    severity: .warning,
-                    subject: override.kind.rawValue,
-                    message: "Team policy override '\(override.kind.rawValue)' has an approved local review record.",
-                    remediation: "Approved profile records document review only; they do not bypass hard-coded Hostwright safety gates."
-                )
-            ]
-        }
-
-        return []
-    }
-
-    private var forbiddenOverrideKinds: [TeamPolicyOverrideKind] {
-        [
-            .allowBroadBindAddress,
-            .bypassPlanConfirmation,
-            .bypassCleanupConfirmation,
-            .bypassOwnershipChecks,
-            .defaultStatePath,
-            .telemetryUpload,
-            .runtimeMutationExpansion
+        let bindings = [
+            ("profileHash", approval.profileHash, expected.profileHash),
+            ("manifestHash", approval.manifestHash, expected.manifestHash),
+            ("planHash", approval.planHash, expected.planHash)
         ]
-    }
-
-    private func hasApprovedRecord(id: String?, in approvals: [TeamApprovalRecord]) -> Bool {
-        guard let id else {
-            return false
+        for (field, actual, wanted) in bindings where actual != wanted {
+            decisions.append(approvalDecision(.teamApprovalBindingMismatch, field, "Approval \(field) does not match the current operation."))
         }
 
-        return approvals.contains { approval in
-            approval.id == id && approval.decision == .approved
+        if decisions.isEmpty {
+            decisions.append(
+                PolicyDecision(
+                    category: .team,
+                    reasonCode: .teamApprovalRecorded,
+                    severity: .allow,
+                    subject: approval.id,
+                    message: "Approval record is bound to the exact profile, manifest, plan, and operation scope.",
+                    remediation: "Preserve the approval hash in the local append-only audit trail.",
+                    stableDetailKey: approval.id
+                )
+            )
         }
+        return decisions.sorted { $0.orderingKey < $1.orderingKey }
     }
 
     private func decision(
@@ -268,6 +324,18 @@ public struct TeamWorkflowPolicyEvaluator: Equatable, Sendable {
             message: message,
             remediation: remediation,
             stableDetailKey: "\(profile.identifier)|\(subject)|\(reasonCode.rawValue)"
+        )
+    }
+
+    private func approvalDecision(_ reasonCode: PolicyReasonCode, _ subject: String, _ message: String) -> PolicyDecision {
+        PolicyDecision(
+            category: .team,
+            reasonCode: reasonCode,
+            severity: .blocker,
+            subject: subject,
+            message: message,
+            remediation: "Create a new explicit approval record for the exact current operation; approvals never bypass core safety gates.",
+            stableDetailKey: "\(subject)|\(reasonCode.rawValue)"
         )
     }
 }

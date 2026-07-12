@@ -7,17 +7,17 @@ The current CLI provides a dependency-free `hostwright` command surface with nar
 ```bash
 hostwright --version
 hostwright init
-hostwright import-stack <path> [--output text|json]
-hostwright validate [path]
-hostwright plan [path] [--output text|json]
+hostwright import-stack <path> [--output text|json] [--team-profile <path>]
+hostwright validate [path] [--team-profile <path>]
+hostwright plan [path] [--output text|json] [--team-profile <path>]
 hostwright status [path] [--state-db <path>] [--output text|json]
-hostwright apply [path] --state-db <path> --confirm-plan <hash>
+hostwright apply [path] --state-db <path> --confirm-plan <hash> [--team-profile <path> --approval-record <path>]
 hostwright logs <service> [path] [--tail <n>] [--state-db <path>]
 hostwright events --state-db <path> [--project <name>] [--type <event>] [--service <name>] [--severity info|warning|error] [--limit <n>] [--sort asc|desc] [--output text|json]
 hostwright recovery --state-db <path> [--project <name>] [--output text|json]
 hostwright diagnostics --state-db <path> --bundle <path> [--project <name>] [--manifest <path>]
-hostwright cleanup [path] --state-db <path> --dry-run
-hostwright cleanup [path] --state-db <path> --confirm-cleanup <token>
+hostwright cleanup [path] --state-db <path> --dry-run [--team-profile <path>]
+hostwright cleanup [path] --state-db <path> --confirm-cleanup <token> [--team-profile <path> --approval-record <path>]
 hostwright doctor [--output text|json]
 hostwrightd --foreground --config <hostwright.yaml> --state-db <path> [options]
 ```
@@ -42,10 +42,10 @@ Manifest failures use an `issues` array with stable Hostwright error codes. `doc
 | ---: | --- | --- |
 | `0` | Success | All commands |
 | `64` | Usage | Unsupported flags, missing arguments, refused overwrite, or local non-manifest file I/O failure |
-| `65` | Validation | Missing/unreadable manifest, manifest parse/validation, and compatibility failures |
+| `65` | Validation | Missing/unreadable manifest, manifest/profile/approval validation, and compatibility failures |
 | `66` | State unavailable | Explicit SQLite state path could not be opened, migrated, verified, locked, or read |
 | `69` | Runtime unavailable | Runtime observation, logs, or mutation failed through `RuntimeAdapter` |
-| `70` | Confirmation mismatch | `apply --confirm-plan` or `cleanup --confirm-cleanup` did not match the current observed plan |
+| `70` | Confirmation mismatch | Plan, cleanup token, approval scope, or approval hash bindings do not match the current operation |
 | `71` | Unsafe operation | Planner/apply safety policy blocked mutation |
 | `72` | Partial failure | Cleanup completed with mixed success and failure |
 
@@ -73,7 +73,7 @@ Failure example:
 HW-CLI-002: hostwright.yaml already exists. init will not overwrite it.
 ```
 
-## `hostwright import-stack <path> [--output text|json]`
+## `hostwright import-stack <path> [--output text|json] [--team-profile <path>]`
 
 Reads a narrow safe stack-file subset and prints converted `hostwright.yaml` text to stdout. It does not write files, create `hostwright.yaml`, read or write state, observe Apple container, contact registries, pull images, or mutate runtime resources.
 
@@ -127,7 +127,9 @@ JSON import failures use the standard validation exit code `65` and include poli
 
 Import is conversion-only. It does not imply Docker Compose compatibility or runtime compatibility. Review the converted manifest and run `hostwright validate` and `hostwright plan` before any confirmed apply.
 
-## `hostwright validate [path]`
+When `--team-profile` is present, the converted manifest is also evaluated against that explicit local profile. Text mode keeps converted manifest stdout parseable and writes profile hashes to stderr; JSON mode adds a `teamPolicy` object. No profile is discovered by default.
+
+## `hostwright validate [path] [--team-profile <path>]`
 
 Reads `hostwright.yaml` by default, or a provided path, and validates the restricted Hostwright manifest shape.
 
@@ -138,19 +140,23 @@ It does not:
 - check whether images exist remotely;
 - mutate runtime state.
 
+With an explicit profile, validation also enforces its strict-only requirements and prints the profile and exact manifest SHA-256 hashes. `requireImageDigest` rejects tag-only images even when the manifest defaults to `allow-tags`.
+
 Failure example:
 
 ```text
 HW-MANIFEST-002: service 'api' must declare an image.
 ```
 
-## `hostwright plan [path] [--output text|json]`
+## `hostwright plan [path] [--output text|json] [--team-profile <path>]`
 
 Reads and validates the manifest, maps the supported manifest subset into runtime-shaped desired state, runs planning policy checks, and prints a non-mutating dry-run plan.
 
 The output includes a deterministic plan hash, typed issues, typed planned actions, and an explicit execution-unavailable notice.
 
 Runtime observation infrastructure exists behind `RuntimeAdapter`, but `hostwright plan` does not inspect Apple container by default and does not claim resources are running, stopped, healthy, or unhealthy.
+
+With an explicit profile, output includes `profileHash`, `manifestHash`, the exact `planHash` binding, and `approvalRequiredForMutation: true`.
 
 JSON shape:
 
@@ -159,6 +165,13 @@ JSON shape:
   "kind": "plan",
   "project": "api-local",
   "planHash": "...",
+  "teamPolicy": {
+    "profileIdentifier": "dev.hostwright.team.local",
+    "profileHash": "...",
+    "manifestHash": "...",
+    "planHash": "...",
+    "approvalRequiredForMutation": true
+  },
   "observationConnected": false,
   "issues": [],
   "drift": [],
@@ -166,7 +179,7 @@ JSON shape:
 }
 ```
 
-## `hostwright apply [path] --state-db <path> --confirm-plan <hash>`
+## `hostwright apply [path] --state-db <path> --confirm-plan <hash> [--team-profile <path> --approval-record <path>]`
 
 Runs the narrow confirmed apply gate.
 
@@ -182,6 +195,8 @@ This command:
 - records operation recovery groups, forward runtime steps, rollback-unavailable steps, checkpoints, and redacted manual recovery hints;
 - records success or failure events and operation status.
 
+When `--team-profile` is selected, `--approval-record` is mandatory. The approved record must match the exact profile SHA-256, manifest SHA-256, current plan hash, and `apply` scope. Hostwright computes the approval SHA-256 and carries all four hashes into runtime confirmation and redacted append-only audit records. Missing, rejected, stale, wrong-scope, or mismatched approvals fail before mutation.
+
 It refuses mutation when:
 
 - `--state-db` is missing;
@@ -195,6 +210,7 @@ It refuses mutation when:
 - a start action is not for an observed Hostwright-managed stopped, created, or exited service allowed by restart policy;
 - a restart action is not for an exact Hostwright-owned running service with a fresh persisted unhealthy health result and a matching ownership record.
 - an operation group with the same idempotency key still has an active lease; the error reports its redacted owner, checkpoint, and expiry without attempting mutation.
+- a profile-aware approval is absent, rejected, wrong-scope, or bound to different profile, manifest, or plan data.
 
 An interrupted operation can reuse the same plan only when its persisted checkpoint proves runtime execution never began (`pre-runtime-state-incomplete`). Completed operations and interruptions with ambiguous or post-runtime state remain blocked.
 
@@ -316,7 +332,7 @@ Example:
 hostwright diagnostics --state-db /tmp/hostwright.sqlite --bundle /tmp/hostwright-diagnostics.json --project api-local
 ```
 
-## `hostwright cleanup [path] --state-db <path> --dry-run`
+## `hostwright cleanup [path] --state-db <path> --dry-run [--team-profile <path>]`
 
 Plans cleanup candidates only. A candidate is eligible only when all of these are true:
 
@@ -327,6 +343,8 @@ Plans cleanup candidates only. A candidate is eligible only when all of these ar
 - live observation shows the service is created, stopped, or exited, not running.
 
 The dry run prints an exact confirmation token and classifies ownership-backed and observed-only resources:
+
+With an explicit profile, the token also binds the profile and manifest hashes. The dry run prints those hashes and requires a new cleanup-scoped approval for confirmed deletion. It does not accept `--approval-record` because review must occur after the exact token is known.
 
 - `eligible`: exact Hostwright-owned created/stopped/exited container covered by the token.
 - `ambiguous`: duplicate observed runtime identities make the target unsafe.
@@ -342,13 +360,17 @@ Failure example:
 HW-CLI-001: cleanup requires exactly one of --dry-run or --confirm-cleanup <token>.
 ```
 
-## `hostwright cleanup [path] --state-db <path> --confirm-cleanup <token>`
+## `hostwright cleanup [path] --state-db <path> --confirm-cleanup <token> [--team-profile <path> --approval-record <path>]`
 
 Deletes only `eligible` containers covered by the current cleanup token through `RuntimeAdapter`.
+
+Profile-aware confirmed cleanup requires an approval record bound to the exact profile hash, manifest hash, cleanup token, and `cleanup` scope. Approval never changes eligibility, ownership, lifecycle, or exact-identifier checks.
 
 It never deletes images, volumes, networks, or unmanaged containers and never uses broad flags such as `--all` or `--force`.
 
 If one runtime delete fails after another succeeds, the process exits with code `72` and preserves successful deletions in the report. If a delete succeeds but success-state persistence fails, the process reports state unavailable and keeps the deletion visible in stdout.
+
+See `docs/reference/team-workflow.md` for the strict JSON schemas and review sequence.
 
 ## `hostwright doctor [--output text|json]`
 

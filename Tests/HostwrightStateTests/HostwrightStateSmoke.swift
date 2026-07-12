@@ -295,23 +295,23 @@ final class HostwrightStateTests: XCTestCase {
                     payloadJSONRedacted: #"{"profile":"dev.hostwright.team.local","approvalID":"approval-1","token":"\#(fakeSecret)"}"#
                 ),
                 EventRecord(
-                    id: "team-policy-1",
+                    id: "team-profile-1",
                     timestamp: "2026-07-09T00:00:01Z",
                     severity: .warning,
-                    type: "team.policy.override.reviewed",
+                    type: "team.profile.selected",
                     source: "team-workflow",
                     projectID: projectID,
                     serviceName: nil,
                     runtimeAdapter: nil,
-                    message: "team policy override reviewed",
-                    payloadJSONRedacted: #"{"profile":"dev.hostwright.team.local","override":"allowPrivilegedPortWarning"}"#
+                    message: "team profile selected",
+                    payloadJSONRedacted: #"{"profile":"dev.hostwright.team.local","requirement":"requireImageDigest"}"#
                 )
             ])
 
             let events = try store.events.loadAll()
             let teamEvents = events.filter { $0.type.hasPrefix("team.") }
 
-            XCTAssertEqual(teamEvents.map(\.id), ["team-approval-1", "team-policy-1"])
+            XCTAssertEqual(teamEvents.map(\.id), ["team-approval-1", "team-profile-1"])
             XCTAssertEqual(teamEvents.map(\.source), ["team-workflow", "team-workflow"])
             XCTAssertEqual(teamEvents.map(\.projectID), [projectID, projectID])
             XCTAssertTrue(teamEvents[0].message.contains("[REDACTED]"))

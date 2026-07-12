@@ -27,6 +27,9 @@ public enum HostwrightErrorCode: String, Sendable {
     case manifestFileIOFailed = "HW-MANIFEST-004"
     case stateStoreUnavailable = "HW-STATE-001"
     case unsafeExposure = "HW-SECURITY-001"
+    case teamProfileInvalid = "HW-TEAM-001"
+    case teamApprovalInvalid = "HW-TEAM-002"
+    case teamBindingMismatch = "HW-TEAM-003"
 }
 
 public struct HostwrightDiagnostic: Error, Equatable, Sendable {

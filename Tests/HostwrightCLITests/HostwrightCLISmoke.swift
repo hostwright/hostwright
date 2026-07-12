@@ -13,12 +13,12 @@ final class HostwrightCLITests: XCTestCase {
     func testCommandParserRecognizesSupportedCommands() throws {
         XCTAssertEqual(try CLICommand.parse(arguments: ["--version"]), .version)
         XCTAssertEqual(try CLICommand.parse(arguments: ["init"]), .initManifest)
-        XCTAssertEqual(try CLICommand.parse(arguments: ["import-stack", "compose.yaml"]), .importStack(path: "compose.yaml", output: .text))
-        XCTAssertEqual(try CLICommand.parse(arguments: ["import-stack", "compose.yaml", "--output", "json"]), .importStack(path: "compose.yaml", output: .json))
-        XCTAssertEqual(try CLICommand.parse(arguments: ["validate"]), .validate(path: "hostwright.yaml"))
-        XCTAssertEqual(try CLICommand.parse(arguments: ["validate", "custom.yaml"]), .validate(path: "custom.yaml"))
-        XCTAssertEqual(try CLICommand.parse(arguments: ["plan"]), .plan(path: "hostwright.yaml", output: .text))
-        XCTAssertEqual(try CLICommand.parse(arguments: ["plan", "--output", "json"]), .plan(path: "hostwright.yaml", output: .json))
+        XCTAssertEqual(try CLICommand.parse(arguments: ["import-stack", "compose.yaml"]), .importStack(path: "compose.yaml", output: .text, teamProfilePath: nil))
+        XCTAssertEqual(try CLICommand.parse(arguments: ["import-stack", "compose.yaml", "--output", "json"]), .importStack(path: "compose.yaml", output: .json, teamProfilePath: nil))
+        XCTAssertEqual(try CLICommand.parse(arguments: ["validate"]), .validate(path: "hostwright.yaml", teamProfilePath: nil))
+        XCTAssertEqual(try CLICommand.parse(arguments: ["validate", "custom.yaml"]), .validate(path: "custom.yaml", teamProfilePath: nil))
+        XCTAssertEqual(try CLICommand.parse(arguments: ["plan"]), .plan(path: "hostwright.yaml", output: .text, teamProfilePath: nil))
+        XCTAssertEqual(try CLICommand.parse(arguments: ["plan", "--output", "json"]), .plan(path: "hostwright.yaml", output: .json, teamProfilePath: nil))
         XCTAssertEqual(try CLICommand.parse(arguments: ["status"]), .status(path: "hostwright.yaml", stateDatabasePath: nil, output: .text))
         XCTAssertEqual(
             try CLICommand.parse(arguments: ["status", "--state-db", "/tmp/state.sqlite"]),
@@ -30,11 +30,11 @@ final class HostwrightCLITests: XCTestCase {
         )
         XCTAssertEqual(
             try CLICommand.parse(arguments: ["apply", "--state-db", "/tmp/state.sqlite", "--confirm-plan", "abc123"]),
-            .apply(path: "hostwright.yaml", stateDatabasePath: "/tmp/state.sqlite", confirmedPlanHash: "abc123")
+            .apply(path: "hostwright.yaml", stateDatabasePath: "/tmp/state.sqlite", confirmedPlanHash: "abc123", teamProfilePath: nil, approvalRecordPath: nil)
         )
         XCTAssertEqual(
             try CLICommand.parse(arguments: ["apply", "custom.yaml", "--state-db", "/tmp/state.sqlite", "--confirm-plan", "abc123"]),
-            .apply(path: "custom.yaml", stateDatabasePath: "/tmp/state.sqlite", confirmedPlanHash: "abc123")
+            .apply(path: "custom.yaml", stateDatabasePath: "/tmp/state.sqlite", confirmedPlanHash: "abc123", teamProfilePath: nil, approvalRecordPath: nil)
         )
         XCTAssertEqual(
             try CLICommand.parse(arguments: ["logs", "api", "--tail", "25", "--state-db", "/tmp/state.sqlite"]),
@@ -63,7 +63,7 @@ final class HostwrightCLITests: XCTestCase {
         )
         XCTAssertEqual(
             try CLICommand.parse(arguments: ["cleanup", "--state-db", "/tmp/state.sqlite", "--dry-run"]),
-            .cleanup(path: "hostwright.yaml", stateDatabasePath: "/tmp/state.sqlite", confirmation: .dryRun)
+            .cleanup(path: "hostwright.yaml", stateDatabasePath: "/tmp/state.sqlite", confirmation: .dryRun, teamProfilePath: nil, approvalRecordPath: nil)
         )
         XCTAssertEqual(
             try CLICommand.parse(arguments: ["diagnostics", "--state-db", "/tmp/state.sqlite", "--bundle", "/tmp/diagnostics.json", "--project", "demo", "--manifest", "custom.yaml"]),
@@ -107,6 +107,9 @@ final class HostwrightCLITests: XCTestCase {
         XCTAssertTrue(result.standardOutput.contains("Diagnostics writes a local redacted JSON bundle only"))
         XCTAssertTrue(result.standardOutput.contains("hostwright import-stack compose.yaml --output json"))
         XCTAssertTrue(result.standardOutput.contains("hostwright doctor --output json"))
+        XCTAssertTrue(result.standardOutput.contains("--team-profile <path>"))
+        XCTAssertTrue(result.standardOutput.contains("--approval-record <path>"))
+        XCTAssertTrue(result.standardOutput.contains("Team profiles and approvals are loaded only from explicit local paths."))
     }
 
     func testInitCreatesStarterManifestWithoutOverwriting() {

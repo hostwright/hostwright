@@ -5,15 +5,15 @@ import HostwrightState
 public enum CLICommand: Equatable, Sendable {
     case version
     case initManifest
-    case importStack(path: String, output: CLIOutputFormat)
-    case validate(path: String)
-    case plan(path: String, output: CLIOutputFormat)
+    case importStack(path: String, output: CLIOutputFormat, teamProfilePath: String?)
+    case validate(path: String, teamProfilePath: String?)
+    case plan(path: String, output: CLIOutputFormat, teamProfilePath: String?)
     case status(path: String, stateDatabasePath: String?, output: CLIOutputFormat)
-    case apply(path: String, stateDatabasePath: String, confirmedPlanHash: String)
+    case apply(path: String, stateDatabasePath: String, confirmedPlanHash: String, teamProfilePath: String?, approvalRecordPath: String?)
     case logs(serviceName: String, path: String, tail: Int, stateDatabasePath: String?)
     case events(stateDatabasePath: String, projectName: String?, filters: EventFilters, output: CLIOutputFormat)
     case recovery(stateDatabasePath: String, projectName: String?, output: CLIOutputFormat)
-    case cleanup(path: String, stateDatabasePath: String, confirmation: CleanupConfirmation)
+    case cleanup(path: String, stateDatabasePath: String, confirmation: CleanupConfirmation, teamProfilePath: String?, approvalRecordPath: String?)
     case diagnostics(stateDatabasePath: String, bundlePath: String, projectName: String?, manifestPath: String?)
     case doctor(output: CLIOutputFormat)
     case help
@@ -36,7 +36,7 @@ public enum CLICommand: Equatable, Sendable {
         case "import-stack":
             return try importStackCommand(arguments: arguments)
         case "validate":
-            return try pathCommand(arguments: arguments, commandName: "validate", make: CLICommand.validate)
+            return try validateCommand(arguments: arguments)
         case "plan":
             return try planCommand(arguments: arguments)
         case "status":
@@ -69,35 +69,34 @@ public enum CLICommand: Equatable, Sendable {
         return CLIOutputFormat(rawValue: arguments[arguments.index(after: outputIndex)])
     }
 
-    private static func pathCommand(arguments: [String], commandName: String, make: (String) -> CLICommand) throws -> CLICommand {
-        if arguments.count == 1 {
-            return make(HostwrightIdentity.manifestFileName)
-        }
-
-        if arguments.count == 2 {
-            return make(arguments[1])
-        }
-
-        throw CLIUsageError("\(commandName) accepts at most one manifest path.")
+    private static func validateCommand(arguments: [String]) throws -> CLICommand {
+        let parsed = try parsePathOutputAndProfile(arguments: arguments, commandName: "validate", supportsOutput: false)
+        return .validate(path: parsed.path ?? HostwrightIdentity.manifestFileName, teamProfilePath: parsed.teamProfilePath)
     }
 
     private static func planCommand(arguments: [String]) throws -> CLICommand {
-        let parsed = try parsePathAndOutput(arguments: arguments, commandName: "plan")
-        return .plan(path: parsed.path ?? HostwrightIdentity.manifestFileName, output: parsed.output)
+        let parsed = try parsePathOutputAndProfile(arguments: arguments, commandName: "plan")
+        return .plan(
+            path: parsed.path ?? HostwrightIdentity.manifestFileName,
+            output: parsed.output,
+            teamProfilePath: parsed.teamProfilePath
+        )
     }
 
     private static func importStackCommand(arguments: [String]) throws -> CLICommand {
-        let parsed = try parsePathAndOutput(arguments: arguments, commandName: "import-stack")
+        let parsed = try parsePathOutputAndProfile(arguments: arguments, commandName: "import-stack")
         guard let path = parsed.path, !path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw CLIUsageError("import-stack requires a stack file path.")
         }
-        return .importStack(path: path, output: parsed.output)
+        return .importStack(path: path, output: parsed.output, teamProfilePath: parsed.teamProfilePath)
     }
 
     private static func applyCommand(arguments: [String]) throws -> CLICommand {
         var path: String?
         var stateDatabasePath: String?
         var confirmedPlanHash: String?
+        var teamProfilePath: String?
+        var approvalRecordPath: String?
         var index = 1
 
         while index < arguments.count {
@@ -114,6 +113,24 @@ public enum CLICommand: Equatable, Sendable {
                     throw CLIUsageError("apply requires a value after --confirm-plan.")
                 }
                 confirmedPlanHash = arguments[index + 1]
+                index += 2
+            case "--team-profile":
+                teamProfilePath = try parseUniquePathValue(
+                    arguments: arguments,
+                    index: index,
+                    commandName: "apply",
+                    flag: "--team-profile",
+                    existing: teamProfilePath
+                )
+                index += 2
+            case "--approval-record":
+                approvalRecordPath = try parseUniquePathValue(
+                    arguments: arguments,
+                    index: index,
+                    commandName: "apply",
+                    flag: "--approval-record",
+                    existing: approvalRecordPath
+                )
                 index += 2
             default:
                 guard !argument.hasPrefix("-") else {
@@ -134,11 +151,19 @@ public enum CLICommand: Equatable, Sendable {
         guard let confirmedPlanHash, !confirmedPlanHash.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw CLIUsageError("apply requires --confirm-plan <hash>. Run plan/apply preview first and confirm the exact hash.")
         }
+        try validateMutationTeamPaths(
+            commandName: "apply",
+            teamProfilePath: teamProfilePath,
+            approvalRecordPath: approvalRecordPath,
+            approvalRequired: teamProfilePath != nil
+        )
 
         return .apply(
             path: path ?? HostwrightIdentity.manifestFileName,
             stateDatabasePath: stateDatabasePath,
-            confirmedPlanHash: confirmedPlanHash
+            confirmedPlanHash: confirmedPlanHash,
+            teamProfilePath: teamProfilePath,
+            approvalRecordPath: approvalRecordPath
         )
     }
 
@@ -348,14 +373,31 @@ public enum CLICommand: Equatable, Sendable {
         return .doctor(output: output)
     }
 
-    private static func parsePathAndOutput(arguments: [String], commandName: String) throws -> (path: String?, output: CLIOutputFormat) {
+    private static func parsePathOutputAndProfile(
+        arguments: [String],
+        commandName: String,
+        supportsOutput: Bool = true
+    ) throws -> (path: String?, output: CLIOutputFormat, teamProfilePath: String?) {
         var path: String?
         var output: CLIOutputFormat = .text
+        var teamProfilePath: String?
         var index = 1
         while index < arguments.count {
             switch arguments[index] {
             case "--output":
+                guard supportsOutput else {
+                    throw CLIUsageError("\(commandName) does not support --output.")
+                }
                 output = try parseOutputValue(arguments: arguments, index: index, commandName: commandName)
+                index += 2
+            case "--team-profile":
+                teamProfilePath = try parseUniquePathValue(
+                    arguments: arguments,
+                    index: index,
+                    commandName: commandName,
+                    flag: "--team-profile",
+                    existing: teamProfilePath
+                )
                 index += 2
             default:
                 let argument = arguments[index]
@@ -369,7 +411,41 @@ public enum CLICommand: Equatable, Sendable {
                 index += 1
             }
         }
-        return (path, output)
+        return (path, output, teamProfilePath)
+    }
+
+    private static func parseUniquePathValue(
+        arguments: [String],
+        index: Int,
+        commandName: String,
+        flag: String,
+        existing: String?
+    ) throws -> String {
+        guard existing == nil else {
+            throw CLIUsageError("\(commandName) accepts \(flag) at most once.")
+        }
+        guard index + 1 < arguments.count else {
+            throw CLIUsageError("\(commandName) requires a value after \(flag).")
+        }
+        let value = arguments[index + 1].trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty, !value.hasPrefix("-") else {
+            throw CLIUsageError("\(commandName) requires a non-empty path after \(flag).")
+        }
+        return value
+    }
+
+    private static func validateMutationTeamPaths(
+        commandName: String,
+        teamProfilePath: String?,
+        approvalRecordPath: String?,
+        approvalRequired: Bool
+    ) throws {
+        if approvalRecordPath != nil, teamProfilePath == nil {
+            throw CLIUsageError("\(commandName) requires --team-profile when --approval-record is present.")
+        }
+        if approvalRequired, approvalRecordPath == nil {
+            throw CLIUsageError("\(commandName) requires --approval-record for a profile-aware confirmed mutation.")
+        }
     }
 
     private static func parseOutputValue(arguments: [String], index: Int, commandName: String) throws -> CLIOutputFormat {
@@ -387,6 +463,8 @@ public enum CLICommand: Equatable, Sendable {
         var stateDatabasePath: String?
         var dryRun = false
         var confirmationToken: String?
+        var teamProfilePath: String?
+        var approvalRecordPath: String?
         var index = 1
 
         while index < arguments.count {
@@ -407,6 +485,24 @@ public enum CLICommand: Equatable, Sendable {
                 }
                 confirmationToken = arguments[index + 1]
                 index += 2
+            case "--team-profile":
+                teamProfilePath = try parseUniquePathValue(
+                    arguments: arguments,
+                    index: index,
+                    commandName: "cleanup",
+                    flag: "--team-profile",
+                    existing: teamProfilePath
+                )
+                index += 2
+            case "--approval-record":
+                approvalRecordPath = try parseUniquePathValue(
+                    arguments: arguments,
+                    index: index,
+                    commandName: "cleanup",
+                    flag: "--approval-record",
+                    existing: approvalRecordPath
+                )
+                index += 2
             default:
                 guard !argument.hasPrefix("-") else {
                     throw CLIUsageError("cleanup does not support flag '\(argument)'.")
@@ -425,11 +521,22 @@ public enum CLICommand: Equatable, Sendable {
         guard dryRun != (confirmationToken != nil) else {
             throw CLIUsageError("cleanup requires exactly one of --dry-run or --confirm-cleanup <token>.")
         }
+        if dryRun, approvalRecordPath != nil {
+            throw CLIUsageError("cleanup --dry-run does not accept --approval-record; approve the exact emitted cleanup token before confirmed cleanup.")
+        }
+        try validateMutationTeamPaths(
+            commandName: "cleanup",
+            teamProfilePath: teamProfilePath,
+            approvalRecordPath: approvalRecordPath,
+            approvalRequired: confirmationToken != nil && teamProfilePath != nil
+        )
 
         return .cleanup(
             path: path ?? HostwrightIdentity.manifestFileName,
             stateDatabasePath: stateDatabasePath,
-            confirmation: dryRun ? .dryRun : .confirmed(token: confirmationToken ?? "")
+            confirmation: dryRun ? .dryRun : .confirmed(token: confirmationToken ?? ""),
+            teamProfilePath: teamProfilePath,
+            approvalRecordPath: approvalRecordPath
         )
     }
 
@@ -526,11 +633,12 @@ public enum CLIExitCode: Int32, Equatable, Sendable {
         switch code {
         case .commandUsage, .fileAlreadyExists, .fileIOFailed:
             return .commandUsage
-        case .confirmationMismatch:
+        case .confirmationMismatch, .teamBindingMismatch:
             return .confirmationMismatch
         case .partialFailure:
             return .partialFailure
-        case .manifestParseFailed, .manifestValidationFailed, .manifestUnsupportedFeature, .manifestFileIOFailed:
+        case .manifestParseFailed, .manifestValidationFailed, .manifestUnsupportedFeature, .manifestFileIOFailed,
+             .teamProfileInvalid, .teamApprovalInvalid:
             return .validation
         case .stateStoreUnavailable:
             return .stateUnavailable

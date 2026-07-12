@@ -61,11 +61,24 @@ public struct RuntimeMutationConfirmation: Equatable, Sendable {
     public let confirmed: Bool
     public let reason: String
     public let planHash: String?
+    public let manifestHash: String?
+    public let profileHash: String?
+    public let approvalHash: String?
 
-    public init(confirmed: Bool, reason: String, planHash: String? = nil) {
+    public init(
+        confirmed: Bool,
+        reason: String,
+        planHash: String? = nil,
+        manifestHash: String? = nil,
+        profileHash: String? = nil,
+        approvalHash: String? = nil
+    ) {
         self.confirmed = confirmed
         self.reason = reason
         self.planHash = planHash
+        self.manifestHash = manifestHash
+        self.profileHash = profileHash
+        self.approvalHash = approvalHash
     }
 }
 

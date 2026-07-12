@@ -1,93 +1,137 @@
 # Team Workflow
 
-Status: Phase 34 local profile and approval model.
+Status: Phase 34 local operational profile and approval workflow.
 
-Hostwright does not provide a cloud team service, central remote control, hosted audit log, user tracking, enterprise support workflow, or organization account system.
+Hostwright loads team policy only from an explicit `--team-profile <path>`. It does not search for a profile, download policy, or apply organization defaults silently. Profile-aware runtime mutation also requires an explicit `--approval-record <path>` bound to the current operation.
 
-Phase 34 adds local data models and policy decisions for team workflow review:
+## Team Profile Format
 
-- team policy profile identity, version, display name, and explicit opt-in;
-- required safety gates;
-- local policy overrides;
-- local approval records;
-- audit events through the existing explicit-path event ledger.
+Profiles are strict JSON objects. Unknown or missing fields, unsupported enum values, duplicate gates or requirements, unsupported versions, invalid identifiers, and `optIn: false` fail closed with `HW-TEAM-001`.
 
-## Local Team Profiles
+```json
+{
+  "kind": "HostwrightTeamProfile",
+  "apiVersion": 1,
+  "identifier": "dev.hostwright.team.local",
+  "displayName": "Local Maintainers",
+  "optIn": true,
+  "requiredGates": [
+    "runtimeAdapter",
+    "explicitStatePath",
+    "localPolicy",
+    "redaction",
+    "auditTrail",
+    "planConfirmation",
+    "cleanupConfirmation",
+    "ownershipChecks",
+    "localOnlyNoCloud",
+    "noTelemetryUpload"
+  ],
+  "requirements": [
+    "requireImageDigest",
+    "requireManifestReview"
+  ]
+}
+```
 
-A team profile is local data. It is not fetched from a server and is not applied silently.
+Every required gate must appear exactly once. Operational profiles can only add these stricter requirements:
 
-Required profile properties:
+- `requireImageDigest`: all service images must use a valid `@sha256:<64 lowercase hex>` content identity, even when the manifest says or defaults to `allow-tags`.
+- `requireManifestReview`: records that the team requires reviewed manifests. All profile-aware apply and confirmed cleanup operations require an exact approval record regardless of the declared requirement list.
 
-- stable identifier;
-- profile version `1`;
-- display name;
-- explicit opt-in;
-- declared required gates;
-- optional stricter policy defaults;
-- optional local approval records for reviewed exceptions.
+There is no weakening override format. A profile cannot permit broad bind addresses, privileged ports, hidden state paths, confirmation bypass, ownership bypass, telemetry upload, expanded runtime mutation, or any other relaxation of core policy.
 
-Required gates:
+## Approval Record Format
 
-- `runtimeAdapter`
-- `explicitStatePath`
-- `localPolicy`
-- `redaction`
-- `auditTrail`
-- `planConfirmation`
-- `cleanupConfirmation`
-- `ownershipChecks`
-- `localOnlyNoCloud`
-- `noTelemetryUpload`
+Approval records are strict JSON objects. They authorize one reviewed `apply` or `cleanup` operation; they do not change policy.
 
-Missing gates are blockers. Team defaults cannot remove required Hostwright gates.
+```json
+{
+  "kind": "HostwrightApprovalRecord",
+  "apiVersion": 1,
+  "id": "approval-2026-07-12-001",
+  "reviewer": "local-maintainer",
+  "decision": "approved",
+  "scope": "apply",
+  "recordedAt": "2026-07-12T12:00:00Z",
+  "profileHash": "<64 lowercase hex characters>",
+  "manifestHash": "<64 lowercase hex characters>",
+  "planHash": "<exact plan hash>"
+}
+```
 
-## Approval Records
+Only `decision: approved` is accepted for mutation. `scope` must be `apply` or `cleanup`. For cleanup, `planHash` contains the exact token printed by the profile-aware dry run. Wrong scope or stale profile, manifest, plan, or cleanup bindings fail with `HW-TEAM-003` before runtime mutation.
 
-Approval records are local review records. They document who reviewed an override, what scope they reviewed, and when the review was recorded.
+## Hash Contract
 
-Approval records do not bypass hard-coded Hostwright safety gates. Plan hashes, cleanup tokens, ownership checks, redaction, explicit state paths, local-only diagnostics, and `RuntimeAdapter` remain mandatory.
+- `profileHash`: SHA-256 of the decoded profile re-encoded as sorted-key canonical JSON.
+- `manifestHash`: SHA-256 of the exact manifest text read by the command.
+- `planHash`: the existing deterministic reconciliation plan hash, or the profile-bound cleanup token.
+- `approvalHash`: SHA-256 of the decoded approval record re-encoded as sorted-key canonical JSON. It is computed by Hostwright and does not appear inside the approval file.
 
-## Override Policy
+Formatting-only changes to a profile or approval do not change its canonical hash. Any manifest byte change invalidates its approval binding. A changed plan, observed state, cleanup candidate set, profile, scope, or approval requires a new approval record.
 
-Stricter team defaults can be declared as policy data, such as requiring digest-pinned images or manifest review.
+## Command Flow
 
-Overrides that weaken required gates require an approved local review record before the profile is accepted as reviewed data.
+Read-only validation and planning:
 
-Some overrides are always blocked in current core scope:
+```bash
+hostwright validate hostwright.yaml --team-profile team-profile.json
+hostwright plan hostwright.yaml --team-profile team-profile.json --output json
+hostwright import-stack compose.yaml --team-profile team-profile.json --output json
+```
 
-- broad bind address allowance;
-- plan confirmation bypass;
-- cleanup confirmation bypass;
-- ownership-check bypass;
-- default state path;
-- telemetry upload;
-- runtime mutation expansion.
+Profile-aware plan output includes `profileHash`, `manifestHash`, `planHash`, and `approvalRequiredForMutation`. Text import keeps converted manifest stdout parseable and reports profile metadata on stderr; JSON import includes a `teamPolicy` object.
 
-## Audit Events
+Confirmed apply:
 
-Team workflow audit records use the existing event ledger and explicit state database path. Suggested event types:
+```bash
+hostwright apply hostwright.yaml \
+  --state-db /absolute/path/state.sqlite \
+  --confirm-plan <plan-hash> \
+  --team-profile team-profile.json \
+  --approval-record approval.json
+```
 
-- `team.approval.recorded`
-- `team.policy.override.reviewed`
-- `team.profile.selected`
+Confirmed cleanup starts with a profile-aware dry run, then uses a cleanup-scoped approval bound to its exact token:
 
-Event payloads are redacted before persistence. Audit events are local records, not uploads.
+```bash
+hostwright cleanup hostwright.yaml \
+  --state-db /absolute/path/state.sqlite \
+  --dry-run \
+  --team-profile team-profile.json
+
+hostwright cleanup hostwright.yaml \
+  --state-db /absolute/path/state.sqlite \
+  --confirm-cleanup <cleanup-token> \
+  --team-profile team-profile.json \
+  --approval-record cleanup-approval.json
+```
+
+`--approval-record` without `--team-profile` is rejected. Apply requires an approval whenever a profile is selected. Cleanup dry-run rejects approval input because review must bind the token produced by that dry run.
+
+## Confirmation And Audit
+
+Profile-aware mutation carries the profile, manifest, plan, and approval hashes in `RuntimeMutationConfirmation`. Existing plan/token confirmation and exact ownership checks still run independently.
+
+The explicit SQLite state path records the same binding in redacted append-only operation/event payloads. Events include:
+
+- `team.profile.selected` for profile-aware cleanup dry-run;
+- `team.approval.recorded` before profile-aware apply or cleanup mutation;
+- the existing apply/cleanup success or failure events with the same binding metadata.
+
+Approval id, reviewer, timestamp, scope, and hashes are redacted before persistence. An audit write failure before mutation blocks the mutation. Approval records never bypass `RuntimeAdapter`, exact resource identifiers, ownership, confirmation, redaction, explicit state paths, local-only diagnostics, or cleanup eligibility.
 
 ## Shared Machines
 
-On shared Macs, operators should treat manifests, state databases, diagnostic bundles, and approval records as local files with local filesystem permissions. Hostwright does not manage macOS users, groups, ACLs, keychain access groups, shared secret stores, or device-management policy.
-
-Teams should keep state database paths explicit and review file permissions outside Hostwright before using a shared machine.
+Profiles, approvals, manifests, and state databases are ordinary local files. Operators must set appropriate filesystem ownership and permissions outside Hostwright. Hostwright does not manage macOS users, groups, ACLs, Keychain access groups, shared secret stores, or device-management policy.
 
 ## Non-Goals
 
-- Cloud team service.
-- Central remote control.
-- Hosted audit log.
-- User tracking.
-- Enterprise support workflow.
-- Organization account model.
-- Remote policy distribution.
-- Policy bypass.
-- Hidden default state paths.
-- macOS user, group, ACL, or MDM management.
+- Cloud team service or organization account model.
+- Central remote control or hosted audit log.
+- Remote policy distribution or silent defaults.
+- Policy weakening or approval-based safety bypass.
+- User tracking or enterprise support workflow.
+- macOS account, ACL, Keychain access-group, or MDM management.
+- Shared-secret distribution.

@@ -33,9 +33,9 @@ Policy decisions do not execute Apple container, write SQLite, contact registrie
 
 ## Team Workflow Boundary
 
-Team workflow support is local profile and approval data only. Hostwright can evaluate explicit opt-in team profiles, required safety gates, local approval records, and policy override declarations, but it does not provide a cloud team service, central remote control, hosted audit log, user tracking, enterprise support workflow, or remote policy distribution.
+Team workflow support is explicit local profile and approval data only. Hostwright accepts strict-only profile requirements and exact profile/manifest/plan-bound approvals; it does not provide policy weakening, a cloud team service, central remote control, hosted audit log, user tracking, enterprise support workflow, or remote policy distribution.
 
-Team profiles cannot bypass plan-hash confirmation, cleanup tokens, ownership checks, redaction, explicit state paths, local-only diagnostics, or `RuntimeAdapter`. Approval records document local review; they do not override hard-coded safety gates.
+Team profiles cannot bypass plan-hash confirmation, cleanup tokens, ownership checks, redaction, explicit state paths, local-only diagnostics, or `RuntimeAdapter`. Approval records authorize only the exact bound apply or cleanup operation; they do not override hard-coded safety gates.
 
 ## Extension Boundary
 

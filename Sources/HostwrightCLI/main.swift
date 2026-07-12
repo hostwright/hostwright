@@ -4,6 +4,7 @@ import HostwrightCore
 import HostwrightHealth
 import HostwrightImport
 import HostwrightManifest
+import HostwrightPolicy
 import HostwrightReconciler
 import HostwrightRuntime
 
@@ -55,15 +56,20 @@ public enum HostwrightCLI {
             return CLIRunResult(standardOutput: helpText)
         case .initManifest:
             return try initManifest(environment: environment)
-        case .importStack(let path, let output):
-            return try importStack(path: path, output: output, environment: environment)
-        case .validate(let path):
-            let manifest = try loadValidManifest(path: path, environment: environment)
-            return CLIRunResult(standardOutput: "Valid hostwright manifest: \(path)\nProject: \(manifest.project ?? "<missing>")\nServices: \(manifest.services.count)\n")
-        case .plan(let path, let output):
-            let manifest = try loadValidManifest(path: path, environment: environment)
-            let plan = ReconciliationPlanner().plan(manifest: manifest)
-            return CLIRunResult(standardOutput: output == .json ? CLIJSON.plan(plan) : PlanRenderer.render(plan))
+        case .importStack(let path, let output, let teamProfilePath):
+            return try importStack(path: path, output: output, teamProfilePath: teamProfilePath, environment: environment)
+        case .validate(let path, let teamProfilePath):
+            let validated = try loadValidManifest(path: path, teamProfilePath: teamProfilePath, environment: environment)
+            let standardOutput = "Valid hostwright manifest: \(path)\nProject: \(validated.manifest.project ?? "<missing>")\nServices: \(validated.manifest.services.count)\n" + hostwrightTeamProfileText(validated)
+            return CLIRunResult(standardOutput: standardOutput)
+        case .plan(let path, let output, let teamProfilePath):
+            let validated = try loadValidManifest(path: path, teamProfilePath: teamProfilePath, environment: environment)
+            let plan = ReconciliationPlanner().plan(manifest: validated.manifest)
+            let binding = validated.previewBinding(planHash: plan.planHash)
+            let standardOutput = output == .json
+                ? CLIJSON.plan(plan, teamBinding: binding)
+                : PlanRenderer.render(plan) + hostwrightTeamProfileText(validated, planHash: plan.planHash)
+            return CLIRunResult(standardOutput: standardOutput)
         case .status(let path, let stateDatabasePath, let output):
             return StatusCommandRunner(
                 manifestPath: path,
@@ -71,11 +77,13 @@ public enum HostwrightCLI {
                 output: output,
                 environment: environment
             ).run()
-        case .apply(let path, let stateDatabasePath, let confirmedPlanHash):
+        case .apply(let path, let stateDatabasePath, let confirmedPlanHash, let teamProfilePath, let approvalRecordPath):
             return ApplyCommandRunner(
                 manifestPath: path,
                 stateDatabasePath: stateDatabasePath,
                 confirmedPlanHash: confirmedPlanHash,
+                teamProfilePath: teamProfilePath,
+                approvalRecordPath: approvalRecordPath,
                 environment: environment
             ).run()
         case .logs(let serviceName, let path, let tail, let stateDatabasePath):
@@ -99,11 +107,13 @@ public enum HostwrightCLI {
                 projectName: projectName,
                 output: output
             ).run()
-        case .cleanup(let path, let stateDatabasePath, let confirmation):
+        case .cleanup(let path, let stateDatabasePath, let confirmation, let teamProfilePath, let approvalRecordPath):
             return CleanupCommandRunner(
                 manifestPath: path,
                 stateDatabasePath: stateDatabasePath,
                 confirmation: confirmation,
+                teamProfilePath: teamProfilePath,
+                approvalRecordPath: approvalRecordPath,
                 environment: environment
             ).run()
         case .diagnostics(let stateDatabasePath, let bundlePath, let projectName, let manifestPath):
@@ -125,16 +135,16 @@ public enum HostwrightCLI {
     Usage:
       hostwright --version
       hostwright init
-      hostwright import-stack <path> [--output text|json]
-      hostwright validate [path]
-      hostwright plan [path] [--output text|json]
+      hostwright import-stack <path> [--output text|json] [--team-profile <path>]
+      hostwright validate [path] [--team-profile <path>]
+      hostwright plan [path] [--output text|json] [--team-profile <path>]
       hostwright status [path] [--state-db <path>] [--output text|json]
-      hostwright apply [path] --state-db <path> --confirm-plan <hash>
+      hostwright apply [path] --state-db <path> --confirm-plan <hash> [--team-profile <path> --approval-record <path>]
       hostwright logs <service> [path] [--tail <n>] [--state-db <path>]
       hostwright events --state-db <path> [--project <name>] [--type <event>] [--service <name>] [--severity info|warning|error] [--limit <n>] [--sort asc|desc] [--output text|json]
       hostwright recovery --state-db <path> [--project <name>] [--output text|json]
-      hostwright cleanup [path] --state-db <path> --dry-run
-      hostwright cleanup [path] --state-db <path> --confirm-cleanup <token>
+      hostwright cleanup [path] --state-db <path> --dry-run [--team-profile <path>]
+      hostwright cleanup [path] --state-db <path> --confirm-cleanup <token> [--team-profile <path> --approval-record <path>]
       hostwright diagnostics --state-db <path> --bundle <path> [--project <name>] [--manifest <path>]
       hostwright doctor [--output text|json]
 
@@ -145,6 +155,7 @@ public enum HostwrightCLI {
     Cleanup deletes only exact cleanup-eligible Hostwright-owned stopped/created/exited containers after dry-run token confirmation.
     Diagnostics writes a local redacted JSON bundle only. It never uploads telemetry.
     JSON output is supported for import-stack, plan, status, events, recovery, doctor, and errors when --output json is present.
+    Team profiles and approvals are loaded only from explicit local paths. Profile-aware mutations require an approval bound to the exact profile, manifest, and plan or cleanup token.
 
     Examples:
       hostwright plan --output json
@@ -167,21 +178,38 @@ public enum HostwrightCLI {
         return CLIRunResult(standardOutput: "Created \(path)\n")
     }
 
-    private static func importStack(path: String, output: CLIOutputFormat, environment: CLIEnvironment) throws -> CLIRunResult {
+    private static func importStack(
+        path: String,
+        output: CLIOutputFormat,
+        teamProfilePath: String?,
+        environment: CLIEnvironment
+    ) throws -> CLIRunResult {
         let text = try hostwrightReadLocalText(path: path, role: "stack file", environment: environment)
         let result = StackFileImporter.convert(text)
         let exitCode: CLIExitCode = result.succeeded ? .success : .validation
+        var validatedManifest: TeamValidatedManifest?
+        if let manifestText = result.manifestText, result.succeeded {
+            validatedManifest = try hostwrightValidatedManifest(
+                text: manifestText,
+                teamProfilePath: teamProfilePath,
+                environment: environment
+            )
+        }
 
         if output == .json {
             if result.succeeded {
-                return CLIRunResult(standardOutput: CLIJSON.stackImport(path: path, result: result), exitCode: exitCode.rawValue)
+                return CLIRunResult(
+                    standardOutput: CLIJSON.stackImport(path: path, result: result, validatedManifest: validatedManifest),
+                    exitCode: exitCode.rawValue
+                )
             }
             return CLIRunResult(standardError: CLIJSON.stackImportError(path: path, result: result, exitCode: exitCode), exitCode: exitCode.rawValue)
         }
 
         if result.succeeded, let manifestText = result.manifestText {
             let warningText = result.warnings.isEmpty ? "" : result.warnings.map(\.rendered).joined(separator: "\n") + "\n"
-            return CLIRunResult(standardOutput: manifestText, standardError: warningText, exitCode: exitCode.rawValue)
+            let teamText = validatedManifest.map { hostwrightTeamProfileText($0) } ?? ""
+            return CLIRunResult(standardOutput: manifestText, standardError: warningText + teamText, exitCode: exitCode.rawValue)
         }
 
         return CLIRunResult(
@@ -210,9 +238,13 @@ public enum HostwrightCLI {
         return CLIRunResult(standardOutput: "Hostwright doctor\n" + lines.joined(separator: "\n") + "\n", exitCode: exitCode)
     }
 
-    private static func loadValidManifest(path: String, environment: CLIEnvironment) throws -> HostwrightManifest {
+    private static func loadValidManifest(
+        path: String,
+        teamProfilePath: String?,
+        environment: CLIEnvironment
+    ) throws -> TeamValidatedManifest {
         let text = try hostwrightReadManifestText(path: path, environment: environment)
-        return try ManifestValidator.validated(text)
+        return try hostwrightValidatedManifest(text: text, teamProfilePath: teamProfilePath, environment: environment)
     }
 
     private static func failure(issues: [ManifestIssue], output: CLIOutputFormat = .text) -> CLIRunResult {

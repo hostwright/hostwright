@@ -830,9 +830,19 @@ final class HostwrightReconcilerTests: XCTestCase {
              .teamProfileMissingIdentity,
              .teamProfileNotOptIn,
              .teamProfileUnsupportedVersion,
+             .teamProfileInvalidKind,
+             .teamProfileInvalidDisplayName,
              .teamProfileMissingRequiredGate,
-             .teamOverrideRequiresApproval,
-             .teamOverrideForbidden,
+             .teamProfileDuplicateGate,
+             .teamProfileDuplicateRequirement,
+             .teamRequirementDeclared,
+             .teamApprovalMissingIdentity,
+             .teamApprovalUnsupportedVersion,
+             .teamApprovalInvalidKind,
+             .teamApprovalRejected,
+             .teamApprovalScopeMismatch,
+             .teamApprovalInvalidTimestamp,
+             .teamApprovalBindingMismatch,
              .teamApprovalRecorded:
             return nil
         }

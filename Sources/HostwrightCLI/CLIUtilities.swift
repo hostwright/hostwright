@@ -3,6 +3,7 @@ import HostwrightCore
 import HostwrightHealth
 import HostwrightImport
 import HostwrightManifest
+import HostwrightPolicy
 import HostwrightReconciler
 import HostwrightRuntime
 import HostwrightState
@@ -265,14 +266,30 @@ enum CLIJSON {
         ])
     }
 
-    static func stackImport(path: String, result: StackImportResult) -> String {
-        render([
+    static func stackImport(
+        path: String,
+        result: StackImportResult,
+        validatedManifest: TeamValidatedManifest? = nil
+    ) -> String {
+        var object: [String: Any] = [
             "kind": "stackImport",
             "sourcePath": path,
             "succeeded": result.succeeded,
             "manifest": result.manifestText as Any,
             "warnings": result.warnings.map(stackImportDiagnostic)
-        ])
+        ]
+        if let validatedManifest,
+           let profileIdentifier = validatedManifest.profileIdentifier,
+           let profileHash = validatedManifest.profileHash,
+           let manifestHash = validatedManifest.manifestHash {
+            object["teamPolicy"] = teamPolicy(
+                profileIdentifier: profileIdentifier,
+                profileHash: profileHash,
+                manifestHash: manifestHash,
+                planHash: nil
+            )
+        }
+        return render(object)
     }
 
     static func stackImportError(path: String, result: StackImportResult, exitCode: CLIExitCode) -> String {
@@ -285,8 +302,8 @@ enum CLIJSON {
         ])
     }
 
-    static func plan(_ plan: ReconciliationPlan) -> String {
-        render([
+    static func plan(_ plan: ReconciliationPlan, teamBinding: TeamWorkflowBinding? = nil) -> String {
+        var object: [String: Any] = [
             "kind": "plan",
             "project": plan.projectName,
             "planHash": plan.planHash,
@@ -318,7 +335,31 @@ enum CLIJSON {
                     "executionAvailability": action.executionAvailability.rawValue
                 ]
             }
-        ])
+        ]
+        if let teamBinding {
+            object["teamPolicy"] = teamPolicy(
+                profileIdentifier: teamBinding.profileIdentifier,
+                profileHash: teamBinding.profileHash,
+                manifestHash: teamBinding.manifestHash,
+                planHash: teamBinding.planHash
+            )
+        }
+        return render(object)
+    }
+
+    private static func teamPolicy(
+        profileIdentifier: String,
+        profileHash: String,
+        manifestHash: String,
+        planHash: String?
+    ) -> [String: Any] {
+        [
+            "profileIdentifier": profileIdentifier,
+            "profileHash": profileHash,
+            "manifestHash": manifestHash,
+            "planHash": planHash as Any,
+            "approvalRequiredForMutation": true
+        ].compactNilValues()
     }
 
     private static func stackImportDiagnostic(_ diagnostic: StackImportDiagnostic) -> [String: Any] {

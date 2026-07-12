@@ -1,6 +1,7 @@
 import Foundation
 import HostwrightCore
 import HostwrightManifest
+import HostwrightPolicy
 import HostwrightReconciler
 import HostwrightRuntime
 import HostwrightSecrets
@@ -12,15 +13,44 @@ struct ApplyCommandRunner {
     let manifestPath: String
     let stateDatabasePath: String
     let confirmedPlanHash: String
+    let teamProfilePath: String?
+    let approvalRecordPath: String?
     let environment: CLIEnvironment
 
+    init(
+        manifestPath: String,
+        stateDatabasePath: String,
+        confirmedPlanHash: String,
+        teamProfilePath: String? = nil,
+        approvalRecordPath: String? = nil,
+        environment: CLIEnvironment
+    ) {
+        self.manifestPath = manifestPath
+        self.stateDatabasePath = stateDatabasePath
+        self.confirmedPlanHash = confirmedPlanHash
+        self.teamProfilePath = teamProfilePath
+        self.approvalRecordPath = approvalRecordPath
+        self.environment = environment
+    }
+
     func run() -> CLIRunResult {
+        guard (teamProfilePath == nil) == (approvalRecordPath == nil) else {
+            return failure(
+                code: .commandUsage,
+                message: "Profile-aware apply requires both --team-profile and --approval-record. No file, state, or runtime operation was attempted."
+            )
+        }
         do {
             let configuration = StateStoreConfiguration(explicitDatabasePath: stateDatabasePath)
             try configuration.validate()
 
             let manifestText = try hostwrightReadManifestText(path: manifestPath, environment: environment)
-            let manifest = try ManifestValidator.validated(manifestText)
+            let validatedManifest = try hostwrightValidatedManifest(
+                text: manifestText,
+                teamProfilePath: teamProfilePath,
+                environment: environment
+            )
+            let manifest = validatedManifest.manifest
             let mapping = ManifestRuntimeMapper.map(manifest)
             let store = SQLiteStateStore(path: configuration.databasePath)
             try store.migrate()
@@ -76,6 +106,25 @@ struct ApplyCommandRunner {
                     code: .unsafeExposure,
                     message: "Current plan has blocker issues. No mutation was attempted.\n\n\(PlanRenderer.render(plan))"
                 )
+            }
+
+            let teamBinding: TeamWorkflowBinding?
+            if validatedManifest.profileArtifact != nil {
+                guard let approvalRecordPath else {
+                    return failure(
+                        code: .teamApprovalInvalid,
+                        message: "Profile-aware apply requires an explicit approval record. No mutation was attempted."
+                    )
+                }
+                teamBinding = try hostwrightApprovedBinding(
+                    approvalRecordPath: approvalRecordPath,
+                    scope: .apply,
+                    validatedManifest: validatedManifest,
+                    planHash: plan.planHash,
+                    environment: environment
+                )
+            } else {
+                teamBinding = nil
             }
 
             let executableActions = plan.actions.filter {
@@ -206,7 +255,8 @@ struct ApplyCommandRunner {
                     idempotencyKey: idempotencyKey,
                     projectID: projectID,
                     timestamp: timestamp,
-                    runtimeAdapter: observedRuntimeAdapter
+                    runtimeAdapter: observedRuntimeAdapter,
+                    teamBinding: teamBinding
                 )
                 try recordOperationGroupStep(
                     store: store,
@@ -251,7 +301,10 @@ struct ApplyCommandRunner {
                         confirmation: RuntimeMutationConfirmation(
                             confirmed: true,
                             reason: "Confirmed Hostwright plan \(plan.planHash)",
-                            planHash: plan.planHash
+                            planHash: plan.planHash,
+                            manifestHash: teamBinding?.manifestHash,
+                            profileHash: teamBinding?.profileHash,
+                            approvalHash: teamBinding?.approvalHash
                         )
                     )
                 }
@@ -303,7 +356,8 @@ struct ApplyCommandRunner {
                         idempotencyKey: idempotencyKey,
                         planHash: plan.planHash,
                         projectID: projectID,
-                        timestamp: timestamp
+                        timestamp: timestamp,
+                        teamBinding: teamBinding
                     )
                     try recordManagedStartAttempt(
                         store: store,
@@ -370,7 +424,8 @@ struct ApplyCommandRunner {
                     planHash: plan.planHash,
                     projectID: projectID,
                     timestamp: timestamp,
-                    runtimeAdapter: observedRuntimeAdapter
+                    runtimeAdapter: observedRuntimeAdapter,
+                    teamBinding: teamBinding
                 )
                 try recordManagedStartAttempt(
                     store: store,
@@ -393,6 +448,9 @@ struct ApplyCommandRunner {
                     ]
                 )
 
+                let teamOutput = teamBinding.map { binding in
+                    "Profile hash: \(binding.profileHash)\nManifest hash: \(binding.manifestHash)\nApproval hash: \(binding.approvalHash ?? "")\n"
+                } ?? ""
                 return CLIRunResult(
                     standardOutput: """
                     Hostwright apply
@@ -401,8 +459,7 @@ struct ApplyCommandRunner {
                     Resource: \(action.resourceIdentifier)
                     Runtime event: \(RuntimeRedactionPolicy.default.redact(event.message))
                     State DB: \(stateDatabasePath)
-
-                    """
+                    """ + teamOutput + "\n"
                 )
             } catch {
                 try? finishOperationGroup(

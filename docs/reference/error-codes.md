@@ -19,6 +19,9 @@ Stable error codes are used for CLI and manifest diagnostics.
 | `HW-MANIFEST-004` | Manifest file I/O failed. | Implemented consistently for validate, plan, status, apply, logs, and cleanup manifest reads |
 | `HW-STATE-001` | State store unavailable. | Implemented for invalid paths, migration failure, incompatible/future schema, corrupt database, locked database, and read/write failures |
 | `HW-SECURITY-001` | Unsafe exposure. | Modelled |
+| `HW-TEAM-001` | Team profile is malformed, unsupported, or violates required gates. | Implemented for strict JSON parsing and profile policy evaluation |
+| `HW-TEAM-002` | Approval record is malformed, rejected, unsupported, or incomplete. | Implemented for profile-aware apply and confirmed cleanup |
+| `HW-TEAM-003` | Approval scope or profile/manifest/plan binding does not match the current operation. | Implemented as confirmation mismatch before runtime mutation |
 
 ## Process Exit Codes
 
@@ -26,10 +29,10 @@ Stable error codes are used for CLI and manifest diagnostics.
 | ---: | --- | --- |
 | `0` | Success | Completed command. |
 | `64` | Usage | Invalid arguments, unsupported flags, missing required confirmation/state arguments, refused overwrite, or local non-manifest file I/O failure. |
-| `65` | Validation | Missing/unreadable manifest, manifest parse or validation failure, unsupported manifest/import feature, stack-file import rejection, or compatibility validation failure. |
+| `65` | Validation | Missing/unreadable manifest, manifest/profile/approval validation failure, unsupported manifest/import feature, stack-file import rejection, or compatibility validation failure. |
 | `66` | State unavailable | Explicit state database path failed validation, migration, schema compatibility, locking, corruption, or read/write. |
 | `69` | Runtime unavailable | Runtime observation, logs, or mutation failed through `RuntimeAdapter`. |
-| `70` | Confirmation mismatch | Confirmed plan hash or cleanup token does not match the current observed plan. |
+| `70` | Confirmation mismatch | Confirmed plan hash, cleanup token, approval scope, or approval hash binding does not match the current operation. |
 | `71` | Unsafe operation | Planner or apply safety policy blocked mutation. |
 | `72` | Partial failure | At least one requested operation succeeded and at least one failed. |
 

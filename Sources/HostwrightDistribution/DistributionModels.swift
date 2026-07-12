@@ -288,24 +288,50 @@ public struct DistributionSPDXDocument: Codable, Equatable, Sendable {
     public let relationships: [SPDXRelationship]
 
     public func validate(manifest: DistributionArtifactManifest, archive: DistributionArtifactDescriptor) throws {
+        try manifest.validate()
+        try archive.validate(suffix: ".tar.gz")
+        let packageID = "SPDXRef-Package-Hostwright"
+        let expectedNamespace = "urn:hostwright:spdx:\(manifest.sourceCommit):\(archive.sha256)"
+        let expectedFileIDs = Set(manifest.files.indices.map { "SPDXRef-File-\($0 + 1)" })
         guard spdxVersion == "SPDX-2.3",
               dataLicense == "CC0-1.0",
               SPDXID == "SPDXRef-DOCUMENT",
+              name == "Hostwright \(manifest.packageVersion) artifact-content SBOM",
+              documentNamespace == expectedNamespace,
+              creationInfo.created == manifest.createdAt,
+              creationInfo.creators == ["Tool: hostwright-dist-1"],
               packages.count == 1,
               let package = packages.first,
               package.name == "Hostwright",
+              package.SPDXID == packageID,
               package.versionInfo == manifest.packageVersion,
+              package.downloadLocation == "NOASSERTION",
               package.filesAnalyzed,
               package.checksums == [SPDXChecksum(algorithm: "SHA256", checksumValue: archive.sha256)],
-              documentNamespace.contains(manifest.sourceCommit),
-              documentNamespace.contains(archive.sha256) else {
+              package.licenseConcluded == "NOASSERTION",
+              package.licenseDeclared == "NOASSERTION",
+              package.copyrightText == "NOASSERTION" else {
             throw DistributionError.invalidArtifact("SPDX package binding is invalid")
         }
         let expectedFiles = Dictionary(uniqueKeysWithValues: manifest.files.map { ($0.path, $0.sha256) })
-        let actualFiles = Dictionary(uniqueKeysWithValues: files.map {
-            ($0.fileName.replacingOccurrences(of: "./", with: ""), $0.checksums.first?.checksumValue ?? "")
-        })
-        let packageID = package.SPDXID
+        guard files.count == expectedFiles.count,
+              Set(files.map(\.fileName)).count == files.count,
+              Set(files.map(\.SPDXID)).count == files.count,
+              Set(files.map(\.SPDXID)) == expectedFileIDs,
+              files.allSatisfy({ file in
+                  guard file.fileName.hasPrefix("./") else { return false }
+                  let path = String(file.fileName.dropFirst(2))
+                  return expectedFiles[path] == file.checksums.first?.checksumValue &&
+                    file.checksums == [SPDXChecksum(algorithm: "SHA256", checksumValue: expectedFiles[path] ?? "")] &&
+                    file.fileTypes == [path.hasPrefix("bin/") ? "BINARY" : "TEXT"] &&
+                    file.licenseConcluded == "NOASSERTION" &&
+                    file.copyrightText == "NOASSERTION"
+              }) else {
+            throw DistributionError.invalidArtifact("SPDX file inventory contains duplicate or malformed entries")
+        }
+        let actualFiles = files.reduce(into: [String: String]()) { result, file in
+            result[String(file.fileName.dropFirst(2))] = file.checksums[0].checksumValue
+        }
         let expectedRelationships = Set(
             [
                 "SPDXRef-DOCUMENT|DESCRIBES|\(packageID)"
@@ -317,7 +343,7 @@ public struct DistributionSPDXDocument: Codable, Equatable, Sendable {
             "\($0.spdxElementId)|\($0.relationshipType)|\($0.relatedSpdxElement)"
         })
         guard expectedFiles == actualFiles,
-              files.allSatisfy({ $0.checksums.count == 1 && $0.checksums[0].algorithm == "SHA256" }),
+              relationships.count == actualRelationships.count,
               actualRelationships == expectedRelationships else {
             throw DistributionError.invalidArtifact("SPDX file inventory is not bound to the manifest")
         }
@@ -387,6 +413,8 @@ public struct DistributionProvenanceStatement: Codable, Equatable, Sendable {
     }
 
     public func validate(manifest: DistributionArtifactManifest, archive: DistributionArtifactDescriptor) throws {
+        try manifest.validate()
+        try archive.validate(suffix: ".tar.gz")
         let started = ISO8601DateFormatter().date(from: predicate.runDetails.metadata.startedOn)
         let finished = ISO8601DateFormatter().date(from: predicate.runDetails.metadata.finishedOn)
         guard statementType == "https://in-toto.io/Statement/v1",
@@ -399,10 +427,12 @@ public struct DistributionProvenanceStatement: Codable, Equatable, Sendable {
               predicate.buildDefinition.externalParameters.architecture == manifest.architecture,
               predicate.buildDefinition.internalParameters.sourceDirty == manifest.sourceDirty,
               predicate.buildDefinition.internalParameters.unsigned,
-              predicate.buildDefinition.resolvedDependencies.contains(where: {
-                  $0.uri == "git+https://github.com/hostwright/hostwright.git" &&
-                    $0.digest["gitCommit"] == manifest.sourceCommit
-              }),
+              predicate.buildDefinition.resolvedDependencies == [
+                  ProvenanceResolvedDependency(
+                      uri: "git+https://github.com/hostwright/hostwright.git",
+                      digest: ["gitCommit": manifest.sourceCommit]
+                  )
+              ],
               predicate.runDetails.builder.id == "urn:hostwright:builder:local-swiftpm:v1",
               UUID(uuidString: predicate.runDetails.metadata.invocationId) != nil,
               let started,

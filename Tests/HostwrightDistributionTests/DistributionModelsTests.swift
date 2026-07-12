@@ -57,7 +57,7 @@ final class DistributionModelsTests: XCTestCase {
         let spdxFiles = manifest.files.enumerated().map { index, file in
             SPDXFileRecord(
                 fileName: "./\(file.path)",
-                SPDXID: "SPDXRef-File-\(index)",
+                SPDXID: "SPDXRef-File-\(index + 1)",
                 checksums: [SPDXChecksum(algorithm: "SHA256", checksumValue: file.sha256)],
                 fileTypes: [file.path.hasPrefix("bin/") ? "BINARY" : "TEXT"],
                 licenseConcluded: "NOASSERTION",
@@ -68,7 +68,7 @@ final class DistributionModelsTests: XCTestCase {
             spdxVersion: "SPDX-2.3",
             dataLicense: "CC0-1.0",
             SPDXID: "SPDXRef-DOCUMENT",
-            name: "Hostwright artifact-content SBOM",
+            name: "Hostwright \(manifest.packageVersion) artifact-content SBOM",
             documentNamespace: "urn:hostwright:spdx:\(commit):\(digest)",
             creationInfo: SPDXCreationInfo(created: manifest.createdAt, creators: ["Tool: hostwright-dist-1"]),
             packages: [
@@ -100,6 +100,24 @@ final class DistributionModelsTests: XCTestCase {
             }
         )
         XCTAssertNoThrow(try spdx.validate(manifest: manifest, archive: archive))
+
+        let duplicateSPDXFile = DistributionSPDXDocument(
+            spdxVersion: spdx.spdxVersion,
+            dataLicense: spdx.dataLicense,
+            SPDXID: spdx.SPDXID,
+            name: spdx.name,
+            documentNamespace: spdx.documentNamespace,
+            creationInfo: spdx.creationInfo,
+            packages: spdx.packages,
+            files: spdx.files + [spdx.files[0]],
+            relationships: spdx.relationships
+        )
+        XCTAssertThrowsError(try duplicateSPDXFile.validate(manifest: manifest, archive: archive)) {
+            XCTAssertEqual(
+                $0 as? DistributionError,
+                .invalidArtifact("SPDX file inventory contains duplicate or malformed entries")
+            )
+        }
 
         let provenance = DistributionProvenanceStatement(
             statementType: "https://in-toto.io/Statement/v1",

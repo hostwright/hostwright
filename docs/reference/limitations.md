@@ -41,7 +41,7 @@ Hostwright is not production ready.
 - Documentation-site information architecture and source-of-truth boundaries for a separate `hostwright.dev` repository.
 - Swift Package Manager module boundaries.
 - RuntimeAdapter contract infrastructure, state scaffolds, reconciler scaffolds, health models, networking scaffolds, and observability scaffolds.
-- `MockRuntimeAdapter` and fake runtime process runner for tests only.
+- Test-only scripted runtime adapter, process runner, executable resolver, and in-memory secret store under `Tests/HostwrightTestSupport`.
 - `AppleContainerReadOnlyAdapter` for read-only observation attempts through `RuntimeAdapter`.
 - `FoundationRuntimeProcessRunner` guarded by read-only command classification, executable resolution, timeouts, and redaction.
 - Fixture-defined Apple container observation parser for empty and running snapshots, including reviewed network attachment metadata in the versioned fixture schema.

@@ -1,4 +1,6 @@
 import Foundation
+import HostwrightTestSupport
+import Network
 import XCTest
 @testable import HostwrightRuntime
 @testable import HostwrightSecrets
@@ -249,14 +251,14 @@ final class HostwrightRuntimeTests: XCTestCase {
         XCTAssertThrowsError(try RuntimeCommandPolicy.validateReadOnlyExecution(unresolvedReadOnly))
     }
 
-    func testMockRuntimeAdapterCanObserveServices() async throws {
+    func testScriptedRuntimeAdapterCanObserveServices() async throws {
         let observedService = ObservedRuntimeService(
             identity: identity,
             image: "ghcr.io/example/api:latest",
             lifecycleState: .running,
             healthState: .healthy
         )
-        let adapter = MockRuntimeAdapter(scenario: .observed([observedService]))
+        let adapter = ScriptedRuntimeAdapter(scenario: .observed([observedService]))
 
         let observed = try await adapter.observe(desiredState: desiredState)
 
@@ -264,8 +266,8 @@ final class HostwrightRuntimeTests: XCTestCase {
         XCTAssertEqual(observed.services[0].lifecycleState, .running)
     }
 
-    func testMockRuntimeAdapterPlansMissingServicesWithoutExecuting() async throws {
-        let adapter = MockRuntimeAdapter(scenario: .availableEmpty)
+    func testScriptedRuntimeAdapterPlansMissingServicesWithoutExecuting() async throws {
+        let adapter = ScriptedRuntimeAdapter(scenario: .availableEmpty)
         let observed = try await adapter.observe(desiredState: desiredState)
 
         let plan = try await adapter.plan(desiredState: desiredState, observedState: observed)
@@ -273,8 +275,8 @@ final class HostwrightRuntimeTests: XCTestCase {
         XCTAssertEqual(plan.actions.map(\.kind), [.create])
     }
 
-    func testMockRuntimeAdapterRedactsFailureOutput() async {
-        let adapter = MockRuntimeAdapter(scenario: .redactedFailure("password=fake-password token=fake-token"))
+    func testScriptedRuntimeAdapterRedactsFailureOutput() async {
+        let adapter = ScriptedRuntimeAdapter(scenario: .redactedFailure("password=fake-password token=fake-token"))
 
         do {
             _ = try await adapter.observe(desiredState: desiredState)
@@ -325,7 +327,7 @@ final class HostwrightRuntimeTests: XCTestCase {
     }
 
     func testRuntimeMutationRemainsUnavailable() async {
-        let adapter = MockRuntimeAdapter(scenario: .availableEmpty)
+        let adapter = ScriptedRuntimeAdapter(scenario: .availableEmpty)
 
         do {
             _ = try await adapter.execute(
@@ -390,6 +392,21 @@ final class HostwrightRuntimeTests: XCTestCase {
 
         XCTAssertNil(redirectedRequest)
         session.invalidateAndCancel()
+    }
+
+    func testURLSessionHealthFetcherReadsRealLoopbackHTTPResponse() async throws {
+        let server = try LoopbackHTTPServer(statusCode: 200, body: "ready")
+        defer { server.stop() }
+        let url = try XCTUnwrap(URL(string: "http://127.0.0.1:\(server.port)/health"))
+
+        let response = try await URLSessionRuntimeHealthURLFetcher().fetch(
+            url: url,
+            timeout: RuntimeCommandTimeout(seconds: 2)
+        )
+
+        XCTAssertEqual(response.statusCode, 200)
+        XCTAssertEqual(response.body, "ready")
+        XCTAssertEqual(server.requestCount, 1)
     }
 
     func testURLSessionHealthFetcherRejectsNonLoopbackURLBeforeNetwork() async throws {
@@ -757,8 +774,8 @@ final class HostwrightRuntimeTests: XCTestCase {
 
     func testAppleContainerReadOnlyAdapterMissingExecutableDegradesHonestly() async {
         let adapter = AppleContainerReadOnlyAdapter(
-            executableResolver: FixedRuntimeExecutableResolver(executables: [:]),
-            processRunner: FakeRuntimeProcessRunner(behavior: .failure(.runtimeUnavailable("should not run")))
+            executableResolver: DictionaryRuntimeExecutableResolver(executables: [:]),
+            processRunner: ScriptedRuntimeProcessRunner(behavior: .failure(.runtimeUnavailable("should not run")))
         )
 
         do {
@@ -777,7 +794,7 @@ final class HostwrightRuntimeTests: XCTestCase {
     func testAppleContainerParserParsesEmptyFixture() async throws {
         let adapter = AppleContainerReadOnlyAdapter(
             executableResolver: resolvedContainer,
-            processRunner: FakeRuntimeProcessRunner(
+            processRunner: ScriptedRuntimeProcessRunner(
                 behavior: .result(
                     RuntimeCommandResult(
                         spec: listSpec,
@@ -798,7 +815,7 @@ final class HostwrightRuntimeTests: XCTestCase {
     func testAppleContainerParserParsesRealEmptyJSONFixture() async throws {
         let adapter = AppleContainerReadOnlyAdapter(
             executableResolver: resolvedContainer,
-            processRunner: FakeRuntimeProcessRunner(
+            processRunner: ScriptedRuntimeProcessRunner(
                 behavior: .result(
                     RuntimeCommandResult(
                         spec: listSpec,
@@ -820,7 +837,7 @@ final class HostwrightRuntimeTests: XCTestCase {
     func testAppleContainerParserIgnoresRealBuilderContainerFixture() async throws {
         let adapter = AppleContainerReadOnlyAdapter(
             executableResolver: resolvedContainer,
-            processRunner: FakeRuntimeProcessRunner(
+            processRunner: ScriptedRuntimeProcessRunner(
                 behavior: .result(
                     RuntimeCommandResult(
                         spec: listSpec,
@@ -841,7 +858,7 @@ final class HostwrightRuntimeTests: XCTestCase {
     func testAppleContainerParserParsesRealCreatedProofContainerFixture() async throws {
         let adapter = AppleContainerReadOnlyAdapter(
             executableResolver: resolvedContainer,
-            processRunner: FakeRuntimeProcessRunner(
+            processRunner: ScriptedRuntimeProcessRunner(
                 behavior: .result(
                     RuntimeCommandResult(
                         spec: listSpec,
@@ -868,7 +885,7 @@ final class HostwrightRuntimeTests: XCTestCase {
     func testAppleContainerParserParsesRunningFixture() async throws {
         let adapter = AppleContainerReadOnlyAdapter(
             executableResolver: resolvedContainer,
-            processRunner: FakeRuntimeProcessRunner(
+            processRunner: ScriptedRuntimeProcessRunner(
                 behavior: .result(
                     RuntimeCommandResult(
                         spec: listSpec,
@@ -917,7 +934,7 @@ final class HostwrightRuntimeTests: XCTestCase {
             try AppleContainerObservationParser.parse(
                 output,
                 desiredState: proofDesiredState,
-                metadata: MockRuntimeAdapter.defaultMetadata
+                metadata: ScriptedRuntimeAdapter.defaultMetadata
             )
         ) { error in
             guard case RuntimeAdapterError.outputParseFailed(let message) = error else {
@@ -932,7 +949,7 @@ final class HostwrightRuntimeTests: XCTestCase {
             try AppleContainerObservationParser.parse(
                 "not-json token=fake-token password=fake-password",
                 desiredState: desiredState,
-                metadata: MockRuntimeAdapter.defaultMetadata
+                metadata: ScriptedRuntimeAdapter.defaultMetadata
             )
         ) { error in
             guard case RuntimeAdapterError.outputParseFailed(let message) = error else {
@@ -949,7 +966,7 @@ final class HostwrightRuntimeTests: XCTestCase {
             try AppleContainerObservationParser.parse(
                 #"{"items":[],"token":"fake-token","password":"fake-password"}"#,
                 desiredState: desiredState,
-                metadata: MockRuntimeAdapter.defaultMetadata
+                metadata: ScriptedRuntimeAdapter.defaultMetadata
             )
         ) { error in
             guard case RuntimeAdapterError.outputParseFailed(let message) = error else {
@@ -964,7 +981,7 @@ final class HostwrightRuntimeTests: XCTestCase {
             try AppleContainerObservationParser.parse(
                 #"[{"id":"abc","image":"example","token":"fake-token"}]"#,
                 desiredState: desiredState,
-                metadata: MockRuntimeAdapter.defaultMetadata
+                metadata: ScriptedRuntimeAdapter.defaultMetadata
             )
         ) { error in
             guard case RuntimeAdapterError.outputParseFailed(let message) = error else {
@@ -982,7 +999,7 @@ final class HostwrightRuntimeTests: XCTestCase {
             try AppleContainerObservationParser.parse(
                 redactionFixture,
                 desiredState: desiredState,
-                metadata: MockRuntimeAdapter.defaultMetadata
+                metadata: ScriptedRuntimeAdapter.defaultMetadata
             )
         ) { error in
             guard case RuntimeAdapterError.outputParseFailed(let message) = error else {
@@ -1048,8 +1065,8 @@ final class HostwrightRuntimeTests: XCTestCase {
         DesiredRuntimeState(projectName: "proof", services: [proofService])
     }
 
-    private var resolvedContainer: FixedRuntimeExecutableResolver {
-        FixedRuntimeExecutableResolver(executables: ["container": "/usr/bin/container-fixture"])
+    private var resolvedContainer: DictionaryRuntimeExecutableResolver {
+        DictionaryRuntimeExecutableResolver(executables: ["container": "/usr/bin/container-fixture"])
     }
 
     private var listSpec: RuntimeCommandSpec {
@@ -1120,6 +1137,96 @@ final class HostwrightRuntimeTests: XCTestCase {
                 throw error
             }
             return response ?? RuntimeHealthURLResponse(statusCode: 200)
+        }
+    }
+}
+
+private final class LoopbackHTTPServer: @unchecked Sendable {
+    private let listener: NWListener
+    private let queue = DispatchQueue(label: "dev.hostwright.tests.loopback-http")
+    private let ready = DispatchSemaphore(value: 0)
+    private let lock = NSLock()
+    private let response: Data
+    private var startupError: String?
+    private var requests = 0
+
+    init(statusCode: Int, body: String) throws {
+        let parameters = NWParameters.tcp
+        parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
+        listener = try NWListener(using: parameters)
+        response = Data(
+            "HTTP/1.1 \(statusCode) Test\r\nContent-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n\(body)".utf8
+        )
+
+        listener.stateUpdateHandler = { [weak self] state in
+            guard let self else { return }
+            switch state {
+            case .ready:
+                ready.signal()
+            case .failed(let error):
+                lock.lock()
+                startupError = String(describing: error)
+                lock.unlock()
+                ready.signal()
+            default:
+                break
+            }
+        }
+        listener.newConnectionHandler = { [weak self] connection in
+            self?.handle(connection)
+        }
+        listener.start(queue: queue)
+
+        guard ready.wait(timeout: .now() + 5) == .success else {
+            listener.cancel()
+            throw NSError(
+                domain: "HostwrightRuntimeTests",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Loopback HTTP server did not become ready."]
+            )
+        }
+        if let startupError {
+            listener.cancel()
+            throw NSError(
+                domain: "HostwrightRuntimeTests",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey: startupError]
+            )
+        }
+    }
+
+    var port: UInt16 {
+        listener.port?.rawValue ?? 0
+    }
+
+    var requestCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return requests
+    }
+
+    func stop() {
+        listener.cancel()
+    }
+
+    private func handle(_ connection: NWConnection) {
+        connection.start(queue: queue)
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 8_192) { [weak self] _, _, _, error in
+            guard let self else {
+                connection.cancel()
+                return
+            }
+            guard error == nil else {
+                connection.cancel()
+                return
+            }
+
+            lock.lock()
+            requests += 1
+            lock.unlock()
+            connection.send(content: response, completion: .contentProcessed { _ in
+                connection.cancel()
+            })
         }
     }
 }

@@ -14,9 +14,9 @@ Implemented:
 
 - typed runtime service identity, desired service, observed service, lifecycle state, health state, ports, mounts, environment values, events, capabilities, and adapter metadata;
 - expanded `RuntimeAdapter` protocol for metadata, capability discovery, read-only observation, planning, bounded logs, and mutation hooks;
-- `MockRuntimeAdapter` for deterministic tests without live process execution;
+- test-only `ScriptedRuntimeAdapter` for deterministic contracts without live process execution;
 - runtime command specs, command results, command classification, timeout model, and process runner protocol;
-- fake process runner for tests;
+- test-only scripted process runner for deterministic result and failure injection;
 - Foundation-backed process runner for policy-approved read-only runtime commands and the supported mutation specs;
 - executable resolution through `RuntimeExecutableResolver`;
 - `AppleContainerReadOnlyAdapter` for read-only observation attempts;
@@ -71,7 +71,7 @@ The command spec records:
 - timeout and output capture are enforced;
 - command args, env, stdout, stderr, and errors are redacted.
 
-Tests use fake process execution and fixtures. Local live observation and supported mutation are allowed only through RuntimeAdapter implementations in `HostwrightRuntime`.
+Unit-contract tests use scripted process execution and fixtures. Real local subprocess and loopback tests are separate local-integration evidence. Live observation and supported mutation are allowed only through RuntimeAdapter implementations in `HostwrightRuntime`.
 
 ## Command Classification
 

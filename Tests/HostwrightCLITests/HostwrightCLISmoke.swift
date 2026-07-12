@@ -1,3 +1,4 @@
+import HostwrightTestSupport
 import XCTest
 @testable import HostwrightCLI
 @testable import HostwrightCore
@@ -286,7 +287,7 @@ final class HostwrightCLITests: XCTestCase {
     }
 
     func testDoctorJSONOutputIncludesResourceReportWithoutRuntimeObservation() throws {
-        let adapter = FakeApplyRuntimeAdapter(observeError: .runtimeUnavailable("doctor should not observe runtime"))
+        let adapter = ScriptedApplyRuntimeAdapter(observeError: .runtimeUnavailable("doctor should not observe runtime"))
         let result = HostwrightCLI.run(
             arguments: ["doctor", "--output", "json"],
             environment: environment(
@@ -362,7 +363,7 @@ final class HostwrightCLITests: XCTestCase {
     func testApplyRefusesWrongPlanHashBeforeMutation() throws {
         try withTemporaryDatabase { databasePath in
             let files = FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest])
-            let adapter = FakeApplyRuntimeAdapter()
+            let adapter = ScriptedApplyRuntimeAdapter()
 
             let result = HostwrightCLI.run(
                 arguments: ["apply", "--state-db", databasePath, "--confirm-plan", "wrong-hash"],
@@ -378,7 +379,7 @@ final class HostwrightCLITests: XCTestCase {
     func testApplyPersistsIntentBeforeCreateAndRecordsSuccess() throws {
         try withTemporaryDatabase { databasePath in
             let files = FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest])
-            let adapter = FakeApplyRuntimeAdapter()
+            let adapter = ScriptedApplyRuntimeAdapter()
             let expectedHash = try planHash(for: singleServiceManifest, observed: adapter.observedState)
 
             let result = HostwrightCLI.run(
@@ -417,7 +418,7 @@ final class HostwrightCLITests: XCTestCase {
         try withTemporaryDatabase { databasePath in
             let files = FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest])
             let observed = ObservedRuntimeState(projectName: "demo", services: [], adapterMetadata: nil)
-            let adapter = FakeApplyRuntimeAdapter(observedState: observed)
+            let adapter = ScriptedApplyRuntimeAdapter(observedState: observed)
             let expectedHash = try planHash(for: singleServiceManifest, observed: observed)
 
             let result = HostwrightCLI.run(
@@ -439,7 +440,7 @@ final class HostwrightCLITests: XCTestCase {
     func testApplyCanStartStoppedServiceWhenRestartPolicyAllowsIt() throws {
         try withTemporaryDatabase { databasePath in
             let files = FileBox(files: [HostwrightIdentity.manifestFileName: restartableServiceManifest])
-            let adapter = FakeApplyRuntimeAdapter(
+            let adapter = ScriptedApplyRuntimeAdapter(
                 observedState: ObservedRuntimeState(
                     projectName: "demo",
                     services: [
@@ -498,7 +499,7 @@ final class HostwrightCLITests: XCTestCase {
                 ],
                 adapterMetadata: fakeAdapterMetadata
             )
-            let adapter = FakeApplyRuntimeAdapter(observedState: observed)
+            let adapter = ScriptedApplyRuntimeAdapter(observedState: observed)
             let expectedHash = try planHash(for: manifestText, observed: observed)
 
             let result = HostwrightCLI.run(
@@ -536,7 +537,7 @@ final class HostwrightCLITests: XCTestCase {
                 ],
                 adapterMetadata: fakeAdapterMetadata
             )
-            let adapter = FakeApplyRuntimeAdapter(observedState: observed)
+            let adapter = ScriptedApplyRuntimeAdapter(observedState: observed)
             let expectedHash = try planHash(for: manifestText, observed: observed)
 
             let result = HostwrightCLI.run(
@@ -591,7 +592,7 @@ final class HostwrightCLITests: XCTestCase {
                 ],
                 adapterMetadata: fakeAdapterMetadata
             )
-            let adapter = FakeApplyRuntimeAdapter(
+            let adapter = ScriptedApplyRuntimeAdapter(
                 observedState: observed,
                 executeError: .managedRestartStartFailedAfterStop(message: "start failed", standardError: "token=\(fakeSecret)")
             )
@@ -643,7 +644,7 @@ final class HostwrightCLITests: XCTestCase {
             try saveOwnership(store: store)
             let observedUnhealthy = runningObservedService(healthState: .unhealthy)
             let observedForPlanning = runningObservedService(healthState: .unknown)
-            let adapter = FakeApplyRuntimeAdapter(observedState: observedUnhealthy)
+            let adapter = ScriptedApplyRuntimeAdapter(observedState: observedUnhealthy)
             let expectedHash = try ReconciliationPlanner()
                 .plan(manifest: ManifestValidator.validated(manifestText), observedState: observedForPlanning)
                 .planHash
@@ -671,7 +672,7 @@ final class HostwrightCLITests: XCTestCase {
             try saveFreshUnhealthyHealthResult(store: store)
             let observedUnhealthy = runningObservedService(healthState: .unhealthy)
             let observedForPlanning = runningObservedService(healthState: .unknown)
-            let adapter = FakeApplyRuntimeAdapter(observedState: observedUnhealthy)
+            let adapter = ScriptedApplyRuntimeAdapter(observedState: observedUnhealthy)
             let expectedHash = try ReconciliationPlanner()
                 .plan(manifest: ManifestValidator.validated(manifestText), observedState: observedForPlanning)
                 .planHash
@@ -698,7 +699,7 @@ final class HostwrightCLITests: XCTestCase {
             try saveOwnership(store: store)
             try saveFreshUnhealthyHealthResult(store: store)
             let observedUnknown = runningObservedService(healthState: .unknown)
-            let adapter = FakeApplyRuntimeAdapter(observedState: observedUnknown)
+            let adapter = ScriptedApplyRuntimeAdapter(observedState: observedUnknown)
 
             let status = HostwrightCLI.run(
                 arguments: ["status", "--state-db", databasePath],
@@ -741,7 +742,7 @@ final class HostwrightCLITests: XCTestCase {
                 )
             )
             let observedUnknown = runningObservedService(healthState: .unknown)
-            let adapter = FakeApplyRuntimeAdapter(observedState: observedUnknown)
+            let adapter = ScriptedApplyRuntimeAdapter(observedState: observedUnknown)
 
             let status = HostwrightCLI.run(
                 arguments: ["status", "--state-db", databasePath],
@@ -786,7 +787,7 @@ final class HostwrightCLITests: XCTestCase {
             ])
             let observedUnknown = runningObservedService(healthState: .unknown)
             let observedUnhealthy = runningObservedService(healthState: .unhealthy)
-            let adapter = FakeApplyRuntimeAdapter(observedState: observedUnknown)
+            let adapter = ScriptedApplyRuntimeAdapter(observedState: observedUnknown)
             let expectedHash = try ReconciliationPlanner()
                 .plan(manifest: ManifestValidator.validated(manifestText), observedState: observedUnhealthy)
                 .planHash
@@ -826,7 +827,7 @@ final class HostwrightCLITests: XCTestCase {
                 )
             ])
             let observedUnknown = runningObservedService(healthState: .unknown)
-            let adapter = FakeApplyRuntimeAdapter(observedState: observedUnknown)
+            let adapter = ScriptedApplyRuntimeAdapter(observedState: observedUnknown)
             let expectedHash = try ReconciliationPlanner()
                 .plan(manifest: ManifestValidator.validated(manifestText), observedState: observedUnknown)
                 .planHash
@@ -871,7 +872,7 @@ final class HostwrightCLITests: XCTestCase {
                 ],
                 adapterMetadata: fakeAdapterMetadata
             )
-            let adapter = FakeApplyRuntimeAdapter(observedState: observed)
+            let adapter = ScriptedApplyRuntimeAdapter(observedState: observed)
             let expectedHash = try planHash(for: restartableServiceManifest, observed: observed)
 
             let result = HostwrightCLI.run(
@@ -914,7 +915,7 @@ final class HostwrightCLITests: XCTestCase {
                 END
                 """
             )
-            let adapter = FakeApplyRuntimeAdapter()
+            let adapter = ScriptedApplyRuntimeAdapter()
             let expectedHash = try planHash(for: singleServiceManifest, observed: adapter.observedState)
 
             let result = HostwrightCLI.run(
@@ -964,7 +965,7 @@ final class HostwrightCLITests: XCTestCase {
                 ],
                 adapterMetadata: fakeAdapterMetadata
             )
-            let adapter = FakeApplyRuntimeAdapter(observedState: observed)
+            let adapter = ScriptedApplyRuntimeAdapter(observedState: observed)
             let manifest = try ManifestValidator.validated(restartableServiceManifest)
             let expectedHash = ReconciliationPlanner().plan(
                 manifest: manifest,
@@ -988,7 +989,7 @@ final class HostwrightCLITests: XCTestCase {
     func testManagedStartDoesNotRemoveCleanupEligibilityFromCreatedOwnership() throws {
         try withTemporaryDatabase { databasePath in
             let files = FileBox(files: [HostwrightIdentity.manifestFileName: restartableServiceManifest])
-            let createAdapter = FakeApplyRuntimeAdapter()
+            let createAdapter = ScriptedApplyRuntimeAdapter()
             let createHash = try planHash(for: restartableServiceManifest, observed: createAdapter.observedState)
 
             let createResult = HostwrightCLI.run(
@@ -1009,7 +1010,7 @@ final class HostwrightCLITests: XCTestCase {
                 ],
                 adapterMetadata: fakeAdapterMetadata
             )
-            let startAdapter = FakeApplyRuntimeAdapter(observedState: stoppedObserved)
+            let startAdapter = ScriptedApplyRuntimeAdapter(observedState: stoppedObserved)
             let startHash = try planHash(for: restartableServiceManifest, observed: stoppedObserved)
             let startResult = HostwrightCLI.run(
                 arguments: ["apply", "--state-db", databasePath, "--confirm-plan", startHash],
@@ -1042,7 +1043,7 @@ final class HostwrightCLITests: XCTestCase {
 
             let result = HostwrightCLI.run(
                 arguments: ["status", "--state-db", databasePath],
-                environment: environment(files: files, runtimeAdapter: FakeApplyRuntimeAdapter(observedState: observed))
+                environment: environment(files: files, runtimeAdapter: ScriptedApplyRuntimeAdapter(observedState: observed))
             )
 
             XCTAssertEqual(result.exitCode, 0)
@@ -1081,7 +1082,7 @@ final class HostwrightCLITests: XCTestCase {
             )
             let result = HostwrightCLI.run(
                 arguments: ["status", "--state-db", databasePath, "--output", "json"],
-                environment: environment(files: files, runtimeAdapter: FakeApplyRuntimeAdapter(observedState: observed))
+                environment: environment(files: files, runtimeAdapter: ScriptedApplyRuntimeAdapter(observedState: observed))
             )
 
             XCTAssertEqual(result.exitCode, 0)
@@ -1124,7 +1125,7 @@ final class HostwrightCLITests: XCTestCase {
                 services: [ObservedRuntimeService(identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"), lifecycleState: .running)],
                 adapterMetadata: fakeAdapterMetadata
             )
-            let adapter = FakeApplyRuntimeAdapter(observedState: observed, logsText: "token=\(fakeSecret)\nready")
+            let adapter = ScriptedApplyRuntimeAdapter(observedState: observed, logsText: "token=\(fakeSecret)\nready")
 
             let result = HostwrightCLI.run(
                 arguments: ["logs", "api", "--tail", "5", "--state-db", databasePath],
@@ -1149,7 +1150,7 @@ final class HostwrightCLITests: XCTestCase {
                 services: [ObservedRuntimeService(identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"), lifecycleState: .running)],
                 adapterMetadata: fakeAdapterMetadata
             )
-            let adapter = FakeApplyRuntimeAdapter(observedState: observed, logsText: "ready")
+            let adapter = ScriptedApplyRuntimeAdapter(observedState: observed, logsText: "ready")
 
             let result = HostwrightCLI.run(
                 arguments: ["logs", "api", "--state-db", directory.path],
@@ -1260,7 +1261,7 @@ final class HostwrightCLITests: XCTestCase {
 
             let result = HostwrightCLI.run(
                 arguments: ["diagnostics", "--state-db", databasePath, "--bundle", bundlePath, "--project", "demo", "--manifest", HostwrightIdentity.manifestFileName],
-                environment: environment(files: files, runtimeAdapter: FakeApplyRuntimeAdapter(observeError: .runtimeUnavailable("should not observe")))
+                environment: environment(files: files, runtimeAdapter: ScriptedApplyRuntimeAdapter(observeError: .runtimeUnavailable("should not observe")))
             )
 
             XCTAssertEqual(result.exitCode, 0)
@@ -1494,7 +1495,7 @@ final class HostwrightCLITests: XCTestCase {
                 services: [ObservedRuntimeService(identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"), lifecycleState: .stopped)],
                 adapterMetadata: fakeAdapterMetadata
             )
-            let adapter = FakeApplyRuntimeAdapter(observedState: observed)
+            let adapter = ScriptedApplyRuntimeAdapter(observedState: observed)
 
             let dryRun = HostwrightCLI.run(
                 arguments: ["cleanup", "--state-db", databasePath, "--dry-run"],
@@ -1598,7 +1599,7 @@ final class HostwrightCLITests: XCTestCase {
                 ],
                 adapterMetadata: fakeAdapterMetadata
             )
-            let adapter = FakeApplyRuntimeAdapter(observedState: observed)
+            let adapter = ScriptedApplyRuntimeAdapter(observedState: observed)
 
             let dryRun = HostwrightCLI.run(
                 arguments: ["cleanup", "--state-db", databasePath, "--dry-run"],
@@ -1645,7 +1646,7 @@ final class HostwrightCLITests: XCTestCase {
     func testApplyOwnershipUsesObservedAdapterAndCleanupBlocksAdapterMismatch() throws {
         try withTemporaryDatabase { databasePath in
             let files = FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest])
-            let applyAdapter = FakeApplyRuntimeAdapter()
+            let applyAdapter = ScriptedApplyRuntimeAdapter()
             let expectedHash = try planHash(for: singleServiceManifest, observed: applyAdapter.observedState)
 
             let apply = HostwrightCLI.run(
@@ -1663,7 +1664,7 @@ final class HostwrightCLITests: XCTestCase {
                 services: [ObservedRuntimeService(identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"), lifecycleState: .stopped)],
                 adapterMetadata: fakeAdapterMetadata
             )
-            let cleanupAdapter = FakeApplyRuntimeAdapter(observedState: stoppedObserved)
+            let cleanupAdapter = ScriptedApplyRuntimeAdapter(observedState: stoppedObserved)
             let eligibleDryRun = HostwrightCLI.run(
                 arguments: ["cleanup", "--state-db", databasePath, "--dry-run"],
                 environment: environment(files: files, runtimeAdapter: cleanupAdapter)
@@ -1684,7 +1685,7 @@ final class HostwrightCLITests: XCTestCase {
                 services: [ObservedRuntimeService(identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"), lifecycleState: .stopped)],
                 adapterMetadata: otherMetadata
             )
-            let mismatchedAdapter = FakeApplyRuntimeAdapter(observedState: mismatchedObserved)
+            let mismatchedAdapter = ScriptedApplyRuntimeAdapter(observedState: mismatchedObserved)
             let blockedDryRun = HostwrightCLI.run(
                 arguments: ["cleanup", "--state-db", databasePath, "--dry-run"],
                 environment: environment(files: files, runtimeAdapter: mismatchedAdapter)
@@ -1744,7 +1745,7 @@ final class HostwrightCLITests: XCTestCase {
 
             let result = HostwrightCLI.run(
                 arguments: ["cleanup", "--state-db", databasePath, "--dry-run"],
-                environment: environment(files: files, runtimeAdapter: FakeApplyRuntimeAdapter(observedState: stoppedObserved))
+                environment: environment(files: files, runtimeAdapter: ScriptedApplyRuntimeAdapter(observedState: stoppedObserved))
             )
 
             XCTAssertEqual(result.exitCode, 0)
@@ -1781,7 +1782,7 @@ final class HostwrightCLITests: XCTestCase {
                 services: [ObservedRuntimeService(identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"), lifecycleState: .stopped)],
                 adapterMetadata: fakeAdapterMetadata
             )
-            let adapter = FakeApplyRuntimeAdapter(
+            let adapter = ScriptedApplyRuntimeAdapter(
                 observedState: observed,
                 onExecute: { _ in
                     try FileManager.default.removeItem(atPath: databasePath)
@@ -1815,7 +1816,7 @@ final class HostwrightCLITests: XCTestCase {
     func testApplyPersistsFailureWithRedactedError() throws {
         try withTemporaryDatabase { databasePath in
             let files = FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest])
-            let adapter = FakeApplyRuntimeAdapter(executeError: .commandFailed(exitStatus: 2, message: "failed", standardError: "token=\(fakeSecret)"))
+            let adapter = ScriptedApplyRuntimeAdapter(executeError: .commandFailed(exitStatus: 2, message: "failed", standardError: "token=\(fakeSecret)"))
             let expectedHash = try planHash(for: singleServiceManifest, observed: adapter.observedState)
 
             let result = HostwrightCLI.run(
@@ -1856,9 +1857,9 @@ final class HostwrightCLITests: XCTestCase {
 
             """
             let files = FileBox(files: [HostwrightIdentity.manifestFileName: manifest])
-            let adapter = FakeApplyRuntimeAdapter()
+            let adapter = ScriptedApplyRuntimeAdapter()
             let opaqueSecret = "opaque-session-value"
-            let secretStore = try FakeKeychainSecretStore(rawValues: ["keychain://hostwright.api/session": opaqueSecret])
+            let secretStore = try InMemorySecretStore(rawValues: ["keychain://hostwright.api/session": opaqueSecret])
             let expectedHash = try planHash(for: manifest, observed: adapter.observedState)
 
             let result = HostwrightCLI.run(
@@ -1884,7 +1885,7 @@ final class HostwrightCLITests: XCTestCase {
     func testApplyIdempotencyBlocksDuplicateSucceededPlan() throws {
         try withTemporaryDatabase { databasePath in
             let files = FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest])
-            let adapter = FakeApplyRuntimeAdapter()
+            let adapter = ScriptedApplyRuntimeAdapter()
             let expectedHash = try planHash(for: singleServiceManifest, observed: adapter.observedState)
 
             let first = HostwrightCLI.run(
@@ -1918,8 +1919,8 @@ final class HostwrightCLITests: XCTestCase {
 
             """
             let files = FileBox(files: [HostwrightIdentity.manifestFileName: manifest])
-            let adapter = FakeApplyRuntimeAdapter()
-            let secretStore = try FakeKeychainSecretStore(rawValues: ["keychain://hostwright.api/api-token": "token=\(fakeSecret)"])
+            let adapter = ScriptedApplyRuntimeAdapter()
+            let secretStore = try InMemorySecretStore(rawValues: ["keychain://hostwright.api/api-token": "token=\(fakeSecret)"])
             let expectedHash = try planHash(for: manifest, observed: adapter.observedState)
 
             let first = HostwrightCLI.run(
@@ -1953,7 +1954,7 @@ final class HostwrightCLITests: XCTestCase {
 
             """
             let files = FileBox(files: [HostwrightIdentity.manifestFileName: manifest])
-            let adapter = FakeApplyRuntimeAdapter()
+            let adapter = ScriptedApplyRuntimeAdapter()
             let expectedHash = try planHash(for: manifest, observed: adapter.observedState)
 
             let result = HostwrightCLI.run(
@@ -1973,14 +1974,14 @@ final class HostwrightCLITests: XCTestCase {
     func testApplyCanRetryAfterFailedOperationWithSamePlanHash() throws {
         try withTemporaryDatabase { databasePath in
             let files = FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest])
-            let failingAdapter = FakeApplyRuntimeAdapter(executeError: .commandFailed(exitStatus: 2, message: "failed", standardError: "token=\(fakeSecret)"))
+            let failingAdapter = ScriptedApplyRuntimeAdapter(executeError: .commandFailed(exitStatus: 2, message: "failed", standardError: "token=\(fakeSecret)"))
             let expectedHash = try planHash(for: singleServiceManifest, observed: failingAdapter.observedState)
 
             let first = HostwrightCLI.run(
                 arguments: ["apply", "--state-db", databasePath, "--confirm-plan", expectedHash],
                 environment: environment(files: files, runtimeAdapter: failingAdapter)
             )
-            let retryAdapter = FakeApplyRuntimeAdapter(observedState: failingAdapter.observedState)
+            let retryAdapter = ScriptedApplyRuntimeAdapter(observedState: failingAdapter.observedState)
             let second = HostwrightCLI.run(
                 arguments: ["apply", "--state-db", databasePath, "--confirm-plan", expectedHash],
                 environment: environment(files: files, runtimeAdapter: retryAdapter)
@@ -2002,7 +2003,7 @@ final class HostwrightCLITests: XCTestCase {
     func testApplyObservationFailureIsRuntimeFailure() throws {
         try withTemporaryDatabase { databasePath in
             let files = FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest])
-            let adapter = FakeApplyRuntimeAdapter(observeError: .runtimeUnavailable("observe failed token=\(fakeSecret)"))
+            let adapter = ScriptedApplyRuntimeAdapter(observeError: .runtimeUnavailable("observe failed token=\(fakeSecret)"))
 
             let result = HostwrightCLI.run(
                 arguments: ["apply", "--state-db", databasePath, "--confirm-plan", "unused"],
@@ -2020,7 +2021,7 @@ final class HostwrightCLITests: XCTestCase {
     func testApplyRuntimeFailureRemainsPrimaryWhenFailurePersistenceFails() throws {
         try withTemporaryDatabase { databasePath in
             let files = FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest])
-            let adapter = FakeApplyRuntimeAdapter(
+            let adapter = ScriptedApplyRuntimeAdapter(
                 executeError: .commandFailed(exitStatus: 2, message: "runtime failed", standardError: "token=\(fakeSecret)"),
                 onExecute: { _ in
                     try FileManager.default.removeItem(atPath: databasePath)
@@ -2058,7 +2059,7 @@ final class HostwrightCLITests: XCTestCase {
                 END
                 """
             )
-            let adapter = FakeApplyRuntimeAdapter(
+            let adapter = ScriptedApplyRuntimeAdapter(
                 executeError: .commandFailed(exitStatus: 2, message: "runtime failed", standardError: "token=\(fakeSecret)")
             )
             let expectedHash = try planHash(for: singleServiceManifest, observed: adapter.observedState)
@@ -2111,7 +2112,7 @@ final class HostwrightCLITests: XCTestCase {
                 adapterMetadata: fakeAdapterMetadata
             )
             let secret = fakeSecret
-            let adapter = FakeApplyRuntimeAdapter(
+            let adapter = ScriptedApplyRuntimeAdapter(
                 observedState: observed,
                 onExecute: { action in
                     if action.identity.serviceName == "worker" {
@@ -2274,7 +2275,7 @@ final class HostwrightCLITests: XCTestCase {
                 files.files[path] = text
             },
             executablePath: { name in name == "container" ? containerPath : "/usr/bin/\(name)" },
-            runtimeAdapter: { runtimeAdapter ?? FakeApplyRuntimeAdapter() },
+            runtimeAdapter: { runtimeAdapter ?? ScriptedApplyRuntimeAdapter() },
             secretStore: { secretStore ?? UnavailableKeychainSecretStore() },
             swiftVersion: { "Swift 6.3.3" },
             platformSnapshot: { platform },
@@ -2400,7 +2401,7 @@ final class HostwrightCLITests: XCTestCase {
         return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
     }
 
-    private final class FakeApplyRuntimeAdapter: RuntimeAdapter, @unchecked Sendable {
+    private final class ScriptedApplyRuntimeAdapter: RuntimeAdapter, @unchecked Sendable {
         typealias ExecuteHook = @Sendable (PlannedRuntimeAction) throws -> Void
 
         let observedState: ObservedRuntimeState

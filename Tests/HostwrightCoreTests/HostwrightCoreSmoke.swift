@@ -24,6 +24,7 @@ final class HostwrightCoreTests: XCTestCase {
         XCTAssertEqual(constraints.count, 4)
         XCTAssertTrue(schemaText.contains(#""exitCode": {"const": 0}"#))
         XCTAssertTrue(schemaText.contains(#""exactResourceIdentifiers": {"minItems": 1}"#))
+        XCTAssertTrue(schemaText.contains(#"{"properties": {"status": {"const": "passed"}}}"#))
         XCTAssertTrue(policy.contains("there is no skipped-success status"))
         XCTAssertTrue(policy.contains("may not be converted to passed with a fixture"))
         XCTAssertTrue(policy.contains("Exact cleanup failure makes live-runtime or hardware evidence fail"))

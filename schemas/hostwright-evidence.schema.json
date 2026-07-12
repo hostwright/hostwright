@@ -157,7 +157,12 @@
       "then": {"properties": {"blockers": {"minItems": 1}}}
     },
     {
-      "if": {"properties": {"evidenceClass": {"const": "live-runtime"}}},
+      "if": {
+        "allOf": [
+          {"properties": {"evidenceClass": {"const": "live-runtime"}}},
+          {"properties": {"status": {"const": "passed"}}}
+        ]
+      },
       "then": {
         "properties": {
           "cleanup": {

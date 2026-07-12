@@ -86,6 +86,9 @@ public enum AppleContainerCommand {
                 "--name",
                 containerName(for: desiredService.identity)
             ]
+            for (key, value) in RuntimeManagedResourceIdentity.labels(for: desiredService.identity).sorted(by: { $0.key < $1.key }) {
+                arguments += ["--label", "\(key)=\(value)"]
+            }
             for value in desiredService.environment.sorted(by: { $0.name < $1.name }) {
                 arguments += ["--env", "\(value.name)=\(value.value)"]
             }

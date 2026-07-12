@@ -440,12 +440,17 @@ final class HostwrightCLITests: XCTestCase {
     func testApplyCanStartStoppedServiceWhenRestartPolicyAllowsIt() throws {
         try withTemporaryDatabase { databasePath in
             let files = FileBox(files: [HostwrightIdentity.manifestFileName: restartableServiceManifest])
+            let store = SQLiteStateStore(path: databasePath)
+            try store.migrate()
+            try saveDesiredManifest(store: store, manifestText: restartableServiceManifest)
+            try saveOwnership(store: store)
             let adapter = ScriptedApplyRuntimeAdapter(
                 observedState: ObservedRuntimeState(
                     projectName: "demo",
                     services: [
                         ObservedRuntimeService(
                             identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"),
+                            resourceIdentifier: RuntimeServiceIdentity(projectName: "demo", serviceName: "api").managedResourceIdentifier,
                             image: "local/demo:latest",
                             lifecycleState: .stopped,
                             healthState: .unknown
@@ -465,7 +470,6 @@ final class HostwrightCLITests: XCTestCase {
             XCTAssertTrue(result.standardOutput.contains("Applied action: proposeStartStoppedService demo/api"))
             XCTAssertEqual(adapter.executedActions.map(\.kind), [.start])
 
-            let store = SQLiteStateStore(path: databasePath)
             let states = try store.restartPolicies.loadProject(projectID: "project-demo")
             XCTAssertEqual(states.count, 1)
             XCTAssertEqual(states[0].policy, .onFailure)
@@ -476,6 +480,74 @@ final class HostwrightCLITests: XCTestCase {
             let events = try store.events.loadAll()
             XCTAssertTrue(events.contains { $0.type == "apply.started-service" })
             XCTAssertTrue(events.contains { $0.type == "restart.policy.active" })
+        }
+    }
+
+    func testApplyCanStartLegacyOwnedServiceWhoseIDMatchesV2Shape() throws {
+        try withTemporaryDatabase { databasePath in
+            let serviceName = "0123456789abcdef0123456789abcdef"
+            let manifestText = """
+            version: 1
+            project: v2-a-b
+            services:
+              \(serviceName):
+                image: local/demo:latest
+                restart:
+                  policy: on-failure
+            """
+            let identity = RuntimeServiceIdentity(projectName: "v2-a-b", serviceName: serviceName)
+            let resourceIdentifier = identity.legacyManagedResourceIdentifier
+            XCTAssertTrue(RuntimeManagedResourceIdentity.isCurrentIdentifier(resourceIdentifier))
+            let files = FileBox(files: [HostwrightIdentity.manifestFileName: manifestText])
+            let store = SQLiteStateStore(path: databasePath)
+            try store.migrate()
+            try store.desiredStates.saveManifestSnapshot(
+                projectID: "project-v2-a-b",
+                manifestPath: HostwrightIdentity.manifestFileName,
+                manifestHash: "manifest-hash",
+                desiredGeneration: 1,
+                manifest: try ManifestValidator.validated(manifestText),
+                timestamp: "2026-07-01T00:00:00Z"
+            )
+            try store.ownership.upsert(
+                OwnershipRecord(
+                    id: "ownership-legacy-v2-shape",
+                    resourceIdentifier: resourceIdentifier,
+                    resourceType: "container",
+                    projectID: "project-v2-a-b",
+                    serviceName: serviceName,
+                    runtimeAdapter: fakeAdapterMetadata.adapterName,
+                    createdAt: "2026-07-01T00:00:00Z",
+                    observedAt: "2026-07-01T00:00:00Z",
+                    cleanupEligible: true,
+                    metadataJSONRedacted: "{}",
+                    identityVersion: 1
+                )
+            )
+            let observed = ObservedRuntimeState(
+                projectName: identity.projectName,
+                services: [
+                    ObservedRuntimeService(
+                        identity: identity,
+                        resourceIdentifier: resourceIdentifier,
+                        image: "local/demo:latest",
+                        lifecycleState: .stopped,
+                        healthState: .unknown
+                    )
+                ],
+                adapterMetadata: fakeAdapterMetadata
+            )
+            let adapter = ScriptedApplyRuntimeAdapter(observedState: observed)
+            let expectedHash = try planHash(for: manifestText, observed: observed)
+
+            let result = HostwrightCLI.run(
+                arguments: ["apply", "--state-db", databasePath, "--confirm-plan", expectedHash],
+                environment: environment(files: files, runtimeAdapter: adapter)
+            )
+
+            XCTAssertEqual(result.exitCode, 0)
+            XCTAssertEqual(adapter.executedActions.map(\.resourceIdentifier), [resourceIdentifier])
+            XCTAssertEqual(adapter.executedActions.map(\.kind), [.start])
         }
     }
 
@@ -492,6 +564,7 @@ final class HostwrightCLITests: XCTestCase {
                 services: [
                     ObservedRuntimeService(
                         identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"),
+                        resourceIdentifier: RuntimeServiceIdentity(projectName: "demo", serviceName: "api").managedResourceIdentifier,
                         image: "local/demo:latest",
                         lifecycleState: .running,
                         healthState: .unhealthy
@@ -530,6 +603,7 @@ final class HostwrightCLITests: XCTestCase {
                 services: [
                     ObservedRuntimeService(
                         identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"),
+                        resourceIdentifier: RuntimeServiceIdentity(projectName: "demo", serviceName: "api").managedResourceIdentifier,
                         image: "local/demo:latest",
                         lifecycleState: .running,
                         healthState: .unhealthy
@@ -585,6 +659,7 @@ final class HostwrightCLITests: XCTestCase {
                 services: [
                     ObservedRuntimeService(
                         identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"),
+                        resourceIdentifier: RuntimeServiceIdentity(projectName: "demo", serviceName: "api").managedResourceIdentifier,
                         image: "local/demo:latest",
                         lifecycleState: .running,
                         healthState: .unhealthy
@@ -715,6 +790,52 @@ final class HostwrightCLITests: XCTestCase {
 
             XCTAssertEqual(apply.exitCode, 0)
             XCTAssertEqual(adapter.executedActions.map(\.kind), [.restart])
+        }
+    }
+
+    func testPlanningHealthOverlayPreservesExactResourceIdentifierAndNetworks() throws {
+        try withTemporaryDatabase { databasePath in
+            let store = SQLiteStateStore(path: databasePath)
+            try store.migrate()
+            try saveDesiredManifest(store: store, manifestText: managedRestartHealthManifest)
+            try saveFreshUnhealthyHealthResult(store: store)
+            let desiredState = ManifestRuntimeMapper.map(
+                try ManifestValidator.validated(managedRestartHealthManifest)
+            ).desiredState
+            let identity = RuntimeServiceIdentity(projectName: "demo", serviceName: "api")
+            let network = RuntimeNetworkAttachment(
+                name: "default",
+                hostname: "api.local",
+                ipv4Address: "192.168.64.8/24",
+                mtu: 1500
+            )
+            let observed = ObservedRuntimeState(
+                projectName: "demo",
+                services: [
+                    ObservedRuntimeService(
+                        identity: identity,
+                        resourceIdentifier: identity.legacyManagedResourceIdentifier,
+                        image: "local/demo:latest",
+                        lifecycleState: .running,
+                        healthState: .unknown,
+                        networks: [network]
+                    )
+                ],
+                adapterMetadata: fakeAdapterMetadata
+            )
+
+            let overlaid = try hostwrightPlanningObservedState(
+                observed: observed,
+                desiredState: desiredState,
+                store: store,
+                projectID: "project-demo",
+                currentTimestamp: hostwrightTimestamp()
+            )
+
+            let service = try XCTUnwrap(overlaid.services.first)
+            XCTAssertEqual(service.healthState, .unhealthy)
+            XCTAssertEqual(service.resourceIdentifier, identity.legacyManagedResourceIdentifier)
+            XCTAssertEqual(service.networks, [network])
         }
     }
 
@@ -849,6 +970,8 @@ final class HostwrightCLITests: XCTestCase {
             let files = FileBox(files: [HostwrightIdentity.manifestFileName: restartableServiceManifest])
             let store = SQLiteStateStore(path: databasePath)
             try store.migrate()
+            try saveDesiredManifest(store: store, manifestText: restartableServiceManifest)
+            try saveOwnership(store: store)
             let connection = try SQLiteConnection(path: databasePath)
             try connection.execute(
                 """
@@ -865,6 +988,7 @@ final class HostwrightCLITests: XCTestCase {
                 services: [
                     ObservedRuntimeService(
                         identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"),
+                        resourceIdentifier: RuntimeServiceIdentity(projectName: "demo", serviceName: "api").managedResourceIdentifier,
                         image: "local/demo:latest",
                         lifecycleState: .stopped,
                         healthState: .unknown
@@ -958,6 +1082,7 @@ final class HostwrightCLITests: XCTestCase {
                 services: [
                     ObservedRuntimeService(
                         identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"),
+                        resourceIdentifier: RuntimeServiceIdentity(projectName: "demo", serviceName: "api").managedResourceIdentifier,
                         image: "local/demo:latest",
                         lifecycleState: .exited,
                         healthState: .unknown
@@ -1003,6 +1128,7 @@ final class HostwrightCLITests: XCTestCase {
                 services: [
                     ObservedRuntimeService(
                         identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"),
+                        resourceIdentifier: RuntimeServiceIdentity(projectName: "demo", serviceName: "api").managedResourceIdentifier,
                         image: "local/demo:latest",
                         lifecycleState: .stopped,
                         healthState: .unknown
@@ -1031,6 +1157,7 @@ final class HostwrightCLITests: XCTestCase {
                 services: [
                     ObservedRuntimeService(
                         identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"),
+                        resourceIdentifier: RuntimeServiceIdentity(projectName: "demo", serviceName: "api").managedResourceIdentifier,
                         image: "local/demo:latest",
                         lifecycleState: .running,
                         healthState: .healthy,
@@ -1051,6 +1178,7 @@ final class HostwrightCLITests: XCTestCase {
             XCTAssertTrue(result.standardOutput.contains("Runtime parser: status-observation-v1"))
             XCTAssertTrue(result.standardOutput.contains("Telemetry: local-only; no upload"))
             XCTAssertTrue(result.standardOutput.contains("lifecycle=running"))
+            XCTAssertTrue(result.standardOutput.contains("id=\(RuntimeServiceIdentity(projectName: "demo", serviceName: "api").managedResourceIdentifier)"))
             let events = try SQLiteStateStore(path: databasePath).events.loadAll()
             XCTAssertTrue(events.contains { $0.type == "status.observed" })
         }
@@ -1072,10 +1200,19 @@ final class HostwrightCLITests: XCTestCase {
                 services: [
                     ObservedRuntimeService(
                         identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"),
+                        resourceIdentifier: RuntimeServiceIdentity(projectName: "demo", serviceName: "api").managedResourceIdentifier,
                         image: "local/demo:latest",
                         lifecycleState: .running,
                         healthState: .healthy,
-                        ports: [RuntimePortMapping(hostPort: 8080, containerPort: 8080)]
+                        ports: [RuntimePortMapping(hostPort: 8080, containerPort: 8080)],
+                        networks: [
+                            RuntimeNetworkAttachment(
+                                name: "default",
+                                hostname: "api.local",
+                                ipv4Address: "192.168.64.8/24",
+                                mtu: 1280
+                            )
+                        ]
                     )
                 ],
                 adapterMetadata: fakeAdapterMetadata
@@ -1096,6 +1233,14 @@ final class HostwrightCLITests: XCTestCase {
             XCTAssertEqual(json["telemetryPolicy"] as? String, "local-only; no upload")
             let services = try XCTUnwrap(json["services"] as? [[String: Any]])
             XCTAssertEqual(services.first?["name"] as? String, "api")
+            let observedService = try XCTUnwrap(services.first?["observed"] as? [String: Any])
+            XCTAssertEqual(
+                observedService["resourceIdentifier"] as? String,
+                RuntimeServiceIdentity(projectName: "demo", serviceName: "api").managedResourceIdentifier
+            )
+            let networks = try XCTUnwrap(observedService["networks"] as? [[String: Any]])
+            XCTAssertEqual(networks.first?["ipv4Address"] as? String, "192.168.64.8/24")
+            XCTAssertEqual(networks.first?["mtu"] as? Int, 1280)
         }
     }
 
@@ -1122,7 +1267,11 @@ final class HostwrightCLITests: XCTestCase {
             let files = FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest])
             let observed = ObservedRuntimeState(
                 projectName: "demo",
-                services: [ObservedRuntimeService(identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"), lifecycleState: .running)],
+                services: [ObservedRuntimeService(
+                    identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"),
+                    resourceIdentifier: RuntimeServiceIdentity(projectName: "demo", serviceName: "api").managedResourceIdentifier,
+                    lifecycleState: .running
+                )],
                 adapterMetadata: fakeAdapterMetadata
             )
             let adapter = ScriptedApplyRuntimeAdapter(observedState: observed, logsText: "token=\(fakeSecret)\nready")
@@ -1137,8 +1286,59 @@ final class HostwrightCLITests: XCTestCase {
             XCTAssertTrue(result.standardOutput.contains("[REDACTED]"))
             XCTAssertFalse(result.standardOutput.contains(fakeSecret))
             XCTAssertEqual(adapter.logRequests, [RuntimeServiceIdentity(projectName: "demo", serviceName: "api")])
+            XCTAssertEqual(adapter.logResourceIdentifiers, [RuntimeServiceIdentity(projectName: "demo", serviceName: "api").managedResourceIdentifier])
             let events = try SQLiteStateStore(path: databasePath).events.loadAll()
             XCTAssertTrue(events.contains { $0.type == "logs.read" })
+        }
+    }
+
+    func testLogsUsesStateBackedLegacyExactResourceIdentifier() throws {
+        try withTemporaryDatabase { databasePath in
+            let files = FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest])
+            let store = SQLiteStateStore(path: databasePath)
+            try store.migrate()
+            try saveDesiredManifest(store: store, manifestText: singleServiceManifest)
+            let identity = RuntimeServiceIdentity(projectName: "demo", serviceName: "api")
+            let resourceIdentifier = identity.legacyManagedResourceIdentifier
+            try store.ownership.upsert(
+                OwnershipRecord(
+                    id: "ownership-legacy-logs",
+                    resourceIdentifier: resourceIdentifier,
+                    resourceType: "container",
+                    projectID: "project-demo",
+                    serviceName: "api",
+                    runtimeAdapter: "AppleContainerApplyAdapter",
+                    createdAt: "2026-07-01T00:00:00Z",
+                    observedAt: "2026-07-01T00:00:00Z",
+                    cleanupEligible: true,
+                    metadataJSONRedacted: "{}",
+                    identityVersion: 1
+                )
+            )
+            let observed = ObservedRuntimeState(
+                projectName: "demo",
+                services: [
+                    ObservedRuntimeService(
+                        identity: identity,
+                        resourceIdentifier: resourceIdentifier,
+                        lifecycleState: .running
+                    )
+                ],
+                adapterMetadata: fakeAdapterMetadata
+            )
+            let adapter = ScriptedApplyRuntimeAdapter(observedState: observed, logsText: "ready")
+
+            let result = HostwrightCLI.run(
+                arguments: ["logs", "api", "--state-db", databasePath],
+                environment: environment(files: files, runtimeAdapter: adapter)
+            )
+
+            XCTAssertEqual(result.exitCode, 0)
+            XCTAssertTrue(result.standardOutput.contains("Resource: \(resourceIdentifier)"))
+            XCTAssertEqual(adapter.logResourceIdentifiers, [resourceIdentifier])
+            XCTAssertEqual(adapter.observedDesiredStates.first?.ownedResourceHints.map(\.resourceIdentifier), [resourceIdentifier])
+            let event = try XCTUnwrap(store.events.loadAll().first { $0.type == "logs.read" })
+            XCTAssertTrue(event.payloadJSONRedacted.contains(resourceIdentifier))
         }
     }
 
@@ -1147,7 +1347,11 @@ final class HostwrightCLITests: XCTestCase {
             let files = FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest])
             let observed = ObservedRuntimeState(
                 projectName: "demo",
-                services: [ObservedRuntimeService(identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"), lifecycleState: .running)],
+                services: [ObservedRuntimeService(
+                    identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"),
+                    resourceIdentifier: RuntimeServiceIdentity(projectName: "demo", serviceName: "api").managedResourceIdentifier,
+                    lifecycleState: .running
+                )],
                 adapterMetadata: fakeAdapterMetadata
             )
             let adapter = ScriptedApplyRuntimeAdapter(observedState: observed, logsText: "ready")
@@ -1160,7 +1364,7 @@ final class HostwrightCLITests: XCTestCase {
             XCTAssertEqual(result.exitCode, CLIExitCode.stateUnavailable.rawValue)
             XCTAssertEqual(result.standardOutput, "")
             XCTAssertTrue(result.standardError.contains(HostwrightErrorCode.stateStoreUnavailable.rawValue))
-            XCTAssertEqual(adapter.logRequests, [RuntimeServiceIdentity(projectName: "demo", serviceName: "api")])
+            XCTAssertEqual(adapter.logRequests, [])
         }
     }
 
@@ -1492,7 +1696,11 @@ final class HostwrightCLITests: XCTestCase {
             )
             let observed = ObservedRuntimeState(
                 projectName: "demo",
-                services: [ObservedRuntimeService(identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"), lifecycleState: .stopped)],
+                services: [ObservedRuntimeService(
+                    identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"),
+                    resourceIdentifier: "hostwright-demo-api",
+                    lifecycleState: .stopped
+                )],
                 adapterMetadata: fakeAdapterMetadata
             )
             let adapter = ScriptedApplyRuntimeAdapter(observedState: observed)
@@ -1587,15 +1795,15 @@ final class HostwrightCLITests: XCTestCase {
             let observed = ObservedRuntimeState(
                 projectName: "demo",
                 services: [
-                    ObservedRuntimeService(identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"), lifecycleState: .stopped),
-                    ObservedRuntimeService(identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "worker"), lifecycleState: .running),
-                    ObservedRuntimeService(identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "unknown"), lifecycleState: .unknown),
-                    ObservedRuntimeService(identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "dupe", instanceName: "one"), lifecycleState: .stopped),
-                    ObservedRuntimeService(identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "dupe", instanceName: "two"), lifecycleState: .exited),
-                    ObservedRuntimeService(identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "collide"), lifecycleState: .stopped),
-                    ObservedRuntimeService(identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "adapter"), lifecycleState: .stopped),
-                    ObservedRuntimeService(identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "disabled"), lifecycleState: .stopped),
-                    ObservedRuntimeService(identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "orphan"), lifecycleState: .stopped)
+                    ObservedRuntimeService(identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"), resourceIdentifier: "hostwright-demo-api", lifecycleState: .stopped),
+                    ObservedRuntimeService(identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "worker"), resourceIdentifier: "hostwright-demo-worker", lifecycleState: .running),
+                    ObservedRuntimeService(identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "unknown"), resourceIdentifier: "hostwright-demo-unknown", lifecycleState: .unknown),
+                    ObservedRuntimeService(identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "dupe", instanceName: "one"), resourceIdentifier: "hostwright-demo-dupe", lifecycleState: .stopped),
+                    ObservedRuntimeService(identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "dupe", instanceName: "two"), resourceIdentifier: "hostwright-demo-dupe", lifecycleState: .exited),
+                    ObservedRuntimeService(identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "collide"), resourceIdentifier: "hostwright-demo-collide", lifecycleState: .stopped),
+                    ObservedRuntimeService(identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "adapter"), resourceIdentifier: "hostwright-demo-adapter", lifecycleState: .stopped),
+                    ObservedRuntimeService(identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "disabled"), resourceIdentifier: "hostwright-demo-disabled", lifecycleState: .stopped),
+                    ObservedRuntimeService(identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "orphan"), resourceIdentifier: "hostwright-demo-orphan", lifecycleState: .stopped)
                 ],
                 adapterMetadata: fakeAdapterMetadata
             )
@@ -1658,10 +1866,15 @@ final class HostwrightCLITests: XCTestCase {
             let ownership = try SQLiteStateStore(path: databasePath).ownership.loadAll()
             XCTAssertEqual(ownership.count, 1)
             XCTAssertEqual(ownership[0].runtimeAdapter, "fake-apply-adapter")
+            let resourceIdentifier = RuntimeServiceIdentity(projectName: "demo", serviceName: "api").managedResourceIdentifier
 
             let stoppedObserved = ObservedRuntimeState(
                 projectName: "demo",
-                services: [ObservedRuntimeService(identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"), lifecycleState: .stopped)],
+                services: [ObservedRuntimeService(
+                    identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"),
+                    resourceIdentifier: resourceIdentifier,
+                    lifecycleState: .stopped
+                )],
                 adapterMetadata: fakeAdapterMetadata
             )
             let cleanupAdapter = ScriptedApplyRuntimeAdapter(observedState: stoppedObserved)
@@ -1670,7 +1883,7 @@ final class HostwrightCLITests: XCTestCase {
                 environment: environment(files: files, runtimeAdapter: cleanupAdapter)
             )
             XCTAssertEqual(eligibleDryRun.exitCode, 0)
-            XCTAssertTrue(eligibleDryRun.standardOutput.contains("[eligible] hostwright-demo-api"))
+            XCTAssertTrue(eligibleDryRun.standardOutput.contains("[eligible] \(resourceIdentifier)"))
 
             let otherMetadata = RuntimeAdapterMetadata(
                 adapterName: "other-apply-adapter",
@@ -1682,7 +1895,11 @@ final class HostwrightCLITests: XCTestCase {
             )
             let mismatchedObserved = ObservedRuntimeState(
                 projectName: "demo",
-                services: [ObservedRuntimeService(identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"), lifecycleState: .stopped)],
+                services: [ObservedRuntimeService(
+                    identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"),
+                    resourceIdentifier: resourceIdentifier,
+                    lifecycleState: .stopped
+                )],
                 adapterMetadata: otherMetadata
             )
             let mismatchedAdapter = ScriptedApplyRuntimeAdapter(observedState: mismatchedObserved)
@@ -1692,7 +1909,7 @@ final class HostwrightCLITests: XCTestCase {
             )
 
             XCTAssertEqual(blockedDryRun.exitCode, 0)
-            XCTAssertTrue(blockedDryRun.standardOutput.contains("[blocked] hostwright-demo-api"))
+            XCTAssertTrue(blockedDryRun.standardOutput.contains("[blocked] \(resourceIdentifier)"))
             XCTAssertTrue(blockedDryRun.standardOutput.contains("runtime adapter mismatch"))
             let blockedToken = blockedDryRun.standardOutput
                 .split(separator: "\n")
@@ -1713,10 +1930,15 @@ final class HostwrightCLITests: XCTestCase {
         try withTemporaryDatabase { databasePath in
             let files = FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest])
             let store = SQLiteStateStore(path: databasePath)
-            try store.migrate()
-            try saveDesiredManifest(store: store, manifestText: singleServiceManifest)
+            try MigrationRunner().apply(to: store, throughVersion: 4)
             let connection = try SQLiteConnection(path: databasePath)
-            try connection.run("DELETE FROM schema_migrations WHERE version = 5")
+            try connection.run(
+                """
+                INSERT INTO projects (id, name, manifest_path, manifest_hash, created_at, updated_at)
+                VALUES ('project-demo', 'demo', 'hostwright.yaml', 'manifest-hash',
+                        '2026-07-01T00:00:00Z', '2026-07-01T00:00:00Z')
+                """
+            )
             try connection.run(
                 """
                 INSERT INTO ownership_records (
@@ -1739,7 +1961,11 @@ final class HostwrightCLITests: XCTestCase {
             )
             let stoppedObserved = ObservedRuntimeState(
                 projectName: "demo",
-                services: [ObservedRuntimeService(identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"), lifecycleState: .stopped)],
+                services: [ObservedRuntimeService(
+                    identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"),
+                    resourceIdentifier: "hostwright-demo-api",
+                    lifecycleState: .stopped
+                )],
                 adapterMetadata: appleApplyMetadata
             )
 
@@ -1779,7 +2005,11 @@ final class HostwrightCLITests: XCTestCase {
             )
             let observed = ObservedRuntimeState(
                 projectName: "demo",
-                services: [ObservedRuntimeService(identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"), lifecycleState: .stopped)],
+                services: [ObservedRuntimeService(
+                    identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"),
+                    resourceIdentifier: "hostwright-demo-api",
+                    lifecycleState: .stopped
+                )],
                 adapterMetadata: fakeAdapterMetadata
             )
             let adapter = ScriptedApplyRuntimeAdapter(
@@ -2106,8 +2336,8 @@ final class HostwrightCLITests: XCTestCase {
             let observed = ObservedRuntimeState(
                 projectName: "demo",
                 services: [
-                    ObservedRuntimeService(identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"), lifecycleState: .stopped),
-                    ObservedRuntimeService(identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "worker"), lifecycleState: .stopped)
+                    ObservedRuntimeService(identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"), resourceIdentifier: "hostwright-demo-api", lifecycleState: .stopped),
+                    ObservedRuntimeService(identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "worker"), resourceIdentifier: "hostwright-demo-worker", lifecycleState: .stopped)
                 ],
                 adapterMetadata: fakeAdapterMetadata
             )
@@ -2344,10 +2574,11 @@ final class HostwrightCLITests: XCTestCase {
     }
 
     private func saveOwnership(store: SQLiteStateStore) throws {
+        let identity = RuntimeServiceIdentity(projectName: "demo", serviceName: "api")
         try store.ownership.upsert(
             OwnershipRecord(
                 id: "ownership-api",
-                resourceIdentifier: "hostwright-demo-api",
+                resourceIdentifier: identity.managedResourceIdentifier,
                 resourceType: "container",
                 projectID: "project-demo",
                 serviceName: "api",
@@ -2355,7 +2586,8 @@ final class HostwrightCLITests: XCTestCase {
                 createdAt: "2026-07-01T00:00:00Z",
                 observedAt: "2026-07-01T00:00:00Z",
                 cleanupEligible: true,
-                metadataJSONRedacted: "{}"
+                metadataJSONRedacted: "{}",
+                identityVersion: RuntimeManagedResourceIdentity.currentVersion
             )
         )
     }
@@ -2387,6 +2619,7 @@ final class HostwrightCLITests: XCTestCase {
             services: [
                 ObservedRuntimeService(
                     identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"),
+                    resourceIdentifier: RuntimeServiceIdentity(projectName: "demo", serviceName: "api").managedResourceIdentifier,
                     image: "local/demo:latest",
                     lifecycleState: lifecycleState,
                     healthState: healthState
@@ -2411,6 +2644,8 @@ final class HostwrightCLITests: XCTestCase {
         let onExecute: ExecuteHook?
         var executedActions: [PlannedRuntimeAction] = []
         var logRequests: [RuntimeServiceIdentity] = []
+        var logResourceIdentifiers: [String] = []
+        var observedDesiredStates: [DesiredRuntimeState] = []
 
         init(
             observedState: ObservedRuntimeState? = nil,
@@ -2446,6 +2681,7 @@ final class HostwrightCLITests: XCTestCase {
         }
 
         func observe(desiredState: DesiredRuntimeState) async throws -> ObservedRuntimeState {
+            observedDesiredStates.append(desiredState)
             if let observeError {
                 throw observeError
             }
@@ -2465,13 +2701,14 @@ final class HostwrightCLITests: XCTestCase {
             return RuntimeEvent(
                 identity: action.identity,
                 message: "\(action.kind.rawValue) token=plain-secret-token",
-                resourceIdentifier: action.identity.managedResourceIdentifier
+                resourceIdentifier: action.resourceIdentifier
             )
         }
 
-        func logs(for identity: RuntimeServiceIdentity, tail: Int) async throws -> RuntimeLogResult {
-            logRequests.append(identity)
-            return RuntimeLogResult(identity: identity, text: RuntimeRedactionPolicy.default.redact(logsText), lineLimit: min(max(1, tail), 1_000))
+        func logs(for service: ObservedRuntimeService, tail: Int) async throws -> RuntimeLogResult {
+            logRequests.append(service.identity)
+            logResourceIdentifiers.append(service.resourceIdentifier)
+            return RuntimeLogResult(identity: service.identity, text: RuntimeRedactionPolicy.default.redact(logsText), lineLimit: min(max(1, tail), 1_000))
         }
     }
 }

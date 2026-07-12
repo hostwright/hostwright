@@ -59,6 +59,7 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
                     PlannedRuntimeAction(
                         kind: .create,
                         identity: desired.identity,
+                        resourceIdentifier: desired.identity.managedResourceIdentifier,
                         isDestructive: false,
                         summary: "Create missing service \(desired.identity.displayName).",
                         desiredService: desired
@@ -68,8 +69,8 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
         )
     }
 
-    public func logs(for identity: RuntimeServiceIdentity, tail: Int) async throws -> RuntimeLogResult {
-        try await readOnlyAdapter.logs(for: identity, tail: tail)
+    public func logs(for service: ObservedRuntimeService, tail: Int) async throws -> RuntimeLogResult {
+        try await readOnlyAdapter.logs(for: service, tail: tail)
     }
 
     public func execute(_ action: PlannedRuntimeAction, confirmation: RuntimeMutationConfirmation?) async throws -> RuntimeEvent {
@@ -102,6 +103,12 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
         guard let desiredService = action.desiredService else {
             throw RuntimeAdapterError.mutationUnavailableByPolicy("Create-missing-service requires desired runtime service details.")
         }
+        guard action.identity == desiredService.identity,
+              action.resourceIdentifier == desiredService.identity.managedResourceIdentifier else {
+            throw RuntimeAdapterError.mutationUnavailableByPolicy(
+                "Create-missing-service requires an action identity and exact versioned identifier bound to the desired service."
+            )
+        }
         try validateCreateSubset(desiredService)
 
         let imageListSpec = AppleContainerCommand.spec(kind: .listImages, executable: executable)
@@ -128,7 +135,10 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
     }
 
     private func executeStart(_ action: PlannedRuntimeAction, executable: ResolvedRuntimeExecutable) async throws -> RuntimeEvent {
-        let containerID = AppleContainerCommand.containerName(for: action.identity)
+        let containerID = action.resourceIdentifier
+        guard RuntimeManagedResourceIdentity.isSupportedIdentifier(containerID) else {
+            throw RuntimeAdapterError.mutationUnavailableByPolicy("Start-managed-service requires an exact supported Hostwright resource identifier.")
+        }
         let spec = AppleContainerCommand.spec(kind: .startContainer(containerID: containerID), executable: executable)
         try RuntimeCommandPolicy.validateStartManagedServiceMutation(spec)
         let result = try await runRedacted(spec)
@@ -148,7 +158,10 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
             )
         }
 
-        let containerID = AppleContainerCommand.containerName(for: action.identity)
+        let containerID = action.resourceIdentifier
+        guard RuntimeManagedResourceIdentity.isSupportedIdentifier(containerID) else {
+            throw RuntimeAdapterError.mutationUnavailableByPolicy("Restart-managed-service requires an exact supported Hostwright resource identifier.")
+        }
         let stopSpec = AppleContainerCommand.spec(kind: .stopForManagedRestart(containerID: containerID), executable: executable)
         try RuntimeCommandPolicy.validateRestartManagedServiceMutation(stopSpec)
         let stopResult = try await runRedacted(stopSpec)
@@ -195,7 +208,10 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
                 message: "Delete-managed-container requires an explicitly destructive planned action."
             )
         }
-        let containerID = AppleContainerCommand.containerName(for: action.identity)
+        let containerID = action.resourceIdentifier
+        guard RuntimeManagedResourceIdentity.isSupportedIdentifier(containerID) else {
+            throw RuntimeAdapterError.mutationUnavailableByPolicy("Delete-managed-container requires an exact supported Hostwright resource identifier.")
+        }
         let spec = AppleContainerCommand.spec(kind: .deleteContainer(containerID: containerID), executable: executable)
         try RuntimeCommandPolicy.validateDeleteManagedContainerMutation(spec)
         let result = try await runRedacted(spec)

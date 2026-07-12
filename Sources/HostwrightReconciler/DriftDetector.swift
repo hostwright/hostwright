@@ -130,6 +130,7 @@ public enum DriftDetector {
                 PlannedAction(
                     kind: .flagUnmanagedService,
                     identity: observed.identity,
+                    resourceIdentifier: observed.resourceIdentifier,
                     reason: "Observed service is unmanaged; cleanup is not available from this plan.",
                     driftKind: .unmanagedObservedService
                 )
@@ -166,6 +167,7 @@ public enum DriftDetector {
                     PlannedAction(
                         kind: .createMissingService,
                         identity: desired.identity,
+                        resourceIdentifier: desired.identity.managedResourceIdentifier,
                         reason: "Desired service is missing; confirmed apply can create exactly one missing service.",
                         driftKind: .missingDesiredService,
                         executionAvailability: .availableForCreateMissingService
@@ -241,6 +243,7 @@ public enum DriftDetector {
                 PlannedAction(
                     kind: .proposeStartStoppedService,
                     identity: observed.identity,
+                    resourceIdentifier: observed.resourceIdentifier,
                     reason: decision.reason,
                     driftKind: .stoppedService,
                     stableDetailKey: observed.lifecycleState.rawValue,
@@ -260,6 +263,7 @@ public enum DriftDetector {
                 PlannedAction(
                     kind: .investigateFailedService,
                     identity: observed.identity,
+                    resourceIdentifier: observed.resourceIdentifier,
                     reason: "Observed service failed; managed start is not available for failed lifecycle state.",
                     driftKind: .failedService
                 )
@@ -277,6 +281,7 @@ public enum DriftDetector {
                 PlannedAction(
                     kind: .createMissingService,
                     identity: observed.identity,
+                    resourceIdentifier: desired.identity.managedResourceIdentifier,
                     reason: "Observed service is missing; confirmed apply can create exactly one missing service.",
                     driftKind: .missingDesiredService,
                     executionAvailability: .availableForCreateMissingService
@@ -311,6 +316,7 @@ public enum DriftDetector {
             PlannedAction(
                 kind: .replaceForImageDrift,
                 identity: desired.identity,
+                resourceIdentifier: observed.resourceIdentifier,
                 reason: "Image drift detected; replacement execution is not available.",
                 driftKind: .imageMismatch,
                 stableDetailKey: detail
@@ -344,6 +350,7 @@ public enum DriftDetector {
             PlannedAction(
                 kind: .reconcilePortDrift,
                 identity: desired.identity,
+                resourceIdentifier: observed.resourceIdentifier,
                 reason: "Port drift detected; port mutation is not available.",
                 driftKind: .portMismatch,
                 stableDetailKey: detail
@@ -377,6 +384,7 @@ public enum DriftDetector {
             PlannedAction(
                 kind: .reconcileMountDrift,
                 identity: desired.identity,
+                resourceIdentifier: observed.resourceIdentifier,
                 reason: "Mount drift detected; mount mutation is not available.",
                 driftKind: .mountMismatch,
                 stableDetailKey: detail
@@ -434,6 +442,7 @@ public enum DriftDetector {
                 PlannedAction(
                     kind: .restartManagedService,
                     identity: observed.identity,
+                    resourceIdentifier: observed.resourceIdentifier,
                     reason: decision.reason,
                     driftKind: .unhealthyService,
                     stableDetailKey: observed.healthState.rawValue,
@@ -447,6 +456,7 @@ public enum DriftDetector {
             PlannedAction(
                 kind: .investigateUnhealthyService,
                 identity: observed.identity,
+                resourceIdentifier: observed.resourceIdentifier,
                 reason: "Health drift detected; bounded health results are recorded for operator review.",
                 driftKind: .unhealthyService,
                 stableDetailKey: observed.healthState.rawValue

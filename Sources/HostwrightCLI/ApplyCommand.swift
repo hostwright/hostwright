@@ -25,12 +25,17 @@ struct ApplyCommandRunner {
             let timestamp = hostwrightTimestamp()
             let projectName = mapping.desiredState.projectName
             let projectID = "project-\(projectName)"
+            let observationDesiredState = try hostwrightDesiredStateWithOwnershipHints(
+                mapping.desiredState,
+                store: store,
+                projectID: projectID
+            )
             let restartPolicyStates = try hostwrightRestartPolicyStateMap(store: store, projectID: projectID, projectName: projectName)
             let adapter = environment.runtimeAdapter()
             let observed: ObservedRuntimeState
             do {
                 observed = try waitForAsync {
-                    try await adapter.observe(desiredState: mapping.desiredState)
+                    try await adapter.observe(desiredState: observationDesiredState)
                 }
             } catch {
                 return failure(code: .runtimeUnavailable, message: "Runtime observation failed: \(RuntimeRedactionPolicy.default.redact(String(describing: error)))")
@@ -119,6 +124,18 @@ struct ApplyCommandRunner {
             } else {
                 executionDesiredService = desiredService
             }
+            if action.executionAvailability == .availableForStartManagedService ||
+                action.executionAvailability == .availableForRestartManagedService {
+                if let ownershipGateFailure = try validateManagedOwnershipGate(
+                    action: action,
+                    observed: observedForPlanning,
+                    store: store,
+                    projectID: projectID,
+                    runtimeAdapter: observedRuntimeAdapter
+                ) {
+                    return failure(code: .unsafeExposure, message: "\(ownershipGateFailure) No mutation was attempted.")
+                }
+            }
             if action.executionAvailability == .availableForRestartManagedService {
                 if let restartGateFailure = try validateManagedRestartGate(
                     action: action,
@@ -191,7 +208,7 @@ struct ApplyCommandRunner {
                     status: .started,
                     idempotencyKey: idempotencyKey,
                     timestamp: timestamp,
-                    resourceIdentifier: action.identity.managedResourceIdentifier,
+                    resourceIdentifier: action.resourceIdentifier,
                     error: nil,
                     hint: "Runtime mutation started for \(action.identity.displayName). If this process is interrupted, inspect the exact runtime resource and rerun apply only after confirming the current plan."
                 )
@@ -242,7 +259,7 @@ struct ApplyCommandRunner {
                             status: .succeeded,
                             idempotencyKey: idempotencyKey,
                             timestamp: timestamp,
-                            resourceIdentifier: action.identity.managedResourceIdentifier,
+                            resourceIdentifier: action.resourceIdentifier,
                             error: nil,
                             hint: "Managed restart stop completed for \(action.identity.displayName); start did not complete."
                         )
@@ -265,7 +282,7 @@ struct ApplyCommandRunner {
                         status: .failed,
                         idempotencyKey: idempotencyKey,
                         timestamp: timestamp,
-                        resourceIdentifier: action.identity.managedResourceIdentifier,
+                        resourceIdentifier: action.resourceIdentifier,
                         error: runtimeErrorDescription,
                         hint: manualRecoveryHint(status: .failed, checkpoint: "runtime-failed", action: action)
                     )
@@ -331,7 +348,7 @@ struct ApplyCommandRunner {
                     status: .succeeded,
                     idempotencyKey: idempotencyKey,
                     timestamp: timestamp,
-                    resourceIdentifier: event.resourceIdentifier ?? action.identity.managedResourceIdentifier,
+                    resourceIdentifier: event.resourceIdentifier ?? action.resourceIdentifier,
                     error: nil,
                     hint: "Runtime mutation completed for \(action.identity.displayName)."
                 )
@@ -372,6 +389,7 @@ struct ApplyCommandRunner {
                     Hostwright apply
                     Plan hash: \(plan.planHash)
                     Applied action: \(action.kind.rawValue) \(action.identity.displayName)
+                    Resource: \(action.resourceIdentifier)
                     Runtime event: \(RuntimeRedactionPolicy.default.redact(event.message))
                     State DB: \(stateDatabasePath)
 
@@ -460,6 +478,7 @@ struct ApplyCommandRunner {
             return PlannedRuntimeAction(
                 kind: .create,
                 identity: action.identity,
+                resourceIdentifier: action.resourceIdentifier,
                 isDestructive: false,
                 summary: "Create missing service \(action.identity.displayName).",
                 desiredService: desiredService
@@ -468,6 +487,7 @@ struct ApplyCommandRunner {
             return PlannedRuntimeAction(
                 kind: .start,
                 identity: action.identity,
+                resourceIdentifier: action.resourceIdentifier,
                 isDestructive: false,
                 summary: "Start managed service \(action.identity.displayName)."
             )
@@ -475,6 +495,7 @@ struct ApplyCommandRunner {
             return PlannedRuntimeAction(
                 kind: .restart,
                 identity: action.identity,
+                resourceIdentifier: action.resourceIdentifier,
                 isDestructive: true,
                 summary: "Restart unhealthy Hostwright-owned running service \(action.identity.displayName)."
             )
@@ -482,6 +503,7 @@ struct ApplyCommandRunner {
             return PlannedRuntimeAction(
                 kind: .noOp,
                 identity: action.identity,
+                resourceIdentifier: action.resourceIdentifier,
                 isDestructive: false,
                 summary: "No runtime action is available."
             )
@@ -530,7 +552,11 @@ struct ApplyCommandRunner {
                 status: .recorded,
                 idempotencyKey: idempotencyKey,
                 planHash: plan.planHash,
-                payloadJSONRedacted: #"{"action":"\#(action.kind.rawValue)","identity":"\#(action.identity.displayName)"}"#
+                payloadJSONRedacted: jsonPayload([
+                    "action": action.kind.rawValue,
+                    "identity": action.identity.displayName,
+                    "resourceIdentifier": action.resourceIdentifier
+                ])
             )
         )
         try store.events.append([
@@ -599,6 +625,11 @@ struct ApplyCommandRunner {
         ])
 
         if action.executionAvailability == .availableForCreateMissingService, let resourceIdentifier = event.resourceIdentifier {
+            guard resourceIdentifier == action.resourceIdentifier else {
+                throw StateStoreError.invalidRecord(
+                    "Runtime create returned identifier \(resourceIdentifier), expected exact planned identifier \(action.resourceIdentifier)."
+                )
+            }
             try store.ownership.upsert(
                 OwnershipRecord(
                     id: "ownership-\(operationID)",
@@ -610,7 +641,8 @@ struct ApplyCommandRunner {
                     createdAt: timestamp,
                     observedAt: timestamp,
                     cleanupEligible: action.executionAvailability == .availableForCreateMissingService,
-                    metadataJSONRedacted: #"{"planHash":"\#(planHash)"}"#
+                    metadataJSONRedacted: #"{"planHash":"\#(planHash)"}"#,
+                    identityVersion: RuntimeManagedResourceIdentity.currentVersion
                 )
             )
         }
@@ -832,7 +864,9 @@ struct ApplyCommandRunner {
             return "Managed restart requires a restart policy that allows Hostwright-managed recovery."
         }
 
-        let observedMatches = observed.services.filter { $0.identity == action.identity }
+        let observedMatches = observed.services.filter {
+            $0.identity == action.identity && $0.resourceIdentifier == action.resourceIdentifier
+        }
         guard observedMatches.count == 1, let observedService = observedMatches.first else {
             return "Managed restart requires exactly one observed service for \(action.identity.displayName)."
         }
@@ -856,17 +890,38 @@ struct ApplyCommandRunner {
             return "Managed restart requires a fresh persisted unhealthy health result for \(action.identity.displayName)."
         }
 
-        let resourceIdentifier = action.identity.managedResourceIdentifier
-        let ownership = try store.ownership.loadAll().first { record in
-            record.resourceType == "container" &&
-            record.resourceIdentifier == resourceIdentifier &&
-            record.projectID == projectID &&
-            record.serviceName == action.identity.serviceName
+        return nil
+    }
+
+    private func validateManagedOwnershipGate(
+        action: PlannedAction,
+        observed: ObservedRuntimeState,
+        store: SQLiteStateStore,
+        projectID: String,
+        runtimeAdapter: String
+    ) throws -> String? {
+        let observedMatches = observed.services.filter {
+            $0.identity == action.identity && $0.resourceIdentifier == action.resourceIdentifier
         }
-        guard ownership != nil else {
-            return "Managed restart requires a Hostwright ownership record for exact container \(resourceIdentifier)."
+        guard observedMatches.count == 1 else {
+            return "Managed lifecycle mutation requires exactly one observed service with exact identifier \(action.resourceIdentifier)."
         }
 
+        let ownership = try store.ownership.loadAll().first { record in
+            let identityBindingMatches = (record.identityVersion == 1 &&
+                action.resourceIdentifier == action.identity.legacyManagedResourceIdentifier) ||
+                (record.identityVersion == RuntimeManagedResourceIdentity.currentVersion &&
+                    action.resourceIdentifier == action.identity.managedResourceIdentifier)
+            return record.resourceType == "container" &&
+            record.resourceIdentifier == action.resourceIdentifier &&
+            record.projectID == projectID &&
+            record.serviceName == action.identity.serviceName &&
+            record.runtimeAdapter == runtimeAdapter &&
+            identityBindingMatches
+        }
+        guard ownership != nil else {
+            return "Managed lifecycle mutation requires a canonical Hostwright ownership record for exact container \(action.resourceIdentifier)."
+        }
         return nil
     }
 
@@ -930,6 +985,7 @@ struct ApplyCommandRunner {
             metadataJSONRedacted: jsonPayload([
                 "executionAvailability": action.executionAvailability.rawValue,
                 "identity": action.identity.displayName,
+                "resourceIdentifier": action.resourceIdentifier,
                 "rollback": "unsupported"
             ])
         )
@@ -970,7 +1026,7 @@ struct ApplyCommandRunner {
             status: .unsupported,
             idempotencyKey: idempotencyKey,
             timestamp: timestamp,
-            resourceIdentifier: action.identity.managedResourceIdentifier,
+            resourceIdentifier: action.resourceIdentifier,
             error: nil,
             hint: "Rollback is unavailable for \(action.identity.displayName) because no safe inverse operation is proven. Use status, events, logs, and manual inspection before retrying."
         )
@@ -1046,7 +1102,7 @@ struct ApplyCommandRunner {
                 operationID: operationID,
                 projectID: projectID,
                 serviceName: action.identity.serviceName,
-                resourceIdentifier: action.identity.managedResourceIdentifier,
+                resourceIdentifier: action.resourceIdentifier,
                 planHash: planHash,
                 status: status,
                 completedStepsJSONRedacted: completedStepsJSON(for: status),

@@ -667,8 +667,10 @@ final class HostwrightReconcilerTests: XCTestCase {
         ports: [RuntimePortMapping] = [],
         mounts: [RuntimeMountReference] = []
     ) -> ObservedRuntimeService {
-        ObservedRuntimeService(
-            identity: identity(serviceName: serviceName),
+        let identity = identity(serviceName: serviceName)
+        return ObservedRuntimeService(
+            identity: identity,
+            resourceIdentifier: identity.managedResourceIdentifier,
             image: image ?? "ghcr.io/example/\(serviceName):latest",
             lifecycleState: lifecycleState,
             healthState: healthState,
@@ -790,6 +792,7 @@ final class HostwrightReconcilerTests: XCTestCase {
              .imageDigestRequired,
              .imageDigestInvalid,
              .secretReferenceUnavailable,
+             .cleanupIdentityBindingMismatch,
              .cleanupEligible,
              .cleanupNotEligible,
              .cleanupWrongResourceType,

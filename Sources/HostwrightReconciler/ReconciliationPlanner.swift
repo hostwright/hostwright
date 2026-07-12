@@ -41,6 +41,7 @@ public struct ReconciliationPlanner: Sendable {
                 PlannedRuntimeAction(
                     kind: .create,
                     identity: service.identity,
+                    resourceIdentifier: service.identity.managedResourceIdentifier,
                     isDestructive: false,
                     summary: "Would create missing service \(service.identity.displayName).",
                     desiredService: service

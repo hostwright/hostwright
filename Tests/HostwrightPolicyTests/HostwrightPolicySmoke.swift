@@ -121,9 +121,10 @@ final class HostwrightPolicySmoke: XCTestCase {
                 resourceType: "container",
                 ownershipProjectID: "project-demo",
                 expectedProjectID: "project-demo",
-                resourceIdentifier: "hostwright-demo-api",
+                resourceIdentifier: identity().managedResourceIdentifier,
                 serviceName: "api",
                 ownershipRuntimeAdapter: "AppleContainerApplyAdapter",
+                ownershipIdentityVersion: RuntimeManagedResourceIdentity.currentVersion,
                 observedAdapterName: "AppleContainerApplyAdapter",
                 observedServices: [observed(lifecycleState: .stopped)]
             )
@@ -138,9 +139,10 @@ final class HostwrightPolicySmoke: XCTestCase {
                 resourceType: "container",
                 ownershipProjectID: "project-demo",
                 expectedProjectID: "project-demo",
-                resourceIdentifier: "hostwright-demo-api",
+                resourceIdentifier: identity().managedResourceIdentifier,
                 serviceName: "api",
                 ownershipRuntimeAdapter: "AppleContainerApplyAdapter",
+                ownershipIdentityVersion: RuntimeManagedResourceIdentity.currentVersion,
                 observedAdapterName: "AppleContainerApplyAdapter",
                 observedServices: [observed(lifecycleState: .running)]
             )
@@ -155,15 +157,50 @@ final class HostwrightPolicySmoke: XCTestCase {
                 resourceType: "container",
                 ownershipProjectID: "project-demo",
                 expectedProjectID: "project-demo",
-                resourceIdentifier: "hostwright-demo-api",
+                resourceIdentifier: identity().managedResourceIdentifier,
                 serviceName: "api",
                 ownershipRuntimeAdapter: "AppleContainerApplyAdapter",
+                ownershipIdentityVersion: RuntimeManagedResourceIdentity.currentVersion,
                 observedAdapterName: nil,
                 observedServices: [observed(lifecycleState: .stopped)]
             )
         )
         XCTAssertEqual(missingAdapter.classification, .blocked)
         XCTAssertEqual(missingAdapter.reason, "runtime adapter metadata is unavailable")
+
+        let malformedIdentifier = LocalPolicyEvaluator.default.evaluateCleanupOwnership(
+            CleanupOwnershipPolicyInput(
+                cleanupEligible: true,
+                resourceType: "container",
+                ownershipProjectID: "project-demo",
+                expectedProjectID: "project-demo",
+                resourceIdentifier: "hostwright-demo-api/../other",
+                serviceName: "api",
+                ownershipRuntimeAdapter: "AppleContainerApplyAdapter",
+                ownershipIdentityVersion: 1,
+                observedAdapterName: "AppleContainerApplyAdapter",
+                observedServices: [observed(lifecycleState: .stopped)]
+            )
+        )
+        XCTAssertEqual(malformedIdentifier.classification, .neverDelete)
+        XCTAssertEqual(malformedIdentifier.decision.reasonCode, .cleanupUnmanagedIdentifier)
+
+        let mismatchedIdentityVersion = LocalPolicyEvaluator.default.evaluateCleanupOwnership(
+            CleanupOwnershipPolicyInput(
+                cleanupEligible: true,
+                resourceType: "container",
+                ownershipProjectID: "project-demo",
+                expectedProjectID: "project-demo",
+                resourceIdentifier: "hostwright-demo-api",
+                serviceName: "api",
+                ownershipRuntimeAdapter: "AppleContainerApplyAdapter",
+                ownershipIdentityVersion: RuntimeManagedResourceIdentity.currentVersion,
+                observedAdapterName: "AppleContainerApplyAdapter",
+                observedServices: [observed(lifecycleState: .stopped)]
+            )
+        )
+        XCTAssertEqual(mismatchedIdentityVersion.classification, .blocked)
+        XCTAssertEqual(mismatchedIdentityVersion.decision.reasonCode, .cleanupIdentityBindingMismatch)
 
         let observedOnly = LocalPolicyEvaluator.default.evaluateObservedOnlyCleanup(
             resourceIdentifier: "hostwright-demo-api",
@@ -486,8 +523,10 @@ final class HostwrightPolicySmoke: XCTestCase {
         lifecycleState: RuntimeLifecycleState = .running,
         ports: [RuntimePortMapping] = []
     ) -> ObservedRuntimeService {
-        ObservedRuntimeService(
-            identity: identity(serviceName),
+        let identity = identity(serviceName)
+        return ObservedRuntimeService(
+            identity: identity,
+            resourceIdentifier: identity.managedResourceIdentifier,
             image: "ghcr.io/example/\(serviceName):latest",
             lifecycleState: lifecycleState,
             healthState: .healthy,

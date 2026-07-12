@@ -228,9 +228,10 @@ Rules:
 
 - default tail is 100 lines;
 - maximum tail is clamped to 1000 lines;
+- the adapter receives the exact observed runtime identifier rather than recomputing a container name; an explicit state path supplies migrated legacy ownership hints;
 - log output is redacted before display;
 - `--follow`, attach, interactive, and exec behavior are not implemented;
-- when `--state-db` is supplied, a `logs.read` event is persisted.
+- when `--state-db` is supplied, a `logs.read` event with the exact resource identifier is persisted.
 
 Failure example:
 

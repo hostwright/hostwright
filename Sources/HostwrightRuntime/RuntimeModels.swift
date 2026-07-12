@@ -19,7 +19,23 @@ public struct RuntimeServiceIdentity: Equatable, Hashable, Sendable {
     }
 
     public var managedResourceIdentifier: String {
-        "hostwright-\(projectName)-\(serviceName)"
+        RuntimeManagedResourceIdentity.resourceIdentifier(for: self)
+    }
+
+    public var legacyManagedResourceIdentifier: String {
+        RuntimeManagedResourceIdentity.legacyResourceIdentifier(for: self)
+    }
+}
+
+public struct RuntimeOwnedResourceHint: Equatable, Sendable {
+    public let resourceIdentifier: String
+    public let identity: RuntimeServiceIdentity
+    public let identityVersion: Int
+
+    public init(resourceIdentifier: String, identity: RuntimeServiceIdentity, identityVersion: Int) {
+        self.resourceIdentifier = resourceIdentifier
+        self.identity = identity
+        self.identityVersion = identityVersion
     }
 }
 
@@ -133,13 +149,37 @@ public struct RuntimeNetworkAttachment: Equatable, Sendable {
     public let address: String?
     public let gateway: String?
     public let interfaceName: String?
+    public let hostname: String?
+    public let ipv4Address: String?
+    public let ipv4Gateway: String?
+    public let ipv6Address: String?
+    public let macAddress: String?
+    public let mtu: Int?
 
-    public init(name: String, kind: String? = nil, address: String? = nil, gateway: String? = nil, interfaceName: String? = nil) {
+    public init(
+        name: String,
+        kind: String? = nil,
+        address: String? = nil,
+        gateway: String? = nil,
+        interfaceName: String? = nil,
+        hostname: String? = nil,
+        ipv4Address: String? = nil,
+        ipv4Gateway: String? = nil,
+        ipv6Address: String? = nil,
+        macAddress: String? = nil,
+        mtu: Int? = nil
+    ) {
         self.name = name
         self.kind = kind
         self.address = address
         self.gateway = gateway
         self.interfaceName = interfaceName
+        self.hostname = hostname
+        self.ipv4Address = ipv4Address
+        self.ipv4Gateway = ipv4Gateway
+        self.ipv6Address = ipv6Address
+        self.macAddress = macAddress
+        self.mtu = mtu
     }
 }
 
@@ -234,6 +274,7 @@ public struct RuntimeLogResult: Equatable, Sendable {
 
 public struct ObservedRuntimeService: Equatable, Sendable {
     public let identity: RuntimeServiceIdentity
+    public let resourceIdentifier: String
     public let image: String?
     public let lifecycleState: RuntimeLifecycleState
     public let healthState: RuntimeHealthState
@@ -244,6 +285,7 @@ public struct ObservedRuntimeService: Equatable, Sendable {
 
     public init(
         identity: RuntimeServiceIdentity,
+        resourceIdentifier: String,
         image: String? = nil,
         lifecycleState: RuntimeLifecycleState = .unknown,
         healthState: RuntimeHealthState = .unknown,
@@ -253,6 +295,7 @@ public struct ObservedRuntimeService: Equatable, Sendable {
         observedAt: String? = nil
     ) {
         self.identity = identity
+        self.resourceIdentifier = resourceIdentifier
         self.image = image
         self.lifecycleState = lifecycleState
         self.healthState = healthState
@@ -266,10 +309,16 @@ public struct ObservedRuntimeService: Equatable, Sendable {
 public struct DesiredRuntimeState: Equatable, Sendable {
     public let projectName: String
     public let services: [DesiredRuntimeService]
+    public let ownedResourceHints: [RuntimeOwnedResourceHint]
 
-    public init(projectName: String, services: [DesiredRuntimeService]) {
+    public init(
+        projectName: String,
+        services: [DesiredRuntimeService],
+        ownedResourceHints: [RuntimeOwnedResourceHint] = []
+    ) {
         self.projectName = projectName
         self.services = services
+        self.ownedResourceHints = ownedResourceHints
     }
 }
 
@@ -298,6 +347,7 @@ public enum PlannedRuntimeActionKind: String, Equatable, Sendable {
 public struct PlannedRuntimeAction: Equatable, Sendable {
     public let kind: PlannedRuntimeActionKind
     public let identity: RuntimeServiceIdentity
+    public let resourceIdentifier: String
     public let isDestructive: Bool
     public let summary: String
     public let desiredService: DesiredRuntimeService?
@@ -305,12 +355,14 @@ public struct PlannedRuntimeAction: Equatable, Sendable {
     public init(
         kind: PlannedRuntimeActionKind,
         identity: RuntimeServiceIdentity,
+        resourceIdentifier: String,
         isDestructive: Bool,
         summary: String,
         desiredService: DesiredRuntimeService? = nil
     ) {
         self.kind = kind
         self.identity = identity
+        self.resourceIdentifier = resourceIdentifier
         self.isDestructive = isDestructive
         self.summary = summary
         self.desiredService = desiredService

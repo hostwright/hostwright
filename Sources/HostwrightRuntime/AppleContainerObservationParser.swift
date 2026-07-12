@@ -71,7 +71,7 @@ public enum AppleContainerObservationParser {
         for service in services {
             try rejectUnknownKeys(
                 Set(service.keys),
-                allowed: ["name", "instance", "image", "lifecycle", "health", "observedAt", "ports", "networks", "mounts"],
+                allowed: ["name", "instance", "resourceIdentifier", "image", "lifecycle", "health", "observedAt", "ports", "networks", "mounts"],
                 context: "service"
             )
 
@@ -80,7 +80,11 @@ public enum AppleContainerObservationParser {
             }
 
             for network in service["networks"] as? [[String: Any]] ?? [] {
-                try rejectUnknownKeys(Set(network.keys), allowed: ["name", "kind", "address", "gateway", "interface"], context: "network")
+                try rejectUnknownKeys(
+                    Set(network.keys),
+                    allowed: ["name", "kind", "address", "gateway", "interface", "hostname", "ipv4Address", "ipv4Gateway", "ipv6Address", "macAddress", "mtu"],
+                    context: "network"
+                )
             }
 
             for mount in service["mounts"] as? [[String: Any]] ?? [] {
@@ -108,6 +112,7 @@ public enum AppleContainerObservationParser {
                 (AppleContainerCommand.containerName(for: $0.identity), $0)
             }
         )
+        let ownedHintsByContainerID = try uniqueOwnedHints(desiredState.ownedResourceHints)
         var services: [ObservedRuntimeService] = []
 
         for item in list {
@@ -124,12 +129,14 @@ public enum AppleContainerObservationParser {
                 continue
             }
 
-            guard let desired = desiredByContainerID[id] else {
-                if id.hasPrefix("hostwright-") {
-                    throw RuntimeAdapterError.outputParseFailed(
-                        "Observed Hostwright-looking Apple container '\(redactionPolicy.redact(id))' is not in the current desired state."
-                    )
-                }
+            guard let identity = try observedIdentity(
+                containerID: id,
+                configuration: configuration,
+                desiredState: desiredState,
+                desiredByContainerID: desiredByContainerID,
+                ownedHintsByContainerID: ownedHintsByContainerID,
+                redactionPolicy: redactionPolicy
+            ) else {
                 continue
             }
 
@@ -147,7 +154,8 @@ public enum AppleContainerObservationParser {
 
             services.append(
                 ObservedRuntimeService(
-                    identity: desired.identity,
+                    identity: identity,
+                    resourceIdentifier: id,
                     image: image,
                     lifecycleState: lifecycleState,
                     healthState: .unknown,
@@ -175,6 +183,84 @@ public enum AppleContainerObservationParser {
             labels["com.apple.container.resource.role"] == "builder"
     }
 
+    private static func uniqueOwnedHints(_ hints: [RuntimeOwnedResourceHint]) throws -> [String: RuntimeOwnedResourceHint] {
+        var result: [String: RuntimeOwnedResourceHint] = [:]
+        for hint in hints {
+            guard result[hint.resourceIdentifier] == nil else {
+                throw RuntimeAdapterError.outputParseFailed(
+                    "State supplied duplicate ownership hints for exact runtime identifier '\(hint.resourceIdentifier)'."
+                )
+            }
+            result[hint.resourceIdentifier] = hint
+        }
+        return result
+    }
+
+    private static func observedIdentity(
+        containerID: String,
+        configuration: [String: Any],
+        desiredState: DesiredRuntimeState,
+        desiredByContainerID: [String: DesiredRuntimeService],
+        ownedHintsByContainerID: [String: RuntimeOwnedResourceHint],
+        redactionPolicy: RuntimeRedactionPolicy
+    ) throws -> RuntimeServiceIdentity? {
+        let labels = stringLabels(configuration["labels"])
+        if RuntimeManagedResourceIdentity.isManaged(labels) {
+            if let labeledProject = labels[RuntimeManagedResourceIdentity.projectLabel],
+               labeledProject != desiredState.projectName {
+                if desiredByContainerID[containerID] != nil || ownedHintsByContainerID[containerID] != nil {
+                    throw RuntimeAdapterError.outputParseFailed(
+                        "Hostwright ownership labels for exact desired identifier '\(redactionPolicy.redact(containerID))' claim another project."
+                    )
+                }
+                return nil
+            }
+
+            guard let identity = RuntimeManagedResourceIdentity.identity(from: labels),
+                  identity.projectName == desiredState.projectName,
+                  RuntimeManagedResourceIdentity.labelsMatch(
+                      labels,
+                      identity: identity,
+                      resourceIdentifier: containerID
+                  ) else {
+                throw RuntimeAdapterError.outputParseFailed(
+                    "Hostwright ownership labels for '\(redactionPolicy.redact(containerID))' are incomplete or do not match its exact identifier."
+                )
+            }
+            return identity
+        }
+
+        if let hint = ownedHintsByContainerID[containerID] {
+            if hint.identity.projectName == desiredState.projectName,
+               hint.identityVersion == 1,
+               containerID == RuntimeManagedResourceIdentity.legacyResourceIdentifier(for: hint.identity) {
+                return hint.identity
+            }
+            throw RuntimeAdapterError.outputParseFailed(
+                "State-owned Hostwright container '\(redactionPolicy.redact(containerID))' is missing compatible exact ownership labels."
+            )
+        }
+
+        if desiredByContainerID[containerID] != nil {
+            throw RuntimeAdapterError.outputParseFailed(
+                "Versioned Hostwright container '\(redactionPolicy.redact(containerID))' is missing exact ownership labels."
+            )
+        }
+
+        return nil
+    }
+
+    private static func stringLabels(_ rawValue: Any?) -> [String: String] {
+        guard let rawLabels = rawValue as? [String: Any] else {
+            return rawValue as? [String: String] ?? [:]
+        }
+        return rawLabels.reduce(into: [:]) { result, element in
+            if let value = element.value as? String {
+                result[element.key] = value
+            }
+        }
+    }
+
     private static func parsePublishedPorts(_ ports: [[String: Any]]) throws -> [RuntimePortMapping] {
         try ports.map { port in
             let hostPort = port["hostPort"] as? Int ?? port["host"] as? Int
@@ -195,13 +281,32 @@ public enum AppleContainerObservationParser {
     }
 
     private static func parseRealNetworks(_ networks: [Any]) throws -> [RuntimeNetworkAttachment] {
-        guard networks.isEmpty else {
-            throw RuntimeAdapterError.outputParseFailed(
-                "Non-empty real Apple container network output is unsupported until a reviewed versioned fixture defines its schema."
+        try networks.map { rawNetwork in
+            guard let network = rawNetwork as? [String: Any] else {
+                throw RuntimeAdapterError.outputParseFailed("Unsupported Apple container network entry shape.")
+            }
+            let allowed = Set(["hostname", "ipv4Address", "ipv4Gateway", "ipv6Address", "macAddress", "mtu", "network"])
+            let unknown = Set(network.keys).subtracting(allowed)
+            guard unknown.isEmpty, let name = network["network"] as? String, !name.isEmpty else {
+                throw RuntimeAdapterError.outputParseFailed(
+                    "Unsupported Apple container network keys: \(unknown.sorted().joined(separator: ", "))."
+                )
+            }
+
+            let ipv4Address = network["ipv4Address"] as? String
+            let ipv4Gateway = network["ipv4Gateway"] as? String
+            return RuntimeNetworkAttachment(
+                name: name,
+                address: ipv4Address,
+                gateway: ipv4Gateway,
+                hostname: network["hostname"] as? String,
+                ipv4Address: ipv4Address,
+                ipv4Gateway: ipv4Gateway,
+                ipv6Address: network["ipv6Address"] as? String,
+                macAddress: network["macAddress"] as? String,
+                mtu: network["mtu"] as? Int
             )
         }
-
-        return []
     }
 }
 
@@ -215,6 +320,7 @@ private struct ObservationFixture: Decodable {
 private struct ServiceFixture: Decodable {
     let name: String
     let instance: String?
+    let resourceIdentifier: String?
     let image: String?
     let lifecycle: String
     let health: String?
@@ -238,8 +344,10 @@ private struct ServiceFixture: Decodable {
             healthState = .unknown
         }
 
+        let identity = RuntimeServiceIdentity(projectName: projectName, serviceName: name, instanceName: instance)
         return ObservedRuntimeService(
-            identity: RuntimeServiceIdentity(projectName: projectName, serviceName: name, instanceName: instance),
+            identity: identity,
+            resourceIdentifier: resourceIdentifier ?? identity.managedResourceIdentifier,
             image: image,
             lifecycleState: lifecycleState,
             healthState: healthState,
@@ -283,6 +391,12 @@ private struct NetworkFixture: Decodable {
     let address: String?
     let gateway: String?
     let `interface`: String?
+    let hostname: String?
+    let ipv4Address: String?
+    let ipv4Gateway: String?
+    let ipv6Address: String?
+    let macAddress: String?
+    let mtu: Int?
 
     func runtimeNetworkAttachment() throws -> RuntimeNetworkAttachment {
         guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -294,7 +408,13 @@ private struct NetworkFixture: Decodable {
             kind: kind,
             address: address,
             gateway: gateway,
-            interfaceName: `interface`
+            interfaceName: `interface`,
+            hostname: hostname,
+            ipv4Address: ipv4Address,
+            ipv4Gateway: ipv4Gateway,
+            ipv6Address: ipv6Address,
+            macAddress: macAddress,
+            mtu: mtu
         )
     }
 }

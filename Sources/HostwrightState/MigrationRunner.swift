@@ -37,13 +37,19 @@ public struct SchemaMigration: Equatable, Sendable {
 }
 
 public struct MigrationRunner: Sendable {
-    public static let latestSchemaVersion = 5
+    public static let latestSchemaVersion = 6
 
     public init() {}
 
     public func apply(to store: SQLiteStateStore) throws {
         try store.withConnection { connection in
-            try apply(on: connection)
+            try apply(on: connection, throughVersion: Self.latestSchemaVersion)
+        }
+    }
+
+    func apply(to store: SQLiteStateStore, throughVersion: Int) throws {
+        try store.withConnection { connection in
+            try apply(on: connection, throughVersion: throughVersion)
         }
     }
 
@@ -65,12 +71,17 @@ public struct MigrationRunner: Sendable {
     }
 
     func apply(on connection: SQLiteConnection) throws {
+        try apply(on: connection, throughVersion: Self.latestSchemaVersion)
+    }
+
+    func apply(on connection: SQLiteConnection, throughVersion: Int) throws {
+        precondition((1...Self.latestSchemaVersion).contains(throughVersion))
         try connection.transaction {
             try ensureDatabaseIsMigratable(on: connection)
             let applied = try appliedMigrations(on: connection)
             try validateCompatibility(applied, requireLatest: false)
 
-            for migration in Self.migrations {
+            for migration in Self.migrations where migration.version <= throughVersion {
                 if let checksum = applied[migration.version] {
                     if !migration.accepts(recordedChecksum: checksum) {
                         throw StateStoreError.migrationFailed(
@@ -497,6 +508,20 @@ public struct MigrationRunner: Sendable {
                 SET runtime_adapter = 'AppleContainerApplyAdapter'
                 WHERE runtime_adapter = 'runtime-adapter'
                 """
+            ]
+        ),
+        SchemaMigration(
+            version: 6,
+            description: "Versioned runtime identity and exact observation records",
+            statements: [
+                "ALTER TABLE observed_services ADD COLUMN resource_identifier TEXT NOT NULL DEFAULT ''",
+                """
+                UPDATE observed_services
+                SET resource_identifier = 'hostwright-' || project_name || '-' || service_name
+                WHERE resource_identifier = ''
+                """,
+                "ALTER TABLE observed_services ADD COLUMN networks_json TEXT NOT NULL DEFAULT '[]'",
+                "ALTER TABLE ownership_records ADD COLUMN identity_version INTEGER NOT NULL DEFAULT 1"
             ]
         )
     ]

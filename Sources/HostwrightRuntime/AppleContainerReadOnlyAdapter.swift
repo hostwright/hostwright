@@ -58,18 +58,24 @@ public struct AppleContainerReadOnlyAdapter: RuntimeAdapter {
         )
     }
 
-    public func logs(for identity: RuntimeServiceIdentity, tail: Int) async throws -> RuntimeLogResult {
+    public func logs(for service: ObservedRuntimeService, tail: Int) async throws -> RuntimeLogResult {
         guard let executable = executableResolver.resolveExecutable(named: AppleContainerCommand.executableName) else {
             throw RuntimeAdapterError.runtimeUnavailable("Apple container CLI was not found on PATH.")
         }
 
-        let containerID = AppleContainerCommand.containerName(for: identity)
+        let containerID = service.resourceIdentifier
+        guard RuntimeManagedResourceIdentity.isSupportedIdentifier(containerID) else {
+            throw RuntimeAdapterError.commandRejected(
+                classification: .readOnly,
+                message: "Logs require an exact supported Hostwright resource identifier."
+            )
+        }
         let spec = AppleContainerCommand.spec(kind: .logs(containerID: containerID, tail: tail), executable: executable)
         try RuntimeCommandPolicy.validateReadOnlyExecution(spec)
 
         let result = try await processRunner.run(spec)
         return RuntimeLogResult(
-            identity: identity,
+            identity: service.identity,
             text: redactionPolicy.redact(result.standardOutput),
             lineLimit: min(max(1, tail), 1_000)
         )

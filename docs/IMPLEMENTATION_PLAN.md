@@ -27,10 +27,10 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 | 16 | Health Checks and Restart Policy Expansion | Complete locally | Add bounded health execution and crash-loop-aware restart policy state. | Health results, max attempts, backoff, manual disable, preexisting operator hold blocking, crash-loop blocking, and redacted events are tested. |
 | 17 | Managed Restart | Complete locally | Add one narrow Hostwright-owned restart path as an explicit stop-then-start sequence. | Ownership, running observed state, plan hash, operation ledger, recovery record, and scripted-runner tests pass. |
 | 18 | Rollback and Partial Failure Recovery | Complete locally | Model operation groups, locks, checkpoints, interruption recovery, and manual recovery hints. | Partial failure and crash/interruption records explain what changed and what remains manual. |
-| 19 | Cleanup and Garbage Collection Maturity | Partial | Improve cleanup classification, ownership mismatch handling, stale ID protection, and partial failure behavior. | Classification tests pass, but exact observed runtime identifiers, collision-safe identity, multi-project observation, and managed-start ownership still need repair. |
+| 19 | Cleanup and Garbage Collection Maturity | Complete locally | Improve cleanup classification, ownership mismatch handling, stale ID protection, and partial failure behavior. | Exact observed identifiers, versioned collision-resistant identity, ownership labels, legacy migration, multi-project observation, managed-start ownership, classifications, and exact cleanup pass tests and a disposable live proof. |
 | 20 | Observability and Diagnostics | Complete locally | Add redacted diagnostics, local-only telemetry policy, audit trail, event filtering, and improved doctor/status output. | Diagnostic bundles, redaction, event ordering/filtering, and local-only telemetry policy are tested. |
 | 21 | API and GUI Readiness Gate | Requirements complete; implementation not started | Define local GUI/control-surface requirements, data contracts, accessibility expectations, command/API boundaries, safety rules, and handoff criteria. | Requirements are documented; a reviewed local API and GUI remain future implementation work. |
-| 22 | Networking and Service Discovery | Complete locally | Harden local networking policy and document unsupported discovery/exposure boundaries. | Localhost publish defaults, duplicate/observed port conflicts, unsupported discovery fields, and fixture-only network metadata are tested. |
+| 22 | Networking and Service Discovery | Complete locally; live HTTP blocked | Harden local networking policy and document unsupported discovery/exposure boundaries. | Localhost publish defaults, duplicate/observed port conflicts, unsupported discovery fields, and real Apple container 1.0.0 network metadata parsing are tested. Localhost HTTP proof is blocked by disabled macOS Local Network access for `container-runtime-linux`. |
 | 23 | Secure Exposure Research | Research complete; implementation not started | Decide tunnel, VPN, mTLS, reverse proxy, DNS, and cloud exposure boundaries before any implementation. | Research is recorded; provider, reverse-proxy, and mTLS implementation require separate evidence-gated work. |
 | 24 | Secrets, Credentials, And Keychain Boundary | Complete for opt-in read boundary | Add local secret references, a test-only in-memory store, an opt-in noninteractive read-only macOS Keychain backend, an unavailable CLI default, and redaction hardening. | `secretEnv`, deterministic in-memory contracts, real add/read/exact-delete/post-delete Keychain evidence, fail-closed unavailable default, and redacted state/diagnostics/plans pass tests. |
 | 25 | Supply Chain And Image Trust | Complete for local digest policy | Add local image digest-reference policy and document trust-tool boundaries. | `imagePolicy: require-digest`, digest syntax validation, schema alignment, docs boundary, and overclaim tests pass without registry calls or scanner/signing dependencies. |
@@ -57,7 +57,7 @@ The status column distinguishes completed implementation from research, requirem
 Execution order is binding unless a later maintainer-approved issue changes it:
 
 1. Define repository evidence classes and separate deterministic tests from real integration, runtime, hardware, and distribution proof.
-2. Repair runtime identity, exact observed identifiers, ownership gates, multi-project observation, legacy upgrade behavior, and live cleanup proof.
+2. Completed: repair runtime identity, exact observed identifiers, ownership gates, multi-project observation, legacy upgrade behavior, and live cleanup proof.
 3. Finish CLI file-error classification, migration continuity/concurrency, and interrupted-operation recovery diagnostics.
 4. Wire explicit local team profiles and approvals into command behavior without default paths or safety-gate bypasses.
 5. Run real Apple container and hardware benchmarks with exact disposable-resource cleanup.
@@ -237,6 +237,7 @@ Phase 16 does not add a broad restart command, daemon-enforced restart loops, st
 
 - Reconciliation can plan one `restartManagedService` action for an unhealthy running service when restart policy state allows managed recovery.
 - `hostwright apply` executes that action only after explicit state DB, current plan-hash confirmation, exact observed running state, fresh persisted unhealthy health state, and a matching Hostwright ownership record.
+- Managed start and managed restart retain the exact observed runtime identifier in the plan hash and require a matching canonical ownership row before execution; legacy identifiers remain supported only through migrated ownership state.
 - Runtime execution remains a narrow internal stop-then-start sequence for the exact Hostwright-managed container identifier; no public stop or restart command is added.
 - SQLite schema v3 adds append-only restart recovery records with redacted manual recovery hints and completed-step metadata.
 - Apply records operation intent before mutation, success/failure operation status after mutation, restart recovery records, restart policy state, and redacted events.
@@ -260,6 +261,8 @@ Phase 18 does not add automatic rollback, inverse runtime mutation, multi-action
 - `hostwright cleanup --dry-run` now classifies ownership-backed and observed-only cleanup assessments as eligible, ambiguous, stale, running, unknown, blocked, or never-delete.
 - Confirmation tokens are derived from eligible candidate identity, lifecycle, runtime adapter, and resource identifier so relevant drift invalidates stale cleanup confirmation.
 - Confirmed cleanup still deletes only eligible exact Hostwright-owned created/stopped/exited containers through `RuntimeAdapter`.
+- Versioned v2 identifiers use a SHA-256 identity digest and exact Hostwright labels, so project/service pairs that collided under legacy hyphen concatenation remain distinct. Current-project labeled orphans remain visible; unrelated labeled projects are ignored.
+- SQLite schema v6 backfills legacy observed identifiers and persists exact observed identifiers, Apple container network metadata, and ownership identity versions without changing prior migration checksums.
 - Ownership/service mismatches, duplicate observed identifiers, adapter mismatches, missing observations, observed-only resources, running containers, unknown lifecycle state, non-container records, disabled cleanup eligibility, and non-Hostwright identifiers are reported without deletion.
 - Cleanup delete success followed by state persistence failure is reported as state unavailable while preserving the actual deletion in command output.
 - XCTest coverage covers mixed dry-run classification, observed-only resources, adapter-mismatch blocking, exact eligible-only delete execution, cleanup token confirmation, runtime partial failure, and delete-success/state-failure reporting.
@@ -293,9 +296,10 @@ Phase 21 does not add GUI code, website implementation, web dashboard, cloud das
 - Manifest parsing now reports DNS, service discovery, network alias, network mode, and `expose` fields as unsupported networking scope.
 - Planning blocks desired host ports that conflict with observed non-target runtime services when live observation is supplied.
 - Manifest-to-runtime mapping continues to emit explicit `127.0.0.1` publish bindings for Hostwright-created Apple containers.
-- Observed runtime services can carry versioned fixture network attachment metadata: name, kind, address, gateway, and interface.
-- The Apple container observation parser continues to accept reviewed fixtures and verified empty/builder/proof real shapes; non-empty real network output fails closed until reviewed.
-- XCTest coverage covers bind normalization, broad-bind conflict behavior, unsupported discovery fields, observed port conflicts, network fixture parsing, and non-empty real network-output refusal.
+- Observed runtime services carry reviewed fixture metadata plus real Apple container 1.0.0 hostname, IPv4/IPv6 address, gateway, MAC address, network name, and MTU fields.
+- The Apple container observation parser accepts reviewed fixtures, empty/builder/legacy proof shapes, and exact labeled current-project Apple container 1.0.0 rows while ignoring unrelated labeled projects and failing closed on malformed current-project ownership.
+- XCTest coverage covers bind normalization, broad-bind conflict behavior, unsupported discovery fields, observed port conflicts, fixture and real-network parsing, ownership labels, unrelated-project filtering, and malformed-network refusal.
+- A live two-project proof parsed Apple container 1.0.0 network metadata and preserved all pre-existing runtime identifiers. End-to-end localhost HTTP remains blocked on this machine because macOS Local Network access for `container-runtime-linux` is disabled; no reachability pass is claimed.
 
 Phase 22 does not add DNS behavior, service discovery, local reverse proxy mutation, tunnel integration, cloud exposure, public exposure defaults, network cleanup, runtime network mutation, release tags, or GitHub Releases.
 

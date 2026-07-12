@@ -74,7 +74,7 @@ public protocol RuntimeAdapter: Sendable {
     func capabilities() async throws -> [RuntimeCapability]
     func observe(desiredState: DesiredRuntimeState) async throws -> ObservedRuntimeState
     func plan(desiredState: DesiredRuntimeState, observedState: ObservedRuntimeState) async throws -> RuntimePlan
-    func logs(for identity: RuntimeServiceIdentity, tail: Int) async throws -> RuntimeLogResult
+    func logs(for service: ObservedRuntimeService, tail: Int) async throws -> RuntimeLogResult
     func execute(_ action: PlannedRuntimeAction, confirmation: RuntimeMutationConfirmation?) async throws -> RuntimeEvent
 }
 
@@ -109,8 +109,8 @@ public struct AppleContainerCLIAdapter: RuntimeAdapter {
         try await applyAdapter.plan(desiredState: desiredState, observedState: observedState)
     }
 
-    public func logs(for identity: RuntimeServiceIdentity, tail: Int) async throws -> RuntimeLogResult {
-        try await applyAdapter.logs(for: identity, tail: tail)
+    public func logs(for service: ObservedRuntimeService, tail: Int) async throws -> RuntimeLogResult {
+        try await applyAdapter.logs(for: service, tail: tail)
     }
 
     public func execute(_ action: PlannedRuntimeAction, confirmation: RuntimeMutationConfirmation?) async throws -> RuntimeEvent {

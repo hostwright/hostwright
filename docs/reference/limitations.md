@@ -45,6 +45,8 @@ Hostwright is not production ready.
 - `AppleContainerReadOnlyAdapter` for read-only observation attempts through `RuntimeAdapter`.
 - `FoundationRuntimeProcessRunner` guarded by read-only command classification, executable resolution, timeouts, and redaction.
 - Fixture-defined Apple container observation parser for empty and running snapshots, including reviewed network attachment metadata in the versioned fixture schema.
+- Exact labeled Apple container 1.0.0 observation for the current project, including owned orphans, unrelated-project filtering, and hostname, IPv4/IPv6, gateway, MAC, network-name, and MTU metadata.
+- Collision-resistant versioned runtime identifiers, exact ownership labels, schema-v6 legacy identifier backfill, and exact-ID managed start/restart/cleanup gates.
 - Verified real empty Apple container JSON list parsing for `container list --all --format json` output of `[]`.
 - Verified real Apple builder-container list parsing as ignored non-Hostwright runtime state.
 - Verified real created/stopped Hostwright proof container parsing.
@@ -92,8 +94,8 @@ Hostwright is not production ready.
 - Apple GPU, ANE, Metal, Core ML, MLX, PyTorch MPS, host-native accelerator helpers, host accelerator device exposure, or accelerator-aware scheduling.
 - Multi-action `hostwright apply`.
 - Guaranteed Apple container observation on every machine.
-- Broad non-empty Apple container JSON list parsing beyond the verified builder/proof shapes.
-- Non-empty real Apple container network attachment parsing until a reviewed fixture defines the schema.
+- Broad non-empty Apple container JSON list parsing beyond verified builder, state-backed legacy, and exact labeled Apple container 1.0.0 shapes.
+- Localhost HTTP reachability evidence on the current proof host; the Apple container listener accepts then resets while macOS Local Network access for `container-runtime-linux` is disabled.
 - Broad non-empty Apple container image list parsing beyond the verified object shape.
 - JSON output for `validate`, `apply`, `logs`, and `cleanup` success paths.
 - Shell completion installation or shell profile mutation.
@@ -170,7 +172,7 @@ Manifest image trust is limited to local reference policy. `imagePolicy: require
 
 The runtime module contains Apple container observation infrastructure and narrow mutation command descriptors. `hostwright plan` renders deterministic desired-state and policy planning output without live runtime observation by default. `hostwright status --state-db <path>` performs live RuntimeAdapter observation and records a status event. Status still does not prove reachability or application-level health beyond the observed runtime state.
 
-The runtime parser accepts the fixture-defined `hostwright.apple-container.observation.v1` schema, the verified real empty JSON array shape returned by `container list --all --format json`, Apple builder container output that is ignored, and the verified `hostwright-proof-web` created/stopped output. Unsupported, malformed, or broader real Apple container JSON output fails closed with redacted errors.
+The runtime parser accepts the fixture-defined `hostwright.apple-container.observation.v1` schema, the verified real empty JSON array shape returned by `container list --all --format json`, ignored Apple builder output, state-backed legacy rows, and exact labeled Apple container 1.0.0 rows with reviewed network fields. Unsupported, malformed, mismatched-current-project, or broader real Apple container JSON output fails closed with redacted errors.
 
 Apply is not general lifecycle management. It uses `container create` only after explicit plan confirmation, idempotency checks, operation intent persistence, local image confirmation, and safe-subset validation. Created port bindings are emitted as explicit `127.0.0.1:host:container` publishes. It uses `container start <id>` only for one observed Hostwright-owned stopped/created/exited service when restart policy allows a managed start. It uses an internal `container stop <id>` then `container start <id>` sequence only for one exact Hostwright-owned running service when restart policy allows managed restart, the explicit state database has a fresh unhealthy health result for the service, and recovery records are written. Cleanup uses `container delete <id>` only after dry-run token confirmation and ownership/live-state eligibility checks.
 

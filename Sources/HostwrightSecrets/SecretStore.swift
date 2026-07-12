@@ -1,4 +1,6 @@
 import Foundation
+import LocalAuthentication
+import Security
 
 public struct HostwrightSecretReference: Equatable, Hashable, Sendable {
     public static let supportedScheme = "keychain"
@@ -70,6 +72,57 @@ public enum SecretStoreError: Error, Equatable, Sendable, CustomStringConvertibl
 
 public protocol SecretStore: Sendable {
     func readString(reference: HostwrightSecretReference) throws -> String
+}
+
+public struct MacOSKeychainSecretStore: SecretStore {
+    public init() {}
+
+    public func readString(reference: HostwrightSecretReference) throws -> String {
+        let authenticationContext = LAContext()
+        authenticationContext.interactionNotAllowed = true
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: reference.service,
+            kSecAttrAccount as String: reference.account,
+            kSecAttrSynchronizable as String: false,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+            kSecUseAuthenticationContext as String: authenticationContext
+        ]
+
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        switch status {
+        case errSecSuccess:
+            guard let data = result as? Data else {
+                throw SecretStoreError.backendUnavailable(
+                    "macOS Keychain returned an unsupported value type for \(reference.redactedDescription)."
+                )
+            }
+            guard let value = String(data: data, encoding: .utf8) else {
+                throw SecretStoreError.backendUnavailable(
+                    "macOS Keychain item data is not valid UTF-8 for \(reference.redactedDescription)."
+                )
+            }
+            return value
+        case errSecItemNotFound:
+            throw SecretStoreError.notFound(
+                "No local macOS Keychain item was found for \(reference.redactedDescription)."
+            )
+        case errSecInteractionNotAllowed, errSecAuthFailed:
+            throw SecretStoreError.interactionNotAllowed(
+                "macOS Keychain access requires disallowed user interaction for \(reference.redactedDescription)."
+            )
+        case errSecNotAvailable:
+            throw SecretStoreError.backendUnavailable(
+                "macOS Keychain is unavailable for \(reference.redactedDescription)."
+            )
+        default:
+            throw SecretStoreError.backendUnavailable(
+                "macOS Keychain lookup failed with status \(status) for \(reference.redactedDescription)."
+            )
+        }
+    }
 }
 
 public enum SecretNamePolicy {

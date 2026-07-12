@@ -219,8 +219,9 @@ Phase 8A is a required preflight before this mutation gate. It proves real read-
 | Requirement IDs | Acceptance criteria | Verification type | Verification command or review |
 | --- | --- | --- | --- |
 | HW-VALID-005, HW-SAFE-004, HW-SAFE-007 | Manifests accept `secretEnv` keychain references, reject plaintext credential-like `env` values, reject malformed references, and keep Compose/Kubernetes `secrets:` unsupported. | Automated | Manifest and schema XCTest cases. |
-| HW-SAFE-004, HW-STATE-004, HW-OBS-003 | Plans, state rows, events, diagnostics, errors, and observability redaction do not expose fake secret values or raw keychain reference labels. | Automated | Secrets, CLI, state, runtime, reconciler, and observability XCTest cases. |
-| HW-SAFE-007, HW-RUNTIME-001 | Apply resolves secret references only through an injected backend immediately before `RuntimeAdapter.execute`; unavailable backends and unresolved runtime references fail before mutation. | Automated + manual | CLI fake backend/unavailable backend tests; runtime unresolved-reference guard; diff review. |
+| HW-SAFE-004, HW-STATE-004, HW-OBS-003 | Plans, state rows, events, diagnostics, errors, and observability redaction do not expose synthetic secret values or raw keychain reference labels. | Automated | Secrets, CLI, state, runtime, reconciler, and observability XCTest cases. |
+| HW-SAFE-007 | The opt-in macOS Keychain backend reads one exact non-synchronizable generic-password item without authentication UI; unique live items are exactly deleted and confirmed absent, while malformed data and missing items fail without label disclosure. | Local integration | Secrets XCTest live Keychain add/read/delete/post-delete and malformed-data cases; no conditional skip. |
+| HW-SAFE-007, HW-RUNTIME-001 | Apply resolves secret references only through an injected backend immediately before `RuntimeAdapter.execute`; the default unavailable backend and unresolved runtime references fail before mutation. | Automated + manual | CLI in-memory/unavailable backend tests; runtime unresolved-reference guard; diff review. |
 
 ## Phase 25 Gate: Supply Chain And Image Trust
 

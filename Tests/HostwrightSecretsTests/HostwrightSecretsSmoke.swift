@@ -20,9 +20,9 @@ final class HostwrightSecretsTests: XCTestCase {
 
     func testInMemorySecretStoreReturnsConfiguredValuesAndUnavailableStoreFailsClosed() throws {
         let reference = try HostwrightSecretReference.parse("keychain://hostwright.api/api-token")
-        let inMemoryStore = InMemorySecretStore(values: [reference: "token=fake-secret"])
+        let inMemoryStore = InMemorySecretStore(values: [reference: "token=synthetic-secret"])
 
-        XCTAssertEqual(try inMemoryStore.readString(reference: reference), "token=fake-secret")
+        XCTAssertEqual(try inMemoryStore.readString(reference: reference), "token=synthetic-secret")
         XCTAssertThrowsError(try UnavailableKeychainSecretStore().readString(reference: reference)) { error in
             XCTAssertTrue(String(describing: error).contains("not enabled"))
             XCTAssertFalse(String(describing: error).contains("hostwright.api"))

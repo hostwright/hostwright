@@ -9,13 +9,14 @@
 ## Verified On 2026-07-12
 
 - `swift build` succeeds after the Phase 40 control-plane direction update.
-- `swift test list` lists 266 XCTest cases across Hostwright test targets.
-- `swift test` executes 266 XCTest cases across CLI, core, daemon, health, import, manifest, networking, observability, policy, reconciler, runtime, secrets, and state targets with 0 failures.
+- `swift test list` lists 268 XCTest cases across Hostwright test targets.
+- `swift test` executes 268 XCTest cases across CLI, core, daemon, health, import, manifest, networking, observability, policy, reconciler, runtime, secrets, and state targets with 0 failures.
 - XCTest count is unit/contract and local-integration coverage, not a live-runtime, hardware-benchmark, or distribution-artifact success rate. Evidence classes are defined in `docs/reference/testing-evidence.md`.
 - `scripts/grep-orchard.sh .` succeeds and reports historical references only in `docs/source-material/` and `docs/naming/`.
 - `scripts/test.sh` succeeds and runs `swift build`, `swift test`, and the built-CLI local integration gate.
 - `scripts/integration.sh` exercises the built executable, validates real JSON output, proves `init` overwrite refusal preserves the file, and verifies no hidden SQLite write occurs.
 - Real local loopback HTTP and file-lock contention XCTest cases pass without conditional skips.
+- Real macOS Keychain XCTest cases add uniquely named non-synchronizable items, read through the production backend without UI, delete exact service/account pairs, verify post-delete absence, and have no conditional skip.
 - `scripts/lint.sh` succeeds.
 - Apple container 1.0.0 is installed locally at `/usr/local/bin/container`.
 - `container system status` reports the container system service as running.
@@ -80,6 +81,7 @@
 - Phase 20 adds read-only event filters, local redacted diagnostics bundles from explicit state DB paths, local-only telemetry policy reporting in status/doctor/diagnostics output, and XCTest coverage for diagnostics redaction and no runtime observation during export.
 - Phase 21 documents local control-surface data contracts and safety boundaries for a future separate design/frontend owner; it does not add a control surface or new API runtime.
 - Phase 22 adds local bind-address policy helpers, observed host-port conflict blockers, unsupported DNS/discovery/networking-field errors, versioned network attachment fixture parsing, and fail-closed handling for non-empty real Apple container network output.
+- Phase 24 adds an opt-in read-only noninteractive macOS Keychain backend with real add/read/exact-delete/post-delete evidence while keeping the default CLI backend unavailable and all production Keychain writes/deletes unsupported.
 - Phase 26 adds ProcessInfo-backed resource intelligence reports in doctor JSON, fixture-backed parser coverage, evidence-based non-arm64 image architecture warnings, and docs that keep benchmark dimensions explicit as unmeasured without capacity or accelerator claims.
 - Phase 27 adds a research-only accelerator boundary decision record and docs guard for Apple GPU, ANE, Metal, Core ML, MLX, PyTorch MPS, host-native accelerator helpers, and scheduler accelerator dimensions.
 - Phase 32 adds `HostwrightPolicy` with deterministic local policy decisions for planner checks, cleanup classification, image policy, env/secrets, lifecycle, untrusted manifests, secure exposure, and accelerator placeholders while preserving existing runtime/state boundaries.
@@ -129,13 +131,13 @@ Important diagnostic correction:
 - `swift -e 'import XCTest'` can still fail and is not the correct gate.
 - A minimal SwiftPM XCTest probe passed after Xcode was fixed.
 - `swift test list` is the local proof that Hostwright now exposes real XCTest cases.
-- `swift test` executes 266 XCTest cases after the evidence-contract, production-source boundary, real loopback HTTP/file-lock tests, and real SQLite integration suite were added.
+- `swift test` executes 268 XCTest cases after the evidence-contract, production-source boundary, real loopback HTTP/file-lock/Keychain tests, and real SQLite integration suite were added.
 
 The old top-level smoke/precondition posture has been replaced with XCTest assertions. Some test file names still include `Smoke.swift`, but the contents are XCTest cases.
 
 ## CI Limitation
 
-Hosted CI runs build, XCTest, the built-CLI local integration gate, package-metadata lint, and naming scans. It does not run live Apple container, Keychain, hardware benchmark, signing, notarization, install, or multi-host evidence.
+Hosted CI runs build, XCTest including the live exact-cleanup Keychain cases, the built-CLI local integration gate, package-metadata lint, and naming scans. It does not run live Apple container, hardware benchmark, signing, notarization, install, or multi-host evidence.
 
 ## Core Repo Boundary
 

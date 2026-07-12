@@ -15,11 +15,15 @@ The manifest stores a reference label, not a secret value. Plaintext sensitive k
 
 Planning, status, state persistence, diagnostics, events, and errors see only redacted secret-reference metadata. A confirmed create action resolves references immediately before calling `RuntimeAdapter.execute`. If no approved backend resolves the reference, apply fails before mutation.
 
-The default CLI backend is unavailable by design. Tests inject `InMemorySecretStore` from the test-only support target. Live macOS Keychain access is not enabled by default in Phase 24.
+`MacOSKeychainSecretStore` is a read-only production backend for local generic-password items. It queries an exact service/account pair, excludes synchronizable items, and supplies a `LAContext` with interaction disabled so a CLI process never presents authentication UI. Tests inject `InMemorySecretStore` for deterministic failure contracts and separately exercise the live backend against uniquely named real Keychain items.
 
-## Future Live Keychain Gate
+The default CLI backend remains unavailable by design. Live macOS Keychain access is not enabled by default in Phase 24; an embedding caller must inject the backend explicitly.
 
-A live macOS Keychain backend requires separate approval and must remain noninteractive for CLI use. Operations that could trigger authentication UI must fail cleanly instead of prompting. Access groups, synchronizable items, biometric or prompt-gated access control, custom keychain selection, credential sync, and credential upload are out of scope.
+## Live Keychain Gate
+
+The live integration gate creates a unique non-synchronizable generic-password item with `SecItemAdd`, resolves it through `MacOSKeychainSecretStore`, deletes the exact service/account item with `SecItemDelete`, and verifies a second lookup returns `errSecItemNotFound`. A malformed-data case proves non-UTF-8 item data fails without exposing the service, account, or bytes. There is no conditional skip path: unavailable Keychain access, disallowed interaction, or failed cleanup fails the test.
+
+Production code does not create, update, or delete Keychain items. Access groups, synchronizable items, biometric or prompt-gated access control, custom keychain selection, credential sync, and credential upload remain out of scope.
 
 ## Persistence Boundary
 

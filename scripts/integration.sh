@@ -5,10 +5,16 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
 
 swift build --product hostwright
+swift build --product hostwright-dist
 bin_dir="$(swift build --show-bin-path)"
 hostwright="$bin_dir/hostwright"
+hostwright_dist="$bin_dir/hostwright-dist"
 if [[ ! -x "$hostwright" ]]; then
   echo "built hostwright executable not found at $hostwright" >&2
+  exit 1
+fi
+if [[ ! -x "$hostwright_dist" ]]; then
+  echo "built hostwright-dist executable not found at $hostwright_dist" >&2
   exit 1
 fi
 
@@ -29,13 +35,14 @@ missing_stderr="$workdir/missing.stderr"
 readonly_dir="$workdir/read-only"
 benchmark_existing_report="$workdir/benchmark-existing.json"
 benchmark_absent_report="$workdir/benchmark-absent.json"
+unexpected_distribution_report="$workdir/unexpected-distribution-report.json"
 
 cleanup() {
   exit_code=$?
   trap - EXIT
   set +e
   chmod 700 "$readonly_dir" 2>/dev/null
-  rm -f "$manifest" "$plan_json" "$status_json" "$doctor_json" "$team_profile" "$team_plan_json" "$stack_file" "$team_import_json" "$invalid_profile" "$overwrite_stdout" "$overwrite_stderr" "$missing_stdout" "$missing_stderr" "$benchmark_existing_report" "$benchmark_absent_report" "$readonly_dir/hostwright.yaml"
+  rm -f "$manifest" "$plan_json" "$status_json" "$doctor_json" "$team_profile" "$team_plan_json" "$stack_file" "$team_import_json" "$invalid_profile" "$overwrite_stdout" "$overwrite_stderr" "$missing_stdout" "$missing_stderr" "$benchmark_existing_report" "$benchmark_absent_report" "$unexpected_distribution_report" "$readonly_dir/hostwright.yaml"
   rmdir "$readonly_dir" 2>/dev/null
   rmdir "$workdir"
   exit "$exit_code"
@@ -159,6 +166,23 @@ grep -q 'HW-CLI-002' "$missing_stderr"
 benchmark_after_checksum="$(shasum -a 256 "$benchmark_existing_report" | awk '{print $1}')"
 [[ "$benchmark_before_checksum" == "$benchmark_after_checksum" ]]
 
+"$hostwright_dist" --help >"$missing_stdout" 2>"$missing_stderr"
+grep -q 'developer distribution evidence tool' "$missing_stdout"
+grep -q 'never signs, notarizes, staples' "$missing_stdout"
+
+set +e
+"$hostwright_dist" lifecycle \
+  --baseline-dir "$workdir/missing-baseline" \
+  --candidate-dir "$workdir/missing-candidate" \
+  --prefix /usr/local/hostwright-dist-unsafe \
+  --report "$unexpected_distribution_report" \
+  >"$missing_stdout" 2>"$missing_stderr"
+distribution_prefix_exit=$?
+set -e
+[[ "$distribution_prefix_exit" -eq 64 ]]
+grep -q 'temporary directory' "$missing_stderr"
+[[ ! -e "$unexpected_distribution_report" ]]
+
 set +e
 "$hostwright" plan "$workdir/missing.yaml" --output json >"$missing_stdout" 2>"$missing_stderr"
 missing_exit=$?
@@ -196,4 +220,4 @@ if find "$workdir" -name '*.sqlite*' -print -quit | grep -q .; then
   exit 1
 fi
 
-echo "local-integration passed: built CLI, team-profile and benchmark argument gates, JSON output/errors, real file failures, overwrite refusal, and no hidden state writes"
+echo "local-integration passed: built CLI and distribution tool, team-profile/benchmark/distribution gates, JSON output/errors, real file failures, overwrite refusal, and no hidden state writes"

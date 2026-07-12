@@ -25,6 +25,8 @@ Stable error codes are used for CLI and manifest diagnostics.
 | `HW-BENCH-001` | Benchmark options or report contract are invalid. | Implemented before file or runtime access |
 | `HW-BENCH-002` | Hardware benchmark evidence is blocked by a missing capability or unmeasured required dimension. | Implemented with exit code 69 and a written blocked report |
 | `HW-BENCH-003` | Hardware benchmark command, version, identity, ownership, report, or cleanup evidence failed. | Implemented with exit code 72 and a written failed report when possible |
+| `HW-DIST-001` | Distribution arguments, source binding, artifact verification, command, ownership, or lifecycle failed. | Implemented by developer-only `hostwright-dist`; existing exit categories 64, 65, 69, 71, or 72 identify the failure class |
+| `HW-DIST-002` | Unsigned artifact assembly or temp-prefix lifecycle succeeded, but required distribution trust stages remain blocked. | Implemented with exit code 69 and blocked `distribution-artifact` evidence |
 
 ## Process Exit Codes
 
@@ -32,11 +34,11 @@ Stable error codes are used for CLI and manifest diagnostics.
 | ---: | --- | --- |
 | `0` | Success | Completed command. |
 | `64` | Usage | Invalid arguments, unsupported flags, missing required confirmation/state arguments, refused overwrite, or local non-manifest file I/O failure. |
-| `65` | Validation | Missing/unreadable manifest, manifest/profile/approval validation failure, unsupported manifest/import feature, stack-file import rejection, or compatibility validation failure. |
+| `65` | Validation | Missing/unreadable manifest, manifest/profile/approval validation failure, unsupported manifest/import feature, stack-file import rejection, compatibility validation failure, or invalid distribution source/artifact evidence. |
 | `66` | State unavailable | Explicit state database path failed validation, migration, schema compatibility, locking, corruption, or read/write. |
-| `69` | Runtime unavailable or evidence blocked | Runtime access failed or a benchmark prerequisite/dimension remains blocked. |
+| `69` | Runtime/tool unavailable or evidence blocked | Runtime or required local tool execution failed, a benchmark dimension remains blocked, or unsigned distribution work completed without required trust stages. |
 | `70` | Confirmation mismatch | Confirmed plan hash, cleanup token, approval scope, or approval hash binding does not match the current operation. |
-| `71` | Unsafe operation | Planner or apply safety policy blocked mutation. |
-| `72` | Partial failure | Mixed cleanup outcome or failed benchmark command/identity/cleanup evidence. |
+| `71` | Unsafe operation | Planner/apply safety policy blocked mutation or distribution ownership validation refused replacement/removal. |
+| `72` | Partial failure | Mixed cleanup outcome, failed benchmark command/identity/cleanup evidence, or failed distribution lifecycle/recovery. |
 
 JSON mode uses the same process exit codes. Classified CLI, manifest, import, state, and runtime failures use a JSON error envelope on stderr. `doctor --output json` reports compatibility failures as a normal doctor report on stdout with `hasFailures: true` and exit code 65.

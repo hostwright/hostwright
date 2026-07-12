@@ -43,7 +43,7 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 | 32 | Policy Engine | Complete locally | Add deterministic local policy decisions before import, compatibility, multi-host, and scheduler work. | Policy evaluator tests cover ports, mounts, images, env/secrets, cleanup, lifecycle, exposure, untrusted manifests, accelerator placeholders, and planner migration. |
 | 33 | Plugin And Extension Architecture | Declaration prototype complete; executable host not started | Define safe extension types, trust model, versioning, capability declarations, and non-mutating prototype boundaries. | Declarations are policy checked; no extension loader, process host, installation, or executable capability exists. |
 | 34 | Enterprise And Team Workflow | Complete locally | Enforce explicit local team profiles, exact approval bindings, and append-only audit records without cloud dependency. | Strict versioned JSON artifacts, SHA-256 binding, validate/plan/import/apply/cleanup wiring, real-file tests, real SQLite audit tests, and built-CLI checks pass. |
-| 35 | Packaging Signing Notarization And Distribution | Blocked | Create and verify release artifacts, installer/uninstaller, upgrade path, checksums, SBOM/provenance, signing, and notarization. | Policy documentation exists, but no artifacts or install lifecycle exist and no Developer ID signing identity or notarization credentials are available. |
+| 35 | Packaging Signing Notarization And Distribution | Operational unsigned local lane; public distribution blocked | Create and verify release artifacts, installer/uninstaller, upgrade path, checksums, SBOM/provenance, signing, and notarization. | Local unsigned archives, checksums, SPDX/provenance sidecars, and exact temp-prefix lifecycle are implemented; Developer ID signing, notarization, stapling, Gatekeeper, `.pkg`, and publication remain blocked. |
 | 36 | CI Benchmarking And Performance Lab | Operational locally; attended sleep/wake evidence pending | Add repeatable CI contracts and explicit local benchmark execution for supported macOS and Apple container evidence. | Versioned evidence, real version/stats probes, 3-10 bounded samples, battery/thermal facts, attended sleep/wake detection, and exact cleanup are implemented; a run without an attended sleep interval remains blocked. |
 | 37 | Documentation Site And Public Education | Information architecture complete; website implementation not started | Define documentation-site information architecture and source-of-truth boundaries for the separate website repository. | Core source-of-truth rules exist; website implementation remains in the separate repository. |
 | 38 | Governance And Contributor Model | Complete locally | Mature OSS governance, contributor workflow, security reporting, review triggers, roadmap process, and release ownership. | Governance docs and templates define issue-to-PR-to-release flow, risky-area review, private-report guidance, and support boundaries. |
@@ -440,12 +440,14 @@ Phase 34 does not add a cloud team service, central remote control, hosted audit
 
 ## Phase 35 Outputs
 
-- Added `docs/release/distribution-readiness.md` as the fail-closed artifact matrix and clean-tag checklist for future binary and installer releases.
-- Documented signing, notarization, checksums, SBOM, provenance, installer, uninstaller, upgrade, downgrade, rollback, and package-channel evidence required before publication.
-- Updated release process, install, security, limitations, requirements, acceptance, traceability, build status, and devlog docs.
-- Added release-doc XCTest coverage that guards source-only current truth and blocks unsupported artifact claims.
+- Added developer-only `hostwright-dist` clean-build, prebuilt-integration, verify, and lifecycle commands with explicit paths and blocked trust-stage exits.
+- Added a strict macOS ARM64 payload manifest, exclusive output, SHA-256 sidecars, SPDX 2.3 artifact-content inventory, unsigned source/archive-bound provenance, and mode-`0600` evidence.
+- Added pre-extraction tar path/type checks, exact post-extraction inventory/hash/size/mode checks, hidden-file and symlink rejection, and sidecar cross-binding.
+- Added atomic temp-prefix install, distinct-revision upgrade, downgrade, reverse-order rollback, modified-owned-file refusal, exact uninstall, and unrelated-prefix snapshot preservation.
+- Added real-file/archive/process XCTest and built-tool integration using the actual Hostwright binaries; deterministic tests do not count as signed distribution proof.
+- Updated only distribution, install, release, security, evidence, requirement, status, and existing Phase 35 devlog truth.
 
-Phase 35 does not produce binary archives, installer packages, install scripts, signed artifacts, notarized artifacts, SBOMs, provenance statements, Homebrew formulae, package-channel support, launch agents, release tags, GitHub Releases, dependencies, runtime mutation, direct Apple container shell-out, SQLite access outside `HostwrightState`, website work, or GUI code.
+Phase 35 produces local unsigned non-publishable archives and sidecars only. It does not produce signed or notarized artifacts, `.pkg` or system installers, install scripts, Homebrew formulae, package-channel support, launch agents, release tags, GitHub Releases, third-party dependencies, runtime mutation, direct Apple container shell-out, SQLite access, website work, or GUI code.
 
 ## Phase 36 Outputs
 

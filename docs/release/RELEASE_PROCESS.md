@@ -69,9 +69,9 @@ Before any beta, stable, binary, installer, signing, notarization, SBOM, provena
 
 ## Distribution Readiness Gate
 
-Phase 35 defines the fail-closed distribution gate in `docs/release/distribution-readiness.md`.
+Phase 35 defines the fail-closed distribution gate and developer-only unsigned evidence lane in `docs/release/distribution-readiness.md`. Local `hostwright-dist` archives and temporary-prefix lifecycle reports are review inputs, not public release artifacts.
 
-No binary archive, installer package, install script, Homebrew formula, signed artifact, notarized artifact, SBOM, provenance statement, or package-channel claim may be published until that gate has matching evidence from a clean public `v*` tag.
+No binary archive, installer package, install script, Homebrew formula, signed/notarized artifact, SBOM/provenance sidecar, or package-channel claim may be published until that gate has matching clean-tag signing, notarization, stapling, Gatekeeper, installer, checksum, lifecycle, and maintainer evidence. A local unsigned SPDX or provenance file does not satisfy distribution trust.
 
 ## Benchmark Gate
 

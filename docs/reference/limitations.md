@@ -34,8 +34,8 @@ Hostwright is not production ready.
 - `hostwright doctor` safe local checks.
 - `hostwright doctor --output json` resource intelligence reports with local ProcessInfo-backed hardware and thermal facts, fixture-backed parser coverage, explicit unmeasured benchmark dimensions, architecture warnings only when evidence exists, and local-only/no-capacity limits.
 - `hostwright benchmark` for explicit local schema-v2 hardware reports using 3-10 bounded Hostwright-owned resources, real RuntimeAdapter version/stats probes, raw samples, optional attended sleep/wake detection, and exact cleanup. Historical schema-v1 fixtures remain contract evidence only.
-- Source-only release candidate packaging for `v0.1.0-alpha.1`.
-- Release distribution readiness documentation for future signed and notarized artifacts, with current binary and installer publication still blocked.
+- Source-only public release policy for `v0.1.0-alpha.1`.
+- Developer-only `hostwright-dist` unsigned macOS ARM64 archive evidence with exact manifest/checksum/SPDX/provenance verification and atomic temp-prefix install/upgrade/downgrade/rollback/uninstall. Signing, notarization, installer, and publication stages remain blocked.
 - Beta readiness checklist documentation for future beta tag approval, with current beta release publication still blocked.
 - Apple silicon control-plane direction documentation that keeps current core single-host and blocks platform-expansion claims until separate evidence and maintainer approval exist.
 - Documentation-site information architecture and source-of-truth boundaries for a separate `hostwright.dev` repository.
@@ -125,8 +125,8 @@ Hostwright is not production ready.
 - GUI implementation, daemon API, or local control-surface runtime.
 - Production readiness.
 - Beta release tag, beta GitHub Release, beta compatibility claim, or maintainer-approved beta support boundary.
-- Binary downloads, installer packages, Homebrew formulae, signing, notarization, SBOM, vulnerability scanning, or binary provenance.
-- Install scripts, uninstaller behavior, upgrade/downgrade smoke tests, rollback proof, package-channel support, Developer ID signing proof, notarization submission proof, stapling proof, Gatekeeper verification proof, or binary release publication.
+- Public binary downloads, `.pkg` installers, system install scripts, Homebrew formulae, package-channel support, launch agents, privileged helpers, or system-prefix installation.
+- Developer ID signing proof, notarization submission proof, stapling proof, Gatekeeper verification proof, signed/trusted provenance, dependency or image SBOM claims, vulnerability scanning, or binary release publication.
 - Enforced CODEOWNERS, branch protection, support SLA, enterprise support workflow, hosted diagnostics, telemetry upload, or cloud support service.
 
 ## Explicitly Out Of Scope For The First Supported Release

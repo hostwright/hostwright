@@ -10,6 +10,7 @@ let package = Package(
     products: [
         .executable(name: "hostwright", targets: ["HostwrightCLI"]),
         .executable(name: "hostwrightd", targets: ["HostwrightDaemon"]),
+        .executable(name: "hostwright-dist", targets: ["HostwrightDistributionTool"]),
         .library(name: "HostwrightCore", targets: ["HostwrightCore"]),
         .library(name: "HostwrightManifest", targets: ["HostwrightManifest"]),
         .library(name: "HostwrightRuntime", targets: ["HostwrightRuntime"]),
@@ -46,7 +47,15 @@ let package = Package(
                 "HostwrightRuntime"
             ]
         ),
+        .executableTarget(
+            name: "HostwrightDistributionTool",
+            dependencies: ["HostwrightDistribution"]
+        ),
         .target(name: "HostwrightCore"),
+        .target(
+            name: "HostwrightDistribution",
+            dependencies: ["HostwrightCore"]
+        ),
         .target(
             name: "HostwrightManifest",
             dependencies: [
@@ -146,6 +155,10 @@ let package = Package(
         .testTarget(
             name: "HostwrightCoreTests",
             dependencies: ["HostwrightCore"]
+        ),
+        .testTarget(
+            name: "HostwrightDistributionTests",
+            dependencies: ["HostwrightDistribution"]
         ),
         .testTarget(
             name: "HostwrightManifestTests",

@@ -68,8 +68,10 @@ Hostwright does not provide:
 - notarized artifacts;
 - packaged launch agents or privileged helpers.
 
-Those require separate signing, notarization, checksum, SBOM, provenance, and installer decisions.
+Those public channels still require signing, notarization, installer, and publication decisions.
 
-Phase 35 defines the future distribution readiness gate in `docs/release/distribution-readiness.md`. That gate is documentation and review policy only in the current tree; it does not publish binaries, create installers, install launch agents, add an install script, or approve a package channel.
+Phase 35 now includes the developer-only `hostwright-dist` evidence tool described in `docs/release/distribution-readiness.md`. It can build a local unsigned macOS ARM64 archive from a clean exact commit, verify its manifest/checksum/SPDX/provenance sidecars, and exercise install/upgrade/downgrade/uninstall only under an explicit `hostwright-dist-*` temporary prefix. Successful local artifact and lifecycle operations still exit `69` with blocked evidence because no Developer ID signing, notarization, stapling, Gatekeeper, or signed `.pkg` stage ran.
+
+`hostwright-dist` is not a public installer. It refuses system prefixes, sudo behavior, launch-agent installation, shell-profile changes, default state paths, unowned overwrite, modified-owned-file uninstall, and publication. Its unsigned archives remain local and non-publishable.
 
 Phase 39 defines the beta readiness gate in `docs/release/beta-readiness.md`. That gate requires clean-checkout source install proof, docs alignment, current limitations review, state upgrade evidence, telemetry/support policy review, and maintainer approval before any beta tag. It does not create a beta release or change the source-only artifact policy by itself.

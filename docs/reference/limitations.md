@@ -12,7 +12,7 @@ Hostwright is not production ready.
 - `hostwright validate` for a restricted Hostwright manifest subset.
 - Manifest `version: 1` support with versionless alpha manifests treated as legacy version 1 input.
 - Manifest `imagePolicy: require-digest` support for local `@sha256:<64 lowercase hex characters>` image reference validation before planning or mutation.
-- Manifest `secretEnv` support for local `keychain://<service>/<account>` secret references, with fake backend tests and no live Keychain default.
+- Manifest `secretEnv` support for local `keychain://<service>/<account>` secret references, with a test-only in-memory store, an opt-in noninteractive read-only macOS Keychain backend, live exact-cleanup tests, and no live Keychain default.
 - Fail-closed unsupported-field, unsupported-version, unsupported DNS/discovery/networking-field, unsafe env-key, and unsafe host-root or parent-traversal mount-source validation for untrusted manifests.
 - `hostwright import-stack <path>` conversion for a narrow safe stack-file subset, printing converted `hostwright.yaml` text without writing files, observing runtime, touching state, or claiming Compose compatibility.
 - `hostwright plan` as non-mutating manifest-level dry-run output.
@@ -83,7 +83,7 @@ Hostwright is not production ready.
 - General runtime mutation.
 - Automatic manifest upgrade, downgrade, or runtime compatibility conversion.
 - General YAML parsing, broad stack-file import, or full orchestrator schema compatibility.
-- Live macOS Keychain access, Keychain prompts, Keychain access groups, synchronizable Keychain items, registry credential storage, credential sync, credential upload, or cloud identity integration.
+- Default CLI activation of live macOS Keychain access; production Keychain writes/deletes; Keychain prompts; Keychain access groups; synchronizable Keychain items; registry credential storage; credential sync; credential upload; or cloud identity integration.
 - Registry image resolution, tag-to-digest lookup, automatic image pulls, signature verification, OCI referrer inspection, SBOM generation/validation, vulnerability scanning, dependency provenance, or source-build integrity automation.
 - Runtime density measurement, VM-per-container overhead measurement, boot-latency benchmarking, polling-overhead benchmarking, battery-impact measurement, sleep/wake runtime proofing, or workload memory-pressure benchmarking as automatic product behavior.
 - Live benchmark command execution, CI Apple container benchmark execution, benchmark number publication, Apple container version drift live probing, performance comparison claims, production capacity claims, or hosted performance monitoring.

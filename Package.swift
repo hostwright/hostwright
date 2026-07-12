@@ -125,7 +125,11 @@ let package = Package(
             ]
         ),
         .target(
-            name: "HostwrightSecrets"
+            name: "HostwrightSecrets",
+            linkerSettings: [
+                .linkedFramework("LocalAuthentication"),
+                .linkedFramework("Security")
+            ]
         ),
         .target(
             name: "HostwrightTestSupport",

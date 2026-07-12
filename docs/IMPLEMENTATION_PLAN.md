@@ -32,7 +32,7 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 | 21 | API and GUI Readiness Gate | Requirements complete; implementation not started | Define local GUI/control-surface requirements, data contracts, accessibility expectations, command/API boundaries, safety rules, and handoff criteria. | Requirements are documented; a reviewed local API and GUI remain future implementation work. |
 | 22 | Networking and Service Discovery | Complete locally | Harden local networking policy and document unsupported discovery/exposure boundaries. | Localhost publish defaults, duplicate/observed port conflicts, unsupported discovery fields, and fixture-only network metadata are tested. |
 | 23 | Secure Exposure Research | Research complete; implementation not started | Decide tunnel, VPN, mTLS, reverse proxy, DNS, and cloud exposure boundaries before any implementation. | Research is recorded; provider, reverse-proxy, and mTLS implementation require separate evidence-gated work. |
-| 24 | Secrets, Credentials, And Keychain Boundary | Complete for unavailable live-backend boundary | Add local secret references, a test-only in-memory store, unavailable live backend, and redaction hardening. | `secretEnv`, in-memory resolution, fail-closed unavailable backend, and redacted state/diagnostics/plans pass tests. |
+| 24 | Secrets, Credentials, And Keychain Boundary | Complete for opt-in read boundary | Add local secret references, a test-only in-memory store, an opt-in noninteractive read-only macOS Keychain backend, an unavailable CLI default, and redaction hardening. | `secretEnv`, deterministic in-memory contracts, real add/read/exact-delete/post-delete Keychain evidence, fail-closed unavailable default, and redacted state/diagnostics/plans pass tests. |
 | 25 | Supply Chain And Image Trust | Complete for local digest policy | Add local image digest-reference policy and document trust-tool boundaries. | `imagePolicy: require-digest`, digest syntax validation, schema alignment, docs boundary, and overclaim tests pass without registry calls or scanner/signing dependencies. |
 | 26 | Apple Silicon Resource Intelligence | Complete locally | Add local resource reports and benchmark-methodology boundaries without scheduler or accelerator claims. | Doctor resource reports, fixture parsing, architecture warnings, unmeasured benchmark dimensions, and docs boundary tests pass. |
 | 27 | Apple Silicon Accelerator Boundary Research | Research complete; implementation not started | Decide GPU, ANE, Metal, Core ML, MLX, PyTorch MPS, host-native accelerator, and scheduler boundaries before implementation. | Research is recorded; host-native accelerator measurement and execution remain unimplemented. |
@@ -311,15 +311,15 @@ Phase 23 does not add provider integration, provider credentials, tunnels, DNS b
 
 ## Phase 24 Outputs
 
-- Added `HostwrightSecrets` with `HostwrightSecretReference`, `SecretStore`, and an unavailable default Keychain backend; tests inject a test-only in-memory store.
+- Added `HostwrightSecrets` with `HostwrightSecretReference`, `SecretStore`, a read-only noninteractive `MacOSKeychainSecretStore`, and an unavailable default CLI backend; deterministic tests inject a test-only in-memory store.
 - Added service-level `secretEnv` for `keychain://<service>/<account>` references while keeping Compose/Kubernetes `secrets:` unsupported.
 - Manifest validation rejects plaintext credential-like keys in `env`, malformed secret references, duplicate keys across `env` and `secretEnv`, and secret references placed under `env`.
 - Apply resolves secret references through the injected backend immediately before confirmed create execution; the default unavailable backend fails before mutation.
 - Runtime mutation rejects unresolved secret references as a final guard.
 - Desired-state persistence, plans, errors, diagnostics, and observability redaction do not store or print resolved synthetic secret values or raw keychain reference labels.
-- XCTest coverage covers secret reference parsing, in-memory store behavior, manifest validation, mapper redaction, apply resolution/failure, runtime guard, state redaction, observability redaction, and schema alignment.
+- XCTest coverage covers real uniquely named local Keychain add/read/exact-delete/post-delete behavior, malformed Keychain data, secret reference parsing, in-memory store contracts, manifest validation, mapper redaction, apply resolution/failure, runtime guard, state redaction, observability redaction, and schema alignment.
 
-Phase 24 does not add live Keychain access, Keychain prompts, access groups, synchronizable items, credential upload/sync, cloud identity, registry credential storage, mounted secret files, provider integration, runtime mutation expansion, release tags, or GitHub Releases.
+Phase 24 does not enable the live backend by default, write or delete Keychain items in production code, present Keychain prompts, use access groups or synchronizable items, upload/sync credentials, add cloud identity or registry credential storage, mount secret files, add provider integration, expand runtime mutation, create release tags, or create GitHub Releases.
 
 ## Phase 25 Outputs
 

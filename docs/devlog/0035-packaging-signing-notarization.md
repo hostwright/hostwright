@@ -22,7 +22,7 @@ Dirty prebuilt local-integration runs used the actual debug `hostwright`, `hostw
 
 ## Clean Local Evidence
 
-A detached two-commit proof used baseline `5b6e7914c93a9a994c7404d7ed0b4c6c72bfd3c3` and implementation commit `8bc05054c3a1cb7b4f1dff884c66fd7e4aaed787`. Both worktrees were clean before and after their release builds. The reports record macOS 26.5 build 25F71, Mac16,8, arm64, 24 GiB memory, Swift 6.3.3, Apple Git 2.50.1, bsdtar 3.5.3, and notarytool 1.1.2.
+A detached two-commit proof used baseline `5b6e7914c93a9a994c7404d7ed0b4c6c72bfd3c3` and final reviewed candidate `f625a218762cf9c6967ef86fa7dd95a6246a7499`. Both worktrees were clean before and after their release builds. The reports record macOS 26.5 build 25F71, Mac16,8, arm64, 24 GiB memory, Swift 6.3.3, Apple Git 2.50.1, bsdtar 3.5.3, and notarytool 1.1.2.
 
 - Both exact commits built `hostwright` and `hostwrightd` in release mode with an empty SwiftPM external-dependency inventory.
 - Both artifacts recorded `sourceDirty: false`, one ARM64 slice per executable, exact payload hashes/sizes/modes, five passed artifact stages, zero failures, and three blocked trust stages.

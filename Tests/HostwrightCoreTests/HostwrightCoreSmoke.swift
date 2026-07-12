@@ -3,6 +3,33 @@ import XCTest
 @testable import HostwrightCore
 
 final class HostwrightCoreTests: XCTestCase {
+    func testEvidenceContractSeparatesDeterministicAndRealProof() throws {
+        let root = try packageRoot()
+        let policy = try read("docs/reference/testing-evidence.md", root: root)
+        let schemaText = try read("schemas/hostwright-evidence.schema.json", root: root)
+        let schemaData = try XCTUnwrap(schemaText.data(using: .utf8))
+        let schema = try XCTUnwrap(JSONSerialization.jsonObject(with: schemaData) as? [String: Any])
+        let properties = try XCTUnwrap(schema["properties"] as? [String: Any])
+        let evidenceClass = try XCTUnwrap(properties["evidenceClass"] as? [String: Any])
+        let status = try XCTUnwrap(properties["status"] as? [String: Any])
+        let commands = try XCTUnwrap(properties["commands"] as? [String: Any])
+        let constraints = try XCTUnwrap(schema["allOf"] as? [[String: Any]])
+
+        XCTAssertEqual(
+            evidenceClass["enum"] as? [String],
+            ["unit-contract", "local-integration", "live-runtime", "hardware-benchmark", "distribution-artifact"]
+        )
+        XCTAssertEqual(status["enum"] as? [String], ["passed", "failed", "blocked"])
+        XCTAssertEqual(commands["minItems"] as? Int, 1)
+        XCTAssertEqual(constraints.count, 4)
+        XCTAssertTrue(schemaText.contains(#""exitCode": {"const": 0}"#))
+        XCTAssertTrue(schemaText.contains(#""exactResourceIdentifiers": {"minItems": 1}"#))
+        XCTAssertTrue(policy.contains("there is no skipped-success status"))
+        XCTAssertTrue(policy.contains("may not be converted to passed with a fixture"))
+        XCTAssertTrue(policy.contains("Exact cleanup failure makes live-runtime or hardware evidence fail"))
+        XCTAssertFalse(policy.localizedCaseInsensitiveContains("skipped tests count as passed"))
+    }
+
     func testHostwrightIdentityConstants() {
         XCTAssertEqual(HostwrightIdentity.projectName, "Hostwright")
         XCTAssertEqual(HostwrightIdentity.cliName, "hostwright")
@@ -69,7 +96,7 @@ final class HostwrightCoreTests: XCTestCase {
         XCTAssertTrue(acceptance.contains("Phase 35 Gate: Packaging Signing Notarization And Distribution"))
         XCTAssertTrue(traceability.contains("HW-REL-005, HW-REL-006, HW-GOV-003"))
         XCTAssertTrue(implementationPlan.contains("## Phase 35 Outputs"))
-        XCTAssertTrue(buildStatus.contains("Phase 35 adds a fail-closed distribution readiness gate"))
+        XCTAssertTrue(buildStatus.contains("Phase 35 is blocked"))
         XCTAssertTrue(devlog.contains("No binary artifacts."))
 
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("brew install"))
@@ -212,7 +239,7 @@ final class HostwrightCoreTests: XCTestCase {
         XCTAssertTrue(acceptance.contains("Phase 36 Gate: CI Benchmarking And Performance Lab"))
         XCTAssertTrue(traceability.contains("HW-COMPAT-011, HW-COMPAT-012, HW-REL-004"))
         XCTAssertTrue(implementationPlan.contains("## Phase 36 Outputs"))
-        XCTAssertTrue(buildStatus.contains("Phase 36 adds dry-run and fixture-backed benchmark lab"))
+        XCTAssertTrue(buildStatus.contains("Phase 36 is partial"))
         XCTAssertTrue(devlog.contains("No benchmark numbers or performance marketing claims."))
         XCTAssertTrue(ci.contains("scripts/lint.sh"))
 
@@ -808,7 +835,7 @@ final class HostwrightCoreTests: XCTestCase {
         XCTAssertTrue(acceptance.contains("Phase 34 Gate: Enterprise And Team Workflow"))
         XCTAssertTrue(traceability.contains("HW-TEAM-001, HW-TEAM-002, HW-TEAM-003, HW-TEAM-004"))
         XCTAssertTrue(implementationPlan.contains("## Phase 34 Outputs"))
-        XCTAssertTrue(buildStatus.contains("Phase 34 adds local team workflow"))
+        XCTAssertTrue(buildStatus.contains("Phase 34 is partial"))
         XCTAssertTrue(devlog.contains("No cloud team service."))
 
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("cloud team service is implemented"))

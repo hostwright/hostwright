@@ -1,0 +1,178 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hostwright.dev/schemas/hostwright-evidence.schema.json",
+  "title": "Hostwright Evidence Report",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "evidenceClass",
+    "status",
+    "recordedAt",
+    "source",
+    "environment",
+    "commands",
+    "rawResults",
+    "failures",
+    "blockers",
+    "cleanup"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1
+    },
+    "evidenceClass": {
+      "enum": [
+        "unit-contract",
+        "local-integration",
+        "live-runtime",
+        "hardware-benchmark",
+        "distribution-artifact"
+      ]
+    },
+    "status": {
+      "enum": ["passed", "failed", "blocked"]
+    },
+    "recordedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "source": {
+      "type": "object",
+      "required": ["commit", "dirty"],
+      "additionalProperties": false,
+      "properties": {
+        "commit": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{40}$"
+        },
+        "dirty": {
+          "type": "boolean"
+        }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "required": ["operatingSystem", "build", "architecture", "hardwareModel", "memoryBytes", "toolVersions"],
+      "additionalProperties": false,
+      "properties": {
+        "operatingSystem": {"type": "string", "minLength": 1},
+        "build": {"type": "string", "minLength": 1},
+        "architecture": {"type": "string", "minLength": 1},
+        "hardwareModel": {"type": "string", "minLength": 1},
+        "memoryBytes": {"type": "integer", "minimum": 1},
+        "toolVersions": {
+          "type": "object",
+          "additionalProperties": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "commands": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["command", "exitCode", "durationMilliseconds"],
+        "additionalProperties": false,
+        "properties": {
+          "command": {"type": "string", "minLength": 1},
+          "exitCode": {"type": "integer"},
+          "durationMilliseconds": {"type": "integer", "minimum": 0}
+        }
+      }
+    },
+    "rawResults": {
+      "type": "object",
+      "required": ["executed", "passed", "failed", "blocked"],
+      "additionalProperties": false,
+      "properties": {
+        "executed": {"type": "integer", "minimum": 0},
+        "passed": {"type": "integer", "minimum": 0},
+        "failed": {"type": "integer", "minimum": 0},
+        "blocked": {"type": "integer", "minimum": 0}
+      }
+    },
+    "failures": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1}
+    },
+    "blockers": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1}
+    },
+    "cleanup": {
+      "type": "object",
+      "required": ["status", "exactResourceIdentifiers"],
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "enum": ["not-required", "succeeded", "failed"]
+        },
+        "exactResourceIdentifiers": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true
+        },
+        "message": {"type": "string"}
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "passed"}}},
+      "then": {
+        "properties": {
+          "commands": {
+            "items": {
+              "properties": {
+                "exitCode": {"const": 0}
+              }
+            }
+          },
+          "rawResults": {
+            "properties": {
+              "executed": {"minimum": 1},
+              "passed": {"minimum": 1},
+              "failed": {"const": 0},
+              "blocked": {"const": 0}
+            }
+          },
+          "failures": {"maxItems": 0},
+          "blockers": {"maxItems": 0},
+          "cleanup": {
+            "properties": {
+              "status": {"enum": ["not-required", "succeeded"]}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"status": {"const": "failed"}}},
+      "then": {"properties": {"failures": {"minItems": 1}}}
+    },
+    {
+      "if": {"properties": {"status": {"const": "blocked"}}},
+      "then": {"properties": {"blockers": {"minItems": 1}}}
+    },
+    {
+      "if": {
+        "allOf": [
+          {"properties": {"evidenceClass": {"const": "live-runtime"}}},
+          {"properties": {"status": {"const": "passed"}}}
+        ]
+      },
+      "then": {
+        "properties": {
+          "cleanup": {
+            "properties": {
+              "status": {"const": "succeeded"},
+              "exactResourceIdentifiers": {"minItems": 1}
+            }
+          }
+        }
+      }
+    }
+  ]
+}

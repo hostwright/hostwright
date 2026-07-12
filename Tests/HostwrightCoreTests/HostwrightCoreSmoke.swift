@@ -717,7 +717,7 @@ final class HostwrightCoreTests: XCTestCase {
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("provenance is provided"))
     }
 
-    func testControlSurfaceDocsDescribeBoundaryWithoutImplementation() throws {
+    func testControlSurfaceDocsDescribePhase42OneShotAPIBoundary() throws {
         let root = try packageRoot()
         let boundary = try read("docs/architecture/control-surface-api-boundary.md", root: root)
         let cli = try read("docs/reference/cli.md", root: root)
@@ -729,6 +729,7 @@ final class HostwrightCoreTests: XCTestCase {
         let implementationPlan = try read("docs/IMPLEMENTATION_PLAN.md", root: root)
         let buildStatus = try read("docs/BUILD_STATUS.md", root: root)
         let devlog = try read("docs/devlog/0021-control-surface-api-boundary.md", root: root)
+        let phase42Devlog = try read("docs/devlog/0042-one-shot-local-control-api.md", root: root)
         let publicDocs = [
             boundary,
             cli,
@@ -739,25 +740,33 @@ final class HostwrightCoreTests: XCTestCase {
             traceability,
             implementationPlan,
             buildStatus,
-            devlog
+            devlog,
+            phase42Devlog
         ].joined(separator: "\n")
 
-        XCTAssertTrue(boundary.contains("Status: Phase 21 requirements and API boundary only."))
+        XCTAssertTrue(boundary.contains("Status: Phase 21 requirements plus the bounded Phase 42 one-shot local API."))
         XCTAssertTrue(boundary.contains("A control surface must not call Apple container, SQLite, `RuntimeAdapter`, state migrations, cleanup deletion, or health execution directly."))
         XCTAssertTrue(boundary.contains("| Cleanup preview | `hostwright cleanup --state-db <path> --dry-run` |"))
+        XCTAssertTrue(boundary.contains("`hostwright-control` is a local stdin/stdout executable, not a service."))
+        XCTAssertTrue(security.contains("State-backed status can perform existing schema migration, observation snapshot, and audit writes"))
         XCTAssertTrue(boundary.contains("Full keyboard navigation"))
         XCTAssertTrue(boundary.contains("Screen-reader labels"))
-        XCTAssertTrue(boundary.contains("maintainer approval for any new API wrapper"))
+        XCTAssertTrue(boundary.contains("maintainer approval for any further API wrapper"))
+        XCTAssertTrue(cli.contains("hostwright-control --manifest <absolute-path>"))
         XCTAssertTrue(cli.contains("hostwright diagnostics --state-db <path> --bundle <path>"))
-        XCTAssertTrue(limitations.contains("Local control-surface requirements and API boundary documentation"))
+        XCTAssertTrue(limitations.contains("Local control-surface requirements plus `hostwright-control`"))
         XCTAssertTrue(security.contains("## Control Surface Boundary"))
         XCTAssertTrue(requirements.contains("HW-GUI-001"))
-        XCTAssertTrue(requirements.contains("HW-GUI-004"))
+        XCTAssertTrue(requirements.contains("HW-GUI-008"))
         XCTAssertTrue(acceptance.contains("Phase 21 Gate: GUI Control Surface Requirements And API Boundary"))
-        XCTAssertTrue(traceability.contains("HW-GUI-001, HW-GUI-002, HW-GUI-003, HW-GUI-004"))
+        XCTAssertTrue(acceptance.contains("Phase 42 Gate: One-Shot Local Control API"))
+        XCTAssertTrue(traceability.contains("HW-GUI-005, HW-GUI-006, HW-GUI-007, HW-GUI-008"))
         XCTAssertTrue(implementationPlan.contains("## Phase 21 Outputs"))
+        XCTAssertTrue(implementationPlan.contains("## Phase 42 Outputs"))
         XCTAssertTrue(buildStatus.contains("Phase 21 adds local control-surface requirements"))
+        XCTAssertTrue(buildStatus.contains("Phase 42 adds `hostwright-control`"))
         XCTAssertTrue(devlog.contains("No GUI code."))
+        XCTAssertTrue(phase42Devlog.contains("No apply, cleanup, logs, diagnostics export"))
 
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("GUI is implemented"))
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("web dashboard is implemented"))
@@ -770,6 +779,8 @@ final class HostwrightCoreTests: XCTestCase {
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("telemetry upload is enabled"))
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("cleanup tokens can be bypassed"))
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("plan hashes can be bypassed"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("control API mutation is implemented"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("control API listener is implemented"))
     }
 
     func testExtensionArchitectureDocsDescribeDeclarationPolicyAndHandshakeOnly() throws {

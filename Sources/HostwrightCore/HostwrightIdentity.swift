@@ -36,6 +36,9 @@ public enum HostwrightErrorCode: String, Sendable {
     case extensionInvalid = "HW-EXT-001"
     case extensionBlocked = "HW-EXT-002"
     case extensionExecutionFailed = "HW-EXT-003"
+    case controlAPIInvalid = "HW-API-001"
+    case controlAPIUnavailable = "HW-API-002"
+    case controlAPIExecutionFailed = "HW-API-003"
 }
 
 public struct HostwrightDiagnostic: Error, Equatable, Sendable {

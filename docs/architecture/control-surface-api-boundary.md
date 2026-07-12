@@ -1,17 +1,51 @@
 # Control Surface API Boundary
 
-Status: Phase 21 requirements and API boundary only.
+Status: Phase 21 requirements plus the bounded Phase 42 one-shot local API.
 
-This document defines what a future local GUI or other control surface may depend on. It does not implement a GUI, daemon API, web dashboard, remote service, or new runtime mutation path.
+This document defines what a future local GUI or other control surface may depend on. Phase 42 implements one local process contract for five existing commands; it does not implement a GUI, daemon API, socket or HTTP listener, web dashboard, remote service, background service, or new runtime mutation path.
 
 ## Principles
 
 - The core repository owns local control contracts and safety rules, not visual design.
-- A control surface must use `hostwright`/`hostwrightd` commands or a future explicit Hostwright API that preserves the same semantics.
+- A control surface must use `hostwright`/`hostwrightd` commands or the explicit `hostwright-control` subset while preserving the same semantics.
 - A control surface must not call Apple container, SQLite, `RuntimeAdapter`, state migrations, cleanup deletion, or health execution directly.
 - Every state path, manifest path, diagnostics bundle path, plan hash, and cleanup token must be explicit and reviewable.
 - Redacted Hostwright output remains redacted; a control surface must not reconstruct secrets from manifests, state rows, logs, diagnostic bundles, or issue reports.
 - Local-only behavior remains local-only. No telemetry upload, hosted diagnostics, cloud dashboard, browser control plane, or remote mutation is part of this boundary.
+
+## Phase 42 One-Shot API
+
+`hostwright-control` is a local stdin/stdout executable, not a service. Launch configuration fixes the manifest path and optional state-database and team-profile paths:
+
+```bash
+hostwright-control --manifest /absolute/hostwright.yaml [--state-db /absolute/state.sqlite] [--team-profile /absolute/team-profile.json]
+```
+
+It reads one JSON object no larger than 64 KiB, writes one JSON object no larger than 1 MiB, and exits. Input has a five-second total read deadline. Requests cannot supply paths and cannot select commands outside this fixed version-1 set:
+
+| Operation | Existing command contract | Side-effect boundary |
+| --- | --- | --- |
+| `plan` | `hostwright plan --output json` | Validates and plans only; no runtime or state access. An explicitly configured team profile is enforced. |
+| `status` | `hostwright status --output json` | Without state, manifest-only. With an explicit configured state database, existing status semantics can observe runtime and perform schema migration, snapshot, and audit writes. It does not mutate runtime. |
+| `events` | `hostwright events --output json` | Requires an explicit configured existing state database and reads event rows only. |
+| `recovery` | `hostwright recovery --output json` | Requires an explicit configured existing state database and reads recovery rows only. |
+| `doctor` | `hostwright doctor --output json` | Runs existing safe local checks; no Apple container command or state write. |
+
+Example request and response:
+
+```json
+{"apiVersion":1,"requestID":"plan-1","operation":"plan"}
+```
+
+```json
+{"apiVersion":1,"exitCode":0,"operation":"plan","requestID":"plan-1","result":{"kind":"plan"},"success":true}
+```
+
+The parser rejects unknown or duplicate fields, unsupported API versions, invalid identifiers and filters, oversized input, and mutation names such as `apply` or `cleanup`. Launch paths must be absolute existing regular non-symlink files with safe ownership and no group/world write or set-ID bits. The tool validates those path facts before delegating, but it is a same-account local process rather than a capability sandbox.
+
+API-owned failures use `HW-API-001` for invalid requests, `HW-API-002` for unavailable or unsafe configured files, and `HW-API-003` for invalid delegated response framing or execution failure. Existing Hostwright command failures preserve their original error body and exit code inside the response. Usage errors before request processing remain text on stderr with exit code 64.
+
+The API has no apply, cleanup, logs, diagnostics export, benchmark, extension execution, arbitrary command, or generic mutation operation. It opens no listener, persists no process registration, discovers no path, chooses no default state database, and grants no authority beyond the invoking account and configured command contracts.
 
 ## Approved Local Data Surfaces
 
@@ -66,7 +100,7 @@ Before design or frontend implementation starts, the separate owner must have:
 - accessibility acceptance criteria for keyboard and screen-reader behavior;
 - a threat-model review for any action that can invoke apply, cleanup, diagnostics export, or daemon control;
 - a clear statement that prototypes must use fixtures until explicit live proof is approved;
-- maintainer approval for any new API wrapper, installer, launch agent, background service, website, or GUI repository work.
+- maintainer approval for any further API wrapper, installer, launch agent, background service, website, or GUI repository work.
 
 ## Non-Goals
 
@@ -78,4 +112,5 @@ Before design or frontend implementation starts, the separate owner must have:
 - Direct Apple container execution.
 - Direct SQLite access.
 - Runtime mutation outside existing Hostwright CLI/API gates.
+- Persistent API service, socket, or HTTP listener.
 - New JSON contracts for text-only commands.

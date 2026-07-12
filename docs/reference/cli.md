@@ -21,6 +21,8 @@ hostwright cleanup [path] --state-db <path> --confirm-cleanup <token> [--team-pr
 hostwright benchmark --image <local-image> --samples <3-10> --report <path> --source-commit <40-hex> --source-dirty <true|false> --expected-container-version <version> [--attended-sleep-wake-seconds <15-300>] --confirm-live
 hostwright extension check --declaration <absolute-path> --executable <absolute-path> [--output text|json]
 hostwright doctor [--output text|json]
+hostwright-control --version
+hostwright-control --manifest <absolute-path> [--state-db <absolute-path>] [--team-profile <absolute-path>]
 hostwrightd --foreground --config <hostwright.yaml> --state-db <path> [options]
 ```
 
@@ -37,6 +39,26 @@ When JSON mode is requested and the CLI can classify the failure, stderr uses th
 ```
 
 Manifest failures use an `issues` array with stable Hostwright error codes. `doctor --output json` reports compatibility failures as a normal doctor JSON document on stdout with `hasFailures: true` and exit code 65, not as an error envelope.
+
+## `hostwright-control --manifest <absolute-path> ...`
+
+Runs one versioned local JSON request through existing `hostwright` command contracts, writes one JSON response, and exits. It is not a daemon, socket, HTTP server, remote API, or background service.
+
+Launch arguments require an explicit absolute manifest path. Optional `--state-db` and `--team-profile` paths are also fixed at launch; request JSON cannot provide or override any path. Configured files must already exist as regular non-symlink files with safe ownership and mode.
+
+Supported operations are `plan`, `status`, `events`, `recovery`, and `doctor`. Requests use this strict top-level shape:
+
+```json
+{"apiVersion":1,"requestID":"request-1","operation":"events","project":"demo","eventType":"apply.failed","service":"api","severity":"error","limit":100,"sort":"desc"}
+```
+
+Only `events` accepts all filters. `recovery` accepts only `project`; `plan`, `status`, and `doctor` accept no filters. Input is limited to 64 KiB with a five-second read deadline. Output is limited to one 1 MiB JSON object.
+
+Success wraps the delegated CLI JSON under `result`. A delegated CLI failure preserves that command's exit code and JSON body under `error`. Invalid requests, unavailable configured files, and control execution failures use `HW-API-001`, `HW-API-002`, and `HW-API-003` respectively.
+
+`status` without `--state-db` is manifest-only. With a configured state database it retains existing status behavior: runtime observation plus possible schema migration, snapshot, and audit writes to that explicit path. The API never mutates runtime, but that state-backed status operation is not filesystem read-only. `events` and `recovery` require an explicitly configured existing state database and remain read-only.
+
+The API deliberately excludes apply, cleanup, logs, diagnostics export, benchmark, extension execution, arbitrary commands, and every generic mutation endpoint.
 
 ## Exit Codes
 

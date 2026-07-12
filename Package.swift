@@ -8,10 +8,12 @@ let package = Package(
         .macOS(.v26)
     ],
     products: [
-        .executable(name: "hostwright", targets: ["HostwrightCLI"]),
+        .executable(name: "hostwright", targets: ["HostwrightCommand"]),
+        .executable(name: "hostwright-control", targets: ["HostwrightControlTool"]),
         .executable(name: "hostwrightd", targets: ["HostwrightDaemon"]),
         .executable(name: "hostwright-dist", targets: ["HostwrightDistributionTool"]),
         .library(name: "HostwrightCore", targets: ["HostwrightCore"]),
+        .library(name: "HostwrightControl", targets: ["HostwrightControl"]),
         .library(name: "HostwrightManifest", targets: ["HostwrightManifest"]),
         .library(name: "HostwrightRuntime", targets: ["HostwrightRuntime"]),
         .library(name: "HostwrightState", targets: ["HostwrightState"]),
@@ -26,7 +28,7 @@ let package = Package(
         .library(name: "HostwrightSecrets", targets: ["HostwrightSecrets"])
     ],
     targets: [
-        .executableTarget(
+        .target(
             name: "HostwrightCLI",
             dependencies: [
                 "HostwrightCore",
@@ -42,6 +44,14 @@ let package = Package(
             ]
         ),
         .executableTarget(
+            name: "HostwrightCommand",
+            dependencies: ["HostwrightCLI"]
+        ),
+        .executableTarget(
+            name: "HostwrightControlTool",
+            dependencies: ["HostwrightControl"]
+        ),
+        .executableTarget(
             name: "HostwrightDaemon",
             dependencies: [
                 "HostwrightCore",
@@ -54,6 +64,13 @@ let package = Package(
             dependencies: ["HostwrightDistribution"]
         ),
         .target(name: "HostwrightCore"),
+        .target(
+            name: "HostwrightControl",
+            dependencies: [
+                "HostwrightCLI",
+                "HostwrightCore"
+            ]
+        ),
         .target(
             name: "HostwrightDistribution",
             dependencies: ["HostwrightCore"]
@@ -160,6 +177,15 @@ let package = Package(
                 "HostwrightSecrets"
             ],
             path: "Tests/HostwrightTestSupport"
+        ),
+        .testTarget(
+            name: "HostwrightControlTests",
+            dependencies: [
+                "HostwrightControl",
+                "HostwrightCore",
+                "HostwrightManifest",
+                "HostwrightState"
+            ]
         ),
         .testTarget(
             name: "HostwrightCoreTests",

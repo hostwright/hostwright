@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 import HostwrightCore
 import HostwrightExtensions
@@ -310,12 +309,3 @@ public enum HostwrightCLI {
         return CLIRunResult(standardError: "\(code.rawValue): \(redactedMessage)\n", exitCode: exitCode.rawValue)
     }
 }
-
-let result = HostwrightCLI.run(arguments: Array(CommandLine.arguments.dropFirst()))
-if !result.standardOutput.isEmpty {
-    print(result.standardOutput, terminator: "")
-}
-if !result.standardError.isEmpty {
-    fputs(result.standardError, stderr)
-}
-exit(result.exitCode)

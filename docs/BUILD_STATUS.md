@@ -9,12 +9,12 @@
 ## Verified On 2026-07-12
 
 - `swift build` succeeds after the runtime identity and ownership repair.
-- `swift test list` lists 300 XCTest cases across Hostwright test targets.
-- `swift test` executes 300 XCTest cases across CLI, core, daemon, health, import, manifest, networking, observability, policy, reconciler, runtime, secrets, and state targets with 0 failures.
+- `swift test list` lists 325 XCTest cases across Hostwright test targets.
+- `swift test` executes 325 XCTest cases across CLI, core, daemon, health, import, manifest, networking, observability, policy, reconciler, runtime, secrets, and state targets with 0 failures.
 - XCTest count is unit/contract and local-integration coverage, not a live-runtime, hardware-benchmark, or distribution-artifact success rate. Evidence classes are defined in `docs/reference/testing-evidence.md`.
 - `scripts/grep-orchard.sh .` succeeds and reports historical references only in `docs/source-material/` and `docs/naming/`.
 - `scripts/test.sh` succeeds and runs `swift build`, `swift test`, and the built-CLI local integration gate.
-- `scripts/integration.sh` exercises the built executable, real team-profile files, profile-aware plan/import JSON, redacted profile errors, missing approval refusal, real file failures, overwrite refusal, and no hidden SQLite writes.
+- `scripts/integration.sh` exercises the built executable, real team-profile files, profile-aware plan/import JSON, benchmark confirmation and overwrite gates, redacted profile errors, real file failures, and no hidden SQLite writes.
 - Real local loopback HTTP and file-lock contention XCTest cases pass without conditional skips.
 - Real macOS Keychain XCTest cases add uniquely named non-synchronizable items, read through the production backend without UI, delete exact service/account pairs, verify post-delete absence, and have no conditional skip.
 - `scripts/lint.sh` succeeds.
@@ -33,7 +33,7 @@
 - Phase 33 adds typed extension declarations and local extension policy decisions without adding a plugin loader, remote plugin registry, binary plugin distribution, untrusted code execution, runtime mutation extension path, state-write extension path, networking provider behavior, tunnel/DNS/reverse proxy/cloud behavior, secret backend extension, accelerator extension, GUI code, dependencies, release tags, or GitHub Releases.
 - Phase 34 is complete locally: explicit strict-only profile and approval files are hash-bound across validate, plan, import, apply, cleanup, runtime confirmation, operation records, and redacted append-only audit events.
 - Phase 35 is blocked: distribution policy exists, but no release artifact, installer lifecycle, signing, notarization, SBOM, or provenance evidence exists.
-- Phase 36 is partial: dry-run and fixture-backed benchmark contracts exist, but no live benchmark runner or measured hardware evidence exists.
+- Phase 36 is operational locally: an explicit benchmark command records adapter capabilities, real Apple container version, local image descriptor/platform digests, exact stats, bounded raw samples, host battery/thermal facts, process durations, source/environment evidence, and exact cleanup. Full evidence remains blocked when the optional attended sleep/wake protocol is not executed.
 - Phase 37 adds documentation-site source-of-truth and public education boundaries without adding website frontend code, hosted docs deployment, analytics, search, product behavior, runtime mutation, dependencies, release tags, GitHub Releases, or GUI code.
 - Phase 39 adds a beta readiness checklist and public-claim gate without adding beta tags, GitHub Releases, version bumps, binary artifacts, installers, support promises, production-readiness claims, product behavior, runtime mutation, dependencies, telemetry upload, website/frontend work, or GUI code.
 - Phase 40 adds an Apple silicon control-plane direction decision that keeps current core single-host and rejects Kubernetes-class, CRI, Docker API, full Compose, cloud, multi-host, remote-placement, and accelerator-aware scheduling work from current core without adding product behavior, dependencies, release tags, or GitHub Releases.
@@ -63,7 +63,7 @@
 
 ## Current Implementation Truth
 
-- The completion audit classifies Phase 34 as complete locally, Phase 36 as partial, Phase 35 as blocked, and research/requirements phases separately from product implementation. Phases 12 and 19 are complete locally after their file-error/recovery and exact-identity/live-cleanup repairs.
+- The completion audit classifies Phase 34 as complete locally, Phase 36 as operational with attended sleep/wake evidence pending, Phase 35 as blocked, and research/requirements phases separately from product implementation. Phases 12 and 19 are complete locally after their file-error/recovery and exact-identity/live-cleanup repairs.
 
 - Phase 5 adds read-only Apple container observation infrastructure behind `RuntimeAdapter`.
 - Phase 6 adds SQLite-backed local state for explicit database paths.
@@ -90,7 +90,7 @@
 - Phase 33 adds `ExtensionPolicyEvaluator` for deterministic local extension declaration decisions while preserving no runtime execution, no state writes, no plugin loading, and no external integration behavior.
 - Phase 34 adds strict versioned local profile/approval parsing, canonical SHA-256 bindings, explicit command wiring, exact mutation approvals, and redacted append-only team audit events without remote behavior or a hidden profile path.
 - Phase 35 adds release distribution readiness docs and release-doc guard tests for signed binary, notarized installer, checksum, SBOM, provenance, install, upgrade, downgrade, uninstall, rollback, and package-channel evidence before any public artifact claim.
-- Phase 36 adds `BenchmarkLabReport` models, parser validation, and fixture tests for environment facts, disposable-resource policy, benchmark observations, and no-mutation/no-telemetry limits.
+- Phase 36 adds typed evidence and benchmark report models, historical fixture parsing, a real local benchmark runner, attended sleep/wake detection, exact-resource cleanup, and unit/local-integration gates without hosted hardware claims.
 - Phase 37 adds documentation-site information architecture and source-of-truth rules for the separate `hostwright.dev` repository while keeping website presentation out of this core repo.
 - Phase 39 adds beta readiness docs and docs guard coverage for clean-checkout source install proof, full local gate, hosted CI, docs alignment, examples, state upgrade evidence, telemetry/support policy review, maintainer approval, blockers, and deferrals before any beta tag.
 - Phase 40 adds a control-plane direction record and docs guard coverage for the single-host core direction, rejected current-core platform expansion paths, and evidence gates before any separate experimental platform work.
@@ -133,7 +133,7 @@ Important diagnostic correction:
 - `swift -e 'import XCTest'` can still fail and is not the correct gate.
 - A minimal SwiftPM XCTest probe passed after Xcode was fixed.
 - `swift test list` is the local proof that Hostwright now exposes real XCTest cases.
-- `swift test` executes 300 XCTest cases after the evidence contract, real loopback HTTP/file-lock/Keychain tests, real SQLite integration, runtime identity/ownership coverage, CLI recovery diagnostics, and operational team workflow binding tests were added.
+- `swift test` executes 325 XCTest cases after the evidence contract, real loopback HTTP/file-lock/Keychain tests, real SQLite integration, runtime identity/ownership coverage, CLI recovery diagnostics, team workflow binding, and benchmark evidence contracts were added.
 
 The old top-level smoke/precondition posture has been replaced with XCTest assertions. Some test file names still include `Smoke.swift`, but the contents are XCTest cases.
 

@@ -44,7 +44,7 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 | 33 | Plugin And Extension Architecture | Declaration prototype complete; executable host not started | Define safe extension types, trust model, versioning, capability declarations, and non-mutating prototype boundaries. | Declarations are policy checked; no extension loader, process host, installation, or executable capability exists. |
 | 34 | Enterprise And Team Workflow | Complete locally | Enforce explicit local team profiles, exact approval bindings, and append-only audit records without cloud dependency. | Strict versioned JSON artifacts, SHA-256 binding, validate/plan/import/apply/cleanup wiring, real-file tests, real SQLite audit tests, and built-CLI checks pass. |
 | 35 | Packaging Signing Notarization And Distribution | Blocked | Create and verify release artifacts, installer/uninstaller, upgrade path, checksums, SBOM/provenance, signing, and notarization. | Policy documentation exists, but no artifacts or install lifecycle exist and no Developer ID signing identity or notarization credentials are available. |
-| 36 | CI Benchmarking And Performance Lab | Partial | Add repeatable CI and local benchmark methodology for supported macOS and Apple container evidence. | Dry-run contracts exist, but no live benchmark runner, runtime measurements, or hardware evidence exists. |
+| 36 | CI Benchmarking And Performance Lab | Operational locally; attended sleep/wake evidence pending | Add repeatable CI contracts and explicit local benchmark execution for supported macOS and Apple container evidence. | Versioned evidence, real version/stats probes, 3-10 bounded samples, battery/thermal facts, attended sleep/wake detection, and exact cleanup are implemented; a run without an attended sleep interval remains blocked. |
 | 37 | Documentation Site And Public Education | Information architecture complete; website implementation not started | Define documentation-site information architecture and source-of-truth boundaries for the separate website repository. | Core source-of-truth rules exist; website implementation remains in the separate repository. |
 | 38 | Governance And Contributor Model | Complete locally | Mature OSS governance, contributor workflow, security reporting, review triggers, roadmap process, and release ownership. | Governance docs and templates define issue-to-PR-to-release flow, risky-area review, private-report guidance, and support boundaries. |
 | 39 | Beta Readiness | Gate defined; readiness not achieved | Define beta criteria, blockers, deferrals, install/upgrade/docs/security/support gates, and public-claim audit. | The checklist exists; partial phases, live evidence, and release rehearsal remain outstanding. |
@@ -60,7 +60,7 @@ Execution order is binding unless a later maintainer-approved issue changes it:
 2. Completed: repair runtime identity, exact observed identifiers, ownership gates, multi-project observation, legacy upgrade behavior, and live cleanup proof.
 3. Completed: consistent CLI file-error classification, migration continuity/concurrency, and interrupted-operation lease diagnostics.
 4. Wire explicit local team profiles and approvals into command behavior without default paths or safety-gate bypasses.
-5. Run real Apple container and hardware benchmarks with exact disposable-resource cleanup.
+5. Completed for the bounded local runner: run real Apple container and hardware measurements with exact disposable-resource cleanup. Attended sleep/wake evidence remains a separate operator-run gate.
 6. Build and test distribution artifacts; keep signing and notarization blocked until real credentials and evidence exist.
 7. Implement expansion foundations in order: executable extension host, local control API, separate GUI, local secure-exposure provider, host-native accelerator path, exact-version compatibility work, and multi-host proof.
 8. Re-run the beta gate from a clean checkout. Version 1 remains blocked on operational soak and real-user evidence.
@@ -69,7 +69,7 @@ All evidence follows [Testing And Evidence](reference/testing-evidence.md). Fixt
 
 ## Current Hard Boundaries
 
-- Apple container mutation is limited to create-missing-service, restart-policy-allowed managed start, restart-policy-allowed managed restart, and exact cleanup-eligible managed container delete.
+- Apple container mutation is limited to create-missing-service, restart-policy-allowed managed start, restart-policy-allowed managed restart, exact cleanup-eligible managed container delete, and explicitly confirmed bounded benchmark resources with exact cleanup.
 - Live Apple container read-only execution exists behind the RuntimeAdapter path.
 - `hostwright apply` requires explicit `--state-db` and `--confirm-plan`.
 - `hostwright cleanup` requires explicit `--state-db`, dry-run planning, a matching cleanup token, ownership records, live observation, exact resource identifiers, and a non-running lifecycle.
@@ -449,12 +449,15 @@ Phase 35 does not produce binary archives, installer packages, install scripts, 
 
 ## Phase 36 Outputs
 
-- Added `BenchmarkLabReport` models and parser validation for dry-run and fixture-backed benchmark reports.
-- Added benchmark fixture coverage for environment facts, disposable-resource policy, measured/unmeasured dimensions, and unsafe policy rejection.
-- Added `docs/architecture/benchmark-lab.md` and linked it from resource intelligence, compatibility, limitations, release process, requirements, acceptance, traceability, build status, and devlog docs.
-- Added `scripts/lint.sh` to hosted CI after build and test.
+- Added typed evidence models and schema validation for unit, local integration, live runtime, hardware benchmark, and distribution artifact reports.
+- Added `hostwright benchmark` with explicit image, sample count, report path, source commit/dirty state, expected Apple container version, and live confirmation.
+- Added RuntimeAdapter-backed metadata/capability, real Apple container version, local image digest/platform, and exact-resource non-streaming stats probes.
+- Added schema version 2 raw iteration reports for create/start/boot/polling/resource/battery/thermal data, failures, blockers, commands, and exact cleanup.
+- Added an optional attended sleep/wake window that compares wall time with monotonic uptime and requires exact post-wake observation; it never forces host sleep.
+- Retained schema version 1 dry-run/fixture parsing as contract history without counting it as hardware proof.
+- Hardened Foundation process termination detection after live output-complete timeout evidence.
 
-Phase 36 does not add live benchmark command execution, Apple container commands, image pulls, runtime mutation, broad cleanup, state writes, cloud telemetry, hosted performance monitoring, benchmark number publication, performance marketing claims, dependencies, release tags, GitHub Releases, website work, or GUI code.
+Phase 36 permits only explicitly confirmed disposable benchmark mutation through `RuntimeAdapter`. It does not add image pulls, broad cleanup, state writes, cloud telemetry, hosted hardware execution, benchmark publication, capacity or performance claims, dependencies, release tags, GitHub Releases, website work, or GUI code.
 
 ## Phase 37 Outputs
 

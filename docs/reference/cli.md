@@ -18,6 +18,7 @@ hostwright recovery --state-db <path> [--project <name>] [--output text|json]
 hostwright diagnostics --state-db <path> --bundle <path> [--project <name>] [--manifest <path>]
 hostwright cleanup [path] --state-db <path> --dry-run [--team-profile <path>]
 hostwright cleanup [path] --state-db <path> --confirm-cleanup <token> [--team-profile <path> --approval-record <path>]
+hostwright benchmark --image <local-image> --samples <3-10> --report <path> --source-commit <40-hex> --source-dirty <true|false> --expected-container-version <version> [--attended-sleep-wake-seconds <15-300>] --confirm-live
 hostwright doctor [--output text|json]
 hostwrightd --foreground --config <hostwright.yaml> --state-db <path> [options]
 ```
@@ -44,10 +45,10 @@ Manifest failures use an `issues` array with stable Hostwright error codes. `doc
 | `64` | Usage | Unsupported flags, missing arguments, refused overwrite, or local non-manifest file I/O failure |
 | `65` | Validation | Missing/unreadable manifest, manifest/profile/approval validation, and compatibility failures |
 | `66` | State unavailable | Explicit SQLite state path could not be opened, migrated, verified, locked, or read |
-| `69` | Runtime unavailable | Runtime observation, logs, or mutation failed through `RuntimeAdapter` |
+| `69` | Runtime unavailable or evidence blocked | Runtime observation/mutation unavailable, or benchmark prerequisites/dimensions remain blocked |
 | `70` | Confirmation mismatch | Plan, cleanup token, approval scope, or approval hash bindings do not match the current operation |
 | `71` | Unsafe operation | Planner/apply safety policy blocked mutation |
-| `72` | Partial failure | Cleanup completed with mixed success and failure |
+| `72` | Partial failure | Cleanup completed with mixed success/failure, or benchmark command/identity/cleanup evidence failed |
 
 ## `hostwright --version`
 
@@ -371,6 +372,26 @@ It never deletes images, volumes, networks, or unmanaged containers and never us
 If one runtime delete fails after another succeeds, the process exits with code `72` and preserves successful deletions in the report. If a delete succeeds but success-state persistence fails, the process reports state unavailable and keeps the deletion visible in stdout.
 
 See `docs/reference/team-workflow.md` for the strict JSON schemas and review sequence.
+
+## `hostwright benchmark ... --confirm-live`
+
+Runs an explicitly confirmed local hardware benchmark and writes a schema-v2 JSON report to a path that must not exist. Required inputs bind the report to a source commit, dirty state, local image, sample count, and expected Apple container version.
+
+Before mutation, the command records RuntimeAdapter metadata/capabilities, exact Apple container version, and the requested local image's descriptor digest, selected platform-variant digest, architecture, and OS. Unexpected version, missing local image, non-arm64 variant, or missing cleanup capability stops before creation.
+
+The command performs 3-10 iterations. Each iteration creates a unique labeled `hostwright-v2-bench-...` resource through `RuntimeAdapter`, starts a bounded process, records boot/poll durations and one exact non-streaming stats sample, waits for terminal-state quiescence, deletes only that identifier, and verifies absence. It never pulls the image, uses a default path, writes SQLite, deletes images/volumes, uses broad cleanup, or uploads the report.
+
+`--attended-sleep-wake-seconds <15-300>` keeps the first bounded process available during an operator-attended window. The command does not put the Mac to sleep. It records sleep/wake as observed only when wall time exceeds monotonic uptime by at least two seconds and the exact resource is observable after wake.
+
+Exit behavior is evidence-driven:
+
+- `0`: every dimension was measured and exact cleanup succeeded;
+- `69` / `HW-BENCH-002`: one or more capabilities or dimensions are blocked, including an unexecuted attended sleep/wake protocol;
+- `72` / `HW-BENCH-003`: a command, version, identity, ownership, report-validation, or cleanup failure occurred.
+
+Blocked and failed runs still write their report when encoding and file output succeed. Missing confirmation or an existing report path is refused before runtime access.
+
+This command records local evidence only. Its values are not capacity, compatibility, efficiency, or comparative performance claims.
 
 ## `hostwright doctor [--output text|json]`
 

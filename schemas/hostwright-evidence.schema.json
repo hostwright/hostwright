@@ -45,7 +45,7 @@
       "properties": {
         "commit": {
           "type": "string",
-          "pattern": "^[a-f0-9]{40}$"
+          "pattern": "^(?!0{40}$)[a-f0-9]{40}$"
         },
         "dirty": {
           "type": "boolean"
@@ -159,7 +159,7 @@
     {
       "if": {
         "allOf": [
-          {"properties": {"evidenceClass": {"const": "live-runtime"}}},
+          {"properties": {"evidenceClass": {"enum": ["live-runtime", "hardware-benchmark"]}}},
           {"properties": {"status": {"const": "passed"}}}
         ]
       },

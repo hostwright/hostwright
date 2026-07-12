@@ -16,6 +16,7 @@ Supported mutation is intentionally narrow:
 - one restart-policy-allowed managed start action;
 - one restart-policy-allowed managed restart action for an exact Hostwright-owned running/unhealthy service;
 - exact cleanup-eligible managed container delete after dry-run token confirmation.
+- explicitly confirmed benchmark create/start/exact-delete for unique versioned Hostwright-owned resources using a pre-existing local image and bounded process.
 
 Hostwright does not implement broad lifecycle management, user-facing stop commands, user-facing restart commands, image replacement, mount mutation, port mutation, automatic rollback, or unattended daemon mutation.
 
@@ -36,6 +37,8 @@ Policy decisions do not execute Apple container, write SQLite, contact registrie
 Team workflow support is explicit local profile and approval data only. Hostwright accepts strict-only profile requirements and exact profile/manifest/plan-bound approvals; it does not provide policy weakening, a cloud team service, central remote control, hosted audit log, user tracking, enterprise support workflow, or remote policy distribution.
 
 Team profiles cannot bypass plan-hash confirmation, cleanup tokens, ownership checks, redaction, explicit state paths, local-only diagnostics, or `RuntimeAdapter`. Approval records authorize only the exact bound apply or cleanup operation; they do not override hard-coded safety gates.
+
+Benchmark execution is separate from apply/cleanup state. It requires all source, image, sample, report, expected-version, and live-confirmation inputs; refuses an existing report path; records every attempted exact identifier; waits for terminal-state quiescence; and verifies absence after delete. It has no image-pull, force-delete, broad-cleanup, state-write, or upload path. An attended sleep/wake option observes a timing gap and exact post-wake identity but never initiates system sleep.
 
 ## Extension Boundary
 

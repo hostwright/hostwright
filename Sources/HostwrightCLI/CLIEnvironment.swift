@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import HostwrightCore
 import HostwrightHealth
@@ -8,6 +9,7 @@ public struct CLIEnvironment: @unchecked Sendable {
     public var fileExists: (String) -> Bool
     public var readTextFile: (String) throws -> String
     public var writeTextFile: (String, String) throws -> Void
+    public var writeNewTextFile: (String, String) throws -> Void
     public var executablePath: (String) -> String?
     public var runtimeAdapter: () -> any RuntimeAdapter
     public var secretStore: () -> any SecretStore
@@ -15,22 +17,38 @@ public struct CLIEnvironment: @unchecked Sendable {
     public var platformSnapshot: () -> PlatformSnapshot
     public var operatingSystemDescription: () -> String
     public var resourceSnapshot: () -> ResourceIntelligenceSnapshot?
+    public var benchmarkHostSnapshot: () -> BenchmarkHostSnapshot
+    public var benchmarkDate: () -> Date
+    public var benchmarkMonotonicNanoseconds: () -> UInt64
+    public var benchmarkSleep: (TimeInterval) -> Void
+    public var benchmarkUUID: () -> UUID
+    public var benchmarkNotice: (String) -> Void
 
     public init(
         fileExists: @escaping (String) -> Bool,
         readTextFile: @escaping (String) throws -> String,
         writeTextFile: @escaping (String, String) throws -> Void,
+        writeNewTextFile: @escaping (String, String) throws -> Void = { path, text in
+            try hostwrightCreateNewTextFile(path: path, text: text)
+        },
         executablePath: @escaping (String) -> String?,
         runtimeAdapter: @escaping () -> any RuntimeAdapter = { RuntimeAdapterFactory.defaultLocal() },
         secretStore: @escaping () -> any SecretStore = { UnavailableKeychainSecretStore() },
         swiftVersion: @escaping () -> String?,
         platformSnapshot: @escaping () -> PlatformSnapshot,
         operatingSystemDescription: @escaping () -> String,
-        resourceSnapshot: @escaping () -> ResourceIntelligenceSnapshot? = { nil }
+        resourceSnapshot: @escaping () -> ResourceIntelligenceSnapshot? = { nil },
+        benchmarkHostSnapshot: @escaping () -> BenchmarkHostSnapshot = { .current },
+        benchmarkDate: @escaping () -> Date = { Date() },
+        benchmarkMonotonicNanoseconds: @escaping () -> UInt64 = { DispatchTime.now().uptimeNanoseconds },
+        benchmarkSleep: @escaping (TimeInterval) -> Void = { Thread.sleep(forTimeInterval: $0) },
+        benchmarkUUID: @escaping () -> UUID = { UUID() },
+        benchmarkNotice: @escaping (String) -> Void = { _ in }
     ) {
         self.fileExists = fileExists
         self.readTextFile = readTextFile
         self.writeTextFile = writeTextFile
+        self.writeNewTextFile = writeNewTextFile
         self.executablePath = executablePath
         self.runtimeAdapter = runtimeAdapter
         self.secretStore = secretStore
@@ -38,12 +56,21 @@ public struct CLIEnvironment: @unchecked Sendable {
         self.platformSnapshot = platformSnapshot
         self.operatingSystemDescription = operatingSystemDescription
         self.resourceSnapshot = resourceSnapshot
+        self.benchmarkHostSnapshot = benchmarkHostSnapshot
+        self.benchmarkDate = benchmarkDate
+        self.benchmarkMonotonicNanoseconds = benchmarkMonotonicNanoseconds
+        self.benchmarkSleep = benchmarkSleep
+        self.benchmarkUUID = benchmarkUUID
+        self.benchmarkNotice = benchmarkNotice
     }
 
     public static let live = CLIEnvironment(
         fileExists: { FileManager.default.fileExists(atPath: $0) },
         readTextFile: { try String(contentsOfFile: $0, encoding: .utf8) },
         writeTextFile: { path, text in try text.write(toFile: path, atomically: true, encoding: .utf8) },
+        writeNewTextFile: { path, text in
+            try hostwrightCreateNewTextFile(path: path, text: text)
+        },
         executablePath: { ProcessLookup.executablePath(named: $0) },
         runtimeAdapter: { RuntimeAdapterFactory.defaultLocal() },
         secretStore: { UnavailableKeychainSecretStore() },
@@ -58,6 +85,53 @@ public struct CLIEnvironment: @unchecked Sendable {
                 platform: platform,
                 appleContainerExecutablePath: ProcessLookup.executablePath(named: "container")
             )
+        },
+        benchmarkHostSnapshot: { .current },
+        benchmarkDate: { Date() },
+        benchmarkMonotonicNanoseconds: { DispatchTime.now().uptimeNanoseconds },
+        benchmarkSleep: { Thread.sleep(forTimeInterval: $0) },
+        benchmarkUUID: { UUID() },
+        benchmarkNotice: { message in
+            FileHandle.standardError.write(Data((message + "\n").utf8))
         }
     )
+}
+
+@usableFromInline
+func hostwrightCreateNewTextFile(path: String, text: String) throws {
+    let descriptor = open(path, O_WRONLY | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR)
+    guard descriptor >= 0 else {
+        throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+    }
+
+    var completed = false
+    defer {
+        close(descriptor)
+        if !completed {
+            unlink(path)
+        }
+    }
+
+    let data = Data(text.utf8)
+    try data.withUnsafeBytes { rawBuffer in
+        var offset = 0
+        while offset < rawBuffer.count {
+            let result = Darwin.write(
+                descriptor,
+                rawBuffer.baseAddress!.advanced(by: offset),
+                rawBuffer.count - offset
+            )
+            if result < 0, errno == EINTR {
+                continue
+            }
+            guard result > 0 else {
+                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+            }
+            offset += result
+        }
+    }
+    guard fsync(descriptor) == 0 else {
+        throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+    }
+    completed = true
 }

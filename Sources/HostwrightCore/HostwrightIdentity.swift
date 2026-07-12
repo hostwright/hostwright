@@ -30,6 +30,9 @@ public enum HostwrightErrorCode: String, Sendable {
     case teamProfileInvalid = "HW-TEAM-001"
     case teamApprovalInvalid = "HW-TEAM-002"
     case teamBindingMismatch = "HW-TEAM-003"
+    case benchmarkInvalid = "HW-BENCH-001"
+    case benchmarkBlocked = "HW-BENCH-002"
+    case benchmarkFailed = "HW-BENCH-003"
 }
 
 public struct HostwrightDiagnostic: Error, Equatable, Sendable {

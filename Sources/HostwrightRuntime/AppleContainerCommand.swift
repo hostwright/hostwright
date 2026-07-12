@@ -6,6 +6,7 @@ public enum AppleContainerCommand {
         case listContainers
         case listImages
         case logs(containerID: String, tail: Int)
+        case stats(containerID: String)
     }
 
     public enum MutatingKind: Equatable, Sendable {
@@ -75,6 +76,8 @@ public enum AppleContainerCommand {
             return ["image", "list", "--format", "json"]
         case .logs(let containerID, let tail):
             return ["logs", "-n", String(clampedTail(tail)), containerID]
+        case .stats(let containerID):
+            return ["stats", containerID, "--no-stream", "--format", "json"]
         }
     }
 
@@ -130,6 +133,8 @@ public enum AppleContainerCommand {
             return "Read local Apple container image list as JSON before confirmed create."
         case .logs(let containerID, let tail):
             return "Read last \(clampedTail(tail)) log lines for Hostwright-managed container \(containerID)."
+        case .stats(let containerID):
+            return "Read one resource-usage sample for exact Hostwright-managed container \(containerID)."
         }
     }
 

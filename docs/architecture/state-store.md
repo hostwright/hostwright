@@ -25,10 +25,12 @@ Implemented:
 - restart recovery records
 - operation recovery groups and step records
 - local redacted diagnostics export from existing state rows
-- temp-database smoke checks
-- migration checksums and future-version refusal
+- real temporary-database integration checks across multiple connections
+- migration checksums, contiguous-history validation, and future-version refusal
 - actionable corrupt/locked database failures
 - read paths validate schema without applying migrations
+- cold backup/restore round-trip coverage for committed rows
+- atomic operation-group acquisition coverage across concurrent stores
 - foreground daemon loop event and operation records
 
 Not implemented:
@@ -64,6 +66,8 @@ Tests use unique temporary database paths. Future CLI/dev commands may add an ex
 Schema version 5 is the latest supported state schema. A database migrated by a newer Hostwright release fails closed with an incompatible-schema error. Hostwright does not downgrade state databases and does not attempt compatibility conversion.
 
 Each migration records a checksum in `schema_migrations`. Current builds accept the historical Phase 6 checksum for schema version 1 and record an algorithmic checksum for fresh migrations. If a known migration version has an unexpected checksum, Hostwright fails before reading or writing application records.
+
+Applied migration history must be a contiguous prefix beginning at version 1. A database that records a later migration while omitting an earlier version fails before schema-version reads, repository access, or migration. Hostwright does not infer, replay, or silently repair out-of-order migration history. A valid older contiguous prefix remains eligible for explicit forward migration.
 
 ## Schema
 
@@ -108,6 +112,8 @@ State backup is a cold file operation today:
 2. Copy the explicit SQLite database path and its SQLite sidecar files if present, such as `state.sqlite-wal` and `state.sqlite-shm`.
 3. Preserve file permissions and the full database contents. Ownership records, event records, operation records, and observed snapshots must stay together.
 
+The state integration suite proves this cold-copy procedure against a real migrated SQLite file: a backup opens with the recorded schema and committed rows, and restoring that backup to a separate explicit path does not include rows committed only after the backup. This is evidence for the documented stopped-process procedure, not an online backup command or a durability guarantee for copies taken while writers are active.
+
 Restore is also a cold file operation:
 
 1. Stop Hostwright processes using the target path.
@@ -129,7 +135,7 @@ Corruption recovery is manual. If Hostwright reports a corrupt or non-SQLite dat
 
 ## Concurrency And Locking
 
-Hostwright uses SQLite `FULLMUTEX`, a bounded busy timeout, and `BEGIN IMMEDIATE` for transactional writes. The contract remains single-writer: one CLI command or future daemon may write a state database at a time.
+Hostwright uses SQLite `FULLMUTEX`, a bounded busy timeout, and `BEGIN IMMEDIATE` for transactional writes. The contract remains single-writer: one CLI command or future daemon may write a state database at a time. Real multi-connection tests verify uncommitted-write isolation, committed cross-connection visibility, bounded lock failure, and one-winner operation-group acquisition across concurrent stores.
 
 Read commands validate schema through read-only connections. Write commands run explicit migration before persistence, then use transactions for grouped writes. If another process holds an exclusive or write lock beyond the bounded timeout, Hostwright reports a locked state database instead of waiting indefinitely.
 

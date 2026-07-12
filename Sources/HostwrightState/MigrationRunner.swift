@@ -52,7 +52,9 @@ public struct MigrationRunner: Sendable {
             guard try migrationTableExists(on: connection) else {
                 return []
             }
-            return try appliedMigrations(on: connection).keys.sorted()
+            let applied = try appliedMigrations(on: connection)
+            try validateCompatibility(applied, requireLatest: false)
+            return applied.keys.sorted()
         }
     }
 
@@ -200,7 +202,7 @@ public struct MigrationRunner: Sendable {
     private func validateCompatibility(_ applied: [Int: String], requireLatest: Bool) throws {
         let knownMigrations = Dictionary(uniqueKeysWithValues: Self.migrations.map { ($0.version, $0) })
 
-        for (version, checksum) in applied {
+        for (version, checksum) in applied.sorted(by: { $0.key < $1.key }) {
             guard let migration = knownMigrations[version] else {
                 if version > Self.latestSchemaVersion {
                     throw StateStoreError.incompatibleSchema(
@@ -221,6 +223,18 @@ public struct MigrationRunner: Sendable {
                 throw StateStoreError.migrationFailed(
                     version: version,
                     message: "Recorded checksum \(checksum) does not match expected checksum \(migration.checksum)."
+                )
+            }
+        }
+
+        if let highestAppliedVersion = applied.keys.max() {
+            let missingVersions = (1...highestAppliedVersion).filter { applied[$0] == nil }
+            if !missingVersions.isEmpty {
+                let missing = missingVersions.map(String.init).joined(separator: ", ")
+                throw StateStoreError.incompatibleSchema(
+                    foundVersion: highestAppliedVersion,
+                    latestSupported: Self.latestSchemaVersion,
+                    message: "Database has a non-contiguous Hostwright migration history. Missing applied version(s): \(missing). Refusing to infer or replay out-of-order migrations."
                 )
             }
         }

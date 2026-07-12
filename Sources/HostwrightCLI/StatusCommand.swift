@@ -12,21 +12,14 @@ struct StatusCommandRunner {
 
     func run() -> CLIRunResult {
         guard environment.fileExists(manifestPath) else {
-            if output == .json {
-                return CLIRunResult(standardOutput: CLIJSON.statusManifestMissing(manifestPath: manifestPath))
-            }
-            return CLIRunResult(
-                standardOutput: """
-                Hostwright status
-                Manifest: \(manifestPath) not found
-                Runtime: not observed
-
-                """
+            return failure(
+                code: .manifestFileIOFailed,
+                message: "Manifest file at \(RuntimeRedactionPolicy.default.redact(manifestPath)) does not exist."
             )
         }
 
         do {
-            let manifestText = try environment.readTextFile(manifestPath)
+            let manifestText = try hostwrightReadManifestText(path: manifestPath, environment: environment)
             let manifest = try ManifestValidator.validated(manifestText)
             guard let stateDatabasePath else {
                 return manifestOnlyStatus(manifest)
@@ -110,6 +103,8 @@ struct StatusCommandRunner {
                 )
             }
             return CLIRunResult(standardOutput: render(manifest: manifest, observed: observedForPlanning, plan: plan, stateDatabasePath: stateDatabasePath))
+        } catch let error as HostwrightDiagnostic {
+            return failure(code: error.code, message: error.message)
         } catch let error as ManifestParseError {
             if output == .json {
                 return CLIRunResult(standardError: CLIJSON.manifestError(issues: error.issues, exitCode: .validation), exitCode: CLIExitCode.validation.rawValue)

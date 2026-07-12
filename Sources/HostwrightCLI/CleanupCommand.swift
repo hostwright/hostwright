@@ -13,7 +13,7 @@ struct CleanupCommandRunner {
 
     func run() -> CLIRunResult {
         do {
-            let manifest = try ManifestValidator.validated(environment.readTextFile(manifestPath))
+            let manifest = try ManifestValidator.validated(hostwrightReadManifestText(path: manifestPath, environment: environment))
             let mapping = ManifestRuntimeMapper.map(manifest)
             let configuration = StateStoreConfiguration(explicitDatabasePath: stateDatabasePath)
             try configuration.validate()
@@ -62,6 +62,8 @@ struct CleanupCommandRunner {
                 }
                 return try executeCleanup(candidates: candidates, token: token, adapter: adapter, observed: observed, store: store, projectName: mapping.desiredState.projectName)
             }
+        } catch let error as HostwrightDiagnostic {
+            return failure(code: error.code, message: error.message)
         } catch let error as ManifestParseError {
             return CLIRunResult(standardError: error.issues.map(\.rendered).joined(separator: "\n") + "\n", exitCode: CLIExitCode.validation.rawValue)
         } catch {

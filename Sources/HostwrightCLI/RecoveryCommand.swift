@@ -50,6 +50,9 @@ struct RecoveryCommandRunner {
                     let group = record.group
                     let mode = recoveryMode(for: group)
                     lines.append("- \(group.updatedAt) \(group.plannedActionType) \(group.serviceName ?? "project") status=\(group.status.rawValue) checkpoint=\(group.checkpoint)")
+                    if group.lockOwner != nil || group.lockExpiresAt != nil {
+                        lines.append("  lock: owner=\(RuntimeRedactionPolicy.default.redact(group.lockOwner ?? "unknown")) expiresAt=\(group.lockExpiresAt ?? "unknown")")
+                    }
                     lines.append("  recovery: automatic=\(mode.automatic) manual=\(mode.manual) rollback=\(mode.rollback)")
                     lines.append("  hint: \(RuntimeRedactionPolicy.default.redact(group.manualRecoveryHintRedacted))")
                     for step in record.steps {

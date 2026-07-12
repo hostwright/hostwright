@@ -51,6 +51,62 @@ func hostwrightUniqueID(prefix: String) -> String {
     "\(prefix)-\(UUID().uuidString)"
 }
 
+func hostwrightReadManifestText(path: String, environment: CLIEnvironment) throws -> String {
+    do {
+        return try environment.readTextFile(path)
+    } catch {
+        throw hostwrightFileDiagnostic(
+            code: .manifestFileIOFailed,
+            action: "read",
+            role: "manifest file",
+            path: path,
+            error: error
+        )
+    }
+}
+
+func hostwrightReadLocalText(path: String, role: String, environment: CLIEnvironment) throws -> String {
+    do {
+        return try environment.readTextFile(path)
+    } catch {
+        throw hostwrightFileDiagnostic(
+            code: .fileIOFailed,
+            action: "read",
+            role: role,
+            path: path,
+            error: error
+        )
+    }
+}
+
+func hostwrightWriteLocalText(path: String, text: String, role: String, environment: CLIEnvironment) throws {
+    do {
+        try environment.writeTextFile(path, text)
+    } catch {
+        throw hostwrightFileDiagnostic(
+            code: .fileIOFailed,
+            action: "write",
+            role: role,
+            path: path,
+            error: error
+        )
+    }
+}
+
+private func hostwrightFileDiagnostic(
+    code: HostwrightErrorCode,
+    action: String,
+    role: String,
+    path: String,
+    error: Error
+) -> HostwrightDiagnostic {
+    let policy = RuntimeRedactionPolicy.default
+    return HostwrightDiagnostic(
+        code: code,
+        message: "Could not \(action) \(role) at \(policy.redact(path)): \(policy.redact(String(describing: error)))"
+    )
+}
+
 func hostwrightRestartPolicyStateMap(
     store: SQLiteStateStore,
     projectID: String,
@@ -389,6 +445,8 @@ enum CLIJSON {
                     "plannedActionType": group.plannedActionType,
                     "status": group.status.rawValue,
                     "checkpoint": group.checkpoint,
+                    "lockOwner": group.lockOwner.map(RuntimeRedactionPolicy.default.redact) as Any,
+                    "lockExpiresAt": group.lockExpiresAt as Any,
                     "planHash": group.planHash,
                     "rollbackAvailable": group.rollbackAvailable,
                     "recovery": [
@@ -416,20 +474,6 @@ enum CLIJSON {
                 ].compactNilValues()
             }
         ].compactNilValues())
-    }
-
-    static func statusManifestMissing(manifestPath: String) -> String {
-        render([
-            "kind": "status",
-            "manifest": [
-                "path": manifestPath,
-                "valid": false,
-                "exists": false
-            ],
-            "runtime": [
-                "observed": false
-            ]
-        ])
     }
 
     static func statusManifestOnly(manifestPath: String, manifest: HostwrightManifest) -> String {

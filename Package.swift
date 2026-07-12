@@ -127,6 +127,15 @@ let package = Package(
         .target(
             name: "HostwrightSecrets"
         ),
+        .target(
+            name: "HostwrightTestSupport",
+            dependencies: [
+                "HostwrightCore",
+                "HostwrightRuntime",
+                "HostwrightSecrets"
+            ],
+            path: "Tests/HostwrightTestSupport"
+        ),
         .testTarget(
             name: "HostwrightCoreTests",
             dependencies: ["HostwrightCore"]
@@ -137,7 +146,10 @@ let package = Package(
         ),
         .testTarget(
             name: "HostwrightRuntimeTests",
-            dependencies: ["HostwrightRuntime"],
+            dependencies: [
+                "HostwrightRuntime",
+                "HostwrightTestSupport"
+            ],
             resources: [
                 .process("Fixtures")
             ]
@@ -175,7 +187,8 @@ let package = Package(
                 "HostwrightReconciler",
                 "HostwrightRuntime",
                 "HostwrightSecrets",
-                "HostwrightState"
+                "HostwrightState",
+                "HostwrightTestSupport"
             ]
         ),
         .testTarget(
@@ -210,7 +223,10 @@ let package = Package(
         ),
         .testTarget(
             name: "HostwrightSecretsTests",
-            dependencies: ["HostwrightSecrets"]
+            dependencies: [
+                "HostwrightSecrets",
+                "HostwrightTestSupport"
+            ]
         )
     ]
 )

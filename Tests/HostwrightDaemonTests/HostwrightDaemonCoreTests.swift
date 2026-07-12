@@ -6,6 +6,23 @@ import XCTest
 @testable import HostwrightState
 
 final class HostwrightDaemonCoreTests: XCTestCase {
+    func testFileDaemonInstanceLockContendsOnRealFile() async throws {
+        try await withTemporaryDirectory { directory in
+            let path = directory.appendingPathComponent("hostwrightd.lock").path
+            let first = FileDaemonInstanceLock(path: path)
+            let second = FileDaemonInstanceLock(path: path)
+
+            XCTAssertTrue(try first.acquire())
+            XCTAssertFalse(try second.acquire())
+
+            first.release()
+            XCTAssertTrue(try second.acquire())
+            second.release()
+
+            XCTAssertTrue(FileManager.default.fileExists(atPath: path))
+        }
+    }
+
     func testCommandParserRequiresForegroundConfigAndStatePath() throws {
         XCTAssertThrowsError(try DaemonCommand.parse(arguments: ["--config", "hostwright.yaml", "--state-db", "/tmp/state.sqlite"])) { error in
             XCTAssertTrue(String(describing: error).contains("--foreground"))
@@ -39,8 +56,8 @@ final class HostwrightDaemonCoreTests: XCTestCase {
         try await withTemporaryDirectory { directory in
             let databasePath = directory.appendingPathComponent("state.sqlite").path
             let adapter = CountingRuntimeAdapter(observedServices: [Self.observedService()])
-            let clock = FakeDaemonClock()
-            let lock = FakeDaemonLock()
+            let clock = ManualDaemonClock()
+            let lock = ScriptedDaemonLock()
             let ids = DeterministicIDs()
             let configuration = DaemonConfiguration(
                 configPath: "hostwright.yaml",
@@ -84,7 +101,7 @@ final class HostwrightDaemonCoreTests: XCTestCase {
     func testForegroundLoopPersistsRedactedHealthResultAndRestartState() async throws {
         try await withTemporaryDirectory { directory in
             let databasePath = directory.appendingPathComponent("state.sqlite").path
-            let healthChecker = FakeHealthChecker(results: [
+            let healthChecker = ScriptedHealthChecker(results: [
                 RuntimeHealthCheckResult(
                     identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"),
                     status: .unhealthy,
@@ -105,8 +122,8 @@ final class HostwrightDaemonCoreTests: XCTestCase {
                 ),
                 runtimeAdapter: adapter,
                 healthChecker: healthChecker,
-                clock: FakeDaemonClock(),
-                instanceLock: FakeDaemonLock(),
+                clock: ManualDaemonClock(),
+                instanceLock: ScriptedDaemonLock(),
                 readConfig: { _ in Self.healthRestartManifest },
                 idGenerator: ids.next
             )
@@ -144,7 +161,7 @@ final class HostwrightDaemonCoreTests: XCTestCase {
     func testForegroundLoopHonorsPersistedHealthInterval() async throws {
         try await withTemporaryDirectory { directory in
             let databasePath = directory.appendingPathComponent("state.sqlite").path
-            let healthChecker = FakeHealthChecker(results: [
+            let healthChecker = ScriptedHealthChecker(results: [
                 RuntimeHealthCheckResult(
                     identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"),
                     status: .healthy,
@@ -166,8 +183,8 @@ final class HostwrightDaemonCoreTests: XCTestCase {
                 ),
                 runtimeAdapter: CountingRuntimeAdapter(observedServices: [Self.observedService(healthState: .unknown)]),
                 healthChecker: healthChecker,
-                clock: FakeDaemonClock(),
-                instanceLock: FakeDaemonLock(),
+                clock: ManualDaemonClock(),
+                instanceLock: ScriptedDaemonLock(),
                 readConfig: { _ in Self.healthRestartManifest },
                 idGenerator: DeterministicIDs().next
             )
@@ -217,9 +234,9 @@ final class HostwrightDaemonCoreTests: XCTestCase {
                     maxIterations: 1
                 ),
                 runtimeAdapter: adapter,
-                healthChecker: FakeHealthChecker(results: []),
-                clock: FakeDaemonClock(),
-                instanceLock: FakeDaemonLock(),
+                healthChecker: ScriptedHealthChecker(results: []),
+                clock: ManualDaemonClock(),
+                instanceLock: ScriptedDaemonLock(),
                 readConfig: { _ in Self.healthRestartManifest },
                 idGenerator: DeterministicIDs().next
             )
@@ -242,7 +259,7 @@ final class HostwrightDaemonCoreTests: XCTestCase {
         try await withTemporaryDirectory { directory in
             let databasePath = directory.appendingPathComponent("state.sqlite").path
             let adapter = CountingRuntimeAdapter(error: .runtimeUnavailable("runtime unavailable token=fake-secret"))
-            let clock = FakeDaemonClock()
+            let clock = ManualDaemonClock()
             let ids = DeterministicIDs()
             let configuration = DaemonConfiguration(
                 configPath: "hostwright.yaml",
@@ -256,7 +273,7 @@ final class HostwrightDaemonCoreTests: XCTestCase {
                 configuration: configuration,
                 runtimeAdapter: adapter,
                 clock: clock,
-                instanceLock: FakeDaemonLock(),
+                instanceLock: ScriptedDaemonLock(),
                 readConfig: { _ in Self.singleServiceManifest },
                 idGenerator: ids.next,
                 jitterProvider: { iteration, _ in iteration == 1 ? 2 : 3 }
@@ -290,8 +307,8 @@ final class HostwrightDaemonCoreTests: XCTestCase {
                     maxIterations: 1
                 ),
                 runtimeAdapter: adapter,
-                clock: FakeDaemonClock(),
-                instanceLock: FakeDaemonLock(),
+                clock: ManualDaemonClock(),
+                instanceLock: ScriptedDaemonLock(),
                 readConfig: { _ in "project: demo\nservices:\n" },
                 idGenerator: ids.next
             )
@@ -321,8 +338,8 @@ final class HostwrightDaemonCoreTests: XCTestCase {
                     maxIterations: 1
                 ),
                 runtimeAdapter: CountingRuntimeAdapter(observedServices: [Self.observedService()]),
-                clock: FakeDaemonClock(),
-                instanceLock: FakeDaemonLock(),
+                clock: ManualDaemonClock(),
+                instanceLock: ScriptedDaemonLock(),
                 readConfig: { _ in
                     throw NSError(
                         domain: NSCocoaErrorDomain,
@@ -355,7 +372,7 @@ final class HostwrightDaemonCoreTests: XCTestCase {
         try await withTemporaryDirectory { directory in
             let databasePath = directory.appendingPathComponent("state.sqlite").path
             let shutdownToken = DaemonShutdownToken()
-            let clock = FakeDaemonClock(wakeReasons: [.shutdownRequested])
+            let clock = ManualDaemonClock(wakeReasons: [.shutdownRequested])
             let ids = DeterministicIDs()
             let configuration = DaemonConfiguration(
                 configPath: "hostwright.yaml",
@@ -368,7 +385,7 @@ final class HostwrightDaemonCoreTests: XCTestCase {
                 configuration: configuration,
                 runtimeAdapter: CountingRuntimeAdapter(observedServices: [Self.observedService()]),
                 clock: clock,
-                instanceLock: FakeDaemonLock(),
+                instanceLock: ScriptedDaemonLock(),
                 shutdownToken: shutdownToken,
                 readConfig: { _ in Self.singleServiceManifest },
                 idGenerator: ids.next
@@ -391,8 +408,8 @@ final class HostwrightDaemonCoreTests: XCTestCase {
             let runner = DaemonLoopRunner(
                 configuration: DaemonConfiguration(configPath: "hostwright.yaml", stateDatabasePath: databasePath, maxIterations: 1),
                 runtimeAdapter: adapter,
-                clock: FakeDaemonClock(),
-                instanceLock: FakeDaemonLock(canAcquire: false),
+                clock: ManualDaemonClock(),
+                instanceLock: ScriptedDaemonLock(canAcquire: false),
                 readConfig: { _ in Self.singleServiceManifest }
             )
 
@@ -410,7 +427,7 @@ final class HostwrightDaemonCoreTests: XCTestCase {
     func testSleepWakeResumeEventIsPersisted() async throws {
         try await withTemporaryDirectory { directory in
             let databasePath = directory.appendingPathComponent("state.sqlite").path
-            let clock = FakeDaemonClock(wakeReasons: [.systemWake])
+            let clock = ManualDaemonClock(wakeReasons: [.systemWake])
             let ids = DeterministicIDs()
             let runner = DaemonLoopRunner(
                 configuration: DaemonConfiguration(
@@ -423,7 +440,7 @@ final class HostwrightDaemonCoreTests: XCTestCase {
                 ),
                 runtimeAdapter: CountingRuntimeAdapter(observedServices: [Self.observedService()]),
                 clock: clock,
-                instanceLock: FakeDaemonLock(),
+                instanceLock: ScriptedDaemonLock(),
                 readConfig: { _ in Self.singleServiceManifest },
                 idGenerator: ids.next
             )
@@ -493,7 +510,7 @@ final class HostwrightDaemonCoreTests: XCTestCase {
 
 }
 
-private final class FakeDaemonClock: DaemonClock {
+private final class ManualDaemonClock: DaemonClock {
     var timestamps: [String]
     var sleepDurations: [Int] = []
     var wakeReasons: [DaemonWakeReason]
@@ -522,7 +539,7 @@ private final class FakeDaemonClock: DaemonClock {
     }
 }
 
-private final class FakeDaemonLock: DaemonInstanceLock {
+private final class ScriptedDaemonLock: DaemonInstanceLock {
     let canAcquire: Bool
     var releaseCount = 0
 
@@ -591,7 +608,7 @@ private final class CountingRuntimeAdapter: RuntimeAdapter, @unchecked Sendable 
     }
 }
 
-private final class FakeHealthChecker: RuntimeHealthChecking, @unchecked Sendable {
+private final class ScriptedHealthChecker: RuntimeHealthChecking, @unchecked Sendable {
     struct Call {
         let identity: RuntimeServiceIdentity
         let spec: RuntimeHealthCheckSpec

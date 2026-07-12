@@ -113,26 +113,3 @@ public struct UnavailableKeychainSecretStore: SecretStore {
         )
     }
 }
-
-public struct FakeKeychainSecretStore: SecretStore {
-    private let values: [HostwrightSecretReference: String]
-
-    public init(values: [HostwrightSecretReference: String]) {
-        self.values = values
-    }
-
-    public init(rawValues: [String: String]) throws {
-        var parsed: [HostwrightSecretReference: String] = [:]
-        for (reference, value) in rawValues {
-            parsed[try HostwrightSecretReference.parse(reference)] = value
-        }
-        self.values = parsed
-    }
-
-    public func readString(reference: HostwrightSecretReference) throws -> String {
-        guard let value = values[reference] else {
-            throw SecretStoreError.notFound("Secret value was not found for \(reference.redactedDescription).")
-        }
-        return value
-    }
-}

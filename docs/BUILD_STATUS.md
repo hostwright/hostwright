@@ -9,11 +9,13 @@
 ## Verified On 2026-07-12
 
 - `swift build` succeeds after the Phase 40 control-plane direction update.
-- `swift test list` lists 258 XCTest cases across Hostwright test targets.
-- `swift test` executes 258 XCTest cases across CLI, core, daemon, health, import, manifest, networking, observability, policy, reconciler, runtime, and state targets with 0 failures.
+- `swift test list` lists 261 XCTest cases across Hostwright test targets.
+- `swift test` executes 261 XCTest cases across CLI, core, daemon, health, import, manifest, networking, observability, policy, reconciler, runtime, secrets, and state targets with 0 failures.
 - XCTest count is unit/contract and local-integration coverage, not a live-runtime, hardware-benchmark, or distribution-artifact success rate. Evidence classes are defined in `docs/reference/testing-evidence.md`.
 - `scripts/grep-orchard.sh .` succeeds and reports historical references only in `docs/source-material/` and `docs/naming/`.
-- `scripts/test.sh` succeeds and runs `swift build` plus `swift test`.
+- `scripts/test.sh` succeeds and runs `swift build`, `swift test`, and the built-CLI local integration gate.
+- `scripts/integration.sh` exercises the built executable, validates real JSON output, proves `init` overwrite refusal preserves the file, and verifies no hidden SQLite write occurs.
+- Real local loopback HTTP and file-lock contention XCTest cases pass without conditional skips.
 - `scripts/lint.sh` succeeds.
 - Apple container 1.0.0 is installed locally at `/usr/local/bin/container`.
 - `container system status` reports the container system service as running.
@@ -94,7 +96,7 @@
 - Phase 31 adds local advisory scheduler reports in `HostwrightReconciler` for declared memory requests, local policy blockers, workload class scoring, fairness warnings, overcommit blockers, accelerator blockers, and remote-placement blockers without changing `ReconciliationPlan`, CLI output, RuntimeAdapter, state, daemon behavior, or runtime mutation.
 - Phase 38 adds explicit maintainer authority, risky-area review triggers, issue and pull request flow, private security-reporting guidance, release governance gates, and support boundaries as documentation and template controls only.
 - No Apple container command was called by Phase 6 or Phase 7.
-- `FoundationRuntimeProcessRunner` exists for policy-approved read-only command specs and supported mutation specs; automated tests still use fake process execution.
+- `FoundationRuntimeProcessRunner` has real subprocess coverage for output draining and timeout behavior; scripted process results remain test-only failure-injection evidence.
 - `AppleContainerReadOnlyAdapter` reports missing `container` as runtime unavailable and rejects mutation through the adapter contract.
 - `AppleContainerObservationParser` accepts the fixture-defined `hostwright.apple-container.observation.v1` schema with reviewed network attachment metadata, the verified real empty JSON array shape `[]`, Apple builder container list output, and the verified created/stopped proof container output. Non-empty real Apple container network output fails closed until reviewed.
 - `AppleContainerImageListParser` accepts the verified real object-based image list shape with `configuration.name`.
@@ -127,13 +129,13 @@ Important diagnostic correction:
 - `swift -e 'import XCTest'` can still fail and is not the correct gate.
 - A minimal SwiftPM XCTest probe passed after Xcode was fixed.
 - `swift test list` is the local proof that Hostwright now exposes real XCTest cases.
-- `swift test` executes 258 XCTest cases after the evidence-contract guard was added.
+- `swift test` executes 261 XCTest cases after the evidence-contract, production-source boundary, real loopback HTTP, and real file-lock tests were added.
 
 The old top-level smoke/precondition posture has been replaced with XCTest assertions. Some test file names still include `Smoke.swift`, but the contents are XCTest cases.
 
 ## CI Limitation
 
-Hosted CI currently runs build, XCTest, package-metadata lint, and naming scans. It does not run live Apple container, Keychain, hardware benchmark, signing, notarization, install, or multi-host evidence.
+Hosted CI runs build, XCTest, the built-CLI local integration gate, package-metadata lint, and naming scans. It does not run live Apple container, Keychain, hardware benchmark, signing, notarization, install, or multi-host evidence.
 
 ## Core Repo Boundary
 

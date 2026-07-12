@@ -119,7 +119,7 @@ The current parser is a restricted Hostwright manifest subset parser, not a gene
 
 ## Runtime Boundary
 
-`RuntimeAdapter` defines the runtime boundary, runtime state models, command classification, timeout model, redaction policy, fake process runner, and mock adapter behavior.
+`RuntimeAdapter` defines the runtime boundary, runtime state models, command classification, timeout model, redaction policy, and production process-runner behavior. Scripted adapters and process results live in the test-only support target.
 
 Apple container observation, bounded logs, create, restart-policy-gated managed start, restart-policy-gated managed restart, exact cleanup-eligible container delete, and foreground daemon observation/planning are implemented through this boundary. General lifecycle management, image/volume cleanup, user-facing stop/restart commands, and unattended daemon mutation are not implemented.
 

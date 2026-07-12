@@ -1,6 +1,8 @@
 import HostwrightCore
+import HostwrightRuntime
+import HostwrightSecrets
 
-public struct MockRuntimeAdapter: RuntimeAdapter {
+public struct ScriptedRuntimeAdapter: RuntimeAdapter {
     public enum Scenario: Sendable {
         case unavailable(String)
         case availableEmpty
@@ -17,7 +19,7 @@ public struct MockRuntimeAdapter: RuntimeAdapter {
 
     public init(
         scenario: Scenario,
-        adapterMetadata: RuntimeAdapterMetadata = MockRuntimeAdapter.defaultMetadata,
+        adapterMetadata: RuntimeAdapterMetadata = ScriptedRuntimeAdapter.defaultMetadata,
         redactionPolicy: RuntimeRedactionPolicy = .default
     ) {
         self.scenario = scenario
@@ -26,9 +28,9 @@ public struct MockRuntimeAdapter: RuntimeAdapter {
     }
 
     public static let defaultMetadata = RuntimeAdapterMetadata(
-        adapterName: "MockRuntimeAdapter",
+        adapterName: "ScriptedRuntimeAdapter",
         adapterVersion: HostwrightIdentity.version,
-        runtimeName: "mock",
+        runtimeName: "scripted-test-runtime",
         runtimeVersion: nil,
         supportsMutation: false,
         capabilities: [.readOnlyObservation, .healthObservation]
@@ -58,9 +60,9 @@ public struct MockRuntimeAdapter: RuntimeAdapter {
         case .commandFailure(let error):
             throw error.redacted(using: redactionPolicy)
         case .timeout:
-            throw RuntimeAdapterError.commandTimedOut(command: "mock-runtime-observe", partialOutput: "", partialError: "")
+            throw RuntimeAdapterError.commandTimedOut(command: "scripted-runtime-observe", partialOutput: "", partialError: "")
         case .redactedFailure(let output):
-            throw RuntimeAdapterError.commandFailed(exitStatus: 1, message: "mock command failed", standardError: redactionPolicy.redact(output))
+            throw RuntimeAdapterError.commandFailed(exitStatus: 1, message: "scripted command failed", standardError: redactionPolicy.redact(output))
         case .logs:
             return ObservedRuntimeState(projectName: desiredState.projectName, services: [], adapterMetadata: adapterMetadata)
         }
@@ -75,7 +77,7 @@ public struct MockRuntimeAdapter: RuntimeAdapter {
                     kind: .create,
                     identity: service.identity,
                     isDestructive: false,
-                    summary: "Mock plan would create \(service.identity.displayName)."
+                    summary: "Scripted plan would create \(service.identity.displayName)."
                 )
             }
 
@@ -83,7 +85,7 @@ public struct MockRuntimeAdapter: RuntimeAdapter {
     }
 
     public func execute(_ action: PlannedRuntimeAction, confirmation: RuntimeMutationConfirmation?) async throws -> RuntimeEvent {
-        throw RuntimeAdapterError.mutationUnavailableByPolicy("MockRuntimeAdapter does not execute runtime mutation.")
+        throw RuntimeAdapterError.mutationUnavailableByPolicy("ScriptedRuntimeAdapter does not execute runtime mutation.")
     }
 
     public func logs(for identity: RuntimeServiceIdentity, tail: Int) async throws -> RuntimeLogResult {
@@ -95,5 +97,79 @@ public struct MockRuntimeAdapter: RuntimeAdapter {
         default:
             throw RuntimeAdapterError.capabilityUnavailable(.logStreaming)
         }
+    }
+}
+
+public struct ScriptedRuntimeProcessRunner: RuntimeProcessRunning {
+    public enum Behavior: Sendable {
+        case result(RuntimeCommandResult)
+        case failure(RuntimeAdapterError)
+    }
+
+    public let behavior: Behavior
+    public let redactionPolicy: RuntimeRedactionPolicy
+
+    public init(behavior: Behavior, redactionPolicy: RuntimeRedactionPolicy = .default) {
+        self.behavior = behavior
+        self.redactionPolicy = redactionPolicy
+    }
+
+    public func run(_ spec: RuntimeCommandSpec) async throws -> RuntimeCommandResult {
+        switch spec.classification {
+        case .readOnly:
+            try RuntimeCommandPolicy.validateReadOnlyExecution(spec)
+        case .mutating:
+            try RuntimeCommandPolicy.validateSupportedMutation(spec)
+        case .forbidden, .unknown:
+            throw RuntimeAdapterError.commandRejected(
+                classification: spec.classification,
+                message: "ScriptedRuntimeProcessRunner rejects forbidden and unknown runtime command specs."
+            )
+        }
+
+        switch behavior {
+        case .result(let result):
+            return result.redacted(using: redactionPolicy)
+        case .failure(let error):
+            throw error.redacted(using: redactionPolicy)
+        }
+    }
+}
+
+public struct DictionaryRuntimeExecutableResolver: RuntimeExecutableResolving {
+    public let executables: [String: String]
+
+    public init(executables: [String: String]) {
+        self.executables = executables
+    }
+
+    public func resolveExecutable(named name: String) -> ResolvedRuntimeExecutable? {
+        guard let path = executables[name] else {
+            return nil
+        }
+        return ResolvedRuntimeExecutable(name: name, path: path)
+    }
+}
+
+public struct InMemorySecretStore: SecretStore {
+    private let values: [HostwrightSecretReference: String]
+
+    public init(values: [HostwrightSecretReference: String]) {
+        self.values = values
+    }
+
+    public init(rawValues: [String: String]) throws {
+        var parsed: [HostwrightSecretReference: String] = [:]
+        for (reference, value) in rawValues {
+            parsed[try HostwrightSecretReference.parse(reference)] = value
+        }
+        values = parsed
+    }
+
+    public func readString(reference: HostwrightSecretReference) throws -> String {
+        guard let value = values[reference] else {
+            throw SecretStoreError.notFound("Secret value was not found for \(reference.redactedDescription).")
+        }
+        return value
     }
 }

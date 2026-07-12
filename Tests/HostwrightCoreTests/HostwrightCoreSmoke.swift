@@ -3,6 +3,25 @@ import XCTest
 @testable import HostwrightCore
 
 final class HostwrightCoreTests: XCTestCase {
+    func testProductionSourcesDoNotContainTestDoubleTypes() throws {
+        let root = try packageRoot()
+        let sources = root.appendingPathComponent("Sources", isDirectory: true)
+        let enumerator = try XCTUnwrap(FileManager.default.enumerator(at: sources, includingPropertiesForKeys: nil))
+        var violations: [String] = []
+
+        for case let fileURL as URL in enumerator where fileURL.pathExtension == "swift" {
+            let contents = try String(contentsOf: fileURL, encoding: .utf8)
+            if contents.range(
+                of: #"\b(?:struct|class|actor|enum)\s+(?:Mock|Fake)[A-Za-z0-9_]*"#,
+                options: .regularExpression
+            ) != nil {
+                violations.append(fileURL.path.replacingOccurrences(of: root.path + "/", with: ""))
+            }
+        }
+
+        XCTAssertEqual(violations, [], "Test-double types must remain outside production Sources.")
+    }
+
     func testEvidenceContractSeparatesDeterministicAndRealProof() throws {
         let root = try packageRoot()
         let policy = try read("docs/reference/testing-evidence.md", root: root)
@@ -160,7 +179,7 @@ final class HostwrightCoreTests: XCTestCase {
         XCTAssertTrue(boundary.contains("secretEnv:"))
         XCTAssertTrue(boundary.contains("Live macOS Keychain access is not enabled by default in Phase 24."))
         XCTAssertTrue(manifest.contains("secretEnv"))
-        XCTAssertTrue(security.contains("tests use a fake Keychain backend"))
+        XCTAssertTrue(security.contains("unit-contract tests inject a test-only in-memory secret store"))
         XCTAssertTrue(limitations.contains("no live Keychain default"))
 
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("live macOS Keychain access is enabled"))

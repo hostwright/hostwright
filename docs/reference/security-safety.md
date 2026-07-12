@@ -84,7 +84,7 @@ Hostwright keeps execution environment values separate from display and persiste
 
 Plaintext credential-like environment keys in `env` are rejected. Use `secretEnv` with `keychain://<service>/<account>` references for local secret values. The reference is not a secret value, but Hostwright still redacts keychain reference labels from state, diagnostics, plans, and errors because labels can reveal local account context.
 
-Hostwright does not use the live macOS Keychain by default in this phase. The default CLI secret store fails closed before mutation, and tests use a fake Keychain backend. A future live Keychain backend must be separately approved, noninteractive, and fail cleanly instead of presenting authentication UI.
+Hostwright does not use the live macOS Keychain by default in this phase. The default CLI secret store fails closed before mutation, and unit-contract tests inject a test-only in-memory secret store. A future live Keychain backend must be separately approved, noninteractive, and fail cleanly instead of presenting authentication UI.
 
 Redaction is heuristic. Users should not place plaintext credentials in manifests, logs, examples, fixtures, or issue reports.
 

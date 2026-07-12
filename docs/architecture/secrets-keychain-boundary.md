@@ -15,7 +15,7 @@ The manifest stores a reference label, not a secret value. Plaintext sensitive k
 
 Planning, status, state persistence, diagnostics, events, and errors see only redacted secret-reference metadata. A confirmed create action resolves references immediately before calling `RuntimeAdapter.execute`. If no approved backend resolves the reference, apply fails before mutation.
 
-The default CLI backend is unavailable by design. Tests use `FakeKeychainSecretStore`. Live macOS Keychain access is not enabled by default in Phase 24.
+The default CLI backend is unavailable by design. Tests inject `InMemorySecretStore` from the test-only support target. Live macOS Keychain access is not enabled by default in Phase 24.
 
 ## Future Live Keychain Gate
 

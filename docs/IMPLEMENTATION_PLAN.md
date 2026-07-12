@@ -25,14 +25,14 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 | 14 | State Migrations and Upgrade Safety | Complete locally | Harden state migrations, compatibility, corruption handling, and locking. | Fresh, existing, future-version, corrupt, locked, checksum-mismatch, rollback, unrelated database, and repeated migration cases are tested. |
 | 15 | Local Daemon Reconciliation Loop | Complete locally | Turn `hostwrightd` into explicit foreground dev-mode reconciliation only. | Fake-clock loop, backoff, lock, shutdown, and sleep/wake behavior pass without unattended mutation. |
 | 16 | Health Checks and Restart Policy Expansion | Complete locally | Add bounded health execution and crash-loop-aware restart policy state. | Health results, max attempts, backoff, manual disable, preexisting operator hold blocking, crash-loop blocking, and redacted events are tested. |
-| 17 | Managed Restart | Complete locally | Add one narrow Hostwright-owned restart path as an explicit stop-then-start sequence. | Ownership, running observed state, plan hash, operation ledger, recovery record, and fake-runner tests pass. |
+| 17 | Managed Restart | Complete locally | Add one narrow Hostwright-owned restart path as an explicit stop-then-start sequence. | Ownership, running observed state, plan hash, operation ledger, recovery record, and scripted-runner tests pass. |
 | 18 | Rollback and Partial Failure Recovery | Complete locally | Model operation groups, locks, checkpoints, interruption recovery, and manual recovery hints. | Partial failure and crash/interruption records explain what changed and what remains manual. |
 | 19 | Cleanup and Garbage Collection Maturity | Partial | Improve cleanup classification, ownership mismatch handling, stale ID protection, and partial failure behavior. | Classification tests pass, but exact observed runtime identifiers, collision-safe identity, multi-project observation, and managed-start ownership still need repair. |
 | 20 | Observability and Diagnostics | Complete locally | Add redacted diagnostics, local-only telemetry policy, audit trail, event filtering, and improved doctor/status output. | Diagnostic bundles, redaction, event ordering/filtering, and local-only telemetry policy are tested. |
 | 21 | API and GUI Readiness Gate | Requirements complete; implementation not started | Define local GUI/control-surface requirements, data contracts, accessibility expectations, command/API boundaries, safety rules, and handoff criteria. | Requirements are documented; a reviewed local API and GUI remain future implementation work. |
 | 22 | Networking and Service Discovery | Complete locally | Harden local networking policy and document unsupported discovery/exposure boundaries. | Localhost publish defaults, duplicate/observed port conflicts, unsupported discovery fields, and fixture-only network metadata are tested. |
 | 23 | Secure Exposure Research | Research complete; implementation not started | Decide tunnel, VPN, mTLS, reverse proxy, DNS, and cloud exposure boundaries before any implementation. | Research is recorded; provider, reverse-proxy, and mTLS implementation require separate evidence-gated work. |
-| 24 | Secrets, Credentials, And Keychain Boundary | Complete locally | Add local secret references, fake Keychain backend, unavailable live backend, and redaction hardening. | `secretEnv`, fake backend resolution, fail-closed unavailable backend, and redacted state/diagnostics/plans pass tests. |
+| 24 | Secrets, Credentials, And Keychain Boundary | Complete for unavailable live-backend boundary | Add local secret references, a test-only in-memory store, unavailable live backend, and redaction hardening. | `secretEnv`, in-memory resolution, fail-closed unavailable backend, and redacted state/diagnostics/plans pass tests. |
 | 25 | Supply Chain And Image Trust | Complete for local digest policy | Add local image digest-reference policy and document trust-tool boundaries. | `imagePolicy: require-digest`, digest syntax validation, schema alignment, docs boundary, and overclaim tests pass without registry calls or scanner/signing dependencies. |
 | 26 | Apple Silicon Resource Intelligence | Complete locally | Add local resource reports and benchmark-methodology boundaries without scheduler or accelerator claims. | Doctor resource reports, fixture parsing, architecture warnings, unmeasured benchmark dimensions, and docs boundary tests pass. |
 | 27 | Apple Silicon Accelerator Boundary Research | Research complete; implementation not started | Decide GPU, ANE, Metal, Core ML, MLX, PyTorch MPS, host-native accelerator, and scheduler boundaries before implementation. | Research is recorded; host-native accelerator measurement and execution remain unimplemented. |
@@ -110,8 +110,8 @@ All evidence follows [Testing And Evidence](reference/testing-evidence.md). Fixt
 
 - Typed runtime models.
 - Expanded `RuntimeAdapter` protocol.
-- `MockRuntimeAdapter` for deterministic tests.
-- Runtime command specs, command results, command classification, timeout model, redaction policy, and fake process runner.
+- Test-only `ScriptedRuntimeAdapter` for deterministic contracts.
+- Runtime command specs, command results, command classification, timeout model, redaction policy, and test-only scripted process runner.
 - Runtime/reconciler smoke checks for contract behavior.
 - Updated runtime-adapter architecture documentation, requirements, limitations, build status, devlog, and maintainer notes.
 
@@ -239,7 +239,7 @@ Phase 16 does not add a broad restart command, daemon-enforced restart loops, st
 - Runtime execution remains a narrow internal stop-then-start sequence for the exact Hostwright-managed container identifier; no public stop or restart command is added.
 - SQLite schema v3 adds append-only restart recovery records with redacted manual recovery hints and completed-step metadata.
 - Apply records operation intent before mutation, success/failure operation status after mutation, restart recovery records, restart policy state, and redacted events.
-- XCTest coverage covers planner gating, ownership refusal, fresh/stale persisted health handling, status/apply plan-hash parity, successful managed restart, failed managed restart recovery hints/backoff, partial stop-success/start-failure records, runtime command policy, and fake-runner stop-then-start sequencing.
+- XCTest coverage covers planner gating, ownership refusal, fresh/stale persisted health handling, status/apply plan-hash parity, successful managed restart, failed managed restart recovery hints/backoff, partial stop-success/start-failure records, runtime command policy, and scripted-runner stop-then-start sequencing.
 
 Phase 17 does not add broad lifecycle management, daemon-enforced restart loops, a public stop/restart command, image replacement, image cleanup, volume cleanup, unmanaged cleanup, release tags, or GitHub Releases.
 
@@ -310,13 +310,13 @@ Phase 23 does not add provider integration, provider credentials, tunnels, DNS b
 
 ## Phase 24 Outputs
 
-- Added `HostwrightSecrets` with `HostwrightSecretReference`, `SecretStore`, `FakeKeychainSecretStore`, and an unavailable default Keychain backend.
+- Added `HostwrightSecrets` with `HostwrightSecretReference`, `SecretStore`, and an unavailable default Keychain backend; tests inject a test-only in-memory store.
 - Added service-level `secretEnv` for `keychain://<service>/<account>` references while keeping Compose/Kubernetes `secrets:` unsupported.
 - Manifest validation rejects plaintext credential-like keys in `env`, malformed secret references, duplicate keys across `env` and `secretEnv`, and secret references placed under `env`.
 - Apply resolves secret references through the injected backend immediately before confirmed create execution; the default unavailable backend fails before mutation.
 - Runtime mutation rejects unresolved secret references as a final guard.
-- Desired-state persistence, plans, errors, diagnostics, and observability redaction do not store or print resolved fake secret values or raw keychain reference labels.
-- XCTest coverage covers secret reference parsing, fake backend behavior, manifest validation, mapper redaction, apply resolution/failure, runtime guard, state redaction, observability redaction, and schema alignment.
+- Desired-state persistence, plans, errors, diagnostics, and observability redaction do not store or print resolved synthetic secret values or raw keychain reference labels.
+- XCTest coverage covers secret reference parsing, in-memory store behavior, manifest validation, mapper redaction, apply resolution/failure, runtime guard, state redaction, observability redaction, and schema alignment.
 
 Phase 24 does not add live Keychain access, Keychain prompts, access groups, synchronizable items, credential upload/sync, cloud identity, registry credential storage, mounted secret files, provider integration, runtime mutation expansion, release tags, or GitHub Releases.
 

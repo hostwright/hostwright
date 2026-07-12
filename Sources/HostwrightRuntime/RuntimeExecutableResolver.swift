@@ -36,19 +36,3 @@ public struct RuntimeExecutableResolver: RuntimeExecutableResolving {
         return nil
     }
 }
-
-public struct FixedRuntimeExecutableResolver: RuntimeExecutableResolving {
-    public let executables: [String: String]
-
-    public init(executables: [String: String]) {
-        self.executables = executables
-    }
-
-    public func resolveExecutable(named name: String) -> ResolvedRuntimeExecutable? {
-        guard let path = executables[name] else {
-            return nil
-        }
-        return ResolvedRuntimeExecutable(name: name, path: path)
-    }
-}
-

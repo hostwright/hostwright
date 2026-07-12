@@ -6,10 +6,28 @@ import XCTest
 @testable import HostwrightSecrets
 
 final class HostwrightRuntimeTests: XCTestCase {
+    func testVersionedRuntimeIdentifiersAvoidLegacyHyphenCollisions() {
+        let first = RuntimeServiceIdentity(projectName: "a-b", serviceName: "c")
+        let second = RuntimeServiceIdentity(projectName: "a", serviceName: "b-c")
+        let instance = RuntimeServiceIdentity(projectName: "a-b", serviceName: "c", instanceName: "one")
+
+        XCTAssertEqual(first.legacyManagedResourceIdentifier, second.legacyManagedResourceIdentifier)
+        XCTAssertNotEqual(first.managedResourceIdentifier, second.managedResourceIdentifier)
+        XCTAssertNotEqual(first.managedResourceIdentifier, instance.managedResourceIdentifier)
+        XCTAssertEqual(first.managedResourceIdentifier, RuntimeManagedResourceIdentity.resourceIdentifier(for: first))
+        XCTAssertLessThanOrEqual(first.managedResourceIdentifier.count, RuntimeManagedResourceIdentity.maximumIdentifierLength)
+        XCTAssertTrue(RuntimeManagedResourceIdentity.isCurrentIdentifier(first.managedResourceIdentifier))
+        let reservedPrefixLegacy = RuntimeServiceIdentity(projectName: "v2", serviceName: "api").legacyManagedResourceIdentifier
+        XCTAssertTrue(RuntimeManagedResourceIdentity.isLegacyIdentifier(reservedPrefixLegacy))
+        XCTAssertFalse(RuntimeManagedResourceIdentity.isCurrentIdentifier(reservedPrefixLegacy))
+        XCTAssertFalse(RuntimeManagedResourceIdentity.isCurrentIdentifier("hostwright-v2-------x-0123456789abcdef0123456789abcdef"))
+        XCTAssertFalse(RuntimeManagedResourceIdentity.isSupportedIdentifier("hostwright-demo-api/../other"))
+    }
+
     func testRuntimePlanReportsMutationAndDestructiveFlags() {
         let identity = RuntimeServiceIdentity(projectName: "demo", serviceName: "web")
         let plan = RuntimePlan(actions: [
-            PlannedRuntimeAction(kind: .create, identity: identity, isDestructive: false, summary: "create web")
+            PlannedRuntimeAction(kind: .create, identity: identity, resourceIdentifier: identity.managedResourceIdentifier, isDestructive: false, summary: "create web")
         ])
 
         XCTAssertTrue(plan.mutatesRuntime)
@@ -85,7 +103,9 @@ final class HostwrightRuntimeTests: XCTestCase {
         XCTAssertNoThrow(try RuntimeCommandPolicy.validateCreateMissingServiceMutation(create))
         XCTAssertEqual(create.classification, .mutating)
         XCTAssertEqual(create.mutationKind, .createMissingService)
-        XCTAssertEqual(create.arguments.prefix(3), ["create", "--name", "hostwright-demo-api"])
+        XCTAssertEqual(create.arguments.prefix(3), ["create", "--name", identity.managedResourceIdentifier])
+        XCTAssertTrue(create.arguments.contains("--label"))
+        XCTAssertTrue(create.arguments.contains("\(RuntimeManagedResourceIdentity.managedLabel)=true"))
         XCTAssertTrue(create.arguments.contains("--publish"))
         XCTAssertTrue(create.arguments.contains("127.0.0.1:8080:8080"))
         XCTAssertFalse(create.arguments.contains("run"))
@@ -132,9 +152,17 @@ final class HostwrightRuntimeTests: XCTestCase {
     }
 
     func testCreateMissingServiceMutationPolicyRejectsFlagLikeImageAndCommandTokens() {
+        let valid = AppleContainerCommand.spec(
+            kind: .createContainer,
+            executable: ResolvedRuntimeExecutable(name: "container", path: "/usr/bin/container-fixture"),
+            desiredService: desiredService
+        )
+        let imageIndex = valid.arguments.firstIndex(of: desiredService.image)!
+        var unsafeImageArguments = valid.arguments
+        unsafeImageArguments[imageIndex] = "--mount=src=/,dst=/host"
         let unsafeImage = RuntimeCommandSpec(
             executablePath: "/usr/bin/container-fixture",
-            arguments: ["create", "--name", "hostwright-demo-api", "--mount=src=/,dst=/host"],
+            arguments: unsafeImageArguments,
             classification: .mutating,
             executableResolution: .resolvedByRuntimeExecutableResolver,
             mutationKind: .createMissingService,
@@ -144,9 +172,11 @@ final class HostwrightRuntimeTests: XCTestCase {
             XCTAssertTrue(String(describing: error).contains("image"))
         }
 
+        var badImageArguments = valid.arguments
+        badImageArguments[imageIndex] = "-bad"
         let badImage = RuntimeCommandSpec(
             executablePath: "/usr/bin/container-fixture",
-            arguments: ["create", "--name", "hostwright-demo-api", "-bad"],
+            arguments: badImageArguments,
             classification: .mutating,
             executableResolution: .resolvedByRuntimeExecutableResolver,
             mutationKind: .createMissingService,
@@ -156,7 +186,7 @@ final class HostwrightRuntimeTests: XCTestCase {
 
         let unsafeCommandToken = RuntimeCommandSpec(
             executablePath: "/usr/bin/container-fixture",
-            arguments: ["create", "--name", "hostwright-demo-api", "local/demo:latest", "--flag"],
+            arguments: valid.arguments + ["--flag"],
             classification: .mutating,
             executableResolution: .resolvedByRuntimeExecutableResolver,
             mutationKind: .createMissingService,
@@ -164,6 +194,50 @@ final class HostwrightRuntimeTests: XCTestCase {
         )
         XCTAssertThrowsError(try RuntimeCommandPolicy.validateCreateMissingServiceMutation(unsafeCommandToken)) { error in
             XCTAssertTrue(String(describing: error).contains("command tokens beginning"))
+        }
+    }
+
+    func testCreateMissingServiceMutationPolicyRejectsTamperedOwnershipBinding() {
+        let valid = AppleContainerCommand.spec(
+            kind: .createContainer,
+            executable: ResolvedRuntimeExecutable(name: "container", path: "/usr/bin/container-fixture"),
+            desiredService: desiredService
+        )
+        XCTAssertNoThrow(try RuntimeCommandPolicy.validateCreateMissingServiceMutation(valid))
+
+        var tamperedArguments = valid.arguments
+        let resourceLabelPrefix = "\(RuntimeManagedResourceIdentity.resourceIdentifierLabel)="
+        let labelIndex = tamperedArguments.firstIndex { $0.hasPrefix(resourceLabelPrefix) }!
+        tamperedArguments[labelIndex] = "\(resourceLabelPrefix)\(RuntimeServiceIdentity(projectName: "other", serviceName: "api").managedResourceIdentifier)"
+        let tampered = RuntimeCommandSpec(
+            executablePath: valid.executablePath,
+            arguments: tamperedArguments,
+            classification: .mutating,
+            executableResolution: .resolvedByRuntimeExecutableResolver,
+            mutationKind: .createMissingService,
+            purpose: "tampered ownership fixture"
+        )
+
+        XCTAssertThrowsError(try RuntimeCommandPolicy.validateCreateMissingServiceMutation(tampered)) { error in
+            XCTAssertTrue(String(describing: error).contains("ownership labels bound to the exact container identifier"))
+        }
+
+        var duplicateNameArguments = valid.arguments
+        let nameIndex = duplicateNameArguments.firstIndex(of: "--name")!
+        duplicateNameArguments.insert(
+            contentsOf: ["--name", RuntimeServiceIdentity(projectName: "other", serviceName: "api").managedResourceIdentifier],
+            at: nameIndex + 2
+        )
+        let duplicateName = RuntimeCommandSpec(
+            executablePath: valid.executablePath,
+            arguments: duplicateNameArguments,
+            classification: .mutating,
+            executableResolution: .resolvedByRuntimeExecutableResolver,
+            mutationKind: .createMissingService,
+            purpose: "duplicate name fixture"
+        )
+        XCTAssertThrowsError(try RuntimeCommandPolicy.validateCreateMissingServiceMutation(duplicateName)) { error in
+            XCTAssertTrue(String(describing: error).contains("exactly one"))
         }
     }
 
@@ -254,6 +328,7 @@ final class HostwrightRuntimeTests: XCTestCase {
     func testScriptedRuntimeAdapterCanObserveServices() async throws {
         let observedService = ObservedRuntimeService(
             identity: identity,
+            resourceIdentifier: identity.managedResourceIdentifier,
             image: "ghcr.io/example/api:latest",
             lifecycleState: .running,
             healthState: .healthy
@@ -291,6 +366,7 @@ final class HostwrightRuntimeTests: XCTestCase {
         } catch {
             XCTFail("Unexpected error: \(error).")
         }
+
     }
 
     func testFoundationRuntimeProcessRunnerDrainsLargeStdout() async throws {
@@ -331,7 +407,7 @@ final class HostwrightRuntimeTests: XCTestCase {
 
         do {
             _ = try await adapter.execute(
-                PlannedRuntimeAction(kind: .start, identity: identity, isDestructive: false, summary: "start"),
+                PlannedRuntimeAction(kind: .start, identity: identity, resourceIdentifier: identity.managedResourceIdentifier, isDestructive: false, summary: "start"),
                 confirmation: nil
             )
             XCTFail("Expected mutation unavailable.")
@@ -520,6 +596,7 @@ final class HostwrightRuntimeTests: XCTestCase {
             PlannedRuntimeAction(
                 kind: .create,
                 identity: proofIdentity,
+                resourceIdentifier: proofIdentity.managedResourceIdentifier,
                 isDestructive: false,
                 summary: "create",
                 desiredService: proofService
@@ -528,7 +605,7 @@ final class HostwrightRuntimeTests: XCTestCase {
         )
 
         XCTAssertEqual(runner.calls.compactMap(\.arguments.first), ["image", "create"])
-        XCTAssertEqual(event.resourceIdentifier, "hostwright-proof-web")
+        XCTAssertEqual(event.resourceIdentifier, proofIdentity.managedResourceIdentifier)
         XCTAssertFalse(event.message.contains("fake-token"))
         XCTAssertTrue(event.message.contains("[REDACTED]"))
     }
@@ -554,7 +631,7 @@ final class HostwrightRuntimeTests: XCTestCase {
         let adapter = AppleContainerApplyAdapter(executableResolver: resolvedContainer, processRunner: runner)
 
         let event = try await adapter.execute(
-            PlannedRuntimeAction(kind: .create, identity: proofIdentity, isDestructive: false, summary: "create", desiredService: service),
+            PlannedRuntimeAction(kind: .create, identity: proofIdentity, resourceIdentifier: proofIdentity.managedResourceIdentifier, isDestructive: false, summary: "create", desiredService: service),
             confirmation: RuntimeMutationConfirmation(confirmed: true, reason: "test", planHash: "plan-hash")
         )
 
@@ -580,7 +657,7 @@ final class HostwrightRuntimeTests: XCTestCase {
 
         do {
             _ = try await adapter.execute(
-                PlannedRuntimeAction(kind: .create, identity: proofIdentity, isDestructive: false, summary: "create", desiredService: service),
+                PlannedRuntimeAction(kind: .create, identity: proofIdentity, resourceIdentifier: proofIdentity.managedResourceIdentifier, isDestructive: false, summary: "create", desiredService: service),
                 confirmation: RuntimeMutationConfirmation(confirmed: true, reason: "test", planHash: "plan-hash")
             )
             XCTFail("Expected unresolved secret reference rejection.")
@@ -592,39 +669,41 @@ final class HostwrightRuntimeTests: XCTestCase {
     }
 
     func testAppleContainerApplyAdapterStartsManagedServiceOnly() async throws {
+        let resourceIdentifier = identity.legacyManagedResourceIdentifier
         let runner = RoutingRuntimeProcessRunner { spec in
-            XCTAssertEqual(spec.arguments, ["start", "hostwright-demo-api"])
+            XCTAssertEqual(spec.arguments, ["start", resourceIdentifier])
             return RuntimeCommandResult(spec: spec, exitStatus: 0, standardOutput: "started token=fake-token", standardError: "")
         }
         let adapter = AppleContainerApplyAdapter(executableResolver: resolvedContainer, processRunner: runner)
 
         let event = try await adapter.execute(
-            PlannedRuntimeAction(kind: .start, identity: identity, isDestructive: false, summary: "start"),
+            PlannedRuntimeAction(kind: .start, identity: identity, resourceIdentifier: resourceIdentifier, isDestructive: false, summary: "start"),
             confirmation: RuntimeMutationConfirmation(confirmed: true, reason: "test", planHash: "plan-hash")
         )
 
-        XCTAssertEqual(runner.calls.map(\.arguments), [["start", "hostwright-demo-api"]])
-        XCTAssertEqual(event.resourceIdentifier, "hostwright-demo-api")
+        XCTAssertEqual(runner.calls.map(\.arguments), [["start", resourceIdentifier]])
+        XCTAssertEqual(event.resourceIdentifier, resourceIdentifier)
         XCTAssertFalse(event.message.contains("fake-token"))
     }
 
     func testAppleContainerApplyAdapterDeletesOnlyExplicitDestructiveManagedContainer() async throws {
+        let resourceIdentifier = identity.legacyManagedResourceIdentifier
         let runner = RoutingRuntimeProcessRunner { spec in
-            XCTAssertEqual(spec.arguments, ["delete", "hostwright-demo-api"])
+            XCTAssertEqual(spec.arguments, ["delete", resourceIdentifier])
             return RuntimeCommandResult(spec: spec, exitStatus: 0, standardOutput: "deleted", standardError: "")
         }
         let adapter = AppleContainerApplyAdapter(executableResolver: resolvedContainer, processRunner: runner)
 
         let event = try await adapter.execute(
-            PlannedRuntimeAction(kind: .remove, identity: identity, isDestructive: true, summary: "delete"),
+            PlannedRuntimeAction(kind: .remove, identity: identity, resourceIdentifier: resourceIdentifier, isDestructive: true, summary: "delete"),
             confirmation: RuntimeMutationConfirmation(confirmed: true, reason: "test", planHash: "cleanup-token")
         )
 
-        XCTAssertEqual(event.resourceIdentifier, "hostwright-demo-api")
+        XCTAssertEqual(event.resourceIdentifier, resourceIdentifier)
 
         do {
             _ = try await adapter.execute(
-                PlannedRuntimeAction(kind: .remove, identity: identity, isDestructive: false, summary: "delete"),
+                PlannedRuntimeAction(kind: .remove, identity: identity, resourceIdentifier: resourceIdentifier, isDestructive: false, summary: "delete"),
                 confirmation: RuntimeMutationConfirmation(confirmed: true, reason: "test", planHash: "cleanup-token")
             )
             XCTFail("Expected non-destructive delete action to be rejected.")
@@ -638,11 +717,12 @@ final class HostwrightRuntimeTests: XCTestCase {
     }
 
     func testAppleContainerApplyAdapterRestartsManagedServiceWithStopThenStartOnly() async throws {
+        let resourceIdentifier = identity.legacyManagedResourceIdentifier
         let runner = RoutingRuntimeProcessRunner { spec in
-            if spec.arguments == ["stop", "hostwright-demo-api"] {
+            if spec.arguments == ["stop", resourceIdentifier] {
                 return RuntimeCommandResult(spec: spec, exitStatus: 0, standardOutput: "stopped token=fake-token", standardError: "")
             }
-            if spec.arguments == ["start", "hostwright-demo-api"] {
+            if spec.arguments == ["start", resourceIdentifier] {
                 return RuntimeCommandResult(spec: spec, exitStatus: 0, standardOutput: "started token=fake-token", standardError: "")
             }
             throw RuntimeAdapterError.commandRejected(classification: spec.classification, message: "unexpected command")
@@ -650,22 +730,23 @@ final class HostwrightRuntimeTests: XCTestCase {
         let adapter = AppleContainerApplyAdapter(executableResolver: resolvedContainer, processRunner: runner)
 
         let event = try await adapter.execute(
-            PlannedRuntimeAction(kind: .restart, identity: identity, isDestructive: true, summary: "restart"),
+            PlannedRuntimeAction(kind: .restart, identity: identity, resourceIdentifier: resourceIdentifier, isDestructive: true, summary: "restart"),
             confirmation: RuntimeMutationConfirmation(confirmed: true, reason: "test", planHash: "plan-hash")
         )
 
-        XCTAssertEqual(runner.calls.map(\.arguments), [["stop", "hostwright-demo-api"], ["start", "hostwright-demo-api"]])
-        XCTAssertEqual(event.resourceIdentifier, "hostwright-demo-api")
+        XCTAssertEqual(runner.calls.map(\.arguments), [["stop", resourceIdentifier], ["start", resourceIdentifier]])
+        XCTAssertEqual(event.resourceIdentifier, resourceIdentifier)
         XCTAssertTrue(event.message.contains("[REDACTED]"))
         XCTAssertFalse(event.message.contains("fake-token"))
     }
 
     func testAppleContainerApplyAdapterReportsPartialManagedRestartWhenStartFailsAfterStop() async throws {
+        let resourceIdentifier = identity.legacyManagedResourceIdentifier
         let runner = RoutingRuntimeProcessRunner { spec in
-            if spec.arguments == ["stop", "hostwright-demo-api"] {
+            if spec.arguments == ["stop", resourceIdentifier] {
                 return RuntimeCommandResult(spec: spec, exitStatus: 0, standardOutput: "stopped", standardError: "")
             }
-            if spec.arguments == ["start", "hostwright-demo-api"] {
+            if spec.arguments == ["start", resourceIdentifier] {
                 throw RuntimeAdapterError.commandFailed(exitStatus: 2, message: "start failed", standardError: "token=fake-token")
             }
             throw RuntimeAdapterError.commandRejected(classification: spec.classification, message: "unexpected command")
@@ -674,7 +755,7 @@ final class HostwrightRuntimeTests: XCTestCase {
 
         do {
             _ = try await adapter.execute(
-                PlannedRuntimeAction(kind: .restart, identity: identity, isDestructive: true, summary: "restart"),
+                PlannedRuntimeAction(kind: .restart, identity: identity, resourceIdentifier: resourceIdentifier, isDestructive: true, summary: "restart"),
                 confirmation: RuntimeMutationConfirmation(confirmed: true, reason: "test", planHash: "plan-hash")
             )
             XCTFail("Expected partial restart failure.")
@@ -685,23 +766,29 @@ final class HostwrightRuntimeTests: XCTestCase {
             XCTAssertTrue(message.contains("start failed"))
             XCTAssertTrue(standardError.contains("[REDACTED]"))
             XCTAssertFalse(standardError.contains("fake-token"))
-            XCTAssertEqual(runner.calls.map(\.arguments), [["stop", "hostwright-demo-api"], ["start", "hostwright-demo-api"]])
+            XCTAssertEqual(runner.calls.map(\.arguments), [["stop", resourceIdentifier], ["start", resourceIdentifier]])
         } catch {
             XCTFail("Unexpected error: \(error).")
         }
     }
 
     func testAppleContainerReadOnlyAdapterReadsTailLogsWithoutFollowAttachOrExec() async throws {
+        let resourceIdentifier = identity.legacyManagedResourceIdentifier
         let runner = RoutingRuntimeProcessRunner { spec in
-            XCTAssertEqual(spec.arguments, ["logs", "-n", "25", "hostwright-demo-api"])
+            XCTAssertEqual(spec.arguments, ["logs", "-n", "25", resourceIdentifier])
             XCTAssertFalse(spec.arguments.contains("--follow"))
             XCTAssertFalse(spec.arguments.contains("--attach"))
             XCTAssertFalse(spec.arguments.contains("exec"))
             return RuntimeCommandResult(spec: spec, exitStatus: 0, standardOutput: "token=fake-token\nready", standardError: "")
         }
         let adapter = AppleContainerReadOnlyAdapter(executableResolver: resolvedContainer, processRunner: runner)
+        let observedService = ObservedRuntimeService(
+            identity: identity,
+            resourceIdentifier: resourceIdentifier,
+            lifecycleState: .running
+        )
 
-        let logs = try await adapter.logs(for: identity, tail: 25)
+        let logs = try await adapter.logs(for: observedService, tail: 25)
 
         XCTAssertEqual(logs.lineLimit, 25)
         XCTAssertTrue(logs.text.contains("[REDACTED]"))
@@ -726,6 +813,7 @@ final class HostwrightRuntimeTests: XCTestCase {
                 PlannedRuntimeAction(
                     kind: .create,
                     identity: identity,
+                    resourceIdentifier: identity.managedResourceIdentifier,
                     isDestructive: false,
                     summary: "create",
                     desiredService: desiredService
@@ -758,7 +846,7 @@ final class HostwrightRuntimeTests: XCTestCase {
 
         do {
             _ = try await adapter.execute(
-                PlannedRuntimeAction(kind: .create, identity: identity, isDestructive: false, summary: "create", desiredService: mounted),
+                PlannedRuntimeAction(kind: .create, identity: identity, resourceIdentifier: identity.managedResourceIdentifier, isDestructive: false, summary: "create", desiredService: mounted),
                 confirmation: RuntimeMutationConfirmation(confirmed: true, reason: "test", planHash: "plan-hash")
             )
             XCTFail("Expected unsupported subset failure.")
@@ -767,6 +855,28 @@ final class HostwrightRuntimeTests: XCTestCase {
                 return XCTFail("Expected commandRejected, got \(error).")
             }
             XCTAssertTrue(message.contains("mounts"))
+        } catch {
+            XCTFail("Unexpected error: \(error).")
+        }
+
+        do {
+            _ = try await adapter.execute(
+                PlannedRuntimeAction(
+                    kind: .create,
+                    identity: identity,
+                    resourceIdentifier: identity.legacyManagedResourceIdentifier,
+                    isDestructive: false,
+                    summary: "tampered create",
+                    desiredService: desiredService
+                ),
+                confirmation: RuntimeMutationConfirmation(confirmed: true, reason: "test", planHash: "plan-hash")
+            )
+            XCTFail("Expected tampered create identity rejection.")
+        } catch let error as RuntimeAdapterError {
+            guard case .mutationUnavailableByPolicy(let message) = error else {
+                return XCTFail("Expected mutationUnavailableByPolicy, got \(error).")
+            }
+            XCTAssertTrue(message.contains("exact versioned identifier"))
         } catch {
             XCTFail("Unexpected error: \(error).")
         }
@@ -870,7 +980,7 @@ final class HostwrightRuntimeTests: XCTestCase {
             )
         )
 
-        let observed = try await adapter.observe(desiredState: proofDesiredState)
+        let observed = try await adapter.observe(desiredState: proofDesiredStateWithLegacyHint)
 
         XCTAssertEqual(observed.services.count, 1)
         XCTAssertEqual(observed.services[0].identity, proofIdentity)
@@ -880,6 +990,171 @@ final class HostwrightRuntimeTests: XCTestCase {
         XCTAssertEqual(observed.services[0].ports.first?.containerPort, 80)
         XCTAssertEqual(observed.services[0].ports.first?.protocolName, .tcp)
         XCTAssertEqual(observed.services[0].ports.first?.bindAddress, "0.0.0.0")
+        XCTAssertEqual(observed.services[0].resourceIdentifier, proofIdentity.legacyManagedResourceIdentifier)
+    }
+
+    func testAppleContainerParserIncludesOwnedOrphanAndIgnoresUnrelatedProject() throws {
+        let orphan = RuntimeServiceIdentity(projectName: "demo", serviceName: "orphan")
+        let unrelated = RuntimeServiceIdentity(projectName: "other", serviceName: "api")
+        let outputObject: [[String: Any]] = [
+            realContainerListItem(
+                identity: orphan,
+                state: "running",
+                networks: [[
+                    "hostname": "orphan.local",
+                    "ipv4Address": "192.168.64.2/24",
+                    "ipv4Gateway": "192.168.64.1",
+                    "ipv6Address": "fd00::2/64",
+                    "macAddress": "02:00:00:00:00:02",
+                    "mtu": 1280,
+                    "network": "default"
+                ]]
+            ),
+            realContainerListItem(identity: unrelated, state: "stopped", networks: [])
+        ]
+        let output = String(data: try JSONSerialization.data(withJSONObject: outputObject), encoding: .utf8)!
+
+        let observed = try AppleContainerObservationParser.parse(
+            output,
+            desiredState: desiredState,
+            metadata: ScriptedRuntimeAdapter.defaultMetadata
+        )
+
+        XCTAssertEqual(observed.services.map(\.identity), [orphan])
+        XCTAssertEqual(observed.services[0].resourceIdentifier, orphan.managedResourceIdentifier)
+        XCTAssertEqual(observed.services[0].networks[0].name, "default")
+        XCTAssertEqual(observed.services[0].networks[0].hostname, "orphan.local")
+        XCTAssertEqual(observed.services[0].networks[0].ipv4Address, "192.168.64.2/24")
+        XCTAssertEqual(observed.services[0].networks[0].ipv4Gateway, "192.168.64.1")
+        XCTAssertEqual(observed.services[0].networks[0].ipv6Address, "fd00::2/64")
+        XCTAssertEqual(observed.services[0].networks[0].macAddress, "02:00:00:00:00:02")
+        XCTAssertEqual(observed.services[0].networks[0].mtu, 1280)
+    }
+
+    func testAppleContainerParserRejectsDesiredVersionedContainerWithoutOwnershipLabels() throws {
+        let resourceIdentifier = identity.managedResourceIdentifier
+        let outputObject: [[String: Any]] = [[
+            "configuration": [
+                "id": resourceIdentifier,
+                "image": ["reference": desiredService.image],
+                "labels": [:],
+                "publishedPorts": []
+            ],
+            "id": resourceIdentifier,
+            "status": ["state": "stopped", "networks": []]
+        ]]
+        let output = String(data: try JSONSerialization.data(withJSONObject: outputObject), encoding: .utf8)!
+
+        XCTAssertThrowsError(
+            try AppleContainerObservationParser.parse(
+                output,
+                desiredState: desiredState,
+                metadata: ScriptedRuntimeAdapter.defaultMetadata
+            )
+        ) { error in
+            XCTAssertTrue(String(describing: error).contains("missing exact ownership labels"))
+        }
+    }
+
+    func testAppleContainerParserRejectsDesiredIdentifierClaimedByAnotherProject() throws {
+        let resourceIdentifier = identity.managedResourceIdentifier
+        let otherProjectIdentity = RuntimeServiceIdentity(projectName: "other", serviceName: identity.serviceName)
+        let outputObject: [[String: Any]] = [[
+            "configuration": [
+                "id": resourceIdentifier,
+                "image": ["reference": desiredService.image],
+                "labels": RuntimeManagedResourceIdentity.labels(for: otherProjectIdentity),
+                "publishedPorts": []
+            ],
+            "id": resourceIdentifier,
+            "status": ["state": "stopped", "networks": []]
+        ]]
+        let output = String(data: try JSONSerialization.data(withJSONObject: outputObject), encoding: .utf8)!
+
+        XCTAssertThrowsError(
+            try AppleContainerObservationParser.parse(
+                output,
+                desiredState: desiredState,
+                metadata: ScriptedRuntimeAdapter.defaultMetadata
+            )
+        ) { error in
+            XCTAssertTrue(String(describing: error).contains("claim another project"))
+        }
+    }
+
+    func testAppleContainerParserUsesOwnershipVersionForLegacyIDMatchingV2Shape() throws {
+        let serviceName = "0123456789abcdef0123456789abcdef"
+        let legacyIdentity = RuntimeServiceIdentity(projectName: "v2-a-b", serviceName: serviceName)
+        let legacyIdentifier = legacyIdentity.legacyManagedResourceIdentifier
+        XCTAssertTrue(RuntimeManagedResourceIdentity.isCurrentIdentifier(legacyIdentifier))
+        let state = DesiredRuntimeState(
+            projectName: legacyIdentity.projectName,
+            services: [DesiredRuntimeService(identity: legacyIdentity, image: "local/test:latest")],
+            ownedResourceHints: [
+                RuntimeOwnedResourceHint(
+                    resourceIdentifier: legacyIdentifier,
+                    identity: legacyIdentity,
+                    identityVersion: 1
+                )
+            ]
+        )
+        let outputObject: [[String: Any]] = [[
+            "configuration": [
+                "id": legacyIdentifier,
+                "image": ["reference": "local/test:latest"],
+                "labels": [:],
+                "publishedPorts": []
+            ],
+            "id": legacyIdentifier,
+            "status": ["state": "stopped", "networks": []]
+        ]]
+        let output = String(data: try JSONSerialization.data(withJSONObject: outputObject), encoding: .utf8)!
+
+        let observed = try AppleContainerObservationParser.parse(
+            output,
+            desiredState: state,
+            metadata: ScriptedRuntimeAdapter.defaultMetadata
+        )
+
+        XCTAssertEqual(observed.services.first?.identity, legacyIdentity)
+        XCTAssertEqual(observed.services.first?.resourceIdentifier, legacyIdentifier)
+    }
+
+    func testAppleContainerParserRejectsUnlabeledVersionedOwnedOrphan() throws {
+        let orphan = RuntimeServiceIdentity(projectName: "demo", serviceName: "orphan")
+        let resourceIdentifier = orphan.managedResourceIdentifier
+        let state = DesiredRuntimeState(
+            projectName: "demo",
+            services: [desiredService],
+            ownedResourceHints: [
+                RuntimeOwnedResourceHint(
+                    resourceIdentifier: resourceIdentifier,
+                    identity: orphan,
+                    identityVersion: RuntimeManagedResourceIdentity.currentVersion
+                )
+            ]
+        )
+        let outputObject: [[String: Any]] = [[
+            "configuration": [
+                "id": resourceIdentifier,
+                "image": ["reference": "local/test:latest"],
+                "labels": [:],
+                "publishedPorts": []
+            ],
+            "id": resourceIdentifier,
+            "status": ["state": "stopped", "networks": []]
+        ]]
+        let output = String(data: try JSONSerialization.data(withJSONObject: outputObject), encoding: .utf8)!
+
+        XCTAssertThrowsError(
+            try AppleContainerObservationParser.parse(
+                output,
+                desiredState: state,
+                metadata: ScriptedRuntimeAdapter.defaultMetadata
+            )
+        ) { error in
+            XCTAssertTrue(String(describing: error).contains("missing compatible exact ownership labels"))
+        }
     }
 
     func testAppleContainerParserParsesRunningFixture() async throws {
@@ -910,16 +1185,24 @@ final class HostwrightRuntimeTests: XCTestCase {
         XCTAssertEqual(observed.services[0].mounts.first?.access, .readOnly)
     }
 
-    func testAppleContainerParserFailsClosedForNonEmptyRealNetworkOutput() {
+    func testAppleContainerParserFailsClosedForMalformedRealNetworkOutput() {
+        let resourceIdentifier = proofIdentity.managedResourceIdentifier
         let output = """
         [
           {
             "configuration": {
-              "id": "hostwright-proof-web",
+              "id": "\(resourceIdentifier)",
               "image": { "reference": "hostwright-proof-web:create-only" },
+              "labels": {
+                "dev.hostwright.managed": "true",
+                "dev.hostwright.identity-version": "2",
+                "dev.hostwright.project": "proof",
+                "dev.hostwright.service": "web",
+                "dev.hostwright.resource-id": "\(resourceIdentifier)"
+              },
               "publishedPorts": []
             },
-            "id": "hostwright-proof-web",
+            "id": "\(resourceIdentifier)",
             "status": {
               "state": "running",
               "networks": [
@@ -940,7 +1223,7 @@ final class HostwrightRuntimeTests: XCTestCase {
             guard case RuntimeAdapterError.outputParseFailed(let message) = error else {
                 return XCTFail("Expected outputParseFailed, got \(error).")
             }
-            XCTAssertTrue(message.contains("Non-empty real Apple container network output is unsupported"))
+            XCTAssertTrue(message.contains("Unsupported Apple container network keys"))
         }
     }
 
@@ -1065,6 +1348,20 @@ final class HostwrightRuntimeTests: XCTestCase {
         DesiredRuntimeState(projectName: "proof", services: [proofService])
     }
 
+    private var proofDesiredStateWithLegacyHint: DesiredRuntimeState {
+        DesiredRuntimeState(
+            projectName: "proof",
+            services: [proofService],
+            ownedResourceHints: [
+                RuntimeOwnedResourceHint(
+                    resourceIdentifier: proofIdentity.legacyManagedResourceIdentifier,
+                    identity: proofIdentity,
+                    identityVersion: 1
+                )
+            ]
+        )
+    }
+
     private var resolvedContainer: DictionaryRuntimeExecutableResolver {
         DictionaryRuntimeExecutableResolver(executables: ["container": "/usr/bin/container-fixture"])
     }
@@ -1074,6 +1371,24 @@ final class HostwrightRuntimeTests: XCTestCase {
             kind: .listContainers,
             executable: ResolvedRuntimeExecutable(name: "container", path: "/usr/bin/container-fixture")
         )
+    }
+
+    private func realContainerListItem(
+        identity: RuntimeServiceIdentity,
+        state: String,
+        networks: [[String: Any]]
+    ) -> [String: Any] {
+        let resourceIdentifier = identity.managedResourceIdentifier
+        return [
+            "configuration": [
+                "id": resourceIdentifier,
+                "image": ["reference": "local/test:latest"],
+                "labels": RuntimeManagedResourceIdentity.labels(for: identity),
+                "publishedPorts": []
+            ],
+            "id": resourceIdentifier,
+            "status": ["state": state, "networks": networks]
+        ]
     }
 
     private func fixture(_ name: String) throws -> String {

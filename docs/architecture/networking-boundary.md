@@ -14,7 +14,8 @@ Hostwright currently controls or rejects these local facts:
 - Planning blocks desired host ports that conflict with observed non-target runtime services when live observation is supplied.
 - Privileged host ports remain warning-level in planning and are rejected before create execution.
 - DNS, service discovery, network aliases, network modes, `expose`, and other orchestrator networking fields fail closed as unsupported manifest fields.
-- The versioned observation fixture schema can record reviewed network attachments by name, kind, address, gateway, and interface. Non-empty real Apple container network output remains unsupported until a reviewed fixture defines its schema.
+- The versioned observation fixture schema and the reviewed Apple container 1.0.0 parser record network name, kind, hostname, IPv4/IPv6 address, gateway, interface, MAC address, and MTU when present.
+- A disposable two-project proof verified real Apple container 1.0.0 network metadata parsing and exact cleanup. Host-to-container localhost HTTP reachability remains blocked on this machine by the macOS Local Network permission state for `container-runtime-linux`, so that data-plane lane is not counted as passing evidence.
 
 ## First-Release Direction
 

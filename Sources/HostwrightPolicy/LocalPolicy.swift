@@ -62,6 +62,7 @@ public enum PolicyReasonCode: String, Equatable, Sendable {
     case cleanupStale
     case cleanupAmbiguous
     case cleanupObservedServiceMismatch
+    case cleanupIdentityBindingMismatch
     case cleanupRunning
     case cleanupUnknownLifecycle
     case cleanupMissingRuntimeResource
@@ -182,6 +183,7 @@ public struct CleanupOwnershipPolicyInput: Equatable, Sendable {
     public let resourceIdentifier: String
     public let serviceName: String?
     public let ownershipRuntimeAdapter: String
+    public let ownershipIdentityVersion: Int
     public let observedAdapterName: String?
     public let observedServices: [ObservedRuntimeService]
 
@@ -193,6 +195,7 @@ public struct CleanupOwnershipPolicyInput: Equatable, Sendable {
         resourceIdentifier: String,
         serviceName: String?,
         ownershipRuntimeAdapter: String,
+        ownershipIdentityVersion: Int,
         observedAdapterName: String?,
         observedServices: [ObservedRuntimeService]
     ) {
@@ -203,6 +206,7 @@ public struct CleanupOwnershipPolicyInput: Equatable, Sendable {
         self.resourceIdentifier = resourceIdentifier
         self.serviceName = serviceName
         self.ownershipRuntimeAdapter = ownershipRuntimeAdapter
+        self.ownershipIdentityVersion = ownershipIdentityVersion
         self.observedAdapterName = observedAdapterName
         self.observedServices = observedServices
     }
@@ -287,7 +291,7 @@ public struct LocalPolicyEvaluator: Equatable, Sendable {
         if input.ownershipProjectID != input.expectedProjectID {
             return cleanupDecision(.neverDelete, reasonCode: .cleanupWrongProject, reason: "ownership record belongs to a different project", resourceIdentifier: input.resourceIdentifier)
         }
-        if !input.resourceIdentifier.hasPrefix("hostwright-") {
+        if !RuntimeManagedResourceIdentity.isSupportedIdentifier(input.resourceIdentifier) {
             return cleanupDecision(.neverDelete, reasonCode: .cleanupUnmanagedIdentifier, reason: "resource identifier is not Hostwright-managed", resourceIdentifier: input.resourceIdentifier)
         }
         guard let expectedServiceName = input.serviceName else {
@@ -307,6 +311,13 @@ public struct LocalPolicyEvaluator: Equatable, Sendable {
         }
         if observedService.identity.serviceName != expectedServiceName {
             return cleanupDecision(.blocked, reasonCode: .cleanupObservedServiceMismatch, reason: "observed service name does not match ownership record", resourceIdentifier: input.resourceIdentifier)
+        }
+        let identityBindingMatches = (input.ownershipIdentityVersion == 1 &&
+            input.resourceIdentifier == observedService.identity.legacyManagedResourceIdentifier) ||
+            (input.ownershipIdentityVersion == RuntimeManagedResourceIdentity.currentVersion &&
+                input.resourceIdentifier == observedService.identity.managedResourceIdentifier)
+        if !identityBindingMatches {
+            return cleanupDecision(.blocked, reasonCode: .cleanupIdentityBindingMismatch, reason: "ownership identity version does not bind the exact observed identifier", resourceIdentifier: input.resourceIdentifier)
         }
 
         switch observedService.lifecycleState {

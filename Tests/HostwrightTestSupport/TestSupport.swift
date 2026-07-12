@@ -76,6 +76,7 @@ public struct ScriptedRuntimeAdapter: RuntimeAdapter {
                 PlannedRuntimeAction(
                     kind: .create,
                     identity: service.identity,
+                    resourceIdentifier: service.identity.managedResourceIdentifier,
                     isDestructive: false,
                     summary: "Scripted plan would create \(service.identity.displayName)."
                 )
@@ -88,10 +89,10 @@ public struct ScriptedRuntimeAdapter: RuntimeAdapter {
         throw RuntimeAdapterError.mutationUnavailableByPolicy("ScriptedRuntimeAdapter does not execute runtime mutation.")
     }
 
-    public func logs(for identity: RuntimeServiceIdentity, tail: Int) async throws -> RuntimeLogResult {
+    public func logs(for service: ObservedRuntimeService, tail: Int) async throws -> RuntimeLogResult {
         switch scenario {
         case .logs(let text):
-            return RuntimeLogResult(identity: identity, text: redactionPolicy.redact(text), lineLimit: min(max(1, tail), 1_000))
+            return RuntimeLogResult(identity: service.identity, text: redactionPolicy.redact(text), lineLimit: min(max(1, tail), 1_000))
         case .unavailable(let message):
             throw RuntimeAdapterError.runtimeUnavailable(redactionPolicy.redact(message))
         default:

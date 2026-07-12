@@ -8,9 +8,9 @@
 
 ## Verified On 2026-07-12
 
-- `swift build` succeeds after the Phase 40 control-plane direction update.
-- `swift test list` lists 268 XCTest cases across Hostwright test targets.
-- `swift test` executes 268 XCTest cases across CLI, core, daemon, health, import, manifest, networking, observability, policy, reconciler, runtime, secrets, and state targets with 0 failures.
+- `swift build` succeeds after the runtime identity and ownership repair.
+- `swift test list` lists 280 XCTest cases across Hostwright test targets.
+- `swift test` executes 280 XCTest cases across CLI, core, daemon, health, import, manifest, networking, observability, policy, reconciler, runtime, secrets, and state targets with 0 failures.
 - XCTest count is unit/contract and local-integration coverage, not a live-runtime, hardware-benchmark, or distribution-artifact success rate. Evidence classes are defined in `docs/reference/testing-evidence.md`.
 - `scripts/grep-orchard.sh .` succeeds and reports historical references only in `docs/source-material/` and `docs/naming/`.
 - `scripts/test.sh` succeeds and runs `swift build`, `swift test`, and the built-CLI local integration gate.
@@ -58,10 +58,12 @@
 - `hostwright apply` created exactly one disposable Apple container named `hostwright-phase22proof-netproof`.
 - `container list --all --format json` reported the proof publish as `127.0.0.1:19022:80/tcp`.
 - `hostwright cleanup --dry-run` plus token confirmation deleted exactly `hostwright-phase22proof-netproof`.
+- The runtime identity live proof used the same existing local image without pulling and created two concurrent projects whose legacy identifiers were identical. Their v2 identifiers were distinct, exact ownership labels matched, Apple container 1.0.0 network metadata parsed through `RuntimeAdapter`, both bounded processes exited naturally, token-confirmed cleanup deleted both exact resources, and the pre-existing Apple builder remained.
+- Localhost HTTP data-plane proof is blocked, not passed: the host listener accepted and reset connections while macOS Local Network access for `container-runtime-linux` was disabled. This matches [apple/container issue #1702](https://github.com/apple/container/issues/1702). No runtime, firewall, privacy, or system-service setting was changed.
 
 ## Current Implementation Truth
 
-- The completion audit classifies Phases 12, 19, 34, and 36 as partial, Phase 35 as blocked, and research/requirements phases separately from product implementation.
+- The completion audit classifies Phases 12, 34, and 36 as partial, Phase 35 as blocked, and research/requirements phases separately from product implementation. Phase 19 is complete locally after the exact-identity repair and disposable live cleanup proof.
 
 - Phase 5 adds read-only Apple container observation infrastructure behind `RuntimeAdapter`.
 - Phase 6 adds SQLite-backed local state for explicit database paths.
@@ -77,10 +79,10 @@
 - Phase 16 adds bounded host-side health check execution, append-only health result persistence, restart policy state with max attempts/backoff/operator hold/manual-disable/crash-loop blocking, redacted health/restart events, and apply/daemon planning gates that avoid aggressive restart loops.
 - Phase 17 adds one restart-policy-gated managed restart path for exact Hostwright-owned running/unhealthy services, using live runtime lifecycle observation, a fresh persisted unhealthy health result from the explicit state DB, status/apply plan-hash parity, internal stop-then-start runtime execution, operation ledger records, partial restart failure records, and redacted events.
 - Phase 18 adds operation recovery groups and steps, apply checkpoints, active-operation locking with expired-lock interruption, rollback-unavailable step records, redacted manual recovery hints, legacy managed-restart recovery rendering, and read-only `hostwright recovery` output for failed or interrupted apply inspection.
-- Phase 19 adds cleanup dry-run classifications for eligible, ambiguous, stale, running, unknown, blocked, and never-delete ownership-backed and observed-only resources, keeps confirmed deletion limited to exact eligible Hostwright-owned non-running containers, hardens cleanup confirmation tokens against eligible-candidate drift, and reports delete-success/state-persistence failures as state failures.
+- Phase 19 adds cleanup dry-run classifications for eligible, ambiguous, stale, running, unknown, blocked, and never-delete ownership-backed and observed-only resources, collision-resistant v2 identifiers and labels, exact observed identifiers, legacy upgrade hints, multi-project filtering, exact managed lifecycle ownership gates, exact eligible-only cleanup, hardened confirmation tokens, and delete-success/state-persistence failure reporting.
 - Phase 20 adds read-only event filters, local redacted diagnostics bundles from explicit state DB paths, local-only telemetry policy reporting in status/doctor/diagnostics output, and XCTest coverage for diagnostics redaction and no runtime observation during export.
 - Phase 21 documents local control-surface data contracts and safety boundaries for a future separate design/frontend owner; it does not add a control surface or new API runtime.
-- Phase 22 adds local bind-address policy helpers, observed host-port conflict blockers, unsupported DNS/discovery/networking-field errors, versioned network attachment fixture parsing, and fail-closed handling for non-empty real Apple container network output.
+- Phase 22 adds local bind-address policy helpers, observed host-port conflict blockers, unsupported DNS/discovery/networking-field errors, versioned network fixtures, and reviewed Apple container 1.0.0 network metadata parsing. Localhost HTTP remains an explicitly blocked evidence lane on this host.
 - Phase 24 adds an opt-in read-only noninteractive macOS Keychain backend with real add/read/exact-delete/post-delete evidence while keeping the default CLI backend unavailable and all production Keychain writes/deletes unsupported.
 - Phase 26 adds ProcessInfo-backed resource intelligence reports in doctor JSON, fixture-backed parser coverage, evidence-based non-arm64 image architecture warnings, and docs that keep benchmark dimensions explicit as unmeasured without capacity or accelerator claims.
 - Phase 27 adds a research-only accelerator boundary decision record and docs guard for Apple GPU, ANE, Metal, Core ML, MLX, PyTorch MPS, host-native accelerator helpers, and scheduler accelerator dimensions.
@@ -100,7 +102,7 @@
 - No Apple container command was called by Phase 6 or Phase 7.
 - `FoundationRuntimeProcessRunner` has real subprocess coverage for output draining and timeout behavior; scripted process results remain test-only failure-injection evidence.
 - `AppleContainerReadOnlyAdapter` reports missing `container` as runtime unavailable and rejects mutation through the adapter contract.
-- `AppleContainerObservationParser` accepts the fixture-defined `hostwright.apple-container.observation.v1` schema with reviewed network attachment metadata, the verified real empty JSON array shape `[]`, Apple builder container list output, and the verified created/stopped proof container output. Non-empty real Apple container network output fails closed until reviewed.
+- `AppleContainerObservationParser` accepts the fixture-defined `hostwright.apple-container.observation.v1` schema, verified real empty and builder shapes, state-backed legacy rows, and exact labeled Apple container 1.0.0 rows with reviewed network metadata. It ignores unrelated labeled projects and fails closed on malformed current-project ownership or unsupported fields.
 - `AppleContainerImageListParser` accepts the verified real object-based image list shape with `configuration.name`.
 - `SQLiteStateStore` uses system `SQLite3`, schema migrations, transactions, and repository APIs for desired services, observed snapshots, events, operations, ownership records, health results, restart policy state, restart recovery records, operation recovery groups/steps, and diagnostics export.
 - Phase 6 state tests use explicit temporary database paths only.
@@ -131,7 +133,7 @@ Important diagnostic correction:
 - `swift -e 'import XCTest'` can still fail and is not the correct gate.
 - A minimal SwiftPM XCTest probe passed after Xcode was fixed.
 - `swift test list` is the local proof that Hostwright now exposes real XCTest cases.
-- `swift test` executes 268 XCTest cases after the evidence-contract, production-source boundary, real loopback HTTP/file-lock/Keychain tests, and real SQLite integration suite were added.
+- `swift test` executes 280 XCTest cases after the evidence-contract, production-source boundary, real loopback HTTP/file-lock/Keychain tests, real SQLite integration suite, and runtime identity/ownership coverage were added.
 
 The old top-level smoke/precondition posture has been replaced with XCTest assertions. Some test file names still include `Smoke.swift`, but the contents are XCTest cases.
 

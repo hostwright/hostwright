@@ -20,16 +20,32 @@ struct LogsCommandRunner {
                 return failure(code: .commandUsage, message: "logs requires a service declared in \(manifestPath).")
             }
 
+            let observationDesiredState: DesiredRuntimeState
+            if let stateDatabasePath {
+                let configuration = StateStoreConfiguration(explicitDatabasePath: stateDatabasePath)
+                try configuration.validate()
+                let store = SQLiteStateStore(configuration: configuration)
+                try store.migrate()
+                observationDesiredState = try hostwrightDesiredStateWithOwnershipHints(
+                    mapping.desiredState,
+                    store: store,
+                    projectID: "project-\(mapping.desiredState.projectName)"
+                )
+            } else {
+                observationDesiredState = mapping.desiredState
+            }
+
             let adapter = environment.runtimeAdapter()
             let observed = try hostwrightWaitForAsync {
-                try await adapter.observe(desiredState: mapping.desiredState)
+                try await adapter.observe(desiredState: observationDesiredState)
             }
-            guard observed.services.contains(where: { $0.identity == desired.identity }) else {
+            let observedMatches = observed.services.filter { $0.identity == desired.identity }
+            guard observedMatches.count == 1, let observedService = observedMatches.first else {
                 return failure(code: .runtimeUnavailable, message: "logs requires an observed Hostwright-managed service. \(desired.identity.displayName) was not observed.")
             }
 
             let result = try hostwrightWaitForAsync {
-                try await adapter.logs(for: desired.identity, tail: tail)
+                try await adapter.logs(for: observedService, tail: tail)
             }
 
             if let stateDatabasePath {
@@ -39,6 +55,7 @@ struct LogsCommandRunner {
                     manifestText: manifestText,
                     projectName: mapping.desiredState.projectName,
                     serviceName: serviceName,
+                    resourceIdentifier: observedService.resourceIdentifier,
                     observed: observed,
                     lineLimit: result.lineLimit
                 )
@@ -48,6 +65,7 @@ struct LogsCommandRunner {
                 standardOutput: """
                 Hostwright logs
                 Service: \(desired.identity.displayName)
+                Resource: \(observedService.resourceIdentifier)
                 Tail: \(result.lineLimit)
 
                 \(RuntimeRedactionPolicy.default.redact(result.text))
@@ -68,6 +86,7 @@ struct LogsCommandRunner {
         manifestText: String,
         projectName: String,
         serviceName: String,
+        resourceIdentifier: String,
         observed: ObservedRuntimeState,
         lineLimit: Int
     ) throws {
@@ -96,7 +115,7 @@ struct LogsCommandRunner {
                 serviceName: serviceName,
                 runtimeAdapter: observed.adapterMetadata?.adapterName,
                 message: "Read last \(lineLimit) log line(s) for \(projectName)/\(serviceName).",
-                payloadJSONRedacted: #"{"tail":\#(lineLimit)}"#
+                payloadJSONRedacted: #"{"resourceIdentifier":"\#(resourceIdentifier)","tail":\#(lineLimit)}"#
             )
         ])
     }

@@ -38,7 +38,7 @@ public enum PlanRenderer {
             lines.append("- none")
         } else {
             lines += plan.actions.map { action in
-                "- \(action.kind.rawValue): \(action.identity.displayName) - \(action.reason) (\(action.executionAvailability.rawValue))"
+                "- \(action.kind.rawValue): \(action.identity.displayName) id=\(action.resourceIdentifier) - \(action.reason) (\(action.executionAvailability.rawValue))"
             }
         }
 

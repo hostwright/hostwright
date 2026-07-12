@@ -104,10 +104,12 @@ public struct ObservedServiceRecord: Equatable, Sendable {
     public let projectName: String
     public let serviceName: String
     public let instanceName: String?
+    public let resourceIdentifier: String
     public let image: String?
     public let lifecycleState: RuntimeLifecycleState
     public let healthState: RuntimeHealthState
     public let portsJSON: String
+    public let networksJSON: String
     public let mountsJSON: String
     public let runtimeIdentifiersJSON: String
 
@@ -117,10 +119,12 @@ public struct ObservedServiceRecord: Equatable, Sendable {
         projectName: String,
         serviceName: String,
         instanceName: String?,
+        resourceIdentifier: String,
         image: String?,
         lifecycleState: RuntimeLifecycleState,
         healthState: RuntimeHealthState,
         portsJSON: String,
+        networksJSON: String = "[]",
         mountsJSON: String,
         runtimeIdentifiersJSON: String
     ) {
@@ -129,10 +133,12 @@ public struct ObservedServiceRecord: Equatable, Sendable {
         self.projectName = projectName
         self.serviceName = serviceName
         self.instanceName = instanceName
+        self.resourceIdentifier = resourceIdentifier
         self.image = image
         self.lifecycleState = lifecycleState
         self.healthState = healthState
         self.portsJSON = portsJSON
+        self.networksJSON = networksJSON
         self.mountsJSON = mountsJSON
         self.runtimeIdentifiersJSON = runtimeIdentifiersJSON
     }
@@ -635,6 +641,7 @@ public struct OwnershipRecord: Equatable, Sendable {
     public let observedAt: String
     public let cleanupEligible: Bool
     public let metadataJSONRedacted: String
+    public let identityVersion: Int
 
     public init(
         id: String,
@@ -646,7 +653,8 @@ public struct OwnershipRecord: Equatable, Sendable {
         createdAt: String,
         observedAt: String,
         cleanupEligible: Bool,
-        metadataJSONRedacted: String
+        metadataJSONRedacted: String,
+        identityVersion: Int = 1
     ) {
         self.id = id
         self.resourceIdentifier = resourceIdentifier
@@ -658,6 +666,7 @@ public struct OwnershipRecord: Equatable, Sendable {
         self.observedAt = observedAt
         self.cleanupEligible = cleanupEligible
         self.metadataJSONRedacted = metadataJSONRedacted
+        self.identityVersion = identityVersion
     }
 
     public func redacted(using policy: RuntimeRedactionPolicy = .default) -> OwnershipRecord {
@@ -671,7 +680,8 @@ public struct OwnershipRecord: Equatable, Sendable {
             createdAt: createdAt,
             observedAt: observedAt,
             cleanupEligible: cleanupEligible,
-            metadataJSONRedacted: policy.redact(metadataJSONRedacted)
+            metadataJSONRedacted: policy.redact(metadataJSONRedacted),
+            identityVersion: identityVersion
         )
     }
 }

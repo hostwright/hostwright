@@ -252,8 +252,9 @@ public struct ObservedStateRepository: Sendable {
         try store.withValidatedConnection(readOnly: true) { connection in
             let rows = try connection.query(
                 """
-                SELECT id, snapshot_id, project_name, service_name, instance_name, image, lifecycle_state,
-                       health_state, ports_json, mounts_json, runtime_identifiers_json
+                SELECT id, snapshot_id, project_name, service_name, instance_name, resource_identifier,
+                       image, lifecycle_state, health_state, ports_json, networks_json, mounts_json,
+                       runtime_identifiers_json
                 FROM observed_services
                 WHERE snapshot_id = ?
                 ORDER BY service_name ASC, instance_name ASC
@@ -271,10 +272,12 @@ public struct ObservedStateRepository: Sendable {
             projectName: service.identity.projectName,
             serviceName: service.identity.serviceName,
             instanceName: service.identity.instanceName,
+            resourceIdentifier: service.resourceIdentifier,
             image: service.image,
             lifecycleState: service.lifecycleState,
             healthState: service.healthState,
             portsJSON: try StateJSON.encode(service.ports.map(portJSON)),
+            networksJSON: try StateJSON.encode(service.networks.map(networkJSON)),
             mountsJSON: try StateJSON.encode(service.mounts.map(mountJSON)),
             runtimeIdentifiersJSON: try StateJSON.encode([
                 "displayName": service.identity.displayName,
@@ -311,10 +314,11 @@ public struct ObservedStateRepository: Sendable {
         try connection.run(
             """
             INSERT INTO observed_services (
-                id, snapshot_id, project_name, service_name, instance_name, image, lifecycle_state,
-                health_state, ports_json, mounts_json, runtime_identifiers_json
+                id, snapshot_id, project_name, service_name, instance_name, resource_identifier,
+                image, lifecycle_state, health_state, ports_json, networks_json, mounts_json,
+                runtime_identifiers_json
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             bindings: [
                 .text(service.id),
@@ -322,10 +326,12 @@ public struct ObservedStateRepository: Sendable {
                 .text(service.projectName),
                 .text(service.serviceName),
                 optionalText(service.instanceName),
+                .text(service.resourceIdentifier),
                 optionalText(service.image),
                 .text(service.lifecycleState.rawValue),
                 .text(service.healthState.rawValue),
                 .text(service.portsJSON),
+                .text(service.networksJSON),
                 .text(service.mountsJSON),
                 .text(service.runtimeIdentifiersJSON)
             ]
@@ -1065,16 +1071,17 @@ public struct OwnershipRepository: Sendable {
                     """
                     INSERT INTO ownership_records (
                         id, resource_identifier, resource_type, project_id, service_name, runtime_adapter,
-                        created_at, observed_at, cleanup_eligible, metadata_json_redacted
+                        created_at, observed_at, cleanup_eligible, metadata_json_redacted, identity_version
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(resource_identifier, runtime_adapter) DO UPDATE SET
                         resource_type = excluded.resource_type,
                         project_id = excluded.project_id,
                         service_name = excluded.service_name,
                         observed_at = excluded.observed_at,
                         cleanup_eligible = excluded.cleanup_eligible,
-                        metadata_json_redacted = excluded.metadata_json_redacted
+                        metadata_json_redacted = excluded.metadata_json_redacted,
+                        identity_version = excluded.identity_version
                     """,
                     bindings: [
                         .text(redacted.id),
@@ -1086,7 +1093,8 @@ public struct OwnershipRepository: Sendable {
                         .text(redacted.createdAt),
                         .text(redacted.observedAt),
                         .bool(redacted.cleanupEligible),
-                        .text(redacted.metadataJSONRedacted)
+                        .text(redacted.metadataJSONRedacted),
+                        .int(redacted.identityVersion)
                     ]
                 )
             }
@@ -1098,13 +1106,31 @@ public struct OwnershipRepository: Sendable {
             let rows = try connection.query(
                 """
                 SELECT id, resource_identifier, resource_type, project_id, service_name, runtime_adapter,
-                       created_at, observed_at, cleanup_eligible, metadata_json_redacted
+                       created_at, observed_at, cleanup_eligible, metadata_json_redacted, identity_version
                 FROM ownership_records
                 ORDER BY resource_identifier ASC, runtime_adapter ASC
                 """
             )
             return try rows.map(ownershipRecord(from:))
         }
+    }
+
+    public func runtimeHints(projectID: String, projectName: String) throws -> [RuntimeOwnedResourceHint] {
+        try loadAll().compactMap { record in
+            guard record.resourceType == "container",
+                  record.projectID == projectID,
+                  record.runtimeAdapter == "AppleContainerApplyAdapter",
+                  let serviceName = record.serviceName,
+                  (record.identityVersion == 1 || record.identityVersion == RuntimeManagedResourceIdentity.currentVersion),
+                  RuntimeManagedResourceIdentity.isSupportedIdentifier(record.resourceIdentifier) else {
+                return nil
+            }
+            return RuntimeOwnedResourceHint(
+                resourceIdentifier: record.resourceIdentifier,
+                identity: RuntimeServiceIdentity(projectName: projectName, serviceName: serviceName),
+                identityVersion: record.identityVersion
+            )
+        }.sorted { $0.resourceIdentifier < $1.resourceIdentifier }
     }
 
     public func markCleanupCompleted(
@@ -1218,18 +1244,20 @@ private func observedSnapshotRecord(from row: [String?]) throws -> ObservedRunti
 }
 
 private func observedServiceRecord(from row: [String?]) throws -> ObservedServiceRecord {
-    guard row.count == 11,
+    guard row.count == 13,
           let id = row[0],
           let snapshotID = row[1],
           let projectName = row[2],
           let serviceName = row[3],
-          let lifecycleText = row[6],
-          let healthText = row[7],
+          let resourceIdentifier = row[5],
+          let lifecycleText = row[7],
+          let healthText = row[8],
           let lifecycleState = RuntimeLifecycleState(rawValue: lifecycleText),
           let healthState = RuntimeHealthState(rawValue: healthText),
-          let portsJSON = row[8],
-          let mountsJSON = row[9],
-          let runtimeIdentifiersJSON = row[10]
+          let portsJSON = row[9],
+          let networksJSON = row[10],
+          let mountsJSON = row[11],
+          let runtimeIdentifiersJSON = row[12]
     else {
         throw StateStoreError.invalidRecord("Could not decode observed service row.")
     }
@@ -1240,10 +1268,12 @@ private func observedServiceRecord(from row: [String?]) throws -> ObservedServic
         projectName: projectName,
         serviceName: serviceName,
         instanceName: row[4],
-        image: row[5],
+        resourceIdentifier: resourceIdentifier,
+        image: row[6],
         lifecycleState: lifecycleState,
         healthState: healthState,
         portsJSON: portsJSON,
+        networksJSON: networksJSON,
         mountsJSON: mountsJSON,
         runtimeIdentifiersJSON: runtimeIdentifiersJSON
     )
@@ -1487,7 +1517,7 @@ private func restartRecoveryRecord(from row: [String?]) throws -> RestartRecover
 }
 
 private func ownershipRecord(from row: [String?]) throws -> OwnershipRecord {
-    guard row.count == 10,
+    guard row.count == 11,
           let id = row[0],
           let resourceIdentifier = row[1],
           let resourceType = row[2],
@@ -1495,7 +1525,9 @@ private func ownershipRecord(from row: [String?]) throws -> OwnershipRecord {
           let createdAt = row[6],
           let observedAt = row[7],
           let cleanupEligibleText = row[8],
-          let metadataJSON = row[9]
+          let metadataJSON = row[9],
+          let identityVersionText = row[10],
+          let identityVersion = Int(identityVersionText)
     else {
         throw StateStoreError.invalidRecord("Could not decode ownership row.")
     }
@@ -1510,7 +1542,8 @@ private func ownershipRecord(from row: [String?]) throws -> OwnershipRecord {
         createdAt: createdAt,
         observedAt: observedAt,
         cleanupEligible: cleanupEligibleText == "1",
-        metadataJSONRedacted: metadataJSON
+        metadataJSONRedacted: metadataJSON,
+        identityVersion: identityVersion
     )
 }
 
@@ -1528,6 +1561,22 @@ private func portJSON(_ port: RuntimePortMapping) -> [String: Any] {
         "containerPort": port.containerPort,
         "protocol": port.protocolName.rawValue,
         "bindAddress": port.bindAddress ?? NSNull()
+    ]
+}
+
+private func networkJSON(_ network: RuntimeNetworkAttachment) -> [String: Any] {
+    [
+        "name": network.name,
+        "kind": network.kind ?? NSNull(),
+        "address": network.address ?? NSNull(),
+        "gateway": network.gateway ?? NSNull(),
+        "interfaceName": network.interfaceName ?? NSNull(),
+        "hostname": network.hostname ?? NSNull(),
+        "ipv4Address": network.ipv4Address ?? NSNull(),
+        "ipv4Gateway": network.ipv4Gateway ?? NSNull(),
+        "ipv6Address": network.ipv6Address ?? NSNull(),
+        "macAddress": network.macAddress ?? NSNull(),
+        "mtu": network.mtu.map { $0 as Any } ?? NSNull()
     ]
 }
 

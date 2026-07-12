@@ -112,7 +112,20 @@ final class HostwrightDaemonCoreTests: XCTestCase {
                     standardError: "password=fake-password"
                 )
             ])
-            let adapter = CountingRuntimeAdapter(observedServices: [Self.observedService(healthState: .unknown)])
+            let identity = RuntimeServiceIdentity(projectName: "demo", serviceName: "api")
+            let network = RuntimeNetworkAttachment(
+                name: "default",
+                hostname: "api.local",
+                ipv4Address: "192.168.64.8/24",
+                mtu: 1500
+            )
+            let adapter = CountingRuntimeAdapter(observedServices: [
+                Self.observedService(
+                    healthState: .unknown,
+                    resourceIdentifier: identity.legacyManagedResourceIdentifier,
+                    networks: [network]
+                )
+            ])
             let ids = DeterministicIDs()
             let runner = DaemonLoopRunner(
                 configuration: DaemonConfiguration(
@@ -145,6 +158,9 @@ final class HostwrightDaemonCoreTests: XCTestCase {
             let latestSnapshot = try XCTUnwrap(store.observedStates.loadSnapshots(projectID: "project-demo").last)
             let observed = try store.observedStates.loadObservedServices(snapshotID: latestSnapshot.id)
             XCTAssertEqual(observed[0].healthState, .unhealthy)
+            XCTAssertEqual(observed[0].resourceIdentifier, identity.legacyManagedResourceIdentifier)
+            XCTAssertTrue(observed[0].networksJSON.contains("192.168.64.8"))
+            XCTAssertTrue(observed[0].networksJSON.contains("1500"))
 
             let restartState = try XCTUnwrap(store.restartPolicies.load(projectID: "project-demo", serviceName: "api"))
             XCTAssertEqual(restartState.policy, .onFailure)
@@ -497,14 +513,19 @@ final class HostwrightDaemonCoreTests: XCTestCase {
 
     private static func observedService(
         lifecycleState: RuntimeLifecycleState = .running,
-        healthState: RuntimeHealthState = .healthy
+        healthState: RuntimeHealthState = .healthy,
+        resourceIdentifier: String? = nil,
+        networks: [RuntimeNetworkAttachment] = []
     ) -> ObservedRuntimeService {
-        ObservedRuntimeService(
-            identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"),
+        let identity = RuntimeServiceIdentity(projectName: "demo", serviceName: "api")
+        return ObservedRuntimeService(
+            identity: identity,
+            resourceIdentifier: resourceIdentifier ?? identity.managedResourceIdentifier,
             image: "ghcr.io/example/api:latest",
             lifecycleState: lifecycleState,
             healthState: healthState,
-            ports: [RuntimePortMapping(hostPort: 8080, containerPort: 8080, bindAddress: "127.0.0.1")]
+            ports: [RuntimePortMapping(hostPort: 8080, containerPort: 8080, bindAddress: "127.0.0.1")],
+            networks: networks
         )
     }
 
@@ -598,8 +619,8 @@ private final class CountingRuntimeAdapter: RuntimeAdapter, @unchecked Sendable 
         RuntimePlan(actions: [])
     }
 
-    func logs(for identity: RuntimeServiceIdentity, tail: Int) async throws -> RuntimeLogResult {
-        RuntimeLogResult(identity: identity, text: "", lineLimit: tail)
+    func logs(for service: ObservedRuntimeService, tail: Int) async throws -> RuntimeLogResult {
+        RuntimeLogResult(identity: service.identity, text: "", lineLimit: tail)
     }
 
     func execute(_ action: PlannedRuntimeAction, confirmation: RuntimeMutationConfirmation?) async throws -> RuntimeEvent {

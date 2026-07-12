@@ -82,6 +82,7 @@ private extension PlanIssueKind {
              .imageDigestRequired,
              .imageDigestInvalid,
              .secretReferenceUnavailable,
+             .cleanupIdentityBindingMismatch,
              .cleanupEligible,
              .cleanupNotEligible,
              .cleanupWrongResourceType,

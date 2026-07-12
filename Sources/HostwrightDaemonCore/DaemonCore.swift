@@ -256,8 +256,16 @@ public struct DaemonLoopRunner {
             let manifestText = try readConfig(configuration.configPath)
             let manifest = try ManifestValidator.validated(manifestText)
             let mapping = ManifestRuntimeMapper.map(manifest)
-            let observed = try await runtimeAdapter.observe(desiredState: mapping.desiredState)
             let projectID = "project-\(mapping.desiredState.projectName)"
+            let observationDesiredState = DesiredRuntimeState(
+                projectName: mapping.desiredState.projectName,
+                services: mapping.desiredState.services,
+                ownedResourceHints: try store.ownership.runtimeHints(
+                    projectID: projectID,
+                    projectName: mapping.desiredState.projectName
+                )
+            )
+            let observed = try await runtimeAdapter.observe(desiredState: observationDesiredState)
             let adapterName = observed.adapterMetadata?.adapterName ?? "runtime-adapter"
 
             try store.desiredStates.saveManifestSnapshot(
@@ -517,10 +525,12 @@ public struct DaemonLoopRunner {
 
             return ObservedRuntimeService(
                 identity: service.identity,
+                resourceIdentifier: service.resourceIdentifier,
                 image: service.image,
                 lifecycleState: service.lifecycleState,
                 healthState: healthState,
                 ports: service.ports,
+                networks: service.networks,
                 mounts: service.mounts,
                 observedAt: service.observedAt
             )

@@ -36,9 +36,8 @@ final class HostwrightStateTests: XCTestCase {
 
     func testMigrationBackfillsLegacyOwnershipRuntimeAdapter() throws {
         try withTemporaryStore { store, databaseURL in
-            try store.migrate()
+            try MigrationRunner().apply(to: store, throughVersion: 4)
             let connection = try SQLiteConnection(path: databaseURL.path)
-            try simulateDatabaseBeforeOwnershipAdapterBackfill(connection: connection)
             try insertOwnershipRecord(connection: connection, id: "owner-legacy", runtimeAdapter: "runtime-adapter")
 
             try store.migrate()
@@ -52,9 +51,8 @@ final class HostwrightStateTests: XCTestCase {
 
     func testMigrationDropsDuplicateLegacyOwnershipRuntimeAdapter() throws {
         try withTemporaryStore { store, databaseURL in
-            try store.migrate()
+            try MigrationRunner().apply(to: store, throughVersion: 4)
             let connection = try SQLiteConnection(path: databaseURL.path)
-            try simulateDatabaseBeforeOwnershipAdapterBackfill(connection: connection)
             try insertOwnershipRecord(connection: connection, id: "owner-legacy", runtimeAdapter: "runtime-adapter")
             try insertOwnershipRecord(connection: connection, id: "owner-canonical", runtimeAdapter: "AppleContainerApplyAdapter")
 
@@ -65,6 +63,42 @@ final class HostwrightStateTests: XCTestCase {
             XCTAssertEqual(ownership[0].id, "owner-canonical")
             XCTAssertEqual(ownership[0].runtimeAdapter, "AppleContainerApplyAdapter")
             XCTAssertEqual(try store.schemaVersion(), MigrationRunner.latestSchemaVersion)
+        }
+    }
+
+    func testVersionSixBackfillsExactObservedIdentifiersAndOwnershipIdentityVersion() throws {
+        try withTemporaryStore { store, databaseURL in
+            try MigrationRunner().apply(to: store, throughVersion: 5)
+            let connection = try SQLiteConnection(path: databaseURL.path)
+            try connection.run(
+                """
+                INSERT INTO observed_runtime_snapshots (
+                    id, project_id, runtime_adapter, runtime_name, runtime_version, observed_at,
+                    parser_version, raw_output_hash, redacted_summary, capabilities_json
+                ) VALUES ('snapshot-v5', NULL, 'AppleContainerApplyAdapter', 'Apple container CLI',
+                          '1.0.0', ?, 'v1', NULL, 'legacy', '[]')
+                """,
+                bindings: [.text(timestamp)]
+            )
+            try connection.run(
+                """
+                INSERT INTO observed_services (
+                    id, snapshot_id, project_name, service_name, instance_name, image,
+                    lifecycle_state, health_state, ports_json, mounts_json, runtime_identifiers_json
+                ) VALUES ('service-v5', 'snapshot-v5', 'api-local', 'api', NULL, 'local/api:latest',
+                          'stopped', 'unknown', '[]', '[]', '{}')
+                """
+            )
+            try insertOwnershipRecord(connection: connection, id: "owner-v5", runtimeAdapter: "AppleContainerApplyAdapter")
+
+            try store.migrate()
+
+            let observed = try store.observedStates.loadObservedServices(snapshotID: "snapshot-v5")
+            XCTAssertEqual(observed.map(\.resourceIdentifier), ["hostwright-api-local-api"])
+            XCTAssertEqual(observed.map(\.networksJSON), ["[]"])
+            let ownership = try store.ownership.loadAll()
+            XCTAssertEqual(ownership.map(\.identityVersion), [1])
+            XCTAssertEqual(try store.schemaVersion(), 6)
         }
     }
 
@@ -201,6 +235,8 @@ final class HostwrightStateTests: XCTestCase {
             let observedServices = try store.observedStates.loadObservedServices(snapshotID: snapshotID)
             XCTAssertEqual(observedServices.count, 1)
             XCTAssertEqual(observedServices[0].lifecycleState, .running)
+            XCTAssertEqual(observedServices[0].resourceIdentifier, observedState.services[0].resourceIdentifier)
+            XCTAssertTrue(observedServices[0].networksJSON.contains("192.168.64.2"))
         }
     }
 
@@ -869,6 +905,60 @@ final class HostwrightStateTests: XCTestCase {
         }
     }
 
+    func testOwnershipHintsReturnOnlyCanonicalSupportedContainerRows() throws {
+        try withTemporaryStore { store, _ in
+            try saveDesiredState(in: store)
+            let identity = RuntimeServiceIdentity(projectName: "api-local", serviceName: "api")
+            let records = [
+                OwnershipRecord(
+                    id: "legacy",
+                    resourceIdentifier: identity.legacyManagedResourceIdentifier,
+                    resourceType: "container",
+                    projectID: projectID,
+                    serviceName: "api",
+                    runtimeAdapter: "AppleContainerApplyAdapter",
+                    createdAt: timestamp,
+                    observedAt: timestamp,
+                    cleanupEligible: true,
+                    metadataJSONRedacted: "{}",
+                    identityVersion: 1
+                ),
+                OwnershipRecord(
+                    id: "current",
+                    resourceIdentifier: identity.managedResourceIdentifier,
+                    resourceType: "container",
+                    projectID: projectID,
+                    serviceName: "api",
+                    runtimeAdapter: "AppleContainerApplyAdapter",
+                    createdAt: timestamp,
+                    observedAt: timestamp,
+                    cleanupEligible: true,
+                    metadataJSONRedacted: "{}",
+                    identityVersion: 2
+                ),
+                OwnershipRecord(
+                    id: "other-adapter",
+                    resourceIdentifier: "hostwright-api-local-other",
+                    resourceType: "container",
+                    projectID: projectID,
+                    serviceName: "other",
+                    runtimeAdapter: "other",
+                    createdAt: timestamp,
+                    observedAt: timestamp,
+                    cleanupEligible: true,
+                    metadataJSONRedacted: "{}"
+                )
+            ]
+            for record in records {
+                try store.ownership.upsert(record)
+            }
+
+            let hints = try store.ownership.runtimeHints(projectID: projectID, projectName: "api-local")
+            XCTAssertEqual(hints.map(\.resourceIdentifier), [identity.legacyManagedResourceIdentifier, identity.managedResourceIdentifier].sorted())
+            XCTAssertEqual(Set(hints.map(\.identityVersion)), Set([1, 2]))
+        }
+    }
+
     func testOpeningDirectoryAsDatabaseFailsSafely() throws {
         try withTemporaryDirectory { directory in
             let invalidStore = SQLiteStateStore(path: directory.path)
@@ -911,11 +1001,6 @@ final class HostwrightStateTests: XCTestCase {
             manifest: manifest,
             timestamp: timestamp
         )
-    }
-
-    private func simulateDatabaseBeforeOwnershipAdapterBackfill(connection: SQLiteConnection) throws {
-        try connection.run("DELETE FROM ownership_records")
-        try connection.run("DELETE FROM schema_migrations WHERE version = 5")
     }
 
     private func insertOwnershipRecord(
@@ -997,10 +1082,21 @@ final class HostwrightStateTests: XCTestCase {
             services: [
                 ObservedRuntimeService(
                     identity: RuntimeServiceIdentity(projectName: "api-local", serviceName: "api", instanceName: "api-1"),
+                    resourceIdentifier: RuntimeServiceIdentity(projectName: "api-local", serviceName: "api", instanceName: "api-1").managedResourceIdentifier,
                     image: "ghcr.io/example/api:latest",
                     lifecycleState: .running,
                     healthState: .unknown,
                     ports: [RuntimePortMapping(hostPort: 8080, containerPort: 8080)],
+                    networks: [
+                        RuntimeNetworkAttachment(
+                            name: "default",
+                            hostname: "api.local",
+                            ipv4Address: "192.168.64.2/24",
+                            ipv4Gateway: "192.168.64.1",
+                            macAddress: "02:00:00:00:00:02",
+                            mtu: 1280
+                        )
+                    ],
                     observedAt: timestamp
                 )
             ],

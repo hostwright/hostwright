@@ -12,7 +12,7 @@ Hostwright has Apple container observation infrastructure behind `RuntimeAdapter
 
 Implemented:
 
-- typed runtime service identity, desired service, observed service, lifecycle state, health state, ports, mounts, environment values, events, capabilities, and adapter metadata;
+- typed versioned runtime service identity, exact observed resource identifiers, desired service, observed service, lifecycle state, health state, ports, networks, mounts, environment values, events, capabilities, and adapter metadata;
 - expanded `RuntimeAdapter` protocol for metadata, capability discovery, read-only observation, planning, bounded logs, and mutation hooks;
 - test-only `ScriptedRuntimeAdapter` for deterministic contracts without live process execution;
 - runtime command specs, command results, command classification, timeout model, and process runner protocol;
@@ -128,7 +128,7 @@ The default policy redacts key/value patterns and sensitive key fragments such a
 
 ## Parser Boundary
 
-`AppleContainerObservationParser` accepts the fixture-defined JSON schema `hostwright.apple-container.observation.v1`, the verified real empty Apple container list output, the verified Apple builder-container output as ignored non-Hostwright runtime state, and the verified created/stopped `hostwright-proof-web` proof container output.
+`AppleContainerObservationParser` accepts the fixture-defined JSON schema `hostwright.apple-container.observation.v1`, the verified real empty Apple container list output, Apple builder output as ignored runtime state, state-backed legacy identifiers, and labeled Apple container 1.0.0 rows. Current-project v2 labels are bound to the exact identifier, labeled orphans remain visible, unrelated labeled projects are ignored, and malformed current-project ownership fails closed. Real network parsing records hostname, IPv4/IPv6 address, gateway, MAC address, network name, and MTU.
 
 If broader real Apple container output does not match one of those reviewed shapes, Hostwright reports a parse failure instead of guessing. This protects the runtime boundary from turning unverified Apple CLI output into fake product truth.
 
@@ -137,11 +137,11 @@ If broader real Apple container output does not match one of those reviewed shap
 Apply and cleanup support only:
 
 - `container image list --format json` as a read-only local-image availability gate;
-- `container create --name <name> --env KEY=value --publish 127.0.0.1:host:container <image> [command...]`.
+- `container create --name <versioned-id> --label <exact-ownership-label> ... --env KEY=value --publish 127.0.0.1:host:container <image> [command...]`.
 - `container start <id>` for exact Hostwright-owned stopped/created/exited services when restart policy allows managed start.
 - internal `container stop <id>` then `container start <id>` for exact Hostwright-owned running/unhealthy services when restart policy allows managed restart.
 - `container delete <id>` for exact cleanup-eligible Hostwright-owned stopped/created/exited containers after dry-run token confirmation.
 
 The adapter rejects mounts, DNS, custom networks, capabilities, Rosetta, virtualization, custom runtime/kernel, SSH forwarding, `--rm`, `run`, image pull, public stop/restart commands, remove, broad cleanup, prune, build, exec, attach, interactive, `--all`, `--force`, image delete, and volume delete.
 
-The live proof used an explicitly approved disposable local image and created exactly one container named `hostwright-proof-web`. A stale repeat apply was rejected before mutation because the recomputed plan hash changed. Cleanup removed only the exact proof container and proof image. Apple builder runtime state and the downloaded base image remain outside Hostwright ownership.
+The latest live identity proof used the existing local `docker.io/library/python:alpine` image without pulling. Two projects whose legacy identifiers were identical produced distinct v2 identifiers and labels, were observed concurrently with Apple container 1.0.0 network metadata, exited naturally, and were removed through exact token-confirmed Hostwright cleanup. Apple builder runtime state and the base image remained outside Hostwright ownership. Localhost HTTP forwarding is not claimed by that proof because macOS Local Network access for `container-runtime-linux` is disabled on the proof host.

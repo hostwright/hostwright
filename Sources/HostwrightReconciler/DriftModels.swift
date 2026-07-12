@@ -119,6 +119,7 @@ public enum PlanExecutionAvailability: String, Equatable, Sendable {
 public struct PlannedAction: Equatable, Sendable {
     public let kind: PlanActionKind
     public let identity: RuntimeServiceIdentity
+    public let resourceIdentifier: String
     public let reason: String
     public let driftKind: DriftKind
     public let stableDetailKey: String
@@ -127,6 +128,7 @@ public struct PlannedAction: Equatable, Sendable {
     public init(
         kind: PlanActionKind,
         identity: RuntimeServiceIdentity,
+        resourceIdentifier: String,
         reason: String,
         driftKind: DriftKind,
         stableDetailKey: String = "",
@@ -134,6 +136,7 @@ public struct PlannedAction: Equatable, Sendable {
     ) {
         self.kind = kind
         self.identity = identity
+        self.resourceIdentifier = resourceIdentifier
         self.reason = reason
         self.driftKind = driftKind
         self.stableDetailKey = stableDetailKey
@@ -144,6 +147,7 @@ public struct PlannedAction: Equatable, Sendable {
         [
             identity.projectName,
             identity.serviceName,
+            resourceIdentifier,
             String(format: "%03d", kind.sortIndex),
             stableDetailKey
         ].joined(separator: "|")
@@ -292,7 +296,7 @@ enum PlanHasher {
             "drift|\(record.kind.rawValue)|\(record.severity.rawValue)|\(record.identity?.displayName ?? "")|\(record.reason)|\(record.stableDetailKey)"
         }
         parts += actions.map { action in
-            "action|\(action.kind.rawValue)|\(action.identity.displayName)|\(action.reason)|\(action.driftKind.rawValue)|\(action.stableDetailKey)|\(action.executionAvailability.rawValue)"
+            "action|\(action.kind.rawValue)|\(action.identity.displayName)|\(action.resourceIdentifier)|\(action.reason)|\(action.driftKind.rawValue)|\(action.stableDetailKey)|\(action.executionAvailability.rawValue)"
         }
 
         return fnv1a64(parts.joined(separator: "\n"))

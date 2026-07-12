@@ -38,13 +38,18 @@ struct StatusCommandRunner {
             try store.migrate()
 
             let mapping = ManifestRuntimeMapper.map(manifest)
-            let adapter = environment.runtimeAdapter()
-            let observed = try hostwrightWaitForAsync {
-                try await adapter.observe(desiredState: mapping.desiredState)
-            }
-            let timestamp = hostwrightTimestamp()
             let projectName = mapping.desiredState.projectName
             let projectID = "project-\(projectName)"
+            let observationDesiredState = try hostwrightDesiredStateWithOwnershipHints(
+                mapping.desiredState,
+                store: store,
+                projectID: projectID
+            )
+            let adapter = environment.runtimeAdapter()
+            let observed = try hostwrightWaitForAsync {
+                try await adapter.observe(desiredState: observationDesiredState)
+            }
+            let timestamp = hostwrightTimestamp()
             let restartPolicyStates = try hostwrightRestartPolicyStateMap(store: store, projectID: projectID, projectName: projectName)
             let observedForPlanning = try hostwrightPlanningObservedState(
                 observed: observed,
@@ -153,7 +158,7 @@ struct StatusCommandRunner {
                 let ports = observed.ports.map { port in
                     "\((port.bindAddress ?? "localhost")):\(port.hostPort.map(String.init) ?? "?")->\(port.containerPort)/\(port.protocolName.rawValue)"
                 }.joined(separator: ", ")
-                lines.append("- \(service.name): desired image=\(service.image ?? "<missing>") observed image=\(observed.image ?? "<unknown>") lifecycle=\(observed.lifecycleState.rawValue) health=\(observed.healthState.rawValue) ports=\(ports.isEmpty ? "none" : ports)")
+                lines.append("- \(service.name): id=\(observed.resourceIdentifier) desired image=\(service.image ?? "<missing>") observed image=\(observed.image ?? "<unknown>") lifecycle=\(observed.lifecycleState.rawValue) health=\(observed.healthState.rawValue) ports=\(ports.isEmpty ? "none" : ports)")
             } else {
                 lines.append("- \(service.name): desired image=\(service.image ?? "<missing>") observed=missing")
             }

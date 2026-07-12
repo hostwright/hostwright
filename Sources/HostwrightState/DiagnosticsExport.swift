@@ -311,6 +311,7 @@ private func ownershipObject(_ record: OwnershipRecord) -> [String: Any] {
         "projectID": record.projectID as Any,
         "serviceName": record.serviceName as Any,
         "runtimeAdapter": record.runtimeAdapter,
+        "identityVersion": record.identityVersion,
         "createdAt": record.createdAt,
         "observedAt": record.observedAt,
         "cleanupEligible": record.cleanupEligible,
@@ -341,10 +342,12 @@ private func observedServiceObject(_ service: ObservedServiceRecord) -> [String:
         "projectName": service.projectName,
         "serviceName": service.serviceName,
         "instanceName": service.instanceName as Any,
+        "resourceIdentifier": RuntimeRedactionPolicy.default.redact(service.resourceIdentifier),
         "image": service.image as Any,
         "lifecycleState": service.lifecycleState.rawValue,
         "healthState": service.healthState.rawValue,
         "portsJSON": service.portsJSON,
+        "networksJSON": service.networksJSON,
         "mountsJSON": service.mountsJSON,
         "runtimeIdentifiersJSON": RuntimeRedactionPolicy.default.redact(service.runtimeIdentifiersJSON)
     ].compactNilValues()
@@ -358,10 +361,12 @@ private extension ObservedServiceRecord {
             projectName: projectName,
             serviceName: serviceName,
             instanceName: instanceName,
+            resourceIdentifier: resourceIdentifier,
             image: image,
             lifecycleState: lifecycleState,
             healthState: healthState,
             portsJSON: RuntimeRedactionPolicy.default.redact(portsJSON),
+            networksJSON: RuntimeRedactionPolicy.default.redact(networksJSON),
             mountsJSON: RuntimeRedactionPolicy.default.redact(mountsJSON),
             runtimeIdentifiersJSON: RuntimeRedactionPolicy.default.redact(runtimeIdentifiersJSON)
         )

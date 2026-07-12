@@ -65,6 +65,21 @@ func hostwrightRestartPolicyStateMap(
     }, uniquingKeysWith: { first, _ in first })
 }
 
+func hostwrightDesiredStateWithOwnershipHints(
+    _ desiredState: DesiredRuntimeState,
+    store: SQLiteStateStore,
+    projectID: String
+) throws -> DesiredRuntimeState {
+    DesiredRuntimeState(
+        projectName: desiredState.projectName,
+        services: desiredState.services,
+        ownedResourceHints: try store.ownership.runtimeHints(
+            projectID: projectID,
+            projectName: desiredState.projectName
+        )
+    )
+}
+
 func hostwrightPlanningObservedState(
     observed: ObservedRuntimeState,
     desiredState: DesiredRuntimeState,
@@ -152,10 +167,12 @@ private extension ObservedRuntimeService {
     func withHealthState(_ healthState: RuntimeHealthState) -> ObservedRuntimeService {
         ObservedRuntimeService(
             identity: identity,
+            resourceIdentifier: resourceIdentifier,
             image: image,
             lifecycleState: lifecycleState,
             healthState: healthState,
             ports: ports,
+            networks: networks,
             mounts: mounts,
             observedAt: observedAt
         )
@@ -240,6 +257,7 @@ enum CLIJSON {
                 [
                     "kind": action.kind.rawValue,
                     "identity": action.identity.displayName,
+                    "resourceIdentifier": action.resourceIdentifier,
                     "reason": RuntimeRedactionPolicy.default.redact(action.reason),
                     "executionAvailability": action.executionAvailability.rawValue
                 ]
@@ -463,6 +481,7 @@ enum CLIJSON {
                     "desiredImage": service.image as Any,
                     "observed": observedService.map { observed in
                         [
+                            "resourceIdentifier": observed.resourceIdentifier,
                             "image": observed.image as Any,
                             "lifecycle": observed.lifecycleState.rawValue,
                             "health": observed.healthState.rawValue,
@@ -472,6 +491,21 @@ enum CLIJSON {
                                     "hostPort": port.hostPort as Any,
                                     "containerPort": port.containerPort,
                                     "protocol": port.protocolName.rawValue
+                                ].compactNilValues()
+                            },
+                            "networks": observed.networks.map { network in
+                                [
+                                    "name": network.name,
+                                    "kind": network.kind as Any,
+                                    "address": network.address as Any,
+                                    "gateway": network.gateway as Any,
+                                    "interface": network.interfaceName as Any,
+                                    "hostname": network.hostname as Any,
+                                    "ipv4Address": network.ipv4Address as Any,
+                                    "ipv4Gateway": network.ipv4Gateway as Any,
+                                    "ipv6Address": network.ipv6Address as Any,
+                                    "macAddress": network.macAddress as Any,
+                                    "mtu": network.mtu as Any
                                 ].compactNilValues()
                             }
                         ].compactNilValues()
@@ -485,6 +519,15 @@ enum CLIJSON {
                     "identity": drift.identity?.displayName as Any,
                     "reason": RuntimeRedactionPolicy.default.redact(drift.reason)
                 ].compactNilValues()
+            },
+            "actions": plan.actions.map { action in
+                [
+                    "kind": action.kind.rawValue,
+                    "identity": action.identity.displayName,
+                    "resourceIdentifier": action.resourceIdentifier,
+                    "reason": RuntimeRedactionPolicy.default.redact(action.reason),
+                    "executionAvailability": action.executionAvailability.rawValue
+                ]
             }
         ].compactNilValues())
     }

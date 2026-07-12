@@ -162,12 +162,34 @@ public enum RuntimeCommandPolicy {
             )
         }
 
-        guard let nameIndex = spec.arguments.firstIndex(of: "--name"),
-              spec.arguments.indices.contains(spec.arguments.index(after: nameIndex)),
-              spec.arguments[spec.arguments.index(after: nameIndex)].hasPrefix("hostwright-") else {
+        let nameIndices = spec.arguments.indices.filter { spec.arguments[$0] == "--name" }
+        guard nameIndices.count == 1,
+              let nameIndex = nameIndices.first,
+              spec.arguments.indices.contains(spec.arguments.index(after: nameIndex)) else {
             throw RuntimeAdapterError.commandRejected(
                 classification: spec.classification,
-                message: "Create-missing-service command specs must name a Hostwright-owned container."
+                message: "Create-missing-service command specs must contain exactly one Hostwright-owned container name."
+            )
+        }
+        let resourceIdentifier = spec.arguments[spec.arguments.index(after: nameIndex)]
+        guard RuntimeManagedResourceIdentity.isCurrentIdentifier(resourceIdentifier) else {
+            throw RuntimeAdapterError.commandRejected(
+                classification: spec.classification,
+                message: "Create-missing-service command specs require a versioned Hostwright container identifier."
+            )
+        }
+
+        let labels = try createLabels(in: spec)
+        guard let identity = RuntimeManagedResourceIdentity.identity(from: labels),
+              RuntimeManagedResourceIdentity.labelsMatch(
+                  labels,
+                  identity: identity,
+                  resourceIdentifier: resourceIdentifier
+              ),
+              labels == RuntimeManagedResourceIdentity.labels(for: identity) else {
+            throw RuntimeAdapterError.commandRejected(
+                classification: spec.classification,
+                message: "Create-missing-service command specs require complete ownership labels bound to the exact container identifier."
             )
         }
 
@@ -219,7 +241,7 @@ public enum RuntimeCommandPolicy {
             )
         }
 
-        guard isHostwrightContainerIdentifier(spec.arguments[1]) else {
+        guard RuntimeManagedResourceIdentity.isSupportedIdentifier(spec.arguments[1]) else {
             throw RuntimeAdapterError.commandRejected(
                 classification: spec.classification,
                 message: "Start-managed-service mutation requires an exact Hostwright-owned container identifier."
@@ -238,7 +260,7 @@ public enum RuntimeCommandPolicy {
             )
         }
 
-        guard isHostwrightContainerIdentifier(spec.arguments[1]) else {
+        guard RuntimeManagedResourceIdentity.isSupportedIdentifier(spec.arguments[1]) else {
             throw RuntimeAdapterError.commandRejected(
                 classification: spec.classification,
                 message: "Restart-managed-service mutation requires an exact Hostwright-owned container identifier."
@@ -256,7 +278,7 @@ public enum RuntimeCommandPolicy {
             )
         }
 
-        guard isHostwrightContainerIdentifier(spec.arguments[1]) else {
+        guard RuntimeManagedResourceIdentity.isSupportedIdentifier(spec.arguments[1]) else {
             throw RuntimeAdapterError.commandRejected(
                 classification: spec.classification,
                 message: "Delete-managed-container mutation requires an exact Hostwright-owned container identifier."
@@ -354,16 +376,12 @@ public enum RuntimeCommandPolicy {
         }
     }
 
-    private static func isHostwrightContainerIdentifier(_ value: String) -> Bool {
-        value.hasPrefix("hostwright-") && !value.contains("/") && !value.contains(" ")
-    }
-
     private static func validateCreateImageAndCommandTokens(_ spec: RuntimeCommandSpec) throws {
         var index = 1
         while index < spec.arguments.count {
             let argument = spec.arguments[index]
             switch argument {
-            case "--name", "--env", "--publish":
+            case "--name", "--label", "--env", "--publish":
                 let valueIndex = index + 1
                 guard valueIndex < spec.arguments.count else {
                     throw RuntimeAdapterError.commandRejected(
@@ -394,6 +412,36 @@ public enum RuntimeCommandPolicy {
             classification: spec.classification,
             message: "Create-missing-service command spec must include an image."
         )
+    }
+
+    private static func createLabels(in spec: RuntimeCommandSpec) throws -> [String: String] {
+        var labels: [String: String] = [:]
+        var index = 1
+        while index < spec.arguments.count {
+            let argument = spec.arguments[index]
+            guard ["--name", "--label", "--env", "--publish"].contains(argument) else {
+                break
+            }
+            let valueIndex = index + 1
+            guard valueIndex < spec.arguments.count else {
+                throw RuntimeAdapterError.commandRejected(
+                    classification: spec.classification,
+                    message: "Create-missing-service command spec is missing a value for \(argument)."
+                )
+            }
+            if argument == "--label" {
+                let pair = spec.arguments[valueIndex].split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+                guard pair.count == 2, !pair[0].isEmpty, labels[String(pair[0])] == nil else {
+                    throw RuntimeAdapterError.commandRejected(
+                        classification: spec.classification,
+                        message: "Create-missing-service command spec contains an invalid or duplicate ownership label."
+                    )
+                }
+                labels[String(pair[0])] = String(pair[1])
+            }
+            index += 2
+        }
+        return labels
     }
 }
 

@@ -19,12 +19,18 @@ struct CleanupCommandRunner {
             try configuration.validate()
             let store = SQLiteStateStore(configuration: configuration)
             try store.migrate()
+            let projectID = "project-\(mapping.desiredState.projectName)"
+            let observationDesiredState = try hostwrightDesiredStateWithOwnershipHints(
+                mapping.desiredState,
+                store: store,
+                projectID: projectID
+            )
 
             let adapter = environment.runtimeAdapter()
             let observed: ObservedRuntimeState
             do {
                 observed = try hostwrightWaitForAsync {
-                    try await adapter.observe(desiredState: mapping.desiredState)
+                    try await adapter.observe(desiredState: observationDesiredState)
                 }
             } catch {
                 return failure(code: .runtimeUnavailable, message: "Runtime observation failed: \(RuntimeRedactionPolicy.default.redact(String(describing: error)))")
@@ -67,7 +73,7 @@ struct CleanupCommandRunner {
         let projectID = "project-\(projectName)"
         var observedByIdentifier: [String: [ObservedRuntimeService]] = [:]
         for observedService in observed.services {
-            observedByIdentifier[observedService.identity.managedResourceIdentifier, default: []].append(observedService)
+            observedByIdentifier[observedService.resourceIdentifier, default: []].append(observedService)
         }
         let observedAdapterName = observed.adapterMetadata?.adapterName
 
@@ -117,6 +123,7 @@ struct CleanupCommandRunner {
                 resourceIdentifier: ownership.resourceIdentifier,
                 serviceName: ownership.serviceName,
                 ownershipRuntimeAdapter: ownership.runtimeAdapter,
+                ownershipIdentityVersion: ownership.identityVersion,
                 observedAdapterName: observedAdapterName,
                 observedServices: observedServices
             )
@@ -231,6 +238,7 @@ struct CleanupCommandRunner {
                         PlannedRuntimeAction(
                             kind: .remove,
                             identity: candidate.identity,
+                            resourceIdentifier: candidate.resourceIdentifier,
                             isDestructive: true,
                             summary: "Delete cleanup-eligible Hostwright-owned container \(candidate.resourceIdentifier)."
                         ),

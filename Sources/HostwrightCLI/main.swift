@@ -124,6 +124,8 @@ public enum HostwrightCLI {
                 manifestPath: manifestPath,
                 environment: environment
             ).run()
+        case .benchmark(let options):
+            return try BenchmarkCommandRunner(options: options, environment: environment).run()
         case .doctor(let output):
             return doctor(environment: environment, output: output)
         }
@@ -146,6 +148,7 @@ public enum HostwrightCLI {
       hostwright cleanup [path] --state-db <path> --dry-run [--team-profile <path>]
       hostwright cleanup [path] --state-db <path> --confirm-cleanup <token> [--team-profile <path> --approval-record <path>]
       hostwright diagnostics --state-db <path> --bundle <path> [--project <name>] [--manifest <path>]
+      hostwright benchmark --image <local-image> --samples <3-10> --report <path> --source-commit <40-hex> --source-dirty <true|false> --expected-container-version <version> [--attended-sleep-wake-seconds <15-300>] --confirm-live
       hostwright doctor [--output text|json]
 
     Most commands are read-only. init writes hostwright.yaml only when absent.
@@ -156,6 +159,7 @@ public enum HostwrightCLI {
     Diagnostics writes a local redacted JSON bundle only. It never uploads telemetry.
     JSON output is supported for import-stack, plan, status, events, recovery, doctor, and errors when --output json is present.
     Team profiles and approvals are loaded only from explicit local paths. Profile-aware mutations require an approval bound to the exact profile, manifest, and plan or cleanup token.
+    Benchmark runs are explicit local hardware evidence. They refuse image pulls and broad cleanup, use bounded disposable Hostwright-owned resources, and write only the requested non-existing report path.
 
     Examples:
       hostwright plan --output json
@@ -164,6 +168,7 @@ public enum HostwrightCLI {
       hostwright events --state-db /tmp/hostwright.sqlite --project api-local --output json
       hostwright recovery --state-db /tmp/hostwright.sqlite --output json
       hostwright diagnostics --state-db /tmp/hostwright.sqlite --bundle /tmp/hostwright-diagnostics.json
+      hostwright benchmark --image docker.io/library/python:alpine --samples 3 --report /tmp/hostwright-benchmark.json --source-commit 0123456789012345678901234567890123456789 --source-dirty true --expected-container-version 1.0.0 --confirm-live
       hostwright doctor --output json
 
     """

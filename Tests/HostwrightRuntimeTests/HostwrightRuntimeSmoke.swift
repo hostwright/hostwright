@@ -385,6 +385,32 @@ final class HostwrightRuntimeTests: XCTestCase {
         XCTAssertGreaterThan(result.standardError.utf8.count, 65_536)
     }
 
+    func testFoundationRuntimeProcessRunnerObservesRepeatedRapidProcessTermination() async throws {
+        let runner = FoundationRuntimeProcessRunner()
+        for sequence in 0..<25 {
+            let result = try await runner.run(shellSpec("printf '\(sequence)'"))
+            XCTAssertEqual(result.exitStatus, 0)
+            XCTAssertEqual(result.standardOutput, String(sequence))
+        }
+    }
+
+    func testFoundationRuntimeProcessRunnerBoundsInheritedOutputPipeDrain() async {
+        let runner = FoundationRuntimeProcessRunner()
+        let started = Date()
+        do {
+            _ = try await runner.run(shellSpec("sleep 5 & printf done"))
+            XCTFail("Expected inherited output pipe refusal.")
+        } catch let error as RuntimeAdapterError {
+            guard case .outputParseFailed(let message) = error else {
+                return XCTFail("Expected outputParseFailed, got \(error).")
+            }
+            XCTAssertTrue(message.contains("output pipes did not close"))
+            XCTAssertLessThan(Date().timeIntervalSince(started), 4.5)
+        } catch {
+            XCTFail("Unexpected error: \(error).")
+        }
+    }
+
     func testFoundationRuntimeProcessRunnerTimeoutRedactsPartialOutput() async {
         let runner = FoundationRuntimeProcessRunner()
 

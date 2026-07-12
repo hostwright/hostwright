@@ -94,6 +94,28 @@ func hostwrightWriteLocalText(path: String, text: String, role: String, environm
     }
 }
 
+func hostwrightWriteNewLocalText(path: String, text: String, role: String, environment: CLIEnvironment) throws {
+    do {
+        try environment.writeNewTextFile(path, text)
+    } catch {
+        let nsError = error as NSError
+        if (nsError.domain == NSCocoaErrorDomain && nsError.code == NSFileWriteFileExistsError) ||
+            (nsError.domain == NSPOSIXErrorDomain && nsError.code == Int(EEXIST)) {
+            throw HostwrightDiagnostic(
+                code: .fileAlreadyExists,
+                message: "Refused to overwrite existing \(role) at \(RuntimeRedactionPolicy.default.redact(path))."
+            )
+        }
+        throw hostwrightFileDiagnostic(
+            code: .fileIOFailed,
+            action: "create",
+            role: role,
+            path: path,
+            error: error
+        )
+    }
+}
+
 private func hostwrightFileDiagnostic(
     code: HostwrightErrorCode,
     action: String,

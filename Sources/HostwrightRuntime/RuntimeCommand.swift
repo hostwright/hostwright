@@ -133,6 +133,17 @@ public enum RuntimeCommandPolicy {
         }
     }
 
+    public static func validateExactResourceStats(_ spec: RuntimeCommandSpec, resourceIdentifier: String) throws {
+        try validateReadOnlyExecution(spec)
+        guard RuntimeManagedResourceIdentity.isCurrentIdentifier(resourceIdentifier),
+              spec.arguments == ["stats", resourceIdentifier, "--no-stream", "--format", "json"] else {
+            throw RuntimeAdapterError.commandRejected(
+                classification: spec.classification,
+                message: "Resource stats require one exact versioned Hostwright identifier and one non-streaming JSON sample."
+            )
+        }
+    }
+
     public static func validateCreateMissingServiceMutation(_ spec: RuntimeCommandSpec) throws {
         guard spec.executableResolution == .resolvedByRuntimeExecutableResolver else {
             throw RuntimeAdapterError.commandRejected(

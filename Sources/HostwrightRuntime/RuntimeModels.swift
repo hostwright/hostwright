@@ -272,6 +272,62 @@ public struct RuntimeLogResult: Equatable, Sendable {
     }
 }
 
+public struct RuntimeResourceUsageSnapshot: Equatable, Sendable {
+    public let resourceIdentifier: String
+    public let cpuUsageMicroseconds: UInt64
+    public let memoryUsageBytes: UInt64
+    public let memoryLimitBytes: UInt64
+    public let networkReceiveBytes: UInt64
+    public let networkTransmitBytes: UInt64
+    public let blockReadBytes: UInt64
+    public let blockWriteBytes: UInt64
+    public let processCount: Int
+
+    public init(
+        resourceIdentifier: String,
+        cpuUsageMicroseconds: UInt64,
+        memoryUsageBytes: UInt64,
+        memoryLimitBytes: UInt64,
+        networkReceiveBytes: UInt64,
+        networkTransmitBytes: UInt64,
+        blockReadBytes: UInt64,
+        blockWriteBytes: UInt64,
+        processCount: Int
+    ) {
+        self.resourceIdentifier = resourceIdentifier
+        self.cpuUsageMicroseconds = cpuUsageMicroseconds
+        self.memoryUsageBytes = memoryUsageBytes
+        self.memoryLimitBytes = memoryLimitBytes
+        self.networkReceiveBytes = networkReceiveBytes
+        self.networkTransmitBytes = networkTransmitBytes
+        self.blockReadBytes = blockReadBytes
+        self.blockWriteBytes = blockWriteBytes
+        self.processCount = processCount
+    }
+}
+
+public struct RuntimeLocalImageEvidence: Equatable, Sendable {
+    public let reference: String
+    public let descriptorDigest: String
+    public let variantDigest: String
+    public let architecture: String
+    public let operatingSystem: String
+
+    public init(
+        reference: String,
+        descriptorDigest: String,
+        variantDigest: String,
+        architecture: String,
+        operatingSystem: String
+    ) {
+        self.reference = reference
+        self.descriptorDigest = descriptorDigest
+        self.variantDigest = variantDigest
+        self.architecture = architecture
+        self.operatingSystem = operatingSystem
+    }
+}
+
 public struct ObservedRuntimeService: Equatable, Sendable {
     public let identity: RuntimeServiceIdentity
     public let resourceIdentifier: String

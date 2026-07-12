@@ -29,7 +29,7 @@ Scheduler output is stable for the same inputs:
 
 ## Evidence Boundary
 
-Resource intelligence currently records coarse host facts such as physical memory, active processor count, and thermal state. It does not measure runtime density, workload memory pressure, boot latency, polling overhead, battery behavior, sleep/wake behavior, VM overhead, or production capacity. Scheduler recommendations therefore remain advisory and manual-review-only.
+The resource report consumed by the scheduler records coarse host facts such as physical memory, active processor count, and thermal state. The separate Phase 36 benchmark report is not scheduler capacity input. Runtime density, VM overhead, sustained workload pressure, and production capacity remain unmeasured, so recommendations remain advisory and manual-review-only.
 
 Kubernetes scheduler references inform the general filter-then-score shape, but Hostwright does not implement Kubernetes scheduling semantics, node behavior, topology, taints, tolerations, cluster state, or compatibility.
 

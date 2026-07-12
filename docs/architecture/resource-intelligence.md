@@ -40,13 +40,13 @@ Future benchmark runs must record:
 
 If any dimension is not measured, the report must say `unmeasured` instead of inferring a value.
 
-Phase 36 adds a separate [Benchmark Lab](benchmark-lab.md) report contract for dry-run and fixture-backed benchmark records. The benchmark lab preserves the same no-mutation, no-telemetry, no-capacity-claim boundary unless a later approved live benchmark command supplies disposable-resource proof.
+Phase 36 adds a separate [Benchmark Lab](benchmark-lab.md). Historical schema version 1 records remain dry-run/fixture contracts; schema version 2 is emitted only by the explicit local runner and records disposable RuntimeAdapter mutation, raw samples, blockers/failures, and exact cleanup.
 
 ## Blocked Evidence
 
-The current implementation does not measure runtime density, VM-per-container overhead, boot latency, polling overhead, battery impact, sleep/wake behavior, or workload memory pressure. These require controlled disposable runtime proofs and maintainer-approved cleanup for every created resource.
+The local runner measures bounded per-container memory use, boot latency, observation-call duration, available battery facts, thermal state, Apple container version drift, and optionally attended sleep/wake behavior. It does not measure runtime density, VM overhead, sustained battery efficiency, sustained thermal behavior, or production capacity.
 
-Apple container version drift monitoring remains a reporting input, not a live command in `doctor`. A future implementation can add a RuntimeAdapter-backed version probe or a separate benchmark command only after the command shape, timeout, redaction, and no-mutation boundary are reviewed.
+Apple container version drift remains unavailable in `doctor`. The benchmark command performs a reviewed RuntimeAdapter-backed version probe and compares it with an explicit expected version; mismatch fails that report rather than becoming a compatibility claim.
 
 Phase 31 advisory scheduling may consume resource reports as coarse local host facts, but it must keep capacity, memory pressure, density, and placement claims advisory. It does not turn resource intelligence into reservation, automatic placement, or production capacity planning.
 

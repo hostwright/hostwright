@@ -75,9 +75,9 @@ No binary archive, installer package, install script, Homebrew formula, signed a
 
 ## Benchmark Gate
 
-Phase 36 defines benchmark report contracts in `docs/architecture/benchmark-lab.md`.
+Phase 36 defines the explicit local benchmark runner and versioned report contract in `docs/architecture/benchmark-lab.md`. Hosted CI does not run the hardware lane.
 
-No release notes, docs, or public artifacts may claim performance numbers, production capacity, Apple container version compatibility, or battery/thermal behavior until a reviewed benchmark report records environment facts, disposable-resource policy, exact measured dimensions, cleanup evidence, and maintainer approval.
+No release notes, docs, or public artifacts may claim performance numbers, production capacity, Apple container version compatibility, or battery/thermal behavior until a clean-source reviewed hardware report passes with environment facts, raw samples, exact measured dimensions, no blockers/failures, exact cleanup, and maintainer approval. A dirty, blocked, failed, fixture, or scripted report cannot satisfy this gate.
 
 ## Public Education Gate
 

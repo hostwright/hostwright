@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 public struct FoundationRuntimeProcessRunner: RuntimeProcessRunning {
@@ -51,6 +52,11 @@ public struct FoundationRuntimeProcessRunner: RuntimeProcessRunning {
         process.standardOutput = outputPipe
         process.standardError = errorPipe
 
+        let semaphore = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in
+            semaphore.signal()
+        }
+
         do {
             try process.run()
         } catch {
@@ -75,17 +81,20 @@ public struct FoundationRuntimeProcessRunner: RuntimeProcessRunning {
             pipeReaders.leave()
         }
 
-        let semaphore = DispatchSemaphore(value: 0)
-        DispatchQueue.global(qos: .utility).async {
-            process.waitUntilExit()
-            semaphore.signal()
-        }
-
         let timeoutResult = semaphore.wait(timeout: .now() + .seconds(spec.timeout.seconds))
         if timeoutResult == .timedOut {
             process.terminate()
-            process.waitUntilExit()
-            pipeReaders.wait()
+            if semaphore.wait(timeout: .now() + .seconds(2)) == .timedOut {
+                if process.isRunning {
+                    kill(process.processIdentifier, SIGKILL)
+                }
+                _ = semaphore.wait(timeout: .now() + .seconds(2))
+            }
+            if pipeReaders.wait(timeout: .now() + .seconds(2)) == .timedOut {
+                try? outputPipe.fileHandleForReading.close()
+                try? errorPipe.fileHandleForReading.close()
+                _ = pipeReaders.wait(timeout: .now() + .seconds(2))
+            }
 
             let partialOutput = String(data: outputData.value(), encoding: .utf8) ?? ""
             let partialError = String(data: errorData.value(), encoding: .utf8) ?? ""
@@ -97,7 +106,14 @@ public struct FoundationRuntimeProcessRunner: RuntimeProcessRunning {
             )
         }
 
-        pipeReaders.wait()
+        if pipeReaders.wait(timeout: .now() + .seconds(2)) == .timedOut {
+            try? outputPipe.fileHandleForReading.close()
+            try? errorPipe.fileHandleForReading.close()
+            _ = pipeReaders.wait(timeout: .now() + .seconds(2))
+            throw RuntimeAdapterError.outputParseFailed(
+                "Runtime command exited but its output pipes did not close within the bounded drain window."
+            )
+        }
 
         let standardOutput = String(data: outputData.value(), encoding: .utf8) ?? ""
         let standardError = String(data: errorData.value(), encoding: .utf8) ?? ""

@@ -33,7 +33,7 @@ Hostwright is not production ready.
 - Restart policy state with max attempts, backoff, manual-disable from `restart.policy: no`, preexisting operator hold state, and crash-loop blocking before managed start or managed restart is exposed as executable.
 - `hostwright doctor` safe local checks.
 - `hostwright doctor --output json` resource intelligence reports with local ProcessInfo-backed hardware and thermal facts, fixture-backed parser coverage, explicit unmeasured benchmark dimensions, architecture warnings only when evidence exists, and local-only/no-capacity limits.
-- Phase 36 benchmark lab report models and fixture parser for dry-run methodology records, disposable-resource policy, environment facts, and unmeasured dimensions.
+- `hostwright benchmark` for explicit local schema-v2 hardware reports using 3-10 bounded Hostwright-owned resources, real RuntimeAdapter version/stats probes, raw samples, optional attended sleep/wake detection, and exact cleanup. Historical schema-v1 fixtures remain contract evidence only.
 - Source-only release candidate packaging for `v0.1.0-alpha.1`.
 - Release distribution readiness documentation for future signed and notarized artifacts, with current binary and installer publication still blocked.
 - Beta readiness checklist documentation for future beta tag approval, with current beta release publication still blocked.
@@ -87,8 +87,8 @@ Hostwright is not production ready.
 - General YAML parsing, broad stack-file import, or full orchestrator schema compatibility.
 - Default CLI activation of live macOS Keychain access; production Keychain writes/deletes; Keychain prompts; Keychain access groups; synchronizable Keychain items; registry credential storage; credential sync; credential upload; or cloud identity integration.
 - Registry image resolution, tag-to-digest lookup, automatic image pulls, signature verification, OCI referrer inspection, SBOM generation/validation, vulnerability scanning, dependency provenance, or source-build integrity automation.
-- Runtime density measurement, VM-per-container overhead measurement, boot-latency benchmarking, polling-overhead benchmarking, battery-impact measurement, sleep/wake runtime proofing, or workload memory-pressure benchmarking as automatic product behavior.
-- Live benchmark command execution, CI Apple container benchmark execution, benchmark number publication, Apple container version drift live probing, performance comparison claims, production capacity claims, or hosted performance monitoring.
+- Runtime density measurement, VM-per-container overhead measurement, sustained battery-efficiency testing, sustained thermal testing, automatic sleep/wake proofing, or production workload-capacity benchmarking.
+- Hosted-CI Apple container benchmarks, benchmark number publication, performance comparison claims, production capacity claims, or hosted performance monitoring.
 - Production capacity planning, automatic placement decisions, daemon-enforced scheduling, or resource reservations.
 - Documentation-site frontend, hosted docs deployment, website search, website analytics, generated site content pipeline, marketing campaign, or website repository implementation in this core repository.
 - Apple GPU, ANE, Metal, Core ML, MLX, PyTorch MPS, host-native accelerator helpers, host accelerator device exposure, or accelerator-aware scheduling.
@@ -181,6 +181,8 @@ Recovery is diagnostic and manual. `hostwright recovery` reads operation groups 
 Diagnostics are local and manual. `hostwright diagnostics` reads existing state rows from the explicit state database and writes a redacted JSON bundle to an explicit file path. It does not observe Apple container, run health checks, create or migrate a missing database, overwrite existing bundle files, upload telemetry, or prove service reachability.
 
 `hostwright doctor` resource intelligence is also local and diagnostic. It records host facts and explicit `unmeasured` observations for benchmark dimensions that were not measured. It does not run Apple container commands, create proof containers, pull images, write state, upload telemetry, or prove runtime density, VM overhead, boot latency, battery behavior, sleep/wake behavior, workload memory pressure, or production capacity.
+
+`hostwright benchmark` is separate from doctor and is explicitly mutating. It requires live confirmation, a pre-existing local image, bounded sample count, explicit source evidence, and a non-existing report path. It creates only unique labeled benchmark resources through `RuntimeAdapter`, never pulls an image, and deletes only exact identifiers after terminal-state quiescence. A missing battery or unattended sleep/wake interval blocks the report; any command, version, identity, ownership, or cleanup failure fails it. One report does not prove capacity, efficiency, compatibility beyond its exact versions, or performance on another host.
 
 Policy evaluation is local and deterministic. Team workflow command wiring may persist bound audit records through explicit `HostwrightState` paths, but policy code itself does not execute Apple container commands, write SQLite, contact registries, resolve DNS, configure tunnels, distribute team policy, load plugins, run extension code, or weaken required gates.
 

@@ -18,7 +18,7 @@ This keeps the current product centered on one local Mac, explicit local state p
 - Phase 29 rejected current-core CRI, Kubernetes node behavior, Docker API, Testcontainers, full Compose parity, attach, exec, log-follow, and port-forward compatibility because those contracts require broader protocol, lifecycle, stream, state, and network semantics.
 - Phase 30 kept current core single-host because multi-host work requires identity, membership, transport trust, state authority, failure recovery, audit, revocation, and scheduler policy.
 - Phase 31 added only local advisory scheduling. It does not reserve capacity, place workloads automatically, expose a scheduler API, schedule accelerators, or place work on remote hosts.
-- Phase 36 benchmark work records dry-run or fixture-backed methodology only. It does not publish benchmark numbers or prove production capacity.
+- Phase 36 has an explicit local evidence runner, but blocked/failed/dirty reports and single-host raw values do not publish benchmark numbers or prove production capacity.
 - Phase 39 keeps beta release claims blocked until clean-checkout, CI, docs, examples, state, security, operations, telemetry, and support evidence exist.
 
 ## Direction Table

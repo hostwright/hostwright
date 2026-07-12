@@ -88,7 +88,24 @@ public protocol RuntimeAdapter: Sendable {
     func observe(desiredState: DesiredRuntimeState) async throws -> ObservedRuntimeState
     func plan(desiredState: DesiredRuntimeState, observedState: ObservedRuntimeState) async throws -> RuntimePlan
     func logs(for service: ObservedRuntimeService, tail: Int) async throws -> RuntimeLogResult
+    func runtimeVersion() async throws -> String
+    func localImageEvidence(for imageReference: String) async throws -> RuntimeLocalImageEvidence
+    func resourceUsage(for resourceIdentifier: String) async throws -> RuntimeResourceUsageSnapshot
     func execute(_ action: PlannedRuntimeAction, confirmation: RuntimeMutationConfirmation?) async throws -> RuntimeEvent
+}
+
+public extension RuntimeAdapter {
+    func runtimeVersion() async throws -> String {
+        throw RuntimeAdapterError.capabilityUnavailable(.readOnlyObservation)
+    }
+
+    func resourceUsage(for resourceIdentifier: String) async throws -> RuntimeResourceUsageSnapshot {
+        throw RuntimeAdapterError.capabilityUnavailable(.readOnlyObservation)
+    }
+
+    func localImageEvidence(for imageReference: String) async throws -> RuntimeLocalImageEvidence {
+        throw RuntimeAdapterError.capabilityUnavailable(.readOnlyObservation)
+    }
 }
 
 public struct AppleContainerCLIAdapter: RuntimeAdapter {
@@ -124,6 +141,18 @@ public struct AppleContainerCLIAdapter: RuntimeAdapter {
 
     public func logs(for service: ObservedRuntimeService, tail: Int) async throws -> RuntimeLogResult {
         try await applyAdapter.logs(for: service, tail: tail)
+    }
+
+    public func runtimeVersion() async throws -> String {
+        try await applyAdapter.runtimeVersion()
+    }
+
+    public func resourceUsage(for resourceIdentifier: String) async throws -> RuntimeResourceUsageSnapshot {
+        try await applyAdapter.resourceUsage(for: resourceIdentifier)
+    }
+
+    public func localImageEvidence(for imageReference: String) async throws -> RuntimeLocalImageEvidence {
+        try await applyAdapter.localImageEvidence(for: imageReference)
     }
 
     public func execute(_ action: PlannedRuntimeAction, confirmation: RuntimeMutationConfirmation?) async throws -> RuntimeEvent {

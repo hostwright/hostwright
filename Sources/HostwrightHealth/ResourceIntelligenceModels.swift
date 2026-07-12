@@ -4,6 +4,7 @@ import HostwrightCore
 public enum ResourceMeasurementMethod: String, Codable, Equatable, Sendable {
     case localProcessInfoSnapshot
     case fixture
+    case liveHardwareBenchmark
 }
 
 public enum ResourceObservationStatus: String, Codable, Equatable, Sendable {
@@ -327,7 +328,7 @@ public enum ResourceIntelligenceReportParser {
     }
 }
 
-private extension ResourcePressureLevel {
+public extension ResourcePressureLevel {
     init(processInfoThermalState: ProcessInfo.ThermalState) {
         switch processInfoThermalState {
         case .nominal:

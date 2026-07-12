@@ -73,6 +73,18 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
         try await readOnlyAdapter.logs(for: service, tail: tail)
     }
 
+    public func runtimeVersion() async throws -> String {
+        try await readOnlyAdapter.runtimeVersion()
+    }
+
+    public func resourceUsage(for resourceIdentifier: String) async throws -> RuntimeResourceUsageSnapshot {
+        try await readOnlyAdapter.resourceUsage(for: resourceIdentifier)
+    }
+
+    public func localImageEvidence(for imageReference: String) async throws -> RuntimeLocalImageEvidence {
+        try await readOnlyAdapter.localImageEvidence(for: imageReference)
+    }
+
     public func execute(_ action: PlannedRuntimeAction, confirmation: RuntimeMutationConfirmation?) async throws -> RuntimeEvent {
         guard confirmation?.confirmed == true, confirmation?.planHash?.isEmpty == false else {
             throw RuntimeAdapterError.commandRejected(

@@ -27,13 +27,15 @@ overwrite_stderr="$workdir/overwrite.stderr"
 missing_stdout="$workdir/missing.stdout"
 missing_stderr="$workdir/missing.stderr"
 readonly_dir="$workdir/read-only"
+benchmark_existing_report="$workdir/benchmark-existing.json"
+benchmark_absent_report="$workdir/benchmark-absent.json"
 
 cleanup() {
   exit_code=$?
   trap - EXIT
   set +e
   chmod 700 "$readonly_dir" 2>/dev/null
-  rm -f "$manifest" "$plan_json" "$status_json" "$doctor_json" "$team_profile" "$team_plan_json" "$stack_file" "$team_import_json" "$invalid_profile" "$overwrite_stdout" "$overwrite_stderr" "$missing_stdout" "$missing_stderr" "$readonly_dir/hostwright.yaml"
+  rm -f "$manifest" "$plan_json" "$status_json" "$doctor_json" "$team_profile" "$team_plan_json" "$stack_file" "$team_import_json" "$invalid_profile" "$overwrite_stdout" "$overwrite_stderr" "$missing_stdout" "$missing_stderr" "$benchmark_existing_report" "$benchmark_absent_report" "$readonly_dir/hostwright.yaml"
   rmdir "$readonly_dir" 2>/dev/null
   rmdir "$workdir"
   exit "$exit_code"
@@ -124,6 +126,40 @@ grep -q -- '--approval-record' "$missing_stderr"
 [[ ! -e "$workdir/unexpected.sqlite" ]]
 
 set +e
+"$hostwright" benchmark \
+  --image docker.io/library/python:alpine \
+  --samples 3 \
+  --report "$benchmark_absent_report" \
+  --source-commit aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+  --source-dirty false \
+  --expected-container-version 1.0.0 \
+  >"$missing_stdout" 2>"$missing_stderr"
+benchmark_confirmation_exit=$?
+set -e
+[[ "$benchmark_confirmation_exit" -eq 64 ]]
+grep -q -- '--confirm-live' "$missing_stderr"
+[[ ! -e "$benchmark_absent_report" ]]
+
+printf 'sentinel benchmark report\n' >"$benchmark_existing_report"
+benchmark_before_checksum="$(shasum -a 256 "$benchmark_existing_report" | awk '{print $1}')"
+set +e
+"$hostwright" benchmark \
+  --image docker.io/library/python:alpine \
+  --samples 3 \
+  --report "$benchmark_existing_report" \
+  --source-commit aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+  --source-dirty false \
+  --expected-container-version 1.0.0 \
+  --confirm-live \
+  >"$missing_stdout" 2>"$missing_stderr"
+benchmark_overwrite_exit=$?
+set -e
+[[ "$benchmark_overwrite_exit" -eq 64 ]]
+grep -q 'HW-CLI-002' "$missing_stderr"
+benchmark_after_checksum="$(shasum -a 256 "$benchmark_existing_report" | awk '{print $1}')"
+[[ "$benchmark_before_checksum" == "$benchmark_after_checksum" ]]
+
+set +e
 "$hostwright" plan "$workdir/missing.yaml" --output json >"$missing_stdout" 2>"$missing_stderr"
 missing_exit=$?
 set -e
@@ -160,4 +196,4 @@ if find "$workdir" -name '*.sqlite*' -print -quit | grep -q .; then
   exit 1
 fi
 
-echo "local-integration passed: built CLI, team-profile files, JSON output/errors, real file failures, overwrite refusal, and no hidden state writes"
+echo "local-integration passed: built CLI, team-profile and benchmark argument gates, JSON output/errors, real file failures, overwrite refusal, and no hidden state writes"

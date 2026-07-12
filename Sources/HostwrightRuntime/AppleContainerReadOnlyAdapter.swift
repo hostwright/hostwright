@@ -81,6 +81,49 @@ public struct AppleContainerReadOnlyAdapter: RuntimeAdapter {
         )
     }
 
+    public func runtimeVersion() async throws -> String {
+        guard let executable = executableResolver.resolveExecutable(named: AppleContainerCommand.executableName) else {
+            throw RuntimeAdapterError.runtimeUnavailable("Apple container CLI was not found on PATH.")
+        }
+        let spec = AppleContainerCommand.spec(kind: .version, executable: executable)
+        try RuntimeCommandPolicy.validateReadOnlyExecution(spec)
+        let result = try await processRunner.run(spec)
+        let version = redactionPolicy.redact(result.standardOutput).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !version.isEmpty else {
+            throw RuntimeAdapterError.outputParseFailed("Apple container version output was empty.")
+        }
+        return version
+    }
+
+    public func resourceUsage(for resourceIdentifier: String) async throws -> RuntimeResourceUsageSnapshot {
+        guard let executable = executableResolver.resolveExecutable(named: AppleContainerCommand.executableName) else {
+            throw RuntimeAdapterError.runtimeUnavailable("Apple container CLI was not found on PATH.")
+        }
+        let spec = AppleContainerCommand.spec(kind: .stats(containerID: resourceIdentifier), executable: executable)
+        try RuntimeCommandPolicy.validateExactResourceStats(spec, resourceIdentifier: resourceIdentifier)
+        let result = try await processRunner.run(spec)
+        return try AppleContainerStatsParser.parse(
+            result.standardOutput,
+            expectedResourceIdentifier: resourceIdentifier,
+            redactionPolicy: redactionPolicy
+        )
+    }
+
+    public func localImageEvidence(for imageReference: String) async throws -> RuntimeLocalImageEvidence {
+        guard let executable = executableResolver.resolveExecutable(named: AppleContainerCommand.executableName) else {
+            throw RuntimeAdapterError.runtimeUnavailable("Apple container CLI was not found on PATH.")
+        }
+        let spec = AppleContainerCommand.spec(kind: .listImages, executable: executable)
+        try RuntimeCommandPolicy.validateReadOnlyExecution(spec)
+        let result = try await processRunner.run(spec)
+        return try AppleContainerImageEvidenceParser.parse(
+            result.standardOutput,
+            expectedReference: imageReference,
+            preferredArchitecture: "arm64",
+            redactionPolicy: redactionPolicy
+        )
+    }
+
     public func execute(_ action: PlannedRuntimeAction, confirmation: RuntimeMutationConfirmation?) async throws -> RuntimeEvent {
         throw RuntimeAdapterError.mutationUnavailableByPolicy("Read-only adapter cannot execute runtime action '\(action.kind.rawValue)'.")
     }

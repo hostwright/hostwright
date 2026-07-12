@@ -1,5 +1,6 @@
 import Foundation
 import HostwrightCore
+import HostwrightRuntime
 import HostwrightState
 
 public enum CLICommand: Equatable, Sendable {
@@ -15,6 +16,7 @@ public enum CLICommand: Equatable, Sendable {
     case recovery(stateDatabasePath: String, projectName: String?, output: CLIOutputFormat)
     case cleanup(path: String, stateDatabasePath: String, confirmation: CleanupConfirmation, teamProfilePath: String?, approvalRecordPath: String?)
     case diagnostics(stateDatabasePath: String, bundlePath: String, projectName: String?, manifestPath: String?)
+    case benchmark(options: BenchmarkCLIOptions)
     case doctor(output: CLIOutputFormat)
     case help
 
@@ -53,6 +55,8 @@ public enum CLICommand: Equatable, Sendable {
             return try cleanupCommand(arguments: arguments)
         case "diagnostics":
             return try diagnosticsCommand(arguments: arguments)
+        case "benchmark":
+            return try benchmarkCommand(arguments: arguments)
         case "doctor":
             return try doctorCommand(arguments: arguments)
         default:
@@ -373,6 +377,131 @@ public enum CLICommand: Equatable, Sendable {
         return .doctor(output: output)
     }
 
+    private static func benchmarkCommand(arguments: [String]) throws -> CLICommand {
+        var image: String?
+        var sampleCount: Int?
+        var reportPath: String?
+        var sourceCommit: String?
+        var sourceDirty: Bool?
+        var expectedContainerVersion: String?
+        var attendedSleepWakeSeconds: Int?
+        var confirmedLive = false
+        var index = 1
+
+        while index < arguments.count {
+            let argument = arguments[index]
+            switch argument {
+            case "--image":
+                image = try benchmarkUniqueValue(arguments, index: index, flag: argument, existing: image)
+                index += 2
+            case "--samples":
+                let value = try benchmarkUniqueValue(arguments, index: index, flag: argument, existing: sampleCount.map(String.init))
+                guard let parsed = Int(value), (3...10).contains(parsed) else {
+                    throw CLIUsageError("benchmark --samples requires an integer from 3 through 10.")
+                }
+                sampleCount = parsed
+                index += 2
+            case "--report":
+                reportPath = try benchmarkUniqueValue(arguments, index: index, flag: argument, existing: reportPath)
+                index += 2
+            case "--source-commit":
+                sourceCommit = try benchmarkUniqueValue(arguments, index: index, flag: argument, existing: sourceCommit)
+                index += 2
+            case "--source-dirty":
+                let value = try benchmarkUniqueValue(arguments, index: index, flag: argument, existing: sourceDirty.map(String.init))
+                guard value == "true" || value == "false" else {
+                    throw CLIUsageError("benchmark --source-dirty supports only 'true' or 'false'.")
+                }
+                sourceDirty = value == "true"
+                index += 2
+            case "--expected-container-version":
+                expectedContainerVersion = try benchmarkUniqueValue(
+                    arguments,
+                    index: index,
+                    flag: argument,
+                    existing: expectedContainerVersion
+                )
+                index += 2
+            case "--attended-sleep-wake-seconds":
+                let value = try benchmarkUniqueValue(
+                    arguments,
+                    index: index,
+                    flag: argument,
+                    existing: attendedSleepWakeSeconds.map(String.init)
+                )
+                guard let parsed = Int(value), (15...300).contains(parsed) else {
+                    throw CLIUsageError("benchmark --attended-sleep-wake-seconds requires an integer from 15 through 300.")
+                }
+                attendedSleepWakeSeconds = parsed
+                index += 2
+            case "--confirm-live":
+                guard !confirmedLive else {
+                    throw CLIUsageError("benchmark accepts --confirm-live at most once.")
+                }
+                confirmedLive = true
+                index += 1
+            default:
+                throw CLIUsageError("benchmark does not support argument '\(argument)'.")
+            }
+        }
+
+        guard let image,
+              let sampleCount,
+              let reportPath,
+              let sourceCommit,
+              let sourceDirty,
+              let expectedContainerVersion,
+              confirmedLive else {
+            throw CLIUsageError(
+                "benchmark requires --image, --samples, --report, --source-commit, --source-dirty, --expected-container-version, and --confirm-live."
+            )
+        }
+        guard sourceCommit.range(of: "^[a-f0-9]{40}$", options: .regularExpression) != nil else {
+            throw CLIUsageError("benchmark --source-commit requires exactly 40 lowercase hexadecimal characters.")
+        }
+        guard sourceCommit != String(repeating: "0", count: 40) else {
+            throw CLIUsageError("benchmark --source-commit cannot use the all-zero sentinel.")
+        }
+        guard AppleContainerVersionParser.isValidExpectedVersion(expectedContainerVersion) else {
+            throw CLIUsageError("benchmark --expected-container-version requires an exact semantic version such as 1.0.0.")
+        }
+        guard BenchmarkImageReferencePolicy.isSafe(image) else {
+            throw CLIUsageError("benchmark --image requires a credential-free OCI image reference without whitespace, URL syntax, or unsupported digest syntax.")
+        }
+
+        return .benchmark(
+            options: BenchmarkCLIOptions(
+                image: image,
+                sampleCount: sampleCount,
+                reportPath: reportPath,
+                sourceCommit: sourceCommit,
+                sourceDirty: sourceDirty,
+                expectedContainerVersion: expectedContainerVersion,
+                attendedSleepWakeSeconds: attendedSleepWakeSeconds,
+                confirmedLive: true
+            )
+        )
+    }
+
+    private static func benchmarkUniqueValue(
+        _ arguments: [String],
+        index: Int,
+        flag: String,
+        existing: String?
+    ) throws -> String {
+        guard existing == nil else {
+            throw CLIUsageError("benchmark accepts \(flag) at most once.")
+        }
+        guard index + 1 < arguments.count else {
+            throw CLIUsageError("benchmark requires a value after \(flag).")
+        }
+        let value = arguments[index + 1].trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty, !value.hasPrefix("-") else {
+            throw CLIUsageError("benchmark requires a non-empty value after \(flag).")
+        }
+        return value
+    }
+
     private static func parsePathOutputAndProfile(
         arguments: [String],
         commandName: String,
@@ -646,9 +775,46 @@ public enum CLIExitCode: Int32, Equatable, Sendable {
             return .runtimeUnavailable
         case .unsafeExposure:
             return .unsafeOperation
+        case .benchmarkInvalid:
+            return .validation
+        case .benchmarkBlocked:
+            return .runtimeUnavailable
+        case .benchmarkFailed:
+            return .partialFailure
         case .unsupportedArchitecture, .unsupportedMacOSVersion:
             return .validation
         }
+    }
+}
+
+public struct BenchmarkCLIOptions: Equatable, Sendable {
+    public let image: String
+    public let sampleCount: Int
+    public let reportPath: String
+    public let sourceCommit: String
+    public let sourceDirty: Bool
+    public let expectedContainerVersion: String
+    public let attendedSleepWakeSeconds: Int?
+    public let confirmedLive: Bool
+
+    public init(
+        image: String,
+        sampleCount: Int,
+        reportPath: String,
+        sourceCommit: String,
+        sourceDirty: Bool,
+        expectedContainerVersion: String,
+        attendedSleepWakeSeconds: Int? = nil,
+        confirmedLive: Bool
+    ) {
+        self.image = image
+        self.sampleCount = sampleCount
+        self.reportPath = reportPath
+        self.sourceCommit = sourceCommit
+        self.sourceDirty = sourceDirty
+        self.expectedContainerVersion = expectedContainerVersion
+        self.attendedSleepWakeSeconds = attendedSleepWakeSeconds
+        self.confirmedLive = confirmedLive
     }
 }
 

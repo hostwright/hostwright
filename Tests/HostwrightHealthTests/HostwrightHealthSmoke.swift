@@ -3,6 +3,19 @@ import XCTest
 @testable import HostwrightHealth
 
 final class HostwrightHealthTests: XCTestCase {
+    func testBenchmarkHostProbeReadsRealLocalHostFacts() {
+        let snapshot = BenchmarkHostSnapshot.current
+        XCTAssertFalse(snapshot.operatingSystem.isEmpty)
+        XCTAssertFalse(snapshot.operatingSystemBuild.isEmpty)
+        XCTAssertFalse(snapshot.hardwareModel.isEmpty)
+        XCTAssertGreaterThan(snapshot.physicalMemoryBytes, 0)
+        XCTAssertGreaterThan(snapshot.activeProcessorCount, 0)
+        if let battery = snapshot.battery {
+            XCTAssertGreaterThanOrEqual(battery.chargePercent, 0)
+            XCTAssertLessThanOrEqual(battery.chargePercent, 100)
+            XCTAssertFalse(battery.powerSource.isEmpty)
+        }
+    }
     func testCompatibilityChecksReportUnsupportedPlatform() {
         let checks = DoctorScaffold.compatibilityChecks(
             for: PlatformSnapshot(macOSMajorVersion: 25, architecture: "x86_64")

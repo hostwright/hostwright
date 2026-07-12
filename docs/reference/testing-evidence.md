@@ -10,9 +10,9 @@ Hostwright separates deterministic test coverage from evidence that exercises re
 | `hardware-benchmark` | Measured work on the recorded physical hardware with raw samples and exact tool versions. | Capacity guarantees, other hardware, or accelerator behavior that was not directly measured. |
 | `distribution-artifact` | Actual build, checksum, SBOM/provenance, signing, notarization, install, upgrade, downgrade, and uninstall stages that ran. | Any stage recorded as blocked or failed. |
 
-Reports conform to `schemas/hostwright-evidence.schema.json`. Status is one of `passed`, `failed`, or `blocked`; there is no skipped-success status.
+Reports conform to `schemas/hostwright-evidence.schema.json`; production Swift models and validation live in `HostwrightCore/EvidenceModels.swift`. Status is one of `passed`, `failed`, or `blocked`; there is no skipped-success status.
 
-The default repository gate runs `swift test` for unit-contract and XCTest-backed local integration coverage, then `scripts/integration.sh` against the built CLI. Live runtime, hardware, and distribution lanes remain separate because they require explicit resources or credentials.
+The default repository gate runs `swift test` for unit-contract and XCTest-backed local integration coverage, then `scripts/integration.sh` against the built CLI. Live runtime, hardware, and distribution lanes remain separate because they require explicit resources or credentials. `hostwright benchmark` can create a hardware report locally, but its scripted contract tests never count as that report's proof.
 
 ## Passing Rules
 

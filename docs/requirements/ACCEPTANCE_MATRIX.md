@@ -325,9 +325,9 @@ Phase 8A is a required preflight before this mutation gate. It proves real read-
 
 | Requirement IDs | Acceptance criteria | Verification type | Verification command or review |
 | --- | --- | --- | --- |
-| HW-COMPAT-011, HW-REL-004 | Benchmark lab reports record environment facts, disposable-resource policy, observations for every benchmark dimension, and explicit limits before any performance claim. | Automated | Health XCTest dry-run report and fixture parser cases. |
-| HW-COMPAT-012, HW-DOCS-002 | Docs explain that hosted CI runs build/test/lint/naming only, Apple container benchmarks are fixture/dry-run only, and current core does not publish benchmark numbers, live version-drift probes, capacity claims, or hosted performance monitoring. | Automated + manual | Core docs guard plus benchmark lab, resource intelligence, limitations, release process, and compatibility review. |
-| HW-RUNTIME-001, HW-RUNTIME-002, HW-STATE-001 | Phase 36 does not add live Apple container commands, image pulls, runtime mutation, broad cleanup, state writes, cloud telemetry, dependencies, release tags, GitHub Releases, website work, or GUI code. | Automated + manual | Full local gate, targeted boundary scans, and diff review. |
+| HW-COMPAT-011, HW-REL-004 | Schema-v2 reports record source/environment facts, every adapter operation, raw sample counts, all dimensions, failures/blockers, and exact cleanup; blocked/failed/fixture/scripted reports cannot satisfy a hardware pass. | Automated + live manual | Evidence/health/runtime/CLI XCTest, built-CLI integration, report parser validation, and reviewed local run. |
+| HW-COMPAT-012, HW-DOCS-002 | Hosted CI remains hardware-independent while the explicit local runner performs version/stats probes, bounded samples, optional attended sleep/wake detection, and exact cleanup without publishing benchmark numbers or capacity claims. | Automated + manual | CI, core docs guard, benchmark lab, resource intelligence, limitations, release process, and compatibility review. |
+| HW-RUNTIME-001, HW-RUNTIME-002, HW-STATE-001 | Phase 36 runtime work stays behind RuntimeAdapter and permits only confirmed unique benchmark resources with a pre-existing image and exact cleanup; no image pull, broad cleanup, state write, telemetry, dependency, release, website, or GUI behavior is added. | Automated + live manual | Full local gate, targeted boundary scans, exact-resource live run, and post-run runtime inventory. |
 
 ## Phase 37 Gate: Documentation Site And Public Education
 

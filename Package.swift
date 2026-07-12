@@ -97,7 +97,10 @@ let package = Package(
         ),
         .target(
             name: "HostwrightHealth",
-            dependencies: ["HostwrightCore"]
+            dependencies: ["HostwrightCore"],
+            linkerSettings: [
+                .linkedFramework("IOKit")
+            ]
         ),
         .target(
             name: "HostwrightImport",

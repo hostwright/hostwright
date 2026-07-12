@@ -17,6 +17,7 @@ public enum CLICommand: Equatable, Sendable {
     case cleanup(path: String, stateDatabasePath: String, confirmation: CleanupConfirmation, teamProfilePath: String?, approvalRecordPath: String?)
     case diagnostics(stateDatabasePath: String, bundlePath: String, projectName: String?, manifestPath: String?)
     case benchmark(options: BenchmarkCLIOptions)
+    case extensionCheck(declarationPath: String, executablePath: String, output: CLIOutputFormat)
     case doctor(output: CLIOutputFormat)
     case help
 
@@ -57,6 +58,8 @@ public enum CLICommand: Equatable, Sendable {
             return try diagnosticsCommand(arguments: arguments)
         case "benchmark":
             return try benchmarkCommand(arguments: arguments)
+        case "extension":
+            return try extensionCommand(arguments: arguments)
         case "doctor":
             return try doctorCommand(arguments: arguments)
         default:
@@ -76,6 +79,59 @@ public enum CLICommand: Equatable, Sendable {
     private static func validateCommand(arguments: [String]) throws -> CLICommand {
         let parsed = try parsePathOutputAndProfile(arguments: arguments, commandName: "validate", supportsOutput: false)
         return .validate(path: parsed.path ?? HostwrightIdentity.manifestFileName, teamProfilePath: parsed.teamProfilePath)
+    }
+
+    private static func extensionCommand(arguments: [String]) throws -> CLICommand {
+        guard arguments.count >= 2, arguments[1] == "check" else {
+            throw CLIUsageError("extension supports only 'check'.")
+        }
+
+        var declarationPath: String?
+        var executablePath: String?
+        var output: CLIOutputFormat = .text
+        var index = 2
+        while index < arguments.count {
+            switch arguments[index] {
+            case "--declaration":
+                declarationPath = try parseUniquePathValue(
+                    arguments: arguments,
+                    index: index,
+                    commandName: "extension check",
+                    flag: "--declaration",
+                    existing: declarationPath
+                )
+                index += 2
+            case "--executable":
+                executablePath = try parseUniquePathValue(
+                    arguments: arguments,
+                    index: index,
+                    commandName: "extension check",
+                    flag: "--executable",
+                    existing: executablePath
+                )
+                index += 2
+            case "--output":
+                output = try parseOutputValue(arguments: arguments, index: index, commandName: "extension check")
+                index += 2
+            default:
+                throw CLIUsageError("extension check supports only --declaration, --executable, and --output.")
+            }
+        }
+
+        guard let declarationPath else {
+            throw CLIUsageError("extension check requires --declaration <absolute-path>.")
+        }
+        guard let executablePath else {
+            throw CLIUsageError("extension check requires --executable <absolute-path>.")
+        }
+        guard declarationPath.hasPrefix("/"), executablePath.hasPrefix("/") else {
+            throw CLIUsageError("extension check requires absolute declaration and executable paths.")
+        }
+        return .extensionCheck(
+            declarationPath: declarationPath,
+            executablePath: executablePath,
+            output: output
+        )
     }
 
     private static func planCommand(arguments: [String]) throws -> CLICommand {
@@ -780,6 +836,12 @@ public enum CLIExitCode: Int32, Equatable, Sendable {
         case .benchmarkBlocked:
             return .runtimeUnavailable
         case .benchmarkFailed:
+            return .partialFailure
+        case .extensionInvalid:
+            return .validation
+        case .extensionBlocked:
+            return .unsafeOperation
+        case .extensionExecutionFailed:
             return .partialFailure
         case .unsupportedArchitecture, .unsupportedMacOSVersion:
             return .validation

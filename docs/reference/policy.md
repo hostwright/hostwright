@@ -28,6 +28,7 @@ Policy decisions include:
 - Advisory scheduling consumes local policy decisions for placement explanations and scores without changing the underlying policy gates.
 - Extension declarations can be evaluated as local data. Built-in or reviewed-local non-mutating declarations can receive allow decisions only when required RuntimeAdapter, HostwrightState, local policy, redaction, audit, explicit-state-path, local-only, ownership, confirmation, and no-runtime-mutation boundaries are declared.
 - Third-party, untrusted, unsupported-version, empty, missing-boundary, runtime-mutation, state-write, networking-provider, tunnel-provider, secret-resolution, and accelerator extension declarations fail closed.
+- `hostwright extension check` consumes these decisions from a separate module and starts the fixed handshake only after one reviewed-local read-only declaration receives an explicit allow. Policy itself still never starts a process or grants capability authority.
 - Team policy profiles can be evaluated as local data. Profiles must be explicit opt-in, versioned, auditable, and preserve required runtime, state, policy, redaction, audit, confirmation, ownership, local-only, and no-telemetry gates.
 - Operational team profiles can only add stricter digest or manifest-review requirements. Approval records authorize one exact bound mutation; they never weaken or override required gates.
 

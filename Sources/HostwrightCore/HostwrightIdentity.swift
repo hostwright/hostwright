@@ -33,6 +33,9 @@ public enum HostwrightErrorCode: String, Sendable {
     case benchmarkInvalid = "HW-BENCH-001"
     case benchmarkBlocked = "HW-BENCH-002"
     case benchmarkFailed = "HW-BENCH-003"
+    case extensionInvalid = "HW-EXT-001"
+    case extensionBlocked = "HW-EXT-002"
+    case extensionExecutionFailed = "HW-EXT-003"
 }
 
 public struct HostwrightDiagnostic: Error, Equatable, Sendable {

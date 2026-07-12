@@ -1,8 +1,8 @@
 # Plugin And Extension Architecture
 
-Status: Phase 33 declaration policy and architecture boundary.
+Status: Phase 33 declaration policy plus Phase 41 reviewed-local handshake host.
 
-Hostwright does not load, install, distribute, or execute plugins. Phase 33 adds a typed declaration model and local policy evaluator so future extension proposals can be reviewed against the same runtime, state, policy, redaction, audit, and confirmation gates before implementation.
+Hostwright does not provide generic plugin loading, installation, distribution, discovery, or capability invocation. Phase 33 adds a typed declaration model and local policy evaluator. Phase 41 adds one explicit, reviewed-local executable handshake so a caller can verify a locally reviewed binary and declaration against that policy before any future capability API is designed.
 
 ## Implemented Scope
 
@@ -14,7 +14,24 @@ Hostwright does not load, install, distribute, or execute plugins. Phase 33 adds
 - Third-party and untrusted declarations are blockers in current core scope.
 - Empty declarations fail closed instead of disappearing from policy output.
 
-This is a non-mutating prototype. It does not run extension code.
+Phase 33 remains a non-mutating declaration model. Phase 41 can execute only the fixed `hostwright-extension-handshake-v1` protocol operation; it does not send capability payloads or grant runtime, state, secret, networking, tunnel, accelerator, or control-plane access.
+
+## Executable Handshake Scope
+
+`hostwright extension check --declaration <absolute-path> --executable <absolute-path>` requires:
+
+- a strict flat JSON declaration with exactly one capability;
+- declaration API and process protocol version 1;
+- `reviewedLocal` trust;
+- a kind/capability pairing accepted by the executable-host allowlist;
+- every boundary required by `ExtensionPolicyEvaluator`;
+- the exact lowercase SHA-256 of the executable;
+- declaration and executable files owned by the invoking user, with no symlink, group-write, or world-write path;
+- an owner-executable binary copied from an open descriptor into a private mode-`0500` staging directory.
+
+The staged process receives one fixed argument, a minimal `LANG`/`LC_ALL` environment, `/` as its working directory, and one bounded JSON request on stdin. The host concurrently drains bounded stdout and stderr, enforces a timeout, requires exit 0 and empty stderr, rejects unknown or duplicate response fields, and verifies the exact request ID, declaration digest, identifier, protocol version, capability, and ready status. The staged file and directory must be removed before success is returned.
+
+A passing check proves only that the exact reviewed file completed this protocol handshake. The protocol supplies no Hostwright capability handle or payload, but the executable still has the invoking macOS account's ambient operating-system privileges. Hostwright cannot prevent that reviewed code from opening accessible files or network connections, invoking absolute-path tools, or spawning descendants. It does not prove that an extension capability works, that the code is sandboxed, that descendant processes are contained, or that the executable is suitable for distribution.
 
 ## Extension Types
 
@@ -82,20 +99,24 @@ Primary risks:
 
 Controls in this phase:
 
-- declarations are data only;
+- declarations remain policy data and the executable path is explicit;
 - evaluation is local, deterministic, and non-mutating;
 - untrusted and third-party declarations block;
 - mutating, state-writing, networking, tunnel, secret-resolution, and accelerator capabilities block;
 - every allowed declaration must include redaction and audit boundaries;
 - runtime observation declarations must include `RuntimeAdapter` and `noRuntimeMutation`;
 - state-read declarations must include `HostwrightState` and explicit state paths.
+- only the fixed version-1 handshake executes, with no capability input or Hostwright authority;
+- executable bytes are hash-bound and privately staged before launch;
+- process time and output are bounded, raw stderr is never surfaced, and exact staging cleanup is required.
 
 ## Non-Goals
 
-- Plugin loader.
+- Generic plugin loader or capability invocation.
 - Remote plugin registry.
 - Binary plugin distribution.
 - Untrusted code execution.
+- Sandboxing or descendant-process containment guarantees.
 - Runtime mutation extension path.
 - Provider networking, DNS, tunnel, reverse proxy, or cloud exposure integration.
 - Secret backend extension path.
@@ -104,7 +125,7 @@ Controls in this phase:
 
 ## Review Requirements For Future Work
 
-Any later extension implementation requires a separate scoped issue with:
+Any later extension capability implementation requires a separate scoped issue with:
 
 - exact capability and trust level;
 - threat model and failure mode review;

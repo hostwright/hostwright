@@ -1,6 +1,6 @@
 import Foundation
 
-public enum HostwrightExtensionKind: String, Equatable, Sendable {
+public enum HostwrightExtensionKind: String, Codable, Equatable, Sendable {
     case policyPack
     case controlSurfaceIntegration
     case diagnosticsIntegration
@@ -11,14 +11,14 @@ public enum HostwrightExtensionKind: String, Equatable, Sendable {
     case future
 }
 
-public enum HostwrightExtensionTrust: String, Equatable, Sendable {
+public enum HostwrightExtensionTrust: String, Codable, Equatable, Sendable {
     case builtIn
     case reviewedLocal
     case thirdParty
     case untrusted
 }
 
-public enum HostwrightExtensionCapability: String, Equatable, Sendable {
+public enum HostwrightExtensionCapability: String, Codable, Equatable, Sendable {
     case policyEvaluation
     case controlSurfaceRead
     case diagnosticsRead
@@ -33,7 +33,7 @@ public enum HostwrightExtensionCapability: String, Equatable, Sendable {
     case acceleratorAccess
 }
 
-public enum HostwrightExtensionBoundary: String, Equatable, Sendable {
+public enum HostwrightExtensionBoundary: String, Codable, Equatable, Sendable {
     case runtimeAdapter
     case stateStore
     case localPolicy

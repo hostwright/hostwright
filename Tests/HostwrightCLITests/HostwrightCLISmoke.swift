@@ -1,3 +1,4 @@
+import Foundation
 import HostwrightTestSupport
 import XCTest
 @testable import HostwrightCLI
@@ -71,11 +72,28 @@ final class HostwrightCLITests: XCTestCase {
         )
         XCTAssertEqual(try CLICommand.parse(arguments: ["doctor"]), .doctor(output: .text))
         XCTAssertEqual(try CLICommand.parse(arguments: ["doctor", "--output", "json"]), .doctor(output: .json))
+        XCTAssertEqual(
+            try CLICommand.parse(arguments: [
+                "extension", "check",
+                "--declaration", "/tmp/extension.json",
+                "--executable", "/tmp/extension",
+                "--output", "json"
+            ]),
+            .extensionCheck(
+                declarationPath: "/tmp/extension.json",
+                executablePath: "/tmp/extension",
+                output: .json
+            )
+        )
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["doctor", "--output", "yaml"]))
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["import-stack"]))
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["import-stack", "compose.yaml", "--write"]))
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["events", "--state-db", "/tmp/state.sqlite", "--sort", "newest"]))
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["diagnostics", "--state-db", "/tmp/state.sqlite"]))
+        XCTAssertThrowsError(try CLICommand.parse(arguments: ["extension"]))
+        XCTAssertThrowsError(try CLICommand.parse(arguments: ["extension", "run"]))
+        XCTAssertThrowsError(try CLICommand.parse(arguments: ["extension", "check", "--declaration", "relative.json", "--executable", "/tmp/extension"]))
+        XCTAssertThrowsError(try CLICommand.parse(arguments: ["extension", "check", "--declaration", "/tmp/extension.json", "--executable", "/tmp/extension", "--output", "yaml"]))
     }
 
     func testApplyRequiresStateDBAndConfirmedPlanHash() {
@@ -102,7 +120,8 @@ final class HostwrightCLITests: XCTestCase {
         XCTAssertTrue(result.standardOutput.contains("hostwright status [path] [--state-db <path>] [--output text|json]"))
         XCTAssertTrue(result.standardOutput.contains("hostwright recovery --state-db <path> [--project <name>] [--output text|json]"))
         XCTAssertTrue(result.standardOutput.contains("hostwright diagnostics --state-db <path> --bundle <path>"))
-        XCTAssertTrue(result.standardOutput.contains("JSON output is supported for import-stack, plan, status, events, recovery, doctor"))
+        XCTAssertTrue(result.standardOutput.contains("hostwright extension check --declaration <absolute-path> --executable <absolute-path> [--output text|json]"))
+        XCTAssertTrue(result.standardOutput.contains("JSON output is supported for import-stack, plan, status, events, recovery, extension check, doctor"))
         XCTAssertTrue(result.standardOutput.contains("import-stack reads a narrow safe stack-file subset"))
         XCTAssertTrue(result.standardOutput.contains("Diagnostics writes a local redacted JSON bundle only"))
         XCTAssertTrue(result.standardOutput.contains("hostwright import-stack compose.yaml --output json"))
@@ -110,6 +129,28 @@ final class HostwrightCLITests: XCTestCase {
         XCTAssertTrue(result.standardOutput.contains("--team-profile <path>"))
         XCTAssertTrue(result.standardOutput.contains("--approval-record <path>"))
         XCTAssertTrue(result.standardOutput.contains("Team profiles and approvals are loaded only from explicit local paths."))
+        XCTAssertTrue(result.standardOutput.contains("it is not sandboxed"))
+    }
+
+    func testExtensionCheckJSONErrorUsesStableCodeAndDoesNotCreateState() throws {
+        let missingDeclaration = "/tmp/hostwright-extension-missing-\(UUID().uuidString).json"
+        let result = HostwrightCLI.run(
+            arguments: [
+                "extension", "check",
+                "--declaration", missingDeclaration,
+                "--executable", "/tmp/hostwright-extension-missing",
+                "--output", "json"
+            ],
+            environment: environment(files: FileBox())
+        )
+
+        XCTAssertEqual(result.exitCode, CLIExitCode.validation.rawValue)
+        XCTAssertEqual(result.standardOutput, "")
+        let object = try jsonObject(result.standardError)
+        XCTAssertEqual(object["kind"] as? String, "error")
+        XCTAssertEqual(object["code"] as? String, HostwrightErrorCode.extensionInvalid.rawValue)
+        XCTAssertEqual(object["exitCode"] as? Int, Int(CLIExitCode.validation.rawValue))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: missingDeclaration))
     }
 
     func testInitCreatesStarterManifestWithoutOverwriting() {

@@ -772,7 +772,7 @@ final class HostwrightCoreTests: XCTestCase {
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("plan hashes can be bypassed"))
     }
 
-    func testExtensionArchitectureDocsDescribeDeclarationPolicyOnly() throws {
+    func testExtensionArchitectureDocsDescribeDeclarationPolicyAndHandshakeOnly() throws {
         let root = try packageRoot()
         let architecture = try read("docs/architecture/plugin-extension-architecture.md", root: root)
         let policy = try read("docs/reference/policy.md", root: root)
@@ -783,7 +783,9 @@ final class HostwrightCoreTests: XCTestCase {
         let traceability = try read("docs/requirements/SOURCE_TRACEABILITY.md", root: root)
         let implementationPlan = try read("docs/IMPLEMENTATION_PLAN.md", root: root)
         let buildStatus = try read("docs/BUILD_STATUS.md", root: root)
-        let devlog = try read("docs/devlog/0033-plugin-extension-architecture.md", root: root)
+        let phase33Devlog = try read("docs/devlog/0033-plugin-extension-architecture.md", root: root)
+        let phase41Devlog = try read("docs/devlog/0041-reviewed-local-extension-handshake-host.md", root: root)
+        let cli = try read("docs/reference/cli.md", root: root)
         let publicDocs = [
             architecture,
             policy,
@@ -794,22 +796,30 @@ final class HostwrightCoreTests: XCTestCase {
             traceability,
             implementationPlan,
             buildStatus,
-            devlog
+            phase33Devlog,
+            phase41Devlog,
+            cli
         ].joined(separator: "\n")
 
-        XCTAssertTrue(architecture.contains("Status: Phase 33 declaration policy and architecture boundary."))
-        XCTAssertTrue(architecture.contains("This is a non-mutating prototype. It does not run extension code."))
+        XCTAssertTrue(architecture.contains("Status: Phase 33 declaration policy plus Phase 41 reviewed-local handshake host."))
+        XCTAssertTrue(architecture.contains("fixed `hostwright-extension-handshake-v1` protocol operation"))
+        XCTAssertTrue(architecture.contains("A passing check proves only that the exact reviewed file completed this protocol handshake."))
         XCTAssertTrue(architecture.contains("| Tunnel provider | Current core blocks tunnels, DNS, reverse proxy setup, and public exposure. |"))
         XCTAssertTrue(policy.contains("Extension declarations can be evaluated as local data."))
-        XCTAssertTrue(limitations.contains("Local extension declaration policy decisions"))
+        XCTAssertTrue(limitations.contains("`hostwright extension check`"))
         XCTAssertTrue(security.contains("## Extension Boundary"))
+        XCTAssertTrue(security.contains("retains the invoking account's ambient file, process, and network privileges"))
         XCTAssertTrue(requirements.contains("HW-EXT-001"))
-        XCTAssertTrue(requirements.contains("HW-EXT-003"))
+        XCTAssertTrue(requirements.contains("HW-EXT-007"))
         XCTAssertTrue(acceptance.contains("Phase 33 Gate: Plugin And Extension Architecture"))
-        XCTAssertTrue(traceability.contains("HW-EXT-001, HW-EXT-002, HW-EXT-003"))
+        XCTAssertTrue(acceptance.contains("Phase 41 Gate: Reviewed-Local Executable Extension Handshake Host"))
+        XCTAssertTrue(traceability.contains("HW-EXT-004, HW-EXT-005, HW-EXT-006, HW-EXT-007"))
         XCTAssertTrue(implementationPlan.contains("## Phase 33 Outputs"))
-        XCTAssertTrue(buildStatus.contains("Phase 33 adds typed extension declarations"))
-        XCTAssertTrue(devlog.contains("No plugin loader."))
+        XCTAssertTrue(implementationPlan.contains("## Phase 41 Outputs"))
+        XCTAssertTrue(buildStatus.contains("Phase 41 adds `HostwrightExtensions`"))
+        XCTAssertTrue(phase33Devlog.contains("No plugin loader."))
+        XCTAssertTrue(phase41Devlog.contains("No generic plugin loader"))
+        XCTAssertTrue(cli.contains("hostwright extension check --declaration <absolute-path> --executable <absolute-path>"))
 
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright loads plugins"))
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright executes plugins"))
@@ -821,6 +831,8 @@ final class HostwrightCoreTests: XCTestCase {
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("tunnel provider is implemented"))
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("secret backend extension is implemented"))
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("accelerator extension is implemented"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("extension capability invocation is implemented"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("extension processes are sandboxed"))
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("extension may bypass RuntimeAdapter"))
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("extension may access SQLite directly"))
     }

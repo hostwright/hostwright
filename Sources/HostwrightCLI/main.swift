@@ -1,6 +1,7 @@
 import Darwin
 import Foundation
 import HostwrightCore
+import HostwrightExtensions
 import HostwrightHealth
 import HostwrightImport
 import HostwrightManifest
@@ -126,6 +127,12 @@ public enum HostwrightCLI {
             ).run()
         case .benchmark(let options):
             return try BenchmarkCommandRunner(options: options, environment: environment).run()
+        case .extensionCheck(let declarationPath, let executablePath, let output):
+            return try checkExtension(
+                declarationPath: declarationPath,
+                executablePath: executablePath,
+                output: output
+            )
         case .doctor(let output):
             return doctor(environment: environment, output: output)
         }
@@ -149,6 +156,7 @@ public enum HostwrightCLI {
       hostwright cleanup [path] --state-db <path> --confirm-cleanup <token> [--team-profile <path> --approval-record <path>]
       hostwright diagnostics --state-db <path> --bundle <path> [--project <name>] [--manifest <path>]
       hostwright benchmark --image <local-image> --samples <3-10> --report <path> --source-commit <40-hex> --source-dirty <true|false> --expected-container-version <version> [--attended-sleep-wake-seconds <15-300>] --confirm-live
+      hostwright extension check --declaration <absolute-path> --executable <absolute-path> [--output text|json]
       hostwright doctor [--output text|json]
 
     Most commands are read-only. init writes hostwright.yaml only when absent.
@@ -157,9 +165,10 @@ public enum HostwrightCLI {
     Apply can execute exactly one confirmed createMissingService or restart-policy-allowed startManagedService action through RuntimeAdapter.
     Cleanup deletes only exact cleanup-eligible Hostwright-owned stopped/created/exited containers after dry-run token confirmation.
     Diagnostics writes a local redacted JSON bundle only. It never uploads telemetry.
-    JSON output is supported for import-stack, plan, status, events, recovery, doctor, and errors when --output json is present.
+    JSON output is supported for import-stack, plan, status, events, recovery, extension check, doctor, and errors when --output json is present.
     Team profiles and approvals are loaded only from explicit local paths. Profile-aware mutations require an approval bound to the exact profile, manifest, and plan or cleanup token.
     Benchmark runs are explicit local hardware evidence. They refuse image pulls and broad cleanup, use bounded disposable Hostwright-owned resources, and write only the requested non-existing report path.
+    Extension check executes one reviewed-local protocol handshake from explicit absolute paths. The protocol grants no Hostwright capability, but the reviewed executable still has the invoking macOS account's ambient privileges; it is not sandboxed.
 
     Examples:
       hostwright plan --output json
@@ -169,6 +178,7 @@ public enum HostwrightCLI {
       hostwright recovery --state-db /tmp/hostwright.sqlite --output json
       hostwright diagnostics --state-db /tmp/hostwright.sqlite --bundle /tmp/hostwright-diagnostics.json
       hostwright benchmark --image docker.io/library/python:alpine --samples 3 --report /tmp/hostwright-benchmark.json --source-commit 0123456789012345678901234567890123456789 --source-dirty true --expected-container-version 1.0.0 --confirm-live
+      hostwright extension check --declaration /tmp/extension.json --executable /tmp/extension --output json
       hostwright doctor --output json
 
     """
@@ -241,6 +251,33 @@ public enum HostwrightCLI {
             "[\(check.status.rawValue)] \(check.identifier.rawValue): \(check.message)"
         }
         return CLIRunResult(standardOutput: "Hostwright doctor\n" + lines.joined(separator: "\n") + "\n", exitCode: exitCode)
+    }
+
+    private static func checkExtension(
+        declarationPath: String,
+        executablePath: String,
+        output: CLIOutputFormat
+    ) throws -> CLIRunResult {
+        let result = try ReviewedLocalExtensionHost().check(
+            declarationURL: URL(fileURLWithPath: declarationPath),
+            executableURL: URL(fileURLWithPath: executablePath)
+        )
+        if output == .json {
+            return CLIRunResult(standardOutput: CLIJSON.extensionHandshake(result))
+        }
+        return CLIRunResult(
+            standardOutput: """
+            Reviewed-local extension handshake ready
+            Identifier: \(result.identifier)
+            Capability: \(result.capability.rawValue)
+            Protocol version: \(result.protocolVersion)
+            Declaration SHA-256: \(result.declarationSHA256)
+            Executable SHA-256: \(result.executableSHA256)
+            Duration: \(result.durationMilliseconds) ms
+            Staging cleanup: succeeded
+
+            """
+        )
     }
 
     private static func loadValidManifest(

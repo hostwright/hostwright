@@ -19,6 +19,7 @@ let package = Package(
         .library(name: "HostwrightDaemonCore", targets: ["HostwrightDaemonCore"]),
         .library(name: "HostwrightHealth", targets: ["HostwrightHealth"]),
         .library(name: "HostwrightImport", targets: ["HostwrightImport"]),
+        .library(name: "HostwrightExtensions", targets: ["HostwrightExtensions"]),
         .library(name: "HostwrightNetworking", targets: ["HostwrightNetworking"]),
         .library(name: "HostwrightObservability", targets: ["HostwrightObservability"]),
         .library(name: "HostwrightPolicy", targets: ["HostwrightPolicy"]),
@@ -29,6 +30,7 @@ let package = Package(
             name: "HostwrightCLI",
             dependencies: [
                 "HostwrightCore",
+                "HostwrightExtensions",
                 "HostwrightHealth",
                 "HostwrightImport",
                 "HostwrightManifest",
@@ -55,6 +57,13 @@ let package = Package(
         .target(
             name: "HostwrightDistribution",
             dependencies: ["HostwrightCore"]
+        ),
+        .target(
+            name: "HostwrightExtensions",
+            dependencies: [
+                "HostwrightCore",
+                "HostwrightPolicy"
+            ]
         ),
         .target(
             name: "HostwrightManifest",
@@ -159,6 +168,17 @@ let package = Package(
         .testTarget(
             name: "HostwrightDistributionTests",
             dependencies: ["HostwrightDistribution"]
+        ),
+        .testTarget(
+            name: "HostwrightExtensionsTests",
+            dependencies: [
+                "HostwrightCore",
+                "HostwrightExtensions",
+                "HostwrightPolicy"
+            ],
+            resources: [
+                .process("Fixtures")
+            ]
         ),
         .testTarget(
             name: "HostwrightManifestTests",

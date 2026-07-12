@@ -19,7 +19,7 @@ Hostwright is not production ready.
 - `--output json` for `import-stack`, `plan`, `status`, `events`, `recovery`, `doctor`, and structured errors when JSON mode is requested.
 - Stable process exit categories for usage, validation, state unavailable, runtime unavailable, confirmation mismatch, unsafe operation, and partial failure.
 - Local deterministic policy decisions for planner safety, cleanup classification, image policy, env/secret boundaries, lifecycle blockers, untrusted manifests, secure exposure blockers, and accelerator placeholders.
-- Local extension declaration policy decisions for built-in or reviewed-local non-mutating capability declarations, with fail-closed trust, version, boundary, runtime-mutation, state-write, networking, tunnel, secret-resolution, and accelerator decisions.
+- Local extension declaration policy decisions plus `hostwright extension check` for one explicit reviewed-local, read-only, digest-bound, bounded version-1 process handshake with strict response binding and exact private-stage cleanup.
 - Explicit local team profiles, strict-only digest/review requirements, exact mutation approval bindings, and redacted append-only local audit records.
 - Local advisory scheduler reports for declared memory requests, workload class, port/policy blockers, fairness scoring, overcommit blockers, accelerator blockers, and remote-placement blockers. Reports are in-memory recommendations only and are not CLI placement commands.
 - Local control-surface requirements and API boundary documentation for a future separate GUI/design owner.
@@ -110,7 +110,7 @@ Hostwright is not production ready.
 - Hidden global state writes.
 - Production durability or automatic corruption-recovery guarantees.
 - Remote policy service, team policy workflow, central policy distribution, silent policy bypass, policy-driven runtime mutation, or automatic policy remediation.
-- Plugin loader, remote plugin registry, binary plugin distribution, untrusted extension execution, runtime-mutation extensions, state-write extensions, networking-provider extensions, tunnel-provider extensions, secret-backend extensions, or accelerator extensions.
+- Generic plugin loading, extension discovery/installation/persistence/distribution, capability payloads or invocation, operating-system sandboxing, restriction of reviewed code's ambient user privileges, descendant-process containment guarantees, remote plugin registry, untrusted extension execution, runtime-mutation extensions, state-write extensions, networking-provider extensions, tunnel-provider extensions, secret-backend extensions, or accelerator extensions.
 - Cloud team service, central remote control, hosted audit log, user tracking, enterprise support workflow, remote policy distribution, macOS user/group/ACL management, MDM integration, or shared-secret management.
 - Online state backup, restore, or repair commands.
 - External telemetry, hosted diagnostics, automatic bundle upload, OSLog integration, or production support-bundle workflows.
@@ -184,7 +184,7 @@ Diagnostics are local and manual. `hostwright diagnostics` reads existing state 
 
 `hostwright benchmark` is separate from doctor and is explicitly mutating. It requires live confirmation, a pre-existing local image, bounded sample count, explicit source evidence, and a non-existing report path. It creates only unique labeled benchmark resources through `RuntimeAdapter`, never pulls an image, and deletes only exact identifiers after terminal-state quiescence. A missing battery or unattended sleep/wake interval blocks the report; any command, version, identity, ownership, or cleanup failure fails it. One report does not prove capacity, efficiency, compatibility beyond its exact versions, or performance on another host.
 
-Policy evaluation is local and deterministic. Team workflow command wiring may persist bound audit records through explicit `HostwrightState` paths, but policy code itself does not execute Apple container commands, write SQLite, contact registries, resolve DNS, configure tunnels, distribute team policy, load plugins, run extension code, or weaken required gates.
+Policy evaluation is local and deterministic. Team workflow command wiring may persist bound audit records through explicit `HostwrightState` paths, but policy code itself does not execute Apple container commands, write SQLite, contact registries, resolve DNS, configure tunnels, distribute team policy, or weaken required gates. `HostwrightExtensions` is separate from policy and can run only the fixed reviewed-local handshake; it receives no RuntimeAdapter, SQLite, state, secret, networking, accelerator, or mutation authority.
 
 Advisory scheduling is local and diagnostic. It produces deterministic in-memory recommendations, scores, reason codes, and remediation text from declared inputs and existing policy decisions, but it does not execute Apple container commands, write state, reserve capacity, mutate manifests, update runtime placement, expose a scheduler API, place workloads remotely, or schedule accelerators.
 

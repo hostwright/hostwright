@@ -1322,7 +1322,11 @@ final class HostwrightRuntimeTests: XCTestCase {
 
     func testCLIReconcilerAndHealthDoNotBypassRuntimeBoundary() throws {
         let runtimeCommandFiles = [
-            "Sources/HostwrightCLI/main.swift",
+            "Sources/HostwrightCLI/HostwrightCLI.swift",
+            "Sources/HostwrightCommand/main.swift",
+            "Sources/HostwrightControl/LocalControlAPI.swift",
+            "Sources/HostwrightControl/ControlToolCommand.swift",
+            "Sources/HostwrightControlTool/main.swift",
             "Sources/HostwrightReconciler/ReconciliationPlanner.swift",
             "Sources/HostwrightHealth/DoctorModels.swift"
         ]

@@ -1,6 +1,6 @@
 # Limitations
 
-Hostwright `v0.1.0-alpha.1` can model and attempt read-only runtime observation through `RuntimeAdapter`, persist desired and observed state to an explicit SQLite database path, compute deterministic desired-vs-observed plans, produce local advisory scheduling recommendations from declared inputs, execute one tightly gated create-missing-service mutation, execute one restart-policy-allowed managed start, execute one restart-policy-allowed managed restart for an exact Hostwright-owned running/unhealthy service, read bounded logs, render and filter state events, write a local redacted diagnostics bundle, run a foreground daemon loop with in-process loopback health probes and restart-state blocking, and delete exact cleanup-eligible Hostwright-owned stopped/created/exited containers through `RuntimeAdapter`.
+Hostwright `v0.1.0-alpha.1` can model and attempt read-only runtime observation through `RuntimeAdapter`, persist desired and observed state to an explicit SQLite database path, compute deterministic desired-vs-observed plans, produce local advisory scheduling recommendations from declared inputs, expose a one-shot local JSON process for five existing command contracts, execute one tightly gated create-missing-service mutation, execute one restart-policy-allowed managed start, execute one restart-policy-allowed managed restart for an exact Hostwright-owned running/unhealthy service, read bounded logs, render and filter state events, write a local redacted diagnostics bundle, run a foreground daemon loop with in-process loopback health probes and restart-state blocking, and delete exact cleanup-eligible Hostwright-owned stopped/created/exited containers through `RuntimeAdapter`.
 
 Hostwright is not production ready.
 
@@ -22,7 +22,7 @@ Hostwright is not production ready.
 - Local extension declaration policy decisions plus `hostwright extension check` for one explicit reviewed-local, read-only, digest-bound, bounded version-1 process handshake with strict response binding and exact private-stage cleanup.
 - Explicit local team profiles, strict-only digest/review requirements, exact mutation approval bindings, and redacted append-only local audit records.
 - Local advisory scheduler reports for declared memory requests, workload class, port/policy blockers, fairness scoring, overcommit blockers, accelerator blockers, and remote-placement blockers. Reports are in-memory recommendations only and are not CLI placement commands.
-- Local control-surface requirements and API boundary documentation for a future separate GUI/design owner.
+- Local control-surface requirements plus `hostwright-control`, a bounded one-request JSON process for plan, status, events, recovery, and doctor with launch-fixed explicit paths and no mutation operation. GUI/design implementation remains future work.
 - `hostwright status [path] --state-db <path>` with live RuntimeAdapter observation and event/snapshot persistence.
 - `hostwright logs <service>` with bounded tail output through RuntimeAdapter and redaction.
 - `hostwright events --state-db <path>` for persisted event ledger records, with project/type/service/severity/limit/sort filtering.
@@ -122,7 +122,7 @@ Hostwright is not production ready.
 - Cloud control plane.
 - Kubernetes-class Apple silicon control plane.
 - Web dashboard.
-- GUI implementation, daemon API, or local control-surface runtime.
+- GUI implementation, persistent daemon API, socket/HTTP listener, background control service, remote control surface, or mutation endpoint in `hostwright-control`.
 - Production readiness.
 - Beta release tag, beta GitHub Release, beta compatibility claim, or maintainer-approved beta support boundary.
 - Public binary downloads, `.pkg` installers, system install scripts, Homebrew formulae, package-channel support, launch agents, privileged helpers, or system-prefix installation.
@@ -185,6 +185,8 @@ Diagnostics are local and manual. `hostwright diagnostics` reads existing state 
 `hostwright benchmark` is separate from doctor and is explicitly mutating. It requires live confirmation, a pre-existing local image, bounded sample count, explicit source evidence, and a non-existing report path. It creates only unique labeled benchmark resources through `RuntimeAdapter`, never pulls an image, and deletes only exact identifiers after terminal-state quiescence. A missing battery or unattended sleep/wake interval blocks the report; any command, version, identity, ownership, or cleanup failure fails it. One report does not prove capacity, efficiency, compatibility beyond its exact versions, or performance on another host.
 
 Policy evaluation is local and deterministic. Team workflow command wiring may persist bound audit records through explicit `HostwrightState` paths, but policy code itself does not execute Apple container commands, write SQLite, contact registries, resolve DNS, configure tunnels, distribute team policy, or weaken required gates. `HostwrightExtensions` is separate from policy and can run only the fixed reviewed-local handshake; it receives no RuntimeAdapter, SQLite, state, secret, networking, accelerator, or mutation authority.
+
+`hostwright-control` is also separate from runtime and state modules. It validates one strict request, fixes all file paths at process launch, and delegates only to existing Hostwright CLI JSON contracts. Its operations do not mutate runtime. State-backed status can still observe runtime and perform the existing explicit-database schema migration, snapshot, and audit writes; events and recovery read an existing explicit database. The process opens no listener and exposes no apply, cleanup, logs, diagnostics export, benchmark, extension execution, arbitrary command, or default path.
 
 Advisory scheduling is local and diagnostic. It produces deterministic in-memory recommendations, scores, reason codes, and remediation text from declared inputs and existing policy decisions, but it does not execute Apple container commands, write state, reserve capacity, mutate manifests, update runtime placement, expose a scheduler API, place workloads remotely, or schedule accelerators.
 

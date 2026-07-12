@@ -5,9 +5,11 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
 
 swift build --product hostwright
+swift build --product hostwright-control
 swift build --product hostwright-dist
 bin_dir="$(swift build --show-bin-path)"
 hostwright="$bin_dir/hostwright"
+hostwright_control="$bin_dir/hostwright-control"
 hostwright_dist="$bin_dir/hostwright-dist"
 if [[ ! -x "$hostwright" ]]; then
   echo "built hostwright executable not found at $hostwright" >&2
@@ -15,6 +17,10 @@ if [[ ! -x "$hostwright" ]]; then
 fi
 if [[ ! -x "$hostwright_dist" ]]; then
   echo "built hostwright-dist executable not found at $hostwright_dist" >&2
+  exit 1
+fi
+if [[ ! -x "$hostwright_control" ]]; then
+  echo "built hostwright-control executable not found at $hostwright_control" >&2
   exit 1
 fi
 
@@ -40,13 +46,17 @@ extension_fixture="$workdir/extension-fixture"
 extension_declaration="$workdir/extension.json"
 extension_failure_declaration="$workdir/extension-failure.json"
 extension_json="$workdir/extension-result.json"
+control_request="$workdir/control-request.json"
+control_response="$workdir/control-response.json"
+control_rejected_request="$workdir/control-rejected-request.json"
+control_rejected_response="$workdir/control-rejected-response.json"
 
 cleanup() {
   exit_code=$?
   trap - EXIT
   set +e
   chmod 700 "$readonly_dir" 2>/dev/null
-  rm -f "$manifest" "$plan_json" "$status_json" "$doctor_json" "$team_profile" "$team_plan_json" "$stack_file" "$team_import_json" "$invalid_profile" "$overwrite_stdout" "$overwrite_stderr" "$missing_stdout" "$missing_stderr" "$benchmark_existing_report" "$benchmark_absent_report" "$unexpected_distribution_report" "$extension_fixture" "$extension_declaration" "$extension_failure_declaration" "$extension_json" "$readonly_dir/hostwright.yaml"
+  rm -f "$manifest" "$plan_json" "$status_json" "$doctor_json" "$team_profile" "$team_plan_json" "$stack_file" "$team_import_json" "$invalid_profile" "$overwrite_stdout" "$overwrite_stderr" "$missing_stdout" "$missing_stderr" "$benchmark_existing_report" "$benchmark_absent_report" "$unexpected_distribution_report" "$extension_fixture" "$extension_declaration" "$extension_failure_declaration" "$extension_json" "$control_request" "$control_response" "$control_rejected_request" "$control_rejected_response" "$readonly_dir/hostwright.yaml"
   rmdir "$readonly_dir" 2>/dev/null
   rmdir "$workdir"
   exit "$exit_code"
@@ -85,6 +95,28 @@ done
 grep -q '"planHash"' "$plan_json"
 grep -q '"observed":false' "$status_json"
 grep -q '"checks"' "$doctor_json"
+
+printf '%s\n' '{"apiVersion":1,"requestID":"integration-plan-1","operation":"plan"}' >"$control_request"
+"$hostwright_control" --manifest "$manifest" <"$control_request" >"$control_response" 2>"$missing_stderr"
+[[ ! -s "$missing_stderr" ]]
+[[ "$(wc -l <"$control_response" | tr -d ' ')" -eq 1 ]]
+plutil -convert json -o /dev/null "$control_response"
+grep -q '"apiVersion":1' "$control_response"
+grep -q '"requestID":"integration-plan-1"' "$control_response"
+grep -q '"success":true' "$control_response"
+grep -q '"kind":"plan"' "$control_response"
+
+printf '%s\n' '{"apiVersion":1,"requestID":"integration-apply-1","operation":"apply"}' >"$control_rejected_request"
+set +e
+"$hostwright_control" --manifest "$manifest" <"$control_rejected_request" >"$control_rejected_response" 2>"$missing_stderr"
+control_rejected_exit=$?
+set -e
+[[ "$control_rejected_exit" -eq 65 ]]
+[[ ! -s "$missing_stderr" ]]
+[[ "$(wc -l <"$control_rejected_response" | tr -d ' ')" -eq 1 ]]
+plutil -convert json -o /dev/null "$control_rejected_response"
+grep -q '"code":"HW-API-001"' "$control_rejected_response"
+grep -q '"success":false' "$control_rejected_response"
 
 printf '%s\n' \
   '{' \
@@ -267,4 +299,4 @@ if find "$workdir" -name '*.sqlite*' -print -quit | grep -q .; then
   exit 1
 fi
 
-echo "local-integration passed: built CLI and distribution tool, reviewed-local extension subprocess handshake, team-profile/benchmark/distribution gates, JSON output/errors, real file failures, overwrite refusal, and no hidden state writes"
+echo "local-integration passed: built CLI, one-shot control API, and distribution tool; reviewed-local extension subprocess handshake, team-profile/benchmark/distribution gates, JSON output/errors, real file failures, overwrite refusal, rejected control mutation, and no hidden state writes"

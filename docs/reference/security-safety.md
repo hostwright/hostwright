@@ -66,9 +66,11 @@ Current public Hostwright releases remain source-only. Local unsigned artifacts 
 
 ## Control Surface Boundary
 
-Future GUI or local control surfaces must use Hostwright command contracts or a future explicit Hostwright API that preserves the same validation, redaction, plan-hash confirmation, cleanup token, ownership, explicit-state-path, and RuntimeAdapter gates.
+Future GUI or local control surfaces must use Hostwright command contracts or the explicit `hostwright-control` subset while preserving the same validation, redaction, ownership, explicit-state-path, and RuntimeAdapter boundaries. Mutation remains outside the Phase 42 API, so plan-hash confirmation and cleanup-token authority are not exposed through it.
 
-They must not call Apple container, SQLite, `RuntimeAdapter`, state migrations, cleanup deletion, health execution, or diagnostics upload directly. Phase 21 documents this boundary only; it does not add GUI code, a daemon API, a web dashboard, hosted diagnostics, telemetry upload, or remote control.
+They must not call Apple container, SQLite, `RuntimeAdapter`, state migrations, cleanup deletion, health execution, or diagnostics upload directly. `hostwright-control` delegates only plan, status, events, recovery, and doctor to existing CLI contracts, requires launch-fixed absolute paths, rejects request-selected paths and mutation names, bounds one stdin request and one stdout response, and then exits. It adds no GUI code, daemon API, listener, web dashboard, hosted diagnostics, telemetry upload, or remote control.
+
+Configured files must be existing regular non-symlink files with safe ownership, no group/world write permission, and no set-ID bits. This check reduces accidental or cross-account substitution; it is not an operating-system sandbox or a guarantee against the invoking account replacing its own files. State-backed status can perform existing schema migration, observation snapshot, and audit writes to the explicit configured database. No API operation mutates runtime.
 
 ## Cleanup Safety
 

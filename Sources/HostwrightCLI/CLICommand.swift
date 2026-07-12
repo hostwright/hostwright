@@ -843,6 +843,12 @@ public enum CLIExitCode: Int32, Equatable, Sendable {
             return .unsafeOperation
         case .extensionExecutionFailed:
             return .partialFailure
+        case .controlAPIInvalid:
+            return .validation
+        case .controlAPIUnavailable:
+            return .stateUnavailable
+        case .controlAPIExecutionFailed:
+            return .partialFailure
         case .unsupportedArchitecture, .unsupportedMacOSVersion:
             return .validation
         }

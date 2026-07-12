@@ -56,9 +56,11 @@ These documents are process controls only. They do not add branch protection, CO
 
 ## Release Distribution Boundary
 
-Phase 35 defines a fail-closed distribution readiness gate. It records the artifact matrix, signing and notarization evidence, checksum, SBOM, provenance, installer, uninstaller, upgrade, downgrade, rollback, and package-channel requirements that must exist before binary or installer publication.
+Phase 35 adds a fail-closed local unsigned distribution lane. `hostwright-dist` accepts explicit paths only, rejects dirty clean-build inputs, validates ARM64 binaries by execution and Mach-O slice, creates an exact archive manifest, binds SHA-256/SPDX/unsigned provenance sidecars, rejects hidden/link/path/mode/digest drift before install, and exercises atomic replacement with reverse-order rollback under a temporary prefix.
 
-Current Hostwright releases remain source-only. The distribution gate does not create signed binaries, notarized artifacts, installer packages, launch agents, install scripts, SBOMs, provenance statements, Homebrew formulae, or package-channel support.
+Lifecycle mutation is restricted to checksum-verified installer-owned files beneath an explicit `hostwright-dist-*` temporary directory. Update and uninstall refuse modified owned files. Uninstall removes only exact owned files and installer-created empty directories, then compares unrelated prefix content with its initial snapshot.
+
+Current public Hostwright releases remain source-only. Local unsigned artifacts are non-publishable and all evidence remains blocked for Developer ID signing, notarization, stapling, Gatekeeper, signed `.pkg`, system installation, Homebrew/package-channel support, launch agents, privileged helpers, and public binary approval.
 
 ## Control Surface Boundary
 
@@ -134,6 +136,6 @@ This alpha does not include:
 - GPU/ANE scheduling, Metal/Core ML/MLX/PyTorch MPS container support, host-native accelerator helpers, or host accelerator device exposure;
 - plugin loader, remote plugin registry, binary plugin distribution, or untrusted extension execution;
 - cloud team service, central remote control, hosted audit log, user tracking, enterprise support workflow, or remote policy distribution;
-- signing, notarization, signature verification, SBOM generation/validation, vulnerability scanning, or binary provenance.
+- Developer ID signing, notarization, stapling, Gatekeeper acceptance, signed installer verification, trusted provenance, dependency/image SBOM claims, or vulnerability scanning;
 - external telemetry, hosted diagnostics, or automatic diagnostic upload.
 - support SLA, enterprise support workflow, enforced CODEOWNERS, or branch-protection policy.

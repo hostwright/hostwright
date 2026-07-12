@@ -12,7 +12,7 @@ Hostwright separates deterministic test coverage from evidence that exercises re
 
 Reports conform to `schemas/hostwright-evidence.schema.json`; production Swift models and validation live in `HostwrightCore/EvidenceModels.swift`. Status is one of `passed`, `failed`, or `blocked`; there is no skipped-success status.
 
-The default repository gate runs `swift test` for unit-contract and XCTest-backed local integration coverage, then `scripts/integration.sh` against the built CLI. Live runtime, hardware, and distribution lanes remain separate because they require explicit resources or credentials. `hostwright benchmark` can create a hardware report locally, but its scripted contract tests never count as that report's proof.
+The default repository gate runs `swift test` for unit-contract and XCTest-backed local integration coverage, then `scripts/integration.sh` against the built tools. Distribution tests exercise actual debug Hostwright binaries, tar archives, checksums, subprocesses, permission failures, and temporary prefixes, but remain local-integration evidence because they use dirty prebuilt assembly and no signing/notarization credentials. `hostwright-dist build` is the separate clean release-build lane. `hostwright benchmark` similarly separates scripted contracts from hardware evidence.
 
 ## Passing Rules
 
@@ -35,6 +35,8 @@ Release evidence must come from a clean checkout. A dirty report can support dev
 - Blocked work may not be converted to passed with a fixture, no-op implementation, conditional early return, or silently skipped test.
 - Exact cleanup failure makes live-runtime or hardware evidence fail even when the measured operation succeeded.
 - Unit and contract tests may use scripted dependencies when a real dependency cannot deterministically produce the required failure. Their output remains `unit-contract` evidence.
+- A successful unsigned archive or temp-prefix lifecycle remains `blocked` when Developer ID signing, notarization, stapling, Gatekeeper, installer, or publication stages did not run.
+- Distribution cleanup must restore the explicit temporary prefix to its initial unrelated-content snapshot; an owned-file cleanup or rollback failure is not a passing lifecycle.
 
 ## Evidence Storage
 

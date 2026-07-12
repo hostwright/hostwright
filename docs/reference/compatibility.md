@@ -15,7 +15,8 @@ Phase 39 defines beta readiness criteria, but no beta compatibility claim exists
 | Runtime | Apple container CLI | Required for runtime observation, apply, logs, status, and cleanup. |
 | Resource intelligence and benchmark lab | Local host facts plus an explicit evidence-gated benchmark command | Doctor remains read-only; Phase 36 can measure a local pre-existing image through RuntimeAdapter with bounded samples and exact cleanup. Missing attended sleep/wake or battery capability remains blocked; no capacity guarantee. |
 | State | Explicit SQLite database path | No default state path is provided. |
-| Artifact | Source only | No binaries, installer packages, Homebrew formula, signing, or notarization. |
+| Public artifact | Source only | No binary download, installer package, Homebrew formula, signing, or notarization is published. |
+| Local distribution evidence | Unsigned macOS ARM64 archive only | `hostwright-dist` verifies local archive/checksum/SPDX/provenance and temporary-prefix lifecycle; every report remains blocked for signing, notarization, Gatekeeper, `.pkg`, and publication. |
 | Beta readiness | Checklist only | `docs/release/beta-readiness.md` defines required evidence before any beta tag; it does not create beta support by itself. |
 
 ## SwiftPM Platform

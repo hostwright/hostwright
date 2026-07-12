@@ -19,6 +19,7 @@ hostwright diagnostics --state-db <path> --bundle <path> [--project <name>] [--m
 hostwright cleanup [path] --state-db <path> --dry-run [--team-profile <path>]
 hostwright cleanup [path] --state-db <path> --confirm-cleanup <token> [--team-profile <path> --approval-record <path>]
 hostwright benchmark --image <local-image> --samples <3-10> --report <path> --source-commit <40-hex> --source-dirty <true|false> --expected-container-version <version> [--attended-sleep-wake-seconds <15-300>] --confirm-live
+hostwright extension check --declaration <absolute-path> --executable <absolute-path> [--output text|json]
 hostwright doctor [--output text|json]
 hostwrightd --foreground --config <hostwright.yaml> --state-db <path> [options]
 ```
@@ -27,7 +28,7 @@ hostwrightd --foreground --config <hostwright.yaml> --state-db <path> [options]
 
 Text output is the default for every command.
 
-`import-stack`, `plan`, `status`, `events`, `recovery`, and `doctor` also accept `--output json`. JSON output is intended for local scripts and tests. It does not change command behavior, state writes, runtime observation, or mutation gates.
+`import-stack`, `plan`, `status`, `events`, `recovery`, `extension check`, and `doctor` also accept `--output json`. JSON output is intended for local scripts and tests. It does not change command behavior, state writes, runtime observation, or mutation gates.
 
 When JSON mode is requested and the CLI can classify the failure, stderr uses this envelope:
 
@@ -43,12 +44,12 @@ Manifest failures use an `issues` array with stable Hostwright error codes. `doc
 | ---: | --- | --- |
 | `0` | Success | All commands |
 | `64` | Usage | Unsupported flags, missing arguments, refused overwrite, or local non-manifest file I/O failure |
-| `65` | Validation | Missing/unreadable manifest, manifest/profile/approval validation, and compatibility failures |
+| `65` | Validation | Missing/unreadable manifest, manifest/profile/approval/extension declaration validation, and compatibility failures |
 | `66` | State unavailable | Explicit SQLite state path could not be opened, migrated, verified, locked, or read |
 | `69` | Runtime unavailable or evidence blocked | Runtime observation/mutation unavailable, or benchmark prerequisites/dimensions remain blocked |
 | `70` | Confirmation mismatch | Plan, cleanup token, approval scope, or approval hash bindings do not match the current operation |
-| `71` | Unsafe operation | Planner/apply safety policy blocked mutation |
-| `72` | Partial failure | Cleanup completed with mixed success/failure, or benchmark command/identity/cleanup evidence failed |
+| `71` | Unsafe operation | Planner/apply safety policy or reviewed-local extension policy blocked execution |
+| `72` | Partial failure | Cleanup completed with mixed success/failure, benchmark command/identity/cleanup evidence failed, or an extension handshake process/protocol failed |
 
 ## `hostwright --version`
 
@@ -392,6 +393,32 @@ Exit behavior is evidence-driven:
 Blocked and failed runs still write their report when encoding and file output succeed. Missing confirmation or an existing report path is refused before runtime access.
 
 This command records local evidence only. Its values are not capacity, compatibility, efficiency, or comparative performance claims.
+
+## `hostwright extension check --declaration <absolute-path> --executable <absolute-path> [--output text|json]`
+
+Runs one explicit reviewed-local extension protocol handshake. It does not discover, install, register, persist, or invoke extension capabilities.
+
+The declaration is strict JSON with exactly these fields:
+
+```json
+{
+  "apiVersion": 1,
+  "boundaries": ["stateStore", "explicitStatePath", "redaction", "auditTrail", "localOnlyNoUpload", "noRuntimeMutation"],
+  "capability": "diagnosticsRead",
+  "executableSHA256": "<64 lowercase hex characters>",
+  "identifier": "dev.example.extension",
+  "kind": "diagnosticsIntegration",
+  "protocolVersion": 1,
+  "purpose": "Check the reviewed diagnostics extension protocol.",
+  "trust": "reviewedLocal"
+}
+```
+
+The declaration and executable must be caller-owned regular non-symlink files without group/world write permission. The executable must have owner execute permission and match the declared SHA-256. The host evaluates existing extension policy before execution, copies the exact bytes into a private mode-`0500` staging directory, runs the fixed version-1 handshake with a minimal environment and bounded time/output, verifies every response binding, then removes the staged file and directory before returning success.
+
+JSON success includes `kind: extensionHandshake`, `status: ready`, identity, capability, protocol version, declaration/executable digests, measured process duration, and `cleanup: succeeded`. Errors use `HW-EXT-001` for invalid files/declarations/digests, `HW-EXT-002` for policy or trust blockers, and `HW-EXT-003` for process, timeout, output, response, or cleanup failures.
+
+A successful check proves only that the exact reviewed executable completed the exact handshake. The protocol provides no RuntimeAdapter, SQLite, state, secret, networking, tunnel, accelerator, or mutation capability. The process is not an operating-system sandbox: it retains the invoking account's ambient file, process, and network privileges, can invoke absolute-path tools, and can spawn descendants. The operator must review the exact digest rather than treat `reviewedLocal` as a technical confinement guarantee.
 
 ## `hostwright doctor [--output text|json]`
 

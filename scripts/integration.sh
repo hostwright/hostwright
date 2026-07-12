@@ -36,13 +36,17 @@ readonly_dir="$workdir/read-only"
 benchmark_existing_report="$workdir/benchmark-existing.json"
 benchmark_absent_report="$workdir/benchmark-absent.json"
 unexpected_distribution_report="$workdir/unexpected-distribution-report.json"
+extension_fixture="$workdir/extension-fixture"
+extension_declaration="$workdir/extension.json"
+extension_failure_declaration="$workdir/extension-failure.json"
+extension_json="$workdir/extension-result.json"
 
 cleanup() {
   exit_code=$?
   trap - EXIT
   set +e
   chmod 700 "$readonly_dir" 2>/dev/null
-  rm -f "$manifest" "$plan_json" "$status_json" "$doctor_json" "$team_profile" "$team_plan_json" "$stack_file" "$team_import_json" "$invalid_profile" "$overwrite_stdout" "$overwrite_stderr" "$missing_stdout" "$missing_stderr" "$benchmark_existing_report" "$benchmark_absent_report" "$unexpected_distribution_report" "$readonly_dir/hostwright.yaml"
+  rm -f "$manifest" "$plan_json" "$status_json" "$doctor_json" "$team_profile" "$team_plan_json" "$stack_file" "$team_import_json" "$invalid_profile" "$overwrite_stdout" "$overwrite_stderr" "$missing_stdout" "$missing_stderr" "$benchmark_existing_report" "$benchmark_absent_report" "$unexpected_distribution_report" "$extension_fixture" "$extension_declaration" "$extension_failure_declaration" "$extension_json" "$readonly_dir/hostwright.yaml"
   rmdir "$readonly_dir" 2>/dev/null
   rmdir "$workdir"
   exit "$exit_code"
@@ -170,6 +174,49 @@ benchmark_after_checksum="$(shasum -a 256 "$benchmark_existing_report" | awk '{p
 grep -q 'developer distribution evidence tool' "$missing_stdout"
 grep -q 'never signs, notarizes, staples' "$missing_stdout"
 
+/usr/bin/swiftc "$root/Tests/HostwrightExtensionsTests/Fixtures/ExtensionFixture.swift" -o "$extension_fixture"
+chmod 700 "$extension_fixture"
+extension_sha256="$(shasum -a 256 "$extension_fixture" | awk '{print $1}')"
+printf '%s\n' \
+  '{' \
+  '  "kind": "diagnosticsIntegration",' \
+  '  "apiVersion": 1,' \
+  '  "protocolVersion": 1,' \
+  '  "identifier": "dev.hostwright.built-cli",' \
+  '  "trust": "reviewedLocal",' \
+  '  "capability": "diagnosticsRead",' \
+  '  "purpose": "Exercise the built CLI reviewed-local extension handshake.",' \
+  '  "boundaries": ["stateStore", "explicitStatePath", "redaction", "auditTrail", "localOnlyNoUpload", "noRuntimeMutation"],' \
+  "  \"executableSHA256\": \"$extension_sha256\"" \
+  '}' >"$extension_declaration"
+chmod 600 "$extension_declaration"
+
+HOSTWRIGHT_EXTENSION_TEST_SECRET='token=parent-must-not-reach-extension' \
+  "$hostwright" extension check --declaration "$extension_declaration" --executable "$extension_fixture" --output json >"$extension_json"
+plutil -convert json -o /dev/null "$extension_json"
+grep -q '"kind":"extensionHandshake"' "$extension_json"
+grep -q '"status":"ready"' "$extension_json"
+grep -q '"cleanup":"succeeded"' "$extension_json"
+HOSTWRIGHT_EXTENSION_TEST_SECRET='token=parent-must-not-reach-extension' \
+  "$hostwright" extension check --declaration "$extension_declaration" --executable "$extension_fixture" >"$missing_stdout"
+grep -q 'Reviewed-local extension handshake ready' "$missing_stdout"
+grep -q 'Staging cleanup: succeeded' "$missing_stdout"
+
+sed 's/dev.hostwright.built-cli/dev.hostwright.built-cli.failure/' "$extension_declaration" >"$extension_failure_declaration"
+chmod 600 "$extension_failure_declaration"
+set +e
+"$hostwright" extension check --declaration "$extension_failure_declaration" --executable "$extension_fixture" --output json >"$missing_stdout" 2>"$missing_stderr"
+extension_failure_exit=$?
+set -e
+[[ "$extension_failure_exit" -eq 72 ]]
+[[ ! -s "$missing_stdout" ]]
+plutil -convert json -o /dev/null "$missing_stderr"
+grep -q '"code":"HW-EXT-003"' "$missing_stderr"
+if grep -q 'fixture-secret-must-not-leak' "$missing_stderr"; then
+  echo "extension process error leaked raw stderr" >&2
+  exit 1
+fi
+
 set +e
 "$hostwright_dist" lifecycle \
   --baseline-dir "$workdir/missing-baseline" \
@@ -220,4 +267,4 @@ if find "$workdir" -name '*.sqlite*' -print -quit | grep -q .; then
   exit 1
 fi
 
-echo "local-integration passed: built CLI and distribution tool, team-profile/benchmark/distribution gates, JSON output/errors, real file failures, overwrite refusal, and no hidden state writes"
+echo "local-integration passed: built CLI and distribution tool, reviewed-local extension subprocess handshake, team-profile/benchmark/distribution gates, JSON output/errors, real file failures, overwrite refusal, and no hidden state writes"

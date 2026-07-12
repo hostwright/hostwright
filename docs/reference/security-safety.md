@@ -42,11 +42,13 @@ Benchmark execution is separate from apply/cleanup state. It requires all source
 
 ## Extension Boundary
 
-Extension architecture is declaration-only in current core scope. Hostwright can evaluate typed extension declarations for identity, declaration API version, trust level, capabilities, and required boundaries, but it does not load, install, distribute, or execute plugins.
+Extension execution is limited to the explicit `hostwright extension check` handshake. Hostwright evaluates a strict typed declaration for identity, declaration/protocol version, reviewed-local trust, one read-only capability, purpose, required boundaries, and exact executable SHA-256 before it starts a process. It does not discover, install, distribute, persist, or invoke extension capabilities.
 
 Built-in and reviewed-local non-mutating declarations can receive allow decisions only when they declare the required RuntimeAdapter, HostwrightState, local policy, redaction, audit, explicit-state-path, local-only/no-upload, confirmation, ownership, and no-runtime-mutation boundaries for the requested capability.
 
-Third-party, untrusted, unsupported-version, empty, missing-boundary, runtime-mutation, state-write, networking-provider, tunnel-provider, secret-resolution, and accelerator extension declarations fail closed. Future extension implementations require a separate issue, threat model, tests, and maintainer approval.
+Executable declarations additionally require explicit absolute paths, caller-owned regular non-symlink files, no group/world write access, an exact digest, and an approved kind/capability pair. The executable is copied from an open descriptor into a private mode-`0500` staging directory. The one-shot process receives a minimal environment and `/` working directory; timeout, stdout, and stderr are bounded; strict response bindings are verified; raw stderr is not surfaced; and staging cleanup must finish before success.
+
+Third-party, untrusted, unsupported-version, empty, missing-boundary, runtime-mutation, state-write, networking-provider, tunnel-provider, secret-resolution, and accelerator extension declarations fail closed. The reviewed-local process is not an operating-system sandbox and retains the invoking account's ambient file, process, and network privileges; Hostwright does not claim to prevent direct absolute-path tool execution or contain descendants. The digest must therefore correspond to code the operator actually reviewed. Future capability invocation, distribution, or additional authority requires a separate issue, threat model, tests, and maintainer approval.
 
 ## Governance Boundary
 
@@ -134,7 +136,7 @@ This alpha does not include:
 - cloud control plane;
 - Kubernetes, CRI, Docker API, or Docker Compose compatibility;
 - GPU/ANE scheduling, Metal/Core ML/MLX/PyTorch MPS container support, host-native accelerator helpers, or host accelerator device exposure;
-- plugin loader, remote plugin registry, binary plugin distribution, or untrusted extension execution;
+- generic plugin loader, capability invocation, remote plugin registry, binary plugin distribution, or untrusted extension execution;
 - cloud team service, central remote control, hosted audit log, user tracking, enterprise support workflow, or remote policy distribution;
 - Developer ID signing, notarization, stapling, Gatekeeper acceptance, signed installer verification, trusted provenance, dependency/image SBOM claims, or vulnerability scanning;
 - external telemetry, hosted diagnostics, or automatic diagnostic upload.

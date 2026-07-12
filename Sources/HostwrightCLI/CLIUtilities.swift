@@ -1,5 +1,6 @@
 import Foundation
 import HostwrightCore
+import HostwrightExtensions
 import HostwrightHealth
 import HostwrightImport
 import HostwrightManifest
@@ -270,6 +271,20 @@ enum CLIJSON {
             "code": code.rawValue,
             "exitCode": Int(exitCode.rawValue),
             "message": RuntimeRedactionPolicy.default.redact(message)
+        ])
+    }
+
+    static func extensionHandshake(_ result: ExtensionHandshakeResult) -> String {
+        render([
+            "kind": "extensionHandshake",
+            "status": "ready",
+            "identifier": result.identifier,
+            "capability": result.capability.rawValue,
+            "protocolVersion": result.protocolVersion,
+            "declarationSHA256": result.declarationSHA256,
+            "executableSHA256": result.executableSHA256,
+            "durationMilliseconds": result.durationMilliseconds,
+            "cleanup": "succeeded"
         ])
     }
 

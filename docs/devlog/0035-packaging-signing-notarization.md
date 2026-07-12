@@ -20,6 +20,19 @@ Phase 35 now has an operational local unsigned distribution lane. Public binary 
 
 Dirty prebuilt local-integration runs used the actual debug `hostwright`, `hostwrightd`, and `hostwright-dist` executables. Archive assembly and verification completed, the four-stage lifecycle completed, exact cleanup succeeded, and unrelated prefix content remained byte-for-byte unchanged. Reports remained blocked for dirty source and absent distribution trust stages. These runs are local-integration evidence, not release artifacts.
 
+## Clean Local Evidence
+
+A detached two-commit proof used baseline `5b6e7914c93a9a994c7404d7ed0b4c6c72bfd3c3` and implementation commit `8bc05054c3a1cb7b4f1dff884c66fd7e4aaed787`. Both worktrees were clean before and after their release builds. The reports record macOS 26.5 build 25F71, Mac16,8, arm64, 24 GiB memory, Swift 6.3.3, Apple Git 2.50.1, bsdtar 3.5.3, and notarytool 1.1.2.
+
+- Both exact commits built `hostwright` and `hostwrightd` in release mode with an empty SwiftPM external-dependency inventory.
+- Both artifacts recorded `sourceDirty: false`, one ARM64 slice per executable, exact payload hashes/sizes/modes, five passed artifact stages, zero failures, and three blocked trust stages.
+- Independent verification passed the exact sidecar inventory, all SHA-256 entries, manifest, SPDX relationships, unsigned provenance binding, tar entry types/paths, extracted tree, and payload metadata.
+- The lifecycle installed and executed the baseline, upgraded and executed the candidate, downgraded and executed the baseline, then uninstalled: four passed stages, zero failures, and three blocked trust stages.
+- Cleanup removed every recorded installer-owned file and created directory, removed transaction/extraction directories, and restored the explicit temporary prefix to its initial unrelated sentinel only.
+- `security find-identity -v -p codesigning` reported zero valid identities. Signing, notarization, stapling, Gatekeeper, `.pkg`, and publication therefore remained blocked rather than passed.
+
+The raw artifacts and machine reports remained outside the repository and were not staged.
+
 ## Safety Boundaries
 
 - No sudo or system prefix.
@@ -34,4 +47,4 @@ Dirty prebuilt local-integration runs used the actual debug `hostwright`, `hostw
 
 ## Remaining Evidence
 
-A clean-source two-commit release-build lifecycle proof is still required. Public distribution additionally requires real Developer ID Application and Installer identities, signature verification, notarization credentials and submission, stapling, Gatekeeper assessment, signed installer review, package-channel approval, and explicit maintainer approval.
+Public distribution still requires real Developer ID Application and Installer identities, signature verification, notarization credentials and submission, stapling, Gatekeeper assessment, signed installer review, package-channel approval, and explicit maintainer approval.

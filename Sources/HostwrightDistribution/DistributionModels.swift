@@ -112,9 +112,8 @@ public struct DistributionArtifactManifest: Codable, Equatable, Sendable {
         ) != nil else {
             throw DistributionError.invalidManifest("package version must be exact semantic version text")
         }
-        let escapedVersion = NSRegularExpression.escapedPattern(for: packageVersion)
-        let expectedArtifactPattern = "^hostwright-\(escapedVersion)-macos-arm64-[a-f0-9]{12}$"
-        guard artifactID.range(of: expectedArtifactPattern, options: .regularExpression) != nil,
+        let expectedArtifactID = "hostwright-\(packageVersion)-macos-arm64-\(sourceCommit.prefix(12))"
+        guard artifactID == expectedArtifactID,
               platform == "macos",
               architecture == "arm64",
               ISO8601DateFormatter().date(from: createdAt) != nil else {
@@ -204,22 +203,35 @@ public struct DistributionBuildReport: Codable, Equatable, Sendable {
         try archive.validate(suffix: ".tar.gz")
         try sbom.validate(suffix: ".spdx.json")
         try provenance.validate(suffix: ".intoto.json")
-        let inputStage = stages.first { $0.identifier == "release-build" || $0.identifier == "prebuilt-validation" }
+        let inputStageID = manifest.sourceDirty ? "prebuilt-validation" : "release-build"
+        var expectedStageIDs = [
+            inputStageID,
+            "archive",
+            "checksums",
+            "sbom",
+            "provenance",
+            "developer-id-signing",
+            "notarization-stapling-gatekeeper",
+            "installer-package"
+        ]
+        if manifest.sourceDirty { expectedStageIDs.append("clean-source") }
+        if stages.last?.identifier == "host-environment" { expectedStageIDs.append("host-environment") }
         guard archive.fileName == "\(manifest.artifactID).tar.gz",
               sbom.fileName == DistributionLayout.sbomFileName,
               provenance.fileName == DistributionLayout.provenanceFileName,
-              Set(stages.map(\.identifier)).count == stages.count,
+              stages.map(\.identifier) == expectedStageIDs,
               stages.allSatisfy({ !$0.identifier.isEmpty && !$0.detail.isEmpty }),
               stages.allSatisfy({ $0.status != .failed }),
-              inputStage?.status == .passed,
-              (inputStage?.identifier == "release-build") == !manifest.sourceDirty,
+              stages.first?.status == .passed,
               stages.first(where: { $0.identifier == "archive" })?.status == .passed,
               stages.first(where: { $0.identifier == "checksums" })?.status == .passed,
               stages.first(where: { $0.identifier == "sbom" })?.status == .passed,
               stages.first(where: { $0.identifier == "provenance" })?.status == .passed,
               stages.first(where: { $0.identifier == "developer-id-signing" })?.status == .blocked,
               stages.first(where: { $0.identifier == "notarization-stapling-gatekeeper" })?.status == .blocked,
-              stages.first(where: { $0.identifier == "installer-package" })?.status == .blocked else {
+              stages.first(where: { $0.identifier == "installer-package" })?.status == .blocked,
+              !manifest.sourceDirty || stages.first(where: { $0.identifier == "clean-source" })?.status == .blocked,
+              stages.first(where: { $0.identifier == "host-environment" })?.status != .passed else {
             throw DistributionError.invalidArtifact("build stages do not preserve the unsigned distribution boundary")
         }
         try evidence.validate()
@@ -232,9 +244,27 @@ public struct DistributionBuildReport: Codable, Equatable, Sendable {
               evidence.blockers == blockedDetails,
               evidence.rawResults.passed == stages.filter({ $0.status == .passed }).count,
               evidence.rawResults.failed == 0,
-              evidence.rawResults.blocked == stages.filter({ $0.status == .blocked }).count,
-              evidence.cleanup.status == .notRequired else {
+              evidence.rawResults.blocked == stages.filter({ $0.status == .blocked }).count else {
             throw DistributionError.invalidArtifact("build evidence is not bound to the artifact manifest")
+        }
+        if manifest.sourceDirty {
+            guard evidence.cleanup.status == .notRequired,
+                  evidence.cleanup.exactResourceIdentifiers.isEmpty else {
+                throw DistributionError.invalidArtifact("prebuilt evidence must not claim clean-build scratch cleanup")
+            }
+        } else {
+            guard evidence.cleanup.status == .succeeded,
+                  evidence.cleanup.exactResourceIdentifiers.count == 1,
+                  let cleanupPath = evidence.cleanup.exactResourceIdentifiers.first,
+                  URL(fileURLWithPath: cleanupPath).lastPathComponent.hasPrefix(
+                    "hostwright-dist-clean-scratch-"
+                  ) else {
+                throw DistributionError.invalidArtifact("clean-build scratch cleanup evidence is missing")
+            }
+            try DistributionTemporaryPathPolicy.validate(
+                URL(fileURLWithPath: cleanupPath),
+                role: "recorded clean-build scratch cleanup"
+            )
         }
     }
 }
@@ -435,6 +465,7 @@ public struct DistributionProvenanceStatement: Codable, Equatable, Sendable {
               ],
               predicate.runDetails.builder.id == "urn:hostwright:builder:local-swiftpm:v1",
               UUID(uuidString: predicate.runDetails.metadata.invocationId) != nil,
+              predicate.runDetails.metadata.startedOn == manifest.createdAt,
               let started,
               let finished,
               finished >= started else {
@@ -478,6 +509,8 @@ public struct DistributionInstallManifest: Codable, Equatable, Sendable {
               ) != nil,
               artifactID == "hostwright-\(packageVersion)-macos-arm64-\(sourceCommit.prefix(12))",
               sourceCommit.range(of: "^[a-f0-9]{40}$", options: .regularExpression) != nil,
+              sourceCommit != String(repeating: "0", count: 40),
+              files.map(\.path) == files.map(\.path).sorted(),
               Set(files.map(\.path)) == Set(DistributionLayout.payloadModes.keys),
               Set(files.map(\.path)).count == files.count,
               createdDirectories == createdDirectories.sorted(),
@@ -547,7 +580,9 @@ public struct DistributionLifecycleReport: Codable, Equatable, Sendable {
               baselineCommit != candidateCommit,
               baselineCommit.range(of: "^[a-f0-9]{40}$", options: .regularExpression) != nil,
               candidateCommit.range(of: "^[a-f0-9]{40}$", options: .regularExpression) != nil,
-              Set(stages.map(\.identifier)) == Set(["install", "upgrade", "downgrade", "uninstall"]),
+              baselineCommit != String(repeating: "0", count: 40),
+              candidateCommit != String(repeating: "0", count: 40),
+              stages.map(\.identifier) == ["install", "upgrade", "downgrade", "uninstall"],
               stages.allSatisfy({ $0.status == .passed && !$0.detail.isEmpty }),
               preservedPaths == preservedPaths.sorted(),
               Set(preservedPaths).count == preservedPaths.count,

@@ -14,6 +14,7 @@ public struct DistributionAssemblyRequest: Sendable {
     public let inputStageIdentifier: String
     public let inputStageDetail: String
     public let priorCommands: [HostwrightEvidenceCommand]
+    public let inputCleanupPaths: [URL]
 
     public init(
         hostwrightBinary: URL,
@@ -27,7 +28,8 @@ public struct DistributionAssemblyRequest: Sendable {
         architecture: String,
         inputStageIdentifier: String,
         inputStageDetail: String,
-        priorCommands: [HostwrightEvidenceCommand] = []
+        priorCommands: [HostwrightEvidenceCommand] = [],
+        inputCleanupPaths: [URL] = []
     ) {
         self.hostwrightBinary = hostwrightBinary
         self.hostwrightDaemonBinary = hostwrightDaemonBinary
@@ -41,6 +43,7 @@ public struct DistributionAssemblyRequest: Sendable {
         self.inputStageIdentifier = inputStageIdentifier
         self.inputStageDetail = inputStageDetail
         self.priorCommands = priorCommands
+        self.inputCleanupPaths = inputCleanupPaths
     }
 }
 
@@ -52,7 +55,7 @@ public struct DistributionAssembler: Sendable {
     }
 
     public func assemble(_ request: DistributionAssemblyRequest) throws -> DistributionBuildReport {
-        guard !FileManager.default.fileExists(atPath: request.outputDirectory.path) else {
+        guard !DistributionFileSystem.entryExists(request.outputDirectory) else {
             throw DistributionError.existingOutput(request.outputDirectory.path)
         }
         guard request.architecture == "arm64",
@@ -60,15 +63,28 @@ public struct DistributionAssembler: Sendable {
               !request.inputStageDetail.isEmpty else {
             throw DistributionError.invalidArguments("Distribution assembly requires an ARM64 input stage.")
         }
-        guard (request.inputStageIdentifier == "release-build" && !request.sourceDirty) ||
-                (request.inputStageIdentifier == "prebuilt-validation" && request.sourceDirty) else {
+        guard (request.inputStageIdentifier == "release-build" &&
+                !request.sourceDirty && request.inputCleanupPaths.count == 1) ||
+                (request.inputStageIdentifier == "prebuilt-validation" &&
+                    request.sourceDirty && request.inputCleanupPaths.isEmpty) else {
             throw DistributionError.invalidArguments(
-                "Clean evidence requires the verified release-build path; prebuilt assembly must record source-dirty true."
+                "Clean evidence requires one isolated release-build scratch path; prebuilt assembly must record source-dirty true without cleanup claims."
             )
         }
         guard try DistributionFileSystem.isRegularNonSymlink(request.licenseFile),
               try DistributionFileSystem.isRegularNonSymlink(request.readmeFile) else {
             throw DistributionError.invalidArtifact("License and README inputs must be regular non-symlink files.")
+        }
+        guard Set(request.inputCleanupPaths.map(\.path)).count == request.inputCleanupPaths.count else {
+            throw DistributionError.invalidArguments("Distribution input cleanup paths must be unique.")
+        }
+        for path in request.inputCleanupPaths {
+            try DistributionTemporaryPathPolicy.validate(path, role: "distribution input cleanup")
+            guard try DistributionFileSystem.isDirectoryNonSymlink(path) else {
+                throw DistributionError.invalidArguments(
+                    "Distribution input cleanup requires an existing non-symlink directory."
+                )
+            }
         }
 
         var commands = request.priorCommands
@@ -92,8 +108,10 @@ public struct DistributionAssembler: Sendable {
         let timestamp = DistributionTimestamp.string(Date())
         let artifactID = "hostwright-\(request.packageVersion)-macos-arm64-\(request.sourceCommit.prefix(12))"
         let parent = request.outputDirectory.deletingLastPathComponent()
-        guard FileManager.default.fileExists(atPath: parent.path) else {
-            throw DistributionError.invalidArguments("Distribution output parent directory does not exist.")
+        guard try DistributionFileSystem.isDirectoryNonSymlink(parent.resolvingSymlinksInPath()) else {
+            throw DistributionError.invalidArguments(
+                "Distribution output parent must exist as a directory."
+            )
         }
         let temporaryOutput = parent.appendingPathComponent(".hostwright-dist-\(UUID().uuidString)", isDirectory: true)
         try DistributionFileSystem.createExclusiveDirectory(temporaryOutput)
@@ -117,6 +135,18 @@ public struct DistributionAssembler: Sendable {
                 from: source,
                 to: artifactRoot.appendingPathComponent(path),
                 mode: DistributionLayout.payloadModes[path]!
+            )
+        }
+        let cleanedInputPaths = request.inputCleanupPaths.map { $0.standardizedFileURL.path }.sorted()
+        for path in request.inputCleanupPaths {
+            let start = DispatchTime.now().uptimeNanoseconds
+            try DistributionFileSystem.removeOwnedTemporaryItem(path)
+            commands.append(
+                HostwrightEvidenceCommand(
+                    command: "remove exact release-build scratch directory",
+                    exitCode: 0,
+                    durationMilliseconds: Int(clamping: (DispatchTime.now().uptimeNanoseconds - start) / 1_000_000)
+                )
             )
         }
 
@@ -245,9 +275,11 @@ public struct DistributionAssembler: Sendable {
             failures: [],
             blockers: stages.filter { $0.status == .blocked }.map(\.detail),
             cleanup: HostwrightEvidenceCleanup(
-                status: .notRequired,
-                exactResourceIdentifiers: [],
-                message: "Requested local distribution output is retained for verification; no runtime or system resource was created."
+                status: cleanedInputPaths.isEmpty ? .notRequired : .succeeded,
+                exactResourceIdentifiers: cleanedInputPaths,
+                message: cleanedInputPaths.isEmpty
+                    ? "Requested local distribution output is retained for verification; no runtime or system resource was created."
+                    : "The exact isolated release-build scratch directory was removed before the artifact output was published."
             )
         )
         let report = DistributionBuildReport(
@@ -521,10 +553,31 @@ public struct DistributionCleanBuilder: Sendable {
         guard statusResult.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw DistributionError.dirtySource
         }
+        let ignoredStatusResult = try runner.run(
+            executablePath: "/usr/bin/git",
+            arguments: ["-C", sourceRoot.path, "status", "--porcelain=v1", "--ignored", "--untracked-files=normal"],
+            label: "verify ignored source inventory",
+            timeoutSeconds: 30
+        )
+        commands.append(record("git status --porcelain=v1 --ignored --untracked-files=normal", ignoredStatusResult))
+        try requireOnlyUnusedBuildDirectory(ignoredStatusResult.standardOutput)
+
+        let scratch = FileManager.default.temporaryDirectory
+            .appendingPathComponent("hostwright-dist-clean-scratch-\(UUID().uuidString)", isDirectory: true)
+        try DistributionTemporaryPathPolicy.validate(scratch, role: "clean release-build scratch")
+        try DistributionFileSystem.createExclusiveDirectory(scratch)
+        defer {
+            if DistributionFileSystem.entryExists(scratch) {
+                try? DistributionFileSystem.removeOwnedTemporaryItem(scratch)
+            }
+        }
 
         let dependencyResult = try runner.run(
             executablePath: "/usr/bin/swift",
-            arguments: ["package", "--package-path", sourceRoot.path, "show-dependencies", "--format", "json"],
+            arguments: [
+                "package", "--package-path", sourceRoot.path, "--scratch-path", scratch.path,
+                "show-dependencies", "--format", "json"
+            ],
             label: "inspect SwiftPM dependencies"
         )
         commands.append(record("swift package show-dependencies --format json", dependencyResult))
@@ -533,14 +586,20 @@ public struct DistributionCleanBuilder: Sendable {
         for product in ["hostwright", "hostwrightd"] {
             let result = try runner.run(
                 executablePath: "/usr/bin/swift",
-                arguments: ["build", "--package-path", sourceRoot.path, "-c", "release", "--product", product],
+                arguments: [
+                    "build", "--package-path", sourceRoot.path, "--scratch-path", scratch.path,
+                    "-c", "release", "--product", product
+                ],
                 label: "build release product \(product)"
             )
             commands.append(record("swift build -c release --product \(product)", result))
         }
         let binPathResult = try runner.run(
             executablePath: "/usr/bin/swift",
-            arguments: ["build", "--package-path", sourceRoot.path, "-c", "release", "--show-bin-path"],
+            arguments: [
+                "build", "--package-path", sourceRoot.path, "--scratch-path", scratch.path,
+                "-c", "release", "--show-bin-path"
+            ],
             label: "read release binary path"
         )
         commands.append(record("swift build -c release --show-bin-path", binPathResult))
@@ -580,6 +639,14 @@ public struct DistributionCleanBuilder: Sendable {
         guard finalStatusResult.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw DistributionError.dirtySource
         }
+        let finalIgnoredStatusResult = try runner.run(
+            executablePath: "/usr/bin/git",
+            arguments: ["-C", sourceRoot.path, "status", "--porcelain=v1", "--ignored", "--untracked-files=normal"],
+            label: "recheck ignored source inventory",
+            timeoutSeconds: 30
+        )
+        commands.append(record("post-build git status --porcelain=v1 --ignored --untracked-files=normal", finalIgnoredStatusResult))
+        try requireOnlyUnusedBuildDirectory(finalIgnoredStatusResult.standardOutput)
 
         return try assembler.assemble(
             DistributionAssemblyRequest(
@@ -594,7 +661,8 @@ public struct DistributionCleanBuilder: Sendable {
                 architecture: "arm64",
                 inputStageIdentifier: "release-build",
                 inputStageDetail: "Built both SwiftPM release products from the clean exact source commit with no external package dependencies.",
-                priorCommands: commands
+                priorCommands: commands,
+                inputCleanupPaths: [scratch]
             )
         )
     }
@@ -604,6 +672,13 @@ public struct DistributionCleanBuilder: Sendable {
               let dependencies = object["dependencies"] as? [Any],
               dependencies.isEmpty else {
             throw DistributionError.invalidArtifact("SwiftPM dependency inventory is malformed or contains external dependencies")
+        }
+    }
+
+    private func requireOnlyUnusedBuildDirectory(_ status: String) throws {
+        let entries = status.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
+        guard entries.allSatisfy({ $0 == "!! .build/" }) else {
+            throw DistributionError.dirtySource
         }
     }
 

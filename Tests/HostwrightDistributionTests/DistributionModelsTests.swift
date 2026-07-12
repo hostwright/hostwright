@@ -34,6 +34,17 @@ final class DistributionModelsTests: XCTestCase {
             files: unsafe.sorted { $0.path < $1.path }
         )
         XCTAssertThrowsError(try traversing.validate())
+
+        let mismatchedCommitPrefix = DistributionArtifactManifest(
+            artifactID: "hostwright-0.1.0-alpha.1-macos-arm64-\(String(repeating: "c", count: 12))",
+            packageVersion: manifest.packageVersion,
+            sourceCommit: manifest.sourceCommit,
+            sourceDirty: false,
+            architecture: "arm64",
+            createdAt: manifest.createdAt,
+            files: manifest.files
+        )
+        XCTAssertThrowsError(try mismatchedCommitPrefix.validate())
     }
 
     func testPathPolicyRejectsAbsoluteTraversalControlAndNestedFileNames() {

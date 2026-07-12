@@ -378,8 +378,18 @@ public struct DistributionLifecycleRunner: Sendable {
         reportURL: URL
     ) throws -> DistributionLifecycleReport {
         try DistributionTemporaryPathPolicy.validate(prefix, role: "lifecycle prefix")
-        guard !FileManager.default.fileExists(atPath: reportURL.path) else {
+        guard !DistributionFileSystem.entryExists(reportURL) else {
             throw DistributionError.existingOutput(reportURL.path)
+        }
+        guard try DistributionFileSystem.isDirectoryNonSymlink(
+            reportURL.deletingLastPathComponent().resolvingSymlinksInPath()
+        ) else {
+            throw DistributionError.invalidArguments("Lifecycle report parent must exist as a directory.")
+        }
+        let resolvedPrefix = prefix.standardizedFileURL.resolvingSymlinksInPath().path
+        let resolvedReport = reportURL.standardizedFileURL.resolvingSymlinksInPath().path
+        guard resolvedReport != resolvedPrefix, !resolvedReport.hasPrefix(resolvedPrefix + "/") else {
+            throw DistributionError.unsafePath("Lifecycle report must be outside the install prefix.")
         }
         let initialSnapshot = try PrefixSnapshot.capture(prefix)
         for path in DistributionLayout.payloadModes.keys + [DistributionLayout.installManifestFileName] {
@@ -399,14 +409,18 @@ public struct DistributionLifecycleRunner: Sendable {
                 try? DistributionFileSystem.removeOwnedTemporaryItem(candidateExtraction)
             }
         }
+        let baselineVerificationStart = DispatchTime.now().uptimeNanoseconds
         let baseline = try verifier.verify(
             distributionDirectory: baselineDirectory,
             extractionDirectory: baselineExtraction
         )
+        let baselineVerificationDuration = elapsedMilliseconds(since: baselineVerificationStart)
+        let candidateVerificationStart = DispatchTime.now().uptimeNanoseconds
         let candidate = try verifier.verify(
             distributionDirectory: candidateDirectory,
             extractionDirectory: candidateExtraction
         )
+        let candidateVerificationDuration = elapsedMilliseconds(since: candidateVerificationStart)
         guard baseline.manifest.sourceCommit != candidate.manifest.sourceCommit,
               baseline.manifest.architecture == candidate.manifest.architecture else {
             throw DistributionError.lifecycleFailed("baseline and candidate must be distinct compatible source revisions")
@@ -415,39 +429,55 @@ public struct DistributionLifecycleRunner: Sendable {
         do {
             var stages: [DistributionStageRecord] = []
             var commands = [
-            HostwrightEvidenceCommand(command: "verify baseline archive and sidecars", exitCode: 0, durationMilliseconds: 0),
-            HostwrightEvidenceCommand(command: "verify candidate archive and sidecars", exitCode: 0, durationMilliseconds: 0)
-        ]
+                HostwrightEvidenceCommand(
+                    command: "verify baseline archive and sidecars",
+                    exitCode: 0,
+                    durationMilliseconds: baselineVerificationDuration
+                ),
+                HostwrightEvidenceCommand(
+                    command: "verify candidate archive and sidecars",
+                    exitCode: 0,
+                    durationMilliseconds: candidateVerificationDuration
+                )
+            ]
             let baselineInstall = try installer.install(artifact: baseline, prefix: prefix)
             commands.append(contentsOf: try installer.verifyInstalled(prefix: prefix, expectedManifest: baselineInstall))
-            stages.append(DistributionStageRecord(
-            identifier: "install",
-            status: .passed,
-            detail: "Installed and executed the baseline revision under the explicit temporary prefix."
-        ))
+            stages.append(
+                DistributionStageRecord(
+                    identifier: "install",
+                    status: .passed,
+                    detail: "Installed and executed the baseline revision under the explicit temporary prefix."
+                )
+            )
 
             let candidateInstall = try installer.install(artifact: candidate, prefix: prefix)
             commands.append(contentsOf: try installer.verifyInstalled(prefix: prefix, expectedManifest: candidateInstall))
-            stages.append(DistributionStageRecord(
-            identifier: "upgrade",
-            status: .passed,
-            detail: "Replaced the exact owned baseline payload with the distinct candidate revision and executed it."
-        ))
+            stages.append(
+                DistributionStageRecord(
+                    identifier: "upgrade",
+                    status: .passed,
+                    detail: "Replaced the exact owned baseline payload with the distinct candidate revision and executed it."
+                )
+            )
 
             let downgradedInstall = try installer.install(artifact: baseline, prefix: prefix)
             commands.append(contentsOf: try installer.verifyInstalled(prefix: prefix, expectedManifest: downgradedInstall))
-            stages.append(DistributionStageRecord(
-            identifier: "downgrade",
-            status: .passed,
-            detail: "Restored the exact baseline revision and executed it after candidate replacement."
-        ))
+            stages.append(
+                DistributionStageRecord(
+                    identifier: "downgrade",
+                    status: .passed,
+                    detail: "Restored the exact baseline revision and executed it after candidate replacement."
+                )
+            )
 
             let removedPaths = try installer.uninstall(prefix: prefix)
-            stages.append(DistributionStageRecord(
-            identifier: "uninstall",
-            status: .passed,
-            detail: "Removed only checksum-verified installer-owned files and retained unrelated prefix content."
-        ))
+            stages.append(
+                DistributionStageRecord(
+                    identifier: "uninstall",
+                    status: .passed,
+                    detail: "Removed only checksum-verified installer-owned files and retained unrelated prefix content."
+                )
+            )
             let finalSnapshot = try PrefixSnapshot.capture(prefix)
             guard initialSnapshot == finalSnapshot else {
                 throw DistributionError.lifecycleFailed("uninstall changed unrelated prefix content")
@@ -469,37 +499,37 @@ public struct DistributionLifecycleRunner: Sendable {
             }
             let toolVersions = candidate.report.evidence.environment.toolVersions
             let evidence = HostwrightEvidenceReport(
-            evidenceClass: .distributionArtifact,
-            status: .blocked,
-            recordedAt: DistributionTimestamp.string(Date()),
-            source: HostwrightEvidenceSource(
-                commit: candidate.manifest.sourceCommit,
-                dirty: candidate.manifest.sourceDirty
-            ),
-            environment: host.evidenceEnvironment(toolVersions: toolVersions),
-            commands: commands,
-            rawResults: HostwrightEvidenceCounts(
-                executed: stages.count + blockers.count,
-                passed: stages.count,
-                failed: 0,
-                blocked: blockers.count
-            ),
-            failures: [],
-            blockers: blockers,
-            cleanup: HostwrightEvidenceCleanup(
-                status: .succeeded,
-                exactResourceIdentifiers: removedPaths.map { prefix.appendingPathComponent($0).path },
-                message: "Every exact installer-owned path was removed; the prefix snapshot returned to its initial unrelated content."
+                evidenceClass: .distributionArtifact,
+                status: .blocked,
+                recordedAt: DistributionTimestamp.string(Date()),
+                source: HostwrightEvidenceSource(
+                    commit: candidate.manifest.sourceCommit,
+                    dirty: candidate.manifest.sourceDirty
+                ),
+                environment: host.evidenceEnvironment(toolVersions: toolVersions),
+                commands: commands,
+                rawResults: HostwrightEvidenceCounts(
+                    executed: stages.count + blockers.count,
+                    passed: stages.count,
+                    failed: 0,
+                    blocked: blockers.count
+                ),
+                failures: [],
+                blockers: blockers,
+                cleanup: HostwrightEvidenceCleanup(
+                    status: .succeeded,
+                    exactResourceIdentifiers: removedPaths.map { prefix.appendingPathComponent($0).path },
+                    message: "Every exact installer-owned path was removed; the prefix snapshot returned to its initial unrelated content."
+                )
             )
-        )
             let report = DistributionLifecycleReport(
-            baselineCommit: baseline.manifest.sourceCommit,
-            candidateCommit: candidate.manifest.sourceCommit,
-            prefix: prefix.path,
-            stages: stages,
-            preservedPaths: initialSnapshot.entries.map(\.path),
-            evidence: evidence
-        )
+                baselineCommit: baseline.manifest.sourceCommit,
+                candidateCommit: candidate.manifest.sourceCommit,
+                prefix: prefix.path,
+                stages: stages,
+                preservedPaths: initialSnapshot.entries.map(\.path),
+                evidence: evidence
+            )
             try report.validate()
             try DistributionFileSystem.writeNewFile(try DistributionJSON.encode(report), to: reportURL, mode: 0o600)
             return report
@@ -517,6 +547,10 @@ public struct DistributionLifecycleRunner: Sendable {
             }
             throw primaryError
         }
+    }
+
+    private func elapsedMilliseconds(since start: UInt64) -> Int {
+        Int(clamping: (DispatchTime.now().uptimeNanoseconds - start) / 1_000_000)
     }
 }
 

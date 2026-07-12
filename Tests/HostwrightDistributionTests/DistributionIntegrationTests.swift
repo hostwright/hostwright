@@ -135,6 +135,24 @@ final class DistributionIntegrationTests: XCTestCase {
             let sentinel = operatorDirectory.appendingPathComponent("sentinel.txt")
             try Data("operator-owned\n".utf8).write(to: sentinel, options: .withoutOverwriting)
             let reportURL = root.appendingPathComponent("lifecycle.json")
+            XCTAssertThrowsError(
+                try DistributionLifecycleRunner().run(
+                    baselineDirectory: root.appendingPathComponent("baseline"),
+                    candidateDirectory: root.appendingPathComponent("candidate"),
+                    prefix: prefix,
+                    reportURL: prefix.appendingPathComponent("in-prefix-report.json")
+                )
+            ) { error in
+                XCTAssertEqual(
+                    error as? DistributionError,
+                    .unsafePath("Lifecycle report must be outside the install prefix.")
+                )
+            }
+            XCTAssertFalse(DistributionFileSystem.entryExists(
+                prefix.appendingPathComponent(DistributionLayout.installManifestFileName)
+            ))
+            XCTAssertEqual(try String(contentsOf: sentinel, encoding: .utf8), "operator-owned\n")
+
             let report = try DistributionLifecycleRunner().run(
                 baselineDirectory: root.appendingPathComponent("baseline"),
                 candidateDirectory: root.appendingPathComponent("candidate"),
@@ -146,6 +164,11 @@ final class DistributionIntegrationTests: XCTestCase {
             XCTAssertTrue(report.stages.allSatisfy { $0.status == .passed })
             XCTAssertEqual(report.evidence.status, .blocked)
             XCTAssertEqual(report.evidence.cleanup.status, .succeeded)
+            XCTAssertTrue(
+                report.evidence.commands
+                    .filter { $0.command.hasPrefix("verify ") }
+                    .allSatisfy { $0.durationMilliseconds > 0 }
+            )
             XCTAssertTrue(report.evidence.cleanup.exactResourceIdentifiers.contains(
                 prefix.appendingPathComponent("share/doc/hostwright").path
             ))
@@ -154,6 +177,16 @@ final class DistributionIntegrationTests: XCTestCase {
                 atPath: prefix.appendingPathComponent(DistributionLayout.installManifestFileName).path
             ))
             XCTAssertEqual(try DistributionFileSystem.mode(of: reportURL), 0o600)
+
+            let duplicateStageReport = DistributionLifecycleReport(
+                baselineCommit: report.baselineCommit,
+                candidateCommit: report.candidateCommit,
+                prefix: report.prefix,
+                stages: report.stages + [report.stages[0]],
+                preservedPaths: report.preservedPaths,
+                evidence: report.evidence
+            )
+            XCTAssertThrowsError(try duplicateStageReport.validate())
         }
     }
 
@@ -349,6 +382,46 @@ final class DistributionIntegrationTests: XCTestCase {
                     sourceRoot: source,
                     outputDirectory: root.appendingPathComponent("output"),
                     expectedCommit: commit
+                )
+            ) { error in
+                XCTAssertEqual(error as? DistributionError, .dirtySource)
+            }
+
+            try FileManager.default.removeItem(at: source.appendingPathComponent("untracked.txt"))
+            try Data("ignored.txt\n".utf8).write(
+                to: source.appendingPathComponent(".gitignore"),
+                options: .withoutOverwriting
+            )
+            _ = try runner.run(
+                executablePath: "/usr/bin/git",
+                arguments: ["add", ".gitignore"],
+                workingDirectory: source,
+                label: "git add ignored inventory"
+            )
+            _ = try runner.run(
+                executablePath: "/usr/bin/git",
+                arguments: [
+                    "-c", "user.name=Hostwright Tests", "-c", "user.email=tests@invalid",
+                    "commit", "-m", "ignored inventory"
+                ],
+                workingDirectory: source,
+                label: "git commit ignored inventory"
+            )
+            let ignoredCommit = try runner.run(
+                executablePath: "/usr/bin/git",
+                arguments: ["rev-parse", "HEAD"],
+                workingDirectory: source,
+                label: "git rev-parse ignored inventory"
+            ).standardOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+            try Data("ignored input\n".utf8).write(
+                to: source.appendingPathComponent("ignored.txt"),
+                options: .withoutOverwriting
+            )
+            XCTAssertThrowsError(
+                try DistributionCleanBuilder().build(
+                    sourceRoot: source,
+                    outputDirectory: root.appendingPathComponent("ignored-output"),
+                    expectedCommit: ignoredCommit
                 )
             ) { error in
                 XCTAssertEqual(error as? DistributionError, .dirtySource)

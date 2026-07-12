@@ -9,12 +9,12 @@
 ## Verified On 2026-07-12
 
 - `swift build` succeeds after the runtime identity and ownership repair.
-- `swift test list` lists 280 XCTest cases across Hostwright test targets.
-- `swift test` executes 280 XCTest cases across CLI, core, daemon, health, import, manifest, networking, observability, policy, reconciler, runtime, secrets, and state targets with 0 failures.
+- `swift test list` lists 287 XCTest cases across Hostwright test targets.
+- `swift test` executes 287 XCTest cases across CLI, core, daemon, health, import, manifest, networking, observability, policy, reconciler, runtime, secrets, and state targets with 0 failures.
 - XCTest count is unit/contract and local-integration coverage, not a live-runtime, hardware-benchmark, or distribution-artifact success rate. Evidence classes are defined in `docs/reference/testing-evidence.md`.
 - `scripts/grep-orchard.sh .` succeeds and reports historical references only in `docs/source-material/` and `docs/naming/`.
 - `scripts/test.sh` succeeds and runs `swift build`, `swift test`, and the built-CLI local integration gate.
-- `scripts/integration.sh` exercises the built executable, validates real JSON output, proves `init` overwrite refusal preserves the file, and verifies no hidden SQLite write occurs.
+- `scripts/integration.sh` exercises the built executable, validates real JSON output and error envelopes, proves missing manifest/import and read-only-directory write failures use stable codes, proves `init` overwrite refusal preserves the file, and verifies no hidden SQLite write occurs.
 - Real local loopback HTTP and file-lock contention XCTest cases pass without conditional skips.
 - Real macOS Keychain XCTest cases add uniquely named non-synchronizable items, read through the production backend without UI, delete exact service/account pairs, verify post-delete absence, and have no conditional skip.
 - `scripts/lint.sh` succeeds.
@@ -63,7 +63,7 @@
 
 ## Current Implementation Truth
 
-- The completion audit classifies Phases 12, 34, and 36 as partial, Phase 35 as blocked, and research/requirements phases separately from product implementation. Phase 19 is complete locally after the exact-identity repair and disposable live cleanup proof.
+- The completion audit classifies Phases 34 and 36 as partial, Phase 35 as blocked, and research/requirements phases separately from product implementation. Phases 12 and 19 are complete locally after their file-error/recovery and exact-identity/live-cleanup repairs.
 
 - Phase 5 adds read-only Apple container observation infrastructure behind `RuntimeAdapter`.
 - Phase 6 adds SQLite-backed local state for explicit database paths.
@@ -72,13 +72,13 @@
 - Phase 8B adds a create-only apply gate that requires explicit state DB path, explicit plan hash confirmation, operation intent persistence before mutation, and RuntimeAdapter execution.
 - Phase 9 adds live `status --state-db`, bounded `logs`, event rendering, one restart-policy-allowed managed start action, and ownership-based cleanup for exact stopped/created/exited containers.
 - Phase 10 prepares the source-only `v0.1.0-alpha.1` pre-release docs, version output, compatibility matrix, install/build instructions, security/safety notes, release checklist, and release notes draft.
-- Phase 12 adds stable CLI exit categories, `--output text|json` for `plan`, `status`, `events`, and `doctor`, JSON error envelopes, and matching CLI XCTest coverage.
+- Phase 12 adds stable CLI exit categories, consistent manifest/local-file I/O diagnostics, `--output text|json` for `plan`, `status`, `events`, and `doctor`, JSON error envelopes, built-CLI subprocess checks, and matching CLI XCTest coverage.
 - Phase 13 adds optional manifest `version: 1`, fail-closed explicit older/newer version policy, contextual unsupported-field errors, unsafe env-key and unsafe mount-source validation, versioned examples, and schema/example alignment tests.
 - Phase 14 adds migration checksums, contiguous-history validation, future-schema refusal, corrupt/locked state error classification, explicit read-vs-migrate boundaries, and real multi-connection, concurrent acquisition, reopen, rollback, and cold backup/restore evidence.
 - Phase 15 adds `hostwrightd --foreground --config <path> --state-db <path>` for non-mutating daemon observation/planning with event and operation persistence, cadence, jitter, backoff, shutdown, lock, and sleep/wake test seams.
 - Phase 16 adds bounded host-side health check execution, append-only health result persistence, restart policy state with max attempts/backoff/operator hold/manual-disable/crash-loop blocking, redacted health/restart events, and apply/daemon planning gates that avoid aggressive restart loops.
 - Phase 17 adds one restart-policy-gated managed restart path for exact Hostwright-owned running/unhealthy services, using live runtime lifecycle observation, a fresh persisted unhealthy health result from the explicit state DB, status/apply plan-hash parity, internal stop-then-start runtime execution, operation ledger records, partial restart failure records, and redacted events.
-- Phase 18 adds operation recovery groups and steps, apply checkpoints, active-operation locking with expired-lock interruption, rollback-unavailable step records, redacted manual recovery hints, legacy managed-restart recovery rendering, and read-only `hostwright recovery` output for failed or interrupted apply inspection.
+- Phase 18 adds operation recovery groups and steps, apply checkpoints, active-operation locking with expired-lock interruption, safe same-plan retry after proven pre-runtime persistence interruption, rollback-unavailable step records, redacted manual recovery hints and lease owner/expiry diagnostics, legacy managed-restart recovery rendering, and read-only `hostwright recovery` output for failed or interrupted apply inspection.
 - Phase 19 adds cleanup dry-run classifications for eligible, ambiguous, stale, running, unknown, blocked, and never-delete ownership-backed and observed-only resources, collision-resistant v2 identifiers and labels, exact observed identifiers, legacy upgrade hints, multi-project filtering, exact managed lifecycle ownership gates, exact eligible-only cleanup, hardened confirmation tokens, and delete-success/state-persistence failure reporting.
 - Phase 20 adds read-only event filters, local redacted diagnostics bundles from explicit state DB paths, local-only telemetry policy reporting in status/doctor/diagnostics output, and XCTest coverage for diagnostics redaction and no runtime observation during export.
 - Phase 21 documents local control-surface data contracts and safety boundaries for a future separate design/frontend owner; it does not add a control surface or new API runtime.
@@ -133,7 +133,7 @@ Important diagnostic correction:
 - `swift -e 'import XCTest'` can still fail and is not the correct gate.
 - A minimal SwiftPM XCTest probe passed after Xcode was fixed.
 - `swift test list` is the local proof that Hostwright now exposes real XCTest cases.
-- `swift test` executes 280 XCTest cases after the evidence-contract, production-source boundary, real loopback HTTP/file-lock/Keychain tests, real SQLite integration suite, and runtime identity/ownership coverage were added.
+- `swift test` executes 287 XCTest cases after the evidence-contract, production-source boundary, real loopback HTTP/file-lock/Keychain tests, real SQLite integration suite, runtime identity/ownership coverage, and CLI file-error/recovery diagnostics were added.
 
 The old top-level smoke/precondition posture has been replaced with XCTest assertions. Some test file names still include `Smoke.swift`, but the contents are XCTest cases.
 

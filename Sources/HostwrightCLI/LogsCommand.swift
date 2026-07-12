@@ -13,7 +13,7 @@ struct LogsCommandRunner {
 
     func run() -> CLIRunResult {
         do {
-            let manifestText = try environment.readTextFile(manifestPath)
+            let manifestText = try hostwrightReadManifestText(path: manifestPath, environment: environment)
             let manifest = try ManifestValidator.validated(manifestText)
             let mapping = ManifestRuntimeMapper.map(manifest)
             guard let desired = mapping.desiredState.services.first(where: { $0.identity.serviceName == serviceName }) else {
@@ -71,6 +71,8 @@ struct LogsCommandRunner {
                 \(RuntimeRedactionPolicy.default.redact(result.text))
                 """
             )
+        } catch let error as HostwrightDiagnostic {
+            return failure(code: error.code, message: error.message)
         } catch let error as ManifestParseError {
             return CLIRunResult(standardError: error.issues.map(\.rendered).joined(separator: "\n") + "\n", exitCode: CLIExitCode.validation.rawValue)
         } catch let error as StateStoreError {

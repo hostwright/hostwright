@@ -7,6 +7,8 @@ import HostwrightSecrets
 import HostwrightState
 
 struct ApplyCommandRunner {
+    private static let preRuntimeStateIncompleteCheckpoint = "pre-runtime-state-incomplete"
+
     let manifestPath: String
     let stateDatabasePath: String
     let confirmedPlanHash: String
@@ -17,7 +19,7 @@ struct ApplyCommandRunner {
             let configuration = StateStoreConfiguration(explicitDatabasePath: stateDatabasePath)
             try configuration.validate()
 
-            let manifestText = try environment.readTextFile(manifestPath)
+            let manifestText = try hostwrightReadManifestText(path: manifestPath, environment: environment)
             let manifest = try ManifestValidator.validated(manifestText)
             let mapping = ManifestRuntimeMapper.map(manifest)
             let store = SQLiteStateStore(path: configuration.databasePath)
@@ -102,6 +104,13 @@ struct ApplyCommandRunner {
 
             let idempotencyKey = "\(plan.planHash):\(action.kind.rawValue):\(action.identity.displayName)"
             if let existingOperation = try blockingOperation(store: store, idempotencyKey: idempotencyKey) {
+                if let existingGroup = try store.operationGroups.latest(groupIdempotencyKey: idempotencyKey),
+                   existingGroup.status == .active {
+                    return failure(
+                        code: .commandUsage,
+                        message: activeOperationConflictMessage(existingGroup, hasRecordedIntent: true)
+                    )
+                }
                 return failure(
                     code: .commandUsage,
                     message: "Operation with the same idempotency key is already \(existingOperation.status.rawValue). No mutation was attempted."
@@ -174,7 +183,7 @@ struct ApplyCommandRunner {
             if let existing = groupAcquire.existingActive {
                 return failure(
                     code: .commandUsage,
-                    message: "Operation group with the same idempotency key is already active at checkpoint \(existing.checkpoint). No mutation was attempted. Run recovery --state-db <path> to inspect manual recovery guidance."
+                    message: activeOperationConflictMessage(existing, hasRecordedIntent: false)
                 )
             }
             do {
@@ -217,7 +226,7 @@ struct ApplyCommandRunner {
                     store: store,
                     groupID: operationGroupID,
                     status: .interrupted,
-                    checkpoint: "pre-runtime-state-incomplete",
+                    checkpoint: Self.preRuntimeStateIncompleteCheckpoint,
                     action: action,
                     timestamp: timestamp,
                     metadata: [
@@ -413,6 +422,8 @@ struct ApplyCommandRunner {
                     message: "Runtime mutation succeeded but success state persistence failed: \(RuntimeRedactionPolicy.default.redact(String(describing: error)))"
                 )
             }
+        } catch let error as HostwrightDiagnostic {
+            return failure(code: error.code, message: error.message)
         } catch let error as ManifestParseError {
             return CLIRunResult(standardError: error.issues.map(\.rendered).joined(separator: "\n") + "\n", exitCode: CLIExitCode.validation.rawValue)
         } catch {
@@ -709,7 +720,23 @@ struct ApplyCommandRunner {
 
     private func failure(code: HostwrightErrorCode, message: String) -> CLIRunResult {
         let exitCode = CLIExitCode.mapped(from: code)
-        return CLIRunResult(standardError: "\(code.rawValue): \(message)\n", exitCode: exitCode.rawValue)
+        let redactedMessage = RuntimeRedactionPolicy.default.redact(message)
+        return CLIRunResult(standardError: "\(code.rawValue): \(redactedMessage)\n", exitCode: exitCode.rawValue)
+    }
+
+    private func activeOperationConflictMessage(
+        _ group: OperationGroupRecord,
+        hasRecordedIntent: Bool
+    ) -> String {
+        let owner = RuntimeRedactionPolicy.default.redact(group.lockOwner ?? "unknown")
+        let expiry = group.lockExpiresAt ?? "unknown"
+        let recovery: String
+        if hasRecordedIntent {
+            recovery = "An operation intent is recorded, so automatic retry remains blocked after expiry until recovery and the exact runtime state are inspected."
+        } else {
+            recovery = "If the prior process was interrupted, retry after lease expiry; acquisition will mark the expired group interrupted."
+        }
+        return "Operation group with the same idempotency key is already active at checkpoint \(group.checkpoint), owner \(owner); lease expires at \(expiry). No mutation was attempted. \(recovery) Run recovery --state-db <path> to inspect manual recovery guidance."
     }
 
     private func blockingOperation(store: SQLiteStateStore, idempotencyKey: String) throws -> OperationRecord? {
@@ -718,7 +745,15 @@ struct ApplyCommandRunner {
         }
 
         switch latest.status {
-        case .planned, .recorded, .succeeded:
+        case .planned, .recorded:
+            let group = try store.operationGroups.latest(groupIdempotencyKey: idempotencyKey)
+            // This checkpoint is written only before RuntimeAdapter execution begins.
+            if group?.status == .interrupted,
+               group?.checkpoint == Self.preRuntimeStateIncompleteCheckpoint {
+                return nil
+            }
+            return latest
+        case .succeeded:
             return latest
         case .failed, .abandoned:
             return nil

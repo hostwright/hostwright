@@ -20,7 +20,7 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 | 9 | Operability, Restart, Logs, and Safe Cleanup | Complete | Make managed workloads operable and observable without broad lifecycle management. | Live status, bounded logs, event rendering, restart-policy-gated start, and ownership-based cleanup pass tests. |
 | 10 | Hardening and First Supported Release | Complete locally | Prepare `v0.1.0-alpha.1` as an honest source-only GitHub pre-release candidate. | Build, tests, docs, examples, compatibility, release notes, security checklist, and reviewer approval pass. |
 | 11 | Release Feedback and Alpha Stabilization | Complete | Address pre-alpha review blockers after external review. | Pipe draining, localhost publishing, redaction, cleanup failure handling, append-only ledgers, idempotency retry, command-token validation, and error preservation are covered by tests. |
-| 12 | CLI and Developer Workflow Hardening | Partial | Add stable CLI exit conventions, structured JSON output, better help/errors/examples, and command consistency. | JSON/help coverage passes, but manifest/file I/O classification is not yet consistent across apply, cleanup, and logs. |
+| 12 | CLI and Developer Workflow Hardening | Complete locally | Add stable CLI exit conventions, structured JSON output, better help/errors/examples, and command consistency. | JSON/help coverage, consistent manifest/local-file I/O classification, built-CLI subprocess checks, and redaction tests pass. |
 | 13 | Manifest Schema Maturity | Complete locally | Align parser, schema, examples, manifest version policy, and untrusted-manifest handling. | Parser, validator, schema, examples, and docs agree on accepted and rejected manifest shapes. |
 | 14 | State Migrations and Upgrade Safety | Complete locally | Harden state migrations, compatibility, corruption handling, locking, and cold backup/restore evidence. | Fresh, existing, future-version, corrupt, locked, checksum-mismatch, migration-gap, rollback, unrelated database, repeated migration, multi-connection, concurrent acquisition, reopen, and cold-copy cases use real SQLite files. |
 | 15 | Local Daemon Reconciliation Loop | Complete locally | Turn `hostwrightd` into explicit foreground dev-mode reconciliation only. | Fake-clock loop, backoff, lock, shutdown, and sleep/wake behavior pass without unattended mutation. |
@@ -58,7 +58,7 @@ Execution order is binding unless a later maintainer-approved issue changes it:
 
 1. Define repository evidence classes and separate deterministic tests from real integration, runtime, hardware, and distribution proof.
 2. Completed: repair runtime identity, exact observed identifiers, ownership gates, multi-project observation, legacy upgrade behavior, and live cleanup proof.
-3. Finish CLI file-error classification, migration continuity/concurrency, and interrupted-operation recovery diagnostics.
+3. Completed: consistent CLI file-error classification, migration continuity/concurrency, and interrupted-operation lease diagnostics.
 4. Wire explicit local team profiles and approvals into command behavior without default paths or safety-gate bypasses.
 5. Run real Apple container and hardware benchmarks with exact disposable-resource cleanup.
 6. Build and test distribution artifacts; keep signing and notarization blocked until real credentials and evidence exist.
@@ -252,7 +252,7 @@ Phase 17 does not add broad lifecycle management, daemon-enforced restart loops,
 - Operation groups carry a group idempotency key, lease fields, current checkpoint, rollback availability flag, and redacted manual recovery hints; expired active leases are marked interrupted before reacquire.
 - Operation group steps carry step idempotency keys, forward/rollback direction, started/completed/failed/unsupported status, redacted resource identifiers, and redacted failure hints.
 - `hostwright recovery --state-db <path> [--project <name>] [--output text|json]` renders recovery guidance from the explicit state database without observing or mutating the runtime, including legacy managed restart recovery rows when no Phase 18 operation group exists for that operation.
-- XCTest coverage covers operation group acquire/release behavior, stale active lease expiration, step append/reload behavior, redaction, apply success/failure/interrupted state, pre-runtime persistence interruption, managed restart stop-success/start-failure recovery steps, read-only recovery behavior, legacy restart recovery rendering, and recovery JSON rendering.
+- XCTest coverage covers operation group acquire/release behavior, stale active lease expiration, step append/reload behavior, redaction, apply success/failure/interrupted state, safe retry after an intent-recorded pre-runtime persistence interruption, managed restart stop-success/start-failure recovery steps, read-only recovery behavior, legacy restart recovery rendering, and recovery JSON rendering.
 
 Phase 18 does not add automatic rollback, inverse runtime mutation, multi-action apply, unattended daemon mutation, broad lifecycle commands, image cleanup, volume cleanup, unmanaged cleanup, release tags, or GitHub Releases.
 

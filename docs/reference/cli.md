@@ -41,8 +41,8 @@ Manifest failures use an `issues` array with stable Hostwright error codes. `doc
 | Exit code | Category | Typical commands |
 | ---: | --- | --- |
 | `0` | Success | All commands |
-| `64` | Usage | Unsupported flags, missing arguments, refused overwrite |
-| `65` | Validation | Manifest parse/validation and compatibility failures |
+| `64` | Usage | Unsupported flags, missing arguments, refused overwrite, or local non-manifest file I/O failure |
+| `65` | Validation | Missing/unreadable manifest, manifest parse/validation, and compatibility failures |
 | `66` | State unavailable | Explicit SQLite state path could not be opened, migrated, verified, locked, or read |
 | `69` | Runtime unavailable | Runtime observation, logs, or mutation failed through `RuntimeAdapter` |
 | `70` | Confirmation mismatch | `apply --confirm-plan` or `cleanup --confirm-cleanup` did not match the current observed plan |
@@ -65,6 +65,8 @@ Creates `hostwright.yaml` in the current directory only when the file does not a
 
 `--force` is not implemented; existing manifests are not overwritten.
 
+A local write failure uses `HW-CLI-005` and exit code 64.
+
 Failure example:
 
 ```text
@@ -74,6 +76,8 @@ HW-CLI-002: hostwright.yaml already exists. init will not overwrite it.
 ## `hostwright import-stack <path> [--output text|json]`
 
 Reads a narrow safe stack-file subset and prints converted `hostwright.yaml` text to stdout. It does not write files, create `hostwright.yaml`, read or write state, observe Apple container, contact registries, pull images, or mutate runtime resources.
+
+A missing or unreadable stack-file input uses `HW-CLI-005` and exit code 64. JSON mode returns the standard error envelope on stderr.
 
 Supported import input is intentionally small:
 
@@ -190,6 +194,9 @@ It refuses mutation when:
 - a create action cannot confirm the local Apple container image;
 - a start action is not for an observed Hostwright-managed stopped, created, or exited service allowed by restart policy;
 - a restart action is not for an exact Hostwright-owned running service with a fresh persisted unhealthy health result and a matching ownership record.
+- an operation group with the same idempotency key still has an active lease; the error reports its redacted owner, checkpoint, and expiry without attempting mutation.
+
+An interrupted operation can reuse the same plan only when its persisted checkpoint proves runtime execution never began (`pre-runtime-state-incomplete`). Completed operations and interruptions with ambiguous or post-runtime state remain blocked.
 
 Manifest-declared ports are published to `127.0.0.1` by default during Hostwright-created container creation. Sensitive environment values are passed to the runtime for execution, but plan output, state rows, events, logs, and errors use redacted values.
 
@@ -204,6 +211,8 @@ HW-CLI-003: Confirmed plan hash does not match current observed plan.
 ## `hostwright status [path] [--state-db <path>] [--output text|json]`
 
 Without `--state-db`, reports manifest-level status only.
+
+A missing or unreadable manifest is a validation failure (`HW-MANIFEST-004`, exit 65), including in JSON mode; absence is not reported as successful status.
 
 With `--state-db`, validates the manifest, observes Apple container through `RuntimeAdapter`, persists a status observation event and snapshot to the explicit state database path, and renders desired services against observed lifecycle/health/port facts.
 
@@ -273,6 +282,8 @@ It does not inspect runtime state, create or migrate the database as a read side
 - no automatic recovery required;
 - manual inspection required after a failed or interrupted operation;
 - rollback unsupported because no safe inverse operation is proven.
+
+Active groups include their redacted lock owner and lease expiry in text and JSON output. A group with no persisted mutation intent can be reacquired after expiry, which marks the old group interrupted. A recorded intent remains blocked unless the persisted checkpoint proves runtime execution never began; ambiguous or post-runtime interruptions require manual inspection.
 
 JSON shape:
 

@@ -5,6 +5,7 @@ import HostwrightHealth
 import HostwrightImport
 import HostwrightManifest
 import HostwrightReconciler
+import HostwrightRuntime
 
 public enum HostwrightCLI {
     public static let starterManifest = """
@@ -35,12 +36,14 @@ public enum HostwrightCLI {
         do {
             let command = try CLICommand.parse(arguments: arguments)
             return try run(command: command, environment: environment)
+        } catch let error as HostwrightDiagnostic {
+            return failure(code: error.code, message: error.message, output: outputHint)
         } catch let error as CLIUsageError {
             return failure(code: .commandUsage, message: "\(error.message)\n\n\(helpText)", output: outputHint)
         } catch let error as ManifestParseError {
             return failure(issues: error.issues, output: outputHint)
         } catch {
-            return failure(code: .manifestFileIOFailed, message: String(describing: error), output: outputHint)
+            return failure(code: .fileIOFailed, message: String(describing: error), output: outputHint)
         }
     }
 
@@ -160,12 +163,12 @@ public enum HostwrightCLI {
             return failure(code: .fileAlreadyExists, message: "\(path) already exists. init will not overwrite it.")
         }
 
-        try environment.writeTextFile(path, starterManifest)
+        try hostwrightWriteLocalText(path: path, text: starterManifest, role: "starter manifest", environment: environment)
         return CLIRunResult(standardOutput: "Created \(path)\n")
     }
 
     private static func importStack(path: String, output: CLIOutputFormat, environment: CLIEnvironment) throws -> CLIRunResult {
-        let text = try environment.readTextFile(path)
+        let text = try hostwrightReadLocalText(path: path, role: "stack file", environment: environment)
         let result = StackFileImporter.convert(text)
         let exitCode: CLIExitCode = result.succeeded ? .success : .validation
 
@@ -208,7 +211,7 @@ public enum HostwrightCLI {
     }
 
     private static func loadValidManifest(path: String, environment: CLIEnvironment) throws -> HostwrightManifest {
-        let text = try environment.readTextFile(path)
+        let text = try hostwrightReadManifestText(path: path, environment: environment)
         return try ManifestValidator.validated(text)
     }
 
@@ -226,10 +229,11 @@ public enum HostwrightCLI {
 
     private static func failure(code: HostwrightErrorCode, message: String, output: CLIOutputFormat = .text) -> CLIRunResult {
         let exitCode = CLIExitCode.mapped(from: code)
+        let redactedMessage = RuntimeRedactionPolicy.default.redact(message)
         if output == .json {
-            return CLIRunResult(standardError: CLIJSON.error(code: code, message: message, exitCode: exitCode), exitCode: exitCode.rawValue)
+            return CLIRunResult(standardError: CLIJSON.error(code: code, message: redactedMessage, exitCode: exitCode), exitCode: exitCode.rawValue)
         }
-        return CLIRunResult(standardError: "\(code.rawValue): \(message)\n", exitCode: exitCode.rawValue)
+        return CLIRunResult(standardError: "\(code.rawValue): \(redactedMessage)\n", exitCode: exitCode.rawValue)
     }
 }
 

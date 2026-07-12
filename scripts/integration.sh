@@ -19,19 +19,24 @@ status_json="$workdir/status.json"
 doctor_json="$workdir/doctor.json"
 overwrite_stdout="$workdir/overwrite.stdout"
 overwrite_stderr="$workdir/overwrite.stderr"
+missing_stdout="$workdir/missing.stdout"
+missing_stderr="$workdir/missing.stderr"
+readonly_dir="$workdir/read-only"
 
 cleanup() {
   exit_code=$?
   trap - EXIT
   set +e
-  rm -f "$manifest" "$plan_json" "$status_json" "$doctor_json" "$overwrite_stdout" "$overwrite_stderr"
+  chmod 700 "$readonly_dir" 2>/dev/null
+  rm -f "$manifest" "$plan_json" "$status_json" "$doctor_json" "$overwrite_stdout" "$overwrite_stderr" "$missing_stdout" "$missing_stderr" "$readonly_dir/hostwright.yaml"
+  rmdir "$readonly_dir" 2>/dev/null
   rmdir "$workdir"
   exit "$exit_code"
 }
 trap cleanup EXIT
 
 version="$("$hostwright" --version)"
-[[ "$version" == "hostwright 0.1.0-alpha.1" ]]
+[[ "$version" == "0.1.0-alpha.1" ]]
 
 (
   cd "$workdir"
@@ -63,9 +68,41 @@ grep -q '"planHash"' "$plan_json"
 grep -q '"observed":false' "$status_json"
 grep -q '"checks"' "$doctor_json"
 
+set +e
+"$hostwright" plan "$workdir/missing.yaml" --output json >"$missing_stdout" 2>"$missing_stderr"
+missing_exit=$?
+set -e
+[[ "$missing_exit" -eq 65 ]]
+[[ ! -s "$missing_stdout" ]]
+plutil -convert json -o /dev/null "$missing_stderr"
+grep -q '"code":"HW-MANIFEST-004"' "$missing_stderr"
+
+set +e
+"$hostwright" import-stack "$workdir/missing-compose.yaml" --output json >"$missing_stdout" 2>"$missing_stderr"
+missing_exit=$?
+set -e
+[[ "$missing_exit" -eq 64 ]]
+[[ ! -s "$missing_stdout" ]]
+plutil -convert json -o /dev/null "$missing_stderr"
+grep -q '"code":"HW-CLI-005"' "$missing_stderr"
+
+mkdir "$readonly_dir"
+chmod 500 "$readonly_dir"
+set +e
+(
+  cd "$readonly_dir"
+  "$hostwright" init >"$missing_stdout" 2>"$missing_stderr"
+)
+readonly_exit=$?
+set -e
+chmod 700 "$readonly_dir"
+[[ "$readonly_exit" -eq 64 ]]
+[[ ! -s "$missing_stdout" ]]
+grep -q 'HW-CLI-005' "$missing_stderr"
+
 if find "$workdir" -name '*.sqlite*' -print -quit | grep -q .; then
   echo "local integration unexpectedly created a state database" >&2
   exit 1
 fi
 
-echo "local-integration passed: built CLI, JSON output, overwrite refusal, and no hidden state writes"
+echo "local-integration passed: built CLI, JSON output/errors, real file failures, overwrite refusal, and no hidden state writes"

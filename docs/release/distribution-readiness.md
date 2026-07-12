@@ -20,7 +20,7 @@ Hostwright public releases remain source-only. The developer-only `hostwright-di
 
 ## Local Evidence Commands
 
-The clean build path requires an explicit source root, new output directory, and exact commit. It verifies `git status`, rejects external SwiftPM dependencies, builds both release products, and intentionally exits `69` because trust stages remain blocked:
+The clean build path requires an explicit source root, new output directory, and exact commit. It verifies tracked, untracked, and ignored source inventory; rejects ignored inputs other than the unused `.build/` containing the tool itself; rejects external SwiftPM dependencies; builds both release products in a unique scratch directory; records exact scratch cleanup; and intentionally exits `69` because trust stages remain blocked:
 
 ```bash
 swift run hostwright-dist build \

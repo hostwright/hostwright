@@ -22,13 +22,13 @@ Dirty prebuilt local-integration runs used the actual debug `hostwright`, `hostw
 
 ## Clean Local Evidence
 
-A detached two-commit proof used baseline `5b6e7914c93a9a994c7404d7ed0b4c6c72bfd3c3` and final reviewed candidate `f625a218762cf9c6967ef86fa7dd95a6246a7499`. Both worktrees were clean before and after their release builds. The reports record macOS 26.5 build 25F71, Mac16,8, arm64, 24 GiB memory, Swift 6.3.3, Apple Git 2.50.1, bsdtar 3.5.3, and notarytool 1.1.2.
+A detached two-commit proof used baseline `5b6e7914c93a9a994c7404d7ed0b4c6c72bfd3c3` and final reviewed candidate `34ca2e20be07150a1ee00f04475bd9acff950353`. Both worktrees were clean before and after their release builds. The reports record macOS 26.5 build 25F71, Mac16,8, arm64, 24 GiB memory, Swift 6.3.3, Apple Git 2.50.1, bsdtar 3.5.3, and notarytool 1.1.2.
 
-- Both exact commits built `hostwright` and `hostwrightd` in release mode with an empty SwiftPM external-dependency inventory.
+- Both exact commits built `hostwright` and `hostwrightd` in release mode with an empty SwiftPM external-dependency inventory, no ignored source input beyond the candidate tool's unused `.build/`, and a new isolated scratch directory.
 - Both artifacts recorded `sourceDirty: false`, one ARM64 slice per executable, exact payload hashes/sizes/modes, five passed artifact stages, zero failures, and three blocked trust stages.
 - Independent verification passed the exact sidecar inventory, all SHA-256 entries, manifest, SPDX relationships, unsigned provenance binding, tar entry types/paths, extracted tree, and payload metadata.
 - The lifecycle installed and executed the baseline, upgraded and executed the candidate, downgraded and executed the baseline, then uninstalled: four passed stages, zero failures, and three blocked trust stages.
-- Cleanup removed every recorded installer-owned file and created directory, removed transaction/extraction directories, and restored the explicit temporary prefix to its initial unrelated sentinel only.
+- Artifact evidence recorded and removed each exact isolated build scratch directory before publishing output. Lifecycle cleanup removed every installer-owned file and created directory, removed transaction/extraction directories, and restored the explicit temporary prefix to its initial unrelated sentinel only.
 - `security find-identity -v -p codesigning` reported zero valid identities. Signing, notarization, stapling, Gatekeeper, `.pkg`, and publication therefore remained blocked rather than passed.
 
 The raw artifacts and machine reports remained outside the repository and were not staged.

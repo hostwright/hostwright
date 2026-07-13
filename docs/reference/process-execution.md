@@ -16,7 +16,7 @@ flowchart LR
     F --> G["Post-spawn identity verification"]
     G --> H["Bounded nonblocking I/O monitor"]
     H --> I["Exit, timeout, cancellation, or limit"]
-    I --> J["Owned process-group cleanup before reap"]
+    I --> J["Freeze, inspect, and clean owned process group"]
     J --> K["Typed result or redaction-safe caller error"]
 ```
 
@@ -30,7 +30,7 @@ The launch sequence is deliberately ordered:
 6. Create close-on-exec pipes, use exact argv and a complete caller-supplied environment, start a new session with inherited descriptors closed by default, and initially suspend the child.
 7. Recheck the executable device, inode, ownership, mode, size, modification time, and change time before continuing it.
 8. Drain stdout and stderr and write stdin without blocking. Enforce separate byte limits, a wall-clock timeout, task/token cancellation, and a bounded TERM-to-KILL escalation.
-9. Observe leader exit with `waitid(..., WNOWAIT)` without immediately reaping it. This keeps its PID and process-group identity fenced while Hostwright sends the final group cleanup signal. Reap only afterward, wait for group and pipe convergence, and never signal a reused PID or process group.
+9. Observe leader exit with `waitid(..., WNOWAIT)` without immediately reaping it. This keeps its PID and process-group identity fenced while Hostwright freezes the inherited group with uncatchable `SIGSTOP`. Reap the leader, preserve whether stopped descendants remain, terminate those descendants with `SIGKILL`, and wait for group and pipe convergence. This ordering never depends on private process-listing APIs and never signals a reused PID or process group.
 
 ## Default Contract
 
@@ -54,7 +54,7 @@ The environment is constructed from an empty baseline; parent variables do not l
 
 The core reports distinct failures for invalid requests, unsafe executable/working-directory identity, launch setup, launch failure, executable replacement, timeout, cancellation, output overflow, input/output I/O failure, wait failure, unexpected descendants, and cleanup non-convergence.
 
-On timeout, cancellation, I/O failure, or output overflow, Hostwright closes stdin, signals the owned session process group with `SIGTERM`, escalates to `SIGKILL` after the configured grace period, drains bounded output, reaps the leader, and verifies that the inherited process group and pipes converge. A pre-launch cancellation creates no child. If `SIGKILL` cannot converge within the cleanup window, the call fails as `processTreeCleanupFailed` and installs an asynchronous leader reap so a later exit does not become a zombie.
+On timeout, cancellation, I/O failure, or output overflow, Hostwright closes stdin, signals the owned session process group with `SIGTERM`, escalates to `SIGKILL` after the configured grace period, drains bounded output, reaps the leader, and verifies that the inherited process group and pipes converge. When the leader exits first, Hostwright freezes the fenced group before reaping so fast descendant cleanup cannot erase the required `descendantProcessDetected` result. A pre-launch cancellation creates no child. If `SIGKILL` cannot converge within the cleanup window, the call fails as `processTreeCleanupFailed` and installs an asynchronous leader reap so a later exit does not become a zombie.
 
 Runtime errors redact sensitive values and partial output before crossing `RuntimeAdapter`. Distribution and extension callers do not expose raw captured output from boundary failures.
 
@@ -76,4 +76,4 @@ Session process-group cleanup covers the leader and descendants that remain in t
 
 ## Evidence
 
-The 419-test repository suite includes real-process coverage for literal shell metacharacters, root-only PATH resolution, unsafe permissions/ownership, executable mutation, lexical traversal, descriptor-pinned working directories, parent-environment isolation, sensitive values outside argv, loader hooks, non-ASCII environment names, bounded stdin round-trip, early stdin closure, stdout/stderr floods, low and high descriptor inheritance, timeout, pre-launch and in-flight cancellation, cancellation races, leader/descendant cleanup, ignored `SIGTERM`, rapid exits, distribution lifecycle execution, and reviewed-local extension execution. The complete 21-test secure-subprocess suite also passes under AddressSanitizer and ThreadSanitizer. Live Apple-runtime evidence ran a read-only Hostwright status workflow through Apple container 1.0.0; the normalized inventory hash was `deb226ad125d10ec1e2f7c50e2cd4b4a890a51944e94bb63f2e8d422302ce73d` before and after, and the temporary manifest/state were removed exactly.
+The 420-test repository suite includes real-process coverage for literal shell metacharacters, root-only PATH resolution, unsafe permissions/ownership, executable mutation, lexical traversal, descriptor-pinned working directories, parent-environment isolation, sensitive values outside argv, loader hooks, non-ASCII environment names, bounded stdin round-trip, early stdin closure, stdout/stderr floods, low and high descriptor inheritance, timeout, pre-launch and in-flight cancellation, cancellation races, leader/descendant cleanup, normal leader exit after child reap, ignored `SIGTERM`, rapid exits, distribution lifecycle execution, and reviewed-local extension execution. The complete 22-test secure-subprocess suite is also exercised under AddressSanitizer and ThreadSanitizer. Live Apple-runtime evidence ran a read-only Hostwright status workflow through Apple container 1.0.0; the normalized inventory hash was `deb226ad125d10ec1e2f7c50e2cd4b4a890a51944e94bb63f2e8d422302ce73d` before and after, and the temporary manifest/state were removed exactly.

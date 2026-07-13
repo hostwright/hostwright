@@ -378,8 +378,7 @@ public struct SecureSubprocessRunner: Sendable {
                !leaderObservationFailed,
                leaderStatus == nil {
                 if killSentAt == nil {
-                    signalOwnedProcessGroup(processID, signal: SIGKILL, leaderIsUnreaped: true)
-                    killSentAt = now
+                    signalOwnedProcessGroup(processID, signal: SIGSTOP, leaderIsUnreaped: true)
                 }
                 do {
                     leaderStatus = try reapExitedLeader(processID)
@@ -394,11 +393,18 @@ public struct SecureSubprocessRunner: Sendable {
                 }
             }
 
-            let groupExists = leaderStatus == nil || (
-                !leaderObservationFailed && processGroupExists(processID)
-            )
-            if leaderStatus != nil, groupExists, cause == nil {
-                cause = .descendantProcessDetected
+            let groupExists: Bool
+            if leaderStatus == nil {
+                groupExists = true
+            } else if leaderObservationFailed {
+                groupExists = false
+            } else {
+                groupExists = processGroupExists(processID)
+                if groupExists, killSentAt == nil {
+                    if cause == nil { cause = .descendantProcessDetected }
+                    signalOwnedProcessGroup(processID, signal: SIGKILL, leaderIsUnreaped: false)
+                    killSentAt = now
+                }
             }
             if leaderStatus != nil, !groupExists, outputPipe.readDescriptor < 0, errorPipe.readDescriptor < 0 {
                 break

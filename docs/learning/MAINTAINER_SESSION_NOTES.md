@@ -332,7 +332,7 @@ Phase 5 adds:
 - `AppleContainerReadOnlyAdapter` behind `RuntimeAdapter`;
 - `AppleContainerCommand` as the only place for Apple command shapes;
 - `RuntimeExecutableResolver` for executable lookup;
-- `FoundationRuntimeProcessRunner` for policy-approved read-only specs;
+- the policy-approved read-only runner then named `FoundationRuntimeProcessRunner` (replaced by `SecureRuntimeProcessRunner` in v0.0.2 issue #116);
 - `AppleContainerObservationParser` for a fixture-defined observation schema;
 - fixtures for empty, running, and redaction cases;
 - smoke checks for missing executable, command policy, parser failure, redaction, mutation-unavailable behavior, and boundary isolation.
@@ -348,7 +348,7 @@ The design lets Hostwright attempt read-only observation without making unverifi
 | `Sources/HostwrightRuntime/AppleContainerReadOnlyAdapter.swift` | Added read-only adapter. | Gives Apple observation one RuntimeAdapter entry point. | No Phase 5 adapter exists. |
 | `Sources/HostwrightRuntime/AppleContainerCommand.swift` | Isolated Apple command shapes. | Prevents command strings from spreading. | CLI/reconciler may grow ad hoc runtime command logic. |
 | `Sources/HostwrightRuntime/AppleContainerObservationParser.swift` | Added fail-closed parser. | Converts fixture-defined output into typed observed state. | Runtime output cannot become typed observations safely. |
-| `Sources/HostwrightRuntime/FoundationRuntimeProcessRunner.swift` | Added guarded live runner. | Enforces read-only classification, resolution, timeout, capture, and redaction. | Future adapter work would need unsafe process execution. |
+| `Sources/HostwrightRuntime/FoundationRuntimeProcessRunner.swift` | Added the original guarded live runner; v0.0.2 issue #116 later replaced this file with `SecureRuntimeProcessRunner.swift`. | Established read-only classification, resolution, timeout, capture, and redaction before the shared secure boundary existed. | Future adapter work would otherwise have needed an ad hoc process path. |
 | `Sources/HostwrightRuntime/RuntimeExecutableResolver.swift` | Added executable resolver. | Proves live specs use resolved executables. | Commands could use arbitrary unresolved paths. |
 | `Tests/HostwrightRuntimeTests/Fixtures/*` | Added empty, running, and redaction fixtures. | Gives parser deterministic coverage. | Parser behavior becomes unreviewable. |
 | `Tests/HostwrightRuntimeTests/HostwrightRuntimeSmoke.swift` | Added Phase 5 smoke checks. | Proves boundaries compile and basic behavior holds. | Regression risk increases. |
@@ -361,7 +361,7 @@ The design lets Hostwright attempt read-only observation without making unverifi
 - `doctor` still only checks executable presence.
 - Apple command shapes must remain inside the runtime adapter layer.
 - The parser schema is fixture-defined and fail-closed, not a verified public Apple CLI compatibility claim.
-- `FoundationRuntimeProcessRunner` is guarded by command classification and executable resolution.
+- The original `FoundationRuntimeProcessRunner` was guarded by command classification and executable resolution; the current `SecureRuntimeProcessRunner` adds the shared v0.0.2 subprocess guarantees.
 
 ### Risks
 
@@ -394,7 +394,7 @@ git diff --name-only
 
 Answer these before approving the Phase 5 commit:
 
-1. Why does `FoundationRuntimeProcessRunner` require a typed `RuntimeCommandSpec`?
+1. Why did the original runtime runner—and why does the current `SecureRuntimeProcessRunner`—require a typed `RuntimeCommandSpec`?
 2. What makes a Phase 5 command executable?
 3. Where are Apple container command shapes allowed to live?
 4. What happens when `container` is missing?
@@ -781,7 +781,7 @@ The first mutation must prove the safety pipeline before expanding the feature s
 - `hostwright apply` is not general apply yet.
 - The CLI orchestrates business logic but does not shell out to Apple container.
 - Runtime mutation still goes through `RuntimeAdapter`.
-- `FoundationRuntimeProcessRunner` is policy-gated, not a free shell.
+- The runtime process runner is policy-gated, not a free shell; its current implementation is `SecureRuntimeProcessRunner`.
 - The command must be typed, resolved, classified, and approved before execution.
 - A matching plan hash proves the user confirmed the currently recomputed plan; it does not prove the runtime will succeed.
 - State intent is written before mutation so failures can be audited.

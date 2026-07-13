@@ -1,46 +1,32 @@
 import Foundation
+import HostwrightCore
 
 public enum ProcessLookup {
     public static func executablePath(named name: String, path: String? = ProcessInfo.processInfo.environment["PATH"]) -> String? {
-        guard let path, !name.contains("/") else { return nil }
-
-        for directory in path.split(separator: ":").map(String.init) {
-            let candidate = "\(directory)/\(name)"
-            if FileManager.default.isExecutableFile(atPath: candidate) {
-                return candidate
-            }
-        }
-
-        return nil
+        try? SecureExecutableResolver.resolve(named: name, searchPath: path)?.path
     }
 
     public static func swiftVersionSummary() -> String? {
         guard let swiftPath = executablePath(named: "swift") else { return nil }
 
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: swiftPath)
-        process.arguments = ["--version"]
-
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = Pipe()
-
         do {
-            try process.run()
-            process.waitUntilExit()
+            let result = try SecureSubprocessRunner().run(
+                SecureSubprocessRequest(
+                    executablePath: swiftPath,
+                    arguments: ["--version"],
+                    environment: SecureSubprocessEnvironment.currentUser,
+                    timeoutMilliseconds: 5_000,
+                    maximumStandardOutputBytes: 64 * 1_024,
+                    maximumStandardErrorBytes: 64 * 1_024
+                )
+            )
+            guard result.exitStatus == 0,
+                  let output = String(data: result.standardOutput, encoding: .utf8) else {
+                return nil
+            }
+            return output.split(separator: "\n").first.map(String.init)
         } catch {
             return nil
         }
-
-        guard process.terminationStatus == 0 else { return nil }
-
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        let output = String(data: data, encoding: .utf8)?
-            .split(separator: "\n")
-            .first
-            .map(String.init)
-
-        return output
     }
 }
-

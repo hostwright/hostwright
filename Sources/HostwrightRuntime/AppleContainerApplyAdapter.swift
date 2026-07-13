@@ -9,7 +9,7 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
 
     public init(
         executableResolver: RuntimeExecutableResolving = RuntimeExecutableResolver(),
-        processRunner: RuntimeProcessRunning = FoundationRuntimeProcessRunner(),
+        processRunner: RuntimeProcessRunning = SecureRuntimeProcessRunner(),
         redactionPolicy: RuntimeRedactionPolicy = .default
     ) {
         self.executableResolver = executableResolver
@@ -34,7 +34,7 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
     }
 
     public func capabilities() async throws -> [RuntimeCapability] {
-        guard executableResolver.resolveExecutable(named: AppleContainerCommand.executableName) != nil else {
+        guard try executableResolver.resolveExecutable(named: AppleContainerCommand.executableName) != nil else {
             throw RuntimeAdapterError.runtimeUnavailable("Apple container CLI was not found on PATH.")
         }
 
@@ -99,7 +99,7 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
             )
         }
 
-        guard let executable = executableResolver.resolveExecutable(named: AppleContainerCommand.executableName) else {
+        guard let executable = try executableResolver.resolveExecutable(named: AppleContainerCommand.executableName) else {
             throw RuntimeAdapterError.runtimeUnavailable("Apple container CLI was not found on PATH.")
         }
 

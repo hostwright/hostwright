@@ -4,6 +4,9 @@ public enum RuntimeAdapterError: Error, Equatable, Sendable {
     case unsupportedRuntime(String)
     case commandRejected(classification: RuntimeCommandClassification, message: String)
     case commandTimedOut(command: String, partialOutput: String, partialError: String)
+    case commandCancelled(command: String, partialOutput: String, partialError: String)
+    case commandOutputLimitExceeded(command: String, partialOutput: String, partialError: String)
+    case commandProcessTreeViolation(command: String, partialOutput: String, partialError: String)
     case commandFailed(exitStatus: Int32, message: String, standardError: String)
     case managedRestartStartFailedAfterStop(message: String, standardError: String)
     case outputParseFailed(String)
@@ -28,6 +31,24 @@ public enum RuntimeAdapterError: Error, Equatable, Sendable {
             return .commandRejected(classification: classification, message: policy.redact(message, exactValues: exactValues))
         case .commandTimedOut(let command, let partialOutput, let partialError):
             return .commandTimedOut(
+                command: policy.redact(command, exactValues: exactValues),
+                partialOutput: policy.redact(partialOutput, exactValues: exactValues),
+                partialError: policy.redact(partialError, exactValues: exactValues)
+            )
+        case .commandCancelled(let command, let partialOutput, let partialError):
+            return .commandCancelled(
+                command: policy.redact(command, exactValues: exactValues),
+                partialOutput: policy.redact(partialOutput, exactValues: exactValues),
+                partialError: policy.redact(partialError, exactValues: exactValues)
+            )
+        case .commandOutputLimitExceeded(let command, let partialOutput, let partialError):
+            return .commandOutputLimitExceeded(
+                command: policy.redact(command, exactValues: exactValues),
+                partialOutput: policy.redact(partialOutput, exactValues: exactValues),
+                partialError: policy.redact(partialError, exactValues: exactValues)
+            )
+        case .commandProcessTreeViolation(let command, let partialOutput, let partialError):
+            return .commandProcessTreeViolation(
                 command: policy.redact(command, exactValues: exactValues),
                 partialOutput: policy.redact(partialOutput, exactValues: exactValues),
                 partialError: policy.redact(partialError, exactValues: exactValues)
@@ -116,7 +137,7 @@ public struct AppleContainerCLIAdapter: RuntimeAdapter {
 
     public init(
         executableResolver: RuntimeExecutableResolving = RuntimeExecutableResolver(),
-        processRunner: RuntimeProcessRunning = FoundationRuntimeProcessRunner(),
+        processRunner: RuntimeProcessRunning = SecureRuntimeProcessRunner(),
         redactionPolicy: RuntimeRedactionPolicy = .default
     ) {
         self.applyAdapter = AppleContainerApplyAdapter(

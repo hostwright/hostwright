@@ -7,7 +7,7 @@ public struct AppleContainerReadOnlyAdapter: RuntimeAdapter {
 
     public init(
         executableResolver: RuntimeExecutableResolving = RuntimeExecutableResolver(),
-        processRunner: RuntimeProcessRunning = FoundationRuntimeProcessRunner(),
+        processRunner: RuntimeProcessRunning = SecureRuntimeProcessRunner(),
         redactionPolicy: RuntimeRedactionPolicy = .default
     ) {
         self.executableResolver = executableResolver
@@ -27,7 +27,7 @@ public struct AppleContainerReadOnlyAdapter: RuntimeAdapter {
     }
 
     public func capabilities() async throws -> [RuntimeCapability] {
-        guard executableResolver.resolveExecutable(named: AppleContainerCommand.executableName) != nil else {
+        guard try executableResolver.resolveExecutable(named: AppleContainerCommand.executableName) != nil else {
             throw RuntimeAdapterError.runtimeUnavailable("Apple container CLI was not found on PATH.")
         }
 
@@ -35,7 +35,7 @@ public struct AppleContainerReadOnlyAdapter: RuntimeAdapter {
     }
 
     public func observe(desiredState: DesiredRuntimeState) async throws -> ObservedRuntimeState {
-        guard let executable = executableResolver.resolveExecutable(named: AppleContainerCommand.executableName) else {
+        guard let executable = try executableResolver.resolveExecutable(named: AppleContainerCommand.executableName) else {
             throw RuntimeAdapterError.runtimeUnavailable("Apple container CLI was not found on PATH.")
         }
 
@@ -59,7 +59,7 @@ public struct AppleContainerReadOnlyAdapter: RuntimeAdapter {
     }
 
     public func logs(for service: ObservedRuntimeService, tail: Int) async throws -> RuntimeLogResult {
-        guard let executable = executableResolver.resolveExecutable(named: AppleContainerCommand.executableName) else {
+        guard let executable = try executableResolver.resolveExecutable(named: AppleContainerCommand.executableName) else {
             throw RuntimeAdapterError.runtimeUnavailable("Apple container CLI was not found on PATH.")
         }
 
@@ -82,7 +82,7 @@ public struct AppleContainerReadOnlyAdapter: RuntimeAdapter {
     }
 
     public func runtimeVersion() async throws -> String {
-        guard let executable = executableResolver.resolveExecutable(named: AppleContainerCommand.executableName) else {
+        guard let executable = try executableResolver.resolveExecutable(named: AppleContainerCommand.executableName) else {
             throw RuntimeAdapterError.runtimeUnavailable("Apple container CLI was not found on PATH.")
         }
         let spec = AppleContainerCommand.spec(kind: .version, executable: executable)
@@ -96,7 +96,7 @@ public struct AppleContainerReadOnlyAdapter: RuntimeAdapter {
     }
 
     public func resourceUsage(for resourceIdentifier: String) async throws -> RuntimeResourceUsageSnapshot {
-        guard let executable = executableResolver.resolveExecutable(named: AppleContainerCommand.executableName) else {
+        guard let executable = try executableResolver.resolveExecutable(named: AppleContainerCommand.executableName) else {
             throw RuntimeAdapterError.runtimeUnavailable("Apple container CLI was not found on PATH.")
         }
         let spec = AppleContainerCommand.spec(kind: .stats(containerID: resourceIdentifier), executable: executable)
@@ -110,7 +110,7 @@ public struct AppleContainerReadOnlyAdapter: RuntimeAdapter {
     }
 
     public func localImageEvidence(for imageReference: String) async throws -> RuntimeLocalImageEvidence {
-        guard let executable = executableResolver.resolveExecutable(named: AppleContainerCommand.executableName) else {
+        guard let executable = try executableResolver.resolveExecutable(named: AppleContainerCommand.executableName) else {
             throw RuntimeAdapterError.runtimeUnavailable("Apple container CLI was not found on PATH.")
         }
         let spec = AppleContainerCommand.spec(kind: .listImages, executable: executable)

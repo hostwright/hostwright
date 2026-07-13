@@ -740,6 +740,12 @@ final class BenchmarkSession: @unchecked Sendable {
             return "Runtime command was rejected (\(classification.rawValue)): \(message)"
         case .commandTimedOut(let command, _, _):
             return "Runtime command timed out: \(command)"
+        case .commandCancelled(let command, _, _):
+            return "Runtime command was cancelled: \(command)"
+        case .commandOutputLimitExceeded(let command, _, _):
+            return "Runtime command exceeded its output limit: \(command)"
+        case .commandProcessTreeViolation(let command, _, _):
+            return "Runtime command left an unexpected process tree: \(command)"
         case .commandFailed(let exitStatus, let message, _):
             return "Runtime command failed with exit \(exitStatus): \(message)"
         case .managedRestartStartFailedAfterStop(let message, _):

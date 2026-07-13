@@ -147,7 +147,8 @@ enum HostwrightDistributionCLI {
             return 65
         case .installOwnershipMismatch:
             return 71
-        case .commandFailed, .commandTimedOut:
+        case .commandFailed, .commandTimedOut, .commandCancelled,
+             .commandOutputLimitExceeded, .commandProcessTreeViolation:
             return 69
         case .lifecycleFailed:
             return 72

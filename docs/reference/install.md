@@ -84,3 +84,5 @@ Do not treat deletion of the checkout as a Hostwright uninstall. Phase 02 implem
 ## Gate Before Package Claims
 
 No package channel is called supported until clean-Mac evidence covers Gatekeeper, reboot, upgrade, rollback, repair, uninstall, corruption, disk full, PATH hijack, symlink attacks, cancellation, and owned process-tree cleanup. Final requirements are in the [v0.0.2 implementation plan](../roadmap/v0.0.2/IMPLEMENTATION_PLAN.md) and [distribution evidence rules](testing-evidence.md).
+
+All production installer, distribution, extension, tool-inspection, and Apple-runtime subprocesses must use the [secure process execution boundary](process-execution.md). Phase 02 issue #116 implements that shared boundary; it does not by itself make the still-unsigned developer distribution a trusted install channel.

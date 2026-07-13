@@ -30,89 +30,61 @@ public struct DistributionProcessRunner: Sendable {
         arguments: [String],
         workingDirectory: URL? = nil,
         label: String,
-        timeoutSeconds: Int = 900
+        timeoutSeconds: Int = 900,
+        cancellation: SecureSubprocessCancellation = SecureSubprocessCancellation()
     ) throws -> DistributionCommandResult {
-        guard executablePath.hasPrefix("/"),
-              FileManager.default.isExecutableFile(atPath: executablePath),
-              timeoutSeconds > 0 else {
+        guard executablePath.hasPrefix("/"), (1...86_400).contains(timeoutSeconds) else {
             throw DistributionError.invalidArguments("Distribution command executable or timeout is invalid.")
         }
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: executablePath)
-        process.arguments = arguments
-        process.currentDirectoryURL = workingDirectory
-        let outputPipe = Pipe()
-        let errorPipe = Pipe()
-        process.standardOutput = outputPipe
-        process.standardError = errorPipe
-
-        let terminated = DispatchSemaphore(value: 0)
-        process.terminationHandler = { _ in terminated.signal() }
-        let start = DispatchTime.now().uptimeNanoseconds
+        var environment = SecureSubprocessEnvironment.currentUser
+        environment["GIT_CONFIG_GLOBAL"] = "/dev/null"
+        environment["GIT_CONFIG_NOSYSTEM"] = "1"
+        environment["GIT_PAGER"] = "cat"
+        environment["GIT_TERMINAL_PROMPT"] = "0"
+        environment["PAGER"] = "cat"
+        environment["TERM"] = "dumb"
+        let request = SecureSubprocessRequest(
+            executablePath: executablePath,
+            arguments: arguments,
+            environment: environment,
+            workingDirectory: workingDirectory?.path ?? "/",
+            timeoutMilliseconds: timeoutSeconds * 1_000,
+            maximumStandardOutputBytes: 16 * 1_024 * 1_024,
+            maximumStandardErrorBytes: 16 * 1_024 * 1_024
+        )
+        let secureResult: SecureSubprocessResult
         do {
-            try process.run()
-        } catch {
-            throw DistributionError.commandFailed(label, -1)
-        }
-
-        let output = DistributionPipeBuffer()
-        let errors = DistributionPipeBuffer()
-        let readers = DispatchGroup()
-        readers.enter()
-        DispatchQueue.global(qos: .utility).async {
-            output.set(outputPipe.fileHandleForReading.readDataToEndOfFile())
-            readers.leave()
-        }
-        readers.enter()
-        DispatchQueue.global(qos: .utility).async {
-            errors.set(errorPipe.fileHandleForReading.readDataToEndOfFile())
-            readers.leave()
-        }
-
-        if terminated.wait(timeout: .now() + .seconds(timeoutSeconds)) == .timedOut {
-            process.terminate()
-            if terminated.wait(timeout: .now() + .seconds(2)) == .timedOut, process.isRunning {
-                kill(process.processIdentifier, SIGKILL)
-                _ = terminated.wait(timeout: .now() + .seconds(2))
+            secureResult = try SecureSubprocessRunner().run(request, cancellation: cancellation)
+        } catch let error as SecureSubprocessError {
+            switch error {
+            case .timedOut:
+                throw DistributionError.commandTimedOut(label)
+            case .cancelled:
+                throw DistributionError.commandCancelled(label)
+            case .outputLimitExceeded:
+                throw DistributionError.commandOutputLimitExceeded(label)
+            case .descendantProcessDetected, .processTreeCleanupFailed:
+                throw DistributionError.commandProcessTreeViolation(label)
+            case .executableRejected, .workingDirectoryRejected, .invalidRequest:
+                throw DistributionError.invalidArguments("Distribution command failed secure path or request validation.")
+            case .inputWriteFailed, .outputReadFailed, .waitFailed, .spawnSetupFailed, .launchFailed, .executableChanged:
+                throw DistributionError.commandFailed(label, -1)
             }
-            try? outputPipe.fileHandleForReading.close()
-            try? errorPipe.fileHandleForReading.close()
-            _ = readers.wait(timeout: .now() + .seconds(2))
-            throw DistributionError.commandTimedOut(label)
         }
-
-        if readers.wait(timeout: .now() + .seconds(5)) == .timedOut {
-            try? outputPipe.fileHandleForReading.close()
-            try? errorPipe.fileHandleForReading.close()
-            _ = readers.wait(timeout: .now() + .seconds(2))
-            throw DistributionError.commandFailed("\(label) output drain", -1)
+        guard let standardOutput = String(data: secureResult.standardOutput, encoding: .utf8),
+              let standardError = String(data: secureResult.standardError, encoding: .utf8) else {
+            throw DistributionError.commandFailed("\(label) output decoding", -1)
         }
-
-        let elapsed = DispatchTime.now().uptimeNanoseconds - start
         let result = DistributionCommandResult(
-            standardOutput: String(data: output.value(), encoding: .utf8) ?? "",
-            standardError: String(data: errors.value(), encoding: .utf8) ?? "",
-            exitStatus: process.terminationStatus,
-            durationMilliseconds: Int(clamping: elapsed / 1_000_000)
+            standardOutput: standardOutput,
+            standardError: standardError,
+            exitStatus: secureResult.exitStatus,
+            durationMilliseconds: secureResult.durationMilliseconds
         )
         guard result.exitStatus == 0 else {
             throw DistributionError.commandFailed(label, result.exitStatus)
         }
         return result
-    }
-}
-
-private final class DistributionPipeBuffer: @unchecked Sendable {
-    private let lock = NSLock()
-    private var data = Data()
-
-    func set(_ value: Data) {
-        lock.withLock { data = value }
-    }
-
-    func value() -> Data {
-        lock.withLock { data }
     }
 }
 

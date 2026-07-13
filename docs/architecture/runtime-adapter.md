@@ -17,8 +17,8 @@ Implemented:
 - test-only `ScriptedRuntimeAdapter` for deterministic contracts without live process execution;
 - runtime command specs, command results, command classification, timeout model, and process runner protocol;
 - test-only scripted process runner for deterministic result and failure injection;
-- Foundation-backed process runner for policy-approved read-only runtime commands and the supported mutation specs;
-- executable resolution through `RuntimeExecutableResolver`;
+- `SecureRuntimeProcessRunner` for policy-approved read-only runtime commands and the supported mutation specs;
+- root-owned executable resolution through `RuntimeExecutableResolver`;
 - `AppleContainerReadOnlyAdapter` for read-only observation attempts;
 - `AppleContainerApplyAdapter` for narrow create, start, managed restart, and delete mutation;
 - fixture-defined observation parser for empty and running service snapshots;
@@ -61,17 +61,17 @@ The command spec records:
 - mutation kind, when classification is mutating;
 - purpose.
 
-`FoundationRuntimeProcessRunner` is not a general shell-out path. Before any live process can run:
+`SecureRuntimeProcessRunner` is not a general shell-out path. Before any live process can run:
 
 - the command must be represented as `RuntimeCommandSpec`;
 - the executable must be resolved through `RuntimeExecutableResolver`;
 - read-only commands must pass read-only policy;
 - mutating commands must be classified as `mutating` and carry a supported mutation kind;
 - forbidden, unknown, unsupported mutating, and unresolved specs are rejected;
-- timeout and output capture are enforced;
+- exact argv, a minimal non-inherited environment, descriptor-pinned working directory, timeout, cancellation, separate output limits, and owned process-group cleanup are enforced;
 - command args, env, stdout, stderr, and errors are redacted.
 
-Unit-contract tests use scripted process execution and fixtures. Real local subprocess and loopback tests are separate local-integration evidence. Live observation and supported mutation are allowed only through RuntimeAdapter implementations in `HostwrightRuntime`.
+The shared launch and recovery contract is documented in [Secure Process Execution](../reference/process-execution.md). Unit-contract tests retain scripted failure injection for adapter policy only. The process boundary itself is exercised with compiled executables, real pipes, real signals, cancellation races, descriptor checks, and real child processes. Live observation and supported mutation remain allowed only through RuntimeAdapter implementations in `HostwrightRuntime`.
 
 ## Command Classification
 
@@ -102,7 +102,7 @@ The command result model records:
 - whether the command timed out;
 - whether the command was cancelled.
 
-The live runner enforces timeout by terminating the process and returning a redacted timeout error with partial output. Cancellation remains represented in the result model; foreground daemon shutdown currently stops between loop iterations and during daemon sleep, not in the middle of a runtime process call.
+The live runner enforces timeout and task cancellation by terminating the owned session process group and returning a distinct redacted error with bounded partial output. Output overflow, I/O failure, unexpected descendants, and cleanup non-convergence are separately typed. Foreground daemon shutdown still stops between loop iterations and during daemon sleep; the daemon does not yet hold and cancel an in-flight runtime task.
 
 ## Redaction Rules
 

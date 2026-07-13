@@ -12,9 +12,9 @@ Hostwright may adapt documented Apple container CLI behavior after local verific
 
 The adapters:
 
-- resolves the `container` executable through `RuntimeExecutableResolver`;
+- resolves the `container` executable through root-owned path-chain validation in `RuntimeExecutableResolver`;
 - build command specs in `AppleContainerCommand`;
-- run only policy-approved specs through `FoundationRuntimeProcessRunner`;
+- run only policy-approved specs through `SecureRuntimeProcessRunner`;
 - parse only fixture-defined and locally verified observation output;
 - reports missing executables as runtime unavailable;
 - reports unsupported output as parse failure.
@@ -35,5 +35,5 @@ The adapter does not expose public stop/restart commands, remove broadly, run, p
 - Verify additional Apple container output shapes before documenting broader command compatibility.
 - Prefer documented structured output when available.
 - Convert runtime errors into Hostwright errors.
-- Keep shell/process execution behind `RuntimeAdapter` and `RuntimeProcessRunning`.
+- Keep bounded process execution behind `RuntimeAdapter` and `RuntimeProcessRunning`.
 - Document unverified Apple container behavior in `docs/BUILD_STATUS.md`.

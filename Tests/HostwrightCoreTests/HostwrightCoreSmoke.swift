@@ -22,6 +22,41 @@ final class HostwrightCoreTests: XCTestCase {
         XCTAssertEqual(violations, [], "Test-double types must remain outside production Sources.")
     }
 
+    func testSecureProcessExecutionTruthIsDocumentedAndFoundationProcessIsAbsent() throws {
+        let root = try packageRoot()
+        let processReference = try read("docs/reference/process-execution.md", root: root)
+        let securityReference = try read("docs/reference/security-safety.md", root: root)
+        let installReference = try read("docs/reference/install.md", root: root)
+        let limitations = try read("docs/reference/limitations.md", root: root)
+        let sources = root.appendingPathComponent("Sources", isDirectory: true)
+        let enumerator = try XCTUnwrap(FileManager.default.enumerator(at: sources, includingPropertiesForKeys: nil))
+        var processCallSites: [String] = []
+
+        for case let fileURL as URL in enumerator where fileURL.pathExtension == "swift" {
+            let contents = try String(contentsOf: fileURL, encoding: .utf8)
+            if contents.range(of: #"\bProcess\s*\("#, options: .regularExpression) != nil {
+                processCallSites.append(fileURL.path.replacingOccurrences(of: root.path + "/", with: ""))
+            }
+        }
+
+        XCTAssertTrue(processReference.contains("Status: implemented for v0.0.2 Phase 02 issue #116."))
+        XCTAssertTrue(processReference.contains("`posix_spawn_file_actions_addfchdir`"))
+        XCTAssertTrue(processReference.contains("`waitid(..., WNOWAIT)`"))
+        XCTAssertTrue(processReference.contains("`--env KEY`"))
+        XCTAssertTrue(processReference.contains("Phase 09 issues #203 and #204"))
+        XCTAssertTrue(securityReference.contains("[Secure Process Execution](process-execution.md)"))
+        XCTAssertTrue(installReference.contains("[secure process execution boundary](process-execution.md)"))
+        XCTAssertTrue(limitations.contains("Phase 02 issue #116 is implemented"))
+        XCTAssertEqual(processCallSites, [])
+        XCTAssertFalse(
+            FileManager.default.fileExists(
+                atPath: root.appendingPathComponent(
+                    "Sources/HostwrightRuntime/FoundationRuntimeProcessRunner.swift"
+                ).path
+            )
+        )
+    }
+
     func testEvidenceContractSeparatesDeterministicAndRealProof() throws {
         let root = try packageRoot()
         let policy = try read("docs/reference/testing-evidence.md", root: root)

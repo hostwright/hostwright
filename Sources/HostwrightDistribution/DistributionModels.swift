@@ -26,6 +26,9 @@ public enum DistributionError: Error, Equatable, CustomStringConvertible, Sendab
     case checksumMismatch(String)
     case commandFailed(String, Int32)
     case commandTimedOut(String)
+    case commandCancelled(String)
+    case commandOutputLimitExceeded(String)
+    case commandProcessTreeViolation(String)
     case dirtySource
     case sourceCommitMismatch(expected: String, actual: String)
     case installOwnershipMismatch(String)
@@ -41,6 +44,9 @@ public enum DistributionError: Error, Equatable, CustomStringConvertible, Sendab
         case .checksumMismatch(let name): return "SHA-256 verification failed for \(name)."
         case .commandFailed(let command, let status): return "Distribution command failed with exit \(status): \(command)."
         case .commandTimedOut(let command): return "Distribution command timed out: \(command)."
+        case .commandCancelled(let command): return "Distribution command was cancelled: \(command)."
+        case .commandOutputLimitExceeded(let command): return "Distribution command exceeded its output limit: \(command)."
+        case .commandProcessTreeViolation(let command): return "Distribution command left an unexpected process tree: \(command)."
         case .dirtySource: return "Clean-source distribution build refused a dirty working tree."
         case .sourceCommitMismatch(let expected, let actual):
             return "Source commit mismatch: expected \(expected), observed \(actual)."

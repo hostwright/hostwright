@@ -41,6 +41,7 @@ public enum AppleContainerCommand {
         RuntimeCommandSpec(
             executablePath: executable.path,
             arguments: arguments(for: kind, desiredService: desiredService),
+            environment: inheritedSensitiveEnvironment(for: desiredService),
             sensitiveValues: desiredService.environment.filter(\.isSensitive).map(\.value),
             timeout: timeout,
             classification: .mutating,
@@ -93,7 +94,8 @@ public enum AppleContainerCommand {
                 arguments += ["--label", "\(key)=\(value)"]
             }
             for value in desiredService.environment.sorted(by: { $0.name < $1.name }) {
-                arguments += ["--env", "\(value.name)=\(value.value)"]
+                let argument = value.isSensitive ? value.name : "\(value.name)=\(value.value)"
+                arguments += ["--env", argument]
             }
             for port in desiredService.ports.sorted(by: stablePortOrdering) {
                 if let hostPort = port.hostPort {
@@ -207,5 +209,19 @@ public enum AppleContainerCommand {
 
     private static func clampedTail(_ tail: Int) -> Int {
         min(max(1, tail), 1_000)
+    }
+
+    private static func inheritedSensitiveEnvironment(
+        for desiredService: DesiredRuntimeService
+    ) -> [String: String] {
+        desiredService.environment
+            .filter(\.isSensitive)
+            .sorted { lhs, rhs in
+                if lhs.name == rhs.name { return lhs.value < rhs.value }
+                return lhs.name < rhs.name
+            }
+            .reduce(into: [:]) { result, value in
+                result[value.name] = value.value
+            }
     }
 }

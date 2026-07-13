@@ -4,6 +4,8 @@ Current product truth is the `0.0.2-dev` capability report plus the [v0.0.2 all-
 
 Permanent exclusions are limited to private Apple APIs, unsupported Intel/old-macOS emulation, unsafe writes without cluster quorum, silent telemetry, unauthenticated public exposure, and destructive garbage collection of unmanaged resources. Homebrew-core and direct guest accelerator constraints have implemented fallback tracks.
 
+Phase 02 issue #116 is implemented: production callers share bounded direct-argv process execution with root-owned PATH resolution, minimal environment, descriptor-pinned working directories, cancellation, I/O/time limits, and inherited session process-group cleanup. This is process lifecycle control, not native hostile-code isolation. A reviewed-local executable retains ambient same-user authority and can deliberately establish a new session; WASI/XPC isolation remains Phase 09 work under issues #203 and #204.
+
 The remainder of this file preserves the detailed pre-v0.0.2 capability inventory because tests, threat boundaries, and earlier evidence refer to its exact wording. It is historical implementation evidence, not the active release scope or schedule. Where it says “not implemented,” consult the v0.0.2 plan for the owning phase.
 
 ## Retained Pre-v0.0.2 Capability Inventory
@@ -51,7 +53,7 @@ Hostwright is not production ready.
 - RuntimeAdapter contract infrastructure, state scaffolds, reconciler scaffolds, health models, networking scaffolds, and observability scaffolds.
 - Test-only scripted runtime adapter, process runner, executable resolver, and in-memory secret store under `Tests/HostwrightTestSupport`.
 - `AppleContainerReadOnlyAdapter` for read-only observation attempts through `RuntimeAdapter`.
-- `FoundationRuntimeProcessRunner` guarded by read-only command classification, executable resolution, timeouts, and redaction.
+- `SecureRuntimeProcessRunner` guarded by command classification, root-owned named resolution, minimal environment, descriptor-pinned working directory, bounded I/O/time, cancellation, process-group cleanup, and redaction.
 - Fixture-defined Apple container observation parser for empty and running snapshots, including reviewed network attachment metadata in the versioned fixture schema.
 - Exact labeled Apple container 1.0.0 observation for the current project, including owned orphans, unrelated-project filtering, and hostname, IPv4/IPv6, gateway, MAC, network-name, and MTU metadata.
 - Collision-resistant versioned runtime identifiers, exact ownership labels, schema-v6 legacy identifier backfill, and exact-ID managed start/restart/cleanup gates.
@@ -118,7 +120,7 @@ Hostwright is not production ready.
 - Hidden global state writes.
 - Production durability or automatic corruption-recovery guarantees.
 - Remote policy service, team policy workflow, central policy distribution, silent policy bypass, policy-driven runtime mutation, or automatic policy remediation.
-- Generic plugin loading, extension discovery/installation/persistence/distribution, capability payloads or invocation, operating-system sandboxing, restriction of reviewed code's ambient user privileges, descendant-process containment guarantees, remote plugin registry, untrusted extension execution, runtime-mutation extensions, state-write extensions, networking-provider extensions, tunnel-provider extensions, secret-backend extensions, or accelerator extensions.
+- Generic plugin loading, extension discovery/installation/persistence/distribution, capability payloads or invocation, operating-system sandboxing, restriction of reviewed code's ambient user privileges, containment after deliberate native session escape, remote plugin registry, untrusted extension execution, runtime-mutation extensions, state-write extensions, networking-provider extensions, tunnel-provider extensions, secret-backend extensions, or accelerator extensions.
 - Cloud team service, central remote control, hosted audit log, user tracking, enterprise support workflow, remote policy distribution, macOS user/group/ACL management, MDM integration, or shared-secret management.
 - Online state backup, restore, or repair commands.
 - External telemetry, hosted diagnostics, automatic bundle upload, OSLog integration, or production support-bundle workflows.

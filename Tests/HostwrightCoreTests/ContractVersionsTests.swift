@@ -32,6 +32,14 @@ final class ContractVersionsTests: XCTestCase {
         XCTAssertTrue(states.contains(.experimental))
         XCTAssertTrue(states.contains(.unavailable))
         XCTAssertTrue(states.contains(.blocked))
+
+        guard let secureSubprocess = report.capabilities.first(where: {
+            $0.identifier == "foundation.secure-subprocess"
+        }) else {
+            return XCTFail("Secure subprocess capability is missing.")
+        }
+        XCTAssertEqual(secureSubprocess.state, .stable)
+        XCTAssertEqual(secureSubprocess.issue, 116)
     }
 
     func testVerificationConstitutionIncludesEveryV002EvidenceClass() {

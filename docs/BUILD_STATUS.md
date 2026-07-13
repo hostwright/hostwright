@@ -1,12 +1,25 @@
 # Build Status
 
-> **Current program:** Hostwright is `0.0.2-dev`; Phase 01 of the [v0.0.2 roadmap](roadmap/v0.0.2/IMPLEMENTATION_PLAN.md) is active. Manifest v2, Control API v2, Runtime Provider API v2, plugin ABI v1, state schema v7, UUID identity, provider binding, migration preview, capability truth, and executable governance are the current foundation. The phase-by-phase entries below are a retained pre-v0.0.2 engineering ledger, not the active release scope or schedule.
+> **Current program:** Hostwright is `0.0.2-dev`; Phase 01 of the [v0.0.2 roadmap](roadmap/v0.0.2/IMPLEMENTATION_PLAN.md) is merged and closed, and Phase 02 is active. Issue #116 implements the shared secure subprocess boundary. The phase-by-phase entries below are a retained pre-v0.0.2 engineering ledger, not the active release scope or schedule.
 
 ## Local Environment
 
 - macOS 26.5
 - Apple silicon (`arm64`)
 - Swift 6.3.3 through full Xcode developer tools
+
+## Verified On 2026-07-13 — v0.0.2 Phase 02 issue #116
+
+- `swift build` succeeds and `swift test list` discovers 419 XCTest cases.
+- `swift test` and the umbrella `scripts/test.sh` gate each execute all 419 tests with 0 failures.
+- `scripts/integration.sh`, `scripts/grep-orchard.sh .`, `scripts/lint.sh`, `scripts/check-docs.sh`, and the 183-issue roadmap-governance validator pass; documentation checks cover 266 links and every executable example quickstart.
+- The new real-process suite covers exact argv and environment, sensitive values outside argv, root-only PATH resolution, executable identity changes, unsafe permissions and traversal, descriptor-pinned working directories, low/high descriptor closure, bounded stdin/stdout/stderr, early input closure, hangs, output floods, pre-launch and in-flight cancellation, repeated cancellation races, rapid exits, ignored `SIGTERM`, spawned descendants, leader-first exits, and inherited process-group cleanup.
+- The complete 21-test secure-subprocess suite also passes under AddressSanitizer and ThreadSanitizer with zero sanitizer reports.
+- All production process callers now use `SecureSubprocessRunner`; production sources contain no `Foundation.Process` call site. Runtime callers preserve typed timeout, cancellation, output-limit, and process-tree errors and redact sensitive values before returning.
+- Resolved Apple container `secretEnv` values use the CLI's `--env KEY` inheritance form through an exact child environment; the secret value is not placed in argv or a temporary environment file.
+- A read-only live `hostwright status` run completed through Apple container 1.0.0. The normalized runtime inventory SHA-256 was `deb226ad125d10ec1e2f7c50e2cd4b4a890a51944e94bb63f2e8d422302ce73d` before and after, and the temporary manifest and SQLite state were removed exactly.
+- The focused security assessment has no confirmed remaining finding in issue #116's declared process-boundary scope. Root-only lookup, descriptor-pinned working directories, PID/group fencing, secret transport, timeout arithmetic, and partial pipe cleanup defects found during review were remediated before merge.
+- Public macOS kqueue child-tracking flags were verified as unsupported, and `libproc` child enumeration is explicitly private. The boundary therefore guarantees inherited session/process-group cleanup and does not claim hostile native-code sandboxing; Phase 09 issues #203 and #204 own WASI/XPC isolation.
 
 ## Verified On 2026-07-12
 
@@ -107,7 +120,7 @@
 - Phase 31 adds local advisory scheduler reports in `HostwrightReconciler` for declared memory requests, local policy blockers, workload class scoring, fairness warnings, overcommit blockers, accelerator blockers, and remote-placement blockers without changing `ReconciliationPlan`, CLI output, RuntimeAdapter, state, daemon behavior, or runtime mutation.
 - Phase 38 adds explicit maintainer authority, risky-area review triggers, issue and pull request flow, private security-reporting guidance, release governance gates, and support boundaries as documentation and template controls only.
 - No Apple container command was called by Phase 6 or Phase 7.
-- `FoundationRuntimeProcessRunner` has real subprocess coverage for output draining and timeout behavior; scripted process results remain test-only failure-injection evidence.
+- `SecureRuntimeProcessRunner` and the shared `SecureSubprocessRunner` have real compiled-process coverage for exact argv/environment, executable and working-directory identity, descriptor hygiene, bounded input/output/time, cancellation races, and inherited process-group cleanup; scripted process results remain test-only failure-injection evidence.
 - `AppleContainerReadOnlyAdapter` reports missing `container` as runtime unavailable and rejects mutation through the adapter contract.
 - `AppleContainerObservationParser` accepts the fixture-defined `hostwright.apple-container.observation.v1` schema, verified real empty and builder shapes, state-backed legacy rows, and exact labeled Apple container 1.0.0 rows with reviewed network metadata. It ignores unrelated labeled projects and fails closed on malformed current-project ownership or unsupported fields.
 - `AppleContainerImageListParser` accepts the verified real object-based image list shape with `configuration.name`.

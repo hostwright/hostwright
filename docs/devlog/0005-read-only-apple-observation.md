@@ -9,7 +9,7 @@ Begin Apple container integration with read-only observation infrastructure only
 - Added `AppleContainerReadOnlyAdapter` behind `RuntimeAdapter`.
 - Added `AppleContainerCommand` to isolate Apple container command shapes.
 - Added `RuntimeExecutableResolver` so runtime commands use resolved executables.
-- Added `FoundationRuntimeProcessRunner` for policy-approved read-only command specs.
+- Added the policy-approved read-only process runner originally named `FoundationRuntimeProcessRunner`; v0.0.2 issue #116 later replaced it with `SecureRuntimeProcessRunner` and the shared secure subprocess boundary.
 - Added `AppleContainerObservationParser` for the Phase 5 fixture-defined observation schema.
 - Added empty, running, and redaction fixtures.
 - Extended runtime smoke checks for missing executables, command-policy rejection, parser behavior, redaction, mutation-unavailable behavior, and runtime-boundary isolation.
@@ -27,6 +27,8 @@ Begin Apple container integration with read-only observation infrastructure only
 ## Design Notes
 
 The live process runner is not a general shell-out API. It accepts only typed `RuntimeCommandSpec` values that are classified as read-only and resolved by `RuntimeExecutableResolver`. Mutating, forbidden, unknown, and unresolved specs fail before execution.
+
+This entry records the Phase 5 implementation as it existed then. The current runner and guarantees are documented in [Secure Process Execution](../reference/process-execution.md).
 
 The parser accepts only the fixture-defined `hostwright.apple-container.observation.v1` schema. This is intentionally conservative: if actual local Apple container output differs, Hostwright reports a parse failure instead of inventing observed state.
 

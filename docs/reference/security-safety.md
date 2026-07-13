@@ -10,6 +10,8 @@ All Apple container runtime behavior must go through `RuntimeAdapter`.
 
 The CLI, reconciler, state store, health checks, networking, and observability modules must not shell out directly to Apple container for runtime behavior.
 
+Production subprocess execution uses one shared bounded implementation. It passes arguments directly without a shell, resolves named tools only through root-owned path chains, constructs a minimal environment instead of inheriting the parent, pins the working directory by file descriptor, closes unrelated descriptors, verifies executable identity before continuing a suspended child, bounds stdin/stdout/stderr and time, distinguishes cancellation from timeout, and cleans the inherited session process group before releasing its PID fence. See [Secure Process Execution](process-execution.md) for the executable contract, migration, recovery, and test matrix.
+
 ## Mutation Boundaries
 
 Supported mutation is intentionally narrow:
@@ -48,9 +50,9 @@ Extension execution is limited to the explicit `hostwright extension check` hand
 
 Built-in and reviewed-local non-mutating declarations can receive allow decisions only when they declare the required RuntimeAdapter, HostwrightState, local policy, redaction, audit, explicit-state-path, local-only/no-upload, confirmation, ownership, and no-runtime-mutation boundaries for the requested capability.
 
-Executable declarations additionally require explicit absolute paths, caller-owned regular non-symlink files, no group/world write access, an exact digest, and an approved kind/capability pair. The executable is copied from an open descriptor into a private mode-`0500` staging directory. The one-shot process receives a minimal environment and `/` working directory; timeout, stdout, and stderr are bounded; strict response bindings are verified; raw stderr is not surfaced; and staging cleanup must finish before success.
+Executable declarations additionally require explicit absolute paths, caller-owned regular non-symlink files, no group/world write access, an exact digest, and an approved kind/capability pair. The executable is copied from an open descriptor into a private mode-`0500` staging directory. The one-shot process receives a minimal environment and descriptor-pinned `/` working directory; stdin, timeout, stdout, and stderr are bounded; inherited descriptors are closed; task/process cancellation and inherited process-group cleanup are enforced; strict response bindings are verified; raw stderr is not surfaced; and staging cleanup must finish before success.
 
-Third-party, untrusted, unsupported-version, empty, missing-boundary, runtime-mutation, state-write, networking-provider, tunnel-provider, secret-resolution, and accelerator extension declarations fail closed. The reviewed-local process is not an operating-system sandbox and retains the invoking account's ambient file, process, and network privileges; Hostwright does not claim to prevent direct absolute-path tool execution or contain descendants. The digest must therefore correspond to code the operator actually reviewed. Future capability invocation, distribution, or additional authority requires a separate issue, threat model, tests, and maintainer approval.
+Third-party, untrusted, unsupported-version, empty, missing-boundary, runtime-mutation, state-write, networking-provider, tunnel-provider, secret-resolution, and accelerator extension declarations fail closed. The reviewed-local process is not an operating-system sandbox and retains the invoking account's ambient file, process, and network privileges. Hostwright terminates descendants that remain in its inherited session/process group, including children that ignore `SIGTERM`; it does not claim to contain native code that deliberately establishes a new session or uses ambient account authority directly. The digest must therefore correspond to code the operator actually reviewed. Phase 09 issues #203 and #204 own capability-limited WASI and signed XPC isolation.
 
 ## Governance Boundary
 
@@ -96,6 +98,8 @@ Cleanup does not delete images, volumes, networks, Apple builder resources, base
 Hostwright keeps execution environment values separate from display and persistence values. Runtime command construction receives the manifest value, while command output, logs, state payloads, events, plan output, and failure messages use redacted values.
 
 Plaintext credential-like environment keys in `env` are rejected. Use `secretEnv` with `keychain://<service>/<account>` references for local secret values. The reference is not a secret value, but Hostwright still redacts keychain reference labels from state, diagnostics, plans, and errors because labels can reveal local account context.
+
+After an explicitly confirmed create resolves a `secretEnv` reference, Hostwright transports the value to the Apple CLI only through its bounded child environment and passes `--env KEY` so the CLI inherits it. The resolved value is not placed in argv or an environment file. Runtime result specs, output, errors, state, events, and diagnostics apply exact-value redaction before leaving the execution boundary.
 
 Hostwright does not use the live macOS Keychain by default in this phase. The default CLI secret store fails closed before mutation, and unit-contract tests inject a test-only in-memory secret store. The opt-in read-only `MacOSKeychainSecretStore` uses an interaction-disabled authentication context, excludes synchronizable items, and is covered by live add/read/exact-delete/post-delete tests. Production Hostwright code does not create, update, or delete Keychain items.
 

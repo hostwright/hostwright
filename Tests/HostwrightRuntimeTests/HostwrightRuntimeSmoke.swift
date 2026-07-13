@@ -370,60 +370,121 @@ final class HostwrightRuntimeTests: XCTestCase {
 
     }
 
-    func testFoundationRuntimeProcessRunnerDrainsLargeStdout() async throws {
-        let runner = FoundationRuntimeProcessRunner()
-        let result = try await runner.run(shellSpec("/usr/bin/yes x | /usr/bin/head -c 131072"))
+    func testSecureRuntimeProcessRunnerDrainsLargeStdout() async throws {
+        let runner = SecureRuntimeProcessRunner()
+        let result = try await runner.run(processSpec(
+            executablePath: "/usr/bin/jot",
+            arguments: ["-b", "x", "70000"]
+        ))
 
         XCTAssertEqual(result.exitStatus, 0)
         XCTAssertGreaterThan(result.standardOutput.utf8.count, 65_536)
     }
 
-    func testFoundationRuntimeProcessRunnerDrainsLargeStderr() async throws {
-        let runner = FoundationRuntimeProcessRunner()
-        let result = try await runner.run(shellSpec("/usr/bin/yes e | /usr/bin/head -c 131072 >&2"))
-
-        XCTAssertEqual(result.exitStatus, 0)
-        XCTAssertGreaterThan(result.standardError.utf8.count, 65_536)
-    }
-
-    func testFoundationRuntimeProcessRunnerObservesRepeatedRapidProcessTermination() async throws {
-        let runner = FoundationRuntimeProcessRunner()
-        for sequence in 0..<25 {
-            let result = try await runner.run(shellSpec("printf '\(sequence)'"))
-            XCTAssertEqual(result.exitStatus, 0)
-            XCTAssertEqual(result.standardOutput, String(sequence))
-        }
-    }
-
-    func testFoundationRuntimeProcessRunnerBoundsInheritedOutputPipeDrain() async {
-        let runner = FoundationRuntimeProcessRunner()
-        let started = Date()
+    func testSecureRuntimeProcessRunnerCapturesFailedCommandStderr() async {
+        let runner = SecureRuntimeProcessRunner()
         do {
-            _ = try await runner.run(shellSpec("sleep 5 & printf done"))
-            XCTFail("Expected inherited output pipe refusal.")
+            _ = try await runner.run(processSpec(
+                executablePath: "/usr/bin/swiftc",
+                arguments: ["--hostwright-invalid-option"]
+            ))
+            XCTFail("Expected command failure.")
         } catch let error as RuntimeAdapterError {
-            guard case .outputParseFailed(let message) = error else {
-                return XCTFail("Expected outputParseFailed, got \(error).")
+            guard case .commandFailed(let status, _, let standardError) = error else {
+                return XCTFail("Expected commandFailed, got \(error).")
             }
-            XCTAssertTrue(message.contains("output pipes did not close"))
-            XCTAssertLessThan(Date().timeIntervalSince(started), 4.5)
+            XCTAssertNotEqual(status, 0)
+            XCTAssertFalse(standardError.isEmpty)
         } catch {
             XCTFail("Unexpected error: \(error).")
         }
     }
 
-    func testFoundationRuntimeProcessRunnerTimeoutRedactsPartialOutput() async {
-        let runner = FoundationRuntimeProcessRunner()
+    func testSecureRuntimeProcessRunnerObservesRepeatedRapidProcessTermination() async throws {
+        let runner = SecureRuntimeProcessRunner()
+        for sequence in 0..<25 {
+            let result = try await runner.run(processSpec(
+                executablePath: "/usr/bin/printf",
+                arguments: ["%s", String(sequence)]
+            ))
+            XCTAssertEqual(result.exitStatus, 0)
+            XCTAssertEqual(result.standardOutput, String(sequence))
+        }
+    }
+
+    func testSecureRuntimeProcessRunnerRejectsShellExecutables() async {
+        let runner = SecureRuntimeProcessRunner()
+        do {
+            _ = try await runner.run(processSpec(
+                executablePath: "/bin/sh",
+                arguments: ["-c", "exit 0"]
+            ))
+            XCTFail("Expected secure executable rejection.")
+        } catch let error as RuntimeAdapterError {
+            guard case .permissionDenied(let message) = error else {
+                return XCTFail("Expected permissionDenied, got \(error).")
+            }
+            XCTAssertTrue(message.contains("secure identity"))
+        } catch {
+            XCTFail("Unexpected error: \(error).")
+        }
+    }
+
+    func testSecureRuntimeProcessRunnerCarriesSensitiveValuesOutsideArgvAndRedactsOutput() async throws {
+        let opaqueSecret = "opaque-runtime-environment-value"
+        let spec = RuntimeCommandSpec(
+            executablePath: "/usr/bin/printenv",
+            arguments: ["SESSION"],
+            environment: ["SESSION": opaqueSecret],
+            sensitiveValues: [opaqueSecret],
+            classification: .readOnly,
+            executableResolution: .resolvedByRuntimeExecutableResolver,
+            purpose: "Verify bounded sensitive environment transport."
+        )
+
+        XCTAssertFalse(spec.arguments.joined(separator: " ").contains(opaqueSecret))
+        let result = try await SecureRuntimeProcessRunner().run(spec)
+
+        XCTAssertEqual(result.exitStatus, 0)
+        XCTAssertFalse(result.standardOutput.contains(opaqueSecret))
+        XCTAssertTrue(result.standardOutput.contains("[REDACTED]"))
+        XCTAssertFalse(result.spec.environment.values.contains(opaqueSecret))
+    }
+
+    func testSecureRuntimeProcessRunnerReportsTimeoutAndCancellationSeparately() async {
+        let runner = SecureRuntimeProcessRunner()
 
         do {
-            _ = try await runner.run(shellSpec("printf 'token=fake-secret\\n'; sleep 2", timeout: 1))
+            _ = try await runner.run(processSpec(
+                executablePath: "/bin/sleep",
+                arguments: ["30"],
+                timeout: 1
+            ))
             XCTFail("Expected timeout.")
         } catch let error as RuntimeAdapterError {
             guard case .commandTimedOut(_, let partialOutput, _) = error else {
                 return XCTFail("Expected commandTimedOut, got \(error).")
             }
-            XCTAssertTrue(partialOutput.contains("[REDACTED]"))
-            XCTAssertFalse(partialOutput.contains("fake-secret"))
+            XCTAssertTrue(partialOutput.isEmpty)
+        } catch {
+            XCTFail("Unexpected error: \(error).")
+        }
+
+        let cancellationSpec = processSpec(
+            executablePath: "/bin/sleep",
+            arguments: ["30"],
+            timeout: 10
+        )
+        let task = Task { try await runner.run(cancellationSpec) }
+        try? await Task.sleep(for: .milliseconds(100))
+        task.cancel()
+        do {
+            _ = try await task.value
+            XCTFail("Expected cancellation.")
+        } catch let error as RuntimeAdapterError {
+            guard case .commandCancelled = error else {
+                return XCTFail("Expected commandCancelled, got \(error).")
+            }
         } catch {
             XCTFail("Unexpected error: \(error).")
         }
@@ -665,7 +726,7 @@ final class HostwrightRuntimeTests: XCTestCase {
         }
     }
 
-    func testAppleContainerApplyAdapterUsesOriginalEnvironmentValuesInCreateSpec() async throws {
+    func testAppleContainerApplyAdapterKeepsSensitiveEnvironmentValuesOutOfArgv() async throws {
         let imageListFixture = try fixture("apple-container-image-list-real-json.txt")
         let opaqueSecret = "opaque-session-value"
         let service = DesiredRuntimeService(
@@ -690,9 +751,12 @@ final class HostwrightRuntimeTests: XCTestCase {
             confirmation: mutationConfirmation()
         )
 
-        let createArguments = try XCTUnwrap(runner.calls.first { $0.arguments.first == "create" }?.arguments)
-        XCTAssertTrue(createArguments.contains("SESSION=\(opaqueSecret)"))
-        XCTAssertTrue(createArguments.contains("127.0.0.1:18080:80"))
+        let createSpec = try XCTUnwrap(runner.calls.first { $0.arguments.first == "create" })
+        XCTAssertTrue(createSpec.arguments.contains("SESSION"))
+        XCTAssertFalse(createSpec.arguments.joined(separator: " ").contains(opaqueSecret))
+        XCTAssertEqual(createSpec.environment, ["SESSION": opaqueSecret])
+        XCTAssertFalse(createSpec.redacted().environment.values.contains(opaqueSecret))
+        XCTAssertTrue(createSpec.arguments.contains("127.0.0.1:18080:80"))
         XCTAssertFalse(event.message.contains(opaqueSecret))
         XCTAssertTrue(event.message.contains("[REDACTED]"))
     }
@@ -1364,7 +1428,7 @@ final class HostwrightRuntimeTests: XCTestCase {
             let text = try String(contentsOfFile: file, encoding: .utf8)
             XCTAssertFalse(text.contains("AppleContainerCommand"), file)
             XCTAssertFalse(text.contains("AppleContainerReadOnlyAdapter"), file)
-            XCTAssertFalse(text.contains("FoundationRuntimeProcessRunner"), file)
+            XCTAssertFalse(text.contains("SecureRuntimeProcessRunner"), file)
         }
     }
 
@@ -1472,14 +1536,18 @@ final class HostwrightRuntimeTests: XCTestCase {
         return try String(contentsOf: url, encoding: .utf8)
     }
 
-    private func shellSpec(_ script: String, timeout: Int = 5) -> RuntimeCommandSpec {
+    private func processSpec(
+        executablePath: String,
+        arguments: [String],
+        timeout: Int = 5
+    ) -> RuntimeCommandSpec {
         RuntimeCommandSpec(
-            executablePath: "/bin/sh",
-            arguments: ["-c", script],
+            executablePath: executablePath,
+            arguments: arguments,
             timeout: RuntimeCommandTimeout(seconds: timeout),
             classification: .readOnly,
             executableResolution: .resolvedByRuntimeExecutableResolver,
-            purpose: "shell fixture"
+            purpose: "secure process integration"
         )
     }
 

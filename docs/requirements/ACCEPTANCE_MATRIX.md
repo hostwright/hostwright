@@ -1,5 +1,7 @@
 # Acceptance Matrix
 
+> **Historical acceptance catalog:** these gates preserve earlier evidence. The active closure constitution and phase ownership are in the [v0.0.2 implementation plan](../roadmap/v0.0.2/IMPLEMENTATION_PLAN.md), evidence schema, and GitHub issue manifest. A former docs/research gate does not satisfy a v0.0.2 implementation issue.
+
 This matrix defines verification gates for the near-term requirements that control future implementation. It also records future gates that must exist before runtime mutation or public release.
 
 Verification types:

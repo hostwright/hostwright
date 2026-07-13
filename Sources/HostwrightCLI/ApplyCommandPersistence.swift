@@ -25,7 +25,8 @@ extension ApplyCommandRunner {
             manifestHash: stableHash(manifestText),
             desiredGeneration: 1,
             manifest: manifest,
-            timestamp: timestamp
+            timestamp: timestamp,
+            mutationProvider: runtimeAdapter
         )
         try store.observedStates.saveSnapshot(
             snapshotID: hostwrightUniqueID(prefix: "snapshot-apply"),
@@ -109,7 +110,8 @@ extension ApplyCommandRunner {
         projectID: String,
         timestamp: String,
         runtimeAdapter: String,
-        teamBinding: TeamWorkflowBinding?
+        teamBinding: TeamWorkflowBinding?,
+        mutationContext: RuntimeMutationContext
     ) throws {
         try store.operations.record(
             OperationRecord(
@@ -164,7 +166,13 @@ extension ApplyCommandRunner {
                     metadataJSONRedacted: jsonPayload(
                         ["planHash": planHash].merging(hostwrightTeamBindingPayload(teamBinding)) { current, _ in current }
                     ),
-                    identityVersion: RuntimeManagedResourceIdentity.currentVersion
+                    identityVersion: RuntimeManagedResourceIdentity.currentVersion,
+                    resourceUUID: mutationContext.resourceUUID,
+                    resourceGeneration: mutationContext.resourceGeneration,
+                    projectResourceUUID: mutationContext.projectResourceUUID,
+                    projectGeneration: mutationContext.projectGeneration,
+                    providerGeneration: mutationContext.providerGeneration,
+                    fencingToken: mutationContext.fencingToken
                 )
             )
         }

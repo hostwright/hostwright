@@ -7,8 +7,8 @@ final class HostwrightManifestTests: XCTestCase {
     func testValidManifestParsesAndValidates() throws {
         let manifest = try ManifestValidator.validated(Self.validManifest)
 
-        XCTAssertEqual(manifest.version, 1)
-        XCTAssertEqual(manifest.effectiveVersion, 1)
+        XCTAssertEqual(manifest.version, 2)
+        XCTAssertEqual(manifest.effectiveVersion, 2)
         XCTAssertNil(manifest.imagePolicy)
         XCTAssertEqual(manifest.effectiveImagePolicy, .allowTags)
         XCTAssertEqual(manifest.project, "api-local")
@@ -22,7 +22,7 @@ final class HostwrightManifestTests: XCTestCase {
     func testSecretEnvironmentReferencesParseAndValidate() throws {
         let manifest = try ManifestValidator.validated(
             """
-            version: 1
+            version: 2
             project: api-local
             services:
               api:
@@ -43,7 +43,7 @@ final class HostwrightManifestTests: XCTestCase {
     func testQuotedScalarsAndInlineArraysPreserveCommasAndEscapes() throws {
         let manifest = try ManifestValidator.validated(
             #"""
-            version: 1
+            version: 2
             project: api-local
             services:
               api:
@@ -65,43 +65,43 @@ final class HostwrightManifestTests: XCTestCase {
         XCTAssertEqual(service.health?.command, ["curl", "http://localhost:8080/a,b"])
     }
 
-    func testVersionlessManifestRemainsLegacyCurrentVersion() throws {
-        let manifest = try ManifestValidator.validated(
-            """
-            project: api-local
-            services:
-              api:
-                image: ghcr.io/example/api:latest
-            """
-        )
+    func testVersionlessManifestIsRecognizedAsLegacyButRequiresMigration() throws {
+        let text = """
+        project: api-local
+        services:
+          api:
+            image: ghcr.io/example/api:latest
+        """
+        let parsed = try ManifestParser.parse(text)
 
-        XCTAssertNil(manifest.version)
-        XCTAssertEqual(manifest.effectiveVersion, HostwrightManifest.currentVersion)
+        XCTAssertNil(parsed.version)
+        XCTAssertEqual(parsed.effectiveVersion, HostwrightManifest.legacyVersion)
+        assertManifestFailure(text, code: "HW-MANIFEST-003", contains: "must declare version: 2")
     }
 
     func testExplicitOlderAndNewerManifestVersionsFailClosed() {
         assertManifestFailure(
             """
-            version: 0
+            version: 1
             project: api-local
             services:
               api:
                 image: ghcr.io/example/api:latest
             """,
             code: "HW-MANIFEST-003",
-            contains: "older than supported version 1"
+            contains: "older than supported version 2"
         )
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             services:
               api:
                 image: ghcr.io/example/api:latest
             """,
             code: "HW-MANIFEST-003",
-            contains: "newer than supported version 1"
+            contains: "newer than supported version 2"
         )
     }
 
@@ -109,7 +109,7 @@ final class HostwrightManifestTests: XCTestCase {
         let digest = String(repeating: "a", count: 64)
         let manifest = try ManifestValidator.validated(
             """
-            version: 1
+            version: 2
             project: api-local
             imagePolicy: require-digest
             services:
@@ -125,7 +125,7 @@ final class HostwrightManifestTests: XCTestCase {
         XCTAssertNoThrow(
             try ManifestValidator.validated(
                 """
-                version: 1
+                version: 2
                 project: api-local
                 imagePolicy: allow-tags
                 services:
@@ -137,7 +137,7 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 1
+            version: 2
             project: api-local
             imagePolicy: require-digest
             services:
@@ -151,7 +151,7 @@ final class HostwrightManifestTests: XCTestCase {
     func testImageDigestSyntaxFailsClosedWithoutRegistryLookup() {
         assertManifestFailure(
             """
-            version: 1
+            version: 2
             project: api-local
             services:
               api:
@@ -162,7 +162,7 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 1
+            version: 2
             project: api-local
             services:
               api:
@@ -173,7 +173,7 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 1
+            version: 2
             project: api-local
             services:
               api:
@@ -184,7 +184,7 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 1
+            version: 2
             project: api-local
             imagePolicy: content-trust
             services:
@@ -196,7 +196,7 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 1
+            version: 2
             project: api-local
             imagePolicy: require-digest
             imagePolicy: allow-tags
@@ -209,7 +209,7 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 1
+            version: 2
             project: api-local
             imagePolicy: content-trust
             imagePolicy: require-digest
@@ -249,6 +249,7 @@ final class HostwrightManifestTests: XCTestCase {
     func testMissingImageFailsValidation() {
         assertManifestFailure(
             """
+            version: 2
             project: api-local
             services:
               api:
@@ -262,6 +263,7 @@ final class HostwrightManifestTests: XCTestCase {
     func testMalformedPortFailsValidation() {
         assertManifestFailure(
             """
+            version: 2
             project: api-local
             services:
               api:
@@ -276,6 +278,7 @@ final class HostwrightManifestTests: XCTestCase {
     func testFlagLikeImageAndServiceCommandTokensFailValidation() {
         assertManifestFailure(
             """
+            version: 2
             project: api-local
             services:
               api:
@@ -286,6 +289,7 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
+            version: 2
             project: api-local
             services:
               api:
@@ -296,6 +300,7 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
+            version: 2
             project: api-local
             services:
               api:
@@ -310,7 +315,7 @@ final class HostwrightManifestTests: XCTestCase {
         XCTAssertNoThrow(
             try ManifestValidator.validated(
                 """
-                version: 1
+                version: 2
                 project: api-local
                 services:
                   api:
@@ -326,7 +331,7 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 1
+            version: 2
             project: api-local
             services:
               api:
@@ -339,7 +344,7 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 1
+            version: 2
             project: api-local
             services:
               api:
@@ -352,7 +357,7 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 1
+            version: 2
             project: api-local
             services:
               api:
@@ -365,7 +370,7 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 1
+            version: 2
             project: api-local
             services:
               api:
@@ -378,7 +383,7 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 1
+            version: 2
             project: api-local
             services:
               api:
@@ -393,7 +398,7 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 1
+            version: 2
             project: api-local
             services:
               api:
@@ -407,7 +412,7 @@ final class HostwrightManifestTests: XCTestCase {
         for rootEquivalent in ["/:/host:ro", "//:/host:ro", "/./:/host:ro", "/data/..:/host:ro"] {
             assertManifestFailure(
                 """
-                version: 1
+                version: 2
                 project: api-local
                 services:
                   api:
@@ -421,7 +426,7 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 1
+            version: 2
             project: api-local
             services:
               api:
@@ -453,6 +458,7 @@ final class HostwrightManifestTests: XCTestCase {
         assertManifestFailure(
             """
             apiVersion: hostwright.dev/v1
+            version: 2
             project: api-local
             services:
               api:
@@ -464,7 +470,7 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 1
+            version: 2
             project: api-local
             services:
               api:
@@ -477,7 +483,7 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 1
+            version: 2
             project: api-local
             services:
               api:
@@ -492,7 +498,7 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 1
+            version: 2
             project: api-local
             services:
               api:
@@ -510,7 +516,7 @@ final class HostwrightManifestTests: XCTestCase {
         for field in ["dns", "dns_search", "domainname", "hostname", "network_mode", "networks", "aliases", "expose", "extra_hosts"] {
             assertManifestFailure(
                 """
-                version: 1
+                version: 2
                 project: api-local
                 services:
                   api:
@@ -537,7 +543,7 @@ final class HostwrightManifestTests: XCTestCase {
         for examplePath in examplePaths {
             let manifestText = try read(examplePath, root: root)
             let manifest = try ManifestValidator.validated(manifestText)
-            XCTAssertEqual(manifest.version, 1, examplePath)
+            XCTAssertEqual(manifest.version, 2, examplePath)
             XCTAssertFalse(manifestText.contains("apiVersion"), examplePath)
             XCTAssertFalse(manifestText.contains("depends_on"), examplePath)
             XCTAssertFalse(manifestText.contains("deploy:"), examplePath)
@@ -569,7 +575,7 @@ final class HostwrightManifestTests: XCTestCase {
         let properties = try XCTUnwrap(schemaJSON["properties"] as? [String: Any])
         XCTAssertEqual(Set(properties.keys), ["version", "project", "imagePolicy", "services"])
         let required = try XCTUnwrap(schemaJSON["required"] as? [String])
-        XCTAssertEqual(required, ["project", "services"])
+        XCTAssertEqual(required, ["version", "project", "services"])
         let version = try XCTUnwrap(properties["version"] as? [String: Any])
         XCTAssertEqual(version["const"] as? Int, HostwrightManifest.currentVersion)
         let project = try XCTUnwrap(properties["project"] as? [String: Any])
@@ -648,7 +654,7 @@ final class HostwrightManifestTests: XCTestCase {
     }
 
     private static let validManifest = """
-    version: 1
+    version: 2
     project: api-local
 
     services:

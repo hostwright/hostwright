@@ -1,5 +1,7 @@
 # Networking Boundary
 
+> **Historical current-support boundary:** Phase 07 now owns complete networking, DNS, ingress, certificate identity, policy, and tunnels. The restrictions below still describe `0.0.2-dev` behavior until that phase passes.
+
 Networking is a high-risk surface. Hostwright must prove local reliability before exposing services beyond the local host.
 
 ## Current State

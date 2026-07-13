@@ -64,7 +64,7 @@ cleanup() {
 trap cleanup EXIT
 
 version="$("$hostwright" --version)"
-[[ "$version" == "0.1.0-alpha.1" ]]
+[[ "$version" == "0.0.2-dev" ]]
 
 (
   cd "$workdir"
@@ -96,17 +96,17 @@ grep -q '"planHash"' "$plan_json"
 grep -q '"observed":false' "$status_json"
 grep -q '"checks"' "$doctor_json"
 
-printf '%s\n' '{"apiVersion":1,"requestID":"integration-plan-1","operation":"plan"}' >"$control_request"
+printf '%s\n' '{"apiVersion":2,"requestID":"integration-plan-1","operation":"plan"}' >"$control_request"
 "$hostwright_control" --manifest "$manifest" <"$control_request" >"$control_response" 2>"$missing_stderr"
 [[ ! -s "$missing_stderr" ]]
 [[ "$(wc -l <"$control_response" | tr -d ' ')" -eq 1 ]]
 plutil -convert json -o /dev/null "$control_response"
-grep -q '"apiVersion":1' "$control_response"
+grep -q '"apiVersion":2' "$control_response"
 grep -q '"requestID":"integration-plan-1"' "$control_response"
 grep -q '"success":true' "$control_response"
 grep -q '"kind":"plan"' "$control_response"
 
-printf '%s\n' '{"apiVersion":1,"requestID":"integration-apply-1","operation":"apply"}' >"$control_rejected_request"
+printf '%s\n' '{"apiVersion":2,"requestID":"integration-apply-1","operation":"apply"}' >"$control_rejected_request"
 set +e
 "$hostwright_control" --manifest "$manifest" <"$control_rejected_request" >"$control_rejected_response" 2>"$missing_stderr"
 control_rejected_exit=$?

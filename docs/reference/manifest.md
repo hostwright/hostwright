@@ -5,7 +5,7 @@ The manifest filename is `hostwright.yaml`.
 ## Current Shape
 
 ```yaml
-version: 1
+version: 2
 project: api-local
 imagePolicy: allow-tags
 
@@ -25,13 +25,20 @@ services:
       policy: on-failure
 ```
 
-Do not use Kubernetes-style `apiVersion`, `kind`, or `metadata` in canonical Hostwright manifests.
+Canonical Hostwright manifests use this versioned Hostwright contract. Phase 12 translates supported Kubernetes resources into Hostwright desired state; it does not overload the canonical file with Kubernetes `apiVersion`, `kind`, or `metadata` fields.
 
 ## Version Policy
 
-`version: 1` is the current manifest version. New examples and generated starter manifests include it.
+`version: 2` is the current manifest contract. New examples and generated starter manifests include it explicitly.
 
-Versionless manifests remain accepted during this alpha and are treated as legacy version 1 input. Explicit versions older than 1 or newer than 1 fail closed. Hostwright does not perform automatic manifest upgrade, downgrade, or compatibility conversion.
+Versionless manifests and explicit `version: 1` manifests are legacy input. Execution fails closed with migration guidance. Preview the deterministic read-only conversion without modifying the source:
+
+```bash
+hostwright migrate preview hostwright.yaml
+hostwright migrate preview hostwright.yaml --json
+```
+
+The Phase 01 preview inserts or replaces only the locked version contract, reports whether input was legacy, and is idempotent for v2. It rejects future versions. Phase 04 owns maintained YAML, the complete workload schema, and semantic migrations for fields whose meaning changes. Hostwright does not silently downgrade or mutate a manifest during validate, plan, or apply.
 
 ## Parser Limitation
 
@@ -39,7 +46,7 @@ Hostwright uses a restricted manifest subset parser, not a general YAML parser.
 
 Supported forms are intentionally narrow:
 
-- optional top-level `version: 1`;
+- required top-level `version: 2` for execution;
 - top-level `project:`;
 - optional top-level `imagePolicy: allow-tags` or `imagePolicy: require-digest`;
 - top-level `services:`;
@@ -64,7 +71,7 @@ Imported stack files do not become Hostwright manifests automatically. The comma
 
 Validation currently checks:
 
-- if `version` is present, it is exactly `1`;
+- `version` is present and exactly `2`;
 - project name is present and DNS-like;
 - service names are DNS-like;
 - each service has an image;
@@ -87,10 +94,10 @@ Validation does not contact registries or Apple container.
 
 After validation, Hostwright maps accepted manifests into runtime desired state and evaluates local policy decisions for planner safety. Current planner policy decisions explain port conflicts, broad bind blockers, privileged-port warnings, unsafe mounts, and secret redaction. Separate local policy APIs can also explain image-policy failures, unsupported untrusted-manifest fields, secure-exposure blockers, and accelerator blockers without adding runtime side effects. Policy evaluation is local and non-mutating; it does not expand the manifest into Compose parity.
 
-`imagePolicy` is a local manifest validation policy only. The default is `allow-tags`, which accepts tag-based alpha manifests such as `ghcr.io/example/api:latest`. `require-digest` rejects mutable tag-only image references and accepts digest-pinned references:
+`imagePolicy` is a local manifest validation policy only. The default is `allow-tags`, which currently accepts tag-based manifests such as `ghcr.io/example/api:latest`. `require-digest` rejects mutable tag-only image references and accepts digest-pinned references:
 
 ```yaml
-version: 1
+version: 2
 project: api-local
 imagePolicy: require-digest
 
@@ -101,7 +108,7 @@ services:
 
 Digest pinning gives Hostwright a stable content identifier string to require before planning. Hostwright does not verify that a digest exists in a registry, does not resolve tags to digests, does not pull images, does not verify signatures or SBOMs, and does not scan vulnerabilities.
 
-Manifest port syntax does not expose a bind-address field in this alpha. Hostwright-created runtime port publishes default to `127.0.0.1` when mapped to Apple container. DNS, service discovery, network aliases, and reverse proxy settings are not manifest features in this release.
+The currently executable Manifest v2 subset does not expose a bind-address field. Hostwright-created runtime port publishes default to `127.0.0.1` when mapped to Apple container. DNS, service discovery, aliases, ingress, and policy are owned by Phase 07 and remain rejected until their accepted fields are executable and observable.
 
 Service-level command tokens beginning with `-` are blocked in the current conservative apply scope because Apple container parses image and command positions after its own flags. Health-check command flags are allowed only after the health command name and arguments are accepted by the bounded health-check policy. Health checks are not shell commands and are not container `exec`; Hostwright does not execute host `curl` or `wget` binaries. Current bounded probes parse `curl`, `wget`, `true`, and `false` shaped commands. `curl` is limited to no-output status flags plus one loopback HTTP(S) URL. `wget` is limited to quiet spider mode plus one loopback HTTP(S) URL. Both URL-shaped probes run through Hostwright's in-process URL fetcher. `true` and `false` accept no arguments and are evaluated directly.
 

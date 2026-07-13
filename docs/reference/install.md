@@ -1,77 +1,86 @@
-# Install And Build
+# Install and Upgrade
 
-Hostwright `v0.1.0-alpha.1` is a source-only alpha. It is not production ready.
+Status: source development workflow only for `0.0.2-dev`. The `v0.0.2` release has not passed its distribution gate.
 
-## Requirements
+## Package Manager Truth
 
-- Apple silicon Mac.
-- macOS 26 or newer.
-- Full Xcode developer tools or a Swift toolchain capable of SwiftPM builds.
-- Apple container CLI for runtime observation and mutation behavior.
-- Git.
+`brew install hostwright` does not exist today. Do not publish or repeat that command as an available installation path.
 
-## Build From Source
+Phase 02 owns:
+
+- a Hostwright-maintained Homebrew tap and formula;
+- signed and notarized Apple-silicon archives;
+- a signed/notarized `.pkg`;
+- secure Application Support paths;
+- install, upgrade, rollback, repair, and uninstall;
+- checksums, SBOM, provenance, and local verification.
+
+The intended guaranteed package-manager command, after Phase 02 evidence passes, is:
+
+```bash
+brew install hostwright/tap/hostwright
+```
+
+That command is a roadmap target, not available current behavior. Phase 15 submits an unqualified Homebrew-core formula. Literal `brew install hostwright` remains contingent on Homebrew acceptance; the vendor tap is the fallback Hostwright controls.
+
+## Current Source Build
+
+Requirements:
+
+- Apple silicon;
+- macOS 26 or later;
+- Xcode command-line tools with a Swift 6.2-compatible toolchain;
+- network access only to clone dependencies/source;
+- Apple `container` installed only for live runtime commands.
 
 ```bash
 git clone https://github.com/hostwright/hostwright.git
 cd hostwright
-git checkout v0.1.0-alpha.1
 swift build
 swift test
-```
-
-Run the CLI from SwiftPM:
-
-```bash
+scripts/integration.sh
 swift run hostwright --version
-swift run hostwright doctor
-swift run hostwright validate
-swift run hostwright plan
-swift run hostwright plan --output json
+swift run hostwright capabilities --json
 ```
 
-Runtime-backed commands require Apple container and explicit state paths:
+Expected development version:
+
+```text
+0.0.2-dev
+```
+
+Do not check out or tag `v0.0.2` until the Phase 15 GA gate has passed. Historical `v0.1.0-alpha.1` documentation is retained as an immutable project record and is not the current installation target.
+
+## Development Executables
+
+SwiftPM builds:
+
+- `hostwright`
+- `hostwright-control`
+- `hostwrightd`
+- `hostwright-dist`
+
+Locate them with:
 
 ```bash
-swift run hostwright status --state-db /tmp/hostwright.sqlite
-swift run hostwright status --state-db /tmp/hostwright.sqlite --output json
-swift run hostwright logs api --state-db /tmp/hostwright.sqlite
-swift run hostwright events --state-db /tmp/hostwright.sqlite
-swift run hostwright events --state-db /tmp/hostwright.sqlite --output json
-swift run hostwright diagnostics --state-db /tmp/hostwright.sqlite --bundle /tmp/hostwright-diagnostics.json
-swift run hostwright cleanup --state-db /tmp/hostwright.sqlite --dry-run
-swift run hostwrightd --foreground --config hostwright.yaml --state-db /tmp/hostwright.sqlite --max-iterations 1
+swift build --show-bin-path
 ```
 
-State databases are never chosen implicitly. `status`, `logs --state-db`, `apply`, `cleanup`, and `hostwrightd --foreground` can run explicit migrations before writing state. `events` and `diagnostics` read an already-migrated state database and fail rather than creating or migrating one as a side effect.
+`hostwright-dist` currently provides unsigned developer evidence only. Its output is not a trusted release artifact and does not satisfy signing, notarization, Gatekeeper, installer, package-manager, or clean-upgrade qualification.
 
-`hostwrightd` requires explicit `--config` and `--state-db` paths. It observes, plans, and records daemon loop events only; it does not install a launch agent or perform unattended runtime mutation.
+## State and Uninstall Reality
 
-For backup or restore, stop Hostwright commands using the database and copy the explicit SQLite file plus sidecar files such as `state.sqlite-wal` and `state.sqlite-shm` if they exist. `hostwright diagnostics` can write a local redacted JSON bundle for review, but Hostwright does not provide online backup, restore, repair, hosted diagnostics, or automatic upload commands in this phase.
+Current commands require explicit state paths. There is no production default under `~/Library/Application Support`, no installed LaunchAgent, and no package receipt to remove. A source checkout can be removed only after the operator has separately stopped workloads and preserved or cleaned explicitly managed runtime/state resources.
 
-JSON output is also available for safe diagnostics:
+Do not treat deletion of the checkout as a Hostwright uninstall. Phase 02 implements a real ownership-aware uninstall that:
 
-```bash
-swift run hostwright doctor --output json
-```
+1. stops installed Hostwright processes;
+2. preserves or explicitly removes managed data according to the operator choice;
+3. removes only files recorded in the signed install manifest/receipt;
+4. leaves unmanaged runtime and filesystem resources untouched;
+5. verifies PATH, launch service, state, and artifact cleanup;
+6. supports rollback to the recorded previous compatible build.
 
-## Artifact Policy
+## Gate Before Package Claims
 
-This alpha provides source only.
-
-Hostwright does not provide:
-
-- binary downloads;
-- installer packages;
-- Homebrew formula;
-- signed binary artifacts;
-- notarized artifacts;
-- packaged launch agents or privileged helpers.
-
-Those public channels still require signing, notarization, installer, and publication decisions.
-
-Phase 35 now includes the developer-only `hostwright-dist` evidence tool described in `docs/release/distribution-readiness.md`. It can build a local unsigned macOS ARM64 archive from a clean exact commit, verify its manifest/checksum/SPDX/provenance sidecars, and exercise install/upgrade/downgrade/uninstall only under an explicit `hostwright-dist-*` temporary prefix. Successful local artifact and lifecycle operations still exit `69` with blocked evidence because no Developer ID signing, notarization, stapling, Gatekeeper, or signed `.pkg` stage ran.
-
-`hostwright-dist` is not a public installer. It refuses system prefixes, sudo behavior, launch-agent installation, shell-profile changes, default state paths, unowned overwrite, modified-owned-file uninstall, and publication. Its unsigned archives remain local and non-publishable.
-
-Phase 39 defines the beta readiness gate in `docs/release/beta-readiness.md`. That gate requires clean-checkout source install proof, docs alignment, current limitations review, state upgrade evidence, telemetry/support policy review, and maintainer approval before any beta tag. It does not create a beta release or change the source-only artifact policy by itself.
+No package channel is called supported until clean-Mac evidence covers Gatekeeper, reboot, upgrade, rollback, repair, uninstall, corruption, disk full, PATH hijack, symlink attacks, cancellation, and owned process-tree cleanup. Final requirements are in the [v0.0.2 implementation plan](../roadmap/v0.0.2/IMPLEMENTATION_PLAN.md) and [distribution evidence rules](testing-evidence.md).

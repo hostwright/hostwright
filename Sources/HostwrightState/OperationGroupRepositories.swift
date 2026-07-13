@@ -1,4 +1,5 @@
 import Foundation
+import HostwrightCore
 import HostwrightRuntime
 
 public struct OperationGroupAcquireResult: Equatable, Sendable {
@@ -25,6 +26,13 @@ public struct OperationGroupRepository: Sendable {
         guard group.status == .active else {
             throw StateStoreError.invalidRecord("Operation group acquire requires active status.")
         }
+        guard HostwrightResourceUUID.isValid(group.fencingToken),
+              StateJSON.isObject(group.metadataJSONRedacted),
+              StateJSON.isObject(group.intentJSONRedacted),
+              StateJSON.isArray(group.compensationJSONRedacted),
+              StateJSON.isObject(group.verificationJSONRedacted) else {
+            throw StateStoreError.invalidRecord("Operation group fencing and saga payloads must use a valid UUID, JSON objects for metadata/intent/verification, and a JSON array for compensation.")
+        }
         let redacted = group.redacted()
         return try store.withValidatedConnection { connection in
             try connection.transaction {
@@ -49,16 +57,35 @@ public struct OperationGroupRepository: Sendable {
         updatedAt: String,
         metadataJSONRedacted: String
     ) throws {
+        guard status != .active else {
+            throw StateStoreError.invalidRecord("Operation group finish requires a terminal status.")
+        }
+        guard !checkpoint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw StateStoreError.invalidRecord("Operation group finish requires a checkpoint.")
+        }
+        guard StateJSON.isObject(metadataJSONRedacted) else {
+            throw StateStoreError.invalidRecord("Operation group finish metadata must be a JSON object.")
+        }
         let redactedHint = RuntimeRedactionPolicy.default.redact(manualRecoveryHintRedacted)
-        let redactedMetadata = RuntimeRedactionPolicy.default.redact(metadataJSONRedacted)
+        let redactedMetadata = try StateJSON.redactedJSON(metadataJSONRedacted)
         try store.withValidatedConnection { connection in
             try connection.transaction {
+                let rows = try connection.query(
+                    "SELECT status FROM operation_groups WHERE id = ? LIMIT 1",
+                    bindings: [.text(groupID)]
+                )
+                guard let currentStatus = rows.first?.first ?? nil else {
+                    throw StateStoreError.notFound("Operation group '\(groupID)' does not exist.")
+                }
+                guard currentStatus == OperationGroupStatus.active.rawValue else {
+                    throw StateStoreError.invalidRecord("Operation group '\(groupID)' is already terminal with status '\(currentStatus)'.")
+                }
                 try connection.run(
                     """
                     UPDATE operation_groups
                     SET status = ?, checkpoint = ?, lock_owner = NULL, lock_expires_at = NULL,
                         manual_recovery_hint_redacted = ?, updated_at = ?, metadata_json_redacted = ?
-                    WHERE id = ?
+                    WHERE id = ? AND status = 'active'
                     """,
                     bindings: [
                         .text(status.rawValue),
@@ -80,7 +107,8 @@ public struct OperationGroupRepository: Sendable {
                 SELECT id, operation_id, group_kind, project_id, service_name, planned_action_type,
                        status, group_idempotency_key, plan_hash, checkpoint, lock_owner, lock_expires_at,
                        rollback_available, manual_recovery_hint_redacted, created_at, updated_at,
-                       metadata_json_redacted
+                       metadata_json_redacted, fencing_token, intent_json_redacted,
+                       compensation_json_redacted, verification_json_redacted
                 FROM operation_groups
                 ORDER BY created_at ASC, rowid ASC
                 """
@@ -96,7 +124,8 @@ public struct OperationGroupRepository: Sendable {
                 SELECT id, operation_id, group_kind, project_id, service_name, planned_action_type,
                        status, group_idempotency_key, plan_hash, checkpoint, lock_owner, lock_expires_at,
                        rollback_available, manual_recovery_hint_redacted, created_at, updated_at,
-                       metadata_json_redacted
+                       metadata_json_redacted, fencing_token, intent_json_redacted,
+                       compensation_json_redacted, verification_json_redacted
                 FROM operation_groups
                 WHERE id = ?
                 LIMIT 1
@@ -114,7 +143,8 @@ public struct OperationGroupRepository: Sendable {
                 SELECT id, operation_id, group_kind, project_id, service_name, planned_action_type,
                        status, group_idempotency_key, plan_hash, checkpoint, lock_owner, lock_expires_at,
                        rollback_available, manual_recovery_hint_redacted, created_at, updated_at,
-                       metadata_json_redacted
+                       metadata_json_redacted, fencing_token, intent_json_redacted,
+                       compensation_json_redacted, verification_json_redacted
                 FROM operation_groups
                 WHERE group_idempotency_key = ?
                 ORDER BY updated_at DESC, created_at DESC, rowid DESC
@@ -133,7 +163,8 @@ public struct OperationGroupRepository: Sendable {
                 SELECT id, operation_id, group_kind, project_id, service_name, planned_action_type,
                        status, group_idempotency_key, plan_hash, checkpoint, lock_owner, lock_expires_at,
                        rollback_available, manual_recovery_hint_redacted, created_at, updated_at,
-                       metadata_json_redacted
+                       metadata_json_redacted, fencing_token, intent_json_redacted,
+                       compensation_json_redacted, verification_json_redacted
                 FROM operation_groups
                 WHERE project_id = ?
                 ORDER BY created_at ASC, rowid ASC
@@ -150,7 +181,8 @@ public struct OperationGroupRepository: Sendable {
             SELECT id, operation_id, group_kind, project_id, service_name, planned_action_type,
                    status, group_idempotency_key, plan_hash, checkpoint, lock_owner, lock_expires_at,
                    rollback_available, manual_recovery_hint_redacted, created_at, updated_at,
-                   metadata_json_redacted
+                   metadata_json_redacted, fencing_token, intent_json_redacted,
+                   compensation_json_redacted, verification_json_redacted
             FROM operation_groups
             WHERE group_idempotency_key = ? AND status = 'active'
             ORDER BY updated_at DESC, created_at DESC, rowid DESC
@@ -172,9 +204,11 @@ public struct OperationGroupRepository: Sendable {
         let hint = RuntimeRedactionPolicy.default.redact(
             "Operation group lock expired at checkpoint \(group.checkpoint). Recovery is manual: inspect status, events, logs, and the exact Hostwright-owned resource before retrying with a fresh confirmed plan."
         )
-        let metadata = RuntimeRedactionPolicy.default.redact(
-            #"{"expiredLock":"true","previousCheckpoint":"\#(group.checkpoint)","previousStatus":"\#(group.status.rawValue)"}"#
-        )
+        let metadata = try StateJSON.redactedJSON(StateJSON.encode([
+            "expiredLock": true,
+            "previousCheckpoint": group.checkpoint,
+            "previousStatus": group.status.rawValue
+        ]))
         try connection.run(
             """
             UPDATE operation_groups
@@ -200,9 +234,10 @@ public struct OperationGroupRepository: Sendable {
                 id, operation_id, group_kind, project_id, service_name, planned_action_type,
                 status, group_idempotency_key, plan_hash, checkpoint, lock_owner, lock_expires_at,
                 rollback_available, manual_recovery_hint_redacted, created_at, updated_at,
-                metadata_json_redacted
+                metadata_json_redacted, fencing_token, intent_json_redacted,
+                compensation_json_redacted, verification_json_redacted
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             bindings: [
                 .text(group.id),
@@ -221,7 +256,11 @@ public struct OperationGroupRepository: Sendable {
                 .text(group.manualRecoveryHintRedacted),
                 .text(group.createdAt),
                 .text(group.updatedAt),
-                .text(group.metadataJSONRedacted)
+                .text(group.metadataJSONRedacted),
+                .text(group.fencingToken),
+                .text(group.intentJSONRedacted),
+                .text(group.compensationJSONRedacted),
+                .text(group.verificationJSONRedacted)
             ]
         )
     }
@@ -235,6 +274,9 @@ public struct OperationGroupStepRepository: Sendable {
     }
 
     public func append(_ step: OperationGroupStepRecord) throws {
+        guard StateJSON.isObject(step.metadataJSONRedacted) else {
+            throw StateStoreError.invalidRecord("Operation group step metadata must be a JSON object.")
+        }
         let redacted = step.redacted()
         try store.withValidatedConnection { connection in
             try connection.transaction {

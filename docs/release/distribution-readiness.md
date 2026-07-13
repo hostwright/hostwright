@@ -1,5 +1,7 @@
 # Distribution Readiness
 
+> **Historical Phase 35 record:** this describes the earlier unsigned developer lane. The active trusted-install work is v0.0.2 Phase 02 and final artifact qualification is Phase 15. Nothing in this historical record authorizes a current binary, installer, signing, notarization, or package-channel claim.
+
 Status: Phase 35 operational unsigned artifact lane; public distribution remains blocked.
 
 Hostwright public releases remain source-only. The developer-only `hostwright-dist` tool can build and verify a local unsigned macOS ARM64 archive and exercise an exact temporary-prefix lifecycle. Its reports remain `blocked` until Developer ID signing, notarization, stapling, Gatekeeper, and installer publication stages run with real credentials and approval.

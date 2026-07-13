@@ -269,7 +269,16 @@ final class BenchmarkSession: @unchecked Sendable {
         let confirmation = RuntimeMutationConfirmation(
             confirmed: true,
             reason: "Confirmed disposable Phase 36 hardware benchmark resource.",
-            planHash: hostwrightStableHash("phase36|\(options.sourceCommit)|\(identifier)")
+            planHash: hostwrightStableHash("phase36|\(options.sourceCommit)|\(identifier)"),
+            context: RuntimeMutationContext(
+                operationID: "benchmark-iteration-\(sequence)-\(instance)",
+                resourceUUID: HostwrightResourceUUID.legacy(kind: "benchmark-resource", identifier: identifier),
+                resourceGeneration: 1,
+                projectResourceUUID: HostwrightResourceUUID.legacy(kind: "project", identifier: "project-bench"),
+                projectGeneration: 1,
+                providerGeneration: 1,
+                fencingToken: HostwrightResourceUUID.generate()
+            )
         )
         let (_, createDuration) = try timed("RuntimeAdapter.execute create \(identifier)") {
             try await self.adapter.execute(createAction, confirmation: confirmation)
@@ -394,7 +403,19 @@ final class BenchmarkSession: @unchecked Sendable {
             let confirmation = RuntimeMutationConfirmation(
                 confirmed: true,
                 reason: "Exact cleanup for disposable Phase 36 hardware benchmark resource.",
-                planHash: hostwrightStableHash("phase36-cleanup|\(options.sourceCommit)|\(service.identity.managedResourceIdentifier)")
+                planHash: hostwrightStableHash("phase36-cleanup|\(options.sourceCommit)|\(service.identity.managedResourceIdentifier)"),
+                context: RuntimeMutationContext(
+                    operationID: "benchmark-cleanup-\(service.identity.instanceName ?? "resource")",
+                    resourceUUID: HostwrightResourceUUID.legacy(
+                        kind: "benchmark-resource",
+                        identifier: service.identity.managedResourceIdentifier
+                    ),
+                    resourceGeneration: 1,
+                    projectResourceUUID: HostwrightResourceUUID.legacy(kind: "project", identifier: "project-bench"),
+                    projectGeneration: 1,
+                    providerGeneration: 1,
+                    fencingToken: HostwrightResourceUUID.generate()
+                )
             )
             do {
                 try cleanup(service: service, confirmation: confirmation)

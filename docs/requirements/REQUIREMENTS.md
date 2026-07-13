@@ -1,5 +1,7 @@
 # Requirements
 
+> **Historical traceability catalog:** requirement IDs and implementation references below remain useful evidence, but their old release phases and deferred/rejected dispositions are superseded by the [v0.0.2 implementation plan](../roadmap/v0.0.2/IMPLEMENTATION_PLAN.md) and 183-issue ledger. Active work must link the owning v0.0.2 issue; earlier non-goals are not current product exclusions.
+
 This file gives Hostwright stable requirement IDs for the first supported release. Requirements are source-grounded in the preserved source documents and naming archive.
 
 Status values:

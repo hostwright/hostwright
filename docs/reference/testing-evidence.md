@@ -9,6 +9,12 @@ Hostwright separates deterministic test coverage from evidence that exercises re
 | `live-runtime` | Real runtime behavior against uniquely named disposable Hostwright-owned resources with exact cleanup. | Unmeasured hardware efficiency, provider behavior, or distribution trust. |
 | `hardware-benchmark` | Measured work on the recorded physical hardware with raw samples and exact tool versions. | Capacity guarantees, other hardware, or accelerator behavior that was not directly measured. |
 | `distribution-artifact` | Actual build, checksum, SBOM/provenance, signing, notarization, install, upgrade, downgrade, and uninstall stages that ran. | Any stage recorded as blocked or failed. |
+| `migration-upgrade` | Real forward migration, upgrade, rollback-window, backup, restore, and mixed-version behavior using retained fixtures or artifacts from supported versions. | A schema unit test alone, an invented old fixture, or a downgrade path that did not execute. |
+| `security-assessment` | Threat-model checks, adversarial tests, fuzzing, static analysis, dependency review, penetration work, and remediation evidence for the reviewed boundary. | A general claim that an unreviewed component or deployment is secure. |
+| `resilience-chaos` | Recovery under injected process, storage, network, timing, cancellation, and checkpoint failures with bounded convergence and exact cleanup. | Availability outside the injected fault model or a soak that did not complete. |
+| `multi-host` | Behavior on the recorded physical Mac cluster, including quorum, fencing, failover, partitions, identity, upgrades, and exact cluster cleanup. | A simulated cluster, multiple processes on one Mac, or unsafe behavior during quorum loss. |
+| `interop-conformance` | Results from the named upstream conformance suite and exact client/server/version matrix against real Hostwright behavior. | Compatibility with untested endpoints, versions, clients, or silently ignored fields. |
+| `ux-accessibility` | Completed user workflows, API-parity checks, accessibility inspection, assistive-technology testing, and recorded platform/version scope. | Visual review alone or accessibility claims for untested workflows. |
 
 Reports conform to `schemas/hostwright-evidence.schema.json`; production Swift models and validation live in `HostwrightCore/EvidenceModels.swift`. Status is one of `passed`, `failed`, or `blocked`; there is no skipped-success status.
 
@@ -33,10 +39,24 @@ Release evidence must come from a clean checkout. A dirty report can support dev
 - A command failure makes the report `failed` and records a redacted failure message.
 - A missing executable, image, credential, signing identity, provider account, second host, permission, or other prerequisite makes the report `blocked`.
 - Blocked work may not be converted to passed with a fixture, no-op implementation, conditional early return, or silently skipped test.
-- Exact cleanup failure makes live-runtime or hardware evidence fail even when the measured operation succeeded.
+- Exact cleanup failure makes live-runtime, hardware, resilience-chaos, multi-host, or interoperability evidence fail even when the measured operation succeeded.
 - Unit and contract tests may use scripted dependencies when a real dependency cannot deterministically produce the required failure. Their output remains `unit-contract` evidence.
 - A successful unsigned archive or temp-prefix lifecycle remains `blocked` when Developer ID signing, notarization, stapling, Gatekeeper, installer, or publication stages did not run.
 - Distribution cleanup must restore the explicit temporary prefix to its initial unrelated-content snapshot; an owned-file cleanup or rollback failure is not a passing lifecycle.
+- Migration evidence must use an artifact or fixture produced by the recorded prior contract, exercise the real migration path, verify retained data, and prove the documented rollback window.
+- Multi-host evidence must identify every physical node, prove that mutation stops without quorum, and record fencing-token behavior after recovery.
+- Interoperability evidence must name the upstream suite, client, protocol version, unsupported surface, raw pass/fail counts, and exact cleanup.
+- UX/accessibility evidence must name the workflow, macOS version, input method or assistive technology, observed result, and parity contract.
+
+## Closure Evidence
+
+Every roadmap child, epic, and release gate declares the evidence classes it requires. Research, design, or documentation can inform an implementation issue, but cannot close it. A final issue evidence comment and a closing PR use this stable marker:
+
+```text
+<!-- hostwright-evidence-gate:v1 -->
+```
+
+The evidence comment records the exact commit, `Dirty: false`, OS, hardware, runtime and framework versions, commands, raw outcomes, failures, blockers, and cleanup. `Blocked`, `skipped`, fixture-only, mock-only, dirty, or cleanup-failed results never satisfy a required class. Intermediate PRs use `Refs #NN`; only the final verification PR can use `Closes #NN`.
 
 ## Evidence Storage
 

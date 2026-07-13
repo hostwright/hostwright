@@ -1,3 +1,4 @@
+import HostwrightCore
 import HostwrightRuntime
 
 public struct StateProjectRecord: Equatable, Sendable {
@@ -7,14 +8,33 @@ public struct StateProjectRecord: Equatable, Sendable {
     public let manifestHash: String
     public let createdAt: String
     public let updatedAt: String
+    public let resourceUUID: String
+    public let manifestVersion: Int
+    public let mutationProvider: String?
+    public let providerGeneration: Int
 
-    public init(id: String, name: String, manifestPath: String?, manifestHash: String, createdAt: String, updatedAt: String) {
+    public init(
+        id: String,
+        name: String,
+        manifestPath: String?,
+        manifestHash: String,
+        createdAt: String,
+        updatedAt: String,
+        resourceUUID: String? = nil,
+        manifestVersion: Int = 1,
+        mutationProvider: String? = nil,
+        providerGeneration: Int = 0
+    ) {
         self.id = id
         self.name = name
         self.manifestPath = manifestPath
         self.manifestHash = manifestHash
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        self.resourceUUID = resourceUUID ?? HostwrightResourceUUID.legacy(kind: "project", identifier: id)
+        self.manifestVersion = manifestVersion
+        self.mutationProvider = mutationProvider
+        self.providerGeneration = providerGeneration
     }
 }
 
@@ -31,6 +51,9 @@ public struct DesiredServiceRecord: Equatable, Sendable {
     public let desiredGeneration: Int
     public let createdAt: String
     public let updatedAt: String
+    public let resourceUUID: String
+    public let resourceGeneration: Int
+    public let mutationProvider: String?
 
     public init(
         id: String,
@@ -44,7 +67,10 @@ public struct DesiredServiceRecord: Equatable, Sendable {
         manifestHash: String,
         desiredGeneration: Int,
         createdAt: String,
-        updatedAt: String
+        updatedAt: String,
+        resourceUUID: String? = nil,
+        resourceGeneration: Int = 1,
+        mutationProvider: String? = nil
     ) {
         self.id = id
         self.projectID = projectID
@@ -58,6 +84,12 @@ public struct DesiredServiceRecord: Equatable, Sendable {
         self.desiredGeneration = desiredGeneration
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        self.resourceUUID = resourceUUID ?? HostwrightResourceUUID.legacy(
+            kind: "service",
+            identifier: "\(projectID):\(serviceName)"
+        )
+        self.resourceGeneration = resourceGeneration
+        self.mutationProvider = mutationProvider
     }
 }
 
@@ -287,6 +319,10 @@ public struct OperationGroupRecord: Equatable, Sendable {
     public let createdAt: String
     public let updatedAt: String
     public let metadataJSONRedacted: String
+    public let fencingToken: String
+    public let intentJSONRedacted: String
+    public let compensationJSONRedacted: String
+    public let verificationJSONRedacted: String
 
     public init(
         id: String,
@@ -305,7 +341,11 @@ public struct OperationGroupRecord: Equatable, Sendable {
         manualRecoveryHintRedacted: String,
         createdAt: String,
         updatedAt: String,
-        metadataJSONRedacted: String
+        metadataJSONRedacted: String,
+        fencingToken: String? = nil,
+        intentJSONRedacted: String = "{}",
+        compensationJSONRedacted: String = "[]",
+        verificationJSONRedacted: String = "{}"
     ) {
         self.id = id
         self.operationID = operationID
@@ -324,6 +364,10 @@ public struct OperationGroupRecord: Equatable, Sendable {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.metadataJSONRedacted = metadataJSONRedacted
+        self.fencingToken = fencingToken ?? HostwrightResourceUUID.legacy(kind: "operation-fence", identifier: id)
+        self.intentJSONRedacted = intentJSONRedacted
+        self.compensationJSONRedacted = compensationJSONRedacted
+        self.verificationJSONRedacted = verificationJSONRedacted
     }
 
     public func redacted(using policy: RuntimeRedactionPolicy = .default) -> OperationGroupRecord {
@@ -344,7 +388,11 @@ public struct OperationGroupRecord: Equatable, Sendable {
             manualRecoveryHintRedacted: policy.redact(manualRecoveryHintRedacted),
             createdAt: createdAt,
             updatedAt: updatedAt,
-            metadataJSONRedacted: policy.redact(metadataJSONRedacted)
+            metadataJSONRedacted: (try? StateJSON.redactedJSON(metadataJSONRedacted, using: policy)) ?? "{}",
+            fencingToken: fencingToken,
+            intentJSONRedacted: (try? StateJSON.redactedJSON(intentJSONRedacted, using: policy)) ?? "{}",
+            compensationJSONRedacted: (try? StateJSON.redactedJSON(compensationJSONRedacted, using: policy)) ?? "[]",
+            verificationJSONRedacted: (try? StateJSON.redactedJSON(verificationJSONRedacted, using: policy)) ?? "{}"
         )
     }
 }
@@ -429,7 +477,7 @@ public struct OperationGroupStepRecord: Equatable, Sendable {
             finishedAt: finishedAt,
             lastErrorRedacted: lastErrorRedacted.map(policy.redact),
             manualRecoveryHintRedacted: policy.redact(manualRecoveryHintRedacted),
-            metadataJSONRedacted: policy.redact(metadataJSONRedacted)
+            metadataJSONRedacted: (try? StateJSON.redactedJSON(metadataJSONRedacted, using: policy)) ?? "{}"
         )
     }
 }
@@ -642,6 +690,12 @@ public struct OwnershipRecord: Equatable, Sendable {
     public let cleanupEligible: Bool
     public let metadataJSONRedacted: String
     public let identityVersion: Int
+    public let resourceUUID: String
+    public let resourceGeneration: Int
+    public let projectResourceUUID: String?
+    public let projectGeneration: Int
+    public let providerGeneration: Int
+    public let fencingToken: String
 
     public init(
         id: String,
@@ -654,7 +708,13 @@ public struct OwnershipRecord: Equatable, Sendable {
         observedAt: String,
         cleanupEligible: Bool,
         metadataJSONRedacted: String,
-        identityVersion: Int = 1
+        identityVersion: Int = 1,
+        resourceUUID: String? = nil,
+        resourceGeneration: Int = 1,
+        projectResourceUUID: String? = nil,
+        projectGeneration: Int = 1,
+        providerGeneration: Int = 1,
+        fencingToken: String? = nil
     ) {
         self.id = id
         self.resourceIdentifier = resourceIdentifier
@@ -667,6 +727,17 @@ public struct OwnershipRecord: Equatable, Sendable {
         self.cleanupEligible = cleanupEligible
         self.metadataJSONRedacted = metadataJSONRedacted
         self.identityVersion = identityVersion
+        self.resourceUUID = resourceUUID ?? HostwrightResourceUUID.legacy(
+            kind: "ownership",
+            identifier: id
+        )
+        self.resourceGeneration = resourceGeneration
+        self.projectResourceUUID = projectResourceUUID ?? projectID.map {
+            HostwrightResourceUUID.legacy(kind: "project", identifier: $0)
+        }
+        self.projectGeneration = projectGeneration
+        self.providerGeneration = providerGeneration
+        self.fencingToken = fencingToken ?? HostwrightResourceUUID.legacy(kind: "ownership-fence", identifier: id)
     }
 
     public func redacted(using policy: RuntimeRedactionPolicy = .default) -> OwnershipRecord {
@@ -681,7 +752,13 @@ public struct OwnershipRecord: Equatable, Sendable {
             observedAt: observedAt,
             cleanupEligible: cleanupEligible,
             metadataJSONRedacted: policy.redact(metadataJSONRedacted),
-            identityVersion: identityVersion
+            identityVersion: identityVersion,
+            resourceUUID: resourceUUID,
+            resourceGeneration: resourceGeneration,
+            projectResourceUUID: projectResourceUUID,
+            projectGeneration: projectGeneration,
+            providerGeneration: providerGeneration,
+            fencingToken: fencingToken
         )
     }
 }

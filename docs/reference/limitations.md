@@ -1,5 +1,13 @@
 # Limitations
 
+Current product truth is the `0.0.2-dev` capability report plus the [v0.0.2 all-in limitation register and implementation plan](../roadmap/v0.0.2/IMPLEMENTATION_PLAN.md). Run `hostwright capabilities --json` for the exact build. Every useful missing or partial capability below now has a phase/workstream owner; it is not dismissed as a non-goal.
+
+Permanent exclusions are limited to private Apple APIs, unsupported Intel/old-macOS emulation, unsafe writes without cluster quorum, silent telemetry, unauthenticated public exposure, and destructive garbage collection of unmanaged resources. Homebrew-core and direct guest accelerator constraints have implemented fallback tracks.
+
+The remainder of this file preserves the detailed pre-v0.0.2 capability inventory because tests, threat boundaries, and earlier evidence refer to its exact wording. It is historical implementation evidence, not the active release scope or schedule. Where it says “not implemented,” consult the v0.0.2 plan for the owning phase.
+
+## Retained Pre-v0.0.2 Capability Inventory
+
 Hostwright `v0.1.0-alpha.1` can model and attempt read-only runtime observation through `RuntimeAdapter`, persist desired and observed state to an explicit SQLite database path, compute deterministic desired-vs-observed plans, produce local advisory scheduling recommendations from declared inputs, expose a one-shot local JSON process for five existing command contracts, execute one tightly gated create-missing-service mutation, execute one restart-policy-allowed managed start, execute one restart-policy-allowed managed restart for an exact Hostwright-owned running/unhealthy service, read bounded logs, render and filter state events, write a local redacted diagnostics bundle, run a foreground daemon loop with in-process loopback health probes and restart-state blocking, and delete exact cleanup-eligible Hostwright-owned stopped/created/exited containers through `RuntimeAdapter`.
 
 Hostwright is not production ready.

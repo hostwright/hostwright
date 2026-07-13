@@ -284,9 +284,11 @@ extension ApplyCommandRunner {
         checkpoint: String,
         lockOwner: String?,
         lockExpiresAt: String?,
-        manualRecoveryHint: String
+        manualRecoveryHint: String,
+        runtimeAdapter: String,
+        mutationContext: RuntimeMutationContext
     ) -> OperationGroupRecord {
-        OperationGroupRecord(
+        return OperationGroupRecord(
             id: id,
             operationID: operationID,
             groupKind: "apply",
@@ -308,6 +310,25 @@ extension ApplyCommandRunner {
                 "identity": action.identity.displayName,
                 "resourceIdentifier": action.resourceIdentifier,
                 "rollback": "unsupported"
+            ]),
+            fencingToken: mutationContext.fencingToken,
+            intentJSONRedacted: jsonPayload([
+                "action": action.kind.rawValue,
+                "planHash": planHash,
+                "projectID": projectID,
+                "projectGeneration": mutationContext.projectGeneration,
+                "projectResourceUUID": mutationContext.projectResourceUUID,
+                "provider": runtimeAdapter,
+                "providerAPIVersion": HostwrightContractVersions.runtimeProviderAPI,
+                "providerGeneration": mutationContext.providerGeneration,
+                "resourceIdentifier": action.resourceIdentifier,
+                "resourceGeneration": mutationContext.resourceGeneration,
+                "resourceUUID": mutationContext.resourceUUID
+            ]),
+            compensationJSONRedacted: "[]",
+            verificationJSONRedacted: jsonPayload([
+                "postcondition": "exact runtime observation",
+                "status": "pending"
             ])
         )
     }

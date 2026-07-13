@@ -1,13 +1,24 @@
 import Foundation
+import HostwrightCore
+import HostwrightManifest
 import HostwrightRuntime
 
 func projectRecord(from row: [String?]) throws -> StateProjectRecord {
-    guard row.count == 6,
+    guard row.count == 10,
           let id = row[0],
           let name = row[1],
           let manifestHash = row[3],
           let createdAt = row[4],
-          let updatedAt = row[5]
+          let updatedAt = row[5],
+          let resourceUUID = row[6],
+          HostwrightResourceUUID.isValid(resourceUUID),
+          let manifestVersionText = row[7],
+          let manifestVersion = Int(manifestVersionText),
+          (HostwrightManifest.legacyVersion...HostwrightManifest.currentVersion).contains(manifestVersion),
+          row[8].map({ !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) ?? true,
+          let providerGenerationText = row[9],
+          let providerGeneration = Int(providerGenerationText),
+          providerGeneration >= 0
     else {
         throw StateStoreError.invalidRecord("Could not decode project row.")
     }
@@ -18,12 +29,16 @@ func projectRecord(from row: [String?]) throws -> StateProjectRecord {
         manifestPath: row[2],
         manifestHash: manifestHash,
         createdAt: createdAt,
-        updatedAt: updatedAt
+        updatedAt: updatedAt,
+        resourceUUID: resourceUUID,
+        manifestVersion: manifestVersion,
+        mutationProvider: row[8],
+        providerGeneration: providerGeneration
     )
 }
 
 func desiredServiceRecord(from row: [String?]) throws -> DesiredServiceRecord {
-    guard row.count == 12,
+    guard row.count == 15,
           let id = row[0],
           let projectID = row[1],
           let serviceName = row[2],
@@ -35,8 +50,15 @@ func desiredServiceRecord(from row: [String?]) throws -> DesiredServiceRecord {
           let manifestHash = row[8],
           let desiredGenerationText = row[9],
           let desiredGeneration = Int(desiredGenerationText),
+          desiredGeneration > 0,
           let createdAt = row[10],
-          let updatedAt = row[11]
+          let updatedAt = row[11],
+          let resourceUUID = row[12],
+          HostwrightResourceUUID.isValid(resourceUUID),
+          let resourceGenerationText = row[13],
+          let resourceGeneration = Int(resourceGenerationText),
+          resourceGeneration > 0,
+          row[14].map({ !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) ?? true
     else {
         throw StateStoreError.invalidRecord("Could not decode desired service row.")
     }
@@ -53,7 +75,10 @@ func desiredServiceRecord(from row: [String?]) throws -> DesiredServiceRecord {
         manifestHash: manifestHash,
         desiredGeneration: desiredGeneration,
         createdAt: createdAt,
-        updatedAt: updatedAt
+        updatedAt: updatedAt,
+        resourceUUID: resourceUUID,
+        resourceGeneration: resourceGeneration,
+        mutationProvider: row[14]
     )
 }
 
@@ -178,7 +203,7 @@ func operationRecord(from row: [String?]) throws -> OperationRecord {
 }
 
 func operationGroupRecord(from row: [String?]) throws -> OperationGroupRecord {
-    guard row.count == 17,
+    guard row.count == 21,
           let id = row[0],
           let operationID = row[1],
           let groupKind = row[2],
@@ -192,7 +217,16 @@ func operationGroupRecord(from row: [String?]) throws -> OperationGroupRecord {
           let manualRecoveryHint = row[13],
           let createdAt = row[14],
           let updatedAt = row[15],
-          let metadataJSON = row[16]
+          let metadataJSON = row[16],
+          StateJSON.isObject(metadataJSON),
+          let fencingToken = row[17],
+          HostwrightResourceUUID.isValid(fencingToken),
+          let intentJSON = row[18],
+          StateJSON.isObject(intentJSON),
+          let compensationJSON = row[19],
+          StateJSON.isArray(compensationJSON),
+          let verificationJSON = row[20],
+          StateJSON.isObject(verificationJSON)
     else {
         throw StateStoreError.invalidRecord("Could not decode operation group row.")
     }
@@ -214,7 +248,11 @@ func operationGroupRecord(from row: [String?]) throws -> OperationGroupRecord {
         manualRecoveryHintRedacted: manualRecoveryHint,
         createdAt: createdAt,
         updatedAt: updatedAt,
-        metadataJSONRedacted: metadataJSON
+        metadataJSONRedacted: metadataJSON,
+        fencingToken: fencingToken,
+        intentJSONRedacted: intentJSON,
+        compensationJSONRedacted: compensationJSON,
+        verificationJSONRedacted: verificationJSON
     )
 }
 
@@ -231,7 +269,8 @@ func operationGroupStepRecord(from row: [String?]) throws -> OperationGroupStepR
           let status = OperationGroupStepStatus(rawValue: statusText),
           let updatedAt = row[10],
           let manualRecoveryHint = row[13],
-          let metadataJSON = row[14]
+          let metadataJSON = row[14],
+          StateJSON.isObject(metadataJSON)
     else {
         throw StateStoreError.invalidRecord("Could not decode operation group step row.")
     }
@@ -358,7 +397,7 @@ func restartRecoveryRecord(from row: [String?]) throws -> RestartRecoveryRecord 
 }
 
 func ownershipRecord(from row: [String?]) throws -> OwnershipRecord {
-    guard row.count == 11,
+    guard row.count == 17,
           let id = row[0],
           let resourceIdentifier = row[1],
           let resourceType = row[2],
@@ -368,7 +407,21 @@ func ownershipRecord(from row: [String?]) throws -> OwnershipRecord {
           let cleanupEligibleText = row[8],
           let metadataJSON = row[9],
           let identityVersionText = row[10],
-          let identityVersion = Int(identityVersionText)
+          let identityVersion = Int(identityVersionText),
+          let resourceUUID = row[11],
+          HostwrightResourceUUID.isValid(resourceUUID),
+          let resourceGenerationText = row[12],
+          let resourceGeneration = Int(resourceGenerationText),
+          resourceGeneration > 0,
+          row[13].map({ HostwrightResourceUUID.isValid($0) }) ?? true,
+          let projectGenerationText = row[14],
+          let projectGeneration = Int(projectGenerationText),
+          projectGeneration >= 0,
+          let providerGenerationText = row[15],
+          let providerGeneration = Int(providerGenerationText),
+          providerGeneration >= 0,
+          let fencingToken = row[16],
+          HostwrightResourceUUID.isValid(fencingToken)
     else {
         throw StateStoreError.invalidRecord("Could not decode ownership row.")
     }
@@ -384,7 +437,13 @@ func ownershipRecord(from row: [String?]) throws -> OwnershipRecord {
         observedAt: observedAt,
         cleanupEligible: cleanupEligibleText == "1",
         metadataJSONRedacted: metadataJSON,
-        identityVersion: identityVersion
+        identityVersion: identityVersion,
+        resourceUUID: resourceUUID,
+        resourceGeneration: resourceGeneration,
+        projectResourceUUID: row[13],
+        projectGeneration: projectGeneration,
+        providerGeneration: providerGeneration,
+        fencingToken: fencingToken
     )
 }
 

@@ -478,7 +478,7 @@ final class TeamWorkflowCLITests: XCTestCase {
 
     private var digestManifest: String {
         """
-        version: 1
+        version: 2
         project: demo
         services:
           api:
@@ -492,7 +492,7 @@ final class TeamWorkflowCLITests: XCTestCase {
 
     private var taggedManifest: String {
         """
-        version: 1
+        version: 2
         project: demo
         services:
           api:
@@ -503,7 +503,7 @@ final class TeamWorkflowCLITests: XCTestCase {
 
     private var digestRestartManifest: String {
         """
-        version: 1
+        version: 2
         project: demo
         services:
           api:

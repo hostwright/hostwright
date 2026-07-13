@@ -1,5 +1,7 @@
 # Advisory Scheduler And Placement Model
 
+> **Current partial behavior with an implementation owner:** the advisory model remains useful but is not the v0.0.2 scheduler. Phase 10 owns requests/limits, hard filters, fair packing, topology, disruption, hysteresis, pressure/energy, accelerators, and exact-oracle qualification.
+
 Status: Phase 31 local advisory model.
 
 Phase 31 adds a deterministic in-memory advisory scheduler for one local Mac. It filters, scores, and explains local recommendations from explicit desired runtime state, optional observed runtime state, local policy decisions, fixture or local resource reports, and declared workload resource requests.

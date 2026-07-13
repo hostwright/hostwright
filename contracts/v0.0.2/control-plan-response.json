@@ -1,0 +1,11 @@
+{
+  "apiVersion": 2,
+  "requestID": "golden-plan-1",
+  "operation": "plan",
+  "success": true,
+  "exitCode": 0,
+  "result": {
+    "kind": "plan",
+    "schemaVersion": 2
+  }
+}

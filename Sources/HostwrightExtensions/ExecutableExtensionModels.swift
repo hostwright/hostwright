@@ -16,8 +16,8 @@ public struct ExecutableExtensionDocument: Codable, Equatable, Sendable {
 
     public init(
         kind: HostwrightExtensionKind,
-        apiVersion: Int = 1,
-        protocolVersion: Int = 1,
+        apiVersion: Int = HostwrightContractVersions.pluginABI,
+        protocolVersion: Int = HostwrightContractVersions.pluginABI,
         identifier: String,
         trust: HostwrightExtensionTrust,
         capability: HostwrightExtensionCapability,
@@ -130,10 +130,10 @@ public enum ExecutableExtensionDocumentParser {
     }
 
     private static func validate(_ document: ExecutableExtensionDocument) throws {
-        guard document.apiVersion == 1 else {
+        guard document.apiVersion == HostwrightContractVersions.pluginABI else {
             throw invalid("Executable extension declaration API version \(document.apiVersion) is not supported.")
         }
-        guard document.protocolVersion == 1 else {
+        guard document.protocolVersion == HostwrightContractVersions.pluginABI else {
             throw invalid("Executable extension protocol version \(document.protocolVersion) is not supported.")
         }
         guard document.trust == .reviewedLocal else {

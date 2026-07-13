@@ -5,6 +5,8 @@ DerivedData/
 *.xcodeproj/
 *.xcworkspace/
 Package.resolved
+__pycache__/
+*.pyc
 
 # Local-only project material
 site/

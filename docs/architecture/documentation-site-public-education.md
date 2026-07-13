@@ -1,5 +1,7 @@
 # Documentation Site And Public Education
 
+> **Historical plan, now executable:** v0.0.2 Phase 01 adds cross-repository typecheck/build/link/quickstart and truth-contract checks; Phase 15 repeats the full site/docs qualification for GA.
+
 Status: Phase 37 source-of-truth and information architecture boundary.
 
 Phase 37 defines how `hostwright.dev` should present Hostwright docs. It does not implement a website, frontend, hosted docs deployment, analytics, search service, content pipeline, or marketing campaign in this core repository.

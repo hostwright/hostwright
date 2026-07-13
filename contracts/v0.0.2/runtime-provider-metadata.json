@@ -1,0 +1,12 @@
+{
+  "providerAPIVersion": 2,
+  "adapterName": "golden-provider",
+  "adapterVersion": "0.0.2",
+  "runtimeName": "golden-runtime",
+  "runtimeVersion": "1.1.0",
+  "supportsMutation": true,
+  "capabilities": [
+    "readOnlyObservation",
+    "lifecycleMutation"
+  ]
+}

@@ -21,7 +21,7 @@ public struct LocalControlRequest: Codable, Equatable, Sendable {
     public let sort: String?
 
     public init(
-        apiVersion: Int = 1,
+        apiVersion: Int = HostwrightContractVersions.controlAPI,
         requestID: String,
         operation: LocalControlOperation,
         project: String? = nil,
@@ -69,7 +69,7 @@ public struct LocalControlResponse: Codable, Equatable, Sendable {
     public let error: ControlJSONValue?
 
     public init(
-        apiVersion: Int = 1,
+        apiVersion: Int = HostwrightContractVersions.controlAPI,
         requestID: String?,
         operation: LocalControlOperation?,
         success: Bool,

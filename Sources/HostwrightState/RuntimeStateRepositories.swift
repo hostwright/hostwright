@@ -1,3 +1,4 @@
+import HostwrightCore
 import HostwrightRuntime
 
 public struct HealthCheckResultRepository: Sendable {
@@ -282,15 +283,25 @@ public struct OwnershipRepository: Sendable {
 
     public func upsert(_ ownership: OwnershipRecord) throws {
         let redacted = ownership.redacted()
+        guard HostwrightResourceUUID.isValid(redacted.resourceUUID),
+              redacted.projectResourceUUID.map(HostwrightResourceUUID.isValid) ?? true,
+              HostwrightResourceUUID.isValid(redacted.fencingToken),
+              redacted.resourceGeneration > 0,
+              redacted.projectGeneration >= 0,
+              redacted.providerGeneration >= 0 else {
+            throw StateStoreError.invalidRecord("Ownership identity, generation, or fencing fields are invalid.")
+        }
         try store.withValidatedConnection { connection in
             try connection.transaction {
                 try connection.run(
                     """
                     INSERT INTO ownership_records (
                         id, resource_identifier, resource_type, project_id, service_name, runtime_adapter,
-                        created_at, observed_at, cleanup_eligible, metadata_json_redacted, identity_version
+                        created_at, observed_at, cleanup_eligible, metadata_json_redacted, identity_version,
+                        resource_uuid, resource_generation, project_resource_uuid, project_generation,
+                        provider_generation, fencing_token
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(resource_identifier, runtime_adapter) DO UPDATE SET
                         resource_type = excluded.resource_type,
                         project_id = excluded.project_id,
@@ -298,7 +309,18 @@ public struct OwnershipRepository: Sendable {
                         observed_at = excluded.observed_at,
                         cleanup_eligible = excluded.cleanup_eligible,
                         metadata_json_redacted = excluded.metadata_json_redacted,
-                        identity_version = excluded.identity_version
+                        identity_version = excluded.identity_version,
+                        resource_uuid = ownership_records.resource_uuid,
+                        resource_generation = MAX(ownership_records.resource_generation, excluded.resource_generation),
+                        project_resource_uuid = COALESCE(ownership_records.project_resource_uuid, excluded.project_resource_uuid),
+                        project_generation = MAX(ownership_records.project_generation, excluded.project_generation),
+                        provider_generation = MAX(ownership_records.provider_generation, excluded.provider_generation),
+                        fencing_token = CASE
+                            WHEN excluded.provider_generation >= ownership_records.provider_generation
+                             AND excluded.resource_generation >= ownership_records.resource_generation
+                            THEN excluded.fencing_token
+                            ELSE ownership_records.fencing_token
+                        END
                     """,
                     bindings: [
                         .text(redacted.id),
@@ -311,7 +333,13 @@ public struct OwnershipRepository: Sendable {
                         .text(redacted.observedAt),
                         .bool(redacted.cleanupEligible),
                         .text(redacted.metadataJSONRedacted),
-                        .int(redacted.identityVersion)
+                        .int(redacted.identityVersion),
+                        .text(redacted.resourceUUID),
+                        .int(redacted.resourceGeneration),
+                        optionalText(redacted.projectResourceUUID),
+                        .int(redacted.projectGeneration),
+                        .int(redacted.providerGeneration),
+                        .text(redacted.fencingToken)
                     ]
                 )
             }
@@ -323,12 +351,70 @@ public struct OwnershipRepository: Sendable {
             let rows = try connection.query(
                 """
                 SELECT id, resource_identifier, resource_type, project_id, service_name, runtime_adapter,
-                       created_at, observed_at, cleanup_eligible, metadata_json_redacted, identity_version
+                       created_at, observed_at, cleanup_eligible, metadata_json_redacted, identity_version,
+                       resource_uuid, resource_generation, project_resource_uuid, project_generation,
+                       provider_generation, fencing_token
                 FROM ownership_records
                 ORDER BY resource_identifier ASC, runtime_adapter ASC
                 """
             )
             return try rows.map(ownershipRecord(from:))
+        }
+    }
+
+    public func advanceFencingToken(
+        resourceIdentifier: String,
+        runtimeAdapter: String,
+        expectedResourceUUID: String,
+        expectedFencingToken: String,
+        newFencingToken: String,
+        observedAt: String
+    ) throws -> OwnershipRecord? {
+        guard HostwrightResourceUUID.isValid(expectedResourceUUID),
+              HostwrightResourceUUID.isValid(expectedFencingToken),
+              HostwrightResourceUUID.isValid(newFencingToken),
+              expectedFencingToken != newFencingToken else {
+            throw StateStoreError.invalidRecord("Ownership fencing compare-and-swap requires valid distinct UUID tokens.")
+        }
+        return try store.withValidatedConnection { connection in
+            try connection.transaction {
+                try connection.run(
+                    """
+                    UPDATE ownership_records
+                    SET fencing_token = ?, observed_at = ?
+                    WHERE resource_identifier = ?
+                      AND runtime_adapter = ?
+                      AND resource_uuid = ?
+                      AND fencing_token = ?
+                    """,
+                    bindings: [
+                        .text(newFencingToken),
+                        .text(observedAt),
+                        .text(resourceIdentifier),
+                        .text(runtimeAdapter),
+                        .text(expectedResourceUUID),
+                        .text(expectedFencingToken)
+                    ]
+                )
+                let rows = try connection.query(
+                    """
+                    SELECT id, resource_identifier, resource_type, project_id, service_name, runtime_adapter,
+                           created_at, observed_at, cleanup_eligible, metadata_json_redacted, identity_version,
+                           resource_uuid, resource_generation, project_resource_uuid, project_generation,
+                           provider_generation, fencing_token
+                    FROM ownership_records
+                    WHERE resource_identifier = ? AND runtime_adapter = ? AND resource_uuid = ? AND fencing_token = ?
+                    LIMIT 1
+                    """,
+                    bindings: [
+                        .text(resourceIdentifier),
+                        .text(runtimeAdapter),
+                        .text(expectedResourceUUID),
+                        .text(newFencingToken)
+                    ]
+                )
+                return try rows.first.map(ownershipRecord(from:))
+            }
         }
     }
 

@@ -99,7 +99,7 @@ PY
 "$CONTAINER_BIN" list --all --format json > "$WORK_DIR/before.json"
 
 cat > "$MANIFEST_A" <<EOF
-version: 1
+version: 2
 project: $PROJECT_A
 
 services:
@@ -111,7 +111,7 @@ services:
 EOF
 
 cat > "$MANIFEST_B" <<EOF
-version: 1
+version: 2
 project: $PROJECT_B
 
 services:

@@ -10,7 +10,7 @@ import HostwrightRuntime
 
 public enum HostwrightCLI {
     public static let starterManifest = """
-    version: 1
+    version: 2
     project: api-local
 
     services:
@@ -52,6 +52,21 @@ public enum HostwrightCLI {
         switch command {
         case .version:
             return CLIRunResult(standardOutput: "\(HostwrightIdentity.version)\n")
+        case .capabilities(let output):
+            let report = HostwrightCapabilityCatalog.report
+            return CLIRunResult(
+                standardOutput: output == .json
+                    ? CLIJSON.capabilities(report)
+                    : renderCapabilities(report)
+            )
+        case .migrateManifestPreview(let path, let output):
+            let source = try hostwrightReadManifestText(path: path, environment: environment)
+            let preview = try ManifestMigrator.previewV2(source)
+            return CLIRunResult(
+                standardOutput: output == .json
+                    ? CLIJSON.manifestMigrationPreview(preview)
+                    : preview.migratedManifest
+            )
         case .help:
             return CLIRunResult(standardOutput: helpText)
         case .initManifest:
@@ -142,6 +157,8 @@ public enum HostwrightCLI {
 
     Usage:
       hostwright --version
+      hostwright capabilities [--json|--output text|json]
+      hostwright migrate preview <path> [--json|--output text|json]
       hostwright init
       hostwright import-stack <path> [--output text|json] [--team-profile <path>]
       hostwright validate [path] [--team-profile <path>]
@@ -158,13 +175,15 @@ public enum HostwrightCLI {
       hostwright extension check --declaration <absolute-path> --executable <absolute-path> [--output text|json]
       hostwright doctor [--output text|json]
 
-    Most commands are read-only. init writes hostwright.yaml only when absent.
+    Most commands are read-only. capabilities reports tested maturity without probing or mutating the host.
+    migrate preview validates and prints an in-memory v1-to-v2 conversion; it never writes the source file.
+    init writes hostwright.yaml only when absent.
     import-stack reads a narrow safe stack-file subset and prints converted hostwright.yaml; it does not write files, observe runtime, or imply Compose parity.
     CLI plan output is deterministic but does not perform live runtime observation.
     Apply can execute exactly one confirmed createMissingService or restart-policy-allowed startManagedService action through RuntimeAdapter.
     Cleanup deletes only exact cleanup-eligible Hostwright-owned stopped/created/exited containers after dry-run token confirmation.
     Diagnostics writes a local redacted JSON bundle only. It never uploads telemetry.
-    JSON output is supported for import-stack, plan, status, events, recovery, extension check, doctor, and errors when --output json is present.
+    JSON output is supported for capabilities, migrate preview, import-stack, plan, status, events, recovery, extension check, doctor, and errors when --json or --output json is present.
     Team profiles and approvals are loaded only from explicit local paths. Profile-aware mutations require an approval bound to the exact profile, manifest, and plan or cleanup token.
     Benchmark runs are explicit local hardware evidence. They refuse image pulls and broad cleanup, use bounded disposable Hostwright-owned resources, and write only the requested non-existing report path.
     Extension check executes one reviewed-local protocol handshake from explicit absolute paths. The protocol grants no Hostwright capability, but the reviewed executable still has the invoking macOS account's ambient privileges; it is not sandboxed.
@@ -181,6 +200,15 @@ public enum HostwrightCLI {
       hostwright doctor --output json
 
     """
+
+    private static func renderCapabilities(_ report: HostwrightCapabilityReport) -> String {
+        let header = "Hostwright \(report.productVersion) (target \(report.releaseTarget))\n"
+        let contracts = "Contracts: manifest v\(report.contracts.manifest), control API v\(report.contracts.controlAPI), runtime provider API v\(report.contracts.runtimeProviderAPI), plugin ABI v\(report.contracts.pluginABI), state schema v\(report.contracts.stateSchema)\n"
+        let rows = report.capabilities.map {
+            "\($0.identifier)\t\($0.state.rawValue)\tphase \(String(format: "%02d", $0.phase))\t#\($0.issue)\t\($0.title)"
+        }.joined(separator: "\n")
+        return header + contracts + rows + "\n"
+    }
 
     private static func initManifest(environment: CLIEnvironment) throws -> CLIRunResult {
         let path = HostwrightIdentity.manifestFileName

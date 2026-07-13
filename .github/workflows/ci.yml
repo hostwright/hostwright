@@ -17,6 +17,12 @@ jobs:
         run: swift test
       - name: Local integration
         run: scripts/integration.sh
+      - name: Roadmap governance
+        run: |
+          python3 scripts/roadmap-governance.py validate
+          python3 scripts/roadmap-governance.py self-test
+          python3 scripts/render-roadmap-index.py check
+          python3 scripts/check-current-truth.py
       - name: Lint
         run: scripts/lint.sh
       - name: Naming scan

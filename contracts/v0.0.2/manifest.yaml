@@ -1,0 +1,6 @@
+version: 2
+project: golden-contract
+
+services:
+  api:
+    image: local/golden-contract:latest

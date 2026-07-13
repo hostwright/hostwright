@@ -206,12 +206,16 @@ struct CleanupCommandRunner {
         let classification = CleanupClassification(policyDecision.classification)
         let observedService = observedServices.count == 1 ? observedServices.first : nil
 
-        if classification == .eligible, let expectedServiceName = ownership.serviceName, let observedService {
+        if classification == .eligible,
+           let expectedServiceName = ownership.serviceName,
+           let observedService,
+           ownership.projectResourceUUID != nil {
             let candidate = CleanupCandidate(
                 identity: observedService.identity,
                 resourceIdentifier: ownership.resourceIdentifier,
                 lifecycleState: observedService.lifecycleState,
-                runtimeAdapter: ownership.runtimeAdapter
+                runtimeAdapter: ownership.runtimeAdapter,
+                ownership: ownership
             )
             return CleanupAssessment(
                 classification: .eligible,
@@ -220,6 +224,17 @@ struct CleanupCommandRunner {
                 lifecycleState: observedService.lifecycleState,
                 reason: policyDecision.reason,
                 candidate: candidate
+            )
+        }
+
+        if classification == .eligible, ownership.projectResourceUUID == nil {
+            return CleanupAssessment(
+                classification: .blocked,
+                resourceIdentifier: ownership.resourceIdentifier,
+                serviceName: serviceName,
+                lifecycleState: observedService?.lifecycleState,
+                reason: "Cleanup requires a project UUID binding in the ownership record.",
+                candidate: nil
             )
         }
 
@@ -312,6 +327,7 @@ struct CleanupCommandRunner {
             }
 
             let operationID = hostwrightUniqueID(prefix: "operation-cleanup")
+            let fencingToken = HostwrightResourceUUID.generate()
             try store.operations.record(
                 OperationRecord(
                     id: "\(operationID)-recorded",
@@ -324,13 +340,44 @@ struct CleanupCommandRunner {
                     idempotencyKey: idempotencyKey,
                     planHash: token,
                     payloadJSONRedacted: jsonPayload(
-                        ["resourceIdentifier": candidate.resourceIdentifier]
+                        [
+                            "fencingToken": fencingToken,
+                            "resourceIdentifier": candidate.resourceIdentifier,
+                            "resourceUUID": candidate.ownership.resourceUUID
+                        ]
                             .merging(hostwrightTeamBindingPayload(teamBinding)) { current, _ in current }
                     )
                 )
             )
 
             do {
+                guard let projectResourceUUID = candidate.ownership.projectResourceUUID else {
+                    throw StateStoreError.invalidRecord("Cleanup ownership lost its project UUID binding.")
+                }
+                guard try store.ownership.advanceFencingToken(
+                    resourceIdentifier: candidate.resourceIdentifier,
+                    runtimeAdapter: candidate.runtimeAdapter,
+                    expectedResourceUUID: candidate.ownership.resourceUUID,
+                    expectedFencingToken: candidate.ownership.fencingToken,
+                    newFencingToken: fencingToken,
+                    observedAt: timestamp
+                ) != nil else {
+                    throw StateStoreError.invalidRecord(
+                        "Ownership fencing changed before cleanup execution; refusing stale deletion."
+                    )
+                }
+                let context = RuntimeMutationContext(
+                    operationID: operationID,
+                    resourceUUID: candidate.ownership.resourceUUID,
+                    resourceGeneration: candidate.ownership.resourceGeneration,
+                    projectResourceUUID: projectResourceUUID,
+                    projectGeneration: candidate.ownership.projectGeneration,
+                    providerGeneration: candidate.ownership.providerGeneration,
+                    fencingToken: fencingToken
+                )
+                if let issue = context.validationIssue {
+                    throw StateStoreError.invalidRecord(issue)
+                }
                 let event = try hostwrightWaitForAsync {
                     try await adapter.execute(
                         PlannedRuntimeAction(
@@ -346,7 +393,8 @@ struct CleanupCommandRunner {
                             planHash: token,
                             manifestHash: teamBinding?.manifestHash,
                             profileHash: teamBinding?.profileHash,
-                            approvalHash: teamBinding?.approvalHash
+                            approvalHash: teamBinding?.approvalHash,
+                            context: context
                         )
                     )
                 }
@@ -571,6 +619,7 @@ private struct CleanupCandidate: Equatable {
     let resourceIdentifier: String
     let lifecycleState: RuntimeLifecycleState
     let runtimeAdapter: String
+    let ownership: OwnershipRecord
 }
 
 private enum CleanupClassification: String, Equatable {

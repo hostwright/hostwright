@@ -1,5 +1,7 @@
 # Build Status
 
+> **Current program:** Hostwright is `0.0.2-dev`; Phase 01 of the [v0.0.2 roadmap](roadmap/v0.0.2/IMPLEMENTATION_PLAN.md) is active. Manifest v2, Control API v2, Runtime Provider API v2, plugin ABI v1, state schema v7, UUID identity, provider binding, migration preview, capability truth, and executable governance are the current foundation. The phase-by-phase entries below are a retained pre-v0.0.2 engineering ledger, not the active release scope or schedule.
+
 ## Local Environment
 
 - macOS 26.5

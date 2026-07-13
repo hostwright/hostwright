@@ -1,4 +1,5 @@
 import Foundation
+import HostwrightCore
 
 public enum HostwrightExtensionKind: String, Codable, Equatable, Sendable {
     case policyPack
@@ -72,7 +73,7 @@ public struct HostwrightExtensionDeclaration: Equatable, Sendable {
     public init(
         identifier: String,
         kind: HostwrightExtensionKind,
-        apiVersion: Int = 1,
+        apiVersion: Int = HostwrightContractVersions.pluginABI,
         trust: HostwrightExtensionTrust,
         capabilities: [HostwrightExtensionCapabilityDeclaration]
     ) {
@@ -107,7 +108,7 @@ public struct ExtensionPolicyEvaluator: Equatable, Sendable {
             )
         }
 
-        if declaration.apiVersion != 1 {
+        if declaration.apiVersion != HostwrightContractVersions.pluginABI {
             decisions.append(
                 decision(
                     identifier: declaration.identifier,

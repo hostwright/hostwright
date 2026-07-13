@@ -35,7 +35,7 @@ final class HostwrightImportTests: XCTestCase {
         XCTAssertEqual(result.warnings.count, 1)
         XCTAssertEqual(result.warnings.first?.line, 1)
         let expectedManifest = """
-            version: 1
+            version: 2
             project: demo
 
             services:

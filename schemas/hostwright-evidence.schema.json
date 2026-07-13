@@ -28,7 +28,13 @@
         "local-integration",
         "live-runtime",
         "hardware-benchmark",
-        "distribution-artifact"
+        "distribution-artifact",
+        "migration-upgrade",
+        "security-assessment",
+        "resilience-chaos",
+        "multi-host",
+        "interop-conformance",
+        "ux-accessibility"
       ]
     },
     "status": {
@@ -159,7 +165,7 @@
     {
       "if": {
         "allOf": [
-          {"properties": {"evidenceClass": {"enum": ["live-runtime", "hardware-benchmark"]}}},
+          {"properties": {"evidenceClass": {"enum": ["live-runtime", "hardware-benchmark", "resilience-chaos", "multi-host", "interop-conformance"]}}},
           {"properties": {"status": {"const": "passed"}}}
         ]
       },

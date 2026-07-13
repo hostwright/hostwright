@@ -6,6 +6,8 @@ The current CLI provides a dependency-free `hostwright` command surface with nar
 
 ```bash
 hostwright --version
+hostwright capabilities [--json | --output text|json]
+hostwright migrate preview <path> [--json | --output text|json]
 hostwright init
 hostwright import-stack <path> [--output text|json] [--team-profile <path>]
 hostwright validate [path] [--team-profile <path>]
@@ -30,7 +32,7 @@ hostwrightd --foreground --config <hostwright.yaml> --state-db <path> [options]
 
 Text output is the default for every command.
 
-`import-stack`, `plan`, `status`, `events`, `recovery`, `extension check`, and `doctor` also accept `--output json`. JSON output is intended for local scripts and tests. It does not change command behavior, state writes, runtime observation, or mutation gates.
+`capabilities`, `migrate preview`, `import-stack`, `plan`, `status`, `events`, `recovery`, `extension check`, and `doctor` also accept JSON output. `capabilities` and `migrate preview` accept the convenience spelling `--json`. JSON output is intended for local scripts, conformance checks, and tests. It does not change command behavior, state writes, runtime observation, or mutation gates.
 
 When JSON mode is requested and the CLI can classify the failure, stderr uses this envelope:
 
@@ -49,7 +51,7 @@ Launch arguments require an explicit absolute manifest path. Optional `--state-d
 Supported operations are `plan`, `status`, `events`, `recovery`, and `doctor`. Requests use this strict top-level shape:
 
 ```json
-{"apiVersion":1,"requestID":"request-1","operation":"events","project":"demo","eventType":"apply.failed","service":"api","severity":"error","limit":100,"sort":"desc"}
+{"apiVersion":2,"requestID":"request-1","operation":"events","project":"demo","eventType":"apply.failed","service":"api","severity":"error","limit":100,"sort":"desc"}
 ```
 
 Only `events` accepts all filters. `recovery` accepts only `project`; `plan`, `status`, and `doctor` accept no filters. Input is limited to 64 KiB with a five-second read deadline. Output is limited to one 1 MiB JSON object.
@@ -75,13 +77,23 @@ The API deliberately excludes apply, cleanup, logs, diagnostics export, benchmar
 
 ## `hostwright --version`
 
-Prints the current release candidate version:
+Prints the current development version:
 
 ```text
-0.1.0-alpha.1
+0.0.2-dev
 ```
 
-The first public release target is `v0.1.0-alpha.1`.
+The release target is `v0.0.2`. The binary does not report the release version until the GA gate passes.
+
+## `hostwright capabilities [--json | --output text|json]`
+
+Prints the current product version, release target, locked contract versions, and a deterministic catalog of stable, experimental, unavailable, and externally blocked capabilities. Each capability names its owning phase, GitHub epic, reason, and required evidence classes.
+
+JSON is the machine-readable current-support source. The command performs no runtime observation, network access, state access, or mutation. It reports what this exact build declares; it does not convert a planned capability into support.
+
+## `hostwright migrate preview <path> [--json | --output text|json]`
+
+Reads a manifest and prints the deterministic Manifest v2 preview without writing the source, state, or runtime. Explicit v1 has its version replaced, versionless input receives `version: 2`, and v2 is idempotent. Future or unsupported versions fail closed. Phase 01 changes only the version contract; Phase 04 owns semantic migration for the complete workload schema.
 
 ## `hostwright init`
 
@@ -125,7 +137,7 @@ Text success prints the converted manifest and warnings on stderr. JSON success 
   "kind": "stackImport",
   "sourcePath": "compose.yaml",
   "succeeded": true,
-  "manifest": "version: 1\nproject: demo\n...",
+  "manifest": "version: 2\nproject: demo\n...",
   "warnings": []
 }
 ```

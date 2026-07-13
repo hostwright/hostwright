@@ -1,0 +1,37 @@
+name: Roadmap governance
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, labeled, unlabeled, reopened]
+  issues:
+    types: [closed]
+
+jobs:
+  pull-request-closure-gate:
+    if: github.event_name == 'pull_request'
+    runs-on: macos-26
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate roadmap manifest
+        run: |
+          python3 scripts/roadmap-governance.py validate
+          python3 scripts/render-roadmap-index.py check
+      - name: Enforce final-PR evidence
+        run: python3 scripts/roadmap-governance.py check-pr --event "$GITHUB_EVENT_PATH"
+
+  issue-closure-gate:
+    if: github.event_name == 'issues'
+    runs-on: macos-26
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Enforce issue evidence and child closure
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/roadmap-governance.py enforce-closure --event "$GITHUB_EVENT_PATH"

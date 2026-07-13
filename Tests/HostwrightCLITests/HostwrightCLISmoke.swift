@@ -106,7 +106,7 @@ final class HostwrightCLITests: XCTestCase {
         let result = HostwrightCLI.run(arguments: ["--version"], environment: environment(files: FileBox()))
 
         XCTAssertEqual(result.exitCode, 0)
-        XCTAssertEqual(result.standardOutput, "0.1.0-alpha.1\n")
+        XCTAssertEqual(result.standardOutput, "0.0.2-dev\n")
         XCTAssertEqual(result.standardError, "")
     }
 
@@ -121,7 +121,9 @@ final class HostwrightCLITests: XCTestCase {
         XCTAssertTrue(result.standardOutput.contains("hostwright recovery --state-db <path> [--project <name>] [--output text|json]"))
         XCTAssertTrue(result.standardOutput.contains("hostwright diagnostics --state-db <path> --bundle <path>"))
         XCTAssertTrue(result.standardOutput.contains("hostwright extension check --declaration <absolute-path> --executable <absolute-path> [--output text|json]"))
-        XCTAssertTrue(result.standardOutput.contains("JSON output is supported for import-stack, plan, status, events, recovery, extension check, doctor"))
+        XCTAssertTrue(result.standardOutput.contains("hostwright capabilities [--json|--output text|json]"))
+        XCTAssertTrue(result.standardOutput.contains("hostwright migrate preview <path> [--json|--output text|json]"))
+        XCTAssertTrue(result.standardOutput.contains("JSON output is supported for capabilities, migrate preview"))
         XCTAssertTrue(result.standardOutput.contains("import-stack reads a narrow safe stack-file subset"))
         XCTAssertTrue(result.standardOutput.contains("Diagnostics writes a local redacted JSON bundle only"))
         XCTAssertTrue(result.standardOutput.contains("hostwright import-stack compose.yaml --output json"))
@@ -176,7 +178,7 @@ final class HostwrightCLITests: XCTestCase {
 
         XCTAssertEqual(result.exitCode, 0)
         XCTAssertEqual(result.standardError, "")
-        XCTAssertTrue(result.standardOutput.contains("version: 1\nproject: demo"))
+        XCTAssertTrue(result.standardOutput.contains("version: 2\nproject: demo"))
         XCTAssertTrue(result.standardOutput.contains("image: ghcr.io/example/api:latest"))
         XCTAssertTrue(result.standardOutput.contains("env:\n      APP_ENV: development"))
         XCTAssertNil(files.files[HostwrightIdentity.manifestFileName])
@@ -258,6 +260,7 @@ final class HostwrightCLITests: XCTestCase {
         let files = FileBox(
             files: [
                 HostwrightIdentity.manifestFileName: """
+                version: 2
                 project: api-local
                 services:
                   api:
@@ -282,6 +285,7 @@ final class HostwrightCLITests: XCTestCase {
         let files = FileBox(
             files: [
                 HostwrightIdentity.manifestFileName: """
+                version: 2
                 project: api-local
                 services:
                   api:
@@ -435,6 +439,9 @@ final class HostwrightCLITests: XCTestCase {
             XCTAssertTrue(result.standardOutput.contains("Applied action: createMissingService demo/api"))
             XCTAssertFalse(result.standardOutput.contains(fakeSecret))
             XCTAssertEqual(adapter.executedActions.map(\.kind), [.create])
+            let confirmation = try XCTUnwrap(adapter.confirmations.first)
+            let context = try XCTUnwrap(confirmation.context)
+            XCTAssertNil(context.validationIssue)
 
             let store = SQLiteStateStore(path: databasePath)
             let operations = try store.operations.loadAll()
@@ -444,6 +451,8 @@ final class HostwrightCLITests: XCTestCase {
             XCTAssertEqual(groups.map(\.status), [.succeeded])
             XCTAssertEqual(groups[0].checkpoint, "completed")
             XCTAssertFalse(groups[0].rollbackAvailable)
+            XCTAssertTrue(groups[0].intentJSONRedacted.contains(context.resourceUUID))
+            XCTAssertEqual(groups[0].fencingToken, context.fencingToken)
             let steps = try store.operationGroupSteps.load(groupID: groups[0].id)
             XCTAssertEqual(steps.map(\.stepKey), ["rollback", "runtime-execute", "runtime-execute"])
             XCTAssertEqual(steps.map(\.status), [.unsupported, .started, .succeeded])
@@ -455,6 +464,9 @@ final class HostwrightCLITests: XCTestCase {
             let ownership = try store.ownership.loadAll()
             XCTAssertEqual(ownership.count, 1)
             XCTAssertTrue(ownership[0].cleanupEligible)
+            XCTAssertEqual(ownership[0].resourceUUID, context.resourceUUID)
+            XCTAssertEqual(ownership[0].projectResourceUUID, context.projectResourceUUID)
+            XCTAssertEqual(ownership[0].fencingToken, context.fencingToken)
         }
     }
 
@@ -481,6 +493,36 @@ final class HostwrightCLITests: XCTestCase {
         }
     }
 
+    func testApplyRejectsLegacyRuntimeProviderAPIBeforeMutation() throws {
+        try withTemporaryDatabase { databasePath in
+            let files = FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest])
+            let observed = ObservedRuntimeState(
+                projectName: "demo",
+                services: [],
+                adapterMetadata: RuntimeAdapterMetadata(
+                    providerAPIVersion: 1,
+                    adapterName: "legacy-provider",
+                    adapterVersion: "1.0.0",
+                    runtimeName: "legacy-runtime",
+                    supportsMutation: true,
+                    capabilities: [.readOnlyObservation, .lifecycleMutation]
+                )
+            )
+            let adapter = ScriptedApplyRuntimeAdapter(observedState: observed)
+            let expectedHash = try planHash(for: singleServiceManifest, observed: observed)
+
+            let result = HostwrightCLI.run(
+                arguments: ["apply", "--state-db", databasePath, "--confirm-plan", expectedHash],
+                environment: environment(files: files, runtimeAdapter: adapter)
+            )
+
+            XCTAssertEqual(result.exitCode, CLIExitCode.runtimeUnavailable.rawValue)
+            XCTAssertTrue(result.standardError.contains("requires Runtime Provider API v2"))
+            XCTAssertTrue(adapter.executedActions.isEmpty)
+            XCTAssertTrue(try SQLiteStateStore(path: databasePath).operationGroups.loadAll().isEmpty)
+        }
+    }
+
     func testApplyCanStartStoppedServiceWhenRestartPolicyAllowsIt() throws {
         try withTemporaryDatabase { databasePath in
             let files = FileBox(files: [HostwrightIdentity.manifestFileName: restartableServiceManifest])
@@ -488,6 +530,7 @@ final class HostwrightCLITests: XCTestCase {
             try store.migrate()
             try saveDesiredManifest(store: store, manifestText: restartableServiceManifest)
             try saveOwnership(store: store)
+            let originalOwnership = try XCTUnwrap(store.ownership.loadAll().first)
             let adapter = ScriptedApplyRuntimeAdapter(
                 observedState: ObservedRuntimeState(
                     projectName: "demo",
@@ -513,6 +556,14 @@ final class HostwrightCLITests: XCTestCase {
             XCTAssertEqual(result.exitCode, 0)
             XCTAssertTrue(result.standardOutput.contains("Applied action: proposeStartStoppedService demo/api"))
             XCTAssertEqual(adapter.executedActions.map(\.kind), [.start])
+            let context = try XCTUnwrap(adapter.confirmations.first?.context)
+            XCTAssertEqual(context.resourceUUID, originalOwnership.resourceUUID)
+            XCTAssertNotEqual(context.fencingToken, originalOwnership.fencingToken)
+            let operationGroup = try XCTUnwrap(store.operationGroups.loadAll().first)
+            let intent = try jsonObject(operationGroup.intentJSONRedacted)
+            XCTAssertEqual(intent["resourceUUID"] as? String, context.resourceUUID)
+            XCTAssertEqual(operationGroup.fencingToken, context.fencingToken)
+            XCTAssertEqual(try XCTUnwrap(store.ownership.loadAll().first).fencingToken, context.fencingToken)
 
             let states = try store.restartPolicies.loadProject(projectID: "project-demo")
             XCTAssertEqual(states.count, 1)
@@ -531,7 +582,7 @@ final class HostwrightCLITests: XCTestCase {
         try withTemporaryDatabase { databasePath in
             let serviceName = "0123456789abcdef0123456789abcdef"
             let manifestText = """
-            version: 1
+            version: 2
             project: v2-a-b
             services:
               \(serviceName):
@@ -1778,6 +1829,8 @@ final class HostwrightCLITests: XCTestCase {
 
             XCTAssertEqual(confirmed.exitCode, 0)
             XCTAssertEqual(adapter.executedActions.map(\.kind), [.remove])
+            let cleanupContext = try XCTUnwrap(adapter.confirmations.last?.context)
+            XCTAssertNil(cleanupContext.validationIssue)
             let events = try SQLiteStateStore(path: databasePath).events.loadAll()
             XCTAssertTrue(events.contains { $0.type == "cleanup.planned" })
             XCTAssertTrue(events.contains { $0.type == "cleanup.deleted" })
@@ -1788,6 +1841,7 @@ final class HostwrightCLITests: XCTestCase {
             let ownership = try SQLiteStateStore(path: databasePath).ownership.loadAll()
             XCTAssertEqual(ownership.count, 1)
             XCTAssertFalse(ownership[0].cleanupEligible)
+            XCTAssertEqual(ownership[0].fencingToken, cleanupContext.fencingToken)
         }
     }
 
@@ -2120,6 +2174,7 @@ final class HostwrightCLITests: XCTestCase {
     func testApplyExecutesWithOriginalSecretEnvAndRedactsSurfaces() throws {
         try withTemporaryDatabase { databasePath in
             let manifest = """
+            version: 2
             project: demo
             services:
               api:
@@ -2182,6 +2237,7 @@ final class HostwrightCLITests: XCTestCase {
     func testApplyIdempotencyBlocksDuplicateSecretPlanBeforeSecretResolution() throws {
         try withTemporaryDatabase { databasePath in
             let manifest = """
+            version: 2
             project: demo
             services:
               api:
@@ -2217,6 +2273,7 @@ final class HostwrightCLITests: XCTestCase {
     func testApplyFailsClosedWhenSecretReferenceBackendIsUnavailable() throws {
         try withTemporaryDatabase { databasePath in
             let manifest = """
+            version: 2
             project: demo
             services:
               api:
@@ -2454,6 +2511,7 @@ final class HostwrightCLITests: XCTestCase {
 
     private var singleServiceManifest: String {
         """
+        version: 2
         project: demo
         services:
           api:
@@ -2469,6 +2527,7 @@ final class HostwrightCLITests: XCTestCase {
 
     private var restartableServiceManifest: String {
         """
+        version: 2
         project: demo
         services:
           api:
@@ -2483,6 +2542,7 @@ final class HostwrightCLITests: XCTestCase {
 
     private var managedRestartHealthManifest: String {
         """
+        version: 2
         project: demo
         services:
           api:
@@ -2500,6 +2560,7 @@ final class HostwrightCLITests: XCTestCase {
 
     private var twoServiceManifest: String {
         """
+        version: 2
         project: demo
         services:
           api:
@@ -2687,6 +2748,7 @@ final class HostwrightCLITests: XCTestCase {
         let logsText: String
         let onExecute: ExecuteHook?
         var executedActions: [PlannedRuntimeAction] = []
+        var confirmations: [RuntimeMutationConfirmation] = []
         var logRequests: [RuntimeServiceIdentity] = []
         var logResourceIdentifiers: [String] = []
         var observedDesiredStates: [DesiredRuntimeState] = []
@@ -2738,6 +2800,9 @@ final class HostwrightCLITests: XCTestCase {
 
         func execute(_ action: PlannedRuntimeAction, confirmation: RuntimeMutationConfirmation?) async throws -> RuntimeEvent {
             executedActions.append(action)
+            if let confirmation {
+                confirmations.append(confirmation)
+            }
             try onExecute?(action)
             if let executeError {
                 throw executeError

@@ -39,7 +39,7 @@ public enum LocalControlRequestParser {
     }
 
     private static func validate(_ request: LocalControlRequest) throws {
-        guard request.apiVersion == 1 else {
+        guard request.apiVersion == HostwrightContractVersions.controlAPI else {
             throw invalid("Local control API version \(request.apiVersion) is not supported.")
         }
         guard request.requestID.range(

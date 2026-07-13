@@ -1,3 +1,5 @@
+import Foundation
+import HostwrightCore
 import HostwrightSecrets
 
 public struct RuntimeServiceIdentity: Equatable, Hashable, Sendable {
@@ -468,7 +470,7 @@ public struct RuntimeEvent: Equatable, Sendable {
     }
 }
 
-public enum RuntimeCapability: String, Equatable, Hashable, Sendable {
+public enum RuntimeCapability: String, Codable, Equatable, Hashable, Sendable {
     case readOnlyObservation
     case lifecycleMutation
     case logStreaming
@@ -478,7 +480,8 @@ public enum RuntimeCapability: String, Equatable, Hashable, Sendable {
     case networkInspection
 }
 
-public struct RuntimeAdapterMetadata: Equatable, Sendable {
+public struct RuntimeAdapterMetadata: Codable, Equatable, Sendable {
+    public let providerAPIVersion: Int
     public let adapterName: String
     public let adapterVersion: String
     public let runtimeName: String
@@ -487,6 +490,7 @@ public struct RuntimeAdapterMetadata: Equatable, Sendable {
     public let capabilities: [RuntimeCapability]
 
     public init(
+        providerAPIVersion: Int = HostwrightContractVersions.runtimeProviderAPI,
         adapterName: String,
         adapterVersion: String,
         runtimeName: String,
@@ -494,11 +498,74 @@ public struct RuntimeAdapterMetadata: Equatable, Sendable {
         supportsMutation: Bool,
         capabilities: [RuntimeCapability]
     ) {
+        self.providerAPIVersion = providerAPIVersion
         self.adapterName = adapterName
         self.adapterVersion = adapterVersion
         self.runtimeName = runtimeName
         self.runtimeVersion = runtimeVersion
         self.supportsMutation = supportsMutation
         self.capabilities = capabilities
+    }
+}
+
+public enum RuntimeProviderCompatibility {
+    public static func mutationIncompatibility(_ metadata: RuntimeAdapterMetadata) -> String? {
+        guard metadata.providerAPIVersion == HostwrightContractVersions.runtimeProviderAPI else {
+            return "Runtime provider \(metadata.adapterName) advertises API v\(metadata.providerAPIVersion); Hostwright requires Runtime Provider API v\(HostwrightContractVersions.runtimeProviderAPI)."
+        }
+        return nil
+    }
+}
+
+public struct RuntimeMutationContext: Equatable, Sendable {
+    public let providerAPIVersion: Int
+    public let operationID: String
+    public let resourceUUID: String
+    public let resourceGeneration: Int
+    public let projectResourceUUID: String
+    public let projectGeneration: Int
+    public let providerGeneration: Int
+    public let fencingToken: String
+
+    public init(
+        providerAPIVersion: Int = HostwrightContractVersions.runtimeProviderAPI,
+        operationID: String,
+        resourceUUID: String,
+        resourceGeneration: Int,
+        projectResourceUUID: String,
+        projectGeneration: Int,
+        providerGeneration: Int,
+        fencingToken: String
+    ) {
+        self.providerAPIVersion = providerAPIVersion
+        self.operationID = operationID
+        self.resourceUUID = resourceUUID
+        self.resourceGeneration = resourceGeneration
+        self.projectResourceUUID = projectResourceUUID
+        self.projectGeneration = projectGeneration
+        self.providerGeneration = providerGeneration
+        self.fencingToken = fencingToken
+    }
+
+    public var validationIssue: String? {
+        guard providerAPIVersion == HostwrightContractVersions.runtimeProviderAPI else {
+            return "Mutation context provider API version is unsupported."
+        }
+        guard !operationID.isEmpty,
+              operationID.count <= 256,
+              operationID.rangeOfCharacter(from: .controlCharacters) == nil else {
+            return "Mutation context operation identity is invalid."
+        }
+        guard HostwrightResourceUUID.isValid(resourceUUID),
+              HostwrightResourceUUID.isValid(projectResourceUUID),
+              HostwrightResourceUUID.isValid(fencingToken) else {
+            return "Mutation context resource, project, and fencing identities must be UUIDs."
+        }
+        guard resourceGeneration > 0,
+              projectGeneration > 0,
+              providerGeneration > 0 else {
+            return "Mutation context generations must be positive."
+        }
+        return nil
     }
 }

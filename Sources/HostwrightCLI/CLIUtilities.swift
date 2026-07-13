@@ -274,6 +274,23 @@ enum CLIJSON {
         ])
     }
 
+    static func capabilities(_ report: HostwrightCapabilityReport) -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        return String(data: try! encoder.encode(report), encoding: .utf8)! + "\n"
+    }
+
+    static func manifestMigrationPreview(_ preview: ManifestMigrationPreview) -> String {
+        render([
+            "kind": "manifestMigrationPreview",
+            "sourceVersion": preview.sourceVersion,
+            "targetVersion": preview.targetVersion,
+            "migratedManifest": preview.migratedManifest,
+            "changes": preview.changes.map(\.description),
+            "writesSource": false
+        ])
+    }
+
     static func extensionHandshake(_ result: ExtensionHandshakeResult) -> String {
         render([
             "kind": "extensionHandshake",

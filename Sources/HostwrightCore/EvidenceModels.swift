@@ -1,11 +1,17 @@
 import Foundation
 
-public enum HostwrightEvidenceClass: String, Codable, Equatable, Sendable {
+public enum HostwrightEvidenceClass: String, Codable, CaseIterable, Equatable, Hashable, Sendable {
     case unitContract = "unit-contract"
     case localIntegration = "local-integration"
     case liveRuntime = "live-runtime"
     case hardwareBenchmark = "hardware-benchmark"
     case distributionArtifact = "distribution-artifact"
+    case migrationUpgrade = "migration-upgrade"
+    case securityAssessment = "security-assessment"
+    case resilienceChaos = "resilience-chaos"
+    case multiHost = "multi-host"
+    case interopConformance = "interop-conformance"
+    case uxAccessibility = "ux-accessibility"
 }
 
 public enum HostwrightEvidenceStatus: String, Codable, Equatable, Sendable {
@@ -188,7 +194,14 @@ public struct HostwrightEvidenceReport: Codable, Equatable, Sendable {
             }
         }
 
-        if evidenceClass == .liveRuntime || evidenceClass == .hardwareBenchmark {
+        let exactCleanupEvidence: Set<HostwrightEvidenceClass> = [
+            .liveRuntime,
+            .hardwareBenchmark,
+            .resilienceChaos,
+            .multiHost,
+            .interopConformance
+        ]
+        if exactCleanupEvidence.contains(evidenceClass) {
             guard status != .passed ||
                     (cleanup.status == .succeeded && !cleanup.exactResourceIdentifiers.isEmpty) else {
                 throw HostwrightEvidenceValidationError.invalidCleanup

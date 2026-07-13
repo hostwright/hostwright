@@ -2,14 +2,15 @@ import HostwrightCore
 import HostwrightSecrets
 
 public struct HostwrightManifest: Equatable, Sendable {
-    public static let currentVersion = 1
+    public static let currentVersion = HostwrightContractVersions.manifest
+    public static let legacyVersion = 1
 
     public var version: Int?
     public var project: String?
     public var imagePolicy: HostwrightImagePolicy?
     public var services: [HostwrightService]
     public var effectiveVersion: Int {
-        version ?? Self.currentVersion
+        version ?? Self.legacyVersion
     }
     public var effectiveImagePolicy: HostwrightImagePolicy {
         imagePolicy ?? .allowTags

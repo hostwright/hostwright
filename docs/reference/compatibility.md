@@ -1,38 +1,55 @@
 # Compatibility
 
-Hostwright `v0.1.0-alpha.1` is a source-only alpha and is not production ready.
+Status: exact development evidence for `0.0.2-dev`; not a `v0.0.2` GA support claim.
 
-Phase 39 defines beta readiness criteria, but no beta compatibility claim exists until a beta tag is approved and release notes are published.
+## Current Development Boundary
 
-## Compatibility Matrix
-
-| Area | Supported for `v0.1.0-alpha.1` | Notes |
+| Area | Current evidence-backed scope | v0.0.2 target |
 | --- | --- | --- |
-| CPU | Apple silicon only | Intel Macs are outside first alpha scope. |
-| macOS | macOS 26 or newer | Older macOS versions are outside first alpha scope. |
-| Build system | Swift Package Manager | `Package.swift` declares macOS 26. |
-| Swift tools | Swift 6.2+ expected | Local verification used Swift 6.3.3 through full Xcode developer tools. |
-| Runtime | Apple container CLI | Required for runtime observation, apply, logs, status, and cleanup. |
-| Resource intelligence and benchmark lab | Local host facts plus an explicit evidence-gated benchmark command | Doctor remains read-only; Phase 36 can measure a local pre-existing image through RuntimeAdapter with bounded samples and exact cleanup. Missing attended sleep/wake or battery capability remains blocked; no capacity guarantee. |
-| State | Explicit SQLite database path | No default state path is provided. |
-| Public artifact | Source only | No binary download, installer package, Homebrew formula, signing, or notarization is published. |
-| Local distribution evidence | Unsigned macOS ARM64 archive only | `hostwright-dist` verifies local archive/checksum/SPDX/provenance and temporary-prefix lifecycle; every report remains blocked for signing, notarization, Gatekeeper, `.pkg`, and publication. |
-| Beta readiness | Checklist only | `docs/release/beta-readiness.md` defines required evidence before any beta tag; it does not create beta support by itself. |
+| CPU | Apple silicon only. | Apple silicon; M1/8 GB is the minimum lab cell. |
+| macOS | Swift package target is macOS 26+. | Apple’s current and previous supported macOS major at GA, subject to physical qualification. |
+| Swift | Package uses Swift tools 6.2; local Phase 01 verification records the exact compiler used. | Reproducible release toolchain recorded in signed provenance. |
+| Apple `container` | Local observation evidence exists for Apple `container` 1.0.0 shapes and narrow mutations; broad conformance is not claimed. | Current and previous tested Apple `container` minor at GA; Phase 03 begins the 1.1+ structured-codec/conformance track. |
+| Containerization | Not implemented. | One exact pinned Containerization version per Hostwright release through an out-of-process helper. |
+| Manifest | Explicit v2 contract with a restricted parser; v1/versionless migration preview. | Complete executable Manifest v2 workload schema. |
+| Control API | v2 contract; current implementation remains a bounded one-shot local process. | Persistent authenticated Unix-socket API with N/N-1 compatibility after v2 establishes the baseline. |
+| Runtime providers | Runtime Provider API v2 metadata and narrow Apple adapter behavior. | Apple CLI and Containerization providers passing the same declared-capability suite. |
+| State | SQLite schema v7 for standalone/node-local state. | Qualified backup/restore/repair and etcd 3.7.x authority for multi-Mac clusters. |
+| Distribution | Source build and unsigned developer artifact evidence only. | Signed/notarized archive and `.pkg`, vendor Homebrew tap, SBOM/provenance, reversible lifecycle. |
+| Kubernetes | Not implemented. | Current and previous supported Kubernetes minor through real pod-sandbox VM, CRI/CNI/CSI/Helm conformance. |
+| Docker ecosystem | Narrow import-only stack conversion; no Docker API. | Published Docker API/client matrix, Compose/Podman/Testcontainers conformance. |
+| GUI/cloud | Not implemented beyond requirements/local policy models. | Native accessible GUI; optional cloud that never breaks complete offline local operation. |
 
-## SwiftPM Platform
+The current machine and tool versions used for evidence belong in the final evidence record, not in a timeless claim. Run:
 
-```swift
-platforms: [.macOS(.v26)]
+```bash
+hostwright --version
+hostwright capabilities --json
+sw_vers
+uname -m
+swift --version
+container --version
 ```
 
-This was locally validated with Swift 6.3.3.
+Missing `container` is allowed for non-runtime commands. It blocks live-runtime evidence and runtime workflows; it does not become a skipped success.
 
-## Runtime Limitation
+Phase 36 can measure a local pre-existing image through RuntimeAdapter when every required capability and exact-cleanup gate passes. That retained local path is evidence for only the recorded machine/image/runtime combination and is not a GA compatibility or capacity claim.
 
-The package can express macOS 26, but runtime compatibility is not complete. Read-only observation is implemented behind `RuntimeAdapter` for verified Apple container output shapes. Unsupported output still fails closed instead of being guessed.
+## Explicit Unsupported Results
 
-Runtime mutation remains narrow: create one missing managed service, start one restart-policy-allowed managed service, restart one exact Hostwright-owned running service with fresh unhealthy health state, delete one exact cleanup-eligible managed container after dry-run token confirmation, or run an explicitly confirmed bounded benchmark using unique Hostwright-owned resources and exact cleanup.
+Until their owning phase closes, unsupported manifest fields, provider capabilities, API versions/endpoints, Kubernetes/Docker operations, and client-specific fields must fail with stable explicit diagnostics. Hostwright never silently drops a requested behavior and then reports success.
 
-## Resource Intelligence Limitation
+## Permanent Platform Boundaries
 
-`hostwright doctor` can report local host facts such as architecture, macOS major version, physical memory, processor count, and current thermal state. It does not run Apple container commands or infer production capacity. `hostwright benchmark` is a separate explicitly confirmed local path that records exact Apple container version, bounded boot/poll/stats samples, battery/thermal facts, and cleanup evidence for one recorded host and commit.
+- No Intel or old-macOS emulation.
+- No private Apple APIs.
+- No unsafe cluster writes without quorum.
+- No unauthenticated public control endpoint.
+- No silent telemetry.
+- No destructive garbage collection of unmanaged resources.
+
+Direct guest GPU/ANE access is not claimed without a supported Apple API. Phase 10 implements the user outcome through a signed authenticated host-native Metal/Core ML/MLX service and can add direct passthrough later only with public-API conformance evidence.
+
+## GA Matrix Rule
+
+The exact GA matrix is frozen in Phase 15. “Current and previous” is a qualification goal, not permission to claim an untested combination. A failing unsafe upstream combination narrows the published matrix with evidence and an accountable issue; it is never papered over with a compatibility shim.

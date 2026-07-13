@@ -1,5 +1,7 @@
 # Source Traceability
 
+> **Historical source map:** this file preserves the earlier source-to-requirement mapping. Current scope, implementation ownership, and release disposition are defined by the [v0.0.2 roadmap](../roadmap/v0.0.2/IMPLEMENTATION_PLAN.md); prior rejected/deferred language does not remove a roadmap workstream.
+
 This file maps the preserved source-material claims to Hostwright requirement IDs. It does not add new product claims.
 
 ## Source Documents

@@ -64,6 +64,7 @@ public struct RuntimeMutationConfirmation: Equatable, Sendable {
     public let manifestHash: String?
     public let profileHash: String?
     public let approvalHash: String?
+    public let context: RuntimeMutationContext?
 
     public init(
         confirmed: Bool,
@@ -71,7 +72,8 @@ public struct RuntimeMutationConfirmation: Equatable, Sendable {
         planHash: String? = nil,
         manifestHash: String? = nil,
         profileHash: String? = nil,
-        approvalHash: String? = nil
+        approvalHash: String? = nil,
+        context: RuntimeMutationContext? = nil
     ) {
         self.confirmed = confirmed
         self.reason = reason
@@ -79,6 +81,7 @@ public struct RuntimeMutationConfirmation: Equatable, Sendable {
         self.manifestHash = manifestHash
         self.profileHash = profileHash
         self.approvalHash = approvalHash
+        self.context = context
     }
 }
 

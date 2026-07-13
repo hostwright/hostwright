@@ -15,10 +15,18 @@ public struct DesiredStateRepository: Sendable {
         manifestHash: String,
         desiredGeneration: Int,
         manifest: HostwrightManifest,
-        timestamp: String
+        timestamp: String,
+        mutationProvider: String? = nil
     ) throws {
         guard let projectName = manifest.project, !projectName.isEmpty else {
             throw StateStoreError.invalidRecord("Manifest snapshot requires a project name.")
+        }
+        guard desiredGeneration > 0 else {
+            throw StateStoreError.invalidRecord("Manifest snapshot desired generation must be positive.")
+        }
+        if let mutationProvider,
+           mutationProvider.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            throw StateStoreError.invalidRecord("Manifest snapshot mutation provider must be non-empty when supplied.")
         }
 
         let project = StateProjectRecord(
@@ -27,7 +35,10 @@ public struct DesiredStateRepository: Sendable {
             manifestPath: manifestPath,
             manifestHash: manifestHash,
             createdAt: timestamp,
-            updatedAt: timestamp
+            updatedAt: timestamp,
+            manifestVersion: manifest.effectiveVersion,
+            mutationProvider: mutationProvider,
+            providerGeneration: mutationProvider == nil ? 0 : desiredGeneration
         )
 
         let services = try manifest.services.map { service in
@@ -36,7 +47,8 @@ public struct DesiredStateRepository: Sendable {
                 manifestHash: manifestHash,
                 desiredGeneration: desiredGeneration,
                 service: service,
-                timestamp: timestamp
+                timestamp: timestamp,
+                mutationProvider: mutationProvider
             )
         }
 
@@ -54,7 +66,8 @@ public struct DesiredStateRepository: Sendable {
         try store.withValidatedConnection(readOnly: true) { connection in
             let rows = try connection.query(
                 """
-                SELECT id, name, manifest_path, manifest_hash, created_at, updated_at
+                SELECT id, name, manifest_path, manifest_hash, created_at, updated_at,
+                       resource_uuid, manifest_version, mutation_provider, provider_generation
                 FROM projects
                 WHERE id = ?
                 """,
@@ -72,7 +85,8 @@ public struct DesiredStateRepository: Sendable {
             let rows = try connection.query(
                 """
                 SELECT id, project_id, service_name, image, command_json, ports_json, mounts_json,
-                       env_json_redacted, manifest_hash, desired_generation, created_at, updated_at
+                       env_json_redacted, manifest_hash, desired_generation, created_at, updated_at,
+                       resource_uuid, resource_generation, mutation_provider
                 FROM desired_services
                 WHERE project_id = ?
                 ORDER BY desired_generation ASC, service_name ASC
@@ -88,7 +102,8 @@ public struct DesiredStateRepository: Sendable {
         manifestHash: String,
         desiredGeneration: Int,
         service: HostwrightService,
-        timestamp: String
+        timestamp: String,
+        mutationProvider: String?
     ) throws -> DesiredServiceRecord {
         guard let image = service.image, !image.isEmpty else {
             throw StateStoreError.invalidRecord("Desired service \(service.name) requires an image.")
@@ -111,19 +126,38 @@ public struct DesiredStateRepository: Sendable {
             manifestHash: manifestHash,
             desiredGeneration: desiredGeneration,
             createdAt: timestamp,
-            updatedAt: timestamp
+            updatedAt: timestamp,
+            mutationProvider: mutationProvider
         )
     }
 
     private func upsert(_ project: StateProjectRecord, on connection: SQLiteConnection) throws {
+        if let incomingProvider = project.mutationProvider {
+            let existingProvider = try connection.query(
+                "SELECT mutation_provider FROM projects WHERE id = ? LIMIT 1",
+                bindings: [.text(project.id)]
+            ).first?.first ?? nil
+            if let existingProvider, existingProvider != incomingProvider {
+                throw StateStoreError.invalidRecord(
+                    "Project \(project.id) is bound to mutation provider \(existingProvider); explicit provider migration is required before using \(incomingProvider)."
+                )
+            }
+        }
         try connection.run(
             """
-            INSERT INTO projects (id, name, manifest_path, manifest_hash, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO projects (
+                id, name, manifest_path, manifest_hash, created_at, updated_at,
+                resource_uuid, manifest_version, mutation_provider, provider_generation
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
                 manifest_path = excluded.manifest_path,
                 manifest_hash = excluded.manifest_hash,
+                resource_uuid = excluded.resource_uuid,
+                manifest_version = excluded.manifest_version,
+                mutation_provider = COALESCE(projects.mutation_provider, excluded.mutation_provider),
+                provider_generation = MAX(projects.provider_generation, excluded.provider_generation),
                 updated_at = excluded.updated_at
             """,
             bindings: [
@@ -132,7 +166,11 @@ public struct DesiredStateRepository: Sendable {
                 optionalText(project.manifestPath),
                 .text(project.manifestHash),
                 .text(project.createdAt),
-                .text(project.updatedAt)
+                .text(project.updatedAt),
+                .text(project.resourceUUID),
+                .int(project.manifestVersion),
+                optionalText(project.mutationProvider),
+                .int(project.providerGeneration)
             ]
         )
     }
@@ -143,8 +181,9 @@ public struct DesiredStateRepository: Sendable {
             INSERT INTO desired_services (
                 id, project_id, service_name, image, command_json, ports_json, mounts_json,
                 env_json_redacted, manifest_hash, desired_generation, created_at, updated_at
+                , resource_uuid, resource_generation, mutation_provider
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(project_id, service_name, desired_generation) DO UPDATE SET
                 image = excluded.image,
                 command_json = excluded.command_json,
@@ -152,6 +191,9 @@ public struct DesiredStateRepository: Sendable {
                 mounts_json = excluded.mounts_json,
                 env_json_redacted = excluded.env_json_redacted,
                 manifest_hash = excluded.manifest_hash,
+                resource_uuid = desired_services.resource_uuid,
+                resource_generation = MAX(desired_services.resource_generation, excluded.resource_generation),
+                mutation_provider = COALESCE(desired_services.mutation_provider, excluded.mutation_provider),
                 updated_at = excluded.updated_at
             """,
             bindings: [
@@ -166,7 +208,10 @@ public struct DesiredStateRepository: Sendable {
                 .text(service.manifestHash),
                 .int(service.desiredGeneration),
                 .text(service.createdAt),
-                .text(service.updatedAt)
+                .text(service.updatedAt),
+                .text(service.resourceUUID),
+                .int(service.resourceGeneration),
+                optionalText(service.mutationProvider)
             ]
         )
     }

@@ -66,7 +66,7 @@ final class HostwrightStateTests: XCTestCase {
         }
     }
 
-    func testVersionSixBackfillsExactObservedIdentifiersAndOwnershipIdentityVersion() throws {
+    func testVersionSixBackfillsSurviveTheVersionSevenContractMigration() throws {
         try withTemporaryStore { store, databaseURL in
             try MigrationRunner().apply(to: store, throughVersion: 5)
             let connection = try SQLiteConnection(path: databaseURL.path)
@@ -98,7 +98,7 @@ final class HostwrightStateTests: XCTestCase {
             XCTAssertEqual(observed.map(\.networksJSON), ["[]"])
             let ownership = try store.ownership.loadAll()
             XCTAssertEqual(ownership.map(\.identityVersion), [1])
-            XCTAssertEqual(try store.schemaVersion(), 6)
+            XCTAssertEqual(try store.schemaVersion(), MigrationRunner.latestSchemaVersion)
         }
     }
 
@@ -591,11 +591,20 @@ final class HostwrightStateTests: XCTestCase {
                 manualRecoveryHintRedacted: "inspect token=\(fakeSecret)",
                 createdAt: timestamp,
                 updatedAt: timestamp,
-                metadataJSONRedacted: #"{"token":"\#(fakeSecret)"}"#
+                metadataJSONRedacted: #"{"message":"token=\#(fakeSecret)","token":"\#(fakeSecret)"}"#,
+                intentJSONRedacted: #"{"message":"password=\#(fakeSecret)"}"#,
+                compensationJSONRedacted: #"[{"message":"auth=\#(fakeSecret)"}]"#,
+                verificationJSONRedacted: #"{"credential":"\#(fakeSecret)"}"#
             )
 
             let first = try store.operationGroups.acquire(group, currentTimestamp: "2026-07-01T00:00:00Z")
-            XCTAssertNotNil(first.acquired)
+            let acquired = try XCTUnwrap(first.acquired)
+            XCTAssertTrue(StateJSON.isObject(acquired.metadataJSONRedacted))
+            XCTAssertTrue(StateJSON.isObject(acquired.intentJSONRedacted))
+            XCTAssertTrue(StateJSON.isArray(acquired.compensationJSONRedacted))
+            XCTAssertTrue(StateJSON.isObject(acquired.verificationJSONRedacted))
+            XCTAssertFalse(acquired.metadataJSONRedacted.contains(fakeSecret))
+            XCTAssertTrue(acquired.metadataJSONRedacted.contains(#""message":"token=[REDACTED]""#))
             let second = try store.operationGroups.acquire(group, currentTimestamp: "2026-07-01T00:00:00Z")
             XCTAssertNil(second.acquired)
             XCTAssertEqual(second.existingActive?.id, "group-1")
@@ -615,6 +624,74 @@ final class HostwrightStateTests: XCTestCase {
             XCTAssertNil(loaded.lockExpiresAt)
             XCTAssertFalse(loaded.manualRecoveryHintRedacted.contains(fakeSecret))
             XCTAssertFalse(loaded.metadataJSONRedacted.contains(fakeSecret))
+            XCTAssertTrue(StateJSON.isObject(loaded.metadataJSONRedacted))
+
+            XCTAssertThrowsError(
+                try store.operationGroups.finish(
+                    groupID: "group-1",
+                    status: .succeeded,
+                    checkpoint: "verified",
+                    manualRecoveryHintRedacted: "none",
+                    updatedAt: "2026-07-01T00:00:02Z",
+                    metadataJSONRedacted: "{}"
+                )
+            ) { error in
+                guard case StateStoreError.invalidRecord(let message) = error else {
+                    return XCTFail("Expected terminal-transition rejection, got \(error)")
+                }
+                XCTAssertTrue(message.contains("already terminal"))
+            }
+        }
+    }
+
+    func testOperationGroupsRejectInvalidSagaPayloadsAndFinishInputs() throws {
+        try withTemporaryStore { store, _ in
+            try saveDesiredState(in: store)
+            let invalid = OperationGroupRecord(
+                id: "group-invalid",
+                operationID: "operation-invalid",
+                groupKind: "apply",
+                projectID: projectID,
+                serviceName: "api",
+                plannedActionType: "createMissingService",
+                status: .active,
+                groupIdempotencyKey: "plan-hash:create:api:invalid",
+                planHash: "plan-hash",
+                checkpoint: "prepared",
+                lockOwner: "hostwright-cli",
+                lockExpiresAt: "2026-07-01T00:10:00Z",
+                rollbackAvailable: false,
+                manualRecoveryHintRedacted: "inspect api",
+                createdAt: timestamp,
+                updatedAt: timestamp,
+                metadataJSONRedacted: #"{"message":"unterminated}"#
+            )
+
+            XCTAssertThrowsError(try store.operationGroups.acquire(invalid)) { error in
+                guard case StateStoreError.invalidRecord = error else {
+                    return XCTFail("Expected invalid-record rejection, got \(error)")
+                }
+            }
+            XCTAssertThrowsError(
+                try store.operationGroups.finish(
+                    groupID: "missing-group",
+                    status: .active,
+                    checkpoint: "prepared",
+                    manualRecoveryHintRedacted: "none",
+                    updatedAt: timestamp,
+                    metadataJSONRedacted: "{}"
+                )
+            )
+            XCTAssertThrowsError(
+                try store.operationGroups.finish(
+                    groupID: "missing-group",
+                    status: .failed,
+                    checkpoint: "failed",
+                    manualRecoveryHintRedacted: "none",
+                    updatedAt: timestamp,
+                    metadataJSONRedacted: "not-json"
+                )
+            )
         }
     }
 

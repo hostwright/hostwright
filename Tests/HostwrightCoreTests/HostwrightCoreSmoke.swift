@@ -36,7 +36,19 @@ final class HostwrightCoreTests: XCTestCase {
 
         XCTAssertEqual(
             evidenceClass["enum"] as? [String],
-            ["unit-contract", "local-integration", "live-runtime", "hardware-benchmark", "distribution-artifact"]
+            [
+                "unit-contract",
+                "local-integration",
+                "live-runtime",
+                "hardware-benchmark",
+                "distribution-artifact",
+                "migration-upgrade",
+                "security-assessment",
+                "resilience-chaos",
+                "multi-host",
+                "interop-conformance",
+                "ux-accessibility"
+            ]
         )
         XCTAssertEqual(status["enum"] as? [String], ["passed", "failed", "blocked"])
         XCTAssertEqual(commands["minItems"] as? Int, 1)
@@ -46,7 +58,8 @@ final class HostwrightCoreTests: XCTestCase {
         XCTAssertTrue(schemaText.contains(#"{"properties": {"status": {"const": "passed"}}}"#))
         XCTAssertTrue(policy.contains("there is no skipped-success status"))
         XCTAssertTrue(policy.contains("may not be converted to passed with a fixture"))
-        XCTAssertTrue(policy.contains("Exact cleanup failure makes live-runtime or hardware evidence fail"))
+        XCTAssertTrue(policy.contains("Exact cleanup failure makes live-runtime, hardware, resilience-chaos, multi-host, or interoperability evidence fail"))
+        XCTAssertTrue(policy.contains("<!-- hostwright-evidence-gate:v1 -->"))
         XCTAssertFalse(policy.localizedCaseInsensitiveContains("skipped tests count as passed"))
     }
 
@@ -56,7 +69,7 @@ final class HostwrightCoreTests: XCTestCase {
         XCTAssertEqual(HostwrightIdentity.daemonName, "hostwrightd")
         XCTAssertEqual(HostwrightIdentity.manifestFileName, "hostwright.yaml")
         XCTAssertEqual(HostwrightIdentity.domain, "hostwright.dev")
-        XCTAssertEqual(HostwrightIdentity.version, "0.1.0-alpha.1")
+        XCTAssertEqual(HostwrightIdentity.version, "0.0.2-dev")
     }
 
     func testCompatibilityGateRejectsUnsupportedPlatform() {
@@ -67,78 +80,36 @@ final class HostwrightCoreTests: XCTestCase {
         XCTAssertEqual(diagnostics.map(\.code), [.unsupportedArchitecture, .unsupportedMacOSVersion])
     }
 
-    func testReleaseDocsDescribeAlphaSourceOnlyTruth() throws {
+    func testReleaseDocsDescribeV002TruthAndPreserveHistory() throws {
         let root = try packageRoot()
         let releaseProcess = try read("docs/release/RELEASE_PROCESS.md", root: root)
         let distributionReadiness = try read("docs/release/distribution-readiness.md", root: root)
         let releaseNotes = try read("docs/release/v0.1.0-alpha.1-notes.md", root: root)
+        let immutableReleases = try read("docs/release/IMMUTABLE_RELEASES.json", root: root)
         let install = try read("docs/reference/install.md", root: root)
         let security = try read("docs/reference/security-safety.md", root: root)
         let limitations = try read("docs/reference/limitations.md", root: root)
-        let requirements = try read("docs/requirements/REQUIREMENTS.md", root: root)
-        let acceptance = try read("docs/requirements/ACCEPTANCE_MATRIX.md", root: root)
-        let traceability = try read("docs/requirements/SOURCE_TRACEABILITY.md", root: root)
         let implementationPlan = try read("docs/IMPLEMENTATION_PLAN.md", root: root)
-        let buildStatus = try read("docs/BUILD_STATUS.md", root: root)
-        let devlog = try read("docs/devlog/0035-packaging-signing-notarization.md", root: root)
-        let publicDocs = [
-            releaseProcess,
-            distributionReadiness,
-            releaseNotes,
-            install,
-            security,
-            limitations,
-            requirements,
-            acceptance,
-            traceability,
-            implementationPlan,
-            buildStatus,
-            devlog
-        ].joined(separator: "\n")
+        let v002Plan = try read("docs/roadmap/v0.0.2/IMPLEMENTATION_PLAN.md", root: root)
 
-        XCTAssertTrue(releaseProcess.contains("v0.1.0-alpha.1"))
-        XCTAssertTrue(releaseProcess.contains("GitHub Releases are created only for `v*` tags."))
-        XCTAssertTrue(releaseProcess.contains("Artifact policy: source-only"))
-        XCTAssertTrue(releaseProcess.contains("## Distribution Readiness Gate"))
-        XCTAssertTrue(distributionReadiness.contains("Status: Phase 35 operational unsigned artifact lane; public distribution remains blocked."))
-        XCTAssertTrue(distributionReadiness.contains("developer-only `hostwright-dist` tool"))
-        XCTAssertTrue(distributionReadiness.contains("unsigned and untrusted"))
-        XCTAssertTrue(distributionReadiness.contains("| `.pkg` installer | Blocked |"))
-        XCTAssertTrue(distributionReadiness.contains("zero installed Developer ID signing identities"))
-        XCTAssertTrue(distributionReadiness.contains("package-channel approval"))
+        XCTAssertTrue(releaseProcess.contains("active release target is `v0.0.2`"))
+        XCTAssertTrue(releaseProcess.contains("`0.0.2-dev` throughout implementation"))
+        XCTAssertTrue(releaseProcess.contains("`v*` tags are public releases or explicitly marked release candidates."))
+        XCTAssertTrue(releaseProcess.contains("two complete clean RC qualification runs"))
+        XCTAssertTrue(releaseProcess.contains("`brew install hostwright` depends on Homebrew-core acceptance"))
+        XCTAssertTrue(install.contains("`brew install hostwright` does not exist today"))
+        XCTAssertTrue(install.contains("brew install hostwright/tap/hostwright"))
+        XCTAssertTrue(install.contains("roadmap target, not available current behavior"))
+        XCTAssertTrue(security.contains("Hostwright `0.0.2-dev` is not production ready"))
+        XCTAssertTrue(limitations.contains("Current product truth is the `0.0.2-dev` capability report"))
+        XCTAssertTrue(v002Plan.contains("one master issue, 15 phase epics, and 167 child workstreams"))
+        XCTAssertTrue(v002Plan.contains("## Complete Limitation Register"))
+        XCTAssertTrue(implementationPlan.hasPrefix("# Historical Implementation Plan"))
+        XCTAssertTrue(distributionReadiness.contains("Historical Phase 35 record"))
         XCTAssertTrue(releaseNotes.localizedCaseInsensitiveContains("not production ready"))
-        XCTAssertTrue(install.localizedCaseInsensitiveContains("source-only alpha"))
-        XCTAssertTrue(install.contains("developer-only `hostwright-dist` evidence tool"))
-        XCTAssertTrue(security.localizedCaseInsensitiveContains("not production ready"))
-        XCTAssertTrue(security.contains("## Release Distribution Boundary"))
-        XCTAssertTrue(limitations.contains("Developer-only `hostwright-dist` unsigned macOS ARM64 archive evidence"))
-        XCTAssertTrue(requirements.contains("HW-REL-005"))
-        XCTAssertTrue(requirements.contains("HW-REL-006"))
-        XCTAssertTrue(acceptance.contains("Phase 35 Gate: Packaging Signing Notarization And Distribution"))
-        XCTAssertTrue(traceability.contains("HW-REL-005, HW-REL-006, HW-GOV-003"))
-        XCTAssertTrue(implementationPlan.contains("## Phase 35 Outputs"))
-        XCTAssertTrue(buildStatus.contains("Phase 35 is operational for unsigned local evidence"))
-        XCTAssertTrue(devlog.contains("Public binary and installer distribution remains blocked."))
-
-        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("brew install"))
-        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("installer package is provided"))
-        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("binary downloads are provided"))
-        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("signed binary is provided"))
-        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("notarized binary is provided"))
-        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Homebrew formula is provided"))
-        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("install script is provided"))
-        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("SBOM is provided"))
-        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("provenance is provided"))
-        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("package-channel support is implemented"))
-        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("launch agent installer is implemented"))
-        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("is production ready"))
-        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("supports Kubernetes"))
-        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("supports CRI"))
-        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("supports Docker API"))
-        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("supports Docker Compose"))
-        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("supports cloud"))
-        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("supports GPU"))
-        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("supports ANE"))
+        XCTAssertTrue(immutableReleases.contains("ff43d52600ffd809bceaf7ed4552c0269f2f23498a662551f62b127bc569b921"))
+        XCTAssertFalse(releaseProcess.localizedCaseInsensitiveContains("source-only alpha"))
+        XCTAssertFalse(install.localizedCaseInsensitiveContains("available today through homebrew"))
     }
 
     func testSecureExposureResearchKeepsCurrentSupportUnsupported() throws {
@@ -320,7 +291,7 @@ final class HostwrightCoreTests: XCTestCase {
         XCTAssertTrue(decision.contains("| Host-native accelerator helper or service | Defer to plugin or later prototype |"))
         XCTAssertTrue(decision.contains("| Scheduler accelerator dimensions | Defer and block |"))
         XCTAssertTrue(limitations.contains("Current Hostwright core does not expose Apple GPU, ANE, Metal, Core ML, MLX, PyTorch MPS"))
-        XCTAssertTrue(security.contains("Host-native accelerator helpers or services require a separate threat model"))
+        XCTAssertTrue(security.contains("Phase 10 implements a host-native accelerator service only with a threat model"))
         XCTAssertTrue(requirements.contains("HW-COMPAT-007"))
         XCTAssertTrue(resourceIntelligence.contains("See [Accelerator Boundary Research](accelerator-boundary-research.md)"))
         XCTAssertTrue(acceptance.contains("Phase 27 Gate: Apple Silicon Accelerator Boundary Research"))
@@ -717,7 +688,7 @@ final class HostwrightCoreTests: XCTestCase {
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("provenance is provided"))
     }
 
-    func testControlSurfaceDocsDescribePhase42OneShotAPIBoundary() throws {
+    func testControlSurfaceDocsDescribeHistoricalOneShotAndV002Boundary() throws {
         let root = try packageRoot()
         let boundary = try read("docs/architecture/control-surface-api-boundary.md", root: root)
         let cli = try read("docs/reference/cli.md", root: root)
@@ -744,7 +715,8 @@ final class HostwrightCoreTests: XCTestCase {
             phase42Devlog
         ].joined(separator: "\n")
 
-        XCTAssertTrue(boundary.contains("Status: Phase 21 requirements plus the bounded Phase 42 one-shot local API."))
+        XCTAssertTrue(boundary.contains("Status: Historical design record for the bounded one-shot API, now versioned as Control API v2."))
+        XCTAssertTrue(boundary.contains("Phase 09 implements the persistent authenticated Control API v2"))
         XCTAssertTrue(boundary.contains("A control surface must not call Apple container, SQLite, `RuntimeAdapter`, state migrations, cleanup deletion, or health execution directly."))
         XCTAssertTrue(boundary.contains("| Cleanup preview | `hostwright cleanup --state-db <path> --dry-run` |"))
         XCTAssertTrue(boundary.contains("`hostwright-control` is a local stdin/stdout executable, not a service."))
@@ -1000,9 +972,9 @@ final class HostwrightCoreTests: XCTestCase {
         XCTAssertTrue(betaReadiness.contains("## Blockers Before Beta"))
         XCTAssertTrue(betaReadiness.contains("## Deferrable Past Beta"))
         XCTAssertTrue(betaReadiness.contains("## Clean-Checkout Smoke"))
-        XCTAssertTrue(readme.contains("Beta readiness gate"))
-        XCTAssertTrue(install.contains("Phase 39 defines the beta readiness gate"))
-        XCTAssertTrue(compatibility.contains("no beta compatibility claim exists"))
+        XCTAssertTrue(readme.contains("two clean release-candidate qualification runs"))
+        XCTAssertTrue(install.contains("Phase 15 GA gate"))
+        XCTAssertTrue(compatibility.contains("not a `v0.0.2` GA support claim"))
         XCTAssertTrue(limitations.contains("Beta readiness checklist documentation"))
         XCTAssertTrue(releaseProcess.contains("## Beta Readiness Gate"))
         XCTAssertTrue(requirements.contains("HW-REL-007"))

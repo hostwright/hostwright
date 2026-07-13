@@ -1,0 +1,5100 @@
+{
+  "schemaVersion": 1,
+  "repository": "hostwright/hostwright",
+  "release": "v0.0.2",
+  "milestone": {
+    "number": 10,
+    "dueOn": "2026-07-27",
+    "url": "https://github.com/hostwright/hostwright/milestone/10"
+  },
+  "phaseSchedule": [
+    { "phase": 1, "targetDate": "2026-07-13" },
+    { "phase": 2, "targetDate": "2026-07-14" },
+    { "phase": 3, "targetDate": "2026-07-15" },
+    { "phase": 4, "targetDate": "2026-07-16" },
+    { "phase": 5, "targetDate": "2026-07-17" },
+    { "phase": 6, "targetDate": "2026-07-18" },
+    { "phase": 7, "targetDate": "2026-07-19" },
+    { "phase": 8, "targetDate": "2026-07-20" },
+    { "phase": 9, "targetDate": "2026-07-21" },
+    { "phase": 10, "targetDate": "2026-07-22" },
+    { "phase": 11, "targetDate": "2026-07-23" },
+    { "phase": 12, "targetDate": "2026-07-24" },
+    { "phase": 13, "targetDate": "2026-07-25" },
+    { "phase": 14, "targetDate": "2026-07-26" },
+    { "phase": 15, "targetDate": "2026-07-27" }
+  ],
+  "source": "GitHub issue metadata; refresh deliberately and review the diff",
+  "evidenceClasses": [
+    "unit-contract",
+    "local-integration",
+    "live-runtime",
+    "hardware-benchmark",
+    "distribution-artifact",
+    "migration-upgrade",
+    "security-assessment",
+    "resilience-chaos",
+    "multi-host",
+    "interop-conformance",
+    "ux-accessibility"
+  ],
+  "counts": {
+    "master": 1,
+    "epics": 15,
+    "workstreams": 167,
+    "total": 183
+  },
+  "issues": [
+    {
+      "marker": "MASTER",
+      "number": 284,
+      "kind": "master",
+      "phase": null,
+      "child": null,
+      "parent": null,
+      "title": "Hostwright v0.0.2 implementation roadmap and release gate",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/284",
+      "labels": [
+        "area:ci",
+        "area:docs",
+        "area:release",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:in-progress",
+        "type:docs",
+        "type:epic",
+        "type:implementation",
+        "type:release",
+        "type:roadmap",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P01",
+      "number": 110,
+      "kind": "epic",
+      "phase": 1,
+      "child": null,
+      "parent": 284,
+      "title": "Phase 01 — Truth reset, architecture contracts, and verification constitution",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/110",
+      "labels": [
+        "area:ci",
+        "area:control-api",
+        "area:docs",
+        "area:manifest",
+        "area:state",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:verification",
+        "type:docs",
+        "type:epic",
+        "type:implementation",
+        "type:release",
+        "type:roadmap",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P02",
+      "number": 120,
+      "kind": "epic",
+      "phase": 2,
+      "child": null,
+      "parent": 284,
+      "title": "Phase 02 — Trusted installation, secure local foundation, and durable state",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/120",
+      "labels": [
+        "area:ci",
+        "area:cli",
+        "area:release",
+        "area:state",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:in-progress",
+        "type:epic",
+        "type:implementation",
+        "type:release",
+        "type:roadmap",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P03",
+      "number": 129,
+      "kind": "epic",
+      "phase": 3,
+      "child": null,
+      "parent": 284,
+      "title": "Phase 03 — Apple `container` and Containerization runtime conformance",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/129",
+      "labels": [
+        "area:apple-silicon",
+        "area:ci",
+        "area:runtime",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:epic",
+        "type:implementation",
+        "type:roadmap",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P04",
+      "number": 140,
+      "kind": "epic",
+      "phase": 4,
+      "child": null,
+      "parent": 284,
+      "title": "Phase 04 — Manifest v2 and complete single-host lifecycle",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/140",
+      "labels": [
+        "area:cli",
+        "area:manifest",
+        "area:reconciler",
+        "area:runtime",
+        "area:state",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:epic",
+        "type:implementation",
+        "type:roadmap",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P05",
+      "number": 152,
+      "kind": "epic",
+      "phase": 5,
+      "child": null,
+      "parent": 284,
+      "title": "Phase 05 — Images, registries, secrets, and supply-chain trust",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/152",
+      "labels": [
+        "area:ci",
+        "area:registry",
+        "area:runtime",
+        "area:security",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:epic",
+        "type:implementation",
+        "type:release",
+        "type:roadmap",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P06",
+      "number": 163,
+      "kind": "epic",
+      "phase": 6,
+      "child": null,
+      "parent": 284,
+      "title": "Phase 06 — Persistent storage and data protection",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/163",
+      "labels": [
+        "area:ci",
+        "area:runtime",
+        "area:state",
+        "area:storage",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:epic",
+        "type:implementation",
+        "type:roadmap",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P07",
+      "number": 178,
+      "kind": "epic",
+      "phase": 7,
+      "child": null,
+      "parent": 284,
+      "title": "Phase 07 — Networking, DNS, ingress, policy, and secure tunnels",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/178",
+      "labels": [
+        "area:ci",
+        "area:networking",
+        "area:runtime",
+        "area:tunnels",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:epic",
+        "type:implementation",
+        "type:roadmap",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P08",
+      "number": 194,
+      "kind": "epic",
+      "phase": 8,
+      "child": null,
+      "parent": 284,
+      "title": "Phase 08 — Autonomous daemon, health, recovery, observability, and garbage collection",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/194",
+      "labels": [
+        "area:ci",
+        "area:daemon",
+        "area:observability",
+        "area:reconciler",
+        "area:state",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:epic",
+        "type:implementation",
+        "type:roadmap",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P09",
+      "number": 206,
+      "kind": "epic",
+      "phase": 9,
+      "child": null,
+      "parent": 284,
+      "title": "Phase 09 — Control API, identity, RBAC, admission, audit, and secure extensions",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/206",
+      "labels": [
+        "area:ci",
+        "area:control-api",
+        "area:daemon",
+        "area:extensions",
+        "area:security",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:epic",
+        "type:implementation",
+        "type:roadmap",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P10",
+      "number": 219,
+      "kind": "epic",
+      "phase": 10,
+      "child": null,
+      "parent": 284,
+      "title": "Phase 10 — Scheduler, optimization, pressure management, and accelerators",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/219",
+      "labels": [
+        "area:accelerator-research",
+        "area:apple-silicon",
+        "area:ci",
+        "area:observability",
+        "area:scheduler",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:epic",
+        "type:implementation",
+        "type:research",
+        "type:roadmap",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P11",
+      "number": 235,
+      "kind": "epic",
+      "phase": 11,
+      "child": null,
+      "parent": 284,
+      "title": "Phase 11 — Multi-Mac consensus, high availability, and remote operations",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/235",
+      "labels": [
+        "area:ci",
+        "area:multi-host",
+        "area:networking",
+        "area:runtime",
+        "area:state",
+        "area:storage",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:epic",
+        "type:implementation",
+        "type:roadmap",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P12",
+      "number": 247,
+      "kind": "epic",
+      "phase": 12,
+      "child": null,
+      "parent": 284,
+      "title": "Phase 12 — Kubernetes, CRI, CNI, CSI, and Helm interoperability",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/247",
+      "labels": [
+        "area:ci",
+        "area:interoperability",
+        "area:networking",
+        "area:runtime",
+        "area:scheduler",
+        "area:storage",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:epic",
+        "type:implementation",
+        "type:research",
+        "type:roadmap",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P13",
+      "number": 257,
+      "kind": "epic",
+      "phase": 13,
+      "child": null,
+      "parent": 284,
+      "title": "Phase 13 — Docker, Compose, Podman, Testcontainers, CI, and IDE interoperability",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/257",
+      "labels": [
+        "area:ci",
+        "area:cli",
+        "area:control-api",
+        "area:interoperability",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:epic",
+        "type:implementation",
+        "type:roadmap",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P14",
+      "number": 270,
+      "kind": "epic",
+      "phase": 14,
+      "child": null,
+      "parent": 284,
+      "title": "Phase 14 — Native GUI, team/MDM, and optional cloud control plane",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/270",
+      "labels": [
+        "area:ci",
+        "area:cloud-research",
+        "area:control-api",
+        "area:gui-boundary",
+        "area:multi-host",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:epic",
+        "type:implementation",
+        "type:research",
+        "type:roadmap",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P15",
+      "number": 283,
+      "kind": "epic",
+      "phase": 15,
+      "child": null,
+      "parent": 284,
+      "title": "Phase 15 — Exhaustive qualification, documentation, and v0.0.2 GA",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/283",
+      "labels": [
+        "area:ci",
+        "area:docs",
+        "area:interoperability",
+        "area:release",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:epic",
+        "type:implementation",
+        "type:release",
+        "type:roadmap",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P01-C01",
+      "number": 103,
+      "kind": "workstream",
+      "phase": 1,
+      "child": 1,
+      "parent": 110,
+      "title": "P01-C01: Align release and version truth for v0.0.2",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/103",
+      "labels": [
+        "area:ci",
+        "area:cli",
+        "area:docs",
+        "area:release",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:verification",
+        "type:docs",
+        "type:implementation",
+        "type:release",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P01-C02",
+      "number": 104,
+      "kind": "workstream",
+      "phase": 1,
+      "child": 2,
+      "parent": 110,
+      "title": "P01-C02: Separate immutable release documentation from current-main documentation",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/104",
+      "labels": [
+        "area:ci",
+        "area:control-api",
+        "area:docs",
+        "area:manifest",
+        "area:state",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:verification",
+        "type:docs",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P01-C03",
+      "number": 105,
+      "kind": "workstream",
+      "phase": 1,
+      "child": 3,
+      "parent": 110,
+      "title": "P01-C03: Implement the v0.0.2 gap and evidence taxonomy",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/105",
+      "labels": [
+        "area:ci",
+        "area:control-api",
+        "area:docs",
+        "area:manifest",
+        "area:state",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:verification",
+        "type:docs",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P01-C04",
+      "number": 106,
+      "kind": "workstream",
+      "phase": 1,
+      "child": 4,
+      "parent": 110,
+      "title": "P01-C04: Lock resource identity, backend binding, and operation saga architecture",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/106",
+      "labels": [
+        "area:ci",
+        "area:control-api",
+        "area:docs",
+        "area:manifest",
+        "area:state",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:verification",
+        "type:docs",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P01-C05",
+      "number": 107,
+      "kind": "workstream",
+      "phase": 1,
+      "child": 5,
+      "parent": 110,
+      "title": "P01-C05: Version Manifest, Control API, Runtime Provider, plugin, and state contracts",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/107",
+      "labels": [
+        "area:ci",
+        "area:control-api",
+        "area:docs",
+        "area:manifest",
+        "area:state",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:verification",
+        "type:docs",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P01-C06",
+      "number": 108,
+      "kind": "workstream",
+      "phase": 1,
+      "child": 6,
+      "parent": 110,
+      "title": "P01-C06: Enforce cross-repository website, docs, links, and quickstart checks",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/108",
+      "labels": [
+        "area:ci",
+        "area:control-api",
+        "area:docs",
+        "area:manifest",
+        "area:state",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:verification",
+        "type:docs",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P01-C07",
+      "number": 109,
+      "kind": "workstream",
+      "phase": 1,
+      "child": 7,
+      "parent": 110,
+      "title": "P01-C07: Enforce GitHub evidence-gated issue and PR closure",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/109",
+      "labels": [
+        "area:ci",
+        "area:control-api",
+        "area:docs",
+        "area:manifest",
+        "area:state",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:verification",
+        "type:docs",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P02-C01",
+      "number": 111,
+      "kind": "workstream",
+      "phase": 2,
+      "child": 1,
+      "parent": 120,
+      "title": "P02-C01: Ship the vendor Homebrew tap and production formula",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/111",
+      "labels": [
+        "area:ci",
+        "area:cli",
+        "area:release",
+        "area:state",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:release",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P02-C02",
+      "number": 112,
+      "kind": "workstream",
+      "phase": 2,
+      "child": 2,
+      "parent": 120,
+      "title": "P02-C02: Ship signed and notarized archives and macOS packages",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/112",
+      "labels": [
+        "area:ci",
+        "area:cli",
+        "area:release",
+        "area:state",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:release",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P02-C03",
+      "number": 113,
+      "kind": "workstream",
+      "phase": 2,
+      "child": 3,
+      "parent": 120,
+      "title": "P02-C03: Adopt secure macOS Application Support defaults",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/113",
+      "labels": [
+        "area:ci",
+        "area:cli",
+        "area:release",
+        "area:state",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:release",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P02-C04",
+      "number": 114,
+      "kind": "workstream",
+      "phase": 2,
+      "child": 4,
+      "parent": 120,
+      "title": "P02-C04: Implement state backup, restore, integrity check, and repair",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/114",
+      "labels": [
+        "area:ci",
+        "area:cli",
+        "area:release",
+        "area:state",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:release",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P02-C05",
+      "number": 115,
+      "kind": "workstream",
+      "phase": 2,
+      "child": 5,
+      "parent": 120,
+      "title": "P02-C05: Harden SQLite files, transactions, and local state ownership",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/115",
+      "labels": [
+        "area:ci",
+        "area:cli",
+        "area:release",
+        "area:state",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:release",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P02-C06",
+      "number": 116,
+      "kind": "workstream",
+      "phase": 2,
+      "child": 6,
+      "parent": 120,
+      "title": "P02-C06: Harden subprocess execution, cancellation, and process-tree cleanup",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/116",
+      "labels": [
+        "area:ci",
+        "area:cli",
+        "area:release",
+        "area:state",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:in-progress",
+        "type:implementation",
+        "type:release",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P02-C07",
+      "number": 117,
+      "kind": "workstream",
+      "phase": 2,
+      "child": 7,
+      "parent": 120,
+      "title": "P02-C07: Turn `hostwright doctor` into a real readiness and remediation command",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/117",
+      "labels": [
+        "area:ci",
+        "area:cli",
+        "area:release",
+        "area:state",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:release",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P02-C08",
+      "number": 118,
+      "kind": "workstream",
+      "phase": 2,
+      "child": 8,
+      "parent": 120,
+      "title": "P02-C08: Implement safe upgrade, rollback, repair, and uninstall workflows",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/118",
+      "labels": [
+        "area:ci",
+        "area:cli",
+        "area:release",
+        "area:state",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:release",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P02-C09",
+      "number": 119,
+      "kind": "workstream",
+      "phase": 2,
+      "child": 9,
+      "parent": 120,
+      "title": "P02-C09: Publish release SBOM, checksums, provenance, and verification tooling",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/119",
+      "labels": [
+        "area:ci",
+        "area:cli",
+        "area:release",
+        "area:state",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:release",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P03-C01",
+      "number": 121,
+      "kind": "workstream",
+      "phase": 3,
+      "child": 1,
+      "parent": 129,
+      "title": "P03-C01: Implement versioned Apple CLI structured codecs",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/121",
+      "labels": [
+        "area:apple-silicon",
+        "area:ci",
+        "area:runtime",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P03-C02",
+      "number": 122,
+      "kind": "workstream",
+      "phase": 3,
+      "child": 2,
+      "parent": 129,
+      "title": "P03-C02: Implement runtime capability negotiation and compatibility reporting",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/122",
+      "labels": [
+        "area:apple-silicon",
+        "area:ci",
+        "area:runtime",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P03-C03",
+      "number": 123,
+      "kind": "workstream",
+      "phase": 3,
+      "child": 3,
+      "parent": 129,
+      "title": "P03-C03: Implement complete Apple runtime observation",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/123",
+      "labels": [
+        "area:apple-silicon",
+        "area:ci",
+        "area:runtime",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P03-C04",
+      "number": 124,
+      "kind": "workstream",
+      "phase": 3,
+      "child": 4,
+      "parent": 129,
+      "title": "P03-C04: Normalize runtime processes, errors, timeouts, and cancellation",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/124",
+      "labels": [
+        "area:apple-silicon",
+        "area:ci",
+        "area:runtime",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P03-C05",
+      "number": 125,
+      "kind": "workstream",
+      "phase": 3,
+      "child": 5,
+      "parent": 129,
+      "title": "P03-C05: Build the pinned out-of-process Containerization helper",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/125",
+      "labels": [
+        "area:apple-silicon",
+        "area:ci",
+        "area:runtime",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P03-C06",
+      "number": 126,
+      "kind": "workstream",
+      "phase": 3,
+      "child": 6,
+      "parent": 129,
+      "title": "P03-C06: Build the cross-provider runtime conformance suite",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/126",
+      "labels": [
+        "area:apple-silicon",
+        "area:ci",
+        "area:runtime",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P03-C07",
+      "number": 127,
+      "kind": "workstream",
+      "phase": 3,
+      "child": 7,
+      "parent": 129,
+      "title": "P03-C07: Enforce project-generation backend binding and safe provider migration",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/127",
+      "labels": [
+        "area:apple-silicon",
+        "area:ci",
+        "area:runtime",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P03-C08",
+      "number": 128,
+      "kind": "workstream",
+      "phase": 3,
+      "child": 8,
+      "parent": 129,
+      "title": "P03-C08: Recover safely across Apple runtime and provider upgrades",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/128",
+      "labels": [
+        "area:apple-silicon",
+        "area:ci",
+        "area:runtime",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P04-C01",
+      "number": 130,
+      "kind": "workstream",
+      "phase": 4,
+      "child": 1,
+      "parent": 140,
+      "title": "P04-C01: Replace the restricted parser with maintained YAML",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/130",
+      "labels": [
+        "area:cli",
+        "area:manifest",
+        "area:reconciler",
+        "area:runtime",
+        "area:state",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P04-C02",
+      "number": 131,
+      "kind": "workstream",
+      "phase": 4,
+      "child": 2,
+      "parent": 140,
+      "title": "P04-C02: Implement the complete Manifest v2 workload schema",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/131",
+      "labels": [
+        "area:cli",
+        "area:manifest",
+        "area:reconciler",
+        "area:runtime",
+        "area:state",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P04-C03",
+      "number": 132,
+      "kind": "workstream",
+      "phase": 4,
+      "child": 3,
+      "parent": 140,
+      "title": "P04-C03: Implement the durable operation DAG and saga engine",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/132",
+      "labels": [
+        "area:cli",
+        "area:manifest",
+        "area:reconciler",
+        "area:runtime",
+        "area:state",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P04-C04",
+      "number": 133,
+      "kind": "workstream",
+      "phase": 4,
+      "child": 4,
+      "parent": 140,
+      "title": "P04-C04: Implement dependency-aware multi-service reconciliation",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/133",
+      "labels": [
+        "area:cli",
+        "area:manifest",
+        "area:reconciler",
+        "area:runtime",
+        "area:state",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P04-C05",
+      "number": 134,
+      "kind": "workstream",
+      "phase": 4,
+      "child": 5,
+      "parent": 140,
+      "title": "P04-C05: Implement complete lifecycle commands",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/134",
+      "labels": [
+        "area:cli",
+        "area:manifest",
+        "area:reconciler",
+        "area:runtime",
+        "area:state",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P04-C06",
+      "number": 135,
+      "kind": "workstream",
+      "phase": 4,
+      "child": 6,
+      "parent": 140,
+      "title": "P04-C06: Implement exec, attach, copy, export, inspect, stats, and log follow",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/135",
+      "labels": [
+        "area:cli",
+        "area:manifest",
+        "area:reconciler",
+        "area:runtime",
+        "area:state",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P04-C07",
+      "number": 136,
+      "kind": "workstream",
+      "phase": 4,
+      "child": 7,
+      "parent": 140,
+      "title": "P04-C07: Implement typed startup, readiness, and liveness probes",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/136",
+      "labels": [
+        "area:cli",
+        "area:manifest",
+        "area:reconciler",
+        "area:runtime",
+        "area:state",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P04-C08",
+      "number": 137,
+      "kind": "workstream",
+      "phase": 4,
+      "child": 8,
+      "parent": 140,
+      "title": "P04-C08: Implement rolling and recreate update strategies",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/137",
+      "labels": [
+        "area:cli",
+        "area:manifest",
+        "area:reconciler",
+        "area:runtime",
+        "area:state",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P04-C09",
+      "number": 138,
+      "kind": "workstream",
+      "phase": 4,
+      "child": 9,
+      "parent": 140,
+      "title": "P04-C09: Implement automatic rollback and rollout recovery",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/138",
+      "labels": [
+        "area:cli",
+        "area:manifest",
+        "area:reconciler",
+        "area:runtime",
+        "area:state",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P04-C10",
+      "number": 139,
+      "kind": "workstream",
+      "phase": 4,
+      "child": 10,
+      "parent": 140,
+      "title": "P04-C10: Ship executable end-to-end lifecycle examples",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/139",
+      "labels": [
+        "area:cli",
+        "area:manifest",
+        "area:reconciler",
+        "area:runtime",
+        "area:state",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P05-C01",
+      "number": 141,
+      "kind": "workstream",
+      "phase": 5,
+      "child": 1,
+      "parent": 152,
+      "title": "P05-C01: Implement the complete OCI image lifecycle",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/141",
+      "labels": [
+        "area:ci",
+        "area:registry",
+        "area:runtime",
+        "area:security",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:release",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P05-C02",
+      "number": 142,
+      "kind": "workstream",
+      "phase": 5,
+      "child": 2,
+      "parent": 152,
+      "title": "P05-C02: Implement registry login, challenges, and token refresh",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/142",
+      "labels": [
+        "area:ci",
+        "area:registry",
+        "area:runtime",
+        "area:security",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:release",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P05-C03",
+      "number": 143,
+      "kind": "workstream",
+      "phase": 5,
+      "child": 3,
+      "parent": 152,
+      "title": "P05-C03: Implement production Keychain secret CRUD",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/143",
+      "labels": [
+        "area:ci",
+        "area:registry",
+        "area:runtime",
+        "area:security",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:release",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P05-C04",
+      "number": 144,
+      "kind": "workstream",
+      "phase": 5,
+      "child": 4,
+      "parent": 152,
+      "title": "P05-C04: Implement configuration and secret provider contracts",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/144",
+      "labels": [
+        "area:ci",
+        "area:registry",
+        "area:runtime",
+        "area:security",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:release",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P05-C05",
+      "number": 145,
+      "kind": "workstream",
+      "phase": 5,
+      "child": 5,
+      "parent": 152,
+      "title": "P05-C05: Implement immutable image digest locks",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/145",
+      "labels": [
+        "area:ci",
+        "area:registry",
+        "area:runtime",
+        "area:security",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:release",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P05-C06",
+      "number": 146,
+      "kind": "workstream",
+      "phase": 5,
+      "child": 6,
+      "parent": 152,
+      "title": "P05-C06: Implement OCI referrer discovery and retention",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/146",
+      "labels": [
+        "area:ci",
+        "area:registry",
+        "area:runtime",
+        "area:security",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:release",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P05-C07",
+      "number": 147,
+      "kind": "workstream",
+      "phase": 5,
+      "child": 7,
+      "parent": 152,
+      "title": "P05-C07: Enforce image signature and trust policy",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/147",
+      "labels": [
+        "area:ci",
+        "area:registry",
+        "area:runtime",
+        "area:security",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:release",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P05-C08",
+      "number": 148,
+      "kind": "workstream",
+      "phase": 5,
+      "child": 8,
+      "parent": 152,
+      "title": "P05-C08: Generate, ingest, and bind image SBOMs",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/148",
+      "labels": [
+        "area:ci",
+        "area:registry",
+        "area:runtime",
+        "area:security",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:release",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P05-C09",
+      "number": 149,
+      "kind": "workstream",
+      "phase": 5,
+      "child": 9,
+      "parent": 152,
+      "title": "P05-C09: Enforce vulnerability policy with explainable decisions",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/149",
+      "labels": [
+        "area:ci",
+        "area:registry",
+        "area:runtime",
+        "area:security",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:release",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P05-C10",
+      "number": 150,
+      "kind": "workstream",
+      "phase": 5,
+      "child": 10,
+      "parent": 152,
+      "title": "P05-C10: Generate and verify build provenance",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/150",
+      "labels": [
+        "area:ci",
+        "area:registry",
+        "area:runtime",
+        "area:security",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:release",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P05-C11",
+      "number": 151,
+      "kind": "workstream",
+      "phase": 5,
+      "child": 11,
+      "parent": 152,
+      "title": "P05-C11: Implement content leases, cache pressure, and safe garbage collection",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/151",
+      "labels": [
+        "area:ci",
+        "area:registry",
+        "area:runtime",
+        "area:security",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:release",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P06-C01",
+      "number": 153,
+      "kind": "workstream",
+      "phase": 6,
+      "child": 1,
+      "parent": 163,
+      "title": "P06-C01: Implement named-volume lifecycle and ownership",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/153",
+      "labels": [
+        "area:ci",
+        "area:runtime",
+        "area:state",
+        "area:storage",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P06-C02",
+      "number": 154,
+      "kind": "workstream",
+      "phase": 6,
+      "child": 2,
+      "parent": 163,
+      "title": "P06-C02: Implement guarded bind, read-only, and tmpfs mounts",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/154",
+      "labels": [
+        "area:ci",
+        "area:runtime",
+        "area:state",
+        "area:storage",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P06-C03",
+      "number": 155,
+      "kind": "workstream",
+      "phase": 6,
+      "child": 3,
+      "parent": 163,
+      "title": "P06-C03: Define and ship the volume-provider SPI",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/155",
+      "labels": [
+        "area:ci",
+        "area:runtime",
+        "area:state",
+        "area:storage",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P06-C04",
+      "number": 156,
+      "kind": "workstream",
+      "phase": 6,
+      "child": 4,
+      "parent": 163,
+      "title": "P06-C04: Implement volume snapshots and restore points",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/156",
+      "labels": [
+        "area:ci",
+        "area:runtime",
+        "area:state",
+        "area:storage",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P06-C05",
+      "number": 157,
+      "kind": "workstream",
+      "phase": 6,
+      "child": 5,
+      "parent": 163,
+      "title": "P06-C05: Implement verified online backup and restore",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/157",
+      "labels": [
+        "area:ci",
+        "area:runtime",
+        "area:state",
+        "area:storage",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P06-C06",
+      "number": 158,
+      "kind": "workstream",
+      "phase": 6,
+      "child": 6,
+      "parent": 163,
+      "title": "P06-C06: Implement quotas, capacity accounting, and storage pressure policy",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/158",
+      "labels": [
+        "area:ci",
+        "area:runtime",
+        "area:state",
+        "area:storage",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P06-C07",
+      "number": 159,
+      "kind": "workstream",
+      "phase": 6,
+      "child": 7,
+      "parent": 163,
+      "title": "P06-C07: Implement attachment fencing and concurrency control",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/159",
+      "labels": [
+        "area:ci",
+        "area:runtime",
+        "area:state",
+        "area:storage",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P06-C08",
+      "number": 160,
+      "kind": "workstream",
+      "phase": 6,
+      "child": 8,
+      "parent": 163,
+      "title": "P06-C08: Implement reclaim and retention policy",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/160",
+      "labels": [
+        "area:ci",
+        "area:runtime",
+        "area:state",
+        "area:storage",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P06-C09",
+      "number": 161,
+      "kind": "workstream",
+      "phase": 6,
+      "child": 9,
+      "parent": 163,
+      "title": "P06-C09: Discover, quarantine, and garbage-collect storage orphans",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/161",
+      "labels": [
+        "area:ci",
+        "area:runtime",
+        "area:state",
+        "area:storage",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P06-C10",
+      "number": 162,
+      "kind": "workstream",
+      "phase": 6,
+      "child": 10,
+      "parent": 163,
+      "title": "P06-C10: Implement CSI-like internal storage semantics",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/162",
+      "labels": [
+        "area:ci",
+        "area:runtime",
+        "area:state",
+        "area:storage",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P07-C01",
+      "number": 164,
+      "kind": "workstream",
+      "phase": 7,
+      "child": 1,
+      "parent": 178,
+      "title": "P07-C01: Implement isolated project networks",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/164",
+      "labels": [
+        "area:ci",
+        "area:networking",
+        "area:runtime",
+        "area:tunnels",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P07-C02",
+      "number": 165,
+      "kind": "workstream",
+      "phase": 7,
+      "child": 2,
+      "parent": 178,
+      "title": "P07-C02: Implement network lifecycle ownership and recovery",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/165",
+      "labels": [
+        "area:ci",
+        "area:networking",
+        "area:runtime",
+        "area:tunnels",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P07-C03",
+      "number": 166,
+      "kind": "workstream",
+      "phase": 7,
+      "child": 3,
+      "parent": 178,
+      "title": "P07-C03: Implement service DNS and aliases",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/166",
+      "labels": [
+        "area:ci",
+        "area:networking",
+        "area:runtime",
+        "area:tunnels",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P07-C04",
+      "number": 167,
+      "kind": "workstream",
+      "phase": 7,
+      "child": 4,
+      "parent": 178,
+      "title": "P07-C04: Implement TCP and UDP transport semantics",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/167",
+      "labels": [
+        "area:ci",
+        "area:networking",
+        "area:runtime",
+        "area:tunnels",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P07-C05",
+      "number": 168,
+      "kind": "workstream",
+      "phase": 7,
+      "child": 5,
+      "parent": 178,
+      "title": "P07-C05: Implement IPv4 and IPv6 dual-stack behavior",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/168",
+      "labels": [
+        "area:ci",
+        "area:networking",
+        "area:runtime",
+        "area:tunnels",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P07-C06",
+      "number": 169,
+      "kind": "workstream",
+      "phase": 7,
+      "child": 6,
+      "parent": 178,
+      "title": "P07-C06: Implement published ports and Unix sockets",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/169",
+      "labels": [
+        "area:ci",
+        "area:networking",
+        "area:runtime",
+        "area:tunnels",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P07-C07",
+      "number": 170,
+      "kind": "workstream",
+      "phase": 7,
+      "child": 7,
+      "parent": 178,
+      "title": "P07-C07: Implement guarded workload access to host services",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/170",
+      "labels": [
+        "area:ci",
+        "area:networking",
+        "area:runtime",
+        "area:tunnels",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P07-C08",
+      "number": 171,
+      "kind": "workstream",
+      "phase": 7,
+      "child": 8,
+      "parent": 178,
+      "title": "P07-C08: Implement explicit LAN exposure policy",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/171",
+      "labels": [
+        "area:ci",
+        "area:networking",
+        "area:runtime",
+        "area:tunnels",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P07-C09",
+      "number": 172,
+      "kind": "workstream",
+      "phase": 7,
+      "child": 9,
+      "parent": 178,
+      "title": "P07-C09: Implement reverse proxy and ingress routing",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/172",
+      "labels": [
+        "area:ci",
+        "area:networking",
+        "area:runtime",
+        "area:tunnels",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P07-C10",
+      "number": 173,
+      "kind": "workstream",
+      "phase": 7,
+      "child": 10,
+      "parent": 178,
+      "title": "P07-C10: Implement TLS certificate lifecycle",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/173",
+      "labels": [
+        "area:ci",
+        "area:networking",
+        "area:runtime",
+        "area:tunnels",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P07-C11",
+      "number": 174,
+      "kind": "workstream",
+      "phase": 7,
+      "child": 11,
+      "parent": 178,
+      "title": "P07-C11: Implement mTLS workload and node identity",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/174",
+      "labels": [
+        "area:ci",
+        "area:networking",
+        "area:runtime",
+        "area:tunnels",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P07-C12",
+      "number": 175,
+      "kind": "workstream",
+      "phase": 7,
+      "child": 12,
+      "parent": 178,
+      "title": "P07-C12: Implement ingress and egress network policy",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/175",
+      "labels": [
+        "area:ci",
+        "area:networking",
+        "area:runtime",
+        "area:tunnels",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P07-C13",
+      "number": 176,
+      "kind": "workstream",
+      "phase": 7,
+      "child": 13,
+      "parent": 178,
+      "title": "P07-C13: Implement Hostwright-to-Hostwright secure tunnels",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/176",
+      "labels": [
+        "area:ci",
+        "area:networking",
+        "area:runtime",
+        "area:tunnels",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P07-C14",
+      "number": 177,
+      "kind": "workstream",
+      "phase": 7,
+      "child": 14,
+      "parent": 178,
+      "title": "P07-C14: Define and ship the third-party tunnel-provider SPI",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/177",
+      "labels": [
+        "area:ci",
+        "area:networking",
+        "area:runtime",
+        "area:tunnels",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P07-C15",
+      "number": 84,
+      "kind": "workstream",
+      "phase": 7,
+      "child": 15,
+      "parent": 178,
+      "title": "Verify Apple container localhost forwarding after Local Network permission",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/84",
+      "labels": [
+        "area:ci",
+        "area:networking",
+        "area:runtime",
+        "area:tunnels",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:blocked",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P08-C01",
+      "number": 179,
+      "kind": "workstream",
+      "phase": 8,
+      "child": 1,
+      "parent": 194,
+      "title": "P08-C01: Implement the complete LaunchAgent lifecycle",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/179",
+      "labels": [
+        "area:ci",
+        "area:daemon",
+        "area:observability",
+        "area:reconciler",
+        "area:state",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P08-C02",
+      "number": 180,
+      "kind": "workstream",
+      "phase": 8,
+      "child": 2,
+      "parent": 194,
+      "title": "P08-C02: Implement level-triggered unattended reconciliation",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/180",
+      "labels": [
+        "area:ci",
+        "area:daemon",
+        "area:observability",
+        "area:reconciler",
+        "area:state",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P08-C03",
+      "number": 181,
+      "kind": "workstream",
+      "phase": 8,
+      "child": 3,
+      "parent": 194,
+      "title": "P08-C03: Implement secure configuration watch and reload",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/181",
+      "labels": [
+        "area:ci",
+        "area:daemon",
+        "area:observability",
+        "area:reconciler",
+        "area:state",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P08-C04",
+      "number": 182,
+      "kind": "workstream",
+      "phase": 8,
+      "child": 4,
+      "parent": 194,
+      "title": "P08-C04: Implement restart budgets and crash-loop holds",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/182",
+      "labels": [
+        "area:ci",
+        "area:daemon",
+        "area:observability",
+        "area:reconciler",
+        "area:state",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P08-C05",
+      "number": 183,
+      "kind": "workstream",
+      "phase": 8,
+      "child": 5,
+      "parent": 194,
+      "title": "P08-C05: Implement maintenance windows and change deferral",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/183",
+      "labels": [
+        "area:ci",
+        "area:daemon",
+        "area:observability",
+        "area:reconciler",
+        "area:state",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P08-C06",
+      "number": 184,
+      "kind": "workstream",
+      "phase": 8,
+      "child": 6,
+      "parent": 194,
+      "title": "P08-C06: Implement health-gated unattended rollout",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/184",
+      "labels": [
+        "area:ci",
+        "area:daemon",
+        "area:observability",
+        "area:reconciler",
+        "area:state",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P08-C07",
+      "number": 185,
+      "kind": "workstream",
+      "phase": 8,
+      "child": 7,
+      "parent": 194,
+      "title": "P08-C07: Implement autonomous rollback and safe holds",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/185",
+      "labels": [
+        "area:ci",
+        "area:daemon",
+        "area:observability",
+        "area:reconciler",
+        "area:state",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P08-C08",
+      "number": 186,
+      "kind": "workstream",
+      "phase": 8,
+      "child": 8,
+      "parent": 194,
+      "title": "P08-C08: Implement mutation checkpoint recovery",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/186",
+      "labels": [
+        "area:ci",
+        "area:daemon",
+        "area:observability",
+        "area:reconciler",
+        "area:state",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P08-C09",
+      "number": 187,
+      "kind": "workstream",
+      "phase": 8,
+      "child": 9,
+      "parent": 194,
+      "title": "P08-C09: Implement ownership, finalizers, and leases",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/187",
+      "labels": [
+        "area:ci",
+        "area:daemon",
+        "area:observability",
+        "area:reconciler",
+        "area:state",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P08-C10",
+      "number": 188,
+      "kind": "workstream",
+      "phase": 8,
+      "child": 10,
+      "parent": 194,
+      "title": "P08-C10: Implement retention, compaction, and state maintenance",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/188",
+      "labels": [
+        "area:ci",
+        "area:daemon",
+        "area:observability",
+        "area:reconciler",
+        "area:state",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P08-C11",
+      "number": 189,
+      "kind": "workstream",
+      "phase": 8,
+      "child": 11,
+      "parent": 194,
+      "title": "P08-C11: Integrate structured redacted OSLog",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/189",
+      "labels": [
+        "area:ci",
+        "area:daemon",
+        "area:observability",
+        "area:reconciler",
+        "area:state",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P08-C12",
+      "number": 190,
+      "kind": "workstream",
+      "phase": 8,
+      "child": 12,
+      "parent": 194,
+      "title": "P08-C12: Implement durable event history and watches",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/190",
+      "labels": [
+        "area:ci",
+        "area:daemon",
+        "area:observability",
+        "area:reconciler",
+        "area:state",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P08-C13",
+      "number": 191,
+      "kind": "workstream",
+      "phase": 8,
+      "child": 13,
+      "parent": 194,
+      "title": "P08-C13: Implement bounded metrics and SLO instrumentation",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/191",
+      "labels": [
+        "area:ci",
+        "area:daemon",
+        "area:observability",
+        "area:reconciler",
+        "area:state",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P08-C14",
+      "number": 192,
+      "kind": "workstream",
+      "phase": 8,
+      "child": 14,
+      "parent": 194,
+      "title": "P08-C14: Implement correlated traces across control and runtime operations",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/192",
+      "labels": [
+        "area:ci",
+        "area:daemon",
+        "area:observability",
+        "area:reconciler",
+        "area:state",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P08-C15",
+      "number": 193,
+      "kind": "workstream",
+      "phase": 8,
+      "child": 15,
+      "parent": 194,
+      "title": "P08-C15: Implement privacy-safe diagnostic support bundles",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/193",
+      "labels": [
+        "area:ci",
+        "area:daemon",
+        "area:observability",
+        "area:reconciler",
+        "area:state",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P09-C01",
+      "number": 195,
+      "kind": "workstream",
+      "phase": 9,
+      "child": 1,
+      "parent": 206,
+      "title": "P09-C01: Implement the persistent Unix-socket Control API",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/195",
+      "labels": [
+        "area:ci",
+        "area:control-api",
+        "area:daemon",
+        "area:extensions",
+        "area:security",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P09-C02",
+      "number": 196,
+      "kind": "workstream",
+      "phase": 9,
+      "child": 2,
+      "parent": 206,
+      "title": "P09-C02: Achieve complete CLI and Control API parity",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/196",
+      "labels": [
+        "area:ci",
+        "area:control-api",
+        "area:daemon",
+        "area:extensions",
+        "area:security",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P09-C03",
+      "number": 197,
+      "kind": "workstream",
+      "phase": 9,
+      "child": 3,
+      "parent": 206,
+      "title": "P09-C03: Implement streaming, watches, backpressure, and recovery",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/197",
+      "labels": [
+        "area:ci",
+        "area:control-api",
+        "area:daemon",
+        "area:extensions",
+        "area:security",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P09-C04",
+      "number": 198,
+      "kind": "workstream",
+      "phase": 9,
+      "child": 4,
+      "parent": 206,
+      "title": "P09-C04: Implement local authentication and peer identity",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/198",
+      "labels": [
+        "area:ci",
+        "area:control-api",
+        "area:daemon",
+        "area:extensions",
+        "area:security",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P09-C05",
+      "number": 199,
+      "kind": "workstream",
+      "phase": 9,
+      "child": 5,
+      "parent": 206,
+      "title": "P09-C05: Implement least-privilege RBAC",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/199",
+      "labels": [
+        "area:ci",
+        "area:control-api",
+        "area:daemon",
+        "area:extensions",
+        "area:security",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P09-C06",
+      "number": 200,
+      "kind": "workstream",
+      "phase": 9,
+      "child": 6,
+      "parent": 206,
+      "title": "P09-C06: Implement admission validation and mutation policy",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/200",
+      "labels": [
+        "area:ci",
+        "area:control-api",
+        "area:daemon",
+        "area:extensions",
+        "area:security",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P09-C07",
+      "number": 201,
+      "kind": "workstream",
+      "phase": 9,
+      "child": 7,
+      "parent": 206,
+      "title": "P09-C07: Implement immutable tamper-evident audit",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/201",
+      "labels": [
+        "area:ci",
+        "area:control-api",
+        "area:daemon",
+        "area:extensions",
+        "area:security",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P09-C08",
+      "number": 202,
+      "kind": "workstream",
+      "phase": 9,
+      "child": 8,
+      "parent": 206,
+      "title": "P09-C08: Implement secure workload profiles",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/202",
+      "labels": [
+        "area:ci",
+        "area:control-api",
+        "area:daemon",
+        "area:extensions",
+        "area:security",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P09-C09",
+      "number": 203,
+      "kind": "workstream",
+      "phase": 9,
+      "child": 9,
+      "parent": 206,
+      "title": "P09-C09: Ship the capability-limited WASI provider SDK",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/203",
+      "labels": [
+        "area:ci",
+        "area:control-api",
+        "area:daemon",
+        "area:extensions",
+        "area:security",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P09-C10",
+      "number": 204,
+      "kind": "workstream",
+      "phase": 9,
+      "child": 10,
+      "parent": 206,
+      "title": "P09-C10: Implement the signed XPC provider boundary",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/204",
+      "labels": [
+        "area:ci",
+        "area:control-api",
+        "area:daemon",
+        "area:extensions",
+        "area:security",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P09-C11",
+      "number": 205,
+      "kind": "workstream",
+      "phase": 9,
+      "child": 11,
+      "parent": 206,
+      "title": "P09-C11: Implement plugin discovery, install, update, revoke, and quarantine",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/205",
+      "labels": [
+        "area:ci",
+        "area:control-api",
+        "area:daemon",
+        "area:extensions",
+        "area:security",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P10-C01",
+      "number": 207,
+      "kind": "workstream",
+      "phase": 10,
+      "child": 1,
+      "parent": 219,
+      "title": "P10-C01: Implement requests, limits, reservations, and admission",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/207",
+      "labels": [
+        "area:accelerator-research",
+        "area:apple-silicon",
+        "area:ci",
+        "area:observability",
+        "area:scheduler",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:research",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P10-C02",
+      "number": 208,
+      "kind": "workstream",
+      "phase": 10,
+      "child": 2,
+      "parent": 219,
+      "title": "P10-C02: Implement hard placement filters",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/208",
+      "labels": [
+        "area:accelerator-research",
+        "area:apple-silicon",
+        "area:ci",
+        "area:observability",
+        "area:scheduler",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:research",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P10-C03",
+      "number": 209,
+      "kind": "workstream",
+      "phase": 10,
+      "child": 3,
+      "parent": 219,
+      "title": "P10-C03: Implement multi-resource best-fit-decreasing packing",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/209",
+      "labels": [
+        "area:accelerator-research",
+        "area:apple-silicon",
+        "area:ci",
+        "area:observability",
+        "area:scheduler",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:research",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P10-C04",
+      "number": 210,
+      "kind": "workstream",
+      "phase": 10,
+      "child": 4,
+      "parent": 219,
+      "title": "P10-C04: Implement dominant-resource fairness",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/210",
+      "labels": [
+        "area:accelerator-research",
+        "area:apple-silicon",
+        "area:ci",
+        "area:observability",
+        "area:scheduler",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:research",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P10-C05",
+      "number": 211,
+      "kind": "workstream",
+      "phase": 10,
+      "child": 5,
+      "parent": 219,
+      "title": "P10-C05: Implement topology, affinity, and anti-affinity scoring",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/211",
+      "labels": [
+        "area:accelerator-research",
+        "area:apple-silicon",
+        "area:ci",
+        "area:observability",
+        "area:scheduler",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:research",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P10-C06",
+      "number": 212,
+      "kind": "workstream",
+      "phase": 10,
+      "child": 6,
+      "parent": 219,
+      "title": "P10-C06: Implement priority, preemption, and disruption budgets",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/212",
+      "labels": [
+        "area:accelerator-research",
+        "area:apple-silicon",
+        "area:ci",
+        "area:observability",
+        "area:scheduler",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:research",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P10-C07",
+      "number": 213,
+      "kind": "workstream",
+      "phase": 10,
+      "child": 7,
+      "parent": 219,
+      "title": "P10-C07: Implement anti-churn hysteresis and placement stability",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/213",
+      "labels": [
+        "area:accelerator-research",
+        "area:apple-silicon",
+        "area:ci",
+        "area:observability",
+        "area:scheduler",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:research",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P10-C08",
+      "number": 214,
+      "kind": "workstream",
+      "phase": 10,
+      "child": 8,
+      "parent": 219,
+      "title": "P10-C08: Implement scheduler explainability and simulation",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/214",
+      "labels": [
+        "area:accelerator-research",
+        "area:apple-silicon",
+        "area:ci",
+        "area:observability",
+        "area:scheduler",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:research",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P10-C09",
+      "number": 215,
+      "kind": "workstream",
+      "phase": 10,
+      "child": 9,
+      "parent": 219,
+      "title": "P10-C09: Implement thermal, battery, sleep, and pressure policy",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/215",
+      "labels": [
+        "area:accelerator-research",
+        "area:apple-silicon",
+        "area:ci",
+        "area:observability",
+        "area:scheduler",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:research",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P10-C10",
+      "number": 216,
+      "kind": "workstream",
+      "phase": 10,
+      "child": 10,
+      "parent": 219,
+      "title": "P10-C10: Implement Apple VM memory-reclamation strategy",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/216",
+      "labels": [
+        "area:accelerator-research",
+        "area:apple-silicon",
+        "area:ci",
+        "area:observability",
+        "area:scheduler",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:research",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P10-C11",
+      "number": 217,
+      "kind": "workstream",
+      "phase": 10,
+      "child": 11,
+      "parent": 219,
+      "title": "P10-C11: Implement accelerator inventory and reservations",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/217",
+      "labels": [
+        "area:accelerator-research",
+        "area:apple-silicon",
+        "area:ci",
+        "area:observability",
+        "area:scheduler",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:research",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P10-C12",
+      "number": 218,
+      "kind": "workstream",
+      "phase": 10,
+      "child": 12,
+      "parent": 219,
+      "title": "P10-C12: Implement the host-native Metal, Core ML, and MLX service",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/218",
+      "labels": [
+        "area:accelerator-research",
+        "area:apple-silicon",
+        "area:ci",
+        "area:observability",
+        "area:scheduler",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:research",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P11-C01",
+      "number": 220,
+      "kind": "workstream",
+      "phase": 11,
+      "child": 1,
+      "parent": 235,
+      "title": "P11-C01: Implement cluster bootstrap, join, leave, and membership changes",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/220",
+      "labels": [
+        "area:ci",
+        "area:multi-host",
+        "area:networking",
+        "area:runtime",
+        "area:state",
+        "area:storage",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P11-C02",
+      "number": 221,
+      "kind": "workstream",
+      "phase": 11,
+      "child": 2,
+      "parent": 235,
+      "title": "P11-C02: Implement cluster CA and mTLS identity lifecycle",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/221",
+      "labels": [
+        "area:ci",
+        "area:multi-host",
+        "area:networking",
+        "area:runtime",
+        "area:state",
+        "area:storage",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P11-C03",
+      "number": 222,
+      "kind": "workstream",
+      "phase": 11,
+      "child": 3,
+      "parent": 235,
+      "title": "P11-C03: Operate a Hostwright-managed pinned etcd 3.7.x ensemble",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/222",
+      "labels": [
+        "area:ci",
+        "area:multi-host",
+        "area:networking",
+        "area:runtime",
+        "area:state",
+        "area:storage",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P11-C04",
+      "number": 223,
+      "kind": "workstream",
+      "phase": 11,
+      "child": 4,
+      "parent": 235,
+      "title": "P11-C04: Implement authoritative replicated desired state",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/223",
+      "labels": [
+        "area:ci",
+        "area:multi-host",
+        "area:networking",
+        "area:runtime",
+        "area:state",
+        "area:storage",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P11-C05",
+      "number": 224,
+      "kind": "workstream",
+      "phase": 11,
+      "child": 5,
+      "parent": 235,
+      "title": "P11-C05: Implement authenticated node agents",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/224",
+      "labels": [
+        "area:ci",
+        "area:multi-host",
+        "area:networking",
+        "area:runtime",
+        "area:state",
+        "area:storage",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P11-C06",
+      "number": 225,
+      "kind": "workstream",
+      "phase": 11,
+      "child": 6,
+      "parent": 235,
+      "title": "P11-C06: Implement fenced remote execution and streaming",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/225",
+      "labels": [
+        "area:ci",
+        "area:multi-host",
+        "area:networking",
+        "area:runtime",
+        "area:state",
+        "area:storage",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P11-C07",
+      "number": 226,
+      "kind": "workstream",
+      "phase": 11,
+      "child": 7,
+      "parent": 235,
+      "title": "P11-C07: Enforce cluster fencing tokens on every mutation",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/226",
+      "labels": [
+        "area:ci",
+        "area:multi-host",
+        "area:networking",
+        "area:runtime",
+        "area:state",
+        "area:storage",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P11-C08",
+      "number": 227,
+      "kind": "workstream",
+      "phase": 11,
+      "child": 8,
+      "parent": 235,
+      "title": "P11-C08: Extend scheduler placement across Macs",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/227",
+      "labels": [
+        "area:ci",
+        "area:multi-host",
+        "area:networking",
+        "area:runtime",
+        "area:state",
+        "area:storage",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P11-C09",
+      "number": 228,
+      "kind": "workstream",
+      "phase": 11,
+      "child": 9,
+      "parent": 235,
+      "title": "P11-C09: Implement cordon, drain, maintenance, and node removal",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/228",
+      "labels": [
+        "area:ci",
+        "area:multi-host",
+        "area:networking",
+        "area:runtime",
+        "area:state",
+        "area:storage",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P11-C10",
+      "number": 229,
+      "kind": "workstream",
+      "phase": 11,
+      "child": 10,
+      "parent": 235,
+      "title": "P11-C10: Implement cross-host service discovery",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/229",
+      "labels": [
+        "area:ci",
+        "area:multi-host",
+        "area:networking",
+        "area:runtime",
+        "area:state",
+        "area:storage",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P11-C11",
+      "number": 230,
+      "kind": "workstream",
+      "phase": 11,
+      "child": 11,
+      "parent": 235,
+      "title": "P11-C11: Implement safe remote volumes",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/230",
+      "labels": [
+        "area:ci",
+        "area:multi-host",
+        "area:networking",
+        "area:runtime",
+        "area:state",
+        "area:storage",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P11-C12",
+      "number": 231,
+      "kind": "workstream",
+      "phase": 11,
+      "child": 12,
+      "parent": 235,
+      "title": "P11-C12: Implement leader election and control-plane leases",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/231",
+      "labels": [
+        "area:ci",
+        "area:multi-host",
+        "area:networking",
+        "area:runtime",
+        "area:state",
+        "area:storage",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P11-C13",
+      "number": 232,
+      "kind": "workstream",
+      "phase": 11,
+      "child": 13,
+      "parent": 235,
+      "title": "P11-C13: Implement cluster failover and node-loss recovery",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/232",
+      "labels": [
+        "area:ci",
+        "area:multi-host",
+        "area:networking",
+        "area:runtime",
+        "area:state",
+        "area:storage",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P11-C14",
+      "number": 233,
+      "kind": "workstream",
+      "phase": 11,
+      "child": 14,
+      "parent": 235,
+      "title": "P11-C14: Implement mixed-version rolling cluster upgrades",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/233",
+      "labels": [
+        "area:ci",
+        "area:multi-host",
+        "area:networking",
+        "area:runtime",
+        "area:state",
+        "area:storage",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P11-C15",
+      "number": 234,
+      "kind": "workstream",
+      "phase": 11,
+      "child": 15,
+      "parent": 235,
+      "title": "P11-C15: Implement cluster disaster recovery",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/234",
+      "labels": [
+        "area:ci",
+        "area:multi-host",
+        "area:networking",
+        "area:runtime",
+        "area:state",
+        "area:storage",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P12-C01",
+      "number": 236,
+      "kind": "workstream",
+      "phase": 12,
+      "child": 1,
+      "parent": 247,
+      "title": "P12-C01: Build the Hostwright pod-sandbox VM and guest agent",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/236",
+      "labels": [
+        "area:ci",
+        "area:interoperability",
+        "area:networking",
+        "area:runtime",
+        "area:scheduler",
+        "area:storage",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:implementation",
+        "type:research",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P12-C02",
+      "number": 237,
+      "kind": "workstream",
+      "phase": 12,
+      "child": 2,
+      "parent": 247,
+      "title": "P12-C02: Implement CRI v1 RuntimeService",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/237",
+      "labels": [
+        "area:ci",
+        "area:interoperability",
+        "area:networking",
+        "area:runtime",
+        "area:scheduler",
+        "area:storage",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:implementation",
+        "type:research",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P12-C03",
+      "number": 238,
+      "kind": "workstream",
+      "phase": 12,
+      "child": 3,
+      "parent": 247,
+      "title": "P12-C03: Implement CRI v1 ImageService",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/238",
+      "labels": [
+        "area:ci",
+        "area:interoperability",
+        "area:networking",
+        "area:runtime",
+        "area:scheduler",
+        "area:storage",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:implementation",
+        "type:research",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P12-C04",
+      "number": 239,
+      "kind": "workstream",
+      "phase": 12,
+      "child": 4,
+      "parent": 247,
+      "title": "P12-C04: Implement CRI streaming, logs, and stats APIs",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/239",
+      "labels": [
+        "area:ci",
+        "area:interoperability",
+        "area:networking",
+        "area:runtime",
+        "area:scheduler",
+        "area:storage",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:implementation",
+        "type:research",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P12-C05",
+      "number": 240,
+      "kind": "workstream",
+      "phase": 12,
+      "child": 5,
+      "parent": 247,
+      "title": "P12-C05: Integrate supported kubelet versions",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/240",
+      "labels": [
+        "area:ci",
+        "area:interoperability",
+        "area:networking",
+        "area:runtime",
+        "area:scheduler",
+        "area:storage",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:implementation",
+        "type:research",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P12-C06",
+      "number": 241,
+      "kind": "workstream",
+      "phase": 12,
+      "child": 6,
+      "parent": 247,
+      "title": "P12-C06: Implement CNI in the real pod guest topology",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/241",
+      "labels": [
+        "area:ci",
+        "area:interoperability",
+        "area:networking",
+        "area:runtime",
+        "area:scheduler",
+        "area:storage",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:implementation",
+        "type:research",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P12-C07",
+      "number": 242,
+      "kind": "workstream",
+      "phase": 12,
+      "child": 7,
+      "parent": 247,
+      "title": "P12-C07: Implement CSI controller and node adapters",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/242",
+      "labels": [
+        "area:ci",
+        "area:interoperability",
+        "area:networking",
+        "area:runtime",
+        "area:scheduler",
+        "area:storage",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:implementation",
+        "type:research",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P12-C08",
+      "number": 243,
+      "kind": "workstream",
+      "phase": 12,
+      "child": 8,
+      "parent": 247,
+      "title": "P12-C08: Translate Kubernetes resources into Hostwright desired state",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/243",
+      "labels": [
+        "area:ci",
+        "area:interoperability",
+        "area:networking",
+        "area:runtime",
+        "area:scheduler",
+        "area:storage",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:implementation",
+        "type:research",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P12-C09",
+      "number": 244,
+      "kind": "workstream",
+      "phase": 12,
+      "child": 9,
+      "parent": 247,
+      "title": "P12-C09: Ingest rendered Helm output safely",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/244",
+      "labels": [
+        "area:ci",
+        "area:interoperability",
+        "area:networking",
+        "area:runtime",
+        "area:scheduler",
+        "area:storage",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:implementation",
+        "type:research",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P12-C10",
+      "number": 245,
+      "kind": "workstream",
+      "phase": 12,
+      "child": 10,
+      "parent": 247,
+      "title": "P12-C10: Integrate Kubernetes scheduling and devices",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/245",
+      "labels": [
+        "area:ci",
+        "area:interoperability",
+        "area:networking",
+        "area:runtime",
+        "area:scheduler",
+        "area:storage",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:implementation",
+        "type:research",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P12-C11",
+      "number": 246,
+      "kind": "workstream",
+      "phase": 12,
+      "child": 11,
+      "parent": 247,
+      "title": "P12-C11: Automate Kubernetes interoperability conformance reporting",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/246",
+      "labels": [
+        "area:ci",
+        "area:interoperability",
+        "area:networking",
+        "area:runtime",
+        "area:scheduler",
+        "area:storage",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:implementation",
+        "type:research",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P13-C01",
+      "number": 248,
+      "kind": "workstream",
+      "phase": 13,
+      "child": 1,
+      "parent": 257,
+      "title": "P13-C01: Implement the version-negotiated Docker Engine API",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/248",
+      "labels": [
+        "area:ci",
+        "area:cli",
+        "area:control-api",
+        "area:interoperability",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P13-C02",
+      "number": 249,
+      "kind": "workstream",
+      "phase": 13,
+      "child": 2,
+      "parent": 257,
+      "title": "P13-C02: Implement the authenticated local Docker socket and context",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/249",
+      "labels": [
+        "area:ci",
+        "area:cli",
+        "area:control-api",
+        "area:interoperability",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P13-C03",
+      "number": 250,
+      "kind": "workstream",
+      "phase": 13,
+      "child": 3,
+      "parent": 257,
+      "title": "P13-C03: Implement complete Compose import, execution, update, export, and loss reporting",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/250",
+      "labels": [
+        "area:ci",
+        "area:cli",
+        "area:control-api",
+        "area:interoperability",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P13-C04",
+      "number": 251,
+      "kind": "workstream",
+      "phase": 13,
+      "child": 4,
+      "parent": 257,
+      "title": "P13-C04: Implement supported Podman client compatibility",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/251",
+      "labels": [
+        "area:ci",
+        "area:cli",
+        "area:control-api",
+        "area:interoperability",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P13-C05",
+      "number": 252,
+      "kind": "workstream",
+      "phase": 13,
+      "child": 5,
+      "parent": 257,
+      "title": "P13-C05: Pass Testcontainers Java, Go, Node, Python, and .NET matrices",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/252",
+      "labels": [
+        "area:ci",
+        "area:cli",
+        "area:control-api",
+        "area:interoperability",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P13-C06",
+      "number": 253,
+      "kind": "workstream",
+      "phase": 13,
+      "child": 6,
+      "parent": 257,
+      "title": "P13-C06: Ship GitHub Actions integration",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/253",
+      "labels": [
+        "area:ci",
+        "area:cli",
+        "area:control-api",
+        "area:interoperability",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P13-C07",
+      "number": 254,
+      "kind": "workstream",
+      "phase": 13,
+      "child": 7,
+      "parent": 257,
+      "title": "P13-C07: Ship Xcode workflows",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/254",
+      "labels": [
+        "area:ci",
+        "area:cli",
+        "area:control-api",
+        "area:interoperability",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P13-C08",
+      "number": 255,
+      "kind": "workstream",
+      "phase": 13,
+      "child": 8,
+      "parent": 257,
+      "title": "P13-C08: Ship VS Code workflows",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/255",
+      "labels": [
+        "area:ci",
+        "area:cli",
+        "area:control-api",
+        "area:interoperability",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P13-C09",
+      "number": 256,
+      "kind": "workstream",
+      "phase": 13,
+      "child": 9,
+      "parent": 257,
+      "title": "P13-C09: Ship JetBrains workflows",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/256",
+      "labels": [
+        "area:ci",
+        "area:cli",
+        "area:control-api",
+        "area:interoperability",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:implementation",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P14-C01",
+      "number": 258,
+      "kind": "workstream",
+      "phase": 14,
+      "child": 1,
+      "parent": 270,
+      "title": "P14-C01: Build the signed SwiftUI app and menu-bar client",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/258",
+      "labels": [
+        "area:ci",
+        "area:cloud-research",
+        "area:control-api",
+        "area:gui-boundary",
+        "area:multi-host",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:implementation",
+        "type:research",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P14-C02",
+      "number": 259,
+      "kind": "workstream",
+      "phase": 14,
+      "child": 2,
+      "parent": 270,
+      "title": "P14-C02: Enforce complete CLI and GUI action parity",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/259",
+      "labels": [
+        "area:ci",
+        "area:cloud-research",
+        "area:control-api",
+        "area:gui-boundary",
+        "area:multi-host",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:implementation",
+        "type:research",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P14-C03",
+      "number": 260,
+      "kind": "workstream",
+      "phase": 14,
+      "child": 3,
+      "parent": 270,
+      "title": "P14-C03: Visualize topology, status, logs, events, metrics, and recovery",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/260",
+      "labels": [
+        "area:ci",
+        "area:cloud-research",
+        "area:control-api",
+        "area:gui-boundary",
+        "area:multi-host",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:implementation",
+        "type:research",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P14-C04",
+      "number": 261,
+      "kind": "workstream",
+      "phase": 14,
+      "child": 4,
+      "parent": 270,
+      "title": "P14-C04: Meet the native accessibility quality gate",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/261",
+      "labels": [
+        "area:ci",
+        "area:cloud-research",
+        "area:control-api",
+        "area:gui-boundary",
+        "area:multi-host",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:implementation",
+        "type:research",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P14-C05",
+      "number": 262,
+      "kind": "workstream",
+      "phase": 14,
+      "child": 5,
+      "parent": 270,
+      "title": "P14-C05: Implement signed native app updates and rollback",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/262",
+      "labels": [
+        "area:ci",
+        "area:cloud-research",
+        "area:control-api",
+        "area:gui-boundary",
+        "area:multi-host",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:implementation",
+        "type:research",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P14-C06",
+      "number": 263,
+      "kind": "workstream",
+      "phase": 14,
+      "child": 6,
+      "parent": 270,
+      "title": "P14-C06: Implement team roles, approvals, and change workflow",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/263",
+      "labels": [
+        "area:ci",
+        "area:cloud-research",
+        "area:control-api",
+        "area:gui-boundary",
+        "area:multi-host",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:implementation",
+        "type:research",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P14-C07",
+      "number": 264,
+      "kind": "workstream",
+      "phase": 14,
+      "child": 7,
+      "parent": 270,
+      "title": "P14-C07: Implement MDM deployment, managed policy, and compliance",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/264",
+      "labels": [
+        "area:ci",
+        "area:cloud-research",
+        "area:control-api",
+        "area:gui-boundary",
+        "area:multi-host",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:implementation",
+        "type:research",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P14-C08",
+      "number": 265,
+      "kind": "workstream",
+      "phase": 14,
+      "child": 8,
+      "parent": 270,
+      "title": "P14-C08: Build the optional cloud control service",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/265",
+      "labels": [
+        "area:ci",
+        "area:cloud-research",
+        "area:control-api",
+        "area:gui-boundary",
+        "area:multi-host",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:implementation",
+        "type:research",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P14-C09",
+      "number": 266,
+      "kind": "workstream",
+      "phase": 14,
+      "child": 9,
+      "parent": 270,
+      "title": "P14-C09: Implement PostgreSQL tenant state and data lifecycle",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/266",
+      "labels": [
+        "area:ci",
+        "area:cloud-research",
+        "area:control-api",
+        "area:gui-boundary",
+        "area:multi-host",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:implementation",
+        "type:research",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P14-C10",
+      "number": 267,
+      "kind": "workstream",
+      "phase": 14,
+      "child": 10,
+      "parent": 270,
+      "title": "P14-C10: Implement OIDC and SSO identity lifecycle",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/267",
+      "labels": [
+        "area:ci",
+        "area:cloud-research",
+        "area:control-api",
+        "area:gui-boundary",
+        "area:multi-host",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:implementation",
+        "type:research",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P14-C11",
+      "number": 268,
+      "kind": "workstream",
+      "phase": 14,
+      "child": 11,
+      "parent": 270,
+      "title": "P14-C11: Implement outbound-only fleet agent connections",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/268",
+      "labels": [
+        "area:ci",
+        "area:cloud-research",
+        "area:control-api",
+        "area:gui-boundary",
+        "area:multi-host",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:implementation",
+        "type:research",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P14-C12",
+      "number": 269,
+      "kind": "workstream",
+      "phase": 14,
+      "child": 12,
+      "parent": 270,
+      "title": "P14-C12: Implement remote audit, diagnostics, and consented support",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/269",
+      "labels": [
+        "area:ci",
+        "area:cloud-research",
+        "area:control-api",
+        "area:gui-boundary",
+        "area:multi-host",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:implementation",
+        "type:research",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P15-C01",
+      "number": 271,
+      "kind": "workstream",
+      "phase": 15,
+      "child": 1,
+      "parent": 283,
+      "title": "P15-C01: Freeze and test all supported-version matrices",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/271",
+      "labels": [
+        "area:ci",
+        "area:docs",
+        "area:interoperability",
+        "area:release",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:implementation",
+        "type:release",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P15-C02",
+      "number": 272,
+      "kind": "workstream",
+      "phase": 15,
+      "child": 2,
+      "parent": 283,
+      "title": "P15-C02: Complete the independent security assessment and remediation gate",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/272",
+      "labels": [
+        "area:ci",
+        "area:docs",
+        "area:interoperability",
+        "area:release",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:implementation",
+        "type:release",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P15-C03",
+      "number": 273,
+      "kind": "workstream",
+      "phase": 15,
+      "child": 3,
+      "parent": 283,
+      "title": "P15-C03: Run release-grade coverage-guided fuzzing",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/273",
+      "labels": [
+        "area:ci",
+        "area:docs",
+        "area:interoperability",
+        "area:release",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:implementation",
+        "type:release",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P15-C04",
+      "number": 274,
+      "kind": "workstream",
+      "phase": 15,
+      "child": 4,
+      "parent": 283,
+      "title": "P15-C04: Run supported ASan and TSan qualification lanes",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/274",
+      "labels": [
+        "area:ci",
+        "area:docs",
+        "area:interoperability",
+        "area:release",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:implementation",
+        "type:release",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P15-C05",
+      "number": 275,
+      "kind": "workstream",
+      "phase": 15,
+      "child": 5,
+      "parent": 283,
+      "title": "P15-C05: Enforce dependency, SAST, secret, and license gates",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/275",
+      "labels": [
+        "area:ci",
+        "area:docs",
+        "area:interoperability",
+        "area:release",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:implementation",
+        "type:release",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P15-C06",
+      "number": 276,
+      "kind": "workstream",
+      "phase": 15,
+      "child": 6,
+      "parent": 283,
+      "title": "P15-C06: Qualify performance, density, energy, and regression budgets",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/276",
+      "labels": [
+        "area:ci",
+        "area:docs",
+        "area:interoperability",
+        "area:release",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:implementation",
+        "type:release",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P15-C07",
+      "number": 277,
+      "kind": "workstream",
+      "phase": 15,
+      "child": 7,
+      "parent": 283,
+      "title": "P15-C07: Complete single-host and cluster disaster-recovery drills",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/277",
+      "labels": [
+        "area:ci",
+        "area:docs",
+        "area:interoperability",
+        "area:release",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:implementation",
+        "type:release",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P15-C08",
+      "number": 278,
+      "kind": "workstream",
+      "phase": 15,
+      "child": 8,
+      "parent": 283,
+      "title": "P15-C08: Verify the complete upgrade lineage and rollback window",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/278",
+      "labels": [
+        "area:ci",
+        "area:docs",
+        "area:interoperability",
+        "area:release",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:implementation",
+        "type:release",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P15-C09",
+      "number": 279,
+      "kind": "workstream",
+      "phase": 15,
+      "child": 9,
+      "parent": 283,
+      "title": "P15-C09: Finish and execute all documentation, website, and examples",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/279",
+      "labels": [
+        "area:ci",
+        "area:docs",
+        "area:interoperability",
+        "area:release",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:implementation",
+        "type:release",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P15-C10",
+      "number": 280,
+      "kind": "workstream",
+      "phase": 15,
+      "child": 10,
+      "parent": 283,
+      "title": "P15-C10: Establish support, governance, compatibility, and incident operations",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/280",
+      "labels": [
+        "area:ci",
+        "area:docs",
+        "area:interoperability",
+        "area:release",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:implementation",
+        "type:release",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P15-C11",
+      "number": 281,
+      "kind": "workstream",
+      "phase": 15,
+      "child": 11,
+      "parent": 283,
+      "title": "P15-C11: Produce and verify signed v0.0.2 GA artifacts",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/281",
+      "labels": [
+        "area:ci",
+        "area:docs",
+        "area:interoperability",
+        "area:release",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:implementation",
+        "type:release",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    },
+    {
+      "marker": "P15-C12",
+      "number": 282,
+      "kind": "workstream",
+      "phase": 15,
+      "child": 12,
+      "parent": 283,
+      "title": "P15-C12: Submit the unqualified Homebrew-core formula",
+      "state": "open",
+      "url": "https://github.com/hostwright/hostwright/issues/282",
+      "labels": [
+        "area:ci",
+        "area:docs",
+        "area:interoperability",
+        "area:release",
+        "risk:high",
+        "roadmap:v0.0.2",
+        "status:planned",
+        "type:docs",
+        "type:implementation",
+        "type:release",
+        "type:security",
+        "type:testing"
+      ],
+      "assignees": [
+        "d3v07"
+      ]
+    }
+  ]
+}

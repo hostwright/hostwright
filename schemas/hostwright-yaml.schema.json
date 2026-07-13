@@ -4,7 +4,7 @@
   "title": "Hostwright Manifest",
   "description": "Hostwright manifest shape. The Swift parser supports a restricted Hostwright subset, not general YAML.",
   "type": "object",
-  "required": ["project", "services"],
+  "required": ["version", "project", "services"],
   "additionalProperties": false,
   "allOf": [
     {
@@ -41,8 +41,8 @@
   "properties": {
     "version": {
       "type": "integer",
-      "const": 1,
-      "description": "Optional in legacy alpha manifests; when present, only manifest version 1 is supported."
+      "const": 2,
+      "description": "Required Manifest v2 contract for Hostwright v0.0.2. Use hostwright migrate preview for legacy v1 manifests."
     },
     "project": {
       "type": "string",

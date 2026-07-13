@@ -471,6 +471,7 @@ final class HostwrightDaemonCoreTests: XCTestCase {
     }
 
     private static let singleServiceManifest = """
+    version: 2
     project: demo
     services:
       api:
@@ -480,6 +481,7 @@ final class HostwrightDaemonCoreTests: XCTestCase {
     """
 
     private static let healthRestartManifest = """
+    version: 2
     project: demo
     services:
       api:

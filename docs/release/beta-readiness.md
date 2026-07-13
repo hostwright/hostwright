@@ -1,5 +1,7 @@
 # Beta Readiness
 
+> **Historical phase record:** the active release ladder is `0.0.2-dev` → clean `v0.0.2-rc.*` qualification → `v0.0.2`. The current gates are defined in `docs/release/RELEASE_PROCESS.md` and the v0.0.2 roadmap.
+
 Status: Phase 39 beta readiness gate. No beta tag, GitHub Release, binary artifact, installer, support promise, production-readiness claim, or version bump is approved by this document.
 
 Phase 39 defines what must be true before Hostwright can move from alpha to beta. It is a checklist and public-claim guard, not a release action.

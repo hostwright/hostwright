@@ -290,7 +290,7 @@ final class CLIFileErrorAndRecoveryTests: XCTestCase {
 
     private var singleServiceManifest: String {
         """
-        version: 1
+        version: 2
         project: demo
         services:
           api:

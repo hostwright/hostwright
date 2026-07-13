@@ -1,6 +1,8 @@
 # Security And Safety Notes
 
-Hostwright `v0.1.0-alpha.1` is not production ready.
+Hostwright `0.0.2-dev` is not production ready. The active release target is `v0.0.2`; security-sensitive features remain unsupported until their owning roadmap issue has clean security and runtime evidence.
+
+The v0.0.2 program turns earlier unsupported security-sensitive scope into explicit implementation work for trusted install, secrets, supply chain, storage, networking, tunnels, autonomous mutation, identity/RBAC/admission/audit, plugins, clusters, interoperability, GUI/MDM, and optional cloud control. This does not make those capabilities supported today. The exact current state is emitted by `hostwright capabilities --json` and the implementation/verification ownership is in the [v0.0.2 plan](../roadmap/v0.0.2/IMPLEMENTATION_PLAN.md).
 
 ## Runtime Boundary
 
@@ -119,17 +121,17 @@ Operators should still decide which registries, image publishers, digests, and l
 
 ## Network Exposure
 
-Manifest ports use `"host:container"` syntax in this alpha and do not expose a bind-address field. Hostwright-created Apple container publishes use explicit `127.0.0.1:host:container` bindings by default. Broad bind addresses such as `0.0.0.0` and `::` remain blocked when represented in runtime desired state, and observed non-target services occupying the same host port block mutation planning when live observation is available.
+The currently executable Manifest v2 subset uses `"host:container"` syntax and does not expose a bind-address field. Hostwright-created Apple container publishes use explicit `127.0.0.1:host:container` bindings by default. Broad bind addresses such as `0.0.0.0` and `::` remain blocked when represented in runtime desired state, and observed non-target services occupying the same host port block mutation planning when live observation is available. Phase 07 may expand this only with explicit LAN/ingress policy, identity, and cleanup.
 
 ## Accelerator Boundary
 
 Apple GPU, ANE, Metal, Core ML, MLX, PyTorch MPS, host-native accelerator helpers, host accelerator device exposure, and accelerator-aware scheduling are not implemented in current core scope.
 
-Host-native accelerator helpers or services require a separate threat model, local auth design, IPC boundary, redaction and audit plan, cleanup model, policy gate, and maintainer approval before implementation. Private or undocumented accelerator interfaces are rejected.
+Phase 10 implements a host-native accelerator service only with a threat model, mutual workload authentication, IPC boundary, quotas, cancellation, redaction/audit, cleanup, and policy gates. Private or undocumented accelerator interfaces remain rejected.
 
 ## Unsupported Security-Sensitive Scope
 
-This alpha does not include:
+The current development build does not yet include the following. Their v0.0.2 implementations are owned by Phases 02–15; this list is a present-tense safety boundary, not a non-goal list:
 
 - privileged helper;
 - installer or launch agent;

@@ -1,0 +1,15 @@
+{
+  "kind": "diagnosticsIntegration",
+  "apiVersion": 1,
+  "protocolVersion": 1,
+  "identifier": "dev.hostwright.golden",
+  "trust": "reviewedLocal",
+  "capability": "diagnosticsRead",
+  "purpose": "Verify the v0.0.2 plugin ABI v1 golden contract.",
+  "boundaries": [
+    "stateStore",
+    "redaction",
+    "noRuntimeMutation"
+  ],
+  "executableSHA256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+}

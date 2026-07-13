@@ -81,7 +81,15 @@ public enum ManifestValidator {
     }
 
     private static func validateVersion(_ version: Int?, issues: inout [ManifestIssue]) {
-        guard let version else { return }
+        guard let version else {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestUnsupportedFeature,
+                    message: "Manifest must declare version: \(HostwrightManifest.currentVersion). Run 'hostwright migrate preview' for legacy manifests."
+                )
+            )
+            return
+        }
 
         if version == HostwrightManifest.currentVersion {
             return
@@ -91,7 +99,7 @@ public enum ManifestValidator {
             issues.append(
                 ManifestIssue(
                     code: .manifestUnsupportedFeature,
-                    message: "Manifest version \(version) is older than supported version \(HostwrightManifest.currentVersion). Automatic downgrade or legacy conversion is unavailable."
+                    message: "Manifest version \(version) is older than supported version \(HostwrightManifest.currentVersion). Run 'hostwright migrate preview' to inspect the required conversion."
                 )
             )
             return

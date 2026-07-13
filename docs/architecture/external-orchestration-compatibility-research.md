@@ -1,5 +1,7 @@
 # External Orchestration Compatibility Research
 
+> **Historical research, promoted to implementation:** v0.0.2 Phase 12 owns Kubernetes/CRI/CNI/CSI/Helm through a real pod-sandbox boundary, and Phase 13 owns Docker/Compose/Podman/Testcontainers. Earlier rejection language is not the active product disposition.
+
 Status: Phase 29 research-only decision record.
 
 Phase 29 records the current boundary for CRI, Kubernetes, Docker API, Docker Compose, attach, forwarding, scheduler, lifecycle, networking, identity, and state compatibility. It does not implement a shim, node agent, external API, scheduler behavior, runtime mutation, image pull, provider integration, or compatibility prototype.

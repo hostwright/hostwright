@@ -1,105 +1,127 @@
 # Release Process
 
-Hostwright uses internal phase tags for engineering checkpoints and semantic version tags for public releases.
+The active release target is `v0.0.2`. The working binary reports `0.0.2-dev` until release qualification is complete.
 
 ## Tag Policy
 
-- `phase-*` tags are internal engineering checkpoints only.
-- `v*` tags are public release tags only.
-- GitHub Releases are created only for `v*` tags.
-- Do not create GitHub Releases for `phase-*` tags.
-- Do not use `first-release`, `initial-release`, `phase-10-final`, or marketing tags.
+- `phase-*` tags are optional internal engineering checkpoints and never receive GitHub Releases.
+- `v*` tags are public releases or explicitly marked release candidates.
+- Do not create `v0.0.2`, publish packages, or change the binary to `0.0.2` before the Phase 15 gate.
+- Never tag from a dirty tree, an unreviewed commit, or a commit whose required evidence is blocked.
+- Never force-move a public release tag.
 
 ## Release Ladder
 
-The approved release ladder is:
+1. `0.0.2-dev` throughout implementation;
+2. `v0.0.2-rc.1` only after all 15 phase epics and child issues reach verification;
+3. `v0.0.2-rc.2` or later after every defect from the prior clean RC run is fixed and the entire qualification run is repeated;
+4. `v0.0.2` only after two clean complete RC qualification runs and final maintainer approval.
 
-1. `v0.1.0-alpha.1`
-2. `v0.1.0-alpha.2`
-3. `v0.1.0-beta.1`
-4. `v0.1.0`
-5. `v1.0.0`, only after real users, operational feedback, compatibility stability, and a separate maintainer decision.
+An RC tag is a pre-release, not a partial implementation escape hatch. It uses the same supported-scope contract as GA and may differ only by resolved defects and repeated evidence.
 
-## First Public Release
+## Active Roadmap Authority
 
-The first public release target is `v0.1.0-alpha.1`.
+- [v0.0.2 implementation plan](../roadmap/v0.0.2/IMPLEMENTATION_PLAN.md)
+- [machine-readable issue manifest](../roadmap/v0.0.2/issues.json)
+- [testing and evidence contract](../reference/testing-evidence.md)
+- [evidence JSON schema](../../schemas/hostwright-evidence.schema.json)
+- [master release issue #284](https://github.com/hostwright/hostwright/issues/284)
 
-- GitHub Release title: `Hostwright v0.1.0-alpha.1`
-- Release type: pre-release
-- Artifact policy: source-only
-- Binary attachments: none
-- Installer packages: none
-- Homebrew formula: none
-- Signing/notarization claims: none
+Every child issue, phase epic, and master gate closes through a final `status:verification` PR and clean evidence comment. Intermediate implementation, research, design, and documentation PRs use `Refs #NN`; only the final evidence PR uses `Closes #NN`.
 
-This alpha is not production ready.
-
-## Required Gates Before `v0.1.0-alpha.1`
-
-Run and record:
+## Baseline Gate for Every Phase and RC
 
 ```bash
 swift build
 swift test list || swift test --list-tests
 swift test
+scripts/integration.sh
 scripts/grep-orchard.sh .
 scripts/test.sh
+scripts/lint.sh
 ```
 
-`scripts/lint.sh` is currently only a Swift package metadata sanity check (`swift package dump-package`). No Swift formatting or style lint is enforced for this alpha.
-
-Review and record:
-
-- GitHub CI passes on the release-hardening pull request.
-- `README.md`, CLI docs, install docs, compatibility docs, limitations, release notes, and security/safety notes agree.
-- `GOVERNANCE.md`, `CONTRIBUTING.md`, `SECURITY.md`, issue templates, and the pull request template agree on review triggers and verification gates.
-- No public docs claim production readiness.
-- No docs claim binaries, installers, Homebrew, signing, or notarization.
-- No docs claim Kubernetes, CRI, Docker API, Compose parity, tunnels, cloud, DNS, GPU/ANE, background daemon service, unattended daemon mutation, broad lifecycle, image cleanup, or volume cleanup support.
-- `git ls-files` contains no `.DS_Store`, `.build`, `site/`, `.env`, keys, local source archives outside preserved paths, or other local-only files.
+The owning phase adds its required live, migration, security, resilience, multi-host, interoperability, accessibility, distribution, and performance lanes. A command that is unavailable, skipped, blocked, fixture-only, mock-only, dirty, or cleanup-failed is recorded honestly and fails that implementation/release gate.
 
 ## Governance Gate
 
-Before any beta, stable, binary, installer, signing, notarization, SBOM, provenance, package-channel, or support-policy claim:
-
-- confirm the change has a scoped issue and PR;
-- confirm risky-area review from `GOVERNANCE.md` and `SECURITY.md` has happened;
-- confirm release notes, limitations, install docs, and security docs use current-support language only;
-- confirm no release tag or GitHub Release is created before final verification and maintainer approval.
+Roadmap manifest validation, issue-parent/label/assignee checks, final-PR evidence enforcement, child closure, security review triggers, and exact public claims must pass. The executable workflow reopens a roadmap issue closed without valid evidence.
 
 ## Distribution Readiness Gate
 
-Phase 35 defines the fail-closed distribution gate and developer-only unsigned evidence lane in `docs/release/distribution-readiness.md`. Local `hostwright-dist` archives and temporary-prefix lifecycle reports are review inputs, not public release artifacts.
-
-No binary archive, installer package, install script, Homebrew formula, signed/notarized artifact, SBOM/provenance sidecar, or package-channel claim may be published until that gate has matching clean-tag signing, notarization, stapling, Gatekeeper, installer, checksum, lifecycle, and maintainer evidence. A local unsigned SPDX or provenance file does not satisfy distribution trust.
+Phase 02 turns the former unsigned developer lane into signed/notarized archives, a `.pkg`, vendor tap, secure install state, and reversible lifecycle. Phase 15 repeats those checks from the final clean tag. The historical `distribution-readiness.md` does not satisfy this gate.
 
 ## Benchmark Gate
 
-Phase 36 defines the explicit local benchmark runner and versioned report contract in `docs/architecture/benchmark-lab.md`. Hosted CI does not run the hardware lane.
-
-No release notes, docs, or public artifacts may claim performance numbers, production capacity, Apple container version compatibility, or battery/thermal behavior until a clean-source reviewed hardware report passes with environment facts, raw samples, exact measured dimensions, no blockers/failures, exact cleanup, and maintainer approval. A dirty, blocked, failed, fixture, or scripted report cannot satisfy this gate.
+Phase 10 implements scheduling, pressure, energy, and accelerator measurement; Phase 15 qualifies performance/density/energy budgets on physical hardware. No benchmark, capacity, efficiency, or comparison claim is published from a dirty, incomplete, blocked, scripted, or cleanup-failed report.
 
 ## Public Education Gate
 
-Phase 37 defines documentation-site source-of-truth boundaries in `docs/architecture/documentation-site-public-education.md`.
-
-Website, tutorial, and release copy must cite current core reference docs for current support claims, link limitations near unsupported behavior, and keep planned, deferred, rejected, and research-only work visibly separate from implemented behavior. The core repository does not publish the website or own presentation-layer implementation.
+Current core docs and `hostwright capabilities --json` are the product-truth source. The separate website must typecheck, build, pass internal-link checks, execute every documented quickstart, and agree on version, install, limitation, compatibility, and roadmap claims.
 
 ## Beta Readiness Gate
 
-Phase 39 defines beta criteria in `docs/release/beta-readiness.md`.
+The former beta checklist is historical. The active pre-GA gate is a complete `v0.0.2-rc.*` qualification run over the same intended GA scope; an RC cannot omit an unimplemented phase or downgrade a blocker into a known limitation.
 
-No beta tag, GitHub Release, beta compatibility claim, support promise, binary artifact, installer, or production-readiness language may be created until the beta readiness checklist has matching clean-checkout source install proof, full local gate results, hosted CI, docs/limitations alignment, state upgrade evidence, telemetry/support policy review, and maintainer approval.
+## v0.0.2 GA Gate
 
-## Tag And Release Steps
+All of the following are required:
 
-Only after the Phase 10 branch is merged to `main` and final verification passes:
+- all 167 workstreams, 15 phase epics, and the master issue are complete;
+- zero unresolved P0/P1 defects;
+- exact current/previous supported macOS, Apple `container`, Kubernetes, Docker API, and client-family matrices are frozen from passing evidence;
+- Apple CLI and pinned Containerization providers pass declared-capability conformance;
+- 10,000 lifecycle cycles and a 72-hour single-host soak pass without duplicate resources, unmanaged mutation, or monotonic leaks;
+- physical three- and five-Mac fault matrices and a seven-day mixed-fault soak pass, including safe read-only behavior without quorum;
+- every critical parser/protocol receives at least 24 aggregate fuzz CPU-hours;
+- supported ASan and TSan lanes pass;
+- independent security assessment findings required for release are remediated and retested;
+- dependency, license, secret, SAST, SBOM, signature, vulnerability, and provenance gates pass;
+- performance, density, energy, upgrade lineage, rollback, disaster recovery, compatibility, and accessibility gates pass;
+- every documentation quickstart executes and website typecheck/build/link checks pass;
+- signed/notarized archives and `.pkg` pass checksum, stapling, Gatekeeper, clean install, reboot, upgrade, rollback, repair, and uninstall;
+- the vendor Homebrew tap installs those exact verified artifacts;
+- two complete clean RC qualification runs pass.
 
-```bash
-git checkout main
-git pull --ff-only
-git tag -a v0.1.0-alpha.1 -m "Hostwright v0.1.0-alpha.1"
-git push origin v0.1.0-alpha.1
+## Artifact and Package Policy
+
+The release publishes only artifacts produced from the final clean tag by the reviewed release workflow:
+
+- signed/notarized Apple-silicon archive;
+- signed/notarized `.pkg`;
+- checksums;
+- SPDX SBOM;
+- signed provenance/attestation;
+- verification instructions and compatibility manifest;
+- vendor-tap formula bound to the released digest.
+
+Unsigned developer `hostwright-dist` output is useful local integration evidence, not a public release artifact.
+
+`brew install hostwright` depends on Homebrew-core acceptance. Phase 15 submits the formula after GA artifact evidence passes. The Hostwright-controlled fallback is the vendor tap; documentation must not claim the unqualified command before core acceptance.
+
+## Final Evidence Record
+
+The final evidence comment contains:
+
+```text
+<!-- hostwright-evidence-gate:v1 -->
 ```
 
-Then create a GitHub pre-release for `v0.1.0-alpha.1` named `Hostwright v0.1.0-alpha.1` using `docs/release/v0.1.0-alpha.1-notes.md` as the body.
+It records the full commit, `Dirty: false`, OS/build/architecture/hardware, runtime/framework/tool versions, every command and raw outcome, failures, blockers, cleanup and exact resource identifiers, artifact links, and documentation/compatibility updates. Public logs are redacted without removing result counts or the ability to audit the claim.
+
+## Promotion Steps
+
+Only after the final RC evidence and approval:
+
+1. verify the release commit is on protected `main`, clean, signed according to policy, and identical to the qualified commit;
+2. set the product version from `0.0.2-dev` to `0.0.2` in a reviewed release PR and rerun the complete release gate;
+3. create the annotated `v0.0.2` tag without rewriting history;
+4. let the release workflow build, sign, notarize, staple, verify, and publish;
+5. verify clean installation, upgrade, rollback, and uninstall from the published channel;
+6. publish the GitHub Release and vendor-tap formula only after artifact verification;
+7. submit the Homebrew-core formula separately and report its external acceptance state exactly;
+8. run the post-release canary/support checks and retain release evidence according to policy.
+
+## Immutable Historical Releases
+
+Historical release notes keep their original text and claims. `docs/release/IMMUTABLE_RELEASES.json` records their SHA-256. They may be annotated through separate index/current docs but are not rewritten to make history resemble the current roadmap. The former alpha plan and development logs are historical evidence, not active release instructions.

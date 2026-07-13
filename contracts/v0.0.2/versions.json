@@ -1,0 +1,9 @@
+{
+  "productVersion": "0.0.2-dev",
+  "releaseTarget": "v0.0.2",
+  "manifest": 2,
+  "controlAPI": 2,
+  "runtimeProviderAPI": 2,
+  "pluginABI": 1,
+  "stateSchema": 7
+}

@@ -5,6 +5,8 @@ import HostwrightState
 
 public enum CLICommand: Equatable, Sendable {
     case version
+    case capabilities(output: CLIOutputFormat)
+    case migrateManifestPreview(path: String, output: CLIOutputFormat)
     case initManifest
     case importStack(path: String, output: CLIOutputFormat, teamProfilePath: String?)
     case validate(path: String, teamProfilePath: String?)
@@ -33,6 +35,10 @@ public enum CLICommand: Equatable, Sendable {
         case "--help", "-h", "help":
             guard arguments.count == 1 else { throw CLIUsageError("help does not accept arguments.") }
             return .help
+        case "capabilities":
+            return try capabilitiesCommand(arguments: arguments)
+        case "migrate":
+            return try migrateCommand(arguments: arguments)
         case "init":
             guard arguments.count == 1 else { throw CLIUsageError("init does not support flags.") }
             return .initManifest
@@ -68,12 +74,59 @@ public enum CLICommand: Equatable, Sendable {
     }
 
     public static func outputFormatHint(arguments: [String]) -> CLIOutputFormat? {
+        if arguments.contains("--json") {
+            return .json
+        }
         guard let outputIndex = arguments.firstIndex(of: "--output"),
               arguments.indices.contains(arguments.index(after: outputIndex))
         else {
             return nil
         }
         return CLIOutputFormat(rawValue: arguments[arguments.index(after: outputIndex)])
+    }
+
+    private static func capabilitiesCommand(arguments: [String]) throws -> CLICommand {
+        let options = Array(arguments.dropFirst())
+        if options.isEmpty {
+            return .capabilities(output: .text)
+        }
+        if options == ["--json"] {
+            return .capabilities(output: .json)
+        }
+        if options.count == 2, options[0] == "--output" {
+            let value = options[1]
+            guard let output = CLIOutputFormat(rawValue: value) else {
+                throw CLIUsageError("capabilities --output supports only 'text' or 'json'.")
+            }
+            return .capabilities(output: output)
+        }
+        throw CLIUsageError("capabilities supports only --json or --output text|json.")
+    }
+
+    private static func migrateCommand(arguments: [String]) throws -> CLICommand {
+        guard arguments.count >= 3, arguments[1] == "preview" else {
+            throw CLIUsageError("migrate supports only the read-only 'preview <path>' operation.")
+        }
+        let path = arguments[2].trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !path.isEmpty, !path.hasPrefix("-") else {
+            throw CLIUsageError("migrate preview requires a manifest path.")
+        }
+
+        let options = Array(arguments.dropFirst(3))
+        if options.isEmpty {
+            return .migrateManifestPreview(path: path, output: .text)
+        }
+        if options == ["--json"] {
+            return .migrateManifestPreview(path: path, output: .json)
+        }
+        if options.count == 2, options[0] == "--output" {
+            let value = options[1]
+            guard let output = CLIOutputFormat(rawValue: value) else {
+                throw CLIUsageError("migrate preview --output supports only 'text' or 'json'.")
+            }
+            return .migrateManifestPreview(path: path, output: output)
+        }
+        throw CLIUsageError("migrate preview supports only --json or --output text|json.")
     }
 
     private static func validateCommand(arguments: [String]) throws -> CLICommand {

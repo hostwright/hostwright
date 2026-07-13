@@ -1,24 +1,55 @@
+import HostwrightCore
+
 public struct SchemaMigration: Equatable, Sendable {
     public let version: Int
     public let description: String
     public let checksum: String
     public let legacyChecksums: [String]
+    public let implementationRevision: String?
     let statements: [String]
+    let finalizationStatements: [String]
 
-    public init(version: Int, description: String, legacyChecksums: [String] = [], statements: [String]) {
+    public init(
+        version: Int,
+        description: String,
+        legacyChecksums: [String] = [],
+        implementationRevision: String? = nil,
+        statements: [String],
+        finalizationStatements: [String] = []
+    ) {
         self.version = version
         self.description = description
-        self.checksum = Self.computeChecksum(version: version, description: description, statements: statements)
+        self.implementationRevision = implementationRevision
+        var checksumInputs = statements + finalizationStatements
+        if let implementationRevision {
+            checksumInputs.append("hostwright:migration-implementation:\(implementationRevision)")
+        }
+        self.checksum = Self.computeChecksum(
+            version: version,
+            description: description,
+            statements: checksumInputs
+        )
         self.legacyChecksums = legacyChecksums
         self.statements = statements
+        self.finalizationStatements = finalizationStatements
     }
 
-    public init(version: Int, description: String, checksum: String, legacyChecksums: [String] = [], statements: [String]) {
+    public init(
+        version: Int,
+        description: String,
+        checksum: String,
+        legacyChecksums: [String] = [],
+        implementationRevision: String? = nil,
+        statements: [String],
+        finalizationStatements: [String] = []
+    ) {
         self.version = version
         self.description = description
         self.checksum = checksum
         self.legacyChecksums = legacyChecksums
+        self.implementationRevision = implementationRevision
         self.statements = statements
+        self.finalizationStatements = finalizationStatements
     }
 
     func accepts(recordedChecksum: String) -> Bool {
@@ -37,7 +68,7 @@ public struct SchemaMigration: Equatable, Sendable {
 }
 
 public struct MigrationRunner: Sendable {
-    public static let latestSchemaVersion = 6
+    public static let latestSchemaVersion = HostwrightContractVersions.stateSchema
 
     public init() {}
 
@@ -96,6 +127,14 @@ public struct MigrationRunner: Sendable {
                     try connection.execute(statement)
                 }
 
+                if migration.version == 7 {
+                    try backfillV7IdentityAndFencing(on: connection)
+                }
+
+                for statement in migration.finalizationStatements {
+                    try connection.execute(statement)
+                }
+
                 try connection.run(
                     """
                     INSERT INTO schema_migrations (version, description, checksum, applied_at)
@@ -126,6 +165,135 @@ public struct MigrationRunner: Sendable {
         }
 
         try ensureMigrationTable(on: connection)
+    }
+
+    private func backfillV7IdentityAndFencing(on connection: SQLiteConnection) throws {
+        let projects = try connection.query("SELECT id FROM projects WHERE resource_uuid IS NULL OR resource_uuid = ''")
+        for row in projects {
+            guard let identifier = row.first ?? nil else {
+                throw StateStoreError.migrationFailed(version: 7, message: "Could not backfill project resource UUID from a missing identifier.")
+            }
+            try connection.run(
+                "UPDATE projects SET resource_uuid = ? WHERE id = ?",
+                bindings: [
+                    .text(HostwrightResourceUUID.legacy(kind: "project", identifier: identifier)),
+                    .text(identifier)
+                ]
+            )
+        }
+
+        let desiredServices = try connection.query(
+            "SELECT id, project_id, service_name FROM desired_services WHERE resource_uuid IS NULL OR resource_uuid = ''"
+        )
+        for row in desiredServices {
+            guard row.count == 3,
+                  let identifier = row[0],
+                  let projectID = row[1],
+                  let serviceName = row[2] else {
+                throw StateStoreError.migrationFailed(version: 7, message: "Could not backfill desired service resource UUID from an incomplete identity.")
+            }
+            try connection.run(
+                "UPDATE desired_services SET resource_uuid = ? WHERE id = ?",
+                bindings: [
+                    .text(HostwrightResourceUUID.legacy(kind: "service", identifier: "\(projectID):\(serviceName)")),
+                    .text(identifier)
+                ]
+            )
+        }
+
+        let ownershipRows = try connection.query(
+            "SELECT id, project_id, service_name FROM ownership_records WHERE resource_uuid IS NULL OR resource_uuid = '' ORDER BY id"
+        )
+        var ownershipIdentityCounts: [String: Int] = [:]
+        for row in ownershipRows {
+            guard row.count == 3, let projectID = row[1], let serviceName = row[2] else {
+                continue
+            }
+            ownershipIdentityCounts["\(projectID)\u{1f}\(serviceName)", default: 0] += 1
+        }
+        for row in ownershipRows {
+            guard row.count == 3, let identifier = row[0] else {
+                throw StateStoreError.migrationFailed(version: 7, message: "Could not backfill ownership resource UUID from a missing identifier.")
+            }
+            var resourceUUID = HostwrightResourceUUID.legacy(kind: "ownership", identifier: identifier)
+            if let projectID = row[1], let serviceName = row[2] {
+                let identityKey = "\(projectID)\u{1f}\(serviceName)"
+                if ownershipIdentityCounts[identityKey] == 1,
+                   let desiredUUID = try connection.query(
+                    """
+                    SELECT resource_uuid
+                    FROM desired_services
+                    WHERE project_id = ? AND service_name = ? AND resource_uuid IS NOT NULL AND resource_uuid != ''
+                    ORDER BY desired_generation DESC, rowid DESC
+                    LIMIT 1
+                    """,
+                    bindings: [.text(projectID), .text(serviceName)]
+                   ).first?.first ?? nil {
+                    resourceUUID = desiredUUID
+                }
+            }
+            try connection.run(
+                "UPDATE ownership_records SET resource_uuid = ? WHERE id = ?",
+                bindings: [.text(resourceUUID), .text(identifier)]
+            )
+        }
+
+        try connection.execute(
+            """
+            UPDATE desired_services
+            SET mutation_provider = (
+                SELECT projects.mutation_provider
+                FROM projects
+                WHERE projects.id = desired_services.project_id
+            )
+            WHERE mutation_provider IS NULL
+            """
+        )
+
+        let ownershipFences = try connection.query("SELECT id FROM ownership_records WHERE fencing_token = ''")
+        for row in ownershipFences {
+            guard let identifier = row.first ?? nil else {
+                throw StateStoreError.migrationFailed(version: 7, message: "Could not backfill ownership fencing from a missing identifier.")
+            }
+            try connection.run(
+                "UPDATE ownership_records SET fencing_token = ? WHERE id = ?",
+                bindings: [
+                    .text(HostwrightResourceUUID.legacy(kind: "ownership-fence", identifier: identifier)),
+                    .text(identifier)
+                ]
+            )
+        }
+
+        try connection.execute(
+            """
+            UPDATE ownership_records
+            SET project_resource_uuid = (
+                    SELECT projects.resource_uuid FROM projects WHERE projects.id = ownership_records.project_id
+                ),
+                project_generation = MAX(1, COALESCE((
+                    SELECT MAX(desired_services.desired_generation)
+                    FROM desired_services
+                    WHERE desired_services.project_id = ownership_records.project_id
+                ), 1)),
+                provider_generation = MAX(1, COALESCE((
+                    SELECT projects.provider_generation FROM projects WHERE projects.id = ownership_records.project_id
+                ), 1))
+            """
+        )
+
+        let groups = try connection.query("SELECT id FROM operation_groups WHERE fencing_token = ''")
+        for row in groups {
+            guard let identifier = row.first ?? nil else {
+                throw StateStoreError.migrationFailed(version: 7, message: "Could not backfill operation fencing from a missing identifier.")
+            }
+            try connection.run(
+                "UPDATE operation_groups SET fencing_token = ? WHERE id = ?",
+                bindings: [
+                    .text(HostwrightResourceUUID.legacy(kind: "operation-fence", identifier: identifier)),
+                    .text(identifier)
+                ]
+            )
+        }
     }
 
     func validateAppliedSchema(on connection: SQLiteConnection) throws {
@@ -522,6 +690,37 @@ public struct MigrationRunner: Sendable {
                 """,
                 "ALTER TABLE observed_services ADD COLUMN networks_json TEXT NOT NULL DEFAULT '[]'",
                 "ALTER TABLE ownership_records ADD COLUMN identity_version INTEGER NOT NULL DEFAULT 1"
+            ]
+        ),
+        SchemaMigration(
+            version: 7,
+            description: "Resource identity, provider binding, and durable saga contracts",
+            implementationRevision: "identity-fencing-backfill-v2",
+            statements: [
+                "ALTER TABLE projects ADD COLUMN resource_uuid TEXT",
+                "ALTER TABLE projects ADD COLUMN manifest_version INTEGER NOT NULL DEFAULT 1",
+                "ALTER TABLE projects ADD COLUMN mutation_provider TEXT",
+                "ALTER TABLE projects ADD COLUMN provider_generation INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE desired_services ADD COLUMN resource_uuid TEXT",
+                "ALTER TABLE desired_services ADD COLUMN resource_generation INTEGER NOT NULL DEFAULT 1",
+                "ALTER TABLE desired_services ADD COLUMN mutation_provider TEXT",
+                "ALTER TABLE ownership_records ADD COLUMN resource_uuid TEXT",
+                "ALTER TABLE ownership_records ADD COLUMN resource_generation INTEGER NOT NULL DEFAULT 1",
+                "ALTER TABLE ownership_records ADD COLUMN project_resource_uuid TEXT",
+                "ALTER TABLE ownership_records ADD COLUMN project_generation INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE ownership_records ADD COLUMN provider_generation INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE ownership_records ADD COLUMN fencing_token TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE operation_groups ADD COLUMN fencing_token TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE operation_groups ADD COLUMN intent_json_redacted TEXT NOT NULL DEFAULT '{}'",
+                "ALTER TABLE operation_groups ADD COLUMN compensation_json_redacted TEXT NOT NULL DEFAULT '[]'",
+                "ALTER TABLE operation_groups ADD COLUMN verification_json_redacted TEXT NOT NULL DEFAULT '{}'"
+            ],
+            finalizationStatements: [
+                "CREATE UNIQUE INDEX IF NOT EXISTS projects_resource_uuid_idx ON projects(resource_uuid)",
+                "CREATE INDEX IF NOT EXISTS desired_services_resource_uuid_idx ON desired_services(resource_uuid)",
+                "CREATE UNIQUE INDEX IF NOT EXISTS ownership_resource_uuid_idx ON ownership_records(resource_uuid)",
+                "CREATE INDEX IF NOT EXISTS ownership_project_resource_uuid_idx ON ownership_records(project_resource_uuid)",
+                "CREATE UNIQUE INDEX IF NOT EXISTS operation_groups_fencing_token_idx ON operation_groups(fencing_token)"
             ]
         )
     ]

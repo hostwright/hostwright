@@ -7,7 +7,7 @@ import XCTest
 final class ControlRequestTests: XCTestCase {
     func testParserAcceptsVersionedBoundedEventRequest() throws {
         let request = try LocalControlRequestParser.parse(
-            Data(#"{"apiVersion":1,"requestID":"request-1","operation":"events","project":"demo","eventType":"apply.succeeded","service":"api","severity":"info","limit":25,"sort":"desc"}"#.utf8)
+            Data(#"{"apiVersion":2,"requestID":"request-1","operation":"events","project":"demo","eventType":"apply.succeeded","service":"api","severity":"info","limit":25,"sort":"desc"}"#.utf8)
         )
 
         XCTAssertEqual(request.requestID, "request-1")
@@ -19,11 +19,11 @@ final class ControlRequestTests: XCTestCase {
 
     func testParserRejectsUnknownDuplicateMissingMutatingAndOversizedRequests() {
         let invalid: [Data] = [
-            Data(#"{"apiVersion":1,"requestID":"r1","operation":"plan","path":"/tmp/manifest"}"#.utf8),
-            Data(#"{"apiVersion":1,"apiVersion":1,"requestID":"r1","operation":"plan"}"#.utf8),
-            Data(#"{"apiVersion":1,"\u0061piVersion":1,"requestID":"r1","operation":"plan"}"#.utf8),
-            Data(#"{"apiVersion":1,"operation":"plan"}"#.utf8),
-            Data(#"{"apiVersion":1,"requestID":"r1","operation":"apply"}"#.utf8),
+            Data(#"{"apiVersion":2,"requestID":"r1","operation":"plan","path":"/tmp/manifest"}"#.utf8),
+            Data(#"{"apiVersion":2,"apiVersion":2,"requestID":"r1","operation":"plan"}"#.utf8),
+            Data(#"{"apiVersion":2,"\u0061piVersion":1,"requestID":"r1","operation":"plan"}"#.utf8),
+            Data(#"{"apiVersion":2,"operation":"plan"}"#.utf8),
+            Data(#"{"apiVersion":2,"requestID":"r1","operation":"apply"}"#.utf8),
             Data(repeating: 65, count: LocalControlRequestParser.maximumRequestBytes + 1)
         ]
 
@@ -34,13 +34,13 @@ final class ControlRequestTests: XCTestCase {
 
     func testParserRejectsUnsupportedVersionIdentifierAndFilterCombinations() {
         let invalid = [
-            #"{"apiVersion":2,"requestID":"r1","operation":"plan"}"#,
-            #"{"apiVersion":1,"requestID":"token=must-not-be-an-id","operation":"plan"}"#,
-            #"{"apiVersion":1,"requestID":"r1","operation":"plan","project":"demo"}"#,
-            #"{"apiVersion":1,"requestID":"r1","operation":"recovery","limit":5}"#,
-            #"{"apiVersion":1,"requestID":"r1","operation":"events","severity":"critical"}"#,
-            #"{"apiVersion":1,"requestID":"r1","operation":"events","limit":1001}"#,
-            #"{"apiVersion":1,"requestID":"r1","operation":"events","sort":"newest"}"#
+            #"{"apiVersion":3,"requestID":"r1","operation":"plan"}"#,
+            #"{"apiVersion":2,"requestID":"token=must-not-be-an-id","operation":"plan"}"#,
+            #"{"apiVersion":2,"requestID":"r1","operation":"plan","project":"demo"}"#,
+            #"{"apiVersion":2,"requestID":"r1","operation":"recovery","limit":5}"#,
+            #"{"apiVersion":2,"requestID":"r1","operation":"events","severity":"critical"}"#,
+            #"{"apiVersion":2,"requestID":"r1","operation":"events","limit":1001}"#,
+            #"{"apiVersion":2,"requestID":"r1","operation":"events","sort":"newest"}"#
         ]
         for text in invalid {
             assertDiagnostic(
@@ -129,7 +129,7 @@ final class ControlRequestTests: XCTestCase {
     func testInputReaderReadsOneRealPipeToEOF() throws {
         let descriptors = try makePipe()
         defer { Darwin.close(descriptors.read) }
-        let request = Data(#"{"apiVersion":1,"requestID":"pipe-1","operation":"plan"}"#.utf8)
+        let request = Data(#"{"apiVersion":2,"requestID":"pipe-1","operation":"plan"}"#.utf8)
 
         try writeAll(request, to: descriptors.write)
         Darwin.close(descriptors.write)

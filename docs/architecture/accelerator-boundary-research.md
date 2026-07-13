@@ -1,5 +1,7 @@
 # Accelerator Boundary Research
 
+> **Historical research, promoted to implementation:** Phase 10 of the v0.0.2 roadmap owns accelerator inventory/reservations and the authenticated host-native Metal/Core ML/MLX service. Earlier “reject/defer” entries describe the old core boundary; only private APIs and unsupported fabricated guest passthrough remain excluded.
+
 Status: Phase 27 research-only decision record.
 
 Phase 27 records the current boundary for Apple silicon accelerator work. It does not implement GPU, ANE, Metal, Core ML, MLX, PyTorch MPS, host-native accelerator helpers, device exposure, accelerator scheduling, runtime mutation, or capacity guarantees.

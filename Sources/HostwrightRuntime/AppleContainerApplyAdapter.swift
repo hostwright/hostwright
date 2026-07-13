@@ -92,6 +92,12 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
                 message: "Runtime mutation requires explicit plan-hash confirmation."
             )
         }
+        guard let context = confirmation?.context, context.validationIssue == nil else {
+            throw RuntimeAdapterError.commandRejected(
+                classification: .mutating,
+                message: "Runtime mutation requires a valid Runtime Provider API v2 identity, generation, and fencing context."
+            )
+        }
 
         guard let executable = executableResolver.resolveExecutable(named: AppleContainerCommand.executableName) else {
             throw RuntimeAdapterError.runtimeUnavailable("Apple container CLI was not found on PATH.")

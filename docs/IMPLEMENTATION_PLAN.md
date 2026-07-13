@@ -1,6 +1,8 @@
-# Implementation Plan
+# Historical Implementation Plan
 
-This is the canonical first-release roadmap for Hostwright.
+> **Historical record:** this document preserves the earlier phase program and its evidence language. It is not the active release plan or current product boundary. The canonical all-in roadmap is [Hostwright v0.0.2 All-In Implementation Plan](roadmap/v0.0.2/IMPLEMENTATION_PLAN.md), backed by the checked-in 183-issue manifest. Earlier “non-goal,” “deferred,” “research-only,” and “reject from current core” decisions are now limitations with owning `v0.0.2` phases unless the new plan records a permanent public-API, safety, privacy, or quorum boundary.
+
+This was the canonical first-release roadmap for Hostwright before the v0.0.2 truth reset.
 
 The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundation work. Phase 3 is intentionally a short alignment and test-foundation control gate. It is not a broad documentation expansion and it does not add runtime behavior.
 

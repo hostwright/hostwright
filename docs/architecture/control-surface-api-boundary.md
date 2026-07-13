@@ -1,6 +1,8 @@
 # Control Surface API Boundary
 
-Status: Phase 21 requirements plus the bounded Phase 42 one-shot local API.
+> **Historical boundary, expanded by v0.0.2:** the one-shot local API remains current partial behavior. Phase 09 implements the persistent authenticated Control API v2 and Phase 14 implements the native GUI with parity; earlier “future/separate” wording does not remove those outcomes.
+
+Status: Historical design record for the bounded one-shot API, now versioned as Control API v2.
 
 This document defines what a future local GUI or other control surface may depend on. Phase 42 implements one local process contract for five existing commands; it does not implement a GUI, daemon API, socket or HTTP listener, web dashboard, remote service, background service, or new runtime mutation path.
 
@@ -21,7 +23,7 @@ This document defines what a future local GUI or other control surface may depen
 hostwright-control --manifest /absolute/hostwright.yaml [--state-db /absolute/state.sqlite] [--team-profile /absolute/team-profile.json]
 ```
 
-It reads one JSON object no larger than 64 KiB, writes one JSON object no larger than 1 MiB, and exits. Input has a five-second total read deadline. Requests cannot supply paths and cannot select commands outside this fixed version-1 set:
+It reads one JSON object no larger than 64 KiB, writes one JSON object no larger than 1 MiB, and exits. Input has a five-second total read deadline. Requests cannot supply paths and cannot select commands outside this fixed Control API v2 subset:
 
 | Operation | Existing command contract | Side-effect boundary |
 | --- | --- | --- |
@@ -34,11 +36,11 @@ It reads one JSON object no larger than 64 KiB, writes one JSON object no larger
 Example request and response:
 
 ```json
-{"apiVersion":1,"requestID":"plan-1","operation":"plan"}
+{"apiVersion":2,"requestID":"plan-1","operation":"plan"}
 ```
 
 ```json
-{"apiVersion":1,"exitCode":0,"operation":"plan","requestID":"plan-1","result":{"kind":"plan"},"success":true}
+{"apiVersion":2,"exitCode":0,"operation":"plan","requestID":"plan-1","result":{"kind":"plan","schemaVersion":2},"success":true}
 ```
 
 The parser rejects unknown or duplicate fields, unsupported API versions, invalid identifiers and filters, oversized input, and mutation names such as `apply` or `cleanup`. Launch paths must be absolute existing regular non-symlink files with safe ownership and no group/world write or set-ID bits. The tool validates those path facts before delegating, but it is a same-account local process rather than a capability sandbox.

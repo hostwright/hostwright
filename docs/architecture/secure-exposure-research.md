@@ -1,5 +1,7 @@
 # Secure Exposure Research
 
+> **Historical research, promoted to implementation:** v0.0.2 Phase 07 owns networks, DNS, ingress, TLS/mTLS, policy, Hostwright tunnels, and third-party provider SPI. The fail-closed current boundary remains until executable security and cleanup evidence passes.
+
 Status: research-only decision record for Phase 23.
 
 Hostwright does not currently support tunnels, public exposure, cloud exposure, local reverse proxy mutation, DNS management, WireGuard setup, Cloudflare integration, Tailscale integration, mTLS provisioning, or a cloud control plane. This document records boundaries that must exist before any later implementation issue starts.

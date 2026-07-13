@@ -1,5 +1,7 @@
 # Apple Silicon Control-Plane Direction
 
+> **Superseded direction record:** ADR 0009 and the v0.0.2 roadmap replace the earlier single-host-only release decision. Phase 11 implements multi-Mac HA, Phase 12 Kubernetes, Phase 13 Docker ecosystem compatibility, Phase 14 GUI/team/cloud, and Phase 10 accelerators.
+
 Status: Phase 40 direction decision.
 
 Phase 40 decides the platform direction after the compatibility, multi-host, scheduler, accelerator, benchmark, and beta-readiness work. It does not implement cluster behavior, remote mutation, CRI, Kubernetes behavior, cloud control, accelerator access, scheduler APIs, runtime mutation, state replication, networking providers, release tags, or GitHub Releases.

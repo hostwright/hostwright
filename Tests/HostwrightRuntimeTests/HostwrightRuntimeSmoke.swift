@@ -2,6 +2,7 @@ import Foundation
 import HostwrightTestSupport
 import Network
 import XCTest
+@testable import HostwrightCore
 @testable import HostwrightRuntime
 @testable import HostwrightSecrets
 
@@ -627,13 +628,41 @@ final class HostwrightRuntimeTests: XCTestCase {
                 summary: "create",
                 desiredService: proofService
             ),
-            confirmation: RuntimeMutationConfirmation(confirmed: true, reason: "test", planHash: "plan-hash")
+            confirmation: mutationConfirmation()
         )
 
         XCTAssertEqual(runner.calls.compactMap(\.arguments.first), ["image", "create"])
         XCTAssertEqual(event.resourceIdentifier, proofIdentity.managedResourceIdentifier)
         XCTAssertFalse(event.message.contains("fake-token"))
         XCTAssertTrue(event.message.contains("[REDACTED]"))
+    }
+
+    func testAppleContainerApplyAdapterRejectsIdentitylessMutationContextBeforeRuntimeAccess() async {
+        let adapter = AppleContainerApplyAdapter(
+            executableResolver: DictionaryRuntimeExecutableResolver(executables: [:]),
+            processRunner: ScriptedRuntimeProcessRunner(behavior: .failure(.runtimeUnavailable("must not run")))
+        )
+
+        do {
+            _ = try await adapter.execute(
+                PlannedRuntimeAction(
+                    kind: .start,
+                    identity: identity,
+                    resourceIdentifier: identity.managedResourceIdentifier,
+                    isDestructive: false,
+                    summary: "start"
+                ),
+                confirmation: RuntimeMutationConfirmation(confirmed: true, reason: "test", planHash: "plan-hash")
+            )
+            XCTFail("Expected an identity-less mutation context to fail closed.")
+        } catch let error as RuntimeAdapterError {
+            guard case .commandRejected(classification: .mutating, message: let message) = error else {
+                return XCTFail("Expected commandRejected, got \(error).")
+            }
+            XCTAssertTrue(message.contains("Runtime Provider API v2"))
+        } catch {
+            XCTFail("Unexpected error: \(error).")
+        }
     }
 
     func testAppleContainerApplyAdapterUsesOriginalEnvironmentValuesInCreateSpec() async throws {
@@ -658,7 +687,7 @@ final class HostwrightRuntimeTests: XCTestCase {
 
         let event = try await adapter.execute(
             PlannedRuntimeAction(kind: .create, identity: proofIdentity, resourceIdentifier: proofIdentity.managedResourceIdentifier, isDestructive: false, summary: "create", desiredService: service),
-            confirmation: RuntimeMutationConfirmation(confirmed: true, reason: "test", planHash: "plan-hash")
+            confirmation: mutationConfirmation()
         )
 
         let createArguments = try XCTUnwrap(runner.calls.first { $0.arguments.first == "create" }?.arguments)
@@ -684,7 +713,7 @@ final class HostwrightRuntimeTests: XCTestCase {
         do {
             _ = try await adapter.execute(
                 PlannedRuntimeAction(kind: .create, identity: proofIdentity, resourceIdentifier: proofIdentity.managedResourceIdentifier, isDestructive: false, summary: "create", desiredService: service),
-                confirmation: RuntimeMutationConfirmation(confirmed: true, reason: "test", planHash: "plan-hash")
+                confirmation: mutationConfirmation()
             )
             XCTFail("Expected unresolved secret reference rejection.")
         } catch {
@@ -704,7 +733,7 @@ final class HostwrightRuntimeTests: XCTestCase {
 
         let event = try await adapter.execute(
             PlannedRuntimeAction(kind: .start, identity: identity, resourceIdentifier: resourceIdentifier, isDestructive: false, summary: "start"),
-            confirmation: RuntimeMutationConfirmation(confirmed: true, reason: "test", planHash: "plan-hash")
+            confirmation: mutationConfirmation()
         )
 
         XCTAssertEqual(runner.calls.map(\.arguments), [["start", resourceIdentifier]])
@@ -722,7 +751,7 @@ final class HostwrightRuntimeTests: XCTestCase {
 
         let event = try await adapter.execute(
             PlannedRuntimeAction(kind: .remove, identity: identity, resourceIdentifier: resourceIdentifier, isDestructive: true, summary: "delete"),
-            confirmation: RuntimeMutationConfirmation(confirmed: true, reason: "test", planHash: "cleanup-token")
+            confirmation: mutationConfirmation(planHash: "cleanup-token")
         )
 
         XCTAssertEqual(event.resourceIdentifier, resourceIdentifier)
@@ -730,7 +759,7 @@ final class HostwrightRuntimeTests: XCTestCase {
         do {
             _ = try await adapter.execute(
                 PlannedRuntimeAction(kind: .remove, identity: identity, resourceIdentifier: resourceIdentifier, isDestructive: false, summary: "delete"),
-                confirmation: RuntimeMutationConfirmation(confirmed: true, reason: "test", planHash: "cleanup-token")
+                confirmation: mutationConfirmation(planHash: "cleanup-token")
             )
             XCTFail("Expected non-destructive delete action to be rejected.")
         } catch let error as RuntimeAdapterError {
@@ -757,7 +786,7 @@ final class HostwrightRuntimeTests: XCTestCase {
 
         let event = try await adapter.execute(
             PlannedRuntimeAction(kind: .restart, identity: identity, resourceIdentifier: resourceIdentifier, isDestructive: true, summary: "restart"),
-            confirmation: RuntimeMutationConfirmation(confirmed: true, reason: "test", planHash: "plan-hash")
+            confirmation: mutationConfirmation()
         )
 
         XCTAssertEqual(runner.calls.map(\.arguments), [["stop", resourceIdentifier], ["start", resourceIdentifier]])
@@ -782,7 +811,7 @@ final class HostwrightRuntimeTests: XCTestCase {
         do {
             _ = try await adapter.execute(
                 PlannedRuntimeAction(kind: .restart, identity: identity, resourceIdentifier: resourceIdentifier, isDestructive: true, summary: "restart"),
-                confirmation: RuntimeMutationConfirmation(confirmed: true, reason: "test", planHash: "plan-hash")
+                confirmation: mutationConfirmation()
             )
             XCTFail("Expected partial restart failure.")
         } catch let error as RuntimeAdapterError {
@@ -844,7 +873,7 @@ final class HostwrightRuntimeTests: XCTestCase {
                     summary: "create",
                     desiredService: desiredService
                 ),
-                confirmation: RuntimeMutationConfirmation(confirmed: true, reason: "test", planHash: "plan-hash")
+                confirmation: mutationConfirmation()
             )
             XCTFail("Expected local image availability failure.")
         } catch let error as RuntimeAdapterError {
@@ -873,7 +902,7 @@ final class HostwrightRuntimeTests: XCTestCase {
         do {
             _ = try await adapter.execute(
                 PlannedRuntimeAction(kind: .create, identity: identity, resourceIdentifier: identity.managedResourceIdentifier, isDestructive: false, summary: "create", desiredService: mounted),
-                confirmation: RuntimeMutationConfirmation(confirmed: true, reason: "test", planHash: "plan-hash")
+                confirmation: mutationConfirmation()
             )
             XCTFail("Expected unsupported subset failure.")
         } catch let error as RuntimeAdapterError {
@@ -895,7 +924,7 @@ final class HostwrightRuntimeTests: XCTestCase {
                     summary: "tampered create",
                     desiredService: desiredService
                 ),
-                confirmation: RuntimeMutationConfirmation(confirmed: true, reason: "test", planHash: "plan-hash")
+                confirmation: mutationConfirmation()
             )
             XCTFail("Expected tampered create identity rejection.")
         } catch let error as RuntimeAdapterError {
@@ -1400,6 +1429,23 @@ final class HostwrightRuntimeTests: XCTestCase {
         AppleContainerCommand.spec(
             kind: .listContainers,
             executable: ResolvedRuntimeExecutable(name: "container", path: "/usr/bin/container-fixture")
+        )
+    }
+
+    private func mutationConfirmation(planHash: String = "plan-hash") -> RuntimeMutationConfirmation {
+        RuntimeMutationConfirmation(
+            confirmed: true,
+            reason: "test",
+            planHash: planHash,
+            context: RuntimeMutationContext(
+                operationID: "runtime-test-operation",
+                resourceUUID: HostwrightResourceUUID.generate(),
+                resourceGeneration: 1,
+                projectResourceUUID: HostwrightResourceUUID.generate(),
+                projectGeneration: 1,
+                providerGeneration: 1,
+                fencingToken: HostwrightResourceUUID.generate()
+            )
         )
     }
 

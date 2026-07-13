@@ -10,11 +10,11 @@
 
 ## Verified On 2026-07-13 — v0.0.2 Phase 02 issue #116
 
-- `swift build` succeeds and `swift test list` discovers 419 XCTest cases.
-- `swift test` and the umbrella `scripts/test.sh` gate each execute all 419 tests with 0 failures.
+- `swift build` succeeds and `swift test list` discovers 420 XCTest cases.
+- `swift test` and the umbrella `scripts/test.sh` gate each execute all 420 tests with 0 failures.
 - `scripts/integration.sh`, `scripts/grep-orchard.sh .`, `scripts/lint.sh`, `scripts/check-docs.sh`, and the 183-issue roadmap-governance validator pass; documentation checks cover 266 links and every executable example quickstart.
 - The new real-process suite covers exact argv and environment, sensitive values outside argv, root-only PATH resolution, executable identity changes, unsafe permissions and traversal, descriptor-pinned working directories, low/high descriptor closure, bounded stdin/stdout/stderr, early input closure, hangs, output floods, pre-launch and in-flight cancellation, repeated cancellation races, rapid exits, ignored `SIGTERM`, spawned descendants, leader-first exits, and inherited process-group cleanup.
-- The complete 21-test secure-subprocess suite also passes under AddressSanitizer and ThreadSanitizer with zero sanitizer reports.
+- The complete 22-test secure-subprocess suite also passes under AddressSanitizer and ThreadSanitizer with zero sanitizer reports. Its leader-first case performs 100 readiness-gated descendant launches and verifies exact PID cleanup after every run; the inverse child-reaped case confirms ordinary fork/wait tools still return normally.
 - All production process callers now use `SecureSubprocessRunner`; production sources contain no `Foundation.Process` call site. Runtime callers preserve typed timeout, cancellation, output-limit, and process-tree errors and redact sensitive values before returning.
 - Resolved Apple container `secretEnv` values use the CLI's `--env KEY` inheritance form through an exact child environment; the secret value is not placed in argv or a temporary environment file.
 - A read-only live `hostwright status` run completed through Apple container 1.0.0. The normalized runtime inventory SHA-256 was `deb226ad125d10ec1e2f7c50e2cd4b4a890a51944e94bb63f2e8d422302ce73d` before and after, and the temporary manifest and SQLite state were removed exactly.

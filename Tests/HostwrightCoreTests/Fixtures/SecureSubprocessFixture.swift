@@ -22,13 +22,14 @@ private func waitForever() -> Never {
     while true { pause() }
 }
 
-private func spawnSleepingChild() -> pid_t {
+private func spawnChild(mode: String, extraArgument: String? = nil) -> pid_t {
     let executable = CommandLine.arguments[0]
     var arguments: [UnsafeMutablePointer<CChar>?] = [
         strdup(executable),
-        strdup("child-sleep"),
-        nil
+        strdup(mode)
     ]
+    if let extraArgument { arguments.append(strdup(extraArgument)) }
+    arguments.append(nil)
     var environment: [UnsafeMutablePointer<CChar>?] = [
         strdup("LANG=C"),
         strdup("LC_ALL=C"),
@@ -59,6 +60,14 @@ private func spawnSleepingChild() -> pid_t {
     return result == 0 ? child : -1
 }
 
+private func waitForFile(_ path: String) -> Bool {
+    for _ in 0..<2_000 {
+        if access(path, F_OK) == 0 { return true }
+        usleep(1_000)
+    }
+    return false
+}
+
 let arguments = CommandLine.arguments
 guard arguments.count >= 2 else { exit(64) }
 
@@ -83,14 +92,30 @@ case "cwd":
     FileHandle.standardOutput.write(Data(FileManager.default.currentDirectoryPath.utf8))
 
 case "child-sleep":
+    guard arguments.count == 3 else { exit(69) }
     _ = Darwin.signal(SIGTERM, SIG_IGN)
+    guard writePIDFile(arguments[2], parent: getpid(), child: getpid()) else { exit(70) }
     waitForever()
+
+case "child-exit":
+    exit(0)
+
+case "fork-wait":
+    let child = spawnChild(mode: "child-exit")
+    guard child >= 0 else { exit(71) }
+    var status: Int32 = 0
+    guard waitpid(child, &status, 0) == child, status == 0 else { exit(72) }
 
 case "fork-sleep", "fork-exit":
     guard arguments.count == 3 else { exit(65) }
     _ = Darwin.signal(SIGTERM, SIG_IGN)
-    let child = spawnSleepingChild()
+    let readyFile = arguments[2] + ".ready"
+    let child = spawnChild(mode: "child-sleep", extraArgument: readyFile)
     guard child >= 0 else { exit(66) }
+    guard waitForFile(readyFile), unlink(readyFile) == 0 else {
+        kill(child, SIGKILL)
+        exit(73)
+    }
     guard writePIDFile(arguments[2], parent: getpid(), child: child) else {
         kill(child, SIGKILL)
         exit(67)

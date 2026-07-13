@@ -260,24 +260,42 @@ final class SecureSubprocessTests: XCTestCase {
     func testLeaderExitWithLiveDescendantFailsAndCleansProcessGroup() throws {
         let fixture = try makeCompiledFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
-        let pidFile = fixture.root.appendingPathComponent("descendant-pids")
+        for iteration in 0..<100 {
+            let pidFile = fixture.root.appendingPathComponent("descendant-pids-\(iteration)")
 
-        XCTAssertThrowsError(
-            try SecureSubprocessRunner().run(
-                SecureSubprocessRequest(
-                    executablePath: fixture.executable.path,
-                    arguments: ["fork-exit", pidFile.path],
-                    timeoutMilliseconds: 5_000,
-                    terminationGraceMilliseconds: 50
+            XCTAssertThrowsError(
+                try SecureSubprocessRunner().run(
+                    SecureSubprocessRequest(
+                        executablePath: fixture.executable.path,
+                        arguments: ["fork-exit", pidFile.path],
+                        timeoutMilliseconds: 5_000,
+                        terminationGraceMilliseconds: 50
+                    )
                 )
-            )
-        ) { error in
-            guard case .descendantProcessDetected = error as? SecureSubprocessError else {
-                return XCTFail("Expected descendantProcessDetected, received \(error)")
+            ) { error in
+                guard case .descendantProcessDetected = error as? SecureSubprocessError else {
+                    return XCTFail("Expected descendantProcessDetected in iteration \(iteration), received \(error)")
+                }
             }
-        }
 
-        try assertRecordedProcessesAreGone(pidFile)
+            try assertRecordedProcessesAreGone(pidFile)
+        }
+    }
+
+    func testLeaderExitAfterReapingItsChildReturnsNormally() throws {
+        let fixture = try makeCompiledFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+
+        let result = try SecureSubprocessRunner().run(
+            SecureSubprocessRequest(
+                executablePath: fixture.executable.path,
+                arguments: ["fork-wait"],
+                timeoutMilliseconds: 5_000,
+                terminationGraceMilliseconds: 50
+            )
+        )
+
+        XCTAssertEqual(result.exitStatus, 0)
     }
 
     func testCancellationTerminatesLeaderAndIgnoringDescendant() async throws {

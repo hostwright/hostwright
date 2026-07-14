@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import HostwrightTestSupport
 import XCTest
@@ -20,6 +21,8 @@ final class HostwrightCLITests: XCTestCase {
         XCTAssertEqual(try CLICommand.parse(arguments: ["validate", "custom.yaml"]), .validate(path: "custom.yaml", teamProfilePath: nil))
         XCTAssertEqual(try CLICommand.parse(arguments: ["plan"]), .plan(path: "hostwright.yaml", output: .text, teamProfilePath: nil))
         XCTAssertEqual(try CLICommand.parse(arguments: ["plan", "--output", "json"]), .plan(path: "hostwright.yaml", output: .json, teamProfilePath: nil))
+        XCTAssertEqual(try CLICommand.parse(arguments: ["paths"]), .paths(stateDatabasePath: nil, output: .text))
+        XCTAssertEqual(try CLICommand.parse(arguments: ["paths", "--json"]), .paths(stateDatabasePath: nil, output: .json))
         XCTAssertEqual(try CLICommand.parse(arguments: ["status"]), .status(path: "hostwright.yaml", stateDatabasePath: nil, output: .text))
         XCTAssertEqual(
             try CLICommand.parse(arguments: ["status", "--state-db", "/tmp/state.sqlite"]),
@@ -96,8 +99,11 @@ final class HostwrightCLITests: XCTestCase {
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["extension", "check", "--declaration", "/tmp/extension.json", "--executable", "/tmp/extension", "--output", "yaml"]))
     }
 
-    func testApplyRequiresStateDBAndConfirmedPlanHash() {
-        XCTAssertThrowsError(try CLICommand.parse(arguments: ["apply", "--confirm-plan", "abc123"]))
+    func testApplyDefaultsStateDBAndRequiresConfirmedPlanHash() throws {
+        XCTAssertEqual(
+            try CLICommand.parse(arguments: ["apply", "--confirm-plan", "abc123"]),
+            .apply(path: "hostwright.yaml", stateDatabasePath: nil, confirmedPlanHash: "abc123", teamProfilePath: nil, approvalRecordPath: nil)
+        )
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["apply", "--state-db", "/tmp/state.sqlite"]))
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["apply", "--state-db", "/tmp/state.sqlite", "--confirm-plan", "abc123", "--force"]))
     }
@@ -110,6 +116,246 @@ final class HostwrightCLITests: XCTestCase {
         XCTAssertEqual(result.standardError, "")
     }
 
+    func testPathsJSONReportsDefaultLayoutWithoutCreatingIt() throws {
+        try withTemporaryDirectory { home in
+            let files = FileBox()
+            let result = HostwrightCLI.run(
+                arguments: ["paths", "--json"],
+                environment: environment(
+                    files: files,
+                    localPathResolution: { explicitPath in
+                        try HostwrightLocalPathResolver.resolve(
+                            explicitStateDatabasePath: explicitPath,
+                            homeDirectory: home.path,
+                            environment: [:]
+                        )
+                    }
+                )
+            )
+
+            XCTAssertEqual(result.exitCode, 0)
+            let json = try jsonObject(result.standardOutput)
+            XCTAssertEqual(json["kind"] as? String, "localPaths")
+            XCTAssertEqual(json["statePathOrigin"] as? String, "application-support-default")
+            XCTAssertEqual(json["readiness"] as? String, "needs-creation")
+            XCTAssertEqual(json["migrationJournalExists"] as? Bool, false)
+            let layout = try XCTUnwrap(json["layout"] as? [String: Any])
+            XCTAssertEqual(
+                layout["stateDatabase"] as? String,
+                home.appendingPathComponent("Library/Application Support/Hostwright/state/state.sqlite").path
+            )
+            XCTAssertEqual(json["daemonLockPath"] as? String, layout["daemonLock"] as? String)
+            XCTAssertEqual(
+                json["migrationJournalPath"] as? String,
+                home
+                    .appendingPathComponent(
+                        "Library/Application Support/Hostwright/metadata/legacy-state-migration.json"
+                    )
+                    .path
+            )
+            XCTAssertFalse(
+                FileManager.default.fileExists(
+                    atPath: home.appendingPathComponent("Library/Application Support/Hostwright").path
+                )
+            )
+
+            let explicitState = home.appendingPathComponent("custom/state.sqlite").path
+            let explicit = HostwrightCLI.run(
+                arguments: ["paths", "--state-db", explicitState, "--json"],
+                environment: environment(
+                    files: files,
+                    localPathResolution: { explicitPath in
+                        try HostwrightLocalPathResolver.resolve(
+                            explicitStateDatabasePath: explicitPath,
+                            homeDirectory: home.path,
+                            environment: [:]
+                        )
+                    }
+                )
+            )
+            let explicitJSON = try jsonObject(explicit.standardOutput)
+            XCTAssertEqual(explicitJSON["statePathOrigin"] as? String, "explicit")
+            XCTAssertEqual(explicitJSON["stateDatabasePath"] as? String, explicitState)
+            XCTAssertEqual(explicitJSON["readiness"] as? String, "blocked-policy")
+            XCTAssertTrue(
+                (explicitJSON["daemonLockPath"] as? String)?.contains("/run/hostwrightd-") == true
+            )
+        }
+    }
+
+    func testPathsAndDoctorReportUnsafeExistingDefaultState() throws {
+        try withTemporaryDirectory { home in
+            let resolution = try HostwrightLocalPathResolver.resolve(homeDirectory: home.path, environment: [:])
+            try FileManager.default.createDirectory(
+                atPath: resolution.layout.stateDirectory,
+                withIntermediateDirectories: true
+            )
+            for directory in [resolution.layout.applicationSupportDirectory, resolution.layout.stateDirectory] {
+                try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory)
+            }
+            try Data().write(to: URL(fileURLWithPath: resolution.stateDatabasePath))
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o644],
+                ofItemAtPath: resolution.stateDatabasePath
+            )
+
+            var testEnvironment = environment(
+                files: FileBox(),
+                localPathResolution: { _ in resolution }
+            )
+            testEnvironment.fileExists = { FileManager.default.fileExists(atPath: $0) }
+
+            let paths = HostwrightCLI.run(arguments: ["paths", "--json"], environment: testEnvironment)
+            XCTAssertEqual(paths.exitCode, 0)
+            let pathsJSON = try jsonObject(paths.standardOutput)
+            XCTAssertEqual(pathsJSON["readiness"] as? String, "blocked-policy")
+            XCTAssertTrue((pathsJSON["policyError"] as? String)?.contains("0600") == true)
+
+            let doctor = HostwrightCLI.run(
+                arguments: ["doctor", "--output", "json"],
+                environment: testEnvironment
+            )
+            XCTAssertEqual(doctor.exitCode, CLIExitCode.validation.rawValue)
+            let doctorJSON = try jsonObject(doctor.standardOutput)
+            let checks = try XCTUnwrap(doctorJSON["checks"] as? [[String: Any]])
+            XCTAssertTrue(
+                checks.contains {
+                    $0["identifier"] as? String == "statePathPolicy" &&
+                        $0["status"] as? String == "fail" &&
+                        ($0["message"] as? String)?.contains("blocked-policy") == true
+                }
+            )
+        }
+
+        try withTemporaryDirectory { home in
+            let resolution = try HostwrightLocalPathResolver.resolve(
+                homeDirectory: home.path,
+                environment: [:]
+            )
+            try FileManager.default.createDirectory(
+                atPath: resolution.layout.applicationSupportDirectory,
+                withIntermediateDirectories: true
+            )
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o755],
+                ofItemAtPath: resolution.layout.applicationSupportDirectory
+            )
+            var testEnvironment = environment(
+                files: FileBox(),
+                localPathResolution: { _ in resolution }
+            )
+            testEnvironment.fileExists = { FileManager.default.fileExists(atPath: $0) }
+
+            let paths = HostwrightCLI.run(
+                arguments: ["paths", "--json"],
+                environment: testEnvironment
+            )
+            XCTAssertEqual(paths.exitCode, 0)
+            let pathsJSON = try jsonObject(paths.standardOutput)
+            XCTAssertEqual(pathsJSON["readiness"] as? String, "blocked-policy")
+            XCTAssertTrue((pathsJSON["policyError"] as? String)?.contains("0700") == true)
+
+            let doctor = HostwrightCLI.run(
+                arguments: ["doctor", "--output", "json"],
+                environment: testEnvironment
+            )
+            XCTAssertEqual(doctor.exitCode, CLIExitCode.validation.rawValue)
+        }
+    }
+
+    func testPathsReportsPendingPostRenameJournalAsMigrationRequired() throws {
+        try withTemporaryDirectory { home in
+            let resolution = try HostwrightLocalPathResolver.resolve(
+                homeDirectory: home.path,
+                environment: [:]
+            )
+            try FileManager.default.createDirectory(
+                atPath: resolution.legacyRootDirectory,
+                withIntermediateDirectories: true
+            )
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o700],
+                ofItemAtPath: resolution.legacyRootDirectory
+            )
+            try SQLiteStateStore(path: resolution.legacyStateDatabase).migrate()
+            for directory in resolution.layout.ownedDirectories {
+                try FileManager.default.createDirectory(
+                    atPath: directory,
+                    withIntermediateDirectories: true
+                )
+                try FileManager.default.setAttributes(
+                    [.posixPermissions: 0o700],
+                    ofItemAtPath: directory
+                )
+            }
+
+            let attributes = try FileManager.default.attributesOfItem(
+                atPath: resolution.legacyStateDatabase
+            )
+            let device = try XCTUnwrap(attributes[.systemNumber] as? NSNumber)
+            let inode = try XCTUnwrap(attributes[.systemFileNumber] as? NSNumber)
+            try FileManager.default.moveItem(
+                atPath: resolution.legacyStateDatabase,
+                toPath: resolution.stateDatabasePath
+            )
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o644],
+                ofItemAtPath: resolution.stateDatabasePath
+            )
+            let journal = try JSONSerialization.data(
+                withJSONObject: [
+                    "schemaVersion": 1,
+                    "source": resolution.legacyStateDatabase,
+                    "destination": resolution.stateDatabasePath,
+                    "sourceDevice": device.uint64Value,
+                    "sourceInode": inode.uint64Value
+                ],
+                options: [.sortedKeys]
+            )
+            try journal.write(
+                to: URL(fileURLWithPath: resolution.legacyStateMigrationJournal)
+            )
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o600],
+                ofItemAtPath: resolution.legacyStateMigrationJournal
+            )
+
+            var testEnvironment = environment(
+                files: FileBox(),
+                localPathResolution: { _ in resolution }
+            )
+            testEnvironment.fileExists = { FileManager.default.fileExists(atPath: $0) }
+            let result = HostwrightCLI.run(
+                arguments: ["paths", "--json"],
+                environment: testEnvironment
+            )
+
+            XCTAssertEqual(result.exitCode, 0)
+            let json = try jsonObject(result.standardOutput)
+            XCTAssertEqual(json["readiness"] as? String, "migration-required")
+            XCTAssertEqual(json["stateDatabaseExists"] as? Bool, true)
+            XCTAssertEqual(json["legacyStateExists"] as? Bool, false)
+            XCTAssertEqual(json["migrationJournalExists"] as? Bool, true)
+            XCTAssertNil(json["policyError"])
+        }
+    }
+
+    func testPathResolutionErrorsUseStableStateFailure() throws {
+        var testEnvironment = environment(files: FileBox())
+        testEnvironment.localPathResolution = { _ in
+            throw HostwrightLocalPathError.invalidEnvironmentOverride(
+                name: HostwrightLocalPathResolver.stateDatabaseOverride,
+                reason: "invalid test override"
+            )
+        }
+
+        let result = HostwrightCLI.run(arguments: ["paths", "--json"], environment: testEnvironment)
+
+        XCTAssertEqual(result.exitCode, CLIExitCode.stateUnavailable.rawValue)
+        let json = try jsonObject(result.standardError)
+        XCTAssertEqual(json["code"] as? String, HostwrightErrorCode.stateStoreUnavailable.rawValue)
+    }
+
     func testHelpDocumentsOutputModesAndExamples() {
         let result = HostwrightCLI.run(arguments: ["--help"], environment: environment(files: FileBox()))
 
@@ -118,12 +364,13 @@ final class HostwrightCLITests: XCTestCase {
         XCTAssertTrue(result.standardOutput.contains("hostwright plan [path] [--output text|json]"))
         XCTAssertTrue(result.standardOutput.contains("hostwright import-stack <path> [--output text|json]"))
         XCTAssertTrue(result.standardOutput.contains("hostwright status [path] [--state-db <path>] [--output text|json]"))
-        XCTAssertTrue(result.standardOutput.contains("hostwright recovery --state-db <path> [--project <name>] [--output text|json]"))
-        XCTAssertTrue(result.standardOutput.contains("hostwright diagnostics --state-db <path> --bundle <path>"))
+        XCTAssertTrue(result.standardOutput.contains("hostwright recovery [--state-db <path>] [--project <name>] [--output text|json]"))
+        XCTAssertTrue(result.standardOutput.contains("hostwright diagnostics [--state-db <path>] --bundle <path>"))
         XCTAssertTrue(result.standardOutput.contains("hostwright extension check --declaration <absolute-path> --executable <absolute-path> [--output text|json]"))
         XCTAssertTrue(result.standardOutput.contains("hostwright capabilities [--json|--output text|json]"))
+        XCTAssertTrue(result.standardOutput.contains("hostwright paths [--state-db <path>] [--json|--output text|json]"))
         XCTAssertTrue(result.standardOutput.contains("hostwright migrate preview <path> [--json|--output text|json]"))
-        XCTAssertTrue(result.standardOutput.contains("JSON output is supported for capabilities, migrate preview"))
+        XCTAssertTrue(result.standardOutput.contains("JSON output is supported for capabilities, paths, migrate preview"))
         XCTAssertTrue(result.standardOutput.contains("import-stack reads a narrow safe stack-file subset"))
         XCTAssertTrue(result.standardOutput.contains("Diagnostics writes a local redacted JSON bundle only"))
         XCTAssertTrue(result.standardOutput.contains("hostwright import-stack compose.yaml --output json"))
@@ -233,27 +480,47 @@ final class HostwrightCLITests: XCTestCase {
         XCTAssertTrue((issues.first?["message"] as? String)?.contains("network_mode") == true)
     }
 
-    func testValidatePlanAndStatusAreNonMutating() {
-        let validFiles = FileBox(files: [HostwrightIdentity.manifestFileName: HostwrightCLI.starterManifest])
+    func testValidateAndPlanRemainNonMutatingWhileStatusUsesSecureDefaultState() throws {
+        try withTemporaryDirectory { home in
+            let validFiles = FileBox(files: [HostwrightIdentity.manifestFileName: HostwrightCLI.starterManifest])
+            let resolution = try HostwrightLocalPathResolver.resolve(homeDirectory: home.path, environment: [:])
+            let observed = ObservedRuntimeState(
+                projectName: "api-local",
+                services: [],
+                adapterMetadata: fakeAdapterMetadata
+            )
+            let testEnvironment = environment(
+                files: validFiles,
+                runtimeAdapter: ScriptedApplyRuntimeAdapter(observedState: observed),
+                localPathResolution: { explicitPath in
+                    try HostwrightLocalPathResolver.resolve(
+                        explicitStateDatabasePath: explicitPath,
+                        homeDirectory: home.path,
+                        environment: [:]
+                    )
+                }
+            )
 
-        let validateResult = HostwrightCLI.run(arguments: ["validate"], environment: environment(files: validFiles))
-        XCTAssertEqual(validateResult.exitCode, 0)
-        XCTAssertTrue(validateResult.standardOutput.contains("Valid hostwright manifest"))
+            let validateResult = HostwrightCLI.run(arguments: ["validate"], environment: testEnvironment)
+            XCTAssertEqual(validateResult.exitCode, 0)
+            XCTAssertTrue(validateResult.standardOutput.contains("Valid hostwright manifest"))
 
-        let planResult = HostwrightCLI.run(arguments: ["plan"], environment: environment(files: validFiles))
-        XCTAssertEqual(planResult.exitCode, 0)
-        XCTAssertTrue(planResult.standardOutput.contains("non-mutating"))
-        XCTAssertTrue(planResult.standardOutput.contains("Runtime observation"))
-        XCTAssertTrue(planResult.standardOutput.contains("Plan hash"))
-        XCTAssertTrue(planResult.standardOutput.contains("Execution: unavailable unless one createMissingService, startManagedService, or restartManagedService action is explicitly confirmed"))
-        XCTAssertTrue(planResult.standardOutput.contains("No runtime actions were executed"))
+            let planResult = HostwrightCLI.run(arguments: ["plan"], environment: testEnvironment)
+            XCTAssertEqual(planResult.exitCode, 0)
+            XCTAssertTrue(planResult.standardOutput.contains("non-mutating"))
+            XCTAssertTrue(planResult.standardOutput.contains("Runtime observation"))
+            XCTAssertTrue(planResult.standardOutput.contains("Plan hash"))
+            XCTAssertTrue(planResult.standardOutput.contains("Execution: unavailable unless one createMissingService, startManagedService, or restartManagedService action is explicitly confirmed"))
+            XCTAssertTrue(planResult.standardOutput.contains("No runtime actions were executed"))
+            XCTAssertFalse(FileManager.default.fileExists(atPath: resolution.stateDatabasePath))
 
-        let statusResult = HostwrightCLI.run(arguments: ["status"], environment: environment(files: validFiles))
-        XCTAssertEqual(statusResult.exitCode, 0)
-        XCTAssertTrue(statusResult.standardOutput.contains("Manifest: hostwright.yaml valid"))
-        XCTAssertTrue(statusResult.standardOutput.contains("Runtime: not observed"))
-        XCTAssertFalse(statusResult.standardOutput.contains("running"))
-        XCTAssertFalse(statusResult.standardOutput.contains("stopped"))
+            let statusResult = HostwrightCLI.run(arguments: ["status"], environment: testEnvironment)
+            XCTAssertEqual(statusResult.exitCode, 0)
+            XCTAssertTrue(statusResult.standardOutput.contains("Runtime: observed"))
+            XCTAssertTrue(statusResult.standardOutput.contains("State DB: \(resolution.stateDatabasePath)"))
+            XCTAssertTrue(FileManager.default.fileExists(atPath: resolution.stateDatabasePath))
+            XCTAssertEqual(try permissions(resolution.stateDatabasePath), 0o600)
+        }
     }
 
     func testPlanOutputRedactsSecretLikeEnvironmentValues() {
@@ -467,6 +734,39 @@ final class HostwrightCLITests: XCTestCase {
             XCTAssertEqual(ownership[0].resourceUUID, context.resourceUUID)
             XCTAssertEqual(ownership[0].projectResourceUUID, context.projectResourceUUID)
             XCTAssertEqual(ownership[0].fencingToken, context.fencingToken)
+        }
+    }
+
+    func testApplyUsesSecureDefaultStateWithoutStateFlag() throws {
+        try withTemporaryDirectory { home in
+            let files = FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest])
+            let adapter = ScriptedApplyRuntimeAdapter()
+            let expectedHash = try planHash(for: singleServiceManifest, observed: adapter.observedState)
+            let resolution = try HostwrightLocalPathResolver.resolve(homeDirectory: home.path, environment: [:])
+
+            let result = HostwrightCLI.run(
+                arguments: ["apply", "--confirm-plan", expectedHash],
+                environment: environment(
+                    files: files,
+                    runtimeAdapter: adapter,
+                    localPathResolution: { explicitPath in
+                        try HostwrightLocalPathResolver.resolve(
+                            explicitStateDatabasePath: explicitPath,
+                            homeDirectory: home.path,
+                            environment: [:]
+                        )
+                    }
+                )
+            )
+
+            XCTAssertEqual(result.exitCode, 0)
+            XCTAssertEqual(adapter.executedActions.map(\.kind), [.create])
+            XCTAssertTrue(result.standardOutput.contains("State DB: \(resolution.stateDatabasePath)"))
+            let store = SQLiteStateStore(
+                configuration: StateStoreConfiguration(localPathResolution: resolution)
+            )
+            XCTAssertEqual(try store.operations.loadAll().map(\.status), [.recorded, .succeeded])
+            XCTAssertEqual(try permissions(resolution.stateDatabasePath), 0o600)
         }
     }
 
@@ -1279,15 +1579,37 @@ final class HostwrightCLITests: XCTestCase {
         }
     }
 
-    func testStatusJSONOutputSupportsManifestOnlyAndObservedRuntimeShapes() throws {
+    func testStatusJSONOutputSupportsDefaultAndExplicitStatePaths() throws {
         let files = FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest])
-        let manifestOnly = HostwrightCLI.run(arguments: ["status", "--output", "json"], environment: environment(files: files))
+        try withTemporaryDirectory { home in
+            let observed = ObservedRuntimeState(
+                projectName: "demo",
+                services: [],
+                adapterMetadata: fakeAdapterMetadata
+            )
+            let resolution = try HostwrightLocalPathResolver.resolve(homeDirectory: home.path, environment: [:])
+            let defaultResult = HostwrightCLI.run(
+                arguments: ["status", "--output", "json"],
+                environment: environment(
+                    files: files,
+                    runtimeAdapter: ScriptedApplyRuntimeAdapter(observedState: observed),
+                    localPathResolution: { explicitPath in
+                        try HostwrightLocalPathResolver.resolve(
+                            explicitStateDatabasePath: explicitPath,
+                            homeDirectory: home.path,
+                            environment: [:]
+                        )
+                    }
+                )
+            )
 
-        XCTAssertEqual(manifestOnly.exitCode, 0)
-        let manifestOnlyJSON = try jsonObject(manifestOnly.standardOutput)
-        XCTAssertEqual(manifestOnlyJSON["kind"] as? String, "status")
-        let runtime = try XCTUnwrap(manifestOnlyJSON["runtime"] as? [String: Any])
-        XCTAssertEqual(runtime["observed"] as? Bool, false)
+            XCTAssertEqual(defaultResult.exitCode, 0)
+            let defaultJSON = try jsonObject(defaultResult.standardOutput)
+            XCTAssertEqual(defaultJSON["kind"] as? String, "status")
+            XCTAssertEqual(defaultJSON["stateDatabasePath"] as? String, resolution.stateDatabasePath)
+            let runtime = try XCTUnwrap(defaultJSON["runtime"] as? [String: Any])
+            XCTAssertEqual(runtime["observed"] as? Bool, true)
+        }
 
         try withTemporaryDatabase { databasePath in
             let observed = ObservedRuntimeState(
@@ -1592,6 +1914,32 @@ final class HostwrightCLITests: XCTestCase {
             XCTAssertEqual(stateOnly.exitCode, 0)
             let stateOnlyJSON = try jsonObject(try XCTUnwrap(files.files[stateOnlyBundlePath]))
             XCTAssertNil(stateOnlyJSON["manifest"])
+        }
+    }
+
+    func testDiagnosticsLiveWriterCreatesModeSixHundredAndRefusesOverwrite() throws {
+        try withTemporaryDirectory { directory in
+            let databasePath = directory.appendingPathComponent("state.sqlite").path
+            let bundlePath = directory.appendingPathComponent("diagnostics.json").path
+            try SQLiteStateStore(path: databasePath).migrate()
+
+            let previousMask = umask(0o777)
+            let first = HostwrightCLI.run(
+                arguments: ["diagnostics", "--state-db", databasePath, "--bundle", bundlePath],
+                environment: .live
+            )
+            _ = umask(previousMask)
+            XCTAssertEqual(first.exitCode, 0)
+            XCTAssertEqual(try permissions(bundlePath), 0o600)
+            let original = try Data(contentsOf: URL(fileURLWithPath: bundlePath))
+
+            let second = HostwrightCLI.run(
+                arguments: ["diagnostics", "--state-db", databasePath, "--bundle", bundlePath],
+                environment: .live
+            )
+            XCTAssertEqual(second.exitCode, CLIExitCode.commandUsage.rawValue)
+            XCTAssertTrue(second.standardError.contains(HostwrightErrorCode.fileAlreadyExists.rawValue))
+            XCTAssertEqual(try Data(contentsOf: URL(fileURLWithPath: bundlePath)), original)
         }
     }
 
@@ -2593,7 +2941,8 @@ final class HostwrightCLITests: XCTestCase {
         secretStore: (any SecretStore)? = nil,
         platform: PlatformSnapshot = PlatformSnapshot(macOSMajorVersion: 26, architecture: "arm64"),
         writeError: Error? = nil,
-        resourceSnapshot: ResourceIntelligenceSnapshot? = nil
+        resourceSnapshot: ResourceIntelligenceSnapshot? = nil,
+        localPathResolution: ((String?) throws -> HostwrightLocalPathResolution)? = nil
     ) -> CLIEnvironment {
         CLIEnvironment(
             fileExists: { files.files[$0] != nil },
@@ -2609,7 +2958,23 @@ final class HostwrightCLITests: XCTestCase {
                 }
                 files.files[path] = text
             },
+            writeNewTextFile: { path, text in
+                if let writeError {
+                    throw writeError
+                }
+                guard files.files[path] == nil else {
+                    throw POSIXError(.EEXIST)
+                }
+                files.files[path] = text
+            },
             executablePath: { name in name == "container" ? containerPath : "/usr/bin/\(name)" },
+            localPathResolution: localPathResolution ?? { explicitPath in
+                try HostwrightLocalPathResolver.resolve(
+                    explicitStateDatabasePath: explicitPath,
+                    homeDirectory: "/nonexistent/hostwright-cli-tests",
+                    environment: [:]
+                )
+            },
             runtimeAdapter: { runtimeAdapter ?? ScriptedApplyRuntimeAdapter() },
             secretStore: { secretStore ?? UnavailableKeychainSecretStore() },
             swiftVersion: { "Swift 6.3.3" },
@@ -2665,6 +3030,11 @@ final class HostwrightCLITests: XCTestCase {
             try? FileManager.default.removeItem(at: directory)
         }
         try body(directory)
+    }
+
+    private func permissions(_ path: String) throws -> Int {
+        let attributes = try FileManager.default.attributesOfItem(atPath: path)
+        return (attributes[.posixPermissions] as? NSNumber)?.intValue ?? -1
     }
 
     private func saveDesiredManifest(store: SQLiteStateStore, manifestText: String) throws {

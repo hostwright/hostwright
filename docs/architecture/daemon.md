@@ -7,14 +7,13 @@
 The daemon runs only when explicitly started:
 
 ```bash
-hostwrightd --foreground --config <hostwright.yaml> --state-db <path>
+hostwrightd --foreground --config <hostwright.yaml>
 ```
 
 Required inputs:
 
 - `--foreground`
 - `--config <path>`
-- `--state-db <path>`
 
 Optional controls:
 
@@ -22,9 +21,10 @@ Optional controls:
 - `--jitter <seconds>` for deterministic jitter cap
 - `--max-backoff <seconds>` for repeated-error backoff cap
 - `--max-iterations <count>` for bounded development runs
+- `--state-db <path>` for an explicit state override
 - `--lock-file <path>` for an explicit daemon lock file
 
-If `--lock-file` is omitted, the lock file is derived from the explicit state database path as `<state-db>.hostwrightd.lock`. Hostwright still does not choose a default config path, state database path, or user-global daemon location.
+If `--state-db` is omitted, the daemon uses `~/Library/Application Support/Hostwright/state/state.sqlite`. If `--lock-file` is omitted, default state uses `~/Library/Application Support/Hostwright/run/hostwrightd.lock`; explicit or environment-selected state uses a stable hashed lock name under that `run` directory. The config/manifest path remains explicit.
 
 ## Loop Contract
 
@@ -36,7 +36,7 @@ Each iteration:
 4. Runs bounded in-process loopback health checks for configured running services.
 5. Persists health results and restart policy state.
 6. Computes a deterministic reconciliation plan with restart-state blocking.
-7. Persists desired state, observed state, a daemon operation record, and daemon events to the explicit state database.
+7. Persists desired state, observed state, a daemon operation record, and daemon events to the selected state database.
 8. Sleeps according to cadence, jitter, and repeated-error backoff.
 
 Successful iterations persist desired and observed snapshots. Failed iterations persist a failed daemon operation and `daemon.reconcile.failed` event with a redacted diagnostic code; they do not claim a desired or observed snapshot was recorded.
@@ -51,12 +51,12 @@ The foreground daemon uses the read-only local runtime adapter and does not call
 
 Confirmed mutation remains limited to existing explicit CLI gates:
 
-- `hostwright apply --state-db <path> --confirm-plan <hash>`
-- `hostwright cleanup --state-db <path> --confirm-cleanup <token>`
+- `hostwright apply --confirm-plan <hash>`
+- `hostwright cleanup --confirm-cleanup <token>`
 
 ## Locking And Shutdown
 
-`hostwrightd` uses a non-blocking single-instance file lock before it opens or migrates state. If another instance holds the lock, the new process exits before running the loop.
+`hostwrightd` prepares the secure runtime directory, then uses a non-blocking single-instance file lock before it opens or migrates state. The parent chain must pass the secure path policy; the lock must be a current-user-owned, regular, non-symlink, single-link file with exact mode `0600`. If another instance holds the validated descriptor lock, the new process exits before running the loop.
 
 The foreground process handles SIGINT and SIGTERM by requesting shutdown. The loop checks the shutdown token between iterations and during sleep.
 
@@ -64,12 +64,11 @@ The foreground process handles SIGINT and SIGTERM by requesting shutdown. The lo
 
 The loop treats sleep/wake as a scheduler event. A wake-aware clock can report that sleep resumed after system wake; the daemon records `daemon.sleep_wake_resumed` and continues with the next iteration. This phase does not install macOS power notifications or launchd keepalive behavior.
 
-## Non-Goals
+## Current Sequenced Limitations
 
 - launch agent installation
 - installer or uninstaller
 - privileged helper
-- default state database path
 - unattended runtime mutation
 - aggressive crash-loop restart policy enforcement
 - broad lifecycle management

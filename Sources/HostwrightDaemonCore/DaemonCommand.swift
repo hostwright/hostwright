@@ -8,7 +8,11 @@ public enum DaemonCommand: Equatable, Sendable {
     case version
     case run(DaemonConfiguration)
 
-    public static func parse(arguments: [String]) throws -> DaemonCommand {
+    public static func parse(
+        arguments: [String],
+        homeDirectory: String = FileManager.default.homeDirectoryForCurrentUser.path,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) throws -> DaemonCommand {
         if arguments.isEmpty || arguments == ["--help"] || arguments == ["-h"] || arguments == ["help"] {
             return .help
         }
@@ -62,10 +66,26 @@ public enum DaemonCommand: Equatable, Sendable {
             throw DaemonError.invalidConfiguration("--foreground is required; launch agent installation is not implemented.")
         }
 
+        let resolution: HostwrightLocalPathResolution
+        do {
+            resolution = try HostwrightLocalPathResolver.resolve(
+                explicitStateDatabasePath: stateDatabasePath,
+                homeDirectory: homeDirectory,
+                environment: environment
+            )
+        } catch {
+            throw DaemonError.invalidConfiguration(String(describing: error))
+        }
+        let resolvedLockPath: String
+        do {
+            resolvedLockPath = try resolution.daemonLockPath(explicitLockPath: lockFilePath)
+        } catch {
+            throw DaemonError.invalidConfiguration(String(describing: error))
+        }
         let configuration = DaemonConfiguration(
             configPath: configPath ?? "",
-            stateDatabasePath: stateDatabasePath ?? "",
-            lockFilePath: lockFilePath,
+            stateStoreConfiguration: StateStoreConfiguration(localPathResolution: resolution),
+            lockFilePath: resolvedLockPath,
             cadenceSeconds: cadenceSeconds,
             jitterSeconds: jitterSeconds,
             maxBackoffSeconds: maxBackoffSeconds,
@@ -116,19 +136,19 @@ public enum HostwrightDaemonMain {
     hostwrightd foreground development loop
 
     Usage:
-      hostwrightd --foreground --config <hostwright.yaml> --state-db <path> [options]
+      hostwrightd --foreground --config <hostwright.yaml> [--state-db <path>] [options]
 
     Required:
       --foreground              Run in foreground development mode.
       --config <path>           Explicit Hostwright manifest/config path.
-      --state-db <path>         Explicit SQLite state database path.
 
     Options:
       --interval <seconds>      Base reconciliation cadence. Default: 30.
       --jitter <seconds>        Deterministic jitter cap. Default: 5.
       --max-backoff <seconds>   Maximum retry backoff. Default: 300.
       --max-iterations <count>  Stop after count loop iterations; intended for tests/dev proof.
-      --lock-file <path>        Explicit daemon lock file. Default: <state-db>.hostwrightd.lock.
+      --state-db <path>         Optional SQLite override; defaults to Application Support.
+      --lock-file <path>        Optional lock override; defaults to Application Support/run.
       --version                 Print version.
       --help                    Show this help.
 

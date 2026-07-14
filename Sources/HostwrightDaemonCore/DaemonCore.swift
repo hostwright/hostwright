@@ -18,7 +18,8 @@ public enum DaemonWakeReason: String, Equatable, Sendable {
 public struct DaemonConfiguration: Equatable, Sendable {
     public let mode: DaemonMode
     public let configPath: String
-    public let stateDatabasePath: String
+    public let stateStoreConfiguration: StateStoreConfiguration
+    public var stateDatabasePath: String { stateStoreConfiguration.databasePath }
     public let lockFilePath: String
     public let cadenceSeconds: Int
     public let jitterSeconds: Int
@@ -37,8 +38,28 @@ public struct DaemonConfiguration: Equatable, Sendable {
     ) {
         self.mode = mode
         self.configPath = configPath
-        self.stateDatabasePath = stateDatabasePath
+        self.stateStoreConfiguration = StateStoreConfiguration(explicitDatabasePath: stateDatabasePath)
         self.lockFilePath = lockFilePath ?? "\(stateDatabasePath).hostwrightd.lock"
+        self.cadenceSeconds = cadenceSeconds
+        self.jitterSeconds = jitterSeconds
+        self.maxBackoffSeconds = maxBackoffSeconds
+        self.maxIterations = maxIterations
+    }
+
+    public init(
+        mode: DaemonMode = .foregroundDev,
+        configPath: String,
+        stateStoreConfiguration: StateStoreConfiguration,
+        lockFilePath: String,
+        cadenceSeconds: Int = 30,
+        jitterSeconds: Int = 5,
+        maxBackoffSeconds: Int = 300,
+        maxIterations: Int? = nil
+    ) {
+        self.mode = mode
+        self.configPath = configPath
+        self.stateStoreConfiguration = stateStoreConfiguration
+        self.lockFilePath = lockFilePath
         self.cadenceSeconds = cadenceSeconds
         self.jitterSeconds = jitterSeconds
         self.maxBackoffSeconds = maxBackoffSeconds
@@ -49,11 +70,14 @@ public struct DaemonConfiguration: Equatable, Sendable {
         guard !configPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw DaemonError.invalidConfiguration("--config <path> is required.")
         }
-        guard !stateDatabasePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw DaemonError.invalidConfiguration("--state-db <path> is required.")
-        }
-        guard !lockFilePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw DaemonError.invalidConfiguration("lock file path must not be empty.")
+        do {
+            try stateStoreConfiguration.validate()
+            _ = try HostwrightLocalPathResolver.normalizedAbsolutePath(
+                lockFilePath,
+                role: "daemon lock"
+            )
+        } catch {
+            throw DaemonError.invalidConfiguration(String(describing: error))
         }
         guard cadenceSeconds > 0 else {
             throw DaemonError.invalidConfiguration("--interval must be a positive integer.")
@@ -166,12 +190,13 @@ public struct DaemonLoopRunner {
 
     public func run() async throws -> DaemonRunSummary {
         try configuration.validate()
+        try configuration.stateStoreConfiguration.prepareRuntimeSupport()
         guard try instanceLock.acquire() else {
             throw DaemonError.lockUnavailable(path: configuration.lockFilePath)
         }
         defer { instanceLock.release() }
 
-        let store = SQLiteStateStore(path: configuration.stateDatabasePath)
+        let store = SQLiteStateStore(configuration: configuration.stateStoreConfiguration)
         try store.migrate()
         try recordLifecycleEvent(store: store, type: "daemon.started", severity: .info, message: "hostwrightd foreground dev loop started.")
 

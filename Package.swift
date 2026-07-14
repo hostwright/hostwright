@@ -181,10 +181,12 @@ let package = Package(
         .testTarget(
             name: "HostwrightControlTests",
             dependencies: [
+                "HostwrightCLI",
                 "HostwrightControl",
                 "HostwrightCore",
                 "HostwrightManifest",
-                "HostwrightState"
+                "HostwrightState",
+                "HostwrightTestSupport"
             ]
         ),
         .testTarget(

@@ -25,10 +25,19 @@ if [[ ! -x "$hostwright_control" ]]; then
 fi
 
 workdir="$(mktemp -d "${TMPDIR:-/tmp}/hostwright-integration.XXXXXX")"
+workdir="$(cd "$workdir" && pwd -P)"
 manifest="$workdir/hostwright.yaml"
 plan_json="$workdir/plan.json"
 status_json="$workdir/status.json"
 doctor_json="$workdir/doctor.json"
+default_paths_json="$workdir/default-paths.json"
+paths_before_json="$workdir/paths-before.json"
+paths_after_json="$workdir/paths-after.json"
+application_support="$workdir/Application Support/Hostwright"
+cache_directory="$workdir/Caches/Hostwright"
+log_directory="$workdir/Logs/Hostwright"
+state_directory="$workdir/state"
+state_database="$state_directory/state.sqlite"
 team_profile="$workdir/team-profile.json"
 team_plan_json="$workdir/team-plan.json"
 stack_file="$workdir/compose.yaml"
@@ -56,8 +65,9 @@ cleanup() {
   trap - EXIT
   set +e
   chmod 700 "$readonly_dir" 2>/dev/null
-  rm -f "$manifest" "$plan_json" "$status_json" "$doctor_json" "$team_profile" "$team_plan_json" "$stack_file" "$team_import_json" "$invalid_profile" "$overwrite_stdout" "$overwrite_stderr" "$missing_stdout" "$missing_stderr" "$benchmark_existing_report" "$benchmark_absent_report" "$unexpected_distribution_report" "$extension_fixture" "$extension_declaration" "$extension_failure_declaration" "$extension_json" "$control_request" "$control_response" "$control_rejected_request" "$control_rejected_response" "$readonly_dir/hostwright.yaml"
+  rm -f "$manifest" "$plan_json" "$status_json" "$doctor_json" "$default_paths_json" "$paths_before_json" "$paths_after_json" "$team_profile" "$team_plan_json" "$stack_file" "$team_import_json" "$invalid_profile" "$overwrite_stdout" "$overwrite_stderr" "$missing_stdout" "$missing_stderr" "$benchmark_existing_report" "$benchmark_absent_report" "$unexpected_distribution_report" "$extension_fixture" "$extension_declaration" "$extension_failure_declaration" "$extension_json" "$control_request" "$control_response" "$control_rejected_request" "$control_rejected_response" "$readonly_dir/hostwright.yaml" "$state_database" "$state_database-wal" "$state_database-shm" "$state_database-journal"
   rmdir "$readonly_dir" 2>/dev/null
+  rmdir "$state_directory" 2>/dev/null
   rmdir "$workdir"
   exit "$exit_code"
 }
@@ -65,6 +75,25 @@ trap cleanup EXIT
 
 version="$("$hostwright" --version)"
 [[ "$version" == "0.0.2-dev" ]]
+
+export HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$application_support"
+export HOSTWRIGHT_CACHE_DIR="$cache_directory"
+export HOSTWRIGHT_LOG_DIR="$log_directory"
+
+env -u HOSTWRIGHT_STATE_DB "$hostwright" paths --json >"$default_paths_json"
+plutil -convert json -o /dev/null "$default_paths_json"
+grep -q '"statePathOrigin":"application-support-default"' "$default_paths_json"
+grep -Fq "Application Support\/Hostwright\/state\/state.sqlite" "$default_paths_json"
+[[ ! -e "$application_support" ]]
+
+mkdir "$state_directory"
+chmod 700 "$state_directory"
+export HOSTWRIGHT_STATE_DB="$state_database"
+"$hostwright" paths --json >"$paths_before_json"
+plutil -convert json -o /dev/null "$paths_before_json"
+grep -q '"statePathOrigin":"environment"' "$paths_before_json"
+grep -q '"readiness":"needs-creation"' "$paths_before_json"
+[[ ! -e "$state_database" ]]
 
 (
   cd "$workdir"
@@ -93,8 +122,16 @@ for json_file in "$plan_json" "$status_json" "$doctor_json"; do
   plutil -convert json -o /dev/null "$json_file"
 done
 grep -q '"planHash"' "$plan_json"
-grep -q '"observed":false' "$status_json"
+grep -q '"observed":true' "$status_json"
+[[ "$(plutil -extract stateDatabasePath raw "$status_json")" == "$state_database" ]]
 grep -q '"checks"' "$doctor_json"
+
+"$hostwright" paths --json >"$paths_after_json"
+plutil -convert json -o /dev/null "$paths_after_json"
+grep -q '"readiness":"ready"' "$paths_after_json"
+[[ -f "$state_database" ]]
+[[ "$(stat -f '%Lp' "$state_directory")" == "700" ]]
+[[ "$(stat -f '%Lp' "$state_database")" == "600" ]]
 
 printf '%s\n' '{"apiVersion":2,"requestID":"integration-plan-1","operation":"plan"}' >"$control_request"
 "$hostwright_control" --manifest "$manifest" <"$control_request" >"$control_response" 2>"$missing_stderr"
@@ -294,9 +331,9 @@ chmod 700 "$readonly_dir"
 [[ ! -s "$missing_stdout" ]]
 grep -q 'HW-CLI-005' "$missing_stderr"
 
-if find "$workdir" -name '*.sqlite*' -print -quit | grep -q .; then
-  echo "local integration unexpectedly created a state database" >&2
+if find "$workdir" -name '*.sqlite*' ! -path "$state_database" -print -quit | grep -q .; then
+  echo "local integration created an unexpected state database or sidecar" >&2
   exit 1
 fi
 
-echo "local-integration passed: built CLI, one-shot control API, and distribution tool; reviewed-local extension subprocess handshake, team-profile/benchmark/distribution gates, JSON output/errors, real file failures, overwrite refusal, rejected control mutation, and no hidden state writes"
+echo "local-integration passed: built CLI, isolated path resolution and private state creation, one-shot control API, and distribution tool; reviewed-local extension subprocess handshake, team-profile/benchmark/distribution gates, JSON output/errors, real file failures, overwrite refusal, rejected control mutation, and no unexpected state writes"

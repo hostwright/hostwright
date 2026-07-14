@@ -12,7 +12,7 @@ The v0.0.2 truth reset separates current contracts from immutable history. A fil
 - `Sources/HostwrightCore/CapabilityCatalog.swift` and `hostwright capabilities --json`: exact build capability state.
 - `schemas/hostwright-yaml.schema.json`: executable manifest schema contract.
 - `schemas/hostwright-evidence.schema.json` and `docs/reference/testing-evidence.md`: evidence contract.
-- `docs/reference/install.md`, `compatibility.md`, `manifest.md`, `cli.md`, and `security-safety.md`: current behavior and constraints.
+- `docs/reference/install.md`, `compatibility.md`, `manifest.md`, `cli.md`, `local-paths.md`, and `security-safety.md`: current behavior and constraints.
 - `docs/release/RELEASE_PROCESS.md`: active v0.0.2 release ladder and gate.
 - ADRs 0007–0009: v0.0.2 identity, saga, scope, and compatibility decisions.
 

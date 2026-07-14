@@ -1,5 +1,7 @@
 public enum StateStoreError: Error, Equatable, CustomStringConvertible, Sendable {
     case invalidPath(String)
+    case pathPolicyViolation(path: String, message: String)
+    case legacyPathMigrationFailed(source: String, destination: String, message: String)
     case openFailed(path: String, message: String)
     case closeFailed(path: String, message: String)
     case databaseLocked(path: String, message: String)
@@ -18,6 +20,10 @@ public enum StateStoreError: Error, Equatable, CustomStringConvertible, Sendable
         switch self {
         case .invalidPath(let path):
             return "Invalid state database path: \(path)"
+        case .pathPolicyViolation(let path, let message):
+            return "State path policy rejected \(path): \(message)"
+        case .legacyPathMigrationFailed(let source, let destination, let message):
+            return "Could not migrate legacy state from \(source) to \(destination): \(message)"
         case .openFailed(let path, let message):
             return "Failed to open state database at \(path): \(message)"
         case .closeFailed(let path, let message):

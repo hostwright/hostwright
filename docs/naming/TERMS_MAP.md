@@ -11,8 +11,12 @@
 | Swift package identity | `hostwright` |
 | Log subsystem | `com.hostwright` |
 | Daemon label, if a later installer is approved | `com.hostwright.daemon` |
-| Config directory | `~/.hostwright/` |
-| State directory | `~/Library/Application Support/Hostwright/` |
+| Config directory | `~/Library/Application Support/Hostwright/config/` |
+| State database | `~/Library/Application Support/Hostwright/state/state.sqlite` |
+| Runtime directory | `~/Library/Application Support/Hostwright/run/` |
+| Cache directory | `~/Library/Caches/Hostwright/` |
+| Log directory | `~/Library/Logs/Hostwright/` |
+| Legacy state candidate | `~/.hostwright/state.sqlite` (journaled migration only) |
 | Schema file | `hostwright-yaml.schema.json` |
 
 ## Swift Modules
@@ -38,4 +42,3 @@
 | `orchardd` | `hostwrightd` | Do not use in public-facing repo files. |
 | `orchard.yaml` | `hostwright.yaml` | Do not use in public-facing repo files. |
 | `orchard.cc` | `hostwright.dev` | Do not use in public-facing repo files. |
-

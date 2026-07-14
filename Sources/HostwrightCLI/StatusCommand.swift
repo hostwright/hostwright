@@ -6,7 +6,7 @@ import HostwrightState
 
 struct StatusCommandRunner {
     let manifestPath: String
-    let stateDatabasePath: String?
+    let stateStoreConfiguration: StateStoreConfiguration
     let output: CLIOutputFormat
     let environment: CLIEnvironment
 
@@ -21,13 +21,8 @@ struct StatusCommandRunner {
         do {
             let manifestText = try hostwrightReadManifestText(path: manifestPath, environment: environment)
             let manifest = try ManifestValidator.validated(manifestText)
-            guard let stateDatabasePath else {
-                return manifestOnlyStatus(manifest)
-            }
-
-            let configuration = StateStoreConfiguration(explicitDatabasePath: stateDatabasePath)
-            try configuration.validate()
-            let store = SQLiteStateStore(configuration: configuration)
+            let stateDatabasePath = stateStoreConfiguration.databasePath
+            let store = SQLiteStateStore(configuration: stateStoreConfiguration)
             try store.migrate()
 
             let mapping = ManifestRuntimeMapper.map(manifest)
@@ -115,22 +110,6 @@ struct StatusCommandRunner {
         } catch {
             return failure(code: .runtimeUnavailable, message: RuntimeRedactionPolicy.default.redact(String(describing: error)))
         }
-    }
-
-    private func manifestOnlyStatus(_ manifest: HostwrightManifest) -> CLIRunResult {
-        if output == .json {
-            return CLIRunResult(standardOutput: CLIJSON.statusManifestOnly(manifestPath: manifestPath, manifest: manifest))
-        }
-        return CLIRunResult(
-            standardOutput: """
-            Hostwright status
-            Manifest: \(manifestPath) valid
-            Project: \(manifest.project ?? "<missing>")
-            Declared services: \(manifest.services.map(\.name).joined(separator: ", "))
-            Runtime: not observed; pass --state-db <path> to record live status.
-
-            """
-        )
     }
 
     private func render(manifest: HostwrightManifest, observed: ObservedRuntimeState, plan: ReconciliationPlan, stateDatabasePath: String) -> String {

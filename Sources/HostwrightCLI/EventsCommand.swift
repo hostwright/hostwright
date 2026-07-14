@@ -3,16 +3,15 @@ import HostwrightRuntime
 import HostwrightState
 
 struct EventsCommandRunner {
-    let stateDatabasePath: String
+    let stateStoreConfiguration: StateStoreConfiguration
     let projectName: String?
     let filters: EventFilters
     let output: CLIOutputFormat
 
     func run() -> CLIRunResult {
         do {
-            let configuration = StateStoreConfiguration(explicitDatabasePath: stateDatabasePath)
-            try configuration.validate()
-            let store = SQLiteStateStore(configuration: configuration)
+            let stateDatabasePath = stateStoreConfiguration.databasePath
+            let store = SQLiteStateStore(configuration: stateStoreConfiguration)
             let projectID = projectName.map { "project-\($0)" }
             var events = try store.events.loadAll()
                 .filter { event in projectID == nil || event.projectID == projectID }

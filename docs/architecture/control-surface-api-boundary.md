@@ -11,7 +11,7 @@ This document defines what a future local GUI or other control surface may depen
 - The core repository owns local control contracts and safety rules, not visual design.
 - A control surface must use `hostwright`/`hostwrightd` commands or the explicit `hostwright-control` subset while preserving the same semantics.
 - A control surface must not call Apple container, SQLite, `RuntimeAdapter`, state migrations, cleanup deletion, or health execution directly.
-- Every state path, manifest path, diagnostics bundle path, plan hash, and cleanup token must be explicit and reviewable.
+- Every selected state path, manifest path, diagnostics bundle path, plan hash, and cleanup token must be resolved and reviewable; a missing state override means the documented Application Support default, never a request-selected path.
 - Redacted Hostwright output remains redacted; a control surface must not reconstruct secrets from manifests, state rows, logs, diagnostic bundles, or issue reports.
 - Local-only behavior remains local-only. No telemetry upload, hosted diagnostics, cloud dashboard, browser control plane, or remote mutation is part of this boundary.
 
@@ -28,9 +28,9 @@ It reads one JSON object no larger than 64 KiB, writes one JSON object no larger
 | Operation | Existing command contract | Side-effect boundary |
 | --- | --- | --- |
 | `plan` | `hostwright plan --output json` | Validates and plans only; no runtime or state access. An explicitly configured team profile is enforced. |
-| `status` | `hostwright status --output json` | Without state, manifest-only. With an explicit configured state database, existing status semantics can observe runtime and perform schema migration, snapshot, and audit writes. It does not mutate runtime. |
-| `events` | `hostwright events --output json` | Requires an explicit configured existing state database and reads event rows only. |
-| `recovery` | `hostwright recovery --output json` | Requires an explicit configured existing state database and reads recovery rows only. |
+| `status` | `hostwright status --output json` | Uses configured state or the secure default, observes runtime, and can perform compatible path/schema migration, snapshot, and audit writes. It does not mutate runtime. |
+| `events` | `hostwright events --output json` | Uses configured state or the secure default and reads event rows only; it does not create or migrate missing state. |
+| `recovery` | `hostwright recovery --output json` | Uses configured state or the secure default and reads recovery rows only; it does not create or migrate missing state. |
 | `doctor` | `hostwright doctor --output json` | Runs existing safe local checks; no Apple container command or state write. |
 
 Example request and response:
@@ -47,7 +47,7 @@ The parser rejects unknown or duplicate fields, unsupported API versions, invali
 
 API-owned failures use `HW-API-001` for invalid requests, `HW-API-002` for unavailable or unsafe configured files, and `HW-API-003` for invalid delegated response framing or execution failure. Existing Hostwright command failures preserve their original error body and exit code inside the response. Usage errors before request processing remain text on stderr with exit code 64.
 
-The API has no apply, cleanup, logs, diagnostics export, benchmark, extension execution, arbitrary command, or generic mutation operation. It opens no listener, persists no process registration, discovers no path, chooses no default state database, and grants no authority beyond the invoking account and configured command contracts.
+The API has no apply, cleanup, logs, diagnostics export, benchmark, extension execution, arbitrary command, or generic mutation operation. It opens no listener, persists no process registration, and grants no authority beyond the invoking account and configured command contracts. It resolves the same documented CLI state default when launch configuration omits a state override; request JSON still cannot select any path.
 
 ## Approved Local Data Surfaces
 
@@ -57,14 +57,14 @@ The current approved surfaces are existing command contracts:
 | --- | --- | --- |
 | Project and service input | `hostwright validate`, `hostwright plan --output json`, manifest reference docs | Treat manifests as untrusted until validation succeeds. Show project/service names, images, ports, health, restart, and policy issues without exposing raw secret values. |
 | Plans | `hostwright plan --output json` | Use `kind`, `project`, `planHash`, `observationConnected`, `issues`, `drift`, and `actions`. A plan is review data, not mutation authority by itself. |
-| Apply confirmation | `hostwright apply --state-db <path> --confirm-plan <hash>` | Present the exact current plan hash and require explicit operator confirmation before invoking apply. Do not synthesize or cache hashes across runtime observations. |
-| Status | `hostwright status --state-db <path> --output json` | Use observed/runtime fields only when Hostwright reports observation. Do not infer reachability or health beyond reported data. |
-| Logs | `hostwright logs <service> --state-db <path>` | Logs are bounded, redacted text. No follow, attach, exec, or interactive terminal behavior is approved. |
-| Events | `hostwright events --state-db <path> --output json` | Use filters and sort options from the CLI. Event rows are local forensic records, not telemetry. |
-| Recovery | `hostwright recovery --state-db <path> --output json` | Render manual recovery hints exactly as redacted Hostwright output. Do not retry or roll back automatically. |
-| Cleanup preview | `hostwright cleanup --state-db <path> --dry-run` | Render every classification: eligible, ambiguous, stale, running, unknown, blocked, and never-delete. Confirmation authority is limited to the current token. |
-| Cleanup confirmation | `hostwright cleanup --state-db <path> --confirm-cleanup <token>` | Require explicit operator confirmation and the current dry-run token. Never delete unowned, running, image, volume, network, or ambiguous resources. |
-| Diagnostics | `hostwright diagnostics --state-db <path> --bundle <path>` | Bundles are local files, refuse overwrite, and may contain sensitive local context even when redacted. A control surface must never upload them automatically. |
+| Apply confirmation | `hostwright apply [--state-db <path>] --confirm-plan <hash>` | Present the exact current plan hash and require explicit operator confirmation before invoking apply. Do not synthesize or cache hashes across runtime observations. |
+| Status | `hostwright status [--state-db <path>] --output json` | Use observed/runtime fields only when Hostwright reports observation. Do not infer reachability or health beyond reported data. |
+| Logs | `hostwright logs <service> [--state-db <path>]` | Logs are bounded, redacted text. No follow, attach, exec, or interactive terminal behavior is approved. |
+| Events | `hostwright events [--state-db <path>] --output json` | Use filters and sort options from the CLI. Event rows are local forensic records, not telemetry. |
+| Recovery | `hostwright recovery [--state-db <path>] --output json` | Render manual recovery hints exactly as redacted Hostwright output. Do not retry or roll back automatically. |
+| Cleanup preview | `hostwright cleanup [--state-db <path>] --dry-run` | Render every classification: eligible, ambiguous, stale, running, unknown, blocked, and never-delete. Confirmation authority is limited to the current token. |
+| Cleanup confirmation | `hostwright cleanup [--state-db <path>] --confirm-cleanup <token>` | Require explicit operator confirmation and the current dry-run token. Never delete unowned, running, image, volume, network, or ambiguous resources. |
+| Diagnostics | `hostwright diagnostics [--state-db <path>] --bundle <path>` | Bundles are local files, refuse overwrite, and may contain sensitive local context even when redacted. A control surface must never upload them automatically. |
 | Doctor | `hostwright doctor --output json` | Use as local compatibility and resource-intelligence diagnostics only. Do not present capacity guarantees. |
 | Errors | JSON error envelope where supported | Use stable `code`, `exitCode`, `kind`, `message`, and optional `issues`. Text-only commands need explicit future JSON contracts before structured parsing is assumed. |
 
@@ -104,7 +104,7 @@ Before design or frontend implementation starts, the separate owner must have:
 - a clear statement that prototypes must use fixtures until explicit live proof is approved;
 - maintainer approval for any further API wrapper, installer, launch agent, background service, website, or GUI repository work.
 
-## Non-Goals
+## Current Sequenced Limitations
 
 - Visual design.
 - Frontend implementation.

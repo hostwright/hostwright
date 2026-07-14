@@ -190,6 +190,7 @@ final class HostwrightStateIntegrationTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: directory) }
         let databaseURL = directory.appendingPathComponent("state.sqlite")
         try Data("not a sqlite database".utf8).write(to: databaseURL)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: databaseURL.path)
         let store = SQLiteStateStore(path: databaseURL.path)
 
         XCTAssertThrowsError(try store.validateSchema()) { error in

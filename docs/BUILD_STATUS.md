@@ -1,12 +1,24 @@
 # Build Status
 
-> **Current program:** Hostwright is `0.0.2-dev`; Phase 01 of the [v0.0.2 roadmap](roadmap/v0.0.2/IMPLEMENTATION_PLAN.md) is merged and closed, and Phase 02 is active. Issue #116 implements the shared secure subprocess boundary. The phase-by-phase entries below are a retained pre-v0.0.2 engineering ledger, not the active release scope or schedule.
+> **Current program:** Hostwright is `0.0.2-dev`; Phase 01 of the [v0.0.2 roadmap](roadmap/v0.0.2/IMPLEMENTATION_PLAN.md) is merged and closed, and Phase 02 is active. Issue #116 implements the shared secure subprocess boundary; issue #113 implements the secure macOS local-path/default-state boundary. The phase-by-phase entries below are a retained pre-v0.0.2 engineering ledger, not the active release scope or schedule.
 
 ## Local Environment
 
 - macOS 26.5
 - Apple silicon (`arm64`)
 - Swift 6.3.3 through full Xcode developer tools
+
+## Verified On 2026-07-13 — v0.0.2 Phase 02 issue #113
+
+- `swift build` succeeds, `swift test list` discovers 445 XCTest cases, and both `swift test` and `scripts/test.sh` execute all 445 with 0 failures.
+- `scripts/integration.sh`, `scripts/grep-orchard.sh .`, `scripts/lint.sh`, `scripts/check-docs.sh`, the current-truth checks, the 183-issue roadmap-governance validator/self-test, and the generated-roadmap check pass. Documentation validation covers 271 references and every executable example quickstart.
+- The production default is `~/Library/Application Support/Hostwright/state/state.sqlite`; CLI input wins over `HOSTWRIGHT_STATE_DB`, which wins over the default. `hostwright paths --json` reports the selected origin, complete macOS layout, effective lock, migration journal, and readiness without creating state.
+- Real-file tests cover exact `0700` directories and `0600` state/journal/lock/diagnostics files under restrictive `umask`, root-owned macOS aliases, unsafe writable or set-ID parents, user symlinks, hard links, wrong owners, unsafe modes, access-granting extended ACLs, path traversal/normalization limits, overwrite refusal, and real non-blocking lock contention.
+- Legacy `~/.hostwright/state.sqlite` migration is same-filesystem, inode-bound, exclusive-lock protected, synchronized, and journaled. Tests cover normal migration, preservation of unknown legacy files, source/destination conflict, active writers, sidecars before and after intent, invalid/empty/tampered ledgers, special bits, post-rename restart, and exact journal cleanup.
+- The 12-test secure-path migration suite, five path-contract tests, two daemon-lock tests, and live diagnostics output test all pass separately under AddressSanitizer and ThreadSanitizer with zero sanitizer reports.
+- An isolated live run used the built `hostwright` and `hostwrightd` binaries with disposable Application Support, cache, and log roots. `paths` moved from `needs-creation` to `ready`; `status`, `doctor`, `events`, `recovery`, diagnostics, and a one-iteration foreground daemon completed; daemon stderr was empty; all owned modes were exact; and no real user state path was touched.
+- Apple `container` 1.0.0 runtime inventory was captured before and after that live run. Both byte-identical snapshots had SHA-256 `72c1055bba3b39b4050f16a777675a1b155f995ff46e2c2cdeca19d392c0819f`, proving the issue's live workflow performed no runtime mutation. Every disposable file and directory was then removed exactly.
+- The focused security assessment has no confirmed remaining finding in issue #113's declared cross-account and accidental/concurrent-failure boundary. Access-granting ACL inheritance, restrictive `umask`, root-alias canonicalization, migration publication/overwrite races, active-writer revalidation, unsafe lock reuse, and diagnostics creation defects found during review were remediated before merge. Hostwright does not claim to sandbox another process already running as the same macOS user.
 
 ## Verified On 2026-07-13 — v0.0.2 Phase 02 issue #116
 

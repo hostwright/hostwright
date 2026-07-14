@@ -11,6 +11,7 @@ public struct CLIEnvironment: @unchecked Sendable {
     public var writeTextFile: (String, String) throws -> Void
     public var writeNewTextFile: (String, String) throws -> Void
     public var executablePath: (String) -> String?
+    public var localPathResolution: (String?) throws -> HostwrightLocalPathResolution
     public var runtimeAdapter: () -> any RuntimeAdapter
     public var secretStore: () -> any SecretStore
     public var swiftVersion: () -> String?
@@ -32,6 +33,9 @@ public struct CLIEnvironment: @unchecked Sendable {
             try hostwrightCreateNewTextFile(path: path, text: text)
         },
         executablePath: @escaping (String) -> String?,
+        localPathResolution: @escaping (String?) throws -> HostwrightLocalPathResolution = { explicitPath in
+            try HostwrightLocalPathResolver.resolve(explicitStateDatabasePath: explicitPath)
+        },
         runtimeAdapter: @escaping () -> any RuntimeAdapter = { RuntimeAdapterFactory.defaultLocal() },
         secretStore: @escaping () -> any SecretStore = { UnavailableKeychainSecretStore() },
         swiftVersion: @escaping () -> String?,
@@ -50,6 +54,7 @@ public struct CLIEnvironment: @unchecked Sendable {
         self.writeTextFile = writeTextFile
         self.writeNewTextFile = writeNewTextFile
         self.executablePath = executablePath
+        self.localPathResolution = localPathResolution
         self.runtimeAdapter = runtimeAdapter
         self.secretStore = secretStore
         self.swiftVersion = swiftVersion
@@ -72,6 +77,9 @@ public struct CLIEnvironment: @unchecked Sendable {
             try hostwrightCreateNewTextFile(path: path, text: text)
         },
         executablePath: { ProcessLookup.executablePath(named: $0) },
+        localPathResolution: { explicitPath in
+            try HostwrightLocalPathResolver.resolve(explicitStateDatabasePath: explicitPath)
+        },
         runtimeAdapter: { RuntimeAdapterFactory.defaultLocal() },
         secretStore: { UnavailableKeychainSecretStore() },
         swiftVersion: { ProcessLookup.swiftVersionSummary() },
@@ -99,7 +107,11 @@ public struct CLIEnvironment: @unchecked Sendable {
 
 @usableFromInline
 func hostwrightCreateNewTextFile(path: String, text: String) throws {
-    let descriptor = open(path, O_WRONLY | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR)
+    let descriptor = open(
+        path,
+        O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC,
+        S_IRUSR | S_IWUSR
+    )
     guard descriptor >= 0 else {
         throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
     }
@@ -112,6 +124,14 @@ func hostwrightCreateNewTextFile(path: String, text: String) throws {
         }
     }
 
+    guard fchmod(descriptor, S_IRUSR | S_IWUSR) == 0 else {
+        throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+    }
+    try HostwrightLocalFilesystemPolicy.validateNoAccessGrantingACL(
+        fileDescriptor: descriptor,
+        path: path,
+        role: "new local output file"
+    )
     let data = Data(text.utf8)
     try data.withUnsafeBytes { rawBuffer in
         var offset = 0
@@ -131,6 +151,16 @@ func hostwrightCreateNewTextFile(path: String, text: String) throws {
         }
     }
     guard fsync(descriptor) == 0 else {
+        throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+    }
+    let parent = (path as NSString).deletingLastPathComponent
+    let parentPath = parent.isEmpty ? "." : parent
+    let parentDescriptor = open(parentPath, O_RDONLY | O_DIRECTORY | O_CLOEXEC)
+    guard parentDescriptor >= 0 else {
+        throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+    }
+    defer { close(parentDescriptor) }
+    guard fsync(parentDescriptor) == 0 else {
         throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
     }
     completed = true

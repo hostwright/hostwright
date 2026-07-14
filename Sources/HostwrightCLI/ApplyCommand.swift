@@ -11,7 +11,7 @@ struct ApplyCommandRunner {
     static let preRuntimeStateIncompleteCheckpoint = "pre-runtime-state-incomplete"
 
     let manifestPath: String
-    let stateDatabasePath: String
+    let stateStoreConfiguration: StateStoreConfiguration
     let confirmedPlanHash: String
     let teamProfilePath: String?
     let approvalRecordPath: String?
@@ -19,14 +19,14 @@ struct ApplyCommandRunner {
 
     init(
         manifestPath: String,
-        stateDatabasePath: String,
+        stateStoreConfiguration: StateStoreConfiguration,
         confirmedPlanHash: String,
         teamProfilePath: String? = nil,
         approvalRecordPath: String? = nil,
         environment: CLIEnvironment
     ) {
         self.manifestPath = manifestPath
-        self.stateDatabasePath = stateDatabasePath
+        self.stateStoreConfiguration = stateStoreConfiguration
         self.confirmedPlanHash = confirmedPlanHash
         self.teamProfilePath = teamProfilePath
         self.approvalRecordPath = approvalRecordPath
@@ -41,9 +41,6 @@ struct ApplyCommandRunner {
             )
         }
         do {
-            let configuration = StateStoreConfiguration(explicitDatabasePath: stateDatabasePath)
-            try configuration.validate()
-
             let manifestText = try hostwrightReadManifestText(path: manifestPath, environment: environment)
             let validatedManifest = try hostwrightValidatedManifest(
                 text: manifestText,
@@ -52,7 +49,7 @@ struct ApplyCommandRunner {
             )
             let manifest = validatedManifest.manifest
             let mapping = ManifestRuntimeMapper.map(manifest)
-            let store = SQLiteStateStore(path: configuration.databasePath)
+            let store = SQLiteStateStore(configuration: stateStoreConfiguration)
             try store.migrate()
             let timestamp = hostwrightTimestamp()
             let projectName = mapping.desiredState.projectName
@@ -533,7 +530,7 @@ struct ApplyCommandRunner {
                     Applied action: \(action.kind.rawValue) \(action.identity.displayName)
                     Resource: \(action.resourceIdentifier)
                     Runtime event: \(RuntimeRedactionPolicy.default.redact(event.message))
-                    State DB: \(stateDatabasePath)
+                    State DB: \(stateStoreConfiguration.databasePath)
                     """ + teamOutput + "\n"
                 )
             } catch {

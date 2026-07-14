@@ -7,7 +7,7 @@ import HostwrightState
 
 struct CleanupCommandRunner {
     let manifestPath: String
-    let stateDatabasePath: String
+    let stateStoreConfiguration: StateStoreConfiguration
     let confirmation: CleanupConfirmation
     let teamProfilePath: String?
     let approvalRecordPath: String?
@@ -15,14 +15,14 @@ struct CleanupCommandRunner {
 
     init(
         manifestPath: String,
-        stateDatabasePath: String,
+        stateStoreConfiguration: StateStoreConfiguration,
         confirmation: CleanupConfirmation,
         teamProfilePath: String? = nil,
         approvalRecordPath: String? = nil,
         environment: CLIEnvironment
     ) {
         self.manifestPath = manifestPath
-        self.stateDatabasePath = stateDatabasePath
+        self.stateStoreConfiguration = stateStoreConfiguration
         self.confirmation = confirmation
         self.teamProfilePath = teamProfilePath
         self.approvalRecordPath = approvalRecordPath
@@ -58,9 +58,7 @@ struct CleanupCommandRunner {
                 environment: environment
             )
             let mapping = ManifestRuntimeMapper.map(validatedManifest.manifest)
-            let configuration = StateStoreConfiguration(explicitDatabasePath: stateDatabasePath)
-            try configuration.validate()
-            let store = SQLiteStateStore(configuration: configuration)
+            let store = SQLiteStateStore(configuration: stateStoreConfiguration)
             try store.migrate()
             let projectID = "project-\(mapping.desiredState.projectName)"
             let observationDesiredState = try hostwrightDesiredStateWithOwnershipHints(
@@ -294,7 +292,7 @@ struct CleanupCommandRunner {
         var hadFailure = false
         var lines = [
             "Hostwright cleanup",
-            "State DB: \(stateDatabasePath)",
+            "State DB: \(stateStoreConfiguration.databasePath)",
             "Confirmation token: \(token)",
             ""
         ]
@@ -569,7 +567,7 @@ struct CleanupCommandRunner {
     ) -> String {
         var lines = [
             "Hostwright cleanup (dry run)",
-            "State DB: \(stateDatabasePath)",
+            "State DB: \(stateStoreConfiguration.databasePath)",
             "Confirmation token: \(token)",
             ""
         ]

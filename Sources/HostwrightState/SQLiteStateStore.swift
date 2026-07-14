@@ -61,7 +61,7 @@ public struct SQLiteStateStore: StateStore {
         StateStoreDescription(
             backend: .sqlite,
             isImplemented: true,
-                message: "SQLite state store requires an explicit local database path. No default user database path is used."
+            message: "SQLite state uses a secure explicit override or the macOS Application Support default."
         )
     }
 
@@ -84,13 +84,13 @@ public struct SQLiteStateStore: StateStore {
     }
 
     func withConnection<T>(createIfNeeded: Bool = true, readOnly: Bool = false, _ body: (SQLiteConnection) throws -> T) throws -> T {
-        try configuration.validate()
+        try configuration.prepare(createIfNeeded: createIfNeeded)
         let connection = try SQLiteConnection(path: configuration.databasePath, createIfNeeded: createIfNeeded, readOnly: readOnly)
         return try body(connection)
     }
 
     func withValidatedConnection<T>(readOnly: Bool = false, _ body: (SQLiteConnection) throws -> T) throws -> T {
-        try configuration.validate()
+        try configuration.prepare(createIfNeeded: false)
         let connection = try SQLiteConnection(path: configuration.databasePath, createIfNeeded: false, readOnly: readOnly)
         try MigrationRunner().validateAppliedSchema(on: connection)
         return try body(connection)

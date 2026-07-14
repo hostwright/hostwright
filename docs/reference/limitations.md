@@ -6,6 +6,8 @@ Permanent exclusions are limited to private Apple APIs, unsupported Intel/old-ma
 
 Phase 02 issue #116 is implemented: production callers share bounded direct-argv process execution with root-owned PATH resolution, minimal environment, descriptor-pinned working directories, cancellation, I/O/time limits, and inherited session process-group cleanup. This is process lifecycle control, not native hostile-code isolation. A reviewed-local executable retains ambient same-user authority and can deliberately establish a new session; WASI/XPC isolation remains Phase 09 work under issues #203 and #204.
 
+Phase 02 issue #113 is implemented: state-backed commands use a secure macOS Application Support default, deterministic override precedence, private path ownership/modes, truthful `paths`/`doctor` reporting, and resumable legacy-state migration. Explicit-only/default-path statements retained below are pre-v0.0.2 history, not current behavior. Backup/restore, deeper repair, release rollback, and installed-service lifecycle remain their named Phase 02 workstreams.
+
 The remainder of this file preserves the detailed pre-v0.0.2 capability inventory because tests, threat boundaries, and earlier evidence refer to its exact wording. It is historical implementation evidence, not the active release scope or schedule. Where it says “not implemented,” consult the v0.0.2 plan for the owning phase.
 
 ## Retained Pre-v0.0.2 Capability Inventory

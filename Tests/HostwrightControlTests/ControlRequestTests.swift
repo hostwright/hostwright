@@ -79,19 +79,22 @@ final class ControlRequestTests: XCTestCase {
         )
     }
 
-    func testStateOperationsRequireConfiguredStatePath() {
+    func testStateOperationsUseCLIApplicationSupportDefaultWhenNoOverrideIsConfigured() throws {
         let configuration = LocalControlConfiguration(manifestPath: "/tmp/hostwright.yaml")
-        for operation in [LocalControlOperation.events, .recovery] {
-            assertDiagnostic(
-                tryRun: {
-                    try LocalControlAPI.commandArguments(
-                        for: LocalControlRequest(requestID: "request-1", operation: operation),
-                        configuration: configuration
-                    )
-                },
-                code: .controlAPIUnavailable
-            )
-        }
+        XCTAssertEqual(
+            try LocalControlAPI.commandArguments(
+                for: LocalControlRequest(requestID: "request-1", operation: .events),
+                configuration: configuration
+            ),
+            ["events", "--limit", "100", "--output", "json"]
+        )
+        XCTAssertEqual(
+            try LocalControlAPI.commandArguments(
+                for: LocalControlRequest(requestID: "request-2", operation: .recovery),
+                configuration: configuration
+            ),
+            ["recovery", "--output", "json"]
+        )
     }
 
     func testToolParserRequiresExplicitAbsoluteLaunchPaths() throws {

@@ -53,6 +53,32 @@ func hostwrightUniqueID(prefix: String) -> String {
     "\(prefix)-\(UUID().uuidString)"
 }
 
+func hostwrightStateStoreConfiguration(
+    explicitPath: String?,
+    environment: CLIEnvironment
+) throws -> StateStoreConfiguration {
+    StateStoreConfiguration(
+        localPathResolution: try hostwrightLocalPathResolution(
+            explicitPath: explicitPath,
+            environment: environment
+        )
+    )
+}
+
+func hostwrightLocalPathResolution(
+    explicitPath: String?,
+    environment: CLIEnvironment
+) throws -> HostwrightLocalPathResolution {
+    do {
+        return try environment.localPathResolution(explicitPath)
+    } catch {
+        throw HostwrightDiagnostic(
+            code: .stateStoreUnavailable,
+            message: RuntimeRedactionPolicy.default.redact(String(describing: error))
+        )
+    }
+}
+
 func hostwrightReadManifestText(path: String, environment: CLIEnvironment) throws -> String {
     do {
         return try environment.readTextFile(path)
@@ -278,6 +304,55 @@ enum CLIJSON {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
         return String(data: try! encoder.encode(report), encoding: .utf8)! + "\n"
+    }
+
+    static func localPaths(
+        _ resolution: HostwrightLocalPathResolution,
+        readiness: HostwrightLocalPathReadiness,
+        daemonLockPath: String,
+        targetExists: Bool,
+        legacyExists: Bool,
+        migrationJournalExists: Bool,
+        policyError: String?
+    ) -> String {
+        var object: [String: Any] = [
+            "kind": "localPaths",
+            "schemaVersion": resolution.schemaVersion,
+            "statePathOrigin": resolution.statePathOrigin.rawValue,
+            "readiness": readiness.rawValue,
+            "stateDatabaseExists": targetExists,
+            "legacyStateExists": legacyExists,
+            "migrationJournalExists": migrationJournalExists,
+            "stateDatabasePath": resolution.stateDatabasePath,
+            "daemonLockPath": daemonLockPath,
+            "legacyRootDirectory": resolution.legacyRootDirectory,
+            "legacyStateDatabase": resolution.legacyStateDatabase,
+            "migrationJournalPath": resolution.legacyStateMigrationJournal,
+            "layout": [
+                "applicationSupportDirectory": resolution.layout.applicationSupportDirectory,
+                "configurationDirectory": resolution.layout.configurationDirectory,
+                "stateDirectory": resolution.layout.stateDirectory,
+                "runtimeDirectory": resolution.layout.runtimeDirectory,
+                "metadataDirectory": resolution.layout.metadataDirectory,
+                "backupsDirectory": resolution.layout.backupsDirectory,
+                "cacheDirectory": resolution.layout.cacheDirectory,
+                "logDirectory": resolution.layout.logDirectory,
+                "stateDatabase": resolution.layout.stateDatabase,
+                "daemonLock": resolution.layout.daemonLock,
+                "controlSocket": resolution.layout.controlSocket
+            ],
+            "permissions": [
+                "ownedDirectories": "0700",
+                "sensitiveFiles": "0600"
+            ],
+            "overridePrecedence": [
+                "--state-db",
+                HostwrightLocalPathResolver.stateDatabaseOverride,
+                "application-support-default"
+            ]
+        ]
+        if let policyError { object["policyError"] = policyError }
+        return render(object)
     }
 
     static func manifestMigrationPreview(_ preview: ManifestMigrationPreview) -> String {
@@ -568,22 +643,6 @@ enum CLIJSON {
                     }
                 ].compactNilValues()
             }
-        ].compactNilValues())
-    }
-
-    static func statusManifestOnly(manifestPath: String, manifest: HostwrightManifest) -> String {
-        render([
-            "kind": "status",
-            "manifest": [
-                "path": manifestPath,
-                "valid": true,
-                "exists": true
-            ],
-            "project": manifest.project as Any,
-            "declaredServices": manifest.services.map(\.name).sorted(),
-            "runtime": [
-                "observed": false
-            ]
         ].compactNilValues())
     }
 

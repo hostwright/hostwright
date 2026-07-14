@@ -12,7 +12,11 @@ Hostwright has a SQLite-backed state ledger inside `HostwrightState`. Apply uses
 
 Implemented:
 
-- explicit-path `SQLiteStateStore`
+- secure Application Support default plus explicit/environment-selected `SQLiteStateStore`
+- private macOS configuration, state, runtime, metadata, backup, cache, and log layout
+- deterministic path precedence and machine-readable `hostwright paths` status
+- `0700` owned-directory and `0600` sensitive-file enforcement
+- journaled, identity-bound `~/.hostwright/state.sqlite` migration with crash resume and active-writer refusal
 - schema migrations
 - desired manifest snapshot persistence
 - observed runtime snapshot persistence
@@ -40,7 +44,6 @@ Not implemented:
 - broad cleanup, image cleanup, volume cleanup, or unmanaged cleanup
 - drift planner
 - production durability claims
-- default user database path
 - automatic state repair
 - online backup/restore/repair commands
 - launch agent or background daemon service
@@ -55,9 +58,13 @@ Not implemented:
 
 ## Path Policy
 
-Hostwright requires explicit database paths. It does not silently write to the repository, `~/Library/Application Support`, XDG paths, or any global location.
+The default database is `~/Library/Application Support/Hostwright/state/state.sqlite`. Command-line `--state-db` wins over `HOSTWRIGHT_STATE_DB`, which wins over the default. No default writes occur in the repository, current working directory, XDG locations, or global system directories.
 
-Tests use unique temporary database paths. Future CLI/dev commands may add an explicit state-path flag, but no default user path exists yet.
+State-writing commands create the Hostwright-owned layout with mode `0700` and sensitive files with mode `0600`, independent of the caller's `umask`. Before use, the complete path chain must be safely owned and non-writable by group/other users; user-controlled symlinks, access-granting extended ACL entries, hard-linked sensitive files, wrong-owner files, special bits, and ambiguous paths fail closed. Tests resolve the same contract beneath unique temporary home directories.
+
+The default path performs a journaled migration of a compatible `~/.hostwright/state.sqlite`. The migration records device/inode identity, synchronizes intent and directories, acquires an exclusive SQLite transaction, atomically renames, resumes after interruption, and preserves every unknown legacy file. Explicit and environment-selected databases never trigger an implicit legacy move.
+
+The normative path table, environment hooks, command creation semantics, status values, and recovery procedure are in [Local Paths, Permissions, and Legacy Migration](../reference/local-paths.md).
 
 ## Migration And Compatibility Policy
 
@@ -123,7 +130,7 @@ Desired environment snapshots never store resolved secret values. `secretEnv` en
 State backup is a cold file operation today:
 
 1. Stop any Hostwright CLI command or future daemon that is using the database.
-2. Copy the explicit SQLite database path and its SQLite sidecar files if present, such as `state.sqlite-wal` and `state.sqlite-shm`.
+2. Resolve the selected path with `hostwright paths`, then copy that SQLite database and its sidecar files if present, such as `state.sqlite-wal` and `state.sqlite-shm`.
 3. Preserve file permissions and the full database contents. Ownership records, event records, operation records, and observed snapshots must stay together.
 
 The state integration suite proves this cold-copy procedure against a real migrated SQLite file: a backup opens with the recorded schema and committed rows, and restoring that backup to a separate explicit path does not include rows committed only after the backup. This is evidence for the documented stopped-process procedure, not an online backup command or a durability guarantee for copies taken while writers are active.
@@ -133,19 +140,19 @@ Restore is also a cold file operation:
 1. Stop Hostwright processes using the target path.
 2. Move the existing database aside instead of overwriting it.
 3. Copy the backup database and sidecars into place.
-4. Run a safe read command such as `hostwright events --state-db <path>` to verify the schema can be opened.
+4. Run a safe read command such as `hostwright events` for the default or `hostwright events --state-db <path>` for an override to verify the schema can be opened.
 
 Diagnostics export is a local read-only command:
 
 ```bash
-hostwright diagnostics --state-db <path> --bundle <path> [--project <name>] [--manifest <path>]
+hostwright diagnostics [--state-db <path>] --bundle <path> [--project <name>] [--manifest <path>]
 ```
 
 The command validates the already-applied schema, reads existing rows, applies Hostwright redaction before JSON rendering, and refuses to overwrite an existing bundle file. It does not observe runtime state, mutate runtime state, create or migrate a missing database, repair state, or upload telemetry.
 
 The exported bundle can still contain sensitive local context such as project names, service names, paths, hostnames, resource identifiers, and redacted-but-contextual metadata. Review it before sharing.
 
-Corruption recovery is manual. If Hostwright reports a corrupt or non-SQLite database, keep the file for investigation, restore from a known-good cold backup, or choose a new explicit database path. Hostwright does not invent ownership records, repair rows, or erase state automatically.
+Corruption recovery is manual. If Hostwright reports a corrupt or non-SQLite database, keep the file for investigation, restore from a known-good cold backup, or choose a new explicit database path. Hostwright does not invent ownership records, repair rows, erase state automatically, or treat a path migration as database repair.
 
 ## Concurrency And Locking
 

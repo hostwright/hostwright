@@ -53,6 +53,6 @@ These rejections are intentional. Import output does not imply Docker Compose co
 2. Review every converted image, port, volume, environment value, health check, and restart policy.
 3. Run `hostwright validate`.
 4. Run `hostwright plan`.
-5. Apply only through the existing explicit state path and plan-hash confirmation gate.
+5. Apply only through the secure selected state path and plan-hash confirmation gate. The Application Support default is used unless you deliberately pass `--state-db`.
 
 `import-stack` itself never performs step 5.

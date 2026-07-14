@@ -6,18 +6,19 @@ import HostwrightState
 public enum CLICommand: Equatable, Sendable {
     case version
     case capabilities(output: CLIOutputFormat)
+    case paths(stateDatabasePath: String?, output: CLIOutputFormat)
     case migrateManifestPreview(path: String, output: CLIOutputFormat)
     case initManifest
     case importStack(path: String, output: CLIOutputFormat, teamProfilePath: String?)
     case validate(path: String, teamProfilePath: String?)
     case plan(path: String, output: CLIOutputFormat, teamProfilePath: String?)
     case status(path: String, stateDatabasePath: String?, output: CLIOutputFormat)
-    case apply(path: String, stateDatabasePath: String, confirmedPlanHash: String, teamProfilePath: String?, approvalRecordPath: String?)
+    case apply(path: String, stateDatabasePath: String?, confirmedPlanHash: String, teamProfilePath: String?, approvalRecordPath: String?)
     case logs(serviceName: String, path: String, tail: Int, stateDatabasePath: String?)
-    case events(stateDatabasePath: String, projectName: String?, filters: EventFilters, output: CLIOutputFormat)
-    case recovery(stateDatabasePath: String, projectName: String?, output: CLIOutputFormat)
-    case cleanup(path: String, stateDatabasePath: String, confirmation: CleanupConfirmation, teamProfilePath: String?, approvalRecordPath: String?)
-    case diagnostics(stateDatabasePath: String, bundlePath: String, projectName: String?, manifestPath: String?)
+    case events(stateDatabasePath: String?, projectName: String?, filters: EventFilters, output: CLIOutputFormat)
+    case recovery(stateDatabasePath: String?, projectName: String?, output: CLIOutputFormat)
+    case cleanup(path: String, stateDatabasePath: String?, confirmation: CleanupConfirmation, teamProfilePath: String?, approvalRecordPath: String?)
+    case diagnostics(stateDatabasePath: String?, bundlePath: String, projectName: String?, manifestPath: String?)
     case benchmark(options: BenchmarkCLIOptions)
     case extensionCheck(declarationPath: String, executablePath: String, output: CLIOutputFormat)
     case doctor(output: CLIOutputFormat)
@@ -37,6 +38,8 @@ public enum CLICommand: Equatable, Sendable {
             return .help
         case "capabilities":
             return try capabilitiesCommand(arguments: arguments)
+        case "paths":
+            return try pathsCommand(arguments: arguments)
         case "migrate":
             return try migrateCommand(arguments: arguments)
         case "init":
@@ -101,6 +104,36 @@ public enum CLICommand: Equatable, Sendable {
             return .capabilities(output: output)
         }
         throw CLIUsageError("capabilities supports only --json or --output text|json.")
+    }
+
+    private static func pathsCommand(arguments: [String]) throws -> CLICommand {
+        var stateDatabasePath: String?
+        var output: CLIOutputFormat = .text
+        var outputSelected = false
+        var index = 1
+        while index < arguments.count {
+            switch arguments[index] {
+            case "--state-db":
+                guard stateDatabasePath == nil, index + 1 < arguments.count else {
+                    throw CLIUsageError("paths accepts one value after --state-db.")
+                }
+                stateDatabasePath = arguments[index + 1]
+                index += 2
+            case "--json":
+                guard !outputSelected else { throw CLIUsageError("paths accepts one output selector.") }
+                output = .json
+                outputSelected = true
+                index += 1
+            case "--output":
+                guard !outputSelected else { throw CLIUsageError("paths accepts one output selector.") }
+                output = try parseOutputValue(arguments: arguments, index: index, commandName: "paths")
+                outputSelected = true
+                index += 2
+            default:
+                throw CLIUsageError("paths supports only --state-db, --json, and --output text|json.")
+            }
+        }
+        return .paths(stateDatabasePath: stateDatabasePath, output: output)
     }
 
     private static func migrateCommand(arguments: [String]) throws -> CLICommand {
@@ -255,10 +288,6 @@ public enum CLICommand: Equatable, Sendable {
                 path = argument
                 index += 1
             }
-        }
-
-        guard let stateDatabasePath, !stateDatabasePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw CLIUsageError("apply requires --state-db <path>. The confirmed single-action gate does not use a default state database path.")
         }
 
         guard let confirmedPlanHash, !confirmedPlanHash.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -426,9 +455,6 @@ public enum CLICommand: Equatable, Sendable {
             }
         }
 
-        guard let stateDatabasePath, !stateDatabasePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw CLIUsageError("events requires --state-db <path>.")
-        }
         return .events(
             stateDatabasePath: stateDatabasePath,
             projectName: projectName,
@@ -465,9 +491,6 @@ public enum CLICommand: Equatable, Sendable {
             }
         }
 
-        guard let stateDatabasePath, !stateDatabasePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw CLIUsageError("recovery requires --state-db <path>.")
-        }
         return .recovery(stateDatabasePath: stateDatabasePath, projectName: projectName, output: output)
     }
 
@@ -753,9 +776,6 @@ public enum CLICommand: Equatable, Sendable {
             }
         }
 
-        guard let stateDatabasePath, !stateDatabasePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw CLIUsageError("cleanup requires --state-db <path>.")
-        }
         guard dryRun != (confirmationToken != nil) else {
             throw CLIUsageError("cleanup requires exactly one of --dry-run or --confirm-cleanup <token>.")
         }
@@ -816,9 +836,6 @@ public enum CLICommand: Equatable, Sendable {
             }
         }
 
-        guard let stateDatabasePath, !stateDatabasePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw CLIUsageError("diagnostics requires --state-db <path>.")
-        }
         guard let bundlePath, !bundlePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw CLIUsageError("diagnostics requires --bundle <path>.")
         }

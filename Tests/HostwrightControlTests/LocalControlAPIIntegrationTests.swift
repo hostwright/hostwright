@@ -1,9 +1,11 @@
 import Foundation
-import HostwrightControl
+import HostwrightCLI
 import HostwrightCore
 import HostwrightManifest
 import HostwrightState
+import HostwrightTestSupport
 import XCTest
+@testable import HostwrightControl
 
 final class LocalControlAPIIntegrationTests: XCTestCase {
     func testRealFilesAndSQLiteServeAllFiveApprovedOperations() throws {
@@ -79,15 +81,21 @@ final class LocalControlAPIIntegrationTests: XCTestCase {
             XCTAssertEqual(string("project", in: plan.result), "demo")
 
             let status = try run(
-                LocalControlAPI(
-                    configuration: LocalControlConfiguration(manifestPath: workspace.manifest.path)
+                isolatedAPI(
+                    configuration: LocalControlConfiguration(manifestPath: workspace.manifest.path),
+                    workspace: workspace
                 ),
                 LocalControlRequest(requestID: "status-1", operation: .status)
             )
             XCTAssertTrue(status.success)
             XCTAssertEqual(string("kind", in: status.result), "status")
             let runtime = try XCTUnwrap(object("runtime", in: status.result))
-            XCTAssertEqual(bool("observed", in: .object(runtime)), false)
+            XCTAssertEqual(bool("observed", in: .object(runtime)), true)
+            let defaultResolution = try HostwrightLocalPathResolver.resolve(
+                homeDirectory: workspace.root.path,
+                environment: [:]
+            )
+            XCTAssertTrue(FileManager.default.fileExists(atPath: defaultResolution.stateDatabasePath))
 
             let events = try run(
                 api,
@@ -193,13 +201,23 @@ final class LocalControlAPIIntegrationTests: XCTestCase {
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: workspace.manifest.path)
 
             let missingState = try run(
-                LocalControlAPI(
-                    configuration: LocalControlConfiguration(manifestPath: workspace.manifest.path)
+                isolatedAPI(
+                    configuration: LocalControlConfiguration(manifestPath: workspace.manifest.path),
+                    workspace: workspace
                 ),
                 LocalControlRequest(requestID: "events-no-state", operation: .events),
-                expectedExitCode: LocalControlExitCode.unavailable.rawValue
+                expectedExitCode: CLIExitCode.stateUnavailable.rawValue
             )
-            XCTAssertEqual(string("code", in: missingState.error), HostwrightErrorCode.controlAPIUnavailable.rawValue)
+            XCTAssertFalse(missingState.success)
+            XCTAssertEqual(
+                string("code", in: missingState.error),
+                HostwrightErrorCode.stateStoreUnavailable.rawValue
+            )
+            let defaultResolution = try HostwrightLocalPathResolver.resolve(
+                homeDirectory: workspace.root.path,
+                environment: [:]
+            )
+            XCTAssertFalse(FileManager.default.fileExists(atPath: defaultResolution.stateDatabasePath))
 
             let missingDatabaseURL = workspace.root.appendingPathComponent("missing-state.sqlite")
             let missingConfiguredState = try run(
@@ -228,6 +246,22 @@ final class LocalControlAPIIntegrationTests: XCTestCase {
         XCTAssertEqual(result.standardError, "")
         XCTAssertEqual(result.exitCode, expectedExitCode)
         return try JSONDecoder().decode(LocalControlResponse.self, from: result.standardOutput)
+    }
+
+    private func isolatedAPI(
+        configuration: LocalControlConfiguration,
+        workspace: Workspace
+    ) -> LocalControlAPI {
+        var environment = CLIEnvironment.live
+        environment.localPathResolution = { explicitPath in
+            try HostwrightLocalPathResolver.resolve(
+                explicitStateDatabasePath: explicitPath,
+                homeDirectory: workspace.root.path,
+                environment: [:]
+            )
+        }
+        environment.runtimeAdapter = { ScriptedRuntimeAdapter(scenario: .availableEmpty) }
+        return LocalControlAPI(configuration: configuration, environment: environment)
     }
 
     private func object(_ key: String, in value: ControlJSONValue?) -> [String: ControlJSONValue]? {

@@ -87,7 +87,6 @@ Confirmed apply:
 
 ```bash
 hostwright apply hostwright.yaml \
-  --state-db /absolute/path/state.sqlite \
   --confirm-plan <plan-hash> \
   --team-profile team-profile.json \
   --approval-record approval.json
@@ -97,36 +96,34 @@ Confirmed cleanup starts with a profile-aware dry run, then uses a cleanup-scope
 
 ```bash
 hostwright cleanup hostwright.yaml \
-  --state-db /absolute/path/state.sqlite \
   --dry-run \
   --team-profile team-profile.json
 
 hostwright cleanup hostwright.yaml \
-  --state-db /absolute/path/state.sqlite \
   --confirm-cleanup <cleanup-token> \
   --team-profile team-profile.json \
   --approval-record cleanup-approval.json
 ```
 
-`--approval-record` without `--team-profile` is rejected. Apply requires an approval whenever a profile is selected. Cleanup dry-run rejects approval input because review must bind the token produced by that dry run.
+`--approval-record` without `--team-profile` is rejected. Apply requires an approval whenever a profile is selected. Cleanup dry-run rejects approval input because review must bind the token produced by that dry run. These examples use the secure default state; add `--state-db <absolute-path>` only when an explicit override is required.
 
 ## Confirmation And Audit
 
 Profile-aware mutation carries the profile, manifest, plan, and approval hashes in `RuntimeMutationConfirmation`. Existing plan/token confirmation and exact ownership checks still run independently.
 
-The explicit SQLite state path records the same binding in redacted append-only operation/event payloads. Events include:
+The selected SQLite state path records the same binding in redacted append-only operation/event payloads. Events include:
 
 - `team.profile.selected` for profile-aware cleanup dry-run;
 - `team.approval.recorded` before profile-aware apply or cleanup mutation;
 - the existing apply/cleanup success or failure events with the same binding metadata.
 
-Approval id, reviewer, timestamp, scope, and hashes are redacted before persistence. An audit write failure before mutation blocks the mutation. Approval records never bypass `RuntimeAdapter`, exact resource identifiers, ownership, confirmation, redaction, explicit state paths, local-only diagnostics, or cleanup eligibility.
+Approval id, reviewer, timestamp, scope, and hashes are redacted before persistence. An audit write failure before mutation blocks the mutation. Approval records never bypass `RuntimeAdapter`, exact resource identifiers, ownership, confirmation, redaction, secure selected-state policy, local-only diagnostics, or cleanup eligibility.
 
 ## Shared Machines
 
 Profiles, approvals, manifests, and state databases are ordinary local files. Operators must set appropriate filesystem ownership and permissions outside Hostwright. Hostwright does not manage macOS users, groups, ACLs, Keychain access groups, shared secret stores, or device-management policy.
 
-## Non-Goals
+## Current Sequenced Limitations
 
 - Cloud team service or organization account model.
 - Central remote control or hosted audit log.

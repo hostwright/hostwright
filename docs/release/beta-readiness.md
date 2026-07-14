@@ -39,7 +39,7 @@ Beta must not be tagged while any of these are unresolved:
 - missing release notes and limitations review for the intended beta tag;
 - unsafe live proof evidence, image pulls, non-disposable resources, or unowned cleanup;
 - raw secret values in examples, docs, state, diagnostics, events, logs, or fixtures;
-- hidden default state path, direct Apple container shell-out outside `HostwrightRuntime`, or SQLite access outside `HostwrightState`;
+- undocumented or unsafe default state path, direct Apple container shell-out outside `HostwrightRuntime`, or SQLite access outside `HostwrightState`;
 - unclear upgrade, downgrade, backup, restore, or state-locking operator guidance;
 - unsupported public claims about binaries, installers, Homebrew, signing, notarization, SBOM, provenance, performance numbers, capacity, cloud, tunnels, DNS, GPU/ANE/Metal/Core ML/MLX, Kubernetes, CRI, Docker API, Compose parity, multi-host, or GUI behavior.
 

@@ -40,7 +40,7 @@ The public docs site should use this structure:
 | Concepts | `docs/architecture/runtime-adapter.md`, `docs/architecture/reconciliation.md`, `docs/architecture/state-store.md`, `docs/architecture/policy-engine.md` | Explain boundaries before behavior. |
 | Tasks | `docs/reference/cli.md`, `docs/guides/stack-import.md`, `examples/` | Each task must name whether it is read-only, state-writing, or mutating. |
 | Reference | `docs/reference/cli.md`, `docs/reference/manifest.md`, `docs/reference/error-codes.md`, `docs/reference/policy.md` | Keep command and manifest syntax sourced from tested docs. |
-| Operations | `docs/reference/security-safety.md`, `docs/reference/team-workflow.md`, `docs/architecture/daemon.md` | Preserve explicit state paths, redaction, confirmation, and ownership gates. |
+| Operations | `docs/reference/security-safety.md`, `docs/reference/team-workflow.md`, `docs/architecture/daemon.md` | Preserve secure selected state paths, redaction, confirmation, and ownership gates. |
 | Release | `docs/release/RELEASE_PROCESS.md`, `docs/release/v0.1.0-alpha.1-notes.md` | Release copy must match artifact policy and current limitations. |
 | Roadmap and research | `docs/IMPLEMENTATION_PLAN.md`, research decision records | Planned, deferred, rejected, and research-only work must not read as current support. |
 

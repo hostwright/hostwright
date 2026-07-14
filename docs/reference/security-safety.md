@@ -24,11 +24,21 @@ Supported mutation is intentionally narrow:
 
 Hostwright does not implement broad lifecycle management, user-facing stop commands, user-facing restart commands, image replacement, mount mutation, port mutation, automatic rollback, or unattended daemon mutation.
 
-Restart policy state can block the narrow managed-start and managed-restart paths through backoff, preexisting operator hold state, manual-disable from `restart.policy: no`, and crash-loop protection. Managed restart also requires exact Hostwright ownership, live observed running state, a fresh persisted unhealthy health result from the explicit state database, operation ledger entries, restart recovery records, and operation recovery group records. The foreground daemon records restart state but does not start or restart services by itself.
+Restart policy state can block the narrow managed-start and managed-restart paths through backoff, preexisting operator hold state, manual-disable from `restart.policy: no`, and crash-loop protection. Managed restart also requires exact Hostwright ownership, live observed running state, a fresh persisted unhealthy health result from the selected state database, operation ledger entries, restart recovery records, and operation recovery group records. The foreground daemon records restart state but does not start or restart services by itself.
 
 New runtime resources use collision-resistant v2 identifiers and exact labels for managed state, identity version, project, service, optional instance, and resource identifier. Mutation plans retain the exact observed identifier. State-backed legacy identifiers remain readable for upgrade continuity, but labels or ownership records may not be inferred from a Hostwright-looking name.
 
 Operation recovery records are audit and recovery guidance only. They record checkpoints, failed/completed steps, and rollback-unavailable status; they do not authorize automatic inverse runtime operations.
+
+## Local State Boundary
+
+State-backed commands default to the per-user Application Support database. An explicit CLI override wins over `HOSTWRIGHT_STATE_DB`, which wins over the default. Before SQLite or daemon-lock use, Hostwright enforces absolute normalized paths, safe root/current-user parent ownership, no group/other-writable or access-granting-ACL parents, no user-controlled directory symlinks, exact `0700` owned directories, and current-user-owned regular single-link `0600` sensitive files without special bits or access-granting ACL entries. Creation explicitly applies those modes instead of depending on the caller's `umask`.
+
+The default-path legacy migration accepts only a compatible checksum-valid Hostwright SQLite ledger. It refuses destination conflicts, SQLite sidecars, active writers, cross-filesystem moves, identity changes, and ambiguous crash state. A synchronized journal makes the one atomic rename resumable; unknown `~/.hostwright` files are never moved or removed.
+
+`hostwright paths` exposes origin, readiness, effective lock path, pending-journal state, and policy failures without creating state. `hostwright doctor` validates existing state plus prospective parent/layout safety before first use. See [Local Paths, Permissions, and Legacy Migration](local-paths.md) for the full security and recovery contract.
+
+These controls prevent Hostwright from crossing filesystem trust boundaries. They do not sandbox another process already running under the same macOS account.
 
 ## Policy Boundary
 
@@ -40,7 +50,7 @@ Policy decisions do not execute Apple container, write SQLite, contact registrie
 
 Team workflow support is explicit local profile and approval data only. Hostwright accepts strict-only profile requirements and exact profile/manifest/plan-bound approvals; it does not provide policy weakening, a cloud team service, central remote control, hosted audit log, user tracking, enterprise support workflow, or remote policy distribution.
 
-Team profiles cannot bypass plan-hash confirmation, cleanup tokens, ownership checks, redaction, explicit state paths, local-only diagnostics, or `RuntimeAdapter`. Approval records authorize only the exact bound apply or cleanup operation; they do not override hard-coded safety gates.
+Team profiles cannot bypass plan-hash confirmation, cleanup tokens, ownership checks, redaction, secure selected-state policy, local-only diagnostics, or `RuntimeAdapter`. Approval records authorize only the exact bound apply or cleanup operation; they do not override hard-coded safety gates.
 
 Benchmark execution is separate from apply/cleanup state. It requires all source, image, sample, report, expected-version, and live-confirmation inputs; refuses an existing report path; records every attempted exact identifier; waits for terminal-state quiescence; and verifies absence after delete. It has no image-pull, force-delete, broad-cleanup, state-write, or upload path. An attended sleep/wake option observes a timing gap and exact post-wake identity but never initiates system sleep.
 
@@ -70,17 +80,17 @@ Current public Hostwright releases remain source-only. Local unsigned artifacts 
 
 ## Control Surface Boundary
 
-Future GUI or local control surfaces must use Hostwright command contracts or the explicit `hostwright-control` subset while preserving the same validation, redaction, ownership, explicit-state-path, and RuntimeAdapter boundaries. Mutation remains outside the Phase 42 API, so plan-hash confirmation and cleanup-token authority are not exposed through it.
+Future GUI or local control surfaces must use Hostwright command contracts or the explicit `hostwright-control` subset while preserving the same validation, redaction, ownership, selected-state-path, and RuntimeAdapter boundaries. Mutation remains outside the current one-shot API, so plan-hash confirmation and cleanup-token authority are not exposed through it.
 
 They must not call Apple container, SQLite, `RuntimeAdapter`, state migrations, cleanup deletion, health execution, or diagnostics upload directly. `hostwright-control` delegates only plan, status, events, recovery, and doctor to existing CLI contracts, requires launch-fixed absolute paths, rejects request-selected paths and mutation names, bounds one stdin request and one stdout response, and then exits. It adds no GUI code, daemon API, listener, web dashboard, hosted diagnostics, telemetry upload, or remote control.
 
-Configured files must be existing regular non-symlink files with safe ownership, no group/world write permission, and no set-ID bits. This check reduces accidental or cross-account substitution; it is not an operating-system sandbox or a guarantee against the invoking account replacing its own files. State-backed status can perform existing schema migration, observation snapshot, and audit writes to the explicit configured database. No API operation mutates runtime.
+Configured files must be existing regular non-symlink files with safe ownership, no group/world write permission, and no set-ID bits. This check reduces accidental or cross-account substitution; it is not an operating-system sandbox or a guarantee against the invoking account replacing its own files. State-backed status can perform compatible path/schema migration, observation snapshot, and audit writes to the launch-configured database or the secure default when no state override is configured. No API operation mutates runtime.
 
 ## Cleanup Safety
 
 Cleanup is destructive and requires all of these:
 
-- explicit `--state-db`;
+- a selected state database that passes the secure local path policy;
 - dry-run first;
 - matching cleanup token;
 - Hostwright ownership record;
@@ -107,7 +117,7 @@ Redaction is heuristic. Users should not place plaintext credentials in manifest
 
 Health check stdout, stderr, command payloads, events, operation recovery hints, operation recovery metadata, and persisted result metadata are redacted before display or storage.
 
-Diagnostic bundles are local-only JSON exports. They redact known secret-like values before writing, refuse to overwrite an existing file, and are never uploaded by Hostwright. They can still contain sensitive local context such as project names, service names, file paths, hostnames, resource identifiers, event timing, and redacted-but-contextual metadata. Review bundles before sharing.
+Diagnostic bundles are local-only JSON exports. They redact known secret-like values before writing, use exclusive `0600` creation, refuse to overwrite an existing file, and are never uploaded by Hostwright. They can still contain sensitive local context such as project names, service names, file paths, hostnames, resource identifiers, event timing, and redacted-but-contextual metadata. Review bundles before sharing.
 
 ## Untrusted Manifest Input
 

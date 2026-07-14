@@ -117,6 +117,7 @@ final class HostwrightStateTests: XCTestCase {
     func testReadOfUnmigratedDatabaseDoesNotCreateMigrationTable() throws {
         try withTemporaryStore { store, databaseURL in
             _ = try SQLiteConnection(path: databaseURL.path)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: databaseURL.path)
 
             XCTAssertThrowsError(try store.events.loadAll()) { error in
                 guard case .incompatibleSchema(let foundVersion, let latestSupported, let message) = error as? StateStoreError else {
@@ -193,6 +194,7 @@ final class HostwrightStateTests: XCTestCase {
         try withTemporaryStore { store, databaseURL in
             let connection = try SQLiteConnection(path: databaseURL.path)
             try connection.execute("CREATE TABLE unrelated (id TEXT PRIMARY KEY)")
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: databaseURL.path)
 
             XCTAssertThrowsError(try store.migrate()) { error in
                 guard case .incompatibleSchema(let foundVersion, let latestSupported, let message) = error as? StateStoreError else {
@@ -1041,7 +1043,7 @@ final class HostwrightStateTests: XCTestCase {
             let invalidStore = SQLiteStateStore(path: directory.path)
 
             XCTAssertThrowsError(try invalidStore.migrate()) { error in
-                XCTAssertTrue(String(describing: error).contains("Failed to open state database"))
+                XCTAssertTrue(String(describing: error).contains("regular non-symlink file"))
             }
         }
     }

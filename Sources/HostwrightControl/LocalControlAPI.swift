@@ -60,10 +60,10 @@ public struct LocalControlAPI: Sendable {
             arguments += ["--output", "json"]
             return arguments
         case .events:
-            guard let stateDatabasePath = configuration.stateDatabasePath else {
-                throw unavailable("The events operation requires an explicit configured state database path.")
+            var arguments = ["events"]
+            if let stateDatabasePath = configuration.stateDatabasePath {
+                arguments += ["--state-db", stateDatabasePath]
             }
-            var arguments = ["events", "--state-db", stateDatabasePath]
             if let project = request.project { arguments += ["--project", project] }
             if let eventType = request.eventType { arguments += ["--type", eventType] }
             if let service = request.service { arguments += ["--service", service] }
@@ -73,10 +73,10 @@ public struct LocalControlAPI: Sendable {
             arguments += ["--output", "json"]
             return arguments
         case .recovery:
-            guard let stateDatabasePath = configuration.stateDatabasePath else {
-                throw unavailable("The recovery operation requires an explicit configured state database path.")
+            var arguments = ["recovery"]
+            if let stateDatabasePath = configuration.stateDatabasePath {
+                arguments += ["--state-db", stateDatabasePath]
             }
-            var arguments = ["recovery", "--state-db", stateDatabasePath]
             if let project = request.project { arguments += ["--project", project] }
             arguments += ["--output", "json"]
             return arguments

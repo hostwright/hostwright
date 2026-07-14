@@ -35,10 +35,19 @@ final class SQLiteConnection {
     }
 
     deinit {
-        guard let handle else {
-            return
+        try? close()
+    }
+
+    func close() throws {
+        guard let handle else { return }
+        let result = sqlite3_close(handle)
+        guard result == SQLITE_OK else {
+            throw classifySQLiteError(
+                result: result,
+                defaultError: .closeFailed(path: path, message: lastErrorMessage)
+            )
         }
-        sqlite3_close(handle)
+        self.handle = nil
     }
 
     var lastErrorMessage: String {

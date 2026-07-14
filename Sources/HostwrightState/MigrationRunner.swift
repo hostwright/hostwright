@@ -150,6 +150,25 @@ public struct MigrationRunner: Sendable {
         }
     }
 
+    func validateMigrationLedger(on connection: SQLiteConnection) throws {
+        guard try migrationTableExists(on: connection) else {
+            throw StateStoreError.incompatibleSchema(
+                foundVersion: nil,
+                latestSupported: Self.latestSchemaVersion,
+                message: "The Hostwright schema_migrations ledger is missing."
+            )
+        }
+        let applied = try appliedMigrations(on: connection)
+        guard !applied.isEmpty else {
+            throw StateStoreError.incompatibleSchema(
+                foundVersion: 0,
+                latestSupported: Self.latestSchemaVersion,
+                message: "The Hostwright schema_migrations ledger contains no applied migration."
+            )
+        }
+        try validateCompatibility(applied, requireLatest: false)
+    }
+
     private func ensureDatabaseIsMigratable(on connection: SQLiteConnection) throws {
         if try migrationTableExists(on: connection) {
             return

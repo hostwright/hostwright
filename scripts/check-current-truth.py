@@ -50,6 +50,12 @@ def main() -> int:
     manifest_doc = read("docs/reference/manifest.md")
     cli = read("docs/reference/cli.md")
     state = read("docs/architecture/state-store.md")
+    requirements = read("docs/requirements/REQUIREMENTS.md")
+    acceptance = read("docs/requirements/ACCEPTANCE_MATRIX.md")
+    traceability = read("docs/requirements/SOURCE_TRACEABILITY.md")
+    documentation_site = read("docs/architecture/documentation-site-public-education.md")
+    extension_architecture = read("docs/architecture/plugin-extension-architecture.md")
+    beta_readiness = read("docs/release/beta-readiness.md")
     release = read("docs/release/RELEASE_PROCESS.md")
     roadmap = read("docs/roadmap/v0.0.2/IMPLEMENTATION_PLAN.md")
     historical_plan = read("docs/IMPLEMENTATION_PLAN.md")
@@ -67,6 +73,31 @@ def main() -> int:
     require("version: 2" in manifest_doc and "migrate preview" in manifest_doc, "manifest docs lack v2/migration truth", errors)
     require("0.0.2-dev" in cli and "apiVersion\":2" in cli, "CLI docs lack product/API v2 truth", errors)
     require("Schema version 7 is the latest" in state, "state docs do not name schema v7", errors)
+    require("secure selected state paths" in requirements, "requirements lack the secure selected-state contract", errors)
+    require("Implemented for API version 2" in requirements, "requirements retain the obsolete Control API version", errors)
+    require("uses the secure selected state database" in acceptance, "acceptance matrix lacks the state-default contract", errors)
+    require("documented secure default" in traceability, "source traceability lacks the state-default contract", errors)
+    require("Preserve secure selected state paths" in documentation_site, "documentation-site guidance retains the old state-path contract", errors)
+    require("secure selected state paths" in extension_architecture, "extension architecture retains the old state-path contract", errors)
+    require("undocumented or unsafe default state path" in beta_readiness, "beta readiness does not reject unsafe state defaults", errors)
+    obsolete_path_claims = [
+        "choose no default state path",
+        "with no default state path",
+        "hidden default state path",
+        "hidden default paths",
+        "one-shot explicit-path JSON process",
+    ]
+    active_path_docs = {
+        "requirements": requirements,
+        "acceptance matrix": acceptance,
+        "source traceability": traceability,
+        "documentation-site architecture": documentation_site,
+        "extension architecture": extension_architecture,
+        "beta readiness": beta_readiness,
+    }
+    for document, content in active_path_docs.items():
+        for claim in obsolete_path_claims:
+            require(claim not in content, f"{document} retains obsolete state-path claim: {claim}", errors)
     require("active release target is `v0.0.2`" in release, "release process does not name v0.0.2", errors)
     require("one master issue, 15 phase epics, and 167 child workstreams" in roadmap, "roadmap count statement is missing", errors)
     require("Target GA gate: 2026-07-27" in roadmap, "roadmap GA target is not 2026-07-27", errors)

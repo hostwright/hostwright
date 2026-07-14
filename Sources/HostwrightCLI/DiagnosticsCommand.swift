@@ -4,7 +4,7 @@ import HostwrightRuntime
 import HostwrightState
 
 struct DiagnosticsCommandRunner {
-    let stateDatabasePath: String
+    let stateStoreConfiguration: StateStoreConfiguration
     let bundlePath: String
     let projectName: String?
     let manifestPath: String?
@@ -12,13 +12,7 @@ struct DiagnosticsCommandRunner {
 
     func run() -> CLIRunResult {
         do {
-            guard !environment.fileExists(bundlePath) else {
-                return failure(code: .fileAlreadyExists, message: "\(bundlePath) already exists. diagnostics will not overwrite it.")
-            }
-
-            let configuration = StateStoreConfiguration(explicitDatabasePath: stateDatabasePath)
-            try configuration.validate()
-            let store = SQLiteStateStore(configuration: configuration)
+            let store = SQLiteStateStore(configuration: stateStoreConfiguration)
             let manifestSummary = try loadManifestSummary()
             let projectID = projectName.map { "project-\($0)" }
             let export = try store.diagnostics.loadExport(
@@ -29,11 +23,12 @@ struct DiagnosticsCommandRunner {
                 )
             )
             let bundleText = try export.jsonString()
-            do {
-                try environment.writeTextFile(bundlePath, bundleText)
-            } catch {
-                return failure(code: .fileIOFailed, message: "failed to write diagnostics bundle \(bundlePath): \(RuntimeRedactionPolicy.default.redact(String(describing: error)))")
-            }
+            try hostwrightWriteNewLocalText(
+                path: bundlePath,
+                text: bundleText,
+                role: "diagnostics bundle",
+                environment: environment
+            )
             return CLIRunResult(
                 standardOutput: """
                 Hostwright diagnostics

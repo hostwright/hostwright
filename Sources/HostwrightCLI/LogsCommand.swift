@@ -8,7 +8,7 @@ struct LogsCommandRunner {
     let serviceName: String
     let manifestPath: String
     let tail: Int
-    let stateDatabasePath: String?
+    let stateStoreConfiguration: StateStoreConfiguration
     let environment: CLIEnvironment
 
     func run() -> CLIRunResult {
@@ -20,20 +20,13 @@ struct LogsCommandRunner {
                 return failure(code: .commandUsage, message: "logs requires a service declared in \(manifestPath).")
             }
 
-            let observationDesiredState: DesiredRuntimeState
-            if let stateDatabasePath {
-                let configuration = StateStoreConfiguration(explicitDatabasePath: stateDatabasePath)
-                try configuration.validate()
-                let store = SQLiteStateStore(configuration: configuration)
-                try store.migrate()
-                observationDesiredState = try hostwrightDesiredStateWithOwnershipHints(
-                    mapping.desiredState,
-                    store: store,
-                    projectID: "project-\(mapping.desiredState.projectName)"
-                )
-            } else {
-                observationDesiredState = mapping.desiredState
-            }
+            let store = SQLiteStateStore(configuration: stateStoreConfiguration)
+            try store.migrate()
+            let observationDesiredState = try hostwrightDesiredStateWithOwnershipHints(
+                mapping.desiredState,
+                store: store,
+                projectID: "project-\(mapping.desiredState.projectName)"
+            )
 
             let adapter = environment.runtimeAdapter()
             let observed = try hostwrightWaitForAsync {
@@ -48,18 +41,16 @@ struct LogsCommandRunner {
                 try await adapter.logs(for: observedService, tail: tail)
             }
 
-            if let stateDatabasePath {
-                try recordLogsRead(
-                    stateDatabasePath: stateDatabasePath,
-                    manifest: manifest,
-                    manifestText: manifestText,
-                    projectName: mapping.desiredState.projectName,
-                    serviceName: serviceName,
-                    resourceIdentifier: observedService.resourceIdentifier,
-                    observed: observed,
-                    lineLimit: result.lineLimit
-                )
-            }
+            try recordLogsRead(
+                store: store,
+                manifest: manifest,
+                manifestText: manifestText,
+                projectName: mapping.desiredState.projectName,
+                serviceName: serviceName,
+                resourceIdentifier: observedService.resourceIdentifier,
+                observed: observed,
+                lineLimit: result.lineLimit
+            )
 
             return CLIRunResult(
                 standardOutput: """
@@ -83,7 +74,7 @@ struct LogsCommandRunner {
     }
 
     private func recordLogsRead(
-        stateDatabasePath: String,
+        store: SQLiteStateStore,
         manifest: HostwrightManifest,
         manifestText: String,
         projectName: String,
@@ -92,10 +83,6 @@ struct LogsCommandRunner {
         observed: ObservedRuntimeState,
         lineLimit: Int
     ) throws {
-        let configuration = StateStoreConfiguration(explicitDatabasePath: stateDatabasePath)
-        try configuration.validate()
-        let store = SQLiteStateStore(configuration: configuration)
-        try store.migrate()
         let timestamp = hostwrightTimestamp()
         let projectID = "project-\(projectName)"
         try store.desiredStates.saveManifestSnapshot(

@@ -51,19 +51,22 @@ See [installation](docs/reference/install.md) and [compatibility](docs/reference
 ```bash
 swift run hostwright --version
 swift run hostwright capabilities --json
+swift run hostwright paths --json
 swift run hostwright init
 swift run hostwright migrate preview hostwright.yaml
 swift run hostwright validate
 swift run hostwright plan
-swift run hostwright status --state-db /tmp/hostwright.sqlite
-swift run hostwright logs api --state-db /tmp/hostwright.sqlite
-swift run hostwright events --state-db /tmp/hostwright.sqlite
-swift run hostwright cleanup --state-db /tmp/hostwright.sqlite --dry-run
+swift run hostwright status
+swift run hostwright logs api
+swift run hostwright events
+swift run hostwright cleanup --dry-run
 swift run hostwright doctor
-swift run hostwrightd --foreground --config hostwright.yaml --state-db /tmp/hostwright.sqlite --max-iterations 1
+swift run hostwrightd --foreground --config hostwright.yaml --max-iterations 1
 ```
 
-The current mutation surface still requires explicit state paths and plan/cleanup confirmation tokens. `hostwrightd` is not yet installed as a LaunchAgent and does not yet perform the Phase 08 unattended reconciliation contract.
+State-backed commands now default to `~/Library/Application Support/Hostwright/state/state.sqlite`; `--state-db` remains an explicit override. Hostwright creates private `0700` local directories, requires `0600` sensitive files, and safely migrates a compatible `~/.hostwright/state.sqlite` through a resumable journal. See [local paths and migration](docs/reference/local-paths.md) for precedence, security checks, recovery, and the exact commands that create or only read state.
+
+The current mutation surface still requires plan/cleanup confirmation tokens. `hostwrightd` is not yet installed as a LaunchAgent and does not yet perform the Phase 08 unattended reconciliation contract.
 
 ## Manifest v2
 
@@ -95,6 +98,7 @@ The preview only upgrades the version contract today; Phase 04 owns the maintain
 - Every new resource receives a Hostwright UUID; Apple names are attributes, not authority.
 - A project generation is bound to one mutation provider.
 - State schema v7 records UUIDs, provider generations, fencing, saga intent, compensation, and verification fields.
+- Local state uses the secure Application Support default unless an explicit CLI or environment override wins.
 - Names or similar configuration never authorize deletion.
 - Hostwright does not delete unmanaged resources.
 - Secrets are resolved only at execution boundaries and must not enter argv, state, logs, diagnostics, crash bundles, or provenance.

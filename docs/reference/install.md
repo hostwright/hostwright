@@ -70,7 +70,18 @@ swift build --show-bin-path
 
 ## State and Uninstall Reality
 
-Current commands require explicit state paths. There is no production default under `~/Library/Application Support`, no installed LaunchAgent, and no package receipt to remove. A source checkout can be removed only after the operator has separately stopped workloads and preserved or cleaned explicitly managed runtime/state resources.
+State-backed commands now use `~/Library/Application Support/Hostwright/state/state.sqlite` when no `--state-db` or `HOSTWRIGHT_STATE_DB` override is present. State-writing commands create the documented Application Support, cache, and log roots with private permissions. A compatible legacy `~/.hostwright/state.sqlite` is moved through a synchronized, identity-bound, resumable journal; unknown legacy files are preserved.
+
+Inspect the selected paths without creating them:
+
+```bash
+swift run hostwright paths --json
+swift run hostwright doctor --output json
+```
+
+The complete precedence, `0700`/`0600` policy, migration failure behavior, and recovery procedure are in [Local Paths, Permissions, and Legacy Migration](local-paths.md).
+
+There is still no installed LaunchAgent or package receipt to remove. A source checkout can be removed only after the operator has separately stopped workloads and preserved or cleaned explicitly managed runtime/state resources. Deleting the checkout does not remove Application Support data.
 
 Do not treat deletion of the checkout as a Hostwright uninstall. Phase 02 implements a real ownership-aware uninstall that:
 
@@ -86,3 +97,5 @@ Do not treat deletion of the checkout as a Hostwright uninstall. Phase 02 implem
 No package channel is called supported until clean-Mac evidence covers Gatekeeper, reboot, upgrade, rollback, repair, uninstall, corruption, disk full, PATH hijack, symlink attacks, cancellation, and owned process-tree cleanup. Final requirements are in the [v0.0.2 implementation plan](../roadmap/v0.0.2/IMPLEMENTATION_PLAN.md) and [distribution evidence rules](testing-evidence.md).
 
 All production installer, distribution, extension, tool-inspection, and Apple-runtime subprocesses must use the [secure process execution boundary](process-execution.md). Phase 02 issue #116 implements that shared boundary; it does not by itself make the still-unsigned developer distribution a trusted install channel.
+
+Phase 02 issue #113 implements secure local defaults and legacy-state migration. It does not claim the backup/restore, deeper SQLite repair, package upgrade/rollback, installer, signing, or notarization work owned by the remaining Phase 02 issues.

@@ -375,7 +375,7 @@ public struct LocalPolicyEvaluator: Equatable, Sendable {
                 identity: identity,
                 subject: action,
                 message: "\(action) is allowed only through its existing narrow Hostwright-owned policy gate.",
-                remediation: "Continue to require exact ownership, live observation, explicit state path, and operation ledgers.",
+                remediation: "Continue to require exact ownership, live observation, a securely selected state path, and operation ledgers.",
                 stableDetailKey: action
             )
         }

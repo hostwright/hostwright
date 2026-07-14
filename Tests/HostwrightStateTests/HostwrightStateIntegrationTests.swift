@@ -3,6 +3,13 @@ import XCTest
 @testable import HostwrightState
 
 final class HostwrightStateIntegrationTests: XCTestCase {
+    @available(*, deprecated, message: "Compile-time coverage for the deprecated public alias.")
+    func testDeprecatedStateStorePathOriginRemainsAvailableFromHostwrightState() {
+        let origin: StateStorePathOrigin = .explicit
+
+        XCTAssertEqual(origin.rawValue, "explicit")
+    }
+
     func testTwoRealConnectionsIsolateUncommittedWritesAndShareCommittedRows() throws {
         let directory = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -190,6 +197,7 @@ final class HostwrightStateIntegrationTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: directory) }
         let databaseURL = directory.appendingPathComponent("state.sqlite")
         try Data("not a sqlite database".utf8).write(to: databaseURL)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: databaseURL.path)
         let store = SQLiteStateStore(path: databaseURL.path)
 
         XCTAssertThrowsError(try store.validateSchema()) { error in

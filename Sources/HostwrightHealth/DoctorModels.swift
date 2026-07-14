@@ -59,6 +59,9 @@ public struct DoctorInputs: Equatable, Sendable {
     public let containerExecutablePath: String?
     public let manifestExists: Bool
     public let resourceSnapshot: ResourceIntelligenceSnapshot?
+    public let localPathResolution: HostwrightLocalPathResolution?
+    public let localPathReadiness: HostwrightLocalPathReadiness?
+    public let localPathPolicyError: String?
 
     public init(
         operatingSystemDescription: String,
@@ -66,7 +69,10 @@ public struct DoctorInputs: Equatable, Sendable {
         swiftVersion: String?,
         containerExecutablePath: String?,
         manifestExists: Bool,
-        resourceSnapshot: ResourceIntelligenceSnapshot? = nil
+        resourceSnapshot: ResourceIntelligenceSnapshot? = nil,
+        localPathResolution: HostwrightLocalPathResolution? = nil,
+        localPathReadiness: HostwrightLocalPathReadiness? = nil,
+        localPathPolicyError: String? = nil
     ) {
         self.operatingSystemDescription = operatingSystemDescription
         self.platform = platform
@@ -74,6 +80,9 @@ public struct DoctorInputs: Equatable, Sendable {
         self.containerExecutablePath = containerExecutablePath
         self.manifestExists = manifestExists
         self.resourceSnapshot = resourceSnapshot
+        self.localPathResolution = localPathResolution
+        self.localPathReadiness = localPathReadiness
+        self.localPathPolicyError = localPathPolicyError
     }
 }
 
@@ -110,7 +119,38 @@ public enum HostwrightDoctor {
                 message: inputs.manifestExists ? "Found hostwright.yaml in the current directory." : "No hostwright.yaml found in the current directory."
             )
         )
-        checks.append(DoctorCheck(identifier: .statePathPolicy, status: .pass, message: "State database paths are explicit; Hostwright does not choose a default user database path."))
+        if let resolution = inputs.localPathResolution {
+            let readiness = inputs.localPathReadiness
+            let status: DoctorCheckStatus
+            switch readiness {
+            case .blockedConflict, .blockedPolicy, .none:
+                status = .fail
+            case .migrationRequired:
+                status = .warning
+            case .ready, .needsCreation:
+                status = .pass
+            }
+            let readinessText = readiness?.rawValue ?? "unknown"
+            let policyText = inputs.localPathPolicyError.map { "; policyError=\($0)" } ?? ""
+            checks.append(
+                DoctorCheck(
+                    identifier: .statePathPolicy,
+                    status: status,
+                    message: "State origin=\(resolution.statePathOrigin.rawValue); readiness=\(readinessText); path=\(resolution.stateDatabasePath); owned directories require 0700 and sensitive files require 0600\(policyText)."
+                )
+            )
+        } else {
+            let hasResolutionError = inputs.localPathPolicyError != nil
+            checks.append(
+                DoctorCheck(
+                    identifier: .statePathPolicy,
+                    status: hasResolutionError ? .fail : .warning,
+                    message: inputs.localPathPolicyError
+                        .map { "The secure local path contract could not be resolved: \($0)." }
+                        ?? "Secure local path inputs were not supplied to this doctor invocation."
+                )
+            )
+        }
         checks.append(DoctorCheck(identifier: .telemetryPolicy, status: .pass, message: "Telemetry is local-only. Hostwright does not upload diagnostics or events."))
 
         let resourceReport = inputs.resourceSnapshot.map(ResourceIntelligenceReport.init(snapshot:))

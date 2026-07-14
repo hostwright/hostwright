@@ -7,32 +7,33 @@ The current CLI provides a dependency-free `hostwright` command surface with nar
 ```bash
 hostwright --version
 hostwright capabilities [--json | --output text|json]
+hostwright paths [--state-db <path>] [--json | --output text|json]
 hostwright migrate preview <path> [--json | --output text|json]
 hostwright init
 hostwright import-stack <path> [--output text|json] [--team-profile <path>]
 hostwright validate [path] [--team-profile <path>]
 hostwright plan [path] [--output text|json] [--team-profile <path>]
 hostwright status [path] [--state-db <path>] [--output text|json]
-hostwright apply [path] --state-db <path> --confirm-plan <hash> [--team-profile <path> --approval-record <path>]
+hostwright apply [path] [--state-db <path>] --confirm-plan <hash> [--team-profile <path> --approval-record <path>]
 hostwright logs <service> [path] [--tail <n>] [--state-db <path>]
-hostwright events --state-db <path> [--project <name>] [--type <event>] [--service <name>] [--severity info|warning|error] [--limit <n>] [--sort asc|desc] [--output text|json]
-hostwright recovery --state-db <path> [--project <name>] [--output text|json]
-hostwright diagnostics --state-db <path> --bundle <path> [--project <name>] [--manifest <path>]
-hostwright cleanup [path] --state-db <path> --dry-run [--team-profile <path>]
-hostwright cleanup [path] --state-db <path> --confirm-cleanup <token> [--team-profile <path> --approval-record <path>]
+hostwright events [--state-db <path>] [--project <name>] [--type <event>] [--service <name>] [--severity info|warning|error] [--limit <n>] [--sort asc|desc] [--output text|json]
+hostwright recovery [--state-db <path>] [--project <name>] [--output text|json]
+hostwright diagnostics [--state-db <path>] --bundle <path> [--project <name>] [--manifest <path>]
+hostwright cleanup [path] [--state-db <path>] --dry-run [--team-profile <path>]
+hostwright cleanup [path] [--state-db <path>] --confirm-cleanup <token> [--team-profile <path> --approval-record <path>]
 hostwright benchmark --image <local-image> --samples <3-10> --report <path> --source-commit <40-hex> --source-dirty <true|false> --expected-container-version <version> [--attended-sleep-wake-seconds <15-300>] --confirm-live
 hostwright extension check --declaration <absolute-path> --executable <absolute-path> [--output text|json]
 hostwright doctor [--output text|json]
 hostwright-control --version
 hostwright-control --manifest <absolute-path> [--state-db <absolute-path>] [--team-profile <absolute-path>]
-hostwrightd --foreground --config <hostwright.yaml> --state-db <path> [options]
+hostwrightd --foreground --config <hostwright.yaml> [--state-db <path>] [options]
 ```
 
 ## Output Modes
 
 Text output is the default for every command.
 
-`capabilities`, `migrate preview`, `import-stack`, `plan`, `status`, `events`, `recovery`, `extension check`, and `doctor` also accept JSON output. `capabilities` and `migrate preview` accept the convenience spelling `--json`. JSON output is intended for local scripts, conformance checks, and tests. It does not change command behavior, state writes, runtime observation, or mutation gates.
+`capabilities`, `paths`, `migrate preview`, `import-stack`, `plan`, `status`, `events`, `recovery`, `extension check`, and `doctor` also accept JSON output. `capabilities`, `paths`, and `migrate preview` accept the convenience spelling `--json`. JSON output is intended for local scripts, conformance checks, and tests. It does not change command behavior, state writes, runtime observation, or mutation gates.
 
 When JSON mode is requested and the CLI can classify the failure, stderr uses this envelope:
 
@@ -58,7 +59,7 @@ Only `events` accepts all filters. `recovery` accepts only `project`; `plan`, `s
 
 Success wraps the delegated CLI JSON under `result`. A delegated CLI failure preserves that command's exit code and JSON body under `error`. Invalid requests, unavailable configured files, and control execution failures use `HW-API-001`, `HW-API-002`, and `HW-API-003` respectively.
 
-`status` without `--state-db` is manifest-only. With a configured state database it retains existing status behavior: runtime observation plus possible schema migration, snapshot, and audit writes to that explicit path. The API never mutates runtime, but that state-backed status operation is not filesystem read-only. `events` and `recovery` require an explicitly configured existing state database and remain read-only.
+Without a configured `--state-db`, `status`, `events`, and `recovery` use the CLI's secure Application Support default. `status` performs runtime observation plus compatible schema migration, snapshot, and audit writes. `events` and `recovery` remain read-only and fail instead of creating or migrating a missing database. The API never mutates runtime.
 
 The API deliberately excludes apply, cleanup, logs, diagnostics export, benchmark, extension execution, arbitrary commands, and every generic mutation endpoint.
 
@@ -69,7 +70,7 @@ The API deliberately excludes apply, cleanup, logs, diagnostics export, benchmar
 | `0` | Success | All commands |
 | `64` | Usage | Unsupported flags, missing arguments, refused overwrite, or local non-manifest file I/O failure |
 | `65` | Validation | Missing/unreadable manifest, manifest/profile/approval/extension declaration validation, and compatibility failures |
-| `66` | State unavailable | Explicit SQLite state path could not be opened, migrated, verified, locked, or read |
+| `66` | State unavailable | Selected SQLite state path could not be resolved, opened, migrated, verified, locked, or read |
 | `69` | Runtime unavailable or evidence blocked | Runtime observation/mutation unavailable, or benchmark prerequisites/dimensions remain blocked |
 | `70` | Confirmation mismatch | Plan, cleanup token, approval scope, or approval hash bindings do not match the current operation |
 | `71` | Unsafe operation | Planner/apply safety policy or reviewed-local extension policy blocked execution |
@@ -90,6 +91,14 @@ The release target is `v0.0.2`. The binary does not report the release version u
 Prints the current product version, release target, locked contract versions, and a deterministic catalog of stable, experimental, unavailable, and externally blocked capabilities. Each capability names its owning phase, GitHub epic, reason, and required evidence classes.
 
 JSON is the machine-readable current-support source. The command performs no runtime observation, network access, state access, or mutation. It reports what this exact build declares; it does not convert a planned capability into support.
+
+## `hostwright paths [--state-db <path>] [--json | --output text|json]`
+
+Resolves and reports the macOS local layout without creating files. Output includes the selected state path and origin, effective daemon-lock path, Application Support/configuration/runtime/metadata/backup/cache/log/control-socket locations, legacy migration journal path, state/legacy/journal existence flags, permission contract, override precedence, and readiness.
+
+Readiness is one of `ready`, `needs-creation`, `migration-required`, `blocked-conflict`, or `blocked-policy`. Existing path components and migration evidence are opened only for non-mutating validation. Unsafe prospective parents, invalid/ambiguous journals, sidecars, and incompatible legacy ledgers report `blocked-policy`; a valid pending journal reports `migration-required`. `blocked-policy` JSON includes a redacted `policyError`.
+
+State precedence is `--state-db`, then `HOSTWRIGHT_STATE_DB`, then the Application Support default. See [Local Paths, Permissions, and Legacy Migration](local-paths.md) for the complete contract.
 
 ## `hostwright migrate preview <path> [--json | --output text|json]`
 
@@ -215,7 +224,7 @@ JSON shape:
 }
 ```
 
-## `hostwright apply [path] --state-db <path> --confirm-plan <hash> [--team-profile <path> --approval-record <path>]`
+## `hostwright apply [path] [--state-db <path>] --confirm-plan <hash> [--team-profile <path> --approval-record <path>]`
 
 Runs the narrow confirmed apply gate.
 
@@ -224,7 +233,7 @@ This command:
 - validates the manifest;
 - observes Apple container through `RuntimeAdapter`;
 - recomputes the deterministic plan;
-- requires an explicit state database path;
+- uses the secure Application Support state default unless `--state-db` or `HOSTWRIGHT_STATE_DB` overrides it;
 - requires the supplied plan hash to match the current observed plan;
 - persists desired state, observed state, operation intent, and an apply-start event before mutation;
 - executes exactly one `createMissingService`, restart-policy-allowed `startManagedService`, or restart-policy-allowed `restartManagedService` action through `RuntimeAdapter`;
@@ -235,7 +244,7 @@ When `--team-profile` is selected, `--approval-record` is mandatory. The approve
 
 It refuses mutation when:
 
-- `--state-db` is missing;
+- the selected state path is invalid, unsafe, conflicting, locked, corrupt, or incompatible;
 - `--confirm-plan` is missing or mismatched;
 - runtime observation fails;
 - the plan has blockers;
@@ -262,11 +271,9 @@ HW-CLI-003: Confirmed plan hash does not match current observed plan.
 
 ## `hostwright status [path] [--state-db <path>] [--output text|json]`
 
-Without `--state-db`, reports manifest-level status only.
-
 A missing or unreadable manifest is a validation failure (`HW-MANIFEST-004`, exit 65), including in JSON mode; absence is not reported as successful status.
 
-With `--state-db`, validates the manifest, observes Apple container through `RuntimeAdapter`, persists a status observation event and snapshot to the explicit state database path, and renders desired services against observed lifecycle/health/port facts.
+The command validates the manifest, observes Apple container through `RuntimeAdapter`, persists a status observation event and snapshot to the selected state database, and renders desired services against observed lifecycle/health/port facts. Without `--state-db`, the selected database is the secure Application Support default. Status is runtime-non-mutating but writes observation state and may perform compatible state/path migration.
 
 It does not mutate runtime state.
 
@@ -289,10 +296,10 @@ Rules:
 
 - default tail is 100 lines;
 - maximum tail is clamped to 1000 lines;
-- the adapter receives the exact observed runtime identifier rather than recomputing a container name; an explicit state path supplies migrated legacy ownership hints;
+- the adapter receives the exact observed runtime identifier rather than recomputing a container name; the selected state path supplies migrated legacy ownership hints;
 - log output is redacted before display;
 - `--follow`, attach, interactive, and exec behavior are not implemented;
-- when `--state-db` is supplied, a `logs.read` event with the exact resource identifier is persisted.
+- a `logs.read` event with the exact resource identifier is persisted to the selected state database.
 
 Failure example:
 
@@ -300,9 +307,9 @@ Failure example:
 HW-RUNTIME-001: logs requires an observed Hostwright-managed service.
 ```
 
-## `hostwright events --state-db <path> [--project <name>] [--type <event>] [--service <name>] [--severity info|warning|error] [--limit <n>] [--sort asc|desc] [--output text|json]`
+## `hostwright events [--state-db <path>] [--project <name>] [--type <event>] [--service <name>] [--severity info|warning|error] [--limit <n>] [--sort asc|desc] [--output text|json]`
 
-Reads the SQLite event ledger from an explicit, already-migrated state database path and renders events in deterministic timestamp/id order.
+Reads the SQLite event ledger from the selected, already-migrated state database and renders events in deterministic timestamp/id order. Selection uses the standard override precedence and Application Support default.
 
 It does not inspect runtime state and does not create or migrate the database as a read side effect.
 
@@ -319,15 +326,15 @@ JSON shape:
 ```json
 {
   "kind": "events",
-  "stateDatabasePath": "/tmp/hostwright.sqlite",
+  "stateDatabasePath": "/Users/me/Library/Application Support/Hostwright/state/state.sqlite",
   "filters": {"sort": "asc"},
   "events": []
 }
 ```
 
-## `hostwright recovery --state-db <path> [--project <name>] [--output text|json]`
+## `hostwright recovery [--state-db <path>] [--project <name>] [--output text|json]`
 
-Reads operation recovery groups and steps from an explicit, already-migrated state database path. For older state databases that contain managed restart recovery records but no Phase 18 operation group for the same operation, the command renders those restart records as legacy recovery entries.
+Reads operation recovery groups and steps from the selected, already-migrated state database. For older state databases that contain managed restart recovery records but no Phase 18 operation group for the same operation, the command renders those restart records as legacy recovery entries.
 
 It does not inspect runtime state, create or migrate the database as a read side effect, retry operations, or roll back runtime changes. Recovery output distinguishes:
 
@@ -342,16 +349,16 @@ JSON shape:
 ```json
 {
   "kind": "recovery",
-  "stateDatabasePath": "/tmp/hostwright.sqlite",
+  "stateDatabasePath": "/Users/me/Library/Application Support/Hostwright/state/state.sqlite",
   "operationGroups": []
 }
 ```
 
-## `hostwright diagnostics --state-db <path> --bundle <path> [--project <name>] [--manifest <path>]`
+## `hostwright diagnostics [--state-db <path>] --bundle <path> [--project <name>] [--manifest <path>]`
 
-Writes a local redacted JSON diagnostics bundle to the exact `--bundle` path.
+Writes a local redacted JSON diagnostics bundle to the exact `--bundle` path using exclusive creation and mode `0600`.
 
-The command reads only the explicit, already-migrated state database path and optional manifest path. If `--manifest` is omitted, the bundle is state-only; it does not discover `hostwright.yaml` from the current directory.
+The command reads only the selected, already-migrated state database and optional manifest path. If `--manifest` is omitted, the bundle is state-only; it does not discover `hostwright.yaml` from the current directory.
 
 The bundle includes:
 
@@ -365,10 +372,10 @@ The command does not inspect Apple container, observe runtime state, mutate runt
 Example:
 
 ```bash
-hostwright diagnostics --state-db /tmp/hostwright.sqlite --bundle /tmp/hostwright-diagnostics.json --project api-local
+hostwright diagnostics --bundle ./hostwright-diagnostics.json --project api-local
 ```
 
-## `hostwright cleanup [path] --state-db <path> --dry-run [--team-profile <path>]`
+## `hostwright cleanup [path] [--state-db <path>] --dry-run [--team-profile <path>]`
 
 Plans cleanup candidates only. A candidate is eligible only when all of these are true:
 
@@ -396,7 +403,7 @@ Failure example:
 HW-CLI-001: cleanup requires exactly one of --dry-run or --confirm-cleanup <token>.
 ```
 
-## `hostwright cleanup [path] --state-db <path> --confirm-cleanup <token> [--team-profile <path> --approval-record <path>]`
+## `hostwright cleanup [path] [--state-db <path>] --confirm-cleanup <token> [--team-profile <path> --approval-record <path>]`
 
 Deletes only `eligible` containers covered by the current cleanup token through `RuntimeAdapter`.
 
@@ -463,7 +470,7 @@ Runs safe local checks only:
 - Swift toolchain version through a controlled `swift --version` process;
 - `container` executable lookup only;
 - `hostwright.yaml` presence;
-- explicit state-path policy;
+- resolved state origin/readiness plus actual existing-path ownership and mode policy;
 - local-only telemetry policy;
 - resource intelligence with local host facts and explicit unmeasured benchmark dimensions.
 
@@ -488,9 +495,9 @@ JSON shape:
 }
 ```
 
-## `hostwrightd --foreground --config <path> --state-db <path> [options]`
+## `hostwrightd --foreground --config <path> [--state-db <path>] [options]`
 
-Runs the foreground development daemon loop. It requires explicit config and state paths.
+Runs the foreground development daemon loop. It requires an explicit config path. State uses the standard Application Support default unless overridden.
 
 Options:
 
@@ -498,9 +505,10 @@ Options:
 - `--jitter <seconds>`: deterministic jitter cap; default `5`.
 - `--max-backoff <seconds>`: repeated-error backoff cap; default `300`.
 - `--max-iterations <count>`: stop after a bounded number of iterations for development proof.
-- `--lock-file <path>`: explicit daemon lock path; default is `<state-db>.hostwrightd.lock`.
+- `--state-db <path>`: optional absolute state override.
+- `--lock-file <path>`: optional absolute lock override. Default state uses `run/hostwrightd.lock`; an explicit/environment state uses a stable hashed lock beneath `run`.
 
-Each iteration validates the manifest, observes runtime through `RuntimeAdapter`, computes a plan, and records daemon events plus operation records in the explicit state database.
+Each iteration validates the manifest, observes runtime through `RuntimeAdapter`, computes a plan, and records daemon events plus operation records in the selected state database. Before the loop, the daemon creates/validates the private runtime layout and acquires the validated `0600` single-instance lock.
 
 It does not call `RuntimeAdapter.execute`, does not install a launch agent, and does not perform unattended runtime mutation.
 

@@ -1,6 +1,8 @@
+import Darwin
 import Foundation
 import XCTest
 @testable import HostwrightDaemonCore
+@testable import HostwrightCore
 @testable import HostwrightManifest
 @testable import HostwrightRuntime
 @testable import HostwrightState
@@ -20,16 +22,101 @@ final class HostwrightDaemonCoreTests: XCTestCase {
             second.release()
 
             XCTAssertTrue(FileManager.default.fileExists(atPath: path))
+            XCTAssertEqual(try permissions(path), 0o600)
+
+            let restrictivePath = directory.appendingPathComponent("restrictive.lock").path
+            let previousMask = umask(0o777)
+            let restrictive = FileDaemonInstanceLock(path: restrictivePath)
+            let acquired: Bool
+            do {
+                acquired = try restrictive.acquire()
+            } catch {
+                _ = umask(previousMask)
+                throw error
+            }
+            _ = umask(previousMask)
+            XCTAssertTrue(acquired)
+            restrictive.release()
+            XCTAssertEqual(try permissions(restrictivePath), 0o600)
         }
     }
 
-    func testCommandParserRequiresForegroundConfigAndStatePath() throws {
+    func testFileDaemonInstanceLockRejectsSymlinkUnsafeParentAndUnsafeMode() async throws {
+        try await withTemporaryDirectory { directory in
+            let target = directory.appendingPathComponent("target.lock")
+            try Data().write(to: target)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: target.path)
+            let symlink = directory.appendingPathComponent("symlink.lock")
+            try FileManager.default.createSymbolicLink(at: symlink, withDestinationURL: target)
+            XCTAssertThrowsError(try FileDaemonInstanceLock(path: symlink.path).acquire())
+
+            let unsafeMode = directory.appendingPathComponent("unsafe-mode.lock")
+            try Data().write(to: unsafeMode)
+            try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: unsafeMode.path)
+            XCTAssertThrowsError(try FileDaemonInstanceLock(path: unsafeMode.path).acquire())
+
+            let unsafeACL = directory.appendingPathComponent("unsafe-acl.lock")
+            try Data().write(to: unsafeACL)
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o600],
+                ofItemAtPath: unsafeACL.path
+            )
+            try setEveryoneReadACL(on: unsafeACL.path)
+            XCTAssertThrowsError(try FileDaemonInstanceLock(path: unsafeACL.path).acquire()) { error in
+                XCTAssertTrue(String(describing: error).contains("access-granting"))
+            }
+
+            let unsafeParent = directory.appendingPathComponent("unsafe-parent", isDirectory: true)
+            try FileManager.default.createDirectory(at: unsafeParent, withIntermediateDirectories: false)
+            try FileManager.default.setAttributes([.posixPermissions: 0o777], ofItemAtPath: unsafeParent.path)
+            XCTAssertThrowsError(
+                try FileDaemonInstanceLock(path: unsafeParent.appendingPathComponent("hostwrightd.lock").path).acquire()
+            )
+
+            let specialParent = directory.appendingPathComponent("special-parent", isDirectory: true)
+            try FileManager.default.createDirectory(
+                at: specialParent,
+                withIntermediateDirectories: false
+            )
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o2700],
+                ofItemAtPath: specialParent.path
+            )
+            XCTAssertThrowsError(
+                try FileDaemonInstanceLock(
+                    path: specialParent.appendingPathComponent("hostwrightd.lock").path
+                ).acquire()
+            )
+
+            XCTAssertThrowsError(
+                try FileDaemonInstanceLock(
+                    path: directory.path + "//non-normalized.lock"
+                ).acquire()
+            )
+        }
+    }
+
+    func testCommandParserRequiresForegroundAndConfigButDefaultsStatePath() throws {
         XCTAssertThrowsError(try DaemonCommand.parse(arguments: ["--config", "hostwright.yaml", "--state-db", "/tmp/state.sqlite"])) { error in
             XCTAssertTrue(String(describing: error).contains("--foreground"))
         }
-        XCTAssertThrowsError(try DaemonCommand.parse(arguments: ["--foreground", "--config", "hostwright.yaml"])) { error in
-            XCTAssertTrue(String(describing: error).contains("--state-db"))
+        let defaultCommand = try DaemonCommand.parse(
+            arguments: ["--foreground", "--config", "hostwright.yaml"],
+            homeDirectory: "/Users/example",
+            environment: [:]
+        )
+        guard case .run(let defaultConfiguration) = defaultCommand else {
+            return XCTFail("Expected default run command.")
         }
+        XCTAssertEqual(
+            defaultConfiguration.stateDatabasePath,
+            "/Users/example/Library/Application Support/Hostwright/state/state.sqlite"
+        )
+        XCTAssertEqual(
+            defaultConfiguration.lockFilePath,
+            "/Users/example/Library/Application Support/Hostwright/run/hostwrightd.lock"
+        )
+        XCTAssertEqual(defaultConfiguration.stateStoreConfiguration.origin, .applicationSupportDefault)
 
         let command = try DaemonCommand.parse(arguments: [
             "--foreground",
@@ -50,6 +137,50 @@ final class HostwrightDaemonCoreTests: XCTestCase {
         XCTAssertEqual(configuration.jitterSeconds, 0)
         XCTAssertEqual(configuration.maxBackoffSeconds, 60)
         XCTAssertEqual(configuration.maxIterations, 2)
+    }
+
+    func testDefaultPathDaemonRunCreatesPrivateLayoutAndUsesRealLock() async throws {
+        try await withTemporaryDirectory { home in
+            let manifest = home.appendingPathComponent("hostwright.yaml")
+            try Data(Self.singleServiceManifest.utf8).write(to: manifest)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: manifest.path)
+            let command = try DaemonCommand.parse(
+                arguments: [
+                    "--foreground",
+                    "--config", manifest.path,
+                    "--max-iterations", "1"
+                ],
+                homeDirectory: home.path,
+                environment: [:]
+            )
+            guard case .run(let configuration) = command else {
+                return XCTFail("Expected run command.")
+            }
+            let runner = DaemonLoopRunner(
+                configuration: configuration,
+                runtimeAdapter: CountingRuntimeAdapter(observedServices: [Self.observedService()]),
+                clock: ManualDaemonClock(),
+                instanceLock: FileDaemonInstanceLock(path: configuration.lockFilePath),
+                readConfig: { try String(contentsOfFile: $0, encoding: .utf8) },
+                idGenerator: DeterministicIDs().next
+            )
+
+            let summary = try await runner.run()
+
+            XCTAssertEqual(summary.successfulIterations, 1)
+            XCTAssertEqual(configuration.stateStoreConfiguration.origin, .applicationSupportDefault)
+            XCTAssertEqual(try permissions(configuration.stateDatabasePath), 0o600)
+            XCTAssertEqual(try permissions(configuration.lockFilePath), 0o600)
+            let resolution = try XCTUnwrap(configuration.stateStoreConfiguration.localPathResolution)
+            for directory in resolution.layout.ownedDirectories {
+                XCTAssertEqual(try permissions(directory), 0o700, directory)
+            }
+            XCTAssertTrue(
+                try SQLiteStateStore(configuration: configuration.stateStoreConfiguration)
+                    .events.loadAll()
+                    .contains { $0.type == "daemon.reconcile.succeeded" }
+            )
+        }
     }
 
     func testForegroundLoopRecordsReconciliationWithoutRuntimeMutation() async throws {
@@ -531,6 +662,26 @@ final class HostwrightDaemonCoreTests: XCTestCase {
         )
     }
 
+}
+
+private func permissions(_ path: String) throws -> Int {
+    let attributes = try FileManager.default.attributesOfItem(atPath: path)
+    return (attributes[.posixPermissions] as? NSNumber)?.intValue ?? -1
+}
+
+private func setEveryoneReadACL(on path: String) throws {
+    let text = """
+    !#acl 1
+    group:ABCDEFAB-CDEF-ABCD-EFAB-CDEF0000000C:everyone:12:allow:read
+
+    """
+    guard let accessControlList = acl_from_text(text) else {
+        throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EINVAL)
+    }
+    defer { acl_free(UnsafeMutableRawPointer(accessControlList)) }
+    guard acl_set_file(path, ACL_TYPE_EXTENDED, accessControlList) == 0 else {
+        throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+    }
 }
 
 private final class ManualDaemonClock: DaemonClock {

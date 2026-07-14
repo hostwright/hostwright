@@ -115,16 +115,30 @@ after_checksum="$(shasum -a 256 "$manifest" | awk '{print $1}')"
 
 "$hostwright" validate "$manifest" >/dev/null
 "$hostwright" plan "$manifest" --output json >"$plan_json"
-"$hostwright" status "$manifest" --output json >"$status_json"
 "$hostwright" doctor --output json >"$doctor_json"
 
-for json_file in "$plan_json" "$status_json" "$doctor_json"; do
+for json_file in "$plan_json" "$doctor_json"; do
   plutil -convert json -o /dev/null "$json_file"
 done
 grep -q '"planHash"' "$plan_json"
-grep -q '"observed":true' "$status_json"
-[[ "$(plutil -extract stateDatabasePath raw "$status_json")" == "$state_database" ]]
 grep -q '"checks"' "$doctor_json"
+
+if command -v container >/dev/null 2>&1; then
+  "$hostwright" status "$manifest" --output json >"$status_json"
+  plutil -convert json -o /dev/null "$status_json"
+  grep -q '"observed":true' "$status_json"
+  [[ "$(plutil -extract stateDatabasePath raw "$status_json")" == "$state_database" ]]
+else
+  set +e
+  "$hostwright" status "$manifest" --output json >"$status_json" 2>"$missing_stderr"
+  status_exit=$?
+  set -e
+  [[ "$status_exit" -eq 69 ]]
+  [[ ! -s "$status_json" ]]
+  plutil -convert json -o /dev/null "$missing_stderr"
+  grep -q '"code":"HW-RUNTIME-001"' "$missing_stderr"
+  grep -q '"exitCode":69' "$missing_stderr"
+fi
 
 "$hostwright" paths --json >"$paths_after_json"
 plutil -convert json -o /dev/null "$paths_after_json"

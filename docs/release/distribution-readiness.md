@@ -1,6 +1,6 @@
 # Distribution Readiness
 
-> **Historical Phase 35 record:** this describes the earlier unsigned developer lane. The active trusted-install work is v0.0.2 Phase 02 and final artifact qualification is Phase 15. Nothing in this historical record authorizes a current binary, installer, signing, notarization, or package-channel claim.
+> **Historical Phase 35 record:** this describes the earlier unsigned developer lane. The active trusted-install work is v0.0.2 Phase 02, recorded in [devlog 0044](../devlog/0044-trusted-release-and-homebrew-foundation.md), and final artifact qualification is Phase 15. Nothing in this historical record authorizes a current binary, installer, signing, notarization, or package-channel claim.
 
 Status: Phase 35 operational unsigned artifact lane; public distribution remains blocked.
 

@@ -301,8 +301,11 @@ benchmark_after_checksum="$(shasum -a 256 "$benchmark_existing_report" | awk '{p
 [[ "$benchmark_before_checksum" == "$benchmark_after_checksum" ]]
 
 "$hostwright_dist" --help >"$missing_stdout" 2>"$missing_stderr"
-grep -q 'developer distribution evidence tool' "$missing_stdout"
-grep -q 'never signs, notarizes, staples' "$missing_stdout"
+grep -q 'trusted and developer distribution tool' "$missing_stdout"
+grep -q 'hostwright-dist release' "$missing_stdout"
+grep -q 'hostwright-dist verify-release' "$missing_stdout"
+grep -q 'hostwright-dist homebrew-formula' "$missing_stdout"
+grep -q 'never accepts passwords, private keys, or tokens in argv' "$missing_stdout"
 
 /usr/bin/swiftc "$root/Tests/HostwrightExtensionsTests/Fixtures/ExtensionFixture.swift" -o "$extension_fixture"
 chmod 700 "$extension_fixture"

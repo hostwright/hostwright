@@ -72,11 +72,15 @@ These documents are process controls only. They do not add branch protection, CO
 
 ## Release Distribution Boundary
 
-Phase 35 adds a fail-closed local unsigned distribution lane. `hostwright-dist` accepts explicit paths only, rejects dirty clean-build inputs, validates ARM64 binaries by execution and Mach-O slice, creates an exact archive manifest, binds SHA-256/SPDX/unsigned provenance sidecars, rejects hidden/link/path/mode/digest drift before install, and exercises atomic replacement with reverse-order rollback under a temporary prefix.
+Phase 35 added the fail-closed local unsigned distribution lane. Phase 02 retains it and adds a separate trusted-release path. `hostwright-dist` accepts explicit paths only, rejects dirty clean-build inputs, validates all three ARM64 executables by execution and Mach-O slice, creates exact manifests, binds SHA-256/SPDX/provenance sidecars, rejects hidden/link/path/mode/digest drift before install, and exercises atomic replacement with reverse-order rollback under a temporary prefix.
 
 Lifecycle mutation is restricted to checksum-verified installer-owned files beneath an explicit `hostwright-dist-*` temporary directory. Update and uninstall refuse modified owned files. Uninstall removes only exact owned files and installer-created empty directories, then compares unrelated prefix content with its initial snapshot.
 
-Current public Hostwright releases remain source-only. Local unsigned artifacts are non-publishable and all evidence remains blocked for Developer ID signing, notarization, stapling, Gatekeeper, signed `.pkg`, system installation, Homebrew/package-channel support, launch agents, privileged helpers, and public binary approval.
+The trusted path requires exact non-ambiguous Developer ID Application and Installer fingerprints from one team, a preconfigured `notarytool` Keychain profile, two byte-identical clean payload builds, hardened-runtime signatures, Apple acceptance, online ZIP tickets, a stapled package ticket, Gatekeeper acceptance, exact payload/package inventories, per-artifact SPDX, source/digest-bound provenance, sorted checksums, exact single-signer CMS verification, and final independent extraction/expansion verification. Secrets are not accepted in argv. SIGINT/SIGTERM and explicit cancellation use the same bounded process-tree cleanup path.
+
+The protected release workflow separates build/sign, attestation, and publication. Repository code runs with read-only contents permission and no OIDC or publication authority. A GitHub-hosted no-checkout job receives only OIDC/attestation authority for the retained signed files. Only the final no-checkout publication job receives contents write permission. Actions are commit-pinned, tags are immutable, published bytes are downloaded and compared, GitHub attestations are verified, and a failure after tag creation removes the release/tag.
+
+Current public Hostwright releases nevertheless remain source-only. Local unsigned artifacts are non-publishable, and no trusted artifact is called supported until real Developer ID identities, notarization, Gatekeeper, signed `.pkg`, system lifecycle, vendor-tap publication/install, and clean-Mac evidence pass. No usable identities or release variables are configured on the reviewed machine/repository, and the vendor tap does not yet exist.
 
 ## Control Surface Boundary
 
@@ -156,6 +160,6 @@ The current development build does not yet include the following. Their v0.0.2 i
 - GPU/ANE scheduling, Metal/Core ML/MLX/PyTorch MPS container support, host-native accelerator helpers, or host accelerator device exposure;
 - generic plugin loader, capability invocation, remote plugin registry, binary plugin distribution, or untrusted extension execution;
 - cloud team service, central remote control, hosted audit log, user tracking, enterprise support workflow, or remote policy distribution;
-- Developer ID signing, notarization, stapling, Gatekeeper acceptance, signed installer verification, trusted provenance, dependency/image SBOM claims, or vulnerability scanning;
+- credentialed passing Developer ID/notarization/stapling/Gatekeeper evidence, published signed installer verification, vendor-tap availability, dependency/image SBOM claims, or vulnerability scanning;
 - external telemetry, hosted diagnostics, or automatic diagnostic upload.
 - support SLA, enterprise support workflow, enforced CODEOWNERS, or branch-protection policy.

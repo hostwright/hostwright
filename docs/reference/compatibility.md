@@ -15,7 +15,7 @@ Status: exact development evidence for `0.0.2-dev`; not a `v0.0.2` GA support cl
 | Control API | v2 contract; current implementation remains a bounded one-shot local process. | Persistent authenticated Unix-socket API with N/N-1 compatibility after v2 establishes the baseline. |
 | Runtime providers | Runtime Provider API v2 metadata and narrow Apple adapter behavior. | Apple CLI and Containerization providers passing the same declared-capability suite. |
 | State | SQLite schema v7 for standalone/node-local state. | Qualified backup/restore/repair and etcd 3.7.x authority for multi-Mac clusters. |
-| Distribution | Source build and unsigned developer artifact evidence only. | Signed/notarized archive and `.pkg`, vendor Homebrew tap, SBOM/provenance, reversible lifecycle. |
+| Distribution | Source is the only available install path. Trusted ZIP/`.pkg`/SBOM/provenance verification and formula generation are implemented but have no credentialed passing run or published vendor tap, so they are not a supported channel. | Signed/notarized archive and `.pkg`, vendor Homebrew tap, SBOM/provenance, reversible lifecycle. |
 | Kubernetes | Not implemented. | Current and previous supported Kubernetes minor through real pod-sandbox VM, CRI/CNI/CSI/Helm conformance. |
 | Docker ecosystem | Narrow import-only stack conversion; no Docker API. | Published Docker API/client matrix, Compose/Podman/Testcontainers conformance. |
 | GUI/cloud | Not implemented beyond requirements/local policy models. | Native accessible GUI; optional cloud that never breaks complete offline local operation. |

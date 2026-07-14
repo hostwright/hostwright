@@ -58,6 +58,31 @@ final class DistributionModelsTests: XCTestCase {
         XCTAssertFalse(DistributionPathPolicy.isSafeFileName("nested/manifest.json"))
     }
 
+    func testDistributionJSONRejectsUnknownAndNoncanonicalFields() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("hostwright-distribution-json-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("manifest.json")
+        let canonical = try DistributionJSON.encode(validManifest())
+        try canonical.write(to: url, options: .withoutOverwriting)
+        XCTAssertNoThrow(try DistributionJSON.decode(DistributionArtifactManifest.self, from: url))
+
+        let text = try XCTUnwrap(String(data: canonical, encoding: .utf8))
+        let unknown = text.replacingOccurrences(
+            of: "{\n",
+            with: "{\n  \"unexpected\" : true,\n",
+            options: .anchored
+        )
+        try Data(unknown.utf8).write(to: url, options: .atomic)
+        XCTAssertThrowsError(try DistributionJSON.decode(DistributionArtifactManifest.self, from: url)) {
+            XCTAssertEqual(
+                $0 as? DistributionError,
+                .invalidArtifact("JSON input is not the exact canonical schema encoding")
+            )
+        }
+    }
+
     func testSPDXAndProvenanceMustBindExactArchiveAndSource() throws {
         let manifest = validManifest()
         let archive = DistributionArtifactDescriptor(
@@ -139,7 +164,7 @@ final class DistributionModelsTests: XCTestCase {
                     buildType: "urn:hostwright:buildtype:swiftpm-archive:v1",
                     externalParameters: ProvenanceExternalParameters(
                         configuration: "release",
-                        products: ["hostwright", "hostwrightd"],
+                        products: ["hostwright", "hostwright-control", "hostwrightd"],
                         platform: "macos",
                         architecture: "arm64"
                     ),

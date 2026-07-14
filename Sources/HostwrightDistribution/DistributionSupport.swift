@@ -93,7 +93,10 @@ public enum DistributionHash {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
-    public static func sha256(fileURL: URL) throws -> String {
+    public static func sha256(
+        fileURL: URL,
+        cancellation: SecureSubprocessCancellation? = nil
+    ) throws -> String {
         guard try DistributionFileSystem.isRegularNonSymlink(fileURL) else {
             throw DistributionError.invalidArtifact("hash input is not a regular non-symlink file")
         }
@@ -101,6 +104,9 @@ public enum DistributionHash {
         defer { try? handle.close() }
         var hasher = SHA256()
         while true {
+            guard cancellation?.isCancelled != true else {
+                throw DistributionError.commandCancelled("hash distribution file")
+            }
             let chunk = try handle.read(upToCount: 1024 * 1024) ?? Data()
             guard !chunk.isEmpty else { break }
             hasher.update(data: chunk)
@@ -116,11 +122,22 @@ public enum DistributionJSON {
         return try encoder.encode(value) + Data("\n".utf8)
     }
 
-    public static func decode<T: Decodable>(_ type: T.Type, from url: URL) throws -> T {
+    public static func decode<T: Codable>(_ type: T.Type, from url: URL) throws -> T {
         guard try DistributionFileSystem.isRegularNonSymlink(url) else {
             throw DistributionError.invalidArtifact("JSON input is not a regular non-symlink file")
         }
-        return try JSONDecoder().decode(type, from: Data(contentsOf: url))
+        let size = try DistributionFileSystem.size(of: url)
+        guard size > 0, size <= 32 * 1_024 * 1_024 else {
+            throw DistributionError.invalidArtifact("JSON input is empty or oversized")
+        }
+        let data = try Data(contentsOf: url, options: .mappedIfSafe)
+        let value = try JSONDecoder().decode(type, from: data)
+        guard try encode(value) == data else {
+            throw DistributionError.invalidArtifact(
+                "JSON input is not the exact canonical schema encoding"
+            )
+        }
+        return value
     }
 }
 

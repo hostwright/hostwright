@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import HostwrightCore
 @testable import HostwrightDistribution
@@ -14,7 +15,9 @@ final class DistributionIntegrationTests: XCTestCase {
             let tool = binaries.appendingPathComponent("hostwright-dist")
             let common = [
                 "--hostwright-binary", binaries.appendingPathComponent("hostwright").path,
+                "--hostwright-control-binary", binaries.appendingPathComponent("hostwright-control").path,
                 "--hostwrightd-binary", binaries.appendingPathComponent("hostwrightd").path,
+                "--example-manifest", repository.appendingPathComponent("examples/single-service/hostwright.yaml").path,
                 "--license", repository.appendingPathComponent("LICENSE").path,
                 "--readme", repository.appendingPathComponent("README.md").path,
                 "--version", HostwrightIdentity.version,
@@ -429,6 +432,97 @@ final class DistributionIntegrationTests: XCTestCase {
         }
     }
 
+    func testDistributionToolSignalCancelsBuildWithoutPublishingOutput() throws {
+        try withTemporaryRoot { root in
+            let repository = repositoryRoot()
+            let source = root.appendingPathComponent("source", isDirectory: true)
+            let runtime = root.appendingPathComponent("runtime", isDirectory: true)
+            try FileManager.default.createDirectory(at: source, withIntermediateDirectories: false)
+            try FileManager.default.createDirectory(at: runtime, withIntermediateDirectories: false)
+            let slowManifest = """
+            // swift-tools-version: 6.2
+            import Foundation
+            import PackageDescription
+
+            Thread.sleep(forTimeInterval: 30)
+            let package = Package(name: "SignalCancellationFixture")
+            """ + "\n"
+            try Data(slowManifest.utf8).write(
+                to: source.appendingPathComponent("Package.swift"),
+                options: .withoutOverwriting
+            )
+            let runner = DistributionProcessRunner()
+            _ = try runner.run(
+                executablePath: "/usr/bin/git",
+                arguments: ["init", "--quiet", source.path],
+                label: "initialize signal-cancellation source"
+            )
+            _ = try runner.run(
+                executablePath: "/usr/bin/git",
+                arguments: ["-C", source.path, "add", "Package.swift"],
+                label: "stage signal-cancellation source"
+            )
+            _ = try runner.run(
+                executablePath: "/usr/bin/git",
+                arguments: [
+                    "-C", source.path,
+                    "-c", "user.name=Hostwright Tests",
+                    "-c", "user.email=tests@invalid",
+                    "commit", "--quiet", "-m", "signal cancellation fixture"
+                ],
+                label: "commit signal-cancellation source"
+            )
+            let commit = try runner.run(
+                executablePath: "/usr/bin/git",
+                arguments: ["-C", source.path, "rev-parse", "HEAD"],
+                label: "read signal-cancellation source commit"
+            ).standardOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            let process = Process()
+            process.executableURL = repository.appendingPathComponent(".build/debug/hostwright-dist")
+            process.arguments = [
+                "build",
+                "--source-root", source.path,
+                "--output-dir", root.appendingPathComponent("output").path,
+                "--expected-commit", commit
+            ]
+            var environment = ProcessInfo.processInfo.environment
+            environment["TMPDIR"] = runtime.path + "/"
+            process.environment = environment
+            let outputPipe = Pipe()
+            let errorPipe = Pipe()
+            process.standardOutput = outputPipe
+            process.standardError = errorPipe
+            try process.run()
+
+            let output = LockedData()
+            let error = LockedData()
+            let readers = DispatchGroup()
+            readers.enter()
+            DispatchQueue.global(qos: .utility).async {
+                output.set(outputPipe.fileHandleForReading.readDataToEndOfFile())
+                readers.leave()
+            }
+            readers.enter()
+            DispatchQueue.global(qos: .utility).async {
+                error.set(errorPipe.fileHandleForReading.readDataToEndOfFile())
+                readers.leave()
+            }
+
+            usleep(250_000)
+            XCTAssertTrue(process.isRunning)
+            XCTAssertEqual(Darwin.kill(process.processIdentifier, SIGTERM), 0)
+            process.waitUntilExit()
+            readers.wait()
+
+            XCTAssertEqual(process.terminationStatus, 69)
+            XCTAssertTrue((String(data: error.value(), encoding: .utf8) ?? "").contains("cancelled"))
+            XCTAssertTrue(output.value().isEmpty)
+            XCTAssertFalse(DistributionFileSystem.entryExists(root.appendingPathComponent("output")))
+            XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: runtime.path).isEmpty)
+        }
+    }
+
     @discardableResult
     private func makeArtifact(root: URL, name: String, commit: String) throws -> DistributionBuildReport {
         let repository = repositoryRoot()
@@ -436,7 +530,9 @@ final class DistributionIntegrationTests: XCTestCase {
         return try DistributionAssembler().assemble(
             DistributionAssemblyRequest(
                 hostwrightBinary: binaries.appendingPathComponent("hostwright"),
+                hostwrightControlBinary: binaries.appendingPathComponent("hostwright-control"),
                 hostwrightDaemonBinary: binaries.appendingPathComponent("hostwrightd"),
+                exampleManifestFile: repository.appendingPathComponent("examples/single-service/hostwright.yaml"),
                 licenseFile: repository.appendingPathComponent("LICENSE"),
                 readmeFile: repository.appendingPathComponent("README.md"),
                 outputDirectory: root.appendingPathComponent(name),

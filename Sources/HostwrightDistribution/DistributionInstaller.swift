@@ -12,13 +12,15 @@ public struct DistributionInstaller: Sendable {
     @discardableResult
     public func install(
         artifact: VerifiedDistributionArtifact,
-        prefix: URL
+        prefix: URL,
+        cancellation: SecureSubprocessCancellation = SecureSubprocessCancellation()
     ) throws -> DistributionInstallManifest {
+        try requireNotCancelled(cancellation, operation: "distribution install preflight")
         try validatePrefix(prefix)
         let manifestURL = prefix.appendingPathComponent(DistributionLayout.installManifestFileName)
         let existing = try loadExistingManifest(manifestURL)
         if let existing {
-            try verifyOwnedFiles(existing, prefix: prefix)
+            try verifyOwnedFiles(existing, prefix: prefix, cancellation: cancellation)
         } else {
             for path in DistributionLayout.payloadModes.keys {
                 guard !DistributionFileSystem.entryExists(prefix.appendingPathComponent(path)) else {
@@ -48,6 +50,7 @@ public struct DistributionInstaller: Sendable {
         try FileManager.default.createDirectory(at: backup, withIntermediateDirectories: false)
 
         for file in artifact.manifest.files {
+            try requireNotCancelled(cancellation, operation: "stage distribution install")
             try DistributionFileSystem.copyRegularFile(
                 from: artifact.extractedRoot.appendingPathComponent(file.path),
                 to: staged.appendingPathComponent(file.path),
@@ -83,18 +86,20 @@ public struct DistributionInstaller: Sendable {
                 }
             }
             for file in nextManifest.files {
+                try requireNotCancelled(cancellation, operation: "publish distribution install")
                 try atomicMoveReplacing(
                     from: staged.appendingPathComponent(file.path),
                     to: prefix.appendingPathComponent(file.path)
                 )
                 appliedPaths.append(file.path)
             }
+            try requireNotCancelled(cancellation, operation: "publish distribution install manifest")
             try atomicMoveReplacing(
                 from: staged.appendingPathComponent(DistributionLayout.installManifestFileName),
                 to: manifestURL
             )
             appliedPaths.append(DistributionLayout.installManifestFileName)
-            try verifyOwnedFiles(nextManifest, prefix: prefix)
+            try verifyOwnedFiles(nextManifest, prefix: prefix, cancellation: cancellation)
         } catch {
             let applyError = error
             do {
@@ -136,7 +141,8 @@ public struct DistributionInstaller: Sendable {
 
     public func verifyInstalled(
         prefix: URL,
-        expectedManifest: DistributionInstallManifest
+        expectedManifest: DistributionInstallManifest,
+        cancellation: SecureSubprocessCancellation = SecureSubprocessCancellation()
     ) throws -> [HostwrightEvidenceCommand] {
         try validatePrefix(prefix)
         let installed = try DistributionJSON.decode(
@@ -147,22 +153,34 @@ public struct DistributionInstaller: Sendable {
         guard installed == expectedManifest else {
             throw DistributionError.installOwnershipMismatch(DistributionLayout.installManifestFileName)
         }
-        try verifyOwnedFiles(installed, prefix: prefix)
+        try verifyOwnedFiles(installed, prefix: prefix, cancellation: cancellation)
 
         let version = try runner.run(
             executablePath: prefix.appendingPathComponent("bin/hostwright").path,
             arguments: ["--version"],
             label: "run installed hostwright --version",
-            timeoutSeconds: 30
+            timeoutSeconds: 30,
+            cancellation: cancellation
         )
         guard version.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines) == installed.packageVersion else {
             throw DistributionError.lifecycleFailed("installed hostwright version output did not match its manifest")
+        }
+        let control = try runner.run(
+            executablePath: prefix.appendingPathComponent("bin/hostwright-control").path,
+            arguments: ["--version"],
+            label: "run installed hostwright-control --version",
+            timeoutSeconds: 30,
+            cancellation: cancellation
+        )
+        guard control.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines) == installed.packageVersion else {
+            throw DistributionError.lifecycleFailed("installed hostwright-control version output did not match its manifest")
         }
         let daemon = try runner.run(
             executablePath: prefix.appendingPathComponent("bin/hostwrightd").path,
             arguments: ["--help"],
             label: "run installed hostwrightd --help",
-            timeoutSeconds: 30
+            timeoutSeconds: 30,
+            cancellation: cancellation
         )
         guard daemon.standardOutput.contains("Usage:"),
               daemon.standardOutput.contains("does not perform unattended runtime mutation") else {
@@ -170,17 +188,22 @@ public struct DistributionInstaller: Sendable {
         }
         return [
             evidenceCommand("installed hostwright --version", result: version),
+            evidenceCommand("installed hostwright-control --version", result: control),
             evidenceCommand("installed hostwrightd --help", result: daemon)
         ]
     }
 
     @discardableResult
-    public func uninstall(prefix: URL) throws -> [String] {
+    public func uninstall(
+        prefix: URL,
+        cancellation: SecureSubprocessCancellation = SecureSubprocessCancellation()
+    ) throws -> [String] {
+        try requireNotCancelled(cancellation, operation: "distribution uninstall preflight")
         try validatePrefix(prefix)
         let manifestURL = prefix.appendingPathComponent(DistributionLayout.installManifestFileName)
         let manifest = try DistributionJSON.decode(DistributionInstallManifest.self, from: manifestURL)
         try manifest.validate()
-        try verifyOwnedFiles(manifest, prefix: prefix)
+        try verifyOwnedFiles(manifest, prefix: prefix, cancellation: cancellation)
 
         let transaction = prefix.deletingLastPathComponent()
             .appendingPathComponent("hostwright-dist-uninstall-\(UUID().uuidString)", isDirectory: true)
@@ -195,6 +218,7 @@ public struct DistributionInstaller: Sendable {
         var removedDirectories: [String] = []
         do {
             for path in paths {
+                try requireNotCancelled(cancellation, operation: "remove distribution payload")
                 let backup = transaction.appendingPathComponent(path)
                 try FileManager.default.createDirectory(
                     at: backup.deletingLastPathComponent(),
@@ -204,6 +228,7 @@ public struct DistributionInstaller: Sendable {
                 moved.append(path)
             }
             for path in manifest.createdDirectories.sorted(by: directoryDepthDescending) {
+                try requireNotCancelled(cancellation, operation: "remove distribution directories")
                 let url = prefix.appendingPathComponent(path, isDirectory: true)
                 guard DistributionFileSystem.entryExists(url),
                       try DistributionFileSystem.isDirectoryNonSymlink(url) else { continue }
@@ -247,11 +272,16 @@ public struct DistributionInstaller: Sendable {
         return manifest
     }
 
-    private func verifyOwnedFiles(_ manifest: DistributionInstallManifest, prefix: URL) throws {
+    private func verifyOwnedFiles(
+        _ manifest: DistributionInstallManifest,
+        prefix: URL,
+        cancellation: SecureSubprocessCancellation = SecureSubprocessCancellation()
+    ) throws {
         for file in manifest.files {
+            try requireNotCancelled(cancellation, operation: "verify installed distribution payload")
             let url = prefix.appendingPathComponent(file.path)
             guard try DistributionFileSystem.isRegularNonSymlink(url),
-                  try DistributionHash.sha256(fileURL: url) == file.sha256,
+                  try DistributionHash.sha256(fileURL: url, cancellation: cancellation) == file.sha256,
                   try DistributionFileSystem.size(of: url) == file.sizeBytes,
                   try DistributionFileSystem.mode(of: url) == file.mode else {
                 throw DistributionError.installOwnershipMismatch(file.path)
@@ -357,6 +387,15 @@ public struct DistributionInstaller: Sendable {
             durationMilliseconds: result.durationMilliseconds
         )
     }
+
+    private func requireNotCancelled(
+        _ cancellation: SecureSubprocessCancellation,
+        operation: String
+    ) throws {
+        guard !cancellation.isCancelled else {
+            throw DistributionError.commandCancelled(operation)
+        }
+    }
 }
 
 public struct DistributionLifecycleRunner: Sendable {
@@ -375,8 +414,12 @@ public struct DistributionLifecycleRunner: Sendable {
         baselineDirectory: URL,
         candidateDirectory: URL,
         prefix: URL,
-        reportURL: URL
+        reportURL: URL,
+        cancellation: SecureSubprocessCancellation = SecureSubprocessCancellation()
     ) throws -> DistributionLifecycleReport {
+        guard !cancellation.isCancelled else {
+            throw DistributionError.commandCancelled("distribution lifecycle preflight")
+        }
         try DistributionTemporaryPathPolicy.validate(prefix, role: "lifecycle prefix")
         guard !DistributionFileSystem.entryExists(reportURL) else {
             throw DistributionError.existingOutput(reportURL.path)
@@ -412,13 +455,15 @@ public struct DistributionLifecycleRunner: Sendable {
         let baselineVerificationStart = DispatchTime.now().uptimeNanoseconds
         let baseline = try verifier.verify(
             distributionDirectory: baselineDirectory,
-            extractionDirectory: baselineExtraction
+            extractionDirectory: baselineExtraction,
+            cancellation: cancellation
         )
         let baselineVerificationDuration = elapsedMilliseconds(since: baselineVerificationStart)
         let candidateVerificationStart = DispatchTime.now().uptimeNanoseconds
         let candidate = try verifier.verify(
             distributionDirectory: candidateDirectory,
-            extractionDirectory: candidateExtraction
+            extractionDirectory: candidateExtraction,
+            cancellation: cancellation
         )
         let candidateVerificationDuration = elapsedMilliseconds(since: candidateVerificationStart)
         guard baseline.manifest.sourceCommit != candidate.manifest.sourceCommit,
@@ -440,8 +485,16 @@ public struct DistributionLifecycleRunner: Sendable {
                     durationMilliseconds: candidateVerificationDuration
                 )
             ]
-            let baselineInstall = try installer.install(artifact: baseline, prefix: prefix)
-            commands.append(contentsOf: try installer.verifyInstalled(prefix: prefix, expectedManifest: baselineInstall))
+            let baselineInstall = try installer.install(
+                artifact: baseline,
+                prefix: prefix,
+                cancellation: cancellation
+            )
+            commands.append(contentsOf: try installer.verifyInstalled(
+                prefix: prefix,
+                expectedManifest: baselineInstall,
+                cancellation: cancellation
+            ))
             stages.append(
                 DistributionStageRecord(
                     identifier: "install",
@@ -450,8 +503,16 @@ public struct DistributionLifecycleRunner: Sendable {
                 )
             )
 
-            let candidateInstall = try installer.install(artifact: candidate, prefix: prefix)
-            commands.append(contentsOf: try installer.verifyInstalled(prefix: prefix, expectedManifest: candidateInstall))
+            let candidateInstall = try installer.install(
+                artifact: candidate,
+                prefix: prefix,
+                cancellation: cancellation
+            )
+            commands.append(contentsOf: try installer.verifyInstalled(
+                prefix: prefix,
+                expectedManifest: candidateInstall,
+                cancellation: cancellation
+            ))
             stages.append(
                 DistributionStageRecord(
                     identifier: "upgrade",
@@ -460,8 +521,16 @@ public struct DistributionLifecycleRunner: Sendable {
                 )
             )
 
-            let downgradedInstall = try installer.install(artifact: baseline, prefix: prefix)
-            commands.append(contentsOf: try installer.verifyInstalled(prefix: prefix, expectedManifest: downgradedInstall))
+            let downgradedInstall = try installer.install(
+                artifact: baseline,
+                prefix: prefix,
+                cancellation: cancellation
+            )
+            commands.append(contentsOf: try installer.verifyInstalled(
+                prefix: prefix,
+                expectedManifest: downgradedInstall,
+                cancellation: cancellation
+            ))
             stages.append(
                 DistributionStageRecord(
                     identifier: "downgrade",
@@ -470,7 +539,7 @@ public struct DistributionLifecycleRunner: Sendable {
                 )
             )
 
-            let removedPaths = try installer.uninstall(prefix: prefix)
+            let removedPaths = try installer.uninstall(prefix: prefix, cancellation: cancellation)
             stages.append(
                 DistributionStageRecord(
                     identifier: "uninstall",

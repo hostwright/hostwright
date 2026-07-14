@@ -49,7 +49,7 @@ Expected development version:
 0.0.2-dev
 ```
 
-Do not check out or tag `v0.0.2` until the Phase 15 GA gate has passed. Historical `v0.1.0-alpha.1` documentation is retained as an immutable project record and is not the current installation target.
+Do not check out or tag `v0.0.2` until the Phase 15 GA gate has passed. Phase 02 may publish one immutable unsupported `v0.0.2-dev` qualification prerelease solely for real signed-byte and vendor-tap evidence; it is not promoted or presented as a supported release. Historical `v0.1.0-alpha.1` documentation is retained as an immutable project record and is not the current installation target.
 
 ## Development Executables
 
@@ -66,7 +66,21 @@ Locate them with:
 swift build --show-bin-path
 ```
 
-`hostwright-dist` currently provides unsigned developer evidence only. Its output is not a trusted release artifact and does not satisfy signing, notarization, Gatekeeper, installer, package-manager, or clean-upgrade qualification.
+`hostwright-dist build`, `assemble`, `verify`, and `lifecycle` remain unsigned developer-evidence commands. Their output is not a trusted release artifact and does not satisfy signing, notarization, Gatekeeper, installer, package-manager, or clean-upgrade qualification.
+
+Phase 02 now also implements the fail-closed trusted path:
+
+```text
+hostwright-dist release ...
+hostwright-dist verify-release ...
+hostwright-dist homebrew-formula ...
+```
+
+`release` accepts exact Developer ID Application and Installer certificate fingerprints plus the name of a preconfigured `notarytool` Keychain profile. It does not accept a password, API private key, issuer, token, or certificate bytes in argv. It performs two isolated clean builds, signs all three shipped executables with hardened runtime and secure timestamps, creates an exact ZIP, submits the ZIP and signed flat `.pkg` to Apple, staples the package, runs Gatekeeper, generates per-artifact SPDX plus digest-bound provenance, signs the manifest/checksums/provenance with detached CMS, and independently re-verifies the completed directory before publishing it locally.
+
+The generated Homebrew formula is accepted only for the exact immutable `https://github.com/hostwright/hostwright/releases/download/<tag>/<archive>` URL from the verified release manifest. Local tests run the rendered formula through real Homebrew Ruby and formula-style checks.
+
+That machinery is implemented, but the supported channel is still unavailable: this repository has no credentialed passing trusted-release run, no published signed artifact, and no `hostwright/homebrew-tap` repository. The current machine reports no usable Developer ID identities. Those are failed gate prerequisites, not skipped successes. Issues #111, #112, and #119 remain open until real signing/notarization, published-byte verification, vendor-tap install, and clean-Mac lifecycle evidence pass.
 
 ## State and Uninstall Reality
 
@@ -96,6 +110,6 @@ Do not treat deletion of the checkout as a Hostwright uninstall. Phase 02 implem
 
 No package channel is called supported until clean-Mac evidence covers Gatekeeper, reboot, upgrade, rollback, repair, uninstall, corruption, disk full, PATH hijack, symlink attacks, cancellation, and owned process-tree cleanup. Final requirements are in the [v0.0.2 implementation plan](../roadmap/v0.0.2/IMPLEMENTATION_PLAN.md) and [distribution evidence rules](testing-evidence.md).
 
-All production installer, distribution, extension, tool-inspection, and Apple-runtime subprocesses must use the [secure process execution boundary](process-execution.md). Phase 02 issue #116 implements that shared boundary; it does not by itself make the still-unsigned developer distribution a trusted install channel.
+All production installer, distribution, extension, tool-inspection, and Apple-runtime subprocesses use the [secure process execution boundary](process-execution.md). The trusted distribution tool propagates one cancellation token through identity lookup, both clean builds, archive/package operations, notarization, verification, install lifecycle, and cleanup; SIGINT/SIGTERM enter the same path. Phase 02 issue #116 implements that shared boundary, but the release pipeline still needs credentialed live evidence before any install channel is supported.
 
-Phase 02 issue #113 implements secure local defaults and legacy-state migration. Issue #114 adds managed integrity, online backup, catalog verification, confirmation-bound restore, projection-only repair, fencing, and recovery. Package upgrade/rollback, installer, signing, notarization, and trusted distribution remain owned by the other Phase 02 issues.
+Phase 02 issue #113 implements secure local defaults and legacy-state migration. Issue #114 adds managed integrity, online backup, catalog verification, confirmation-bound restore, projection-only repair, fencing, and recovery. The trusted artifact/formula implementation is recorded in [devlog 0044](../devlog/0044-trusted-release-and-homebrew-foundation.md). System install, reboot, upgrade/rollback, repair/uninstall, real credentials, vendor-tap publication, and clean-Mac qualification remain open Phase 02 work.

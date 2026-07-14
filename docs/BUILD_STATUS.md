@@ -1,12 +1,21 @@
 # Build Status
 
-> **Current program:** Hostwright is `0.0.2-dev`; Phase 01 of the [v0.0.2 roadmap](roadmap/v0.0.2/IMPLEMENTATION_PLAN.md) is merged and closed, and Phase 02 is active. Issue #116 implements the shared secure subprocess boundary; issue #113 implements secure macOS local paths/default state; issue #114 implements verified state integrity, backup, restore, projection repair, fencing, and recovery. The phase-by-phase entries below are a retained pre-v0.0.2 engineering ledger, not the active release scope or schedule.
+> **Current program:** Hostwright is `0.0.2-dev`; Phase 01 of the [v0.0.2 roadmap](roadmap/v0.0.2/IMPLEMENTATION_PLAN.md) is merged and closed, and Phase 02 is active. Issue #116 implements the shared secure subprocess boundary; issue #113 implements secure macOS local paths/default state; issue #114 implements verified state integrity, backup, restore, projection repair, fencing, and recovery. Issues #111, #112, and #119 now have trusted artifact/formula code on the shared phase branch but remain open pending credentialed/public-channel evidence. The phase-by-phase entries below are a retained pre-v0.0.2 engineering ledger, not the active release scope or schedule.
 
 ## Local Environment
 
 - macOS 26.5
 - Apple silicon (`arm64`)
 - Swift 6.3.3 through full Xcode developer tools
+
+## Verified On 2026-07-13 — v0.0.2 Phase 02 trusted distribution foundation
+
+- `hostwright-dist release`, `verify-release`, and `homebrew-formula` implement the exact identity, two-build reproducibility, hardened Developer ID, ZIP/`.pkg`, notarization, stapling, Gatekeeper, per-artifact SPDX, provenance, checksum, detached-CMS, independent verification, and atomic publication flow. The unsigned developer lane now carries `hostwright-control` and the maintained example manifest as well as `hostwright` and `hostwrightd`.
+- The protected manual release workflow separates a read-only/no-OIDC build/sign job, a GitHub-hosted no-checkout attestation job, and the no-checkout publication job with repository write authority. It uses commit-pinned actions, exact `main` ancestry/tag checks before build and again before publish, retained artifacts, GitHub provenance/SBOM attestations, published-byte download/comparison, and compensation that removes either a partial release plus tag or a tag created before failed release upload.
+- The Homebrew renderer accepts only the exact immutable Hostwright release URL and installs all three shipped executables, docs, and example. A real temporary Homebrew tap passes Ruby syntax and formula style, then is untapped exactly.
+- Focused distribution verification executes 23 tests with 0 failures. Coverage includes canonical strict JSON, exact SPDX creator policy, malformed identity/notary/CMS inputs, immutable URL policy, real Homebrew validation, cancellation-aware hashing, pre-cancellation and real SIGTERM, archive/package models, tamper and symlink refusal, atomic upgrade/uninstall rollback, modified-owned-file refusal, actual binary execution, and exact temporary-prefix cleanup. The new signal/process-order pair passes five consecutive repetitions.
+- `swift build`, `scripts/integration.sh`, `git diff --check`, `scripts/lint.sh`, `scripts/check-docs.sh`, and `scripts/check-current-truth.py` pass. Documentation validation checks 276 references and every example quickstart. Verified actionlint 1.7.12 reports no workflow defect after allowing the intentional dedicated `hostwright-release` self-hosted runner label.
+- This is implementation evidence, not a trusted artifact claim. The reviewed machine has zero usable Developer ID identities; release repository variables are absent; no notarization submission, signed/stapled artifact, public prerelease, public vendor tap, tap install, or clean-Mac system lifecycle ran. Issues #111, #112, and #119 remain open.
 
 ## Verified On 2026-07-13 — v0.0.2 Phase 02 issue #114
 

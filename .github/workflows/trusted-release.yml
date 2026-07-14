@@ -1,0 +1,325 @@
+name: Trusted release
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: Exact 40-character commit already merged to main
+        required: true
+        type: string
+      version:
+        description: Exact binary semantic version
+        required: true
+        default: 0.0.2-dev
+        type: string
+      tag:
+        description: Exact immutable release tag
+        required: true
+        default: v0.0.2-dev
+        type: string
+      publish:
+        description: Create the annotated tag and GitHub prerelease after all local gates pass
+        required: true
+        default: false
+        type: boolean
+
+permissions: {}
+
+concurrency:
+  group: trusted-release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  build-sign-notarize:
+    name: Build, sign, notarize, and verify
+    runs-on: [self-hosted, macOS, ARM64, hostwright-release]
+    environment: release
+    timeout-minutes: 180
+    permissions:
+      contents: read
+    env:
+      RELEASE_APPLICATION_IDENTITY: ${{ vars.RELEASE_APPLICATION_IDENTITY }}
+      RELEASE_INSTALLER_IDENTITY: ${{ vars.RELEASE_INSTALLER_IDENTITY }}
+      RELEASE_TEAM_ID: ${{ vars.RELEASE_TEAM_ID }}
+      RELEASE_NOTARY_PROFILE: ${{ vars.RELEASE_NOTARY_PROFILE }}
+    steps:
+      - name: Check out the exact commit
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ inputs.commit }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate immutable release inputs and host trust
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${{ inputs.commit }}" =~ ^[a-f0-9]{40}$ ]]
+          [[ "${{ inputs.version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]
+          [[ "${{ inputs.tag }}" == "v${{ inputs.version }}" ]]
+          [[ "$RELEASE_APPLICATION_IDENTITY" =~ ^[A-F0-9]{40}$ ]]
+          [[ "$RELEASE_INSTALLER_IDENTITY" =~ ^[A-F0-9]{40}$ ]]
+          [[ "$RELEASE_APPLICATION_IDENTITY" != "$RELEASE_INSTALLER_IDENTITY" ]]
+          [[ "$RELEASE_TEAM_ID" =~ ^[A-Z0-9]{10}$ ]]
+          [[ "$RELEASE_NOTARY_PROFILE" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]]
+          test "$GITHUB_REPOSITORY" = hostwright/hostwright
+          test "$(git rev-parse HEAD)" = "${{ inputs.commit }}"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "${{ inputs.commit }}" origin/main
+          if git ls-remote --exit-code --tags origin "refs/tags/${{ inputs.tag }}" >/dev/null 2>&1; then
+            echo "Release tag already exists; tags are immutable." >&2
+            exit 65
+          fi
+          test "$(uname -m)" = arm64
+          security find-identity -v | grep -F "$RELEASE_APPLICATION_IDENTITY" >/dev/null
+          security find-identity -v | grep -F "$RELEASE_INSTALLER_IDENTITY" >/dev/null
+          xcrun notarytool history --keychain-profile "$RELEASE_NOTARY_PROFILE" --output-format json >/dev/null
+
+      - name: Run repository regression gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          swift build
+          swift test list
+          swift test
+          scripts/integration.sh
+          scripts/grep-orchard.sh .
+          scripts/test.sh
+          scripts/lint.sh
+
+      - name: Build the trusted release twice and verify every trust stage
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle="$RUNNER_TEMP/hostwright-publish-bundle-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          release_dir="$bundle/release"
+          formula_dir="$bundle/Formula"
+          test ! -e "$bundle"
+          mkdir -m 700 "$bundle"
+          swift run hostwright-dist release \
+            --source-root "$GITHUB_WORKSPACE" \
+            --output-dir "$release_dir" \
+            --expected-commit "${{ inputs.commit }}" \
+            --expected-version "${{ inputs.version }}" \
+            --release-tag "${{ inputs.tag }}" \
+            --application-identity "$RELEASE_APPLICATION_IDENTITY" \
+            --installer-identity "$RELEASE_INSTALLER_IDENTITY" \
+            --team-id "$RELEASE_TEAM_ID" \
+            --notary-keychain-profile "$RELEASE_NOTARY_PROFILE"
+          swift run hostwright-dist verify-release \
+            --release-dir "$release_dir" \
+            --team-id "$RELEASE_TEAM_ID"
+          archive_name="$(plutil -extract archive.fileName raw "$release_dir/release-manifest.json")"
+          mkdir -p "$formula_dir"
+          artifact_url="https://github.com/$GITHUB_REPOSITORY/releases/download/${{ inputs.tag }}/$archive_name"
+          swift run hostwright-dist homebrew-formula \
+            --release-dir "$release_dir" \
+            --team-id "$RELEASE_TEAM_ID" \
+            --artifact-url "$artifact_url" \
+            --output "$formula_dir/hostwright.rb"
+          brew ruby -- -c "$formula_dir/hostwright.rb"
+          temporary_tap="hostwright-release-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/tap"
+          brew tap-new "$temporary_tap"
+          tap_repository="$(brew --repository "$temporary_tap")"
+          trap 'brew untap --force "$temporary_tap" >/dev/null 2>&1 || true' EXIT
+          cp "$formula_dir/hostwright.rb" "$tap_repository/Formula/hostwright.rb"
+          brew style --formula "$tap_repository/Formula/hostwright.rb"
+          brew untap --force "$temporary_tap"
+          trap - EXIT
+          echo "bundle=$bundle" >> "$GITHUB_OUTPUT"
+          echo "release_dir=$release_dir" >> "$GITHUB_OUTPUT"
+          echo "formula=$formula_dir/hostwright.rb" >> "$GITHUB_OUTPUT"
+          echo "archive=$release_dir/$archive_name" >> "$GITHUB_OUTPUT"
+          package_name="$(plutil -extract package.fileName raw "$release_dir/release-manifest.json")"
+          echo "package=$release_dir/$package_name" >> "$GITHUB_OUTPUT"
+          echo "archive_sbom=$release_dir/$(plutil -extract archiveSBOM.fileName raw "$release_dir/release-manifest.json")" >> "$GITHUB_OUTPUT"
+          echo "package_sbom=$release_dir/$(plutil -extract packageSBOM.fileName raw "$release_dir/release-manifest.json")" >> "$GITHUB_OUTPUT"
+
+      - name: Retain the exact verified output
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hostwright-${{ inputs.version }}-trusted-release
+          path: ${{ steps.release.outputs.bundle }}
+          if-no-files-found: error
+          retention-days: 90
+
+  attest:
+    name: Attest the retained signed artifacts
+    needs: build-sign-notarize
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Download the verified release bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: hostwright-${{ inputs.version }}-trusted-release
+          path: ${{ runner.temp }}/hostwright-publish-bundle
+
+      - name: Locate the exact retained artifacts
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_dir="$RUNNER_TEMP/hostwright-publish-bundle/release"
+          test -d "$release_dir"
+          archive="$(find "$release_dir" -mindepth 1 -maxdepth 1 -type f -name '*.zip')"
+          package="$(find "$release_dir" -mindepth 1 -maxdepth 1 -type f -name '*.pkg')"
+          archive_sbom="$(find "$release_dir" -mindepth 1 -maxdepth 1 -type f -name '*.archive.spdx.json')"
+          package_sbom="$(find "$release_dir" -mindepth 1 -maxdepth 1 -type f -name '*.pkg.spdx.json')"
+          formula="$RUNNER_TEMP/hostwright-publish-bundle/Formula/hostwright.rb"
+          test "$(printf '%s\n' "$archive" | grep -c .)" = 1
+          test "$(printf '%s\n' "$package" | grep -c .)" = 1
+          test "$(printf '%s\n' "$archive_sbom" | grep -c .)" = 1
+          test "$(printf '%s\n' "$package_sbom" | grep -c .)" = 1
+          test -f "$formula"
+          echo "archive=$archive" >> "$GITHUB_OUTPUT"
+          echo "package=$package" >> "$GITHUB_OUTPUT"
+          echo "archive_sbom=$archive_sbom" >> "$GITHUB_OUTPUT"
+          echo "package_sbom=$package_sbom" >> "$GITHUB_OUTPUT"
+          echo "formula=$formula" >> "$GITHUB_OUTPUT"
+
+      - name: Attest archive provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: ${{ steps.release.outputs.archive }}
+
+      - name: Attest package provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: ${{ steps.release.outputs.package }}
+
+      - name: Attest Homebrew formula provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: ${{ steps.release.outputs.formula }}
+
+      - name: Attest archive SBOM
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-path: ${{ steps.release.outputs.archive }}
+          sbom-path: ${{ steps.release.outputs.archive_sbom }}
+
+      - name: Attest package SBOM
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-path: ${{ steps.release.outputs.package }}
+          sbom-path: ${{ steps.release.outputs.package_sbom }}
+
+  publish:
+    name: Publish and verify immutable prerelease
+    if: ${{ inputs.publish }}
+    needs: attest
+    runs-on: [self-hosted, macOS, ARM64, hostwright-release]
+    environment: release
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      attestations: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Recheck immutable publication inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = hostwright/hostwright
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/${{ inputs.tag }}" >/dev/null 2>&1; then
+            echo "Release tag now exists; tags are immutable." >&2
+            exit 65
+          fi
+          if gh release view "${{ inputs.tag }}" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "GitHub release now exists; refusing duplicate publication." >&2
+            exit 65
+          fi
+
+      - name: Download the attested release bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: hostwright-${{ inputs.version }}-trusted-release
+          path: ${{ runner.temp }}/hostwright-publish-bundle
+
+      - name: Revalidate signed inventory before publication
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_dir="$RUNNER_TEMP/hostwright-publish-bundle/release"
+          formula="$RUNNER_TEMP/hostwright-publish-bundle/Formula/hostwright.rb"
+          test -d "$release_dir"
+          test -f "$formula"
+          test "$(find "$release_dir" -mindepth 1 -maxdepth 1 -type f | wc -l | tr -d ' ')" = 11
+          test "$(find "$release_dir" -mindepth 1 -maxdepth 1 ! -type f | wc -l | tr -d ' ')" = 0
+          (cd "$release_dir" && /usr/bin/shasum -a 256 -c SHA256SUMS)
+          security cms -D -i "$release_dir/release-manifest.json.cms" \
+            -c "$release_dir/release-manifest.json" -n -h 15 -u 6 >/dev/null
+          security cms -D -i "$release_dir/SHA256SUMS.cms" \
+            -c "$release_dir/SHA256SUMS" -n -h 15 -u 6 >/dev/null
+          security cms -D -i "$release_dir/provenance.intoto.json.cms" \
+            -c "$release_dir/provenance.intoto.json" -n -h 15 -u 6 >/dev/null
+          brew ruby -- -c "$formula"
+
+      - name: Publish immutable development prerelease
+        id: publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag_object="$(gh api --method POST "repos/$GITHUB_REPOSITORY/git/tags" \
+            -f tag="${{ inputs.tag }}" \
+            -f message="Hostwright ${{ inputs.version }} trusted development release" \
+            -f object="${{ inputs.commit }}" \
+            -f type=commit \
+            --jq .sha)"
+          gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+            -f ref="refs/tags/${{ inputs.tag }}" \
+            -f sha="$tag_object" >/dev/null
+          echo "tag_created=true" >> "$GITHUB_OUTPUT"
+          gh release create "${{ inputs.tag }}" \
+            "$RUNNER_TEMP/hostwright-publish-bundle/release"/* \
+            "$RUNNER_TEMP/hostwright-publish-bundle/Formula/hostwright.rb" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "${{ inputs.commit }}" \
+            --title "Hostwright ${{ inputs.version }}" \
+            --notes "Trusted Phase 02 development channel artifact. This is not v0.0.2 GA." \
+            --prerelease \
+            --verify-tag
+          echo "release_created=true" >> "$GITHUB_OUTPUT"
+
+      - name: Verify bytes downloaded from the published release
+        shell: bash
+        run: |
+          set -euo pipefail
+          download="$RUNNER_TEMP/hostwright-release-download-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          mkdir "$download"
+          gh release download "${{ inputs.tag }}" --repo "$GITHUB_REPOSITORY" --dir "$download"
+          expected="$RUNNER_TEMP/hostwright-publish-bundle"
+          diff \
+            <({ find "$expected/release" -mindepth 1 -maxdepth 1 -type f -exec basename {} \;; basename "$expected/Formula/hostwright.rb"; } | sort) \
+            <(find "$download" -mindepth 1 -maxdepth 1 -type f -exec basename {} \; | sort)
+          for original in "$expected/release"/* "$expected/Formula/hostwright.rb"; do
+            cmp "$original" "$download/$(basename "$original")"
+          done
+          (cd "$download" && /usr/bin/shasum -a 256 -c SHA256SUMS)
+          archive_name="$(plutil -extract archive.fileName raw "$download/release-manifest.json")"
+          package_name="$(plutil -extract package.fileName raw "$download/release-manifest.json")"
+          gh attestation verify "$download/$archive_name" --repo "$GITHUB_REPOSITORY"
+          gh attestation verify "$download/$package_name" --repo "$GITHUB_REPOSITORY"
+          gh attestation verify "$download/hostwright.rb" --repo "$GITHUB_REPOSITORY"
+
+      - name: Compensate a failed publication
+        if: ${{ failure() && steps.publish.outputs.tag_created == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "${{ inputs.tag }}" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release delete "${{ inputs.tag }}" \
+              --repo "$GITHUB_REPOSITORY" \
+              --cleanup-tag \
+              --yes
+          else
+            gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/${{ inputs.tag }}"
+          fi

@@ -1,4 +1,5 @@
 import Foundation
+import HostwrightCore
 
 public struct VerifiedDistributionArtifact: Sendable {
     public let distributionDirectory: URL
@@ -28,8 +29,12 @@ public struct DistributionVerifier: Sendable {
 
     public func verify(
         distributionDirectory: URL,
-        extractionDirectory: URL
+        extractionDirectory: URL,
+        cancellation: SecureSubprocessCancellation = SecureSubprocessCancellation()
     ) throws -> VerifiedDistributionArtifact {
+        guard !cancellation.isCancelled else {
+            throw DistributionError.commandCancelled("distribution verification preflight")
+        }
         guard try DistributionFileSystem.isDirectoryNonSymlink(distributionDirectory) else {
             throw DistributionError.invalidArtifact("distribution input is not a regular directory")
         }
@@ -57,9 +62,11 @@ public struct DistributionVerifier: Sendable {
             throw DistributionError.invalidArtifact("distribution directory contains missing, extra, or non-regular entries")
         }
         try validateSidecarModes(distributionDirectory: distributionDirectory, archiveName: report.archive.fileName)
-        try validateChecksums(distributionDirectory: distributionDirectory, expectedFileNames: expectedTopLevel.subtracting([
-            DistributionLayout.checksumFileName
-        ]))
+        try validateChecksums(
+            distributionDirectory: distributionDirectory,
+            expectedFileNames: expectedTopLevel.subtracting([DistributionLayout.checksumFileName]),
+            cancellation: cancellation
+        )
 
         let manifestURL = distributionDirectory.appendingPathComponent(DistributionLayout.manifestFileName)
         let manifest = try DistributionJSON.decode(DistributionArtifactManifest.self, from: manifestURL)
@@ -69,15 +76,18 @@ public struct DistributionVerifier: Sendable {
         }
         try validateDescriptor(
             report.archive,
-            at: distributionDirectory.appendingPathComponent(report.archive.fileName)
+            at: distributionDirectory.appendingPathComponent(report.archive.fileName),
+            cancellation: cancellation
         )
         try validateDescriptor(
             report.sbom,
-            at: distributionDirectory.appendingPathComponent(DistributionLayout.sbomFileName)
+            at: distributionDirectory.appendingPathComponent(DistributionLayout.sbomFileName),
+            cancellation: cancellation
         )
         try validateDescriptor(
             report.provenance,
-            at: distributionDirectory.appendingPathComponent(DistributionLayout.provenanceFileName)
+            at: distributionDirectory.appendingPathComponent(DistributionLayout.provenanceFileName),
+            cancellation: cancellation
         )
         let sbom = try DistributionJSON.decode(
             DistributionSPDXDocument.self,
@@ -91,7 +101,7 @@ public struct DistributionVerifier: Sendable {
         try provenance.validate(manifest: manifest, archive: report.archive)
 
         let archiveURL = distributionDirectory.appendingPathComponent(report.archive.fileName)
-        try validateArchiveTable(archiveURL: archiveURL, manifest: manifest)
+        try validateArchiveTable(archiveURL: archiveURL, manifest: manifest, cancellation: cancellation)
         try DistributionFileSystem.createExclusiveDirectory(extractionDirectory)
         var verified = false
         defer {
@@ -103,14 +113,16 @@ public struct DistributionVerifier: Sendable {
             executablePath: "/usr/bin/tar",
             arguments: ["-xzf", archiveURL.path, "-C", extractionDirectory.path],
             label: "extract verified distribution archive",
-            timeoutSeconds: 120
+            timeoutSeconds: 120,
+            cancellation: cancellation
         )
         let extractedRoot = extractionDirectory.appendingPathComponent(manifest.artifactID, isDirectory: true)
         try validateExtractedTree(
             extractionDirectory: extractionDirectory,
             extractedRoot: extractedRoot,
             manifestURL: manifestURL,
-            manifest: manifest
+            manifest: manifest,
+            cancellation: cancellation
         )
         verified = true
         return VerifiedDistributionArtifact(
@@ -121,10 +133,17 @@ public struct DistributionVerifier: Sendable {
         )
     }
 
-    public func verifyAndCleanup(distributionDirectory: URL) throws -> DistributionBuildReport {
+    public func verifyAndCleanup(
+        distributionDirectory: URL,
+        cancellation: SecureSubprocessCancellation = SecureSubprocessCancellation()
+    ) throws -> DistributionBuildReport {
         let extraction = FileManager.default.temporaryDirectory
             .appendingPathComponent("hostwright-dist-verify-\(UUID().uuidString)", isDirectory: true)
-        let artifact = try verify(distributionDirectory: distributionDirectory, extractionDirectory: extraction)
+        let artifact = try verify(
+            distributionDirectory: distributionDirectory,
+            extractionDirectory: extraction,
+            cancellation: cancellation
+        )
         do {
             try DistributionFileSystem.removeOwnedTemporaryItem(extraction)
         } catch {
@@ -135,7 +154,8 @@ public struct DistributionVerifier: Sendable {
 
     private func validateChecksums(
         distributionDirectory: URL,
-        expectedFileNames: Set<String>
+        expectedFileNames: Set<String>,
+        cancellation: SecureSubprocessCancellation
     ) throws {
         let checksumURL = distributionDirectory.appendingPathComponent(DistributionLayout.checksumFileName)
         let text = try String(contentsOf: checksumURL, encoding: .utf8)
@@ -155,26 +175,38 @@ public struct DistributionVerifier: Sendable {
             throw DistributionError.invalidArtifact("SHA256SUMS does not cover the exact sidecar set")
         }
         for (name, expected) in values {
-            let actual = try DistributionHash.sha256(fileURL: distributionDirectory.appendingPathComponent(name))
+            let actual = try DistributionHash.sha256(
+                fileURL: distributionDirectory.appendingPathComponent(name),
+                cancellation: cancellation
+            )
             guard actual == expected else {
                 throw DistributionError.checksumMismatch(name)
             }
         }
     }
 
-    private func validateDescriptor(_ descriptor: DistributionArtifactDescriptor, at url: URL) throws {
-        guard descriptor.sha256 == (try DistributionHash.sha256(fileURL: url)),
+    private func validateDescriptor(
+        _ descriptor: DistributionArtifactDescriptor,
+        at url: URL,
+        cancellation: SecureSubprocessCancellation
+    ) throws {
+        guard descriptor.sha256 == (try DistributionHash.sha256(fileURL: url, cancellation: cancellation)),
               descriptor.sizeBytes == (try DistributionFileSystem.size(of: url)) else {
             throw DistributionError.checksumMismatch(descriptor.fileName)
         }
     }
 
-    func validateArchiveTable(archiveURL: URL, manifest: DistributionArtifactManifest) throws {
+    func validateArchiveTable(
+        archiveURL: URL,
+        manifest: DistributionArtifactManifest,
+        cancellation: SecureSubprocessCancellation = SecureSubprocessCancellation()
+    ) throws {
         let result = try runner.run(
             executablePath: "/usr/bin/tar",
             arguments: ["-tvzf", archiveURL.path],
             label: "inspect distribution archive entries",
-            timeoutSeconds: 120
+            timeoutSeconds: 120,
+            cancellation: cancellation
         )
         let lines = result.standardOutput.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
         let expected = expectedArchivePaths(manifest: manifest)
@@ -200,7 +232,8 @@ public struct DistributionVerifier: Sendable {
         extractionDirectory: URL,
         extractedRoot: URL,
         manifestURL: URL,
-        manifest: DistributionArtifactManifest
+        manifest: DistributionArtifactManifest,
+        cancellation: SecureSubprocessCancellation
     ) throws {
         guard try DistributionFileSystem.isDirectoryNonSymlink(extractedRoot) else {
             throw DistributionError.invalidArtifact("archive did not extract one regular artifact root")
@@ -212,6 +245,9 @@ public struct DistributionVerifier: Sendable {
         }
         let expectedDirectories = expectedDirectoryPaths(manifest: manifest)
         for path in subpaths {
+            guard !cancellation.isCancelled else {
+                throw DistributionError.commandCancelled("validate extracted distribution tree")
+            }
             let url = extractionDirectory.appendingPathComponent(path)
             let values = try url.resourceValues(forKeys: [.isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey])
             guard values.isSymbolicLink != true else {
@@ -233,8 +269,11 @@ public struct DistributionVerifier: Sendable {
             throw DistributionError.invalidArtifact("archive manifest differs from its verified sidecar")
         }
         for file in manifest.files {
+            guard !cancellation.isCancelled else {
+                throw DistributionError.commandCancelled("hash extracted distribution payload")
+            }
             let url = extractedRoot.appendingPathComponent(file.path)
-            guard try DistributionHash.sha256(fileURL: url) == file.sha256,
+            guard try DistributionHash.sha256(fileURL: url, cancellation: cancellation) == file.sha256,
                   try DistributionFileSystem.size(of: url) == file.sizeBytes,
                   try DistributionFileSystem.mode(of: url) == file.mode else {
                 throw DistributionError.invalidArtifact("payload metadata drifted for \(file.path)")

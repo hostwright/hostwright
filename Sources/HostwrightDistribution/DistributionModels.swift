@@ -11,7 +11,9 @@ public enum DistributionLayout {
 
     public static let payloadModes: [String: Int] = [
         "bin/hostwright": 0o755,
+        "bin/hostwright-control": 0o755,
         "bin/hostwrightd": 0o755,
+        "share/hostwright/examples/hostwright.yaml": 0o644,
         "share/doc/hostwright/LICENSE": 0o644,
         "share/doc/hostwright/README.md": 0o644
     ]
@@ -323,19 +325,34 @@ public struct DistributionSPDXDocument: Codable, Equatable, Sendable {
     public let files: [SPDXFileRecord]
     public let relationships: [SPDXRelationship]
 
-    public func validate(manifest: DistributionArtifactManifest, archive: DistributionArtifactDescriptor) throws {
+    public func validate(
+        manifest: DistributionArtifactManifest,
+        archive: DistributionArtifactDescriptor,
+        expectedCreator: String = "Tool: hostwright-dist-1"
+    ) throws {
         try manifest.validate()
-        try archive.validate(suffix: ".tar.gz")
+        try archive.validate()
+        guard archive.fileName.hasSuffix(".tar.gz") ||
+                archive.fileName.hasSuffix(".zip") ||
+                archive.fileName.hasSuffix(".pkg") else {
+            throw DistributionError.invalidArtifact("SPDX subject must be a supported archive or package")
+        }
         let packageID = "SPDXRef-Package-Hostwright"
         let expectedNamespace = "urn:hostwright:spdx:\(manifest.sourceCommit):\(archive.sha256)"
         let expectedFileIDs = Set(manifest.files.indices.map { "SPDXRef-File-\($0 + 1)" })
+        guard expectedCreator == "Tool: hostwright-dist-1" ||
+                expectedCreator == "Tool: hostwright-dist-2" else {
+            throw DistributionError.invalidArtifact("SPDX creator policy is unsupported")
+        }
+        let isTrustedRelease = expectedCreator == "Tool: hostwright-dist-2"
+        let expectedLicense = isTrustedRelease ? "Apache-2.0" : "NOASSERTION"
         guard spdxVersion == "SPDX-2.3",
               dataLicense == "CC0-1.0",
               SPDXID == "SPDXRef-DOCUMENT",
               name == "Hostwright \(manifest.packageVersion) artifact-content SBOM",
               documentNamespace == expectedNamespace,
               creationInfo.created == manifest.createdAt,
-              creationInfo.creators == ["Tool: hostwright-dist-1"],
+              creationInfo.creators == [expectedCreator],
               packages.count == 1,
               let package = packages.first,
               package.name == "Hostwright",
@@ -344,8 +361,8 @@ public struct DistributionSPDXDocument: Codable, Equatable, Sendable {
               package.downloadLocation == "NOASSERTION",
               package.filesAnalyzed,
               package.checksums == [SPDXChecksum(algorithm: "SHA256", checksumValue: archive.sha256)],
-              package.licenseConcluded == "NOASSERTION",
-              package.licenseDeclared == "NOASSERTION",
+              package.licenseConcluded == expectedLicense,
+              package.licenseDeclared == expectedLicense,
               package.copyrightText == "NOASSERTION" else {
             throw DistributionError.invalidArtifact("SPDX package binding is invalid")
         }
@@ -360,7 +377,7 @@ public struct DistributionSPDXDocument: Codable, Equatable, Sendable {
                   return expectedFiles[path] == file.checksums.first?.checksumValue &&
                     file.checksums == [SPDXChecksum(algorithm: "SHA256", checksumValue: expectedFiles[path] ?? "")] &&
                     file.fileTypes == [path.hasPrefix("bin/") ? "BINARY" : "TEXT"] &&
-                    file.licenseConcluded == "NOASSERTION" &&
+                    file.licenseConcluded == expectedLicense &&
                     file.copyrightText == "NOASSERTION"
               }) else {
             throw DistributionError.invalidArtifact("SPDX file inventory contains duplicate or malformed entries")
@@ -458,7 +475,7 @@ public struct DistributionProvenanceStatement: Codable, Equatable, Sendable {
               subject == [ProvenanceSubject(name: archive.fileName, digest: ["sha256": archive.sha256])],
               predicate.buildDefinition.buildType == "urn:hostwright:buildtype:swiftpm-archive:v1",
               predicate.buildDefinition.externalParameters.configuration == "release",
-              predicate.buildDefinition.externalParameters.products == ["hostwright", "hostwrightd"],
+              predicate.buildDefinition.externalParameters.products == ["hostwright", "hostwright-control", "hostwrightd"],
               predicate.buildDefinition.externalParameters.platform == manifest.platform,
               predicate.buildDefinition.externalParameters.architecture == manifest.architecture,
               predicate.buildDefinition.internalParameters.sourceDirty == manifest.sourceDirty,

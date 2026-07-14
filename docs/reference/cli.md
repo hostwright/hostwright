@@ -35,6 +35,7 @@ hostwright doctor [--output text|json]
 hostwright-control --version
 hostwright-control --manifest <absolute-path> [--state-db <absolute-path>] [--team-profile <absolute-path>]
 hostwrightd --foreground --config <hostwright.yaml> [--state-db <path>] [options]
+hostwright-dist help
 ```
 
 ## Output Modes
@@ -93,6 +94,22 @@ Prints the current development version:
 ```
 
 The release target is `v0.0.2`. The binary does not report the release version until the GA gate passes.
+
+## `hostwright-dist` release and developer surfaces
+
+The unsigned `build`, `assemble`, `verify`, and `lifecycle` commands remain local development evidence. They deliberately cannot return passing trusted-distribution evidence.
+
+The trusted surface is:
+
+```text
+hostwright-dist release --source-root <path> --output-dir <path> --expected-commit <40-hex> --expected-version <semver> --release-tag <v-semver> --application-identity <SHA-1> --installer-identity <SHA-1> --team-id <10-char> --notary-keychain-profile <name>
+hostwright-dist verify-release --release-dir <path> --team-id <10-char>
+hostwright-dist homebrew-formula --release-dir <path> --team-id <10-char> --artifact-url <immutable-https-url> --output <Formula/hostwright.rb>
+```
+
+`release` creates no tag, GitHub release, or tap commit. It writes a new output directory only after all build, signature, notarization, package, Gatekeeper, SBOM, provenance, checksum, detached-CMS, cleanup, and independent-verification stages pass. `verify-release` requires the expected Developer ID team and refuses extra, missing, linked, wrong-mode, wrong-digest, wrong-signer, unsafe archive/package, or evidence-mismatched files. `homebrew-formula` operates only on a fully verified trusted release and only for the exact Hostwright GitHub release URL bound by its manifest.
+
+These commands are implemented but not yet an available package channel. See [Install and Upgrade](install.md) for the live evidence blockers.
 
 ## `hostwright capabilities [--json | --output text|json]`
 

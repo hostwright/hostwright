@@ -1,12 +1,18 @@
 import Darwin
+import Dispatch
 import Foundation
+import HostwrightCore
 import HostwrightDistribution
 
 @main
 enum HostwrightDistributionCLI {
     static func main() {
+        let signalCancellation = DistributionSignalCancellation()
         do {
-            let result = try run(Array(CommandLine.arguments.dropFirst()))
+            let result = try run(
+                Array(CommandLine.arguments.dropFirst()),
+                cancellation: signalCancellation.cancellation
+            )
             if !result.output.isEmpty {
                 FileHandle.standardOutput.write(Data(result.output.utf8))
             }
@@ -23,23 +29,89 @@ enum HostwrightDistributionCLI {
         }
     }
 
-    private static func run(_ arguments: [String]) throws -> ToolResult {
+    private static func run(
+        _ arguments: [String],
+        cancellation: SecureSubprocessCancellation
+    ) throws -> ToolResult {
         guard let command = arguments.first else {
             return ToolResult(output: helpText, exitCode: 0)
         }
         let values = Array(arguments.dropFirst())
         switch command {
+        case "release":
+            let options = try parse(values, required: [
+                "--source-root", "--output-dir", "--expected-commit", "--expected-version",
+                "--release-tag", "--application-identity", "--installer-identity",
+                "--team-id", "--notary-keychain-profile"
+            ])
+            let report = try TrustedReleaseBuilder().build(
+                TrustedReleaseBuildRequest(
+                    sourceRoot: fileURL(options["--source-root"]!),
+                    outputDirectory: fileURL(options["--output-dir"]!),
+                    expectedCommit: options["--expected-commit"]!,
+                    expectedVersion: options["--expected-version"]!,
+                    releaseTag: options["--release-tag"]!,
+                    applicationIdentityFingerprint: options["--application-identity"]!,
+                    installerIdentityFingerprint: options["--installer-identity"]!,
+                    teamIdentifier: options["--team-id"]!,
+                    notaryKeychainProfile: options["--notary-keychain-profile"]!
+                ),
+                cancellation: cancellation
+            )
+            return ToolResult(
+                output: "Trusted release output: \(options["--output-dir"]!)\nArchive: \(report.manifest.archive.fileName)\nPackage: \(report.manifest.package.fileName)\nStatus: \(report.evidence.status.rawValue)\n",
+                exitCode: 0
+            )
+        case "verify-release":
+            let options = try parse(values, required: ["--release-dir", "--team-id"])
+            let result = try TrustedReleaseVerifier().verify(
+                releaseDirectory: fileURL(options["--release-dir"]!),
+                expectedTeamIdentifier: options["--team-id"]!,
+                cancellation: cancellation
+            )
+            return ToolResult(
+                output: "Verified trusted release\nVersion: \(result.manifest.packageVersion)\nCommit: \(result.manifest.sourceCommit)\nTeam: \(result.manifest.applicationSigner.teamIdentifier)\nStatus: passed\n",
+                exitCode: 0
+            )
+        case "homebrew-formula":
+            let options = try parse(
+                values,
+                required: ["--release-dir", "--team-id", "--artifact-url", "--output"]
+            )
+            let verified = try TrustedReleaseVerifier().verify(
+                releaseDirectory: fileURL(options["--release-dir"]!),
+                expectedTeamIdentifier: options["--team-id"]!,
+                cancellation: cancellation
+            )
+            let formula = try HomebrewFormulaRenderer.render(
+                HomebrewFormulaRequest(
+                    manifest: verified.manifest,
+                    artifactURL: options["--artifact-url"]!
+                )
+            )
+            let output = fileURL(options["--output"]!)
+            guard try DistributionFileSystem.isDirectoryNonSymlink(
+                output.deletingLastPathComponent().resolvingSymlinksInPath()
+            ) else {
+                throw DistributionError.invalidArguments("Homebrew formula output parent must be a non-symlink directory.")
+            }
+            try DistributionFileSystem.writeNewFile(Data(formula.utf8), to: output, mode: 0o644)
+            return ToolResult(
+                output: "Homebrew formula: \(output.path)\nArchive SHA-256: \(verified.manifest.archive.sha256)\nStatus: passed\n",
+                exitCode: 0
+            )
         case "build":
             let options = try parse(values, required: ["--source-root", "--output-dir", "--expected-commit"])
             let report = try DistributionCleanBuilder().build(
                 sourceRoot: fileURL(options["--source-root"]!),
                 outputDirectory: fileURL(options["--output-dir"]!),
-                expectedCommit: options["--expected-commit"]!
+                expectedCommit: options["--expected-commit"]!,
+                cancellation: cancellation
             )
             return blockedResult(report: report, outputDirectory: options["--output-dir"]!)
         case "assemble":
             let required = [
-                "--hostwright-binary", "--hostwrightd-binary", "--license", "--readme",
+                "--hostwright-binary", "--hostwright-control-binary", "--hostwrightd-binary", "--example-manifest", "--license", "--readme",
                 "--output-dir", "--version", "--source-commit", "--source-dirty", "--architecture"
             ]
             let options = try parse(values, required: required)
@@ -54,7 +126,9 @@ enum HostwrightDistributionCLI {
             let report = try DistributionAssembler().assemble(
                 DistributionAssemblyRequest(
                     hostwrightBinary: fileURL(options["--hostwright-binary"]!),
+                    hostwrightControlBinary: fileURL(options["--hostwright-control-binary"]!),
                     hostwrightDaemonBinary: fileURL(options["--hostwrightd-binary"]!),
+                    exampleManifestFile: fileURL(options["--example-manifest"]!),
                     licenseFile: fileURL(options["--license"]!),
                     readmeFile: fileURL(options["--readme"]!),
                     outputDirectory: fileURL(options["--output-dir"]!),
@@ -64,13 +138,15 @@ enum HostwrightDistributionCLI {
                     architecture: options["--architecture"]!,
                     inputStageIdentifier: "prebuilt-validation",
                     inputStageDetail: "Validated and executed explicit prebuilt inputs for local integration; this is not clean release-build evidence."
-                )
+                ),
+                cancellation: cancellation
             )
             return blockedResult(report: report, outputDirectory: options["--output-dir"]!)
         case "verify":
             let options = try parse(values, required: ["--distribution-dir"])
             let report = try DistributionVerifier().verifyAndCleanup(
-                distributionDirectory: fileURL(options["--distribution-dir"]!)
+                distributionDirectory: fileURL(options["--distribution-dir"]!),
+                cancellation: cancellation
             )
             return ToolResult(
                 output: "Verified unsigned distribution artifact\nCommit: \(report.manifest.sourceCommit)\nArchive: \(report.archive.fileName)\nStatus: \(report.evidence.status.rawValue)\n",
@@ -85,7 +161,8 @@ enum HostwrightDistributionCLI {
                 baselineDirectory: fileURL(options["--baseline-dir"]!),
                 candidateDirectory: fileURL(options["--candidate-dir"]!),
                 prefix: fileURL(options["--prefix"]!),
-                reportURL: fileURL(options["--report"]!)
+                reportURL: fileURL(options["--report"]!),
+                cancellation: cancellation
             )
             return ToolResult(
                 output: "Distribution lifecycle report: \(options["--report"]!)\nStatus: \(report.evidence.status.rawValue)\nStages: \(report.stages.count)/4\nCleanup: \(report.evidence.cleanup.status.rawValue)\n",
@@ -156,18 +233,54 @@ enum HostwrightDistributionCLI {
     }
 
     private static let helpText = """
-    hostwright-dist developer distribution evidence tool
+    hostwright-dist trusted and developer distribution tool
 
     Usage:
+      hostwright-dist release --source-root <path> --output-dir <path> --expected-commit <40-hex> --expected-version <semver> --release-tag <v-semver> --application-identity <SHA-1> --installer-identity <SHA-1> --team-id <10-char> --notary-keychain-profile <name>
+      hostwright-dist verify-release --release-dir <path> --team-id <10-char>
+      hostwright-dist homebrew-formula --release-dir <path> --team-id <10-char> --artifact-url <immutable-https-url> --output <Formula/hostwright.rb>
       hostwright-dist build --source-root <path> --output-dir <path> --expected-commit <40-hex>
-      hostwright-dist assemble --hostwright-binary <path> --hostwrightd-binary <path> --license <path> --readme <path> --output-dir <path> --version <semver> --source-commit <40-hex> --source-dirty <true|false> --architecture arm64
+      hostwright-dist assemble --hostwright-binary <path> --hostwright-control-binary <path> --hostwrightd-binary <path> --example-manifest <path> --license <path> --readme <path> --output-dir <path> --version <semver> --source-commit <40-hex> --source-dirty <true|false> --architecture arm64
       hostwright-dist verify --distribution-dir <path>
       hostwright-dist lifecycle --baseline-dir <path> --candidate-dir <path> --prefix <hostwright-dist-* temp-path> --report <path>
 
-    The tool creates local unsigned evidence only. It never signs, notarizes, staples,
-    invokes Gatekeeper acceptance, builds a pkg, installs outside an explicit temporary
-    prefix, creates release tags, or publishes artifacts.
+    `release` requires exact Developer ID identities and a preconfigured notarytool
+    Keychain profile. It never accepts passwords, private keys, or tokens in argv.
+    It builds twice, signs, notarizes, staples the pkg, verifies Gatekeeper, and emits
+    signed release evidence. The tool never creates tags or publishes artifacts.
     """ + "\n"
+}
+
+private final class DistributionSignalCancellation {
+    let cancellation: SecureSubprocessCancellation
+    private let sources: [DispatchSourceSignal]
+
+    init() {
+        let cancellation = SecureSubprocessCancellation()
+        self.cancellation = cancellation
+        let queue = DispatchQueue(label: "dev.hostwright.distribution.signals")
+        sources = [SIGINT, SIGTERM].map { signalNumber in
+            Darwin.signal(signalNumber, SIG_IGN)
+            let source = DispatchSource.makeSignalSource(signal: signalNumber, queue: queue)
+            source.setEventHandler { [cancellation] in
+                if cancellation.isCancelled {
+                    Darwin.signal(signalNumber, SIG_DFL)
+                    Darwin.raise(signalNumber)
+                } else {
+                    cancellation.cancel()
+                }
+            }
+            source.resume()
+            return source
+        }
+    }
+
+    deinit {
+        for (source, signalNumber) in zip(sources, [SIGINT, SIGTERM]) {
+            source.cancel()
+            Darwin.signal(signalNumber, SIG_DFL)
+        }
+    }
 }
 
 private struct ToolResult {

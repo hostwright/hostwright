@@ -6,7 +6,8 @@ The active release target is `v0.0.2`. The working binary reports `0.0.2-dev` un
 
 - `phase-*` tags are optional internal engineering checkpoints and never receive GitHub Releases.
 - `v*` tags are public releases or explicitly marked release candidates.
-- Do not create `v0.0.2`, publish packages, or change the binary to `0.0.2` before the Phase 15 gate.
+- Phase 02 may create one immutable `v0.0.2-dev` GitHub prerelease through the protected trusted-release workflow solely to qualify signed public bytes and the vendor-tap install path. It remains unsupported, cannot be moved or replaced, and does not advance the release ladder.
+- Do not create `v0.0.2`, publish a supported package/channel claim, or change the binary to `0.0.2` before the Phase 15 gate.
 - Never tag from a dirty tree, an unreviewed commit, or a commit whose required evidence is blocked.
 - Never force-move a public release tag.
 
@@ -18,6 +19,8 @@ The active release target is `v0.0.2`. The working binary reports `0.0.2-dev` un
 4. `v0.0.2` only after two clean complete RC qualification runs and final maintainer approval.
 
 An RC tag is a pre-release, not a partial implementation escape hatch. It uses the same supported-scope contract as GA and may differ only by resolved defects and repeated evidence.
+
+The one Phase 02 `v0.0.2-dev` qualification artifact is not an RC or beta and is never promoted in place. Its only purpose is to prove the real distribution path that Phase 02 must close; later implementation continues on `0.0.2-dev`, and Phase 15 produces new immutable RC/GA artifacts from their exact qualified commits.
 
 ## Active Roadmap Authority
 
@@ -49,7 +52,7 @@ Roadmap manifest validation, issue-parent/label/assignee checks, final-PR eviden
 
 ## Distribution Readiness Gate
 
-Phase 02 turns the former unsigned developer lane into signed/notarized archives, a `.pkg`, vendor tap, secure install state, and reversible lifecycle. Phase 15 repeats those checks from the final clean tag. The historical `distribution-readiness.md` does not satisfy this gate.
+Phase 02 turns the former unsigned developer lane into signed/notarized archives, a `.pkg`, vendor tap, secure install state, and reversible lifecycle. The trusted builder/verifier, Homebrew formula renderer, and protected two-job workflow are implemented, but this gate remains open until a credentialed run and public-channel/clean-Mac lifecycle evidence pass. Phase 15 repeats those checks from the final clean tag. The historical `distribution-readiness.md` does not satisfy this gate.
 
 ## Benchmark Gate
 
@@ -115,8 +118,8 @@ Only after the final RC evidence and approval:
 
 1. verify the release commit is on protected `main`, clean, signed according to policy, and identical to the qualified commit;
 2. set the product version from `0.0.2-dev` to `0.0.2` in a reviewed release PR and rerun the complete release gate;
-3. create the annotated `v0.0.2` tag without rewriting history;
-4. let the release workflow build, sign, notarize, staple, verify, and publish;
+3. dispatch the protected trusted-release workflow for the exact qualified commit/version/tag;
+4. let that workflow build, sign, notarize, staple, verify, create the immutable annotated tag, publish, download, compare, and attest the exact bytes;
 5. verify clean installation, upgrade, rollback, and uninstall from the published channel;
 6. publish the GitHub Release and vendor-tap formula only after artifact verification;
 7. submit the Homebrew-core formula separately and report its external acceptance state exactly;

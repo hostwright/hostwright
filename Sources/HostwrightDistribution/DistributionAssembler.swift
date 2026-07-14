@@ -3,7 +3,9 @@ import HostwrightCore
 
 public struct DistributionAssemblyRequest: Sendable {
     public let hostwrightBinary: URL
+    public let hostwrightControlBinary: URL
     public let hostwrightDaemonBinary: URL
+    public let exampleManifestFile: URL
     public let licenseFile: URL
     public let readmeFile: URL
     public let outputDirectory: URL
@@ -18,7 +20,9 @@ public struct DistributionAssemblyRequest: Sendable {
 
     public init(
         hostwrightBinary: URL,
+        hostwrightControlBinary: URL,
         hostwrightDaemonBinary: URL,
+        exampleManifestFile: URL,
         licenseFile: URL,
         readmeFile: URL,
         outputDirectory: URL,
@@ -32,7 +36,9 @@ public struct DistributionAssemblyRequest: Sendable {
         inputCleanupPaths: [URL] = []
     ) {
         self.hostwrightBinary = hostwrightBinary
+        self.hostwrightControlBinary = hostwrightControlBinary
         self.hostwrightDaemonBinary = hostwrightDaemonBinary
+        self.exampleManifestFile = exampleManifestFile
         self.licenseFile = licenseFile
         self.readmeFile = readmeFile
         self.outputDirectory = outputDirectory
@@ -54,7 +60,13 @@ public struct DistributionAssembler: Sendable {
         self.runner = runner
     }
 
-    public func assemble(_ request: DistributionAssemblyRequest) throws -> DistributionBuildReport {
+    public func assemble(
+        _ request: DistributionAssemblyRequest,
+        cancellation: SecureSubprocessCancellation = SecureSubprocessCancellation()
+    ) throws -> DistributionBuildReport {
+        guard !cancellation.isCancelled else {
+            throw DistributionError.commandCancelled("distribution assembly preflight")
+        }
         guard !DistributionFileSystem.entryExists(request.outputDirectory) else {
             throw DistributionError.existingOutput(request.outputDirectory.path)
         }
@@ -71,9 +83,10 @@ public struct DistributionAssembler: Sendable {
                 "Clean evidence requires one isolated release-build scratch path; prebuilt assembly must record source-dirty true without cleanup claims."
             )
         }
-        guard try DistributionFileSystem.isRegularNonSymlink(request.licenseFile),
+        guard try DistributionFileSystem.isRegularNonSymlink(request.exampleManifestFile),
+              try DistributionFileSystem.isRegularNonSymlink(request.licenseFile),
               try DistributionFileSystem.isRegularNonSymlink(request.readmeFile) else {
-            throw DistributionError.invalidArtifact("License and README inputs must be regular non-symlink files.")
+            throw DistributionError.invalidArtifact("Example, license, and README inputs must be regular non-symlink files.")
         }
         guard Set(request.inputCleanupPaths.map(\.path)).count == request.inputCleanupPaths.count else {
             throw DistributionError.invalidArguments("Distribution input cleanup paths must be unique.")
@@ -93,6 +106,7 @@ public struct DistributionAssembler: Sendable {
             versionArguments: ["--version"],
             expectedVersion: request.packageVersion,
             label: "validate hostwright version",
+            cancellation: cancellation,
             commands: &commands
         )
         try validateBinary(
@@ -100,10 +114,35 @@ public struct DistributionAssembler: Sendable {
             versionArguments: ["--version"],
             expectedVersion: request.packageVersion,
             label: "validate hostwrightd version",
+            cancellation: cancellation,
             commands: &commands
         )
-        try validateArchitecture(request.hostwrightBinary, label: "validate hostwright architecture", commands: &commands)
-        try validateArchitecture(request.hostwrightDaemonBinary, label: "validate hostwrightd architecture", commands: &commands)
+        try validateBinary(
+            request.hostwrightControlBinary,
+            versionArguments: ["--version"],
+            expectedVersion: request.packageVersion,
+            label: "validate hostwright-control version",
+            cancellation: cancellation,
+            commands: &commands
+        )
+        try validateArchitecture(
+            request.hostwrightBinary,
+            label: "validate hostwright architecture",
+            cancellation: cancellation,
+            commands: &commands
+        )
+        try validateArchitecture(
+            request.hostwrightControlBinary,
+            label: "validate hostwright-control architecture",
+            cancellation: cancellation,
+            commands: &commands
+        )
+        try validateArchitecture(
+            request.hostwrightDaemonBinary,
+            label: "validate hostwrightd architecture",
+            cancellation: cancellation,
+            commands: &commands
+        )
 
         let timestamp = DistributionTimestamp.string(Date())
         let artifactID = "hostwright-\(request.packageVersion)-macos-arm64-\(request.sourceCommit.prefix(12))"
@@ -126,11 +165,16 @@ public struct DistributionAssembler: Sendable {
         try FileManager.default.createDirectory(at: artifactRoot, withIntermediateDirectories: false)
         let inputs: [(String, URL)] = [
             ("bin/hostwright", request.hostwrightBinary),
+            ("bin/hostwright-control", request.hostwrightControlBinary),
             ("bin/hostwrightd", request.hostwrightDaemonBinary),
+            ("share/hostwright/examples/hostwright.yaml", request.exampleManifestFile),
             ("share/doc/hostwright/LICENSE", request.licenseFile),
             ("share/doc/hostwright/README.md", request.readmeFile)
         ]
         for (path, source) in inputs {
+            guard !cancellation.isCancelled else {
+                throw DistributionError.commandCancelled("distribution payload copy")
+            }
             try DistributionFileSystem.copyRegularFile(
                 from: source,
                 to: artifactRoot.appendingPathComponent(path),
@@ -154,7 +198,7 @@ public struct DistributionAssembler: Sendable {
             let url = artifactRoot.appendingPathComponent(path)
             return DistributionFileRecord(
                 path: path,
-                sha256: try DistributionHash.sha256(fileURL: url),
+                sha256: try DistributionHash.sha256(fileURL: url, cancellation: cancellation),
                 sizeBytes: try DistributionFileSystem.size(of: url),
                 mode: try DistributionFileSystem.mode(of: url)
             )
@@ -186,19 +230,20 @@ public struct DistributionAssembler: Sendable {
         let archiveResult = try runner.run(
             executablePath: "/usr/bin/tar",
             arguments: ["-czf", archiveURL.path, "-C", temporaryOutput.path, artifactID],
-            label: "create distribution archive"
+            label: "create distribution archive",
+            cancellation: cancellation
         )
         commands.append(command("tar create exact artifact root", result: archiveResult))
         guard FileManager.default.fileExists(atPath: archiveURL.path) else {
             throw DistributionError.invalidArtifact("archive command did not create its exact output")
         }
         try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: archiveURL.path)
-        let archive = try descriptor(archiveURL)
+        let archive = try descriptor(archiveURL, cancellation: cancellation)
 
         let sbomDocument = makeSPDX(manifest: manifest, archive: archive)
         let sbomURL = temporaryOutput.appendingPathComponent(DistributionLayout.sbomFileName)
         try DistributionFileSystem.writeNewFile(try DistributionJSON.encode(sbomDocument), to: sbomURL, mode: 0o644)
-        let sbom = try descriptor(sbomURL)
+        let sbom = try descriptor(sbomURL, cancellation: cancellation)
         commands.append(HostwrightEvidenceCommand(command: "generate SPDX 2.3 artifact-content SBOM", exitCode: 0, durationMilliseconds: 0))
 
         let provenanceDocument = makeProvenance(manifest: manifest, archive: archive, timestamp: timestamp)
@@ -208,12 +253,15 @@ public struct DistributionAssembler: Sendable {
             to: provenanceURL,
             mode: 0o644
         )
-        let provenance = try descriptor(provenanceURL)
+        let provenance = try descriptor(provenanceURL, cancellation: cancellation)
         commands.append(HostwrightEvidenceCommand(command: "generate unsigned in-toto provenance statement", exitCode: 0, durationMilliseconds: 0))
 
         commands.append(HostwrightEvidenceCommand(command: "generate SHA-256 sidecar checksums", exitCode: 0, durationMilliseconds: 0))
 
-        let identityAvailable = developerIDApplicationIdentityAvailable(commands: &commands)
+        let identityAvailable = try developerIDApplicationIdentityAvailable(
+            cancellation: cancellation,
+            commands: &commands
+        )
         var stages = [
             DistributionStageRecord(
                 identifier: request.inputStageIdentifier,
@@ -261,7 +309,11 @@ public struct DistributionAssembler: Sendable {
                 )
             )
         }
-        let toolVersions = collectToolVersions(identityAvailable: identityAvailable, commands: &commands)
+        let toolVersions = try collectToolVersions(
+            identityAvailable: identityAvailable,
+            cancellation: cancellation,
+            commands: &commands
+        )
         let passed = stages.filter { $0.status == .passed }.count
         let blocked = stages.filter { $0.status == .blocked }.count
         let evidence = HostwrightEvidenceReport(
@@ -298,10 +350,16 @@ public struct DistributionAssembler: Sendable {
         )
         let checksumInputs = [
             archive,
-            try descriptor(temporaryOutput.appendingPathComponent(DistributionLayout.manifestFileName)),
+            try descriptor(
+                temporaryOutput.appendingPathComponent(DistributionLayout.manifestFileName),
+                cancellation: cancellation
+            ),
             sbom,
             provenance,
-            try descriptor(temporaryOutput.appendingPathComponent(DistributionLayout.evidenceFileName))
+            try descriptor(
+                temporaryOutput.appendingPathComponent(DistributionLayout.evidenceFileName),
+                cancellation: cancellation
+            )
         ].sorted { $0.fileName < $1.fileName }
         let checksumText = checksumInputs.map { "\($0.sha256)  \($0.fileName)" }.joined(separator: "\n") + "\n"
         try DistributionFileSystem.writeNewFile(
@@ -320,13 +378,20 @@ public struct DistributionAssembler: Sendable {
         versionArguments: [String],
         expectedVersion: String,
         label: String,
+        cancellation: SecureSubprocessCancellation,
         commands: inout [HostwrightEvidenceCommand]
     ) throws {
         guard try DistributionFileSystem.isRegularNonSymlink(url),
               FileManager.default.isExecutableFile(atPath: url.path) else {
             throw DistributionError.invalidArtifact("\(label) input is not an executable regular file")
         }
-        let result = try runner.run(executablePath: url.path, arguments: versionArguments, label: label, timeoutSeconds: 30)
+        let result = try runner.run(
+            executablePath: url.path,
+            arguments: versionArguments,
+            label: label,
+            timeoutSeconds: 30,
+            cancellation: cancellation
+        )
         commands.append(command(label, result: result))
         guard result.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines) == expectedVersion else {
             throw DistributionError.invalidArtifact("\(label) output did not match the package version")
@@ -336,13 +401,15 @@ public struct DistributionAssembler: Sendable {
     private func validateArchitecture(
         _ url: URL,
         label: String,
+        cancellation: SecureSubprocessCancellation,
         commands: inout [HostwrightEvidenceCommand]
     ) throws {
         let result = try runner.run(
             executablePath: "/usr/bin/lipo",
             arguments: ["-archs", url.path],
             label: label,
-            timeoutSeconds: 30
+            timeoutSeconds: 30,
+            cancellation: cancellation
         )
         commands.append(command(label, result: result))
         guard result.standardOutput.split(whereSeparator: { $0.isWhitespace }).map(String.init) == ["arm64"] else {
@@ -350,17 +417,24 @@ public struct DistributionAssembler: Sendable {
         }
     }
 
-    private func developerIDApplicationIdentityAvailable(commands: inout [HostwrightEvidenceCommand]) -> Bool {
+    private func developerIDApplicationIdentityAvailable(
+        cancellation: SecureSubprocessCancellation,
+        commands: inout [HostwrightEvidenceCommand]
+    ) throws -> Bool {
         do {
             let result = try runner.run(
                 executablePath: "/usr/bin/security",
                 arguments: ["find-identity", "-v", "-p", "codesigning"],
                 label: "inspect local code-signing identities",
-                timeoutSeconds: 30
+                timeoutSeconds: 30,
+                cancellation: cancellation
             )
             commands.append(command("inspect Developer ID Application identity availability", result: result))
             return result.standardOutput.contains("Developer ID Application:")
         } catch {
+            guard !cancellation.isCancelled else {
+                throw DistributionError.commandCancelled("inspect local code-signing identities")
+            }
             commands.append(HostwrightEvidenceCommand(
                 command: "inspect Developer ID Application identity availability",
                 exitCode: 1,
@@ -372,8 +446,9 @@ public struct DistributionAssembler: Sendable {
 
     private func collectToolVersions(
         identityAvailable: Bool,
+        cancellation: SecureSubprocessCancellation,
         commands: inout [HostwrightEvidenceCommand]
-    ) -> [String: String] {
+    ) throws -> [String: String] {
         var versions = [
             "hostwright-dist": "1",
             "developer-id-application": identityAvailable ? "available-unconsumed" : "unavailable"
@@ -385,12 +460,16 @@ public struct DistributionAssembler: Sendable {
             ("notarytool", "/usr/bin/xcrun", ["notarytool", "--version"])
         ]
         for (name, executable, arguments) in probes {
+            guard !cancellation.isCancelled else {
+                throw DistributionError.commandCancelled("read distribution tool versions")
+            }
             do {
                 let result = try runner.run(
                     executablePath: executable,
                     arguments: arguments,
                     label: "read \(name) version",
-                    timeoutSeconds: 30
+                    timeoutSeconds: 30,
+                    cancellation: cancellation
                 )
                 commands.append(command("read \(name) version", result: result))
                 let output = (result.standardOutput + result.standardError)
@@ -400,16 +479,22 @@ public struct DistributionAssembler: Sendable {
                     .map(String.init)
                 versions[name] = output?.isEmpty == false ? output : "unavailable"
             } catch {
+                guard !cancellation.isCancelled else {
+                    throw DistributionError.commandCancelled("read \(name) version")
+                }
                 versions[name] = "unavailable"
             }
         }
         return versions
     }
 
-    private func descriptor(_ url: URL) throws -> DistributionArtifactDescriptor {
+    private func descriptor(
+        _ url: URL,
+        cancellation: SecureSubprocessCancellation
+    ) throws -> DistributionArtifactDescriptor {
         DistributionArtifactDescriptor(
             fileName: url.lastPathComponent,
-            sha256: try DistributionHash.sha256(fileURL: url),
+            sha256: try DistributionHash.sha256(fileURL: url, cancellation: cancellation),
             sizeBytes: try DistributionFileSystem.size(of: url)
         )
     }
@@ -488,7 +573,7 @@ public struct DistributionAssembler: Sendable {
                     buildType: "urn:hostwright:buildtype:swiftpm-archive:v1",
                     externalParameters: ProvenanceExternalParameters(
                         configuration: "release",
-                        products: ["hostwright", "hostwrightd"],
+                        products: ["hostwright", "hostwright-control", "hostwrightd"],
                         platform: manifest.platform,
                         architecture: manifest.architecture
                     ),
@@ -525,7 +610,15 @@ public struct DistributionCleanBuilder: Sendable {
         self.assembler = DistributionAssembler(runner: runner)
     }
 
-    public func build(sourceRoot: URL, outputDirectory: URL, expectedCommit: String) throws -> DistributionBuildReport {
+    public func build(
+        sourceRoot: URL,
+        outputDirectory: URL,
+        expectedCommit: String,
+        cancellation: SecureSubprocessCancellation = SecureSubprocessCancellation()
+    ) throws -> DistributionBuildReport {
+        guard !cancellation.isCancelled else {
+            throw DistributionError.commandCancelled("clean distribution build preflight")
+        }
         guard expectedCommit.range(of: "^[a-f0-9]{40}$", options: .regularExpression) != nil,
               try DistributionFileSystem.isDirectoryNonSymlink(sourceRoot),
               try DistributionFileSystem.isRegularNonSymlink(sourceRoot.appendingPathComponent("Package.swift")) else {
@@ -536,7 +629,8 @@ public struct DistributionCleanBuilder: Sendable {
             executablePath: "/usr/bin/git",
             arguments: ["-C", sourceRoot.path, "rev-parse", "HEAD"],
             label: "read source commit",
-            timeoutSeconds: 30
+            timeoutSeconds: 30,
+            cancellation: cancellation
         )
         commands.append(record("git rev-parse HEAD", commitResult))
         let actualCommit = commitResult.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -547,7 +641,8 @@ public struct DistributionCleanBuilder: Sendable {
             executablePath: "/usr/bin/git",
             arguments: ["-C", sourceRoot.path, "status", "--porcelain=v1", "--untracked-files=all"],
             label: "verify clean source",
-            timeoutSeconds: 30
+            timeoutSeconds: 30,
+            cancellation: cancellation
         )
         commands.append(record("git status --porcelain=v1 --untracked-files=all", statusResult))
         guard statusResult.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -557,7 +652,8 @@ public struct DistributionCleanBuilder: Sendable {
             executablePath: "/usr/bin/git",
             arguments: ["-C", sourceRoot.path, "status", "--porcelain=v1", "--ignored", "--untracked-files=normal"],
             label: "verify ignored source inventory",
-            timeoutSeconds: 30
+            timeoutSeconds: 30,
+            cancellation: cancellation
         )
         commands.append(record("git status --porcelain=v1 --ignored --untracked-files=normal", ignoredStatusResult))
         try requireOnlyUnusedBuildDirectory(ignoredStatusResult.standardOutput)
@@ -578,19 +674,21 @@ public struct DistributionCleanBuilder: Sendable {
                 "package", "--package-path", sourceRoot.path, "--scratch-path", scratch.path,
                 "show-dependencies", "--format", "json"
             ],
-            label: "inspect SwiftPM dependencies"
+            label: "inspect SwiftPM dependencies",
+            cancellation: cancellation
         )
         commands.append(record("swift package show-dependencies --format json", dependencyResult))
         try requireNoExternalDependencies(dependencyResult.standardOutput)
 
-        for product in ["hostwright", "hostwrightd"] {
+        for product in ["hostwright", "hostwright-control", "hostwrightd"] {
             let result = try runner.run(
                 executablePath: "/usr/bin/swift",
                 arguments: [
                     "build", "--package-path", sourceRoot.path, "--scratch-path", scratch.path,
                     "-c", "release", "--product", product
                 ],
-                label: "build release product \(product)"
+                label: "build release product \(product)",
+                cancellation: cancellation
             )
             commands.append(record("swift build -c release --product \(product)", result))
         }
@@ -600,7 +698,8 @@ public struct DistributionCleanBuilder: Sendable {
                 "build", "--package-path", sourceRoot.path, "--scratch-path", scratch.path,
                 "-c", "release", "--show-bin-path"
             ],
-            label: "read release binary path"
+            label: "read release binary path",
+            cancellation: cancellation
         )
         commands.append(record("swift build -c release --show-bin-path", binPathResult))
         let binPath = binPathResult.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -608,12 +707,14 @@ public struct DistributionCleanBuilder: Sendable {
             throw DistributionError.invalidArtifact("SwiftPM did not return an absolute release binary path")
         }
         let hostwright = URL(fileURLWithPath: binPath).appendingPathComponent("hostwright")
+        let control = URL(fileURLWithPath: binPath).appendingPathComponent("hostwright-control")
         let daemon = URL(fileURLWithPath: binPath).appendingPathComponent("hostwrightd")
         let versionResult = try runner.run(
             executablePath: hostwright.path,
             arguments: ["--version"],
             label: "read release package version",
-            timeoutSeconds: 30
+            timeoutSeconds: 30,
+            cancellation: cancellation
         )
         commands.append(record("release hostwright --version", versionResult))
         let version = versionResult.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -622,7 +723,8 @@ public struct DistributionCleanBuilder: Sendable {
             executablePath: "/usr/bin/git",
             arguments: ["-C", sourceRoot.path, "rev-parse", "HEAD"],
             label: "recheck source commit",
-            timeoutSeconds: 30
+            timeoutSeconds: 30,
+            cancellation: cancellation
         )
         commands.append(record("post-build git rev-parse HEAD", finalCommitResult))
         let finalCommit = finalCommitResult.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -633,7 +735,8 @@ public struct DistributionCleanBuilder: Sendable {
             executablePath: "/usr/bin/git",
             arguments: ["-C", sourceRoot.path, "status", "--porcelain=v1", "--untracked-files=all"],
             label: "recheck clean source",
-            timeoutSeconds: 30
+            timeoutSeconds: 30,
+            cancellation: cancellation
         )
         commands.append(record("post-build git status --porcelain=v1 --untracked-files=all", finalStatusResult))
         guard finalStatusResult.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -643,7 +746,8 @@ public struct DistributionCleanBuilder: Sendable {
             executablePath: "/usr/bin/git",
             arguments: ["-C", sourceRoot.path, "status", "--porcelain=v1", "--ignored", "--untracked-files=normal"],
             label: "recheck ignored source inventory",
-            timeoutSeconds: 30
+            timeoutSeconds: 30,
+            cancellation: cancellation
         )
         commands.append(record("post-build git status --porcelain=v1 --ignored --untracked-files=normal", finalIgnoredStatusResult))
         try requireOnlyUnusedBuildDirectory(finalIgnoredStatusResult.standardOutput)
@@ -651,7 +755,9 @@ public struct DistributionCleanBuilder: Sendable {
         return try assembler.assemble(
             DistributionAssemblyRequest(
                 hostwrightBinary: hostwright,
+                hostwrightControlBinary: control,
                 hostwrightDaemonBinary: daemon,
+                exampleManifestFile: sourceRoot.appendingPathComponent("examples/single-service/hostwright.yaml"),
                 licenseFile: sourceRoot.appendingPathComponent("LICENSE"),
                 readmeFile: sourceRoot.appendingPathComponent("README.md"),
                 outputDirectory: outputDirectory,
@@ -660,10 +766,11 @@ public struct DistributionCleanBuilder: Sendable {
                 sourceDirty: false,
                 architecture: "arm64",
                 inputStageIdentifier: "release-build",
-                inputStageDetail: "Built both SwiftPM release products from the clean exact source commit with no external package dependencies.",
+                inputStageDetail: "Built all three shipped SwiftPM release products from the clean exact source commit with no external package dependencies.",
                 priorCommands: commands,
                 inputCleanupPaths: [scratch]
-            )
+            ),
+            cancellation: cancellation
         )
     }
 

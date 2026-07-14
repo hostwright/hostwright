@@ -71,7 +71,7 @@ Migration proceeds only when all checks pass:
 1. the destination does not already exist;
 2. the legacy parent chain and database are safely owned, have no access-granting extended ACL, and are not writable by group/other users;
 3. the source is a regular single-link file, not a symlink;
-4. no `-journal`, `-wal`, or `-shm` sidecar exists, including a second check after the exclusive lock and immediately before rename;
+4. no `-journal`, `-wal`, or `-shm` sidecar exists at either the legacy or destination database path, including checks after intent, after the exclusive lock, and after rename recovery;
 5. the database contains a contiguous, checksum-valid Hostwright migration ledger supported by this build;
 6. source and destination are on the same filesystem;
 7. an exclusive SQLite transaction can be acquired, proving there is no active writer at the migration checkpoint.

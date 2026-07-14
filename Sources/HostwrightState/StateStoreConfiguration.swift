@@ -1,6 +1,9 @@
 import Foundation
 import HostwrightCore
 
+@available(*, deprecated, renamed: "HostwrightStatePathOrigin")
+public typealias StateStorePathOrigin = HostwrightStatePathOrigin
+
 public struct StateStoreConfiguration: Equatable, Sendable {
     public let databasePath: String
     public let origin: HostwrightStatePathOrigin

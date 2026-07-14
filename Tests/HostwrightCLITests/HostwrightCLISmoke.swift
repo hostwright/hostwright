@@ -23,6 +23,10 @@ final class HostwrightCLITests: XCTestCase {
         XCTAssertEqual(try CLICommand.parse(arguments: ["plan", "--output", "json"]), .plan(path: "hostwright.yaml", output: .json, teamProfilePath: nil))
         XCTAssertEqual(try CLICommand.parse(arguments: ["paths"]), .paths(stateDatabasePath: nil, output: .text))
         XCTAssertEqual(try CLICommand.parse(arguments: ["paths", "--json"]), .paths(stateDatabasePath: nil, output: .json))
+        XCTAssertThrowsError(try CLICommand.parse(arguments: ["paths", "--json", "--output", "text"]))
+        XCTAssertThrowsError(try CLICommand.parse(arguments: ["paths", "--output", "text", "--json"]))
+        XCTAssertThrowsError(try CLICommand.parse(arguments: ["paths", "--output", "text", "--output", "json"]))
+        XCTAssertThrowsError(try CLICommand.parse(arguments: ["paths", "--state-db", "/tmp/a.sqlite", "--state-db", "/tmp/b.sqlite"]))
         XCTAssertEqual(try CLICommand.parse(arguments: ["status"]), .status(path: "hostwright.yaml", stateDatabasePath: nil, output: .text))
         XCTAssertEqual(
             try CLICommand.parse(arguments: ["status", "--state-db", "/tmp/state.sqlite"]),

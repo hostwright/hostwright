@@ -13,6 +13,7 @@ struct SecureStatePathManager {
         if let resolution = configuration.localPathResolution,
            resolution.usesApplicationSupportState {
             if createIfNeeded {
+                try validateProspective(configuration: configuration)
                 try prepareDefaultLayout(resolution.layout)
                 try migrateLegacyStateIfNeeded(resolution)
             } else {
@@ -213,9 +214,7 @@ struct SecureStatePathManager {
             )
         }
 
-        if sourceExists {
-            try validateNoSQLiteSidecars(record.source, destination: record.destination)
-        }
+        try validateNoSQLiteSidecars(record.source, destination: record.destination)
         try validateLegacyHostwrightDatabase(currentPath)
 
         if sourceExists {
@@ -324,6 +323,7 @@ struct SecureStatePathManager {
             }
         }
 
+        try validateNoSQLiteSidecars(record.source, destination: record.destination)
         let migratedIdentity = try validateRegularFile(record.destination, requirePrivateMode: false)
         guard UInt64(migratedIdentity.device) == record.sourceDevice,
               UInt64(migratedIdentity.inode) == record.sourceInode else {
@@ -630,12 +630,14 @@ struct SecureStatePathManager {
         _ source: String,
         destination: String
     ) throws {
-        for suffix in ["-journal", "-wal", "-shm"] where pathExists(source + suffix) {
-            throw migrationError(
-                source,
-                destination,
-                "legacy SQLite sidecar \(source + suffix) exists; stop legacy writers and checkpoint the database first"
-            )
+        for (role, database) in [("legacy", source), ("destination", destination)] {
+            for suffix in ["-journal", "-wal", "-shm"] where pathExists(database + suffix) {
+                throw migrationError(
+                    source,
+                    destination,
+                    "\(role) SQLite sidecar \(database + suffix) exists; stop writers and checkpoint the database first"
+                )
+            }
         }
     }
 

@@ -3,6 +3,13 @@ import XCTest
 @testable import HostwrightState
 
 final class HostwrightStateIntegrationTests: XCTestCase {
+    @available(*, deprecated, message: "Compile-time coverage for the deprecated public alias.")
+    func testDeprecatedStateStorePathOriginRemainsAvailableFromHostwrightState() {
+        let origin: StateStorePathOrigin = .explicit
+
+        XCTAssertEqual(origin.rawValue, "explicit")
+    }
+
     func testTwoRealConnectionsIsolateUncommittedWritesAndShareCommittedRows() throws {
         let directory = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }

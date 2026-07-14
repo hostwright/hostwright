@@ -109,6 +109,7 @@ public enum CLICommand: Equatable, Sendable {
     private static func pathsCommand(arguments: [String]) throws -> CLICommand {
         var stateDatabasePath: String?
         var output: CLIOutputFormat = .text
+        var outputSelected = false
         var index = 1
         while index < arguments.count {
             switch arguments[index] {
@@ -119,11 +120,14 @@ public enum CLICommand: Equatable, Sendable {
                 stateDatabasePath = arguments[index + 1]
                 index += 2
             case "--json":
-                guard output == .text else { throw CLIUsageError("paths accepts one output selector.") }
+                guard !outputSelected else { throw CLIUsageError("paths accepts one output selector.") }
                 output = .json
+                outputSelected = true
                 index += 1
             case "--output":
+                guard !outputSelected else { throw CLIUsageError("paths accepts one output selector.") }
                 output = try parseOutputValue(arguments: arguments, index: index, commandName: "paths")
+                outputSelected = true
                 index += 2
             default:
                 throw CLIUsageError("paths supports only --state-db, --json, and --output text|json.")

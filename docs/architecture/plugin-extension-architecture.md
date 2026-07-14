@@ -38,8 +38,8 @@ A passing check proves only that the exact reviewed file completed this protocol
 | Type | Current decision |
 | --- | --- |
 | Policy pack | Declaration-only non-mutating policy evaluation can be allowed when local policy, redaction, audit, and no-runtime-mutation boundaries are declared. |
-| Control-surface integration | Declaration-only read integration can be allowed when it preserves local policy, redaction, audit, explicit state paths, and no-runtime-mutation boundaries. |
-| Diagnostics integration | Declaration-only read/export integration can be allowed when it preserves `HostwrightState`, explicit state paths, redaction, audit, local-only/no-upload, and no-runtime-mutation boundaries. |
+| Control-surface integration | Declaration-only read integration can be allowed when it preserves local policy, redaction, audit, secure selected state paths, and no-runtime-mutation boundaries. |
+| Diagnostics integration | Declaration-only read/export integration can be allowed when it preserves `HostwrightState`, secure selected state paths, redaction, audit, local-only/no-upload, and no-runtime-mutation boundaries. |
 | Runtime adapter | Runtime observation declarations can be evaluated only as non-mutating paths behind `RuntimeAdapter`; runtime mutation remains unsupported for extensions. |
 | Networking provider | Current core blocks provider networking configuration. |
 | Tunnel provider | Current core blocks tunnels, DNS, reverse proxy setup, and public exposure. |
@@ -90,7 +90,7 @@ A future extension path must declare the relevant boundaries before it can be re
 Primary risks:
 
 - bypassing `RuntimeAdapter` with direct Apple container calls;
-- bypassing explicit state paths or writing SQLite outside `HostwrightState`;
+- bypassing secure state-path selection or writing SQLite outside `HostwrightState`;
 - weakening local policy gates through a silent override;
 - leaking raw secrets or keychain labels through diagnostics, events, or errors;
 - bypassing plan-hash confirmation, cleanup tokens, ownership checks, or audit records;
@@ -105,7 +105,7 @@ Controls in this phase:
 - mutating, state-writing, networking, tunnel, secret-resolution, and accelerator capabilities block;
 - every allowed declaration must include redaction and audit boundaries;
 - runtime observation declarations must include `RuntimeAdapter` and `noRuntimeMutation`;
-- state-read declarations must include `HostwrightState` and explicit state paths.
+- state-read declarations must include `HostwrightState` and secure selected state paths.
 - only the fixed version-1 handshake executes, with no capability input or Hostwright authority;
 - executable bytes are hash-bound and privately staged before launch;
 - process time and output are bounded, raw stderr is never surfaced, and exact staging cleanup is required.

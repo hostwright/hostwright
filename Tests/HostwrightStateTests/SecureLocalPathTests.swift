@@ -121,6 +121,22 @@ final class SecureLocalPathTests: XCTestCase {
             let resumed = SQLiteStateStore(
                 configuration: StateStoreConfiguration(localPathResolution: resolution)
             )
+            let sidecar = resolution.stateDatabasePath + "-wal"
+            let descriptor = open(
+                sidecar,
+                O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC,
+                S_IRUSR | S_IWUSR
+            )
+            XCTAssertGreaterThanOrEqual(descriptor, 0)
+            close(descriptor)
+
+            XCTAssertThrowsError(try resumed.migrate()) { error in
+                XCTAssertTrue(String(describing: error).contains("destination SQLite sidecar"))
+            }
+            XCTAssertTrue(FileManager.default.fileExists(atPath: journal.path))
+            XCTAssertTrue(FileManager.default.fileExists(atPath: resolution.stateDatabasePath))
+
+            try FileManager.default.removeItem(atPath: sidecar)
             try resumed.migrate()
 
             XCTAssertEqual(try resumed.schemaVersion(), MigrationRunner.latestSchemaVersion)
@@ -206,6 +222,34 @@ final class SecureLocalPathTests: XCTestCase {
             XCTAssertTrue(FileManager.default.fileExists(atPath: resolution.legacyStateDatabase))
             XCTAssertFalse(FileManager.default.fileExists(atPath: resolution.stateDatabasePath))
         }
+
+        try withTemporaryHome { home in
+            let resolution = try HostwrightLocalPathResolver.resolve(homeDirectory: home.path, environment: [:])
+            try createPrivateDirectory(URL(fileURLWithPath: resolution.legacyRootDirectory, isDirectory: true))
+            try SQLiteStateStore(path: resolution.legacyStateDatabase).migrate()
+            for directory in resolution.layout.ownedDirectories {
+                try createPrivateDirectory(URL(fileURLWithPath: directory, isDirectory: true))
+            }
+            let sidecar = resolution.stateDatabasePath + "-wal"
+            let descriptor = open(sidecar, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, S_IRUSR | S_IWUSR)
+            XCTAssertGreaterThanOrEqual(descriptor, 0)
+            close(descriptor)
+
+            let target = SQLiteStateStore(
+                configuration: StateStoreConfiguration(localPathResolution: resolution)
+            )
+            XCTAssertThrowsError(try target.migrate()) { error in
+                XCTAssertTrue(String(describing: error).contains("destination SQLite sidecar"))
+            }
+            XCTAssertTrue(FileManager.default.fileExists(atPath: resolution.legacyStateDatabase))
+            XCTAssertFalse(FileManager.default.fileExists(atPath: resolution.stateDatabasePath))
+            XCTAssertTrue(FileManager.default.fileExists(atPath: sidecar))
+
+            try FileManager.default.removeItem(atPath: sidecar)
+            try target.migrate()
+            XCTAssertFalse(FileManager.default.fileExists(atPath: resolution.legacyStateDatabase))
+            XCTAssertEqual(try target.schemaVersion(), MigrationRunner.latestSchemaVersion)
+        }
     }
 
     func testLegacyMigrationRejectsAnInvalidHostwrightLedgerBeforeMove() throws {
@@ -236,6 +280,9 @@ final class SecureLocalPathTests: XCTestCase {
             }
             XCTAssertTrue(FileManager.default.fileExists(atPath: resolution.legacyStateDatabase))
             XCTAssertFalse(FileManager.default.fileExists(atPath: resolution.stateDatabasePath))
+            XCTAssertFalse(
+                FileManager.default.fileExists(atPath: resolution.layout.applicationSupportDirectory)
+            )
         }
     }
 
@@ -296,52 +343,57 @@ final class SecureLocalPathTests: XCTestCase {
         }
     }
 
-    func testMigrationResumeRefusesSidecarCreatedAfterIntentThenCompletesSafely() throws {
-        try withTemporaryHome { home in
-            let resolution = try HostwrightLocalPathResolver.resolve(
-                homeDirectory: home.path,
-                environment: [:]
-            )
-            try createPrivateDirectory(
-                URL(fileURLWithPath: resolution.legacyRootDirectory, isDirectory: true)
-            )
-            try SQLiteStateStore(path: resolution.legacyStateDatabase).migrate()
-            for directory in resolution.layout.ownedDirectories {
-                try createPrivateDirectory(URL(fileURLWithPath: directory, isDirectory: true))
+    func testMigrationResumeRefusesSourceAndDestinationSidecarsCreatedAfterIntent() throws {
+        for useDestinationSidecar in [false, true] {
+            try withTemporaryHome { home in
+                let resolution = try HostwrightLocalPathResolver.resolve(
+                    homeDirectory: home.path,
+                    environment: [:]
+                )
+                try createPrivateDirectory(
+                    URL(fileURLWithPath: resolution.legacyRootDirectory, isDirectory: true)
+                )
+                try SQLiteStateStore(path: resolution.legacyStateDatabase).migrate()
+                for directory in resolution.layout.ownedDirectories {
+                    try createPrivateDirectory(URL(fileURLWithPath: directory, isDirectory: true))
+                }
+
+                var identity = stat()
+                XCTAssertEqual(lstat(resolution.legacyStateDatabase, &identity), 0)
+                try writeMigrationJournal(resolution: resolution, identity: identity)
+                let sidecarBase = useDestinationSidecar
+                    ? resolution.stateDatabasePath
+                    : resolution.legacyStateDatabase
+                let sidecar = sidecarBase + "-wal"
+                let descriptor = open(
+                    sidecar,
+                    O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC,
+                    S_IRUSR | S_IWUSR
+                )
+                XCTAssertGreaterThanOrEqual(descriptor, 0)
+                close(descriptor)
+
+                let target = SQLiteStateStore(
+                    configuration: StateStoreConfiguration(localPathResolution: resolution)
+                )
+                XCTAssertThrowsError(try target.migrate()) { error in
+                    XCTAssertTrue(String(describing: error).contains("sidecar"))
+                }
+                XCTAssertTrue(FileManager.default.fileExists(atPath: resolution.legacyStateDatabase))
+                XCTAssertTrue(
+                    FileManager.default.fileExists(atPath: resolution.legacyStateMigrationJournal)
+                )
+                XCTAssertFalse(FileManager.default.fileExists(atPath: resolution.stateDatabasePath))
+
+                try FileManager.default.removeItem(atPath: sidecar)
+                try target.migrate()
+
+                XCTAssertFalse(FileManager.default.fileExists(atPath: resolution.legacyStateDatabase))
+                XCTAssertFalse(
+                    FileManager.default.fileExists(atPath: resolution.legacyStateMigrationJournal)
+                )
+                XCTAssertEqual(try target.schemaVersion(), MigrationRunner.latestSchemaVersion)
             }
-
-            var identity = stat()
-            XCTAssertEqual(lstat(resolution.legacyStateDatabase, &identity), 0)
-            try writeMigrationJournal(resolution: resolution, identity: identity)
-            let sidecar = resolution.legacyStateDatabase + "-wal"
-            let descriptor = open(
-                sidecar,
-                O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC,
-                S_IRUSR | S_IWUSR
-            )
-            XCTAssertGreaterThanOrEqual(descriptor, 0)
-            close(descriptor)
-
-            let target = SQLiteStateStore(
-                configuration: StateStoreConfiguration(localPathResolution: resolution)
-            )
-            XCTAssertThrowsError(try target.migrate()) { error in
-                XCTAssertTrue(String(describing: error).contains("sidecar"))
-            }
-            XCTAssertTrue(FileManager.default.fileExists(atPath: resolution.legacyStateDatabase))
-            XCTAssertTrue(
-                FileManager.default.fileExists(atPath: resolution.legacyStateMigrationJournal)
-            )
-            XCTAssertFalse(FileManager.default.fileExists(atPath: resolution.stateDatabasePath))
-
-            try FileManager.default.removeItem(atPath: sidecar)
-            try target.migrate()
-
-            XCTAssertFalse(FileManager.default.fileExists(atPath: resolution.legacyStateDatabase))
-            XCTAssertFalse(
-                FileManager.default.fileExists(atPath: resolution.legacyStateMigrationJournal)
-            )
-            XCTAssertEqual(try target.schemaVersion(), MigrationRunner.latestSchemaVersion)
         }
     }
 
@@ -449,6 +501,20 @@ final class SecureLocalPathTests: XCTestCase {
 
             XCTAssertThrowsError(try store.schemaVersion()) { error in
                 XCTAssertTrue(String(describing: error).contains("access-granting"))
+            }
+        }
+    }
+
+    func testHardLinkedStateFileIsRejectedBeforeSQLiteUse() throws {
+        try withTemporaryHome { home in
+            let database = home.appendingPathComponent("state.sqlite")
+            let linked = home.appendingPathComponent("state-copy.sqlite")
+            let store = SQLiteStateStore(path: database.path)
+            try store.migrate()
+            XCTAssertEqual(link(database.path, linked.path), 0)
+
+            XCTAssertThrowsError(try store.schemaVersion()) { error in
+                XCTAssertTrue(String(describing: error).contains("multiply linked"))
             }
         }
     }

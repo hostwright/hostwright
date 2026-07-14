@@ -13,7 +13,7 @@ Phase 29 records the current boundary for CRI, Kubernetes, Docker API, Docker Co
 - Kubernetes streaming behavior is part of the compatibility contract. Exec, attach, and port-forward are not ordinary local command execution; they are streaming setup calls whose client-visible behavior is tied to kubelet and runtime semantics.
 - Docker Engine clients speak a versioned HTTP API to a Docker daemon. Compatibility includes API negotiation, response-field drift, lifecycle endpoints, attach/log stream behavior, event streaming, image APIs, networks, volumes, and broad container inspection.
 - Docker Compose is broader than Hostwright's import subset. Compose services can express build, deploy, dependencies, networks, configs, secrets, aliases, named volumes, and lifecycle behavior that Hostwright intentionally rejects or leaves unsupported.
-- Hostwright currently has a local `RuntimeAdapter` boundary, explicit state paths, narrow managed lifecycle actions, local deterministic policy, and import-only stack conversion. Those are not equivalent to a kubelet runtime, Docker daemon, Compose runtime, Testcontainers target, or external scheduler.
+- Hostwright currently has a local `RuntimeAdapter` boundary, secure selected state paths, narrow managed lifecycle actions, local deterministic policy, and import-only stack conversion. Those are not equivalent to a kubelet runtime, Docker daemon, Compose runtime, Testcontainers target, or external scheduler.
 
 ## Decisions
 

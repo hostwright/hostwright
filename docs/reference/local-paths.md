@@ -1,6 +1,6 @@
 # Local Paths, Permissions, and Legacy Migration
 
-Status: implemented for the `0.0.2-dev` single-Mac foundation. Backup contents, repair, installed-service lifecycle, and release rollback remain owned by their separate Phase 02 workstreams.
+Status: implemented for the `0.0.2-dev` single-Mac path and state-maintenance foundation. Installed-service lifecycle, release rollback, and generalized SQLite pressure/soak qualification remain separate Phase 02 workstreams.
 
 ## Default Layout
 
@@ -12,8 +12,8 @@ Hostwright uses macOS-native per-user locations. A state-writing command creates
 | Configuration | `~/Library/Application Support/Hostwright/config` | Reserved for Hostwright-managed configuration; no implicit profile discovery. |
 | SQLite state | `~/Library/Application Support/Hostwright/state/state.sqlite` | Production default for state-backed commands. |
 | Runtime files | `~/Library/Application Support/Hostwright/run` | Contains daemon locks and the reserved local-control socket path. |
-| Runtime metadata | `~/Library/Application Support/Hostwright/metadata` | Contains the durable legacy-path migration journal. |
-| Backups | `~/Library/Application Support/Hostwright/backups` | Reserved default; backup creation and restore commands are issue #114. |
+| Runtime metadata | `~/Library/Application Support/Hostwright/metadata` | Contains the legacy migration journal plus the state-access fence and pending state-maintenance journal. |
+| Backups | `~/Library/Application Support/Hostwright/backups` | Verified online state-backup catalogs. |
 | Cache | `~/Library/Caches/Hostwright` | Private cache root; image/content cache behavior is implemented in later phases. |
 | Logs | `~/Library/Logs/Hostwright` | Private log root; structured daemon logging is implemented in Phase 08. |
 | Daemon lock | `~/Library/Application Support/Hostwright/run/hostwrightd.lock` | Real `0600` non-symlink lock for the default state database. |
@@ -35,11 +35,13 @@ Controlled installations may relocate the layout roots with absolute `HOSTWRIGHT
 
 An explicit state parent must already exist and pass the same path policy. Hostwright does not silently create arbitrary caller-selected parent directories.
 
+For an explicit or environment-selected database, state-maintenance paths are identity-derived hidden siblings of that database: `.hostwright-<digest>-access-v1.lock`, `.hostwright-<digest>-maintenance-v1.json`, and `.hostwright-<digest>-backups/`. This prevents unrelated explicit databases in one directory from sharing a fence, journal, or catalog.
+
 ## Commands and Creation Behavior
 
-`status`, `apply`, `logs`, `cleanup`, and `hostwrightd` are state-writing workflows. Without `--state-db`, they use the Application Support default, create the private layout as needed, run compatible schema migration, and then perform their documented operation.
+`status`, `apply`, `logs`, `cleanup`, `hostwrightd`, `state backup`, confirmed `state restore`, confirmed `state repair`, and journal-finalizing `state recover` are state-writing workflows. Without `--state-db`, they use the Application Support default and create private owned artifacts as documented. Existing application workflows run compatible schema migration; maintenance commands require an already compatible catalog/database contract.
 
-`events`, `recovery`, and `diagnostics` are state read workflows. They use the same default when no override is supplied, but do not create or migrate a missing database. A missing, unsafe, or incompatible database returns `HW-STATE-001` with exit code `66`.
+`events`, workload `recovery`, `diagnostics`, `state integrity`, `state backups`, and restore/repair dry-runs are read or planning workflows. They use the same default when no override is supplied, but do not create or migrate a missing database. State reads and `state integrity` return the documented `HW-STATE-001` behavior for missing, unsafe, incompatible, degraded, or unrecoverable state. `state backups` deliberately remains available when the current database is missing or corrupt so a verified catalog can drive restore; an absent catalog is an empty result. `state recover` is idempotent and reports the current health even when no journal exists.
 
 `validate`, `plan`, `migrate preview`, `capabilities`, and `paths` do not create local state.
 
@@ -56,7 +58,8 @@ Before SQLite or daemon-lock use, Hostwright validates the complete parent chain
 - state, journal, and lock files must be regular, non-symlink, single-link files owned by the invoking user;
 - sensitive files require exact mode `0600`; special permission bits and access-granting extended ACL entries are rejected;
 - state and lock creation use no-follow, close-on-exec, exclusive creation where applicable, file synchronization, and parent-directory synchronization;
-- daemon locks are non-blocking and held on the validated descriptor, not on a path-only claim.
+- daemon and state-access locks are bounded and held on validated descriptors, not path-only claims;
+- backup directories/files and maintenance journals use the same owner/mode/ACL/link rules, strict bounded manifests, exact identity-derived paths, and synchronized publication.
 
 This policy protects Hostwright from crossing filesystem ownership boundaries or following ambiguous paths. It is not a sandbox against another process already running as the same macOS account.
 
@@ -92,6 +95,9 @@ Use:
 hostwright paths
 hostwright paths --json
 hostwright doctor --output json
+hostwright state integrity --json
+hostwright state backups --json
+hostwright state recover --json
 ```
 
 `paths` reports the complete layout, selected state origin, effective daemon lock, state/legacy/journal paths and existence flags, override precedence, permission contract, and one readiness value:
@@ -104,4 +110,4 @@ hostwright doctor --output json
 
 For `blocked-policy`, JSON includes a redacted `policyError`. Inspection validates existing components even before the database exists, so an absent explicit parent or an already-created default-layout directory with unsafe ownership/mode is visible before first use. A valid pending journal reports `migration-required`, including the post-rename/pre-chmod checkpoint. `doctor` independently reports the path-policy check as pass, warning, or failure and exits `65` when the resolved current or prospective path violates policy.
 
-Do not delete either database or the migration journal to resolve a conflict. Stop Hostwright processes, preserve both files, and inspect the reported identities and schema before choosing a recovery action. Issue #114 adds managed backup/restore, issue #115 adds deeper SQLite repair and disk-fault handling, and issue #118 owns release upgrade/rollback/uninstall. This implementation does not claim those separate capabilities early.
+Do not delete a database or migration/maintenance journal to resolve a conflict. Stop non-Hostwright SQLite writers, preserve the reported files, and use `state integrity`, `state backups`, or `state recover` as directed. Issue #114 implements managed integrity/backup/restore/projection repair/checkpoint recovery; issue #115 owns generalized SQLite pressure/disk-fault/soak work; issue #118 owns release upgrade/rollback/uninstall.

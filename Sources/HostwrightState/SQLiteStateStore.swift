@@ -84,15 +84,27 @@ public struct SQLiteStateStore: StateStore {
     }
 
     func withConnection<T>(createIfNeeded: Bool = true, readOnly: Bool = false, _ body: (SQLiteConnection) throws -> T) throws -> T {
-        try configuration.prepare(createIfNeeded: createIfNeeded)
-        let connection = try SQLiteConnection(path: configuration.databasePath, createIfNeeded: createIfNeeded, readOnly: readOnly)
-        return try body(connection)
+        try configuration.prepareStateAccessFoundation()
+        return try StateAccessCoordinator(configuration: configuration).withLock(.shared) {
+            try configuration.prepare(createIfNeeded: createIfNeeded)
+            let connection = try SQLiteConnection(path: configuration.databasePath, createIfNeeded: createIfNeeded, readOnly: readOnly)
+            defer { try? connection.close() }
+            let result = try body(connection)
+            try connection.close()
+            return result
+        }
     }
 
     func withValidatedConnection<T>(readOnly: Bool = false, _ body: (SQLiteConnection) throws -> T) throws -> T {
-        try configuration.prepare(createIfNeeded: false)
-        let connection = try SQLiteConnection(path: configuration.databasePath, createIfNeeded: false, readOnly: readOnly)
-        try MigrationRunner().validateAppliedSchema(on: connection)
-        return try body(connection)
+        try configuration.prepareStateAccessFoundation()
+        return try StateAccessCoordinator(configuration: configuration).withLock(.shared) {
+            try configuration.prepare(createIfNeeded: false)
+            let connection = try SQLiteConnection(path: configuration.databasePath, createIfNeeded: false, readOnly: readOnly)
+            defer { try? connection.close() }
+            try MigrationRunner().validateAppliedSchema(on: connection)
+            let result = try body(connection)
+            try connection.close()
+            return result
+        }
     }
 }

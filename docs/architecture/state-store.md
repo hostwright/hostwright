@@ -1,6 +1,6 @@
 # State Store
 
-Hostwright's intended local state store is SQLite.
+Hostwright's local single-host state store is SQLite.
 
 ## Purpose
 
@@ -33,7 +33,13 @@ Implemented:
 - migration checksums, contiguous-history validation, and future-version refusal
 - actionable corrupt/locked database failures
 - read paths validate schema without applying migrations
-- cold backup/restore round-trip coverage for committed rows
+- online SQLite backup with verified private catalogs
+- full integrity, foreign-key, migration-ledger, required-table/index, UUID, enum, JSON-shape, and logical-record checks
+- confirmation-bound atomic restore with pre-restore backup or corrupt-source quarantine
+- projection-only repair for runtime observation and health results
+- cross-process shared/exclusive access fencing and external maintenance journals
+- recovery at every restore publication checkpoint, including the torn window before a publication checkpoint is durable
+- executable pre-repair rollback when a committed repair database becomes unrecoverable
 - atomic operation-group acquisition coverage across concurrent stores
 - foreground daemon loop event and operation records
 
@@ -43,9 +49,8 @@ Not implemented:
 - runtime mutation beyond create-missing-service, restart-policy-allowed managed start, restart-policy-allowed managed restart, and exact cleanup-eligible managed container delete
 - broad cleanup, image cleanup, volume cleanup, or unmanaged cleanup
 - drift planner
-- production durability claims
-- automatic state repair
-- online backup/restore/repair commands
+- GA durability SLO, extended disk-fault, and long-soak qualification
+- arbitrary SQLite page salvage or automatic repair of authoritative records
 - launch agent or background daemon service
 
 ## Requirements
@@ -125,22 +130,60 @@ JSON blobs hold ports, networks, mounts, environment snapshots, runtime capabili
 
 Desired environment snapshots never store resolved secret values. `secretEnv` entries persist only redacted markers in `env_json_redacted`; raw `keychain://<service>/<account>` labels and resolved values are not stored in desired-state rows.
 
-## Backup, Restore, And Diagnostics Export
+## Integrity, Backup, Restore, Repair, And Diagnostics Export
 
-State backup is a cold file operation today:
+`hostwright state integrity` classifies the selected database as:
 
-1. Stop any Hostwright CLI command or future daemon that is using the database.
-2. Resolve the selected path with `hostwright paths`, then copy that SQLite database and its sidecar files if present, such as `state.sqlite-wal` and `state.sqlite-shm`.
-3. Preserve file permissions and the full database contents. Ownership records, event records, operation records, and observed snapshots must stay together.
+- `healthy`: SQLite structure, foreign keys, schema v7 ledger/checksums, required tables and indexes, resource/fencing UUIDs, authoritative enums/JSON contracts, and reconstructible projections all pass;
+- `degraded`: authoritative state is valid, but runtime-observation or health projections contain invalid enum/JSON/identity data that can be re-observed safely;
+- `unrecoverable`: SQLite structure, foreign keys, migrations, required schema objects, or authoritative desired/ownership/operation/audit records are invalid.
 
-The state integration suite proves this cold-copy procedure against a real migrated SQLite file: a backup opens with the recorded schema and committed rows, and restoring that backup to a separate explicit path does not include rows committed only after the backup. This is evidence for the documented stopped-process procedure, not an online backup command or a durability guarantee for copies taken while writers are active.
+The integrity command does not change the database. It reports the database SHA-256 and size when the file can be read, every check and affected-row count, the exact repairable projection tables, and one bounded recovery action. `PRAGMA integrity_check(100)` does not validate foreign keys, so Hostwright also runs `PRAGMA foreign_key_check` and its own schema/logical validators.
 
-Restore is also a cold file operation:
+`hostwright state backup` uses SQLite's online backup API through a live source connection. It never copies a changing database with a filesystem copy. The destination is created as a `0600` file inside a `0700` unpublished directory, copied incrementally, normalized to sidecar-free `DELETE` journal mode, checked completely, hashed, and then published by an exclusive same-filesystem rename. Each final catalog directory contains exactly:
 
-1. Stop Hostwright processes using the target path.
-2. Move the existing database aside instead of overwriting it.
-3. Copy the backup database and sidecars into place.
-4. Run a safe read command such as `hostwright events` for the default or `hostwright events --state-db <path>` for an override to verify the schema can be opened.
+```text
+backup-<uuid>/
+├── manifest.json  # schema, purpose, time, digest, size, state version, source health
+└── state.sqlite   # complete verified SQLite snapshot
+```
+
+Catalog reads revalidate directory/file ownership, modes, ACLs, link counts, exact contents, strict manifest fields, maximum manifest size, digest, database size, schema version, SQLite integrity, foreign keys, and logical contracts. Tampered, incomplete, rollback-only, or unreadable entries remain visible with `restorable: false`; they are never silently omitted. A catalog-root policy or read failure returns a real command error instead of fabricating a backup entry. Unknown partial evidence is preserved rather than recursively deleted.
+
+Normal backup artifacts must be `healthy`. A pre-repair snapshot may be `degraded` only in the exact reconstructible projections and is marked rollback-only, never general-purpose restorable.
+
+Restore has a mandatory two-step contract:
+
+```bash
+hostwright state restore --backup <id> --dry-run
+hostwright state restore --backup <id> --confirm-restore <token>
+```
+
+The token binds the selected path, backup ID and digest, and current database digest/device/inode. A changed database or stale token fails before mutation. If a plan was generated while state was missing, confirmation also revalidates that any newly appeared path is a private, singly linked Hostwright state file; an unmanaged hard link, symlink, wrong-owner file, or wrong-mode file fails closed and remains untouched. A confirmed restore takes the exclusive Hostwright state fence, revalidates the backup and token, rejects source SQLite sidecars, creates a verified pre-restore backup when current state is healthy, creates and verifies a same-parent staged database, and requires that stage's digest and byte count to match the exact selected backup before publication. It records durable intent and publishes by atomic rename. If the current database is unreadable, its exact bytes are retained as a quarantine artifact. Hostwright never opens it as authority or invents replacement rows.
+
+After publication, all runtime-observation and health projections are cleared because they describe a past runtime observation. Desired state, ownership, operation history, restart state, and audit events come from the selected verified backup. A new maintenance event records the restore and exact projection counts.
+
+```mermaid
+flowchart LR
+    A["Verified backup"] --> B["Dry-run token"]
+    B --> C["Exclusive state fence"]
+    C --> D["Pre-restore backup or quarantine policy"]
+    D --> E["Durable staging intent"]
+    E --> F["Verified same-parent stage"]
+    F --> P["Durable prepared journal"]
+    P --> G["Displace current database"]
+    G --> H["Publish staged database"]
+    H --> I["Clear reconstructible projections"]
+    I --> J["Full verification and journal cleanup"]
+    G -. interruption .-> K["state recover restores original"]
+    H -. interruption or ordinary failure .-> L["verify/finalize or preserve failed replacement and roll back"]
+```
+
+Repair also requires dry-run plus exact token confirmation. It is allowed only for a `degraded` report whose failures are confined to `observed_services`, `observed_runtime_snapshots`, or `health_check_results`. Hostwright creates a verified rollback-only snapshot, records a maintenance journal, deletes only the declared projection tables in one SQLite transaction, appends an audit event, and reruns the full integrity suite. If the committed repair database becomes unrecoverable before journal finalization, recovery preserves its exact bytes as failed evidence, restores the verified pre-repair snapshot, clears only the same recorded reconstructible projections, appends a distinct rollback event, and verifies healthy state before removing the journal. Any pre-existing authoritative/schema/foreign-key/SQLite failure refuses repair and directs the operator to a verified restore.
+
+Ordinary repository access takes a shared per-database file fence. Restore and repair take the exclusive fence. Existing state, fence, journal, staged, and displaced files are validated without changing their permissions before they are opened, moved, or removed; unmanaged, hard-linked, wrong-owner, wrong-mode, ACL-granting, or path-swapped files fail closed without being repaired in place. Restore records staging intent before creating its temporary SQLite copy, so interruption during copy or verification has an exact cleanup path. A pending maintenance journal blocks every ordinary read, write, and migration—including creation of a missing database—until `hostwright state recover` completes or rolls back the exact recorded checkpoint. Journals and their paths are strict, bounded, `0600`, identity-derived contracts; unsupported, duplicated, or path-injected fields fail closed and remain for inspection.
+
+Direct database writes by other programs are unsupported. Online backup can read a live WAL-mode source consistently, but filesystem-replacement restore and repair refuse any `-wal`, `-shm`, or `-journal` sidecar and require the external writer to stop and checkpoint first.
 
 Diagnostics export is a local read-only command:
 
@@ -152,11 +195,11 @@ The command validates the already-applied schema, reads existing rows, applies H
 
 The exported bundle can still contain sensitive local context such as project names, service names, paths, hostnames, resource identifiers, and redacted-but-contextual metadata. Review it before sharing.
 
-Corruption recovery is manual. If Hostwright reports a corrupt or non-SQLite database, keep the file for investigation, restore from a known-good cold backup, or choose a new explicit database path. Hostwright does not invent ownership records, repair rows, erase state automatically, or treat a path migration as database repair.
+For corrupt or non-SQLite state, generate a restore dry-run against a verified catalog entry. Confirmed restore preserves the unreadable original as quarantine evidence and atomically publishes the verified backup. Hostwright does not salvage arbitrary pages, invent ownership, delete authoritative rows, or treat path migration as database repair.
 
 ## Concurrency And Locking
 
-Hostwright uses SQLite `FULLMUTEX`, a bounded busy timeout, and `BEGIN IMMEDIATE` for transactional writes. The contract remains single-writer: one CLI command or future daemon may write a state database at a time. Real multi-connection tests verify uncommitted-write isolation, committed cross-connection visibility, bounded lock failure, and one-winner operation-group acquisition across concurrent stores.
+Hostwright uses SQLite `FULLMUTEX`, a bounded busy timeout, `BEGIN IMMEDIATE` for transactional writes, and a persistent cross-process coordination file. Ordinary operations hold a shared coordination lock for the complete SQLite connection lifetime; restore/repair/recovery hold the exclusive lock across validation, journal, rename/transaction, verification, and cleanup. The contract remains single-writer. Real tests verify uncommitted-write isolation, committed cross-connection visibility, bounded SQLite and coordination-lock failure, non-mutating rejection of unmanaged hard links at both the fence and a state path that appears after a missing-state restore plan, one-winner operation-group acquisition, live WAL backup consistency, selected-backup replacement races, every durable checkpoint, ordinary-error rollback after publication, repair rollback after unrecoverable post-commit state, and the torn windows between a copy/rename/transaction and its next journal update.
 
 Read commands validate schema through read-only connections. Write commands run explicit migration before persistence, then use transactions for grouped writes. If another process holds an exclusive or write lock beyond the bounded timeout, Hostwright reports a locked state database instead of waiting indefinitely.
 

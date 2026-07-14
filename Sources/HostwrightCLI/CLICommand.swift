@@ -7,6 +7,7 @@ public enum CLICommand: Equatable, Sendable {
     case version
     case capabilities(output: CLIOutputFormat)
     case paths(stateDatabasePath: String?, output: CLIOutputFormat)
+    case state(action: StateCLIAction, stateDatabasePath: String?, output: CLIOutputFormat)
     case migrateManifestPreview(path: String, output: CLIOutputFormat)
     case initManifest
     case importStack(path: String, output: CLIOutputFormat, teamProfilePath: String?)
@@ -40,6 +41,8 @@ public enum CLICommand: Equatable, Sendable {
             return try capabilitiesCommand(arguments: arguments)
         case "paths":
             return try pathsCommand(arguments: arguments)
+        case "state":
+            return try stateCommand(arguments: arguments)
         case "migrate":
             return try migrateCommand(arguments: arguments)
         case "init":
@@ -134,6 +137,142 @@ public enum CLICommand: Equatable, Sendable {
             }
         }
         return .paths(stateDatabasePath: stateDatabasePath, output: output)
+    }
+
+    private static func stateCommand(arguments: [String]) throws -> CLICommand {
+        guard arguments.count >= 2 else {
+            throw CLIUsageError("state requires integrity, backup, backups, restore, repair, or recover.")
+        }
+        let operation = arguments[1]
+        guard ["integrity", "backup", "backups", "restore", "repair", "recover"].contains(operation) else {
+            throw CLIUsageError("state supports integrity, backup, backups, restore, repair, and recover.")
+        }
+
+        var stateDatabasePath: String?
+        var output: CLIOutputFormat = .text
+        var outputSelected = false
+        var backupID: String?
+        var dryRun = false
+        var confirmationToken: String?
+        var index = 2
+        while index < arguments.count {
+            switch arguments[index] {
+            case "--state-db":
+                guard stateDatabasePath == nil, index + 1 < arguments.count else {
+                    throw CLIUsageError("state \(operation) accepts one value after --state-db.")
+                }
+                let value = arguments[index + 1].trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !value.isEmpty, !value.hasPrefix("-") else {
+                    throw CLIUsageError("state \(operation) requires a non-empty path after --state-db.")
+                }
+                stateDatabasePath = value
+                index += 2
+            case "--json":
+                guard !outputSelected else {
+                    throw CLIUsageError("state \(operation) accepts one output selector.")
+                }
+                output = .json
+                outputSelected = true
+                index += 1
+            case "--output":
+                guard !outputSelected else {
+                    throw CLIUsageError("state \(operation) accepts one output selector.")
+                }
+                output = try parseOutputValue(
+                    arguments: arguments,
+                    index: index,
+                    commandName: "state \(operation)"
+                )
+                outputSelected = true
+                index += 2
+            case "--backup":
+                guard operation == "restore", backupID == nil, index + 1 < arguments.count else {
+                    throw CLIUsageError("state restore accepts one non-empty value after --backup.")
+                }
+                let value = arguments[index + 1].trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !value.isEmpty, !value.hasPrefix("-") else {
+                    throw CLIUsageError("state restore requires a non-empty backup identifier.")
+                }
+                backupID = value
+                index += 2
+            case "--dry-run":
+                guard operation == "restore" || operation == "repair", !dryRun else {
+                    throw CLIUsageError("state \(operation) accepts --dry-run at most once.")
+                }
+                dryRun = true
+                index += 1
+            case "--confirm-restore":
+                guard operation == "restore", confirmationToken == nil, index + 1 < arguments.count else {
+                    throw CLIUsageError("state restore accepts one value after --confirm-restore.")
+                }
+                confirmationToken = try parseStateConfirmationToken(
+                    arguments[index + 1],
+                    flag: "--confirm-restore"
+                )
+                index += 2
+            case "--confirm-repair":
+                guard operation == "repair", confirmationToken == nil, index + 1 < arguments.count else {
+                    throw CLIUsageError("state repair accepts one value after --confirm-repair.")
+                }
+                confirmationToken = try parseStateConfirmationToken(
+                    arguments[index + 1],
+                    flag: "--confirm-repair"
+                )
+                index += 2
+            default:
+                throw CLIUsageError("state \(operation) does not support argument '\(arguments[index])'.")
+            }
+        }
+
+        let action: StateCLIAction
+        switch operation {
+        case "integrity":
+            guard backupID == nil, !dryRun, confirmationToken == nil else {
+                throw CLIUsageError("state integrity is read-only and does not accept mutation flags.")
+            }
+            action = .integrity
+        case "backup":
+            action = .backup
+        case "backups":
+            action = .backups
+        case "recover":
+            action = .recover
+        case "restore":
+            guard let backupID else {
+                throw CLIUsageError("state restore requires --backup <id>.")
+            }
+            guard dryRun != (confirmationToken != nil) else {
+                throw CLIUsageError("state restore requires exactly one of --dry-run or --confirm-restore <token>.")
+            }
+            action = .restore(
+                backupID: backupID,
+                confirmation: dryRun ? .dryRun : .confirmed(token: confirmationToken ?? "")
+            )
+        case "repair":
+            guard dryRun != (confirmationToken != nil) else {
+                throw CLIUsageError("state repair requires exactly one of --dry-run or --confirm-repair <token>.")
+            }
+            action = .repair(
+                confirmation: dryRun ? .dryRun : .confirmed(token: confirmationToken ?? "")
+            )
+        default:
+            fatalError("validated state operation was not handled")
+        }
+        return .state(
+            action: action,
+            stateDatabasePath: stateDatabasePath,
+            output: output
+        )
+    }
+
+    private static func parseStateConfirmationToken(
+        _ value: String,
+        flag: String
+    ) throws -> String {
+        guard value.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil else {
+            throw CLIUsageError("\(flag) requires the exact 64-character token emitted by the dry-run plan.")
+        }
+        return value
     }
 
     private static func migrateCommand(arguments: [String]) throws -> CLICommand {
@@ -865,6 +1004,20 @@ public struct EventFilters: Equatable, Sendable {
 }
 
 public enum CleanupConfirmation: Equatable, Sendable {
+    case dryRun
+    case confirmed(token: String)
+}
+
+public enum StateCLIAction: Equatable, Sendable {
+    case integrity
+    case backup
+    case backups
+    case restore(backupID: String, confirmation: StateMutationConfirmation)
+    case repair(confirmation: StateMutationConfirmation)
+    case recover
+}
+
+public enum StateMutationConfirmation: Equatable, Sendable {
     case dryRun
     case confirmed(token: String)
 }

@@ -52,6 +52,9 @@ See [installation](docs/reference/install.md) and [compatibility](docs/reference
 swift run hostwright --version
 swift run hostwright capabilities --json
 swift run hostwright paths --json
+swift run hostwright state integrity --json
+swift run hostwright state backup --json
+swift run hostwright state backups --json
 swift run hostwright init
 swift run hostwright migrate preview hostwright.yaml
 swift run hostwright validate
@@ -64,7 +67,7 @@ swift run hostwright doctor
 swift run hostwrightd --foreground --config hostwright.yaml --max-iterations 1
 ```
 
-State-backed commands now default to `~/Library/Application Support/Hostwright/state/state.sqlite`; `--state-db` remains an explicit override. Hostwright creates private `0700` local directories, requires `0600` sensitive files, and safely migrates a compatible `~/.hostwright/state.sqlite` through a resumable journal. See [local paths and migration](docs/reference/local-paths.md) for precedence, security checks, recovery, and the exact commands that create or only read state.
+State-backed commands default to `~/Library/Application Support/Hostwright/state/state.sqlite`; `--state-db` remains an explicit override. Hostwright creates private `0700` directories, requires `0600` sensitive files, and safely migrates a compatible `~/.hostwright/state.sqlite` through a resumable journal. `hostwright state` provides full integrity reports, SQLite online backup, verified catalogs, confirmation-bound atomic restore, reconstruction-only repair, and interrupted-maintenance recovery. See [state-store architecture](docs/architecture/state-store.md), [CLI reference](docs/reference/cli.md), and [local paths](docs/reference/local-paths.md).
 
 The current mutation surface still requires plan/cleanup confirmation tokens. `hostwrightd` is not yet installed as a LaunchAgent and does not yet perform the Phase 08 unattended reconciliation contract.
 

@@ -89,6 +89,15 @@ public enum HostwrightCLI {
                     policyError: status.policyError
                 )
             )
+        case .state(let action, let stateDatabasePath, let output):
+            return StateMaintenanceCommandRunner(
+                stateStoreConfiguration: try hostwrightStateStoreConfiguration(
+                    explicitPath: stateDatabasePath,
+                    environment: environment
+                ),
+                action: action,
+                output: output
+            ).run()
         case .migrateManifestPreview(let path, let output):
             let source = try hostwrightReadManifestText(path: path, environment: environment)
             let preview = try ManifestMigrator.previewV2(source)
@@ -210,6 +219,14 @@ public enum HostwrightCLI {
       hostwright --version
       hostwright capabilities [--json|--output text|json]
       hostwright paths [--state-db <path>] [--json|--output text|json]
+      hostwright state integrity [--state-db <path>] [--json|--output text|json]
+      hostwright state backup [--state-db <path>] [--json|--output text|json]
+      hostwright state backups [--state-db <path>] [--json|--output text|json]
+      hostwright state restore --backup <id> --dry-run [--state-db <path>] [--json|--output text|json]
+      hostwright state restore --backup <id> --confirm-restore <token> [--state-db <path>] [--json|--output text|json]
+      hostwright state repair --dry-run [--state-db <path>] [--json|--output text|json]
+      hostwright state repair --confirm-repair <token> [--state-db <path>] [--json|--output text|json]
+      hostwright state recover [--state-db <path>] [--json|--output text|json]
       hostwright migrate preview <path> [--json|--output text|json]
       hostwright init
       hostwright import-stack <path> [--output text|json] [--team-profile <path>]
@@ -229,6 +246,11 @@ public enum HostwrightCLI {
 
     Most commands are read-only. capabilities reports tested maturity without probing or mutating the host.
     paths reports the resolved macOS-native layout and override origin without creating files.
+    state integrity performs SQLite, foreign-key, migration, schema-object, and logical contract checks.
+    state backup uses SQLite's online backup API and publishes only a verified private catalog entry.
+    state restore and repair require a dry-run token bound to the exact state fingerprint and planned effects.
+    state repair clears only reconstructible runtime-observation and health projections; it never invents authoritative state.
+    state recover completes or rolls back a journaled maintenance operation before ordinary state access resumes.
     migrate preview validates and prints an in-memory v1-to-v2 conversion; it never writes the source file.
     init writes hostwright.yaml only when absent.
     import-stack reads a narrow safe stack-file subset and prints converted hostwright.yaml; it does not write files, observe runtime, or imply Compose parity.
@@ -236,7 +258,7 @@ public enum HostwrightCLI {
     Apply can execute exactly one confirmed createMissingService or restart-policy-allowed startManagedService action through RuntimeAdapter.
     Cleanup deletes only exact cleanup-eligible Hostwright-owned stopped/created/exited containers after dry-run token confirmation.
     Diagnostics writes a local redacted JSON bundle only. It never uploads telemetry.
-    JSON output is supported for capabilities, paths, migrate preview, import-stack, plan, status, events, recovery, extension check, doctor, and errors when --json or --output json is present.
+    JSON output is supported for capabilities, paths, migrate preview, every state subcommand, import-stack, plan, status, events, recovery, extension check, doctor, and errors when --json or --output json is present.
     Team profiles and approvals are loaded only from explicit local paths. Profile-aware mutations require an approval bound to the exact profile, manifest, and plan or cleanup token.
     Benchmark runs are explicit local hardware evidence. They refuse image pulls and broad cleanup, use bounded disposable Hostwright-owned resources, and write only the requested non-existing report path.
     Extension check executes one reviewed-local protocol handshake from explicit absolute paths. The protocol grants no Hostwright capability, but the reviewed executable still has the invoking macOS account's ambient privileges; it is not sandboxed.
@@ -245,6 +267,9 @@ public enum HostwrightCLI {
       hostwright plan --output json
       hostwright import-stack compose.yaml --output json
       hostwright paths --json
+      hostwright state integrity --json
+      hostwright state backup --json
+      hostwright state backups --json
       hostwright status --output json
       hostwright events --project api-local --output json
       hostwright recovery --output json

@@ -8,6 +8,14 @@ The current CLI provides a dependency-free `hostwright` command surface with nar
 hostwright --version
 hostwright capabilities [--json | --output text|json]
 hostwright paths [--state-db <path>] [--json | --output text|json]
+hostwright state integrity [--state-db <path>] [--json | --output text|json]
+hostwright state backup [--state-db <path>] [--json | --output text|json]
+hostwright state backups [--state-db <path>] [--json | --output text|json]
+hostwright state restore --backup <id> --dry-run [--state-db <path>] [--json | --output text|json]
+hostwright state restore --backup <id> --confirm-restore <token> [--state-db <path>] [--json | --output text|json]
+hostwright state repair --dry-run [--state-db <path>] [--json | --output text|json]
+hostwright state repair --confirm-repair <token> [--state-db <path>] [--json | --output text|json]
+hostwright state recover [--state-db <path>] [--json | --output text|json]
 hostwright migrate preview <path> [--json | --output text|json]
 hostwright init
 hostwright import-stack <path> [--output text|json] [--team-profile <path>]
@@ -33,7 +41,7 @@ hostwrightd --foreground --config <hostwright.yaml> [--state-db <path>] [options
 
 Text output is the default for every command.
 
-`capabilities`, `paths`, `migrate preview`, `import-stack`, `plan`, `status`, `events`, `recovery`, `extension check`, and `doctor` also accept JSON output. `capabilities`, `paths`, and `migrate preview` accept the convenience spelling `--json`. JSON output is intended for local scripts, conformance checks, and tests. It does not change command behavior, state writes, runtime observation, or mutation gates.
+`capabilities`, `paths`, every `state` subcommand, `migrate preview`, `import-stack`, `plan`, `status`, `events`, `recovery`, `extension check`, and `doctor` also accept JSON output. `capabilities`, `paths`, every `state` subcommand, and `migrate preview` accept the convenience spelling `--json`. JSON output is intended for local scripts, conformance checks, and tests. It does not weaken mutation gates.
 
 When JSON mode is requested and the CLI can classify the failure, stderr uses this envelope:
 
@@ -70,10 +78,10 @@ The API deliberately excludes apply, cleanup, logs, diagnostics export, benchmar
 | `0` | Success | All commands |
 | `64` | Usage | Unsupported flags, missing arguments, refused overwrite, or local non-manifest file I/O failure |
 | `65` | Validation | Missing/unreadable manifest, manifest/profile/approval/extension declaration validation, and compatibility failures |
-| `66` | State unavailable | Selected SQLite state path could not be resolved, opened, migrated, verified, locked, or read |
+| `66` | State unavailable | Selected SQLite state path could not be resolved, opened, migrated, verified, locked, read, backed up, restored, repaired, or recovered; integrity also returns 66 for `degraded`/`unrecoverable` while preserving its report on stdout |
 | `69` | Runtime unavailable or evidence blocked | Runtime observation/mutation unavailable, or benchmark prerequisites/dimensions remain blocked |
-| `70` | Confirmation mismatch | Plan, cleanup token, approval scope, or approval hash bindings do not match the current operation |
-| `71` | Unsafe operation | Planner/apply safety policy or reviewed-local extension policy blocked execution |
+| `70` | Confirmation mismatch | Plan, cleanup, state restore/repair, approval scope, or approval hash bindings do not match current state |
+| `71` | Unsafe operation | Planner/apply policy, state-repair authority boundary, or reviewed-local extension policy blocked execution |
 | `72` | Partial failure | Cleanup completed with mixed success/failure, benchmark command/identity/cleanup evidence failed, or an extension handshake process/protocol failed |
 
 ## `hostwright --version`
@@ -99,6 +107,54 @@ Resolves and reports the macOS local layout without creating files. Output inclu
 Readiness is one of `ready`, `needs-creation`, `migration-required`, `blocked-conflict`, or `blocked-policy`. Existing path components and migration evidence are opened only for non-mutating validation. Unsafe prospective parents, invalid/ambiguous journals, sidecars, and incompatible legacy ledgers report `blocked-policy`; a valid pending journal reports `migration-required`. `blocked-policy` JSON includes a redacted `policyError`.
 
 State precedence is `--state-db`, then `HOSTWRIGHT_STATE_DB`, then the Application Support default. See [Local Paths, Permissions, and Legacy Migration](local-paths.md) for the complete contract.
+
+## `hostwright state ...`
+
+Provides the complete local state-maintenance surface. These commands never inspect or mutate Apple container runtime resources.
+
+### `state integrity`
+
+Runs bounded SQLite structure, foreign-key, migration-ledger/checksum, required-table, authoritative-record, runtime-observation projection, and health-projection checks. JSON is a versioned `stateIntegrityReport` with `health` equal to `healthy`, `degraded`, or `unrecoverable`, plus the database digest/size, every check, affected-row counts, repairable projection tables, and recommended action.
+
+`healthy` exits 0. `degraded` and `unrecoverable` return the complete report on stdout, a standard `HW-STATE-001` envelope on stderr, and exit 66 so shell gates cannot mistake damage for success. The command is read-only.
+
+### `state backup` and `state backups`
+
+`state backup` uses SQLite's online backup API against the already-migrated selected database. It publishes only after the copied database passes digest, size, schema, SQLite, foreign-key, and logical verification. JSON returns a `stateBackupRecord` containing the opaque `backupID`; do not construct IDs manually.
+
+`state backups` rescans the private catalog and returns every entry. A record with `restorable: false` is evidence, not a restore candidate. Tampered, oversized, hard-linked, strict-JSON-invalid, rollback-only, and incomplete entries remain visible with a verification reason.
+
+The Application Support default stores catalogs under `~/Library/Application Support/Hostwright/backups`. An explicit/environment-selected database uses an identity-derived hidden backup directory beside that database. Catalog directories are `0700`; manifests and databases are `0600`.
+
+### `state restore`
+
+Restore always starts with a dry-run:
+
+```bash
+hostwright state restore --backup backup-... --dry-run --json
+hostwright state restore --backup backup-... --confirm-restore <confirmationToken> --json
+```
+
+The token binds the selected path, backup ID/digest, and current database digest/device/inode. Confirmation after any state change returns `HW-CLI-003`/70. Confirmed restore revalidates under the exclusive state fence, makes a verified pre-restore backup when possible, atomically publishes a same-parent verified stage, clears stale runtime/health projections, appends a maintenance event, and verifies the result. An unreadable original is preserved at the returned `quarantinedDatabasePath`.
+
+Restore refuses source `-wal`, `-shm`, or `-journal` sidecars because filesystem replacement would otherwise be ambiguous. Stop/checkpoint any non-Hostwright SQLite writer first.
+
+### `state repair`
+
+Repair also requires dry-run and confirmation:
+
+```bash
+hostwright state repair --dry-run --json
+hostwright state repair --confirm-repair <confirmationToken> --json
+```
+
+It is available only when integrity is `degraded` exclusively in `observed_services`, `observed_runtime_snapshots`, or `health_check_results`. Dry-run returns exact table row counts. Confirmed repair creates a verified rollback-only pre-repair snapshot, deletes only those declared reconstructible projections in one transaction, appends an event, and requires a final `healthy` report. SQLite, migration, schema, foreign-key, desired-state, ownership, operation, restart, or audit damage is never auto-repaired.
+
+### `state recover`
+
+Resolves a pending restore/repair maintenance journal under the exclusive state fence. Depending on the durable checkpoint, it removes an unpublished stage, restores the displaced original, verifies and finalizes the published replacement, or relies on SQLite transaction rollback. Invalid/tampered journal fields or filesystem state fail closed and preserve evidence. With no journal, the command is idempotent and returns `recovered: false` plus current health.
+
+Do not confuse `hostwright state recover` with `hostwright recovery`: the former repairs the state-database maintenance saga; the latter is read-only inspection of workload operation recovery records.
 
 ## `hostwright migrate preview <path> [--json | --output text|json]`
 

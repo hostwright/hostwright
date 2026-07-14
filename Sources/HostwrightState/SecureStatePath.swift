@@ -39,6 +39,16 @@ struct SecureStatePathManager {
         try ensureDirectory(layout.runtimeDirectory, privateLeaf: true)
     }
 
+    func prepareStateAccessFoundation(_ configuration: StateStoreConfiguration) throws {
+        if let resolution = configuration.localPathResolution,
+           resolution.usesApplicationSupportState {
+            try validateProspective(configuration: configuration)
+            try prepareDefaultLayout(resolution.layout)
+            return
+        }
+        try validateDirectoryChain(databaseParent(configuration.databasePath))
+    }
+
     func validateProspective(configuration: StateStoreConfiguration) throws {
         let hasPendingMigrationJournal: Bool
         if let resolution = configuration.localPathResolution,
@@ -54,6 +64,91 @@ struct SecureStatePathManager {
         if pathExists(configuration.databasePath), !hasPendingMigrationJournal {
             _ = try validateRegularFile(configuration.databasePath, requirePrivateMode: true)
         }
+    }
+
+    func ensurePrivateMaintenanceDirectory(_ path: String) throws {
+        let parent = try databaseParent(path)
+        try validateDirectoryChain(parent)
+        try ensureDirectory(path, privateLeaf: true)
+    }
+
+    func validatePrivateMaintenanceDirectory(_ path: String) throws {
+        try validateDirectoryChain(path)
+        var metadata = stat()
+        guard lstat(path, &metadata) == 0 else {
+            throw pathError(path, String(cString: strerror(errno)))
+        }
+        try validateDirectoryMetadata(metadata, path: path, requirePrivateMode: true)
+    }
+
+    func createExclusiveSensitiveFile(_ path: String) throws {
+        let parent = try databaseParent(path)
+        try validateDirectoryChain(parent)
+        guard !pathExists(path) else {
+            throw pathError(path, "refused to overwrite an existing sensitive file")
+        }
+        try prepareDatabaseFile(path, createIfNeeded: true)
+    }
+
+    func validateSensitiveRegularFile(_ path: String) throws {
+        _ = try validateRegularFile(path, requirePrivateMode: true)
+    }
+
+    func itemExists(_ path: String) -> Bool {
+        pathExists(path)
+    }
+
+    func readPrivateFile(_ path: String, maximumBytes: Int) throws -> Data {
+        try readSensitiveFile(path, maximumBytes: maximumBytes)
+    }
+
+    func writePrivateJSON<T: Encodable>(_ value: T, to path: String) throws {
+        try writeSensitiveJSON(value, to: path)
+    }
+
+    func replacePrivateJSON<T: Encodable>(_ value: T, at path: String) throws {
+        if pathExists(path) {
+            _ = try validateRegularFile(path, requirePrivateMode: true)
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        let data = try encoder.encode(value) + Data("\n".utf8)
+        let temporary = "\(path).tmp.\(UUID().uuidString)"
+        let descriptor = open(
+            temporary,
+            O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC,
+            S_IRUSR | S_IWUSR
+        )
+        guard descriptor >= 0 else {
+            throw pathError(temporary, String(cString: strerror(errno)))
+        }
+        var succeeded = false
+        defer {
+            close(descriptor)
+            if !succeeded { unlink(temporary) }
+        }
+        guard fchmod(descriptor, S_IRUSR | S_IWUSR) == 0 else {
+            throw pathError(temporary, String(cString: strerror(errno)))
+        }
+        _ = try validateDescriptor(
+            descriptor,
+            path: temporary,
+            requirePrivateMode: true,
+            regularFile: true
+        )
+        try writeAll(data, descriptor: descriptor, path: temporary)
+        guard fsync(descriptor) == 0 else {
+            throw pathError(temporary, String(cString: strerror(errno)))
+        }
+        guard rename(temporary, path) == 0 else {
+            throw pathError(path, String(cString: strerror(errno)))
+        }
+        succeeded = true
+        try synchronizeDirectory((path as NSString).deletingLastPathComponent)
+    }
+
+    func syncDirectory(_ path: String) throws {
+        try synchronizeDirectory(path)
     }
 
     private func prepareDefaultLayout(_ layout: HostwrightLocalPathLayout) throws {

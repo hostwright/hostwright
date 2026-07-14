@@ -98,4 +98,4 @@ No package channel is called supported until clean-Mac evidence covers Gatekeepe
 
 All production installer, distribution, extension, tool-inspection, and Apple-runtime subprocesses must use the [secure process execution boundary](process-execution.md). Phase 02 issue #116 implements that shared boundary; it does not by itself make the still-unsigned developer distribution a trusted install channel.
 
-Phase 02 issue #113 implements secure local defaults and legacy-state migration. It does not claim the backup/restore, deeper SQLite repair, package upgrade/rollback, installer, signing, or notarization work owned by the remaining Phase 02 issues.
+Phase 02 issue #113 implements secure local defaults and legacy-state migration. Issue #114 adds managed integrity, online backup, catalog verification, confirmation-bound restore, projection-only repair, fencing, and recovery. Package upgrade/rollback, installer, signing, notarization, and trusted distribution remain owned by the other Phase 02 issues.

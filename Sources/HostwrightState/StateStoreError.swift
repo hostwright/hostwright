@@ -6,6 +6,7 @@ public enum StateStoreError: Error, Equatable, CustomStringConvertible, Sendable
     case closeFailed(path: String, message: String)
     case databaseLocked(path: String, message: String)
     case corruptDatabase(path: String, message: String)
+    case maintenanceRecoveryRequired(journalPath: String)
     case executeFailed(message: String)
     case prepareFailed(sql: String, message: String)
     case bindFailed(index: Int32, message: String)
@@ -32,6 +33,8 @@ public enum StateStoreError: Error, Equatable, CustomStringConvertible, Sendable
             return "State database at \(path) is locked by another process: \(message)"
         case .corruptDatabase(let path, let message):
             return "State database at \(path) appears corrupt or is not a SQLite database: \(message)"
+        case .maintenanceRecoveryRequired(let journalPath):
+            return "State maintenance recovery is required before opening the database. Run 'hostwright state recover'; pending journal: \(journalPath)"
         case .executeFailed(let message):
             return "SQLite execution failed: \(message)"
         case .prepareFailed(let sql, let message):

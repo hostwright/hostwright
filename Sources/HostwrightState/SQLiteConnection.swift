@@ -125,6 +125,96 @@ final class SQLiteConnection {
         }
     }
 
+    func onlineBackup(
+        to destinationPath: String,
+        destinationMaximumPages: Int32? = nil,
+        shouldCancel: () -> Bool = { false }
+    ) throws {
+        guard let sourceHandle = handle else {
+            throw StateMaintenanceError.sqlite(message: "the source database is closed")
+        }
+        let destination = try SQLiteConnection(
+            path: destinationPath,
+            createIfNeeded: false,
+            readOnly: false
+        )
+        defer { try? destination.close() }
+        if let destinationMaximumPages {
+            guard destinationMaximumPages > 0 else {
+                throw StateMaintenanceError.sqlite(message: "destination page limit must be positive")
+            }
+            try destination.execute("PRAGMA max_page_count = \(destinationMaximumPages)")
+        }
+        guard let destinationHandle = destination.handle else {
+            throw StateMaintenanceError.sqlite(message: "the destination database is closed")
+        }
+        guard let backup = sqlite3_backup_init(
+            destinationHandle,
+            "main",
+            sourceHandle,
+            "main"
+        ) else {
+            throw StateMaintenanceError.sqlite(message: destination.lastErrorMessage)
+        }
+
+        var stepResult: Int32 = SQLITE_OK
+        var busyAttempts = 0
+        var cancellationRequested = false
+        while true {
+            if shouldCancel() {
+                cancellationRequested = true
+                break
+            }
+            stepResult = sqlite3_backup_step(backup, 128)
+            switch stepResult {
+            case SQLITE_DONE:
+                break
+            case SQLITE_OK:
+                continue
+            case SQLITE_BUSY, SQLITE_LOCKED:
+                busyAttempts += 1
+                guard busyAttempts <= 25 else { break }
+                sqlite3_sleep(10)
+                continue
+            default:
+                break
+            }
+            break
+        }
+
+        let finishResult = sqlite3_backup_finish(backup)
+        if cancellationRequested {
+            throw StateMaintenanceError.cancelled
+        }
+        guard stepResult == SQLITE_DONE, finishResult == SQLITE_OK else {
+            let code = stepResult == SQLITE_DONE ? finishResult : stepResult
+            let message = destination.lastErrorMessage
+            if code == SQLITE_BUSY || code == SQLITE_LOCKED {
+                throw StateStoreError.databaseLocked(path: path, message: message)
+            }
+            if code == SQLITE_CORRUPT || code == SQLITE_NOTADB {
+                throw StateStoreError.corruptDatabase(path: path, message: message)
+            }
+            throw StateMaintenanceError.sqlite(
+                message: "online backup failed with SQLite code \(code): \(message)"
+            )
+        }
+        let journalMode = try destination.query("PRAGMA journal_mode = DELETE")
+            .first?.first ?? nil
+        guard journalMode?.lowercased() == "delete" else {
+            throw StateMaintenanceError.sqlite(
+                message: "the copied database could not be normalized to sidecar-free DELETE journal mode"
+            )
+        }
+        try destination.close()
+        for suffix in ["-wal", "-shm", "-journal"] {
+            let sidecar = destinationPath + suffix
+            if StateMaintenanceFileSupport.exists(sidecar) {
+                try StateMaintenanceFileSupport.unlinkSensitiveFile(sidecar)
+            }
+        }
+    }
+
     private func prepare(_ sql: String) throws -> SQLiteStatement {
         guard let handle else {
             throw StateStoreError.prepareFailed(sql: sql, message: "SQLite database is closed.")

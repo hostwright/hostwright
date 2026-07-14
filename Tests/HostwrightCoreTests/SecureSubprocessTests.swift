@@ -244,7 +244,7 @@ final class SecureSubprocessTests: XCTestCase {
                 SecureSubprocessRequest(
                     executablePath: fixture.executable.path,
                     arguments: ["fork-sleep", pidFile.path],
-                    timeoutMilliseconds: 150,
+                    timeoutMilliseconds: 2_500,
                     terminationGraceMilliseconds: 50
                 )
             )

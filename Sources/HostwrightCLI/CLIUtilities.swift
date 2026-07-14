@@ -300,6 +300,12 @@ enum CLIJSON {
         ])
     }
 
+    static func codable<T: Encodable>(_ value: T) -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        return String(data: try! encoder.encode(value), encoding: .utf8)! + "\n"
+    }
+
     static func capabilities(_ report: HostwrightCapabilityReport) -> String {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]

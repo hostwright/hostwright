@@ -43,13 +43,15 @@ swift run hostwright --version
 swift run hostwright capabilities --json
 ```
 
-Expected development version:
+The two preserved Phase 02 qualification commits report these exact versions:
 
 ```text
-0.0.2-dev
+0.0.2-dev.1
+0.0.2-dev.2
 ```
 
-Do not check out or tag `v0.0.2` until the Phase 15 GA gate has passed. Phase 02 may publish one immutable unsupported `v0.0.2-dev` qualification prerelease solely for real signed-byte and vendor-tap evidence; it is not promoted or presented as a supported release. Historical `v0.1.0-alpha.1` documentation is retained as an immutable project record and is not the current installation target.
+The current exact value is also recorded in `contracts/v0.0.2/versions.json`.
+Do not check out or tag `v0.0.2` until the Phase 15 GA gate has passed. Phase 02 may publish the two immutable unsupported `v0.0.2-dev.1` and `v0.0.2-dev.2` qualification prereleases solely for real signed-byte and vendor-tap upgrade evidence; neither is promoted or presented as a supported release. Historical `v0.1.0-alpha.1` documentation is retained as an immutable project record and is not the current installation target.
 
 ## Development Executables
 
@@ -80,7 +82,7 @@ hostwright-dist homebrew-formula ...
 
 The generated Homebrew formula is accepted only for the exact immutable `https://github.com/hostwright/hostwright/releases/download/<tag>/<archive>` URL from the verified release manifest. Local tests run the rendered formula through real Homebrew Ruby and formula-style checks.
 
-That machinery is implemented, but the supported channel is still unavailable: this repository has no credentialed passing trusted-release run, no published signed artifact, and no `hostwright/homebrew-tap` repository. The current machine reports no usable Developer ID identities. Those are failed gate prerequisites, not skipped successes. Issues #111, #112, and #119 remain open until real signing/notarization, published-byte verification, vendor-tap install, and clean-Mac lifecycle evidence pass.
+That machinery is implemented, but the supported channel is still unavailable: this repository has no credentialed passing trusted-release run or published signed artifact. The `hostwright/homebrew-tap` repository exists but cannot publish a qualified formula until those immutable artifacts exist. The current machine reports no usable Developer ID identities. Those are failed gate prerequisites, not skipped successes. Issues #111, #112, and #119 remain open until real signing/notarization, published-byte verification, vendor-tap install, and clean-Mac lifecycle evidence pass.
 
 ## State and Installed Lifecycle Reality
 
@@ -97,7 +99,7 @@ The complete precedence, `0700`/`0600` policy, migration failure behavior, and r
 
 `hostwright-dist` now implements install, strict upgrade, same-generation repair, status, explicit legacy adoption, interrupted-operation recovery, one-generation verified rollback, and ownership-scoped uninstall for a verifier-produced artifact at an explicit existing prefix. Every lifecycle command uses structured JSON. Upgrade snapshots and migrates a bound compatible state database; rollback restores the exact pre-upgrade snapshot when one was retained.
 
-This is installed-lifecycle behavior, not an available package channel. The prefix is always explicit; no Homebrew tap, public signed archive, or supported `.pkg` install is available yet. The lifecycle does not create/register/autostart a LaunchAgent, create or manage an Apple Installer receipt, edit `PATH` or shell profiles, or mutate Apple container workloads. It stops and restores only an exact existing Homebrew launchd record bound to this prefix; an unmanaged installed `hostwrightd` is refused instead of killed or adopted.
+This is installed-lifecycle behavior, not an available package channel. The prefix is always explicit; no published Homebrew formula, public signed archive, or supported `.pkg` install is available yet. The `.pkg` implementation stages its payload only in the private root-owned `/Library/Application Support/Hostwright/InstallerPayload` directory. Its `postinstall` entrypoint runs elevated `hostwright-dist package-apply`, which verifies the exact `dev.hostwright.cli` receipt/version, staged manifest and digests, executable signatures against the trusted release's exact Team ID, package-origin status, and `/usr/local` prefix before using the existing durable install/upgrade/repair lifecycle. It does not create/register/autostart a LaunchAgent, edit `PATH` or shell profiles, or mutate Apple container workloads. It stops and restores only an exact existing Homebrew launchd record bound to this prefix; an unmanaged installed `hostwrightd` is refused instead of killed or adopted.
 
 Uninstall offers two exact choices:
 
@@ -105,6 +107,8 @@ Uninstall offers two exact choices:
 2. `remove` requires a current plan token and removes the verified bound SQLite database and existing SQLite sidecars after taking a recovery snapshot.
 
 Neither choice removes backup catalogs, configuration, caches, logs, unrelated prefix content, or Apple container resources. Modified, linked, symlinked, wrong-owner, or otherwise ambiguous owned paths fail closed. See [Installed Distribution Lifecycle](installed-lifecycle.md) for commands, checkpoints, recovery, rollback, legacy adoption, service limitations, and troubleshooting.
+
+A package-owned installation uses elevated `hostwright-dist package-uninstall` for the same preserve/remove choice. It re-verifies lifecycle ownership, the receipt, and the staged payload; after the uninstall transaction commits, it forgets only `dev.hostwright.cli` and removes only verified staging content. A bounded pending-cleanup marker lets `hostwright-dist recover --prefix /usr/local --output json` finish an interrupted receipt cleanup. Generic archive upgrade or uninstall is refused for a package-owned generation.
 
 A source checkout remains separate from an installed prefix. Deleting the checkout does not run `hostwright-dist uninstall` and does not remove Application Support data or runtime resources.
 
@@ -114,4 +118,4 @@ No package channel is called supported until clean-Mac evidence covers Gatekeepe
 
 All production installer, distribution, extension, tool-inspection, and Apple-runtime subprocesses use the [secure process execution boundary](process-execution.md). The trusted distribution tool propagates one cancellation token through identity lookup, both clean builds, archive/package operations, notarization, verification, install lifecycle, and cleanup; SIGINT/SIGTERM enter the same path. Phase 02 issue #116 implements that shared boundary, but the release pipeline still needs credentialed live evidence before any install channel is supported.
 
-Phase 02 issue #113 implements secure local defaults and legacy-state migration. Issue #114 adds managed integrity, online backup, catalog verification, confirmation-bound restore, projection-only repair, fencing, and recovery. Issue #118 adds the explicit-prefix installed lifecycle documented above. The trusted artifact/formula implementation is recorded in [devlog 0044](../devlog/0044-trusted-release-and-homebrew-foundation.md). Real credentials, vendor-tap publication, Apple Installer/LaunchAgent integration, reboot behavior, and clean-Mac package-channel qualification remain open evidence; issues #111, #112, and #119 are not satisfied by developer-artifact lifecycle tests.
+Phase 02 issue #113 implements secure local defaults and legacy-state migration. Issue #114 adds managed integrity, online backup, catalog verification, confirmation-bound restore, projection-only repair, fencing, and recovery. Issue #118 adds the explicit-prefix and Apple Installer lifecycle documented above. The trusted artifact/formula implementation is recorded in [devlog 0044](../devlog/0044-trusted-release-and-homebrew-foundation.md). Real credentials, vendor-tap publication, signed Apple Installer/reboot execution, and clean-Mac package-channel qualification remain open evidence; issues #111, #112, and #119 are not satisfied by developer-artifact lifecycle tests.

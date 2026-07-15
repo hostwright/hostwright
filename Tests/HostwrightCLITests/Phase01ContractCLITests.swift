@@ -22,7 +22,7 @@ final class Phase01ContractCLITests: XCTestCase {
         XCTAssertEqual(first.standardError, "")
         XCTAssertEqual(first.standardOutput, second.standardOutput)
         let report = try JSONDecoder().decode(HostwrightCapabilityReport.self, from: Data(first.standardOutput.utf8))
-        XCTAssertEqual(report.productVersion, "0.0.2-dev")
+        XCTAssertEqual(report.productVersion, HostwrightIdentity.version)
         XCTAssertEqual(report.releaseTarget, "v0.0.2")
         XCTAssertFalse(report.capabilities.isEmpty)
     }

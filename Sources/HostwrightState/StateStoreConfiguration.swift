@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import HostwrightCore
 
@@ -32,14 +33,46 @@ public struct StateStoreConfiguration: Equatable, Sendable {
         }
     }
 
-    func prepare(createIfNeeded: Bool) throws {
+    @discardableResult
+    func prepare(createIfNeeded: Bool) throws -> FileIdentity? {
         try validate()
         do {
-            try SecureStatePathManager().prepare(configuration: self, createIfNeeded: createIfNeeded)
+            return try SecureStatePathManager().prepare(
+                configuration: self,
+                createIfNeeded: createIfNeeded
+            )
         } catch let error as StateStoreError {
             throw error
         } catch {
             throw StateStoreError.pathPolicyViolation(path: databasePath, message: String(describing: error))
+        }
+    }
+
+    func validateSQLiteFileSet() throws -> FileIdentity? {
+        try validate()
+        do {
+            return try SecureStatePathManager().validateSQLiteFileSet(databasePath)
+        } catch let error as StateStoreError {
+            throw error
+        } catch {
+            throw StateStoreError.pathPolicyViolation(
+                path: databasePath,
+                message: String(describing: error)
+            )
+        }
+    }
+
+    func prepareStateAccessFoundation() throws {
+        try validate()
+        do {
+            try SecureStatePathManager().prepareStateAccessFoundation(self)
+        } catch let error as StateStoreError {
+            throw error
+        } catch {
+            throw StateStoreError.pathPolicyViolation(
+                path: databasePath,
+                message: String(describing: error)
+            )
         }
     }
 
@@ -71,5 +104,45 @@ public struct StateStoreConfiguration: Equatable, Sendable {
                 message: String(describing: error)
             )
         }
+    }
+
+    public func maintenancePaths() throws -> StateMaintenancePaths {
+        try validate()
+        if let resolution = localPathResolution, resolution.usesApplicationSupportState {
+            return StateMaintenancePaths(
+                backupDirectory: resolution.layout.backupsDirectory,
+                journalPath: URL(
+                    fileURLWithPath: resolution.layout.metadataDirectory,
+                    isDirectory: true
+                ).appendingPathComponent("state-maintenance-v1.json").path,
+                accessLockPath: URL(
+                    fileURLWithPath: resolution.layout.metadataDirectory,
+                    isDirectory: true
+                ).appendingPathComponent("state-access-v1.lock").path
+            )
+        }
+
+        let parent = (databasePath as NSString).deletingLastPathComponent
+        guard !parent.isEmpty, parent != databasePath else {
+            throw StateStoreError.pathPolicyViolation(
+                path: databasePath,
+                message: "a database filename beneath a secure parent directory is required"
+            )
+        }
+        let digest = SHA256.hash(data: Data(databasePath.utf8))
+            .prefix(8)
+            .map { String(format: "%02x", $0) }
+            .joined()
+        return StateMaintenancePaths(
+            backupDirectory: URL(fileURLWithPath: parent, isDirectory: true)
+                .appendingPathComponent(".hostwright-\(digest)-backups", isDirectory: true)
+                .path,
+            journalPath: URL(fileURLWithPath: parent, isDirectory: true)
+                .appendingPathComponent(".hostwright-\(digest)-maintenance-v1.json")
+                .path,
+            accessLockPath: URL(fileURLWithPath: parent, isDirectory: true)
+                .appendingPathComponent(".hostwright-\(digest)-access-v1.lock")
+                .path
+        )
     }
 }

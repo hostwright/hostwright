@@ -7,6 +7,19 @@ final class DistributionModelsTests: XCTestCase {
     private let commit = String(repeating: "a", count: 40)
     private let digest = String(repeating: "b", count: 64)
 
+    func testPostCommitCleanupReportsPendingWithoutTurningCommittedMutationIntoFailure() {
+        let extraction = URL(fileURLWithPath: "/tmp/hostwright-dist-lifecycle-extract-test")
+        let pending = DistributionPostCommitCleanup.removeOwnedTemporaryItem(extraction) { _ in
+            throw CocoaError(.fileWriteNoPermission)
+        }
+        XCTAssertEqual(pending.status, .pending)
+        XCTAssertEqual(pending.pendingPaths, [extraction.path])
+
+        let complete = DistributionPostCommitCleanup.removeOwnedTemporaryItem(extraction) { _ in }
+        XCTAssertEqual(complete.status, .complete)
+        XCTAssertEqual(complete.pendingPaths, [])
+    }
+
     func testManifestRequiresExactSafePayloadLayout() throws {
         let manifest = validManifest()
         XCTAssertNoThrow(try manifest.validate())
@@ -56,6 +69,150 @@ final class DistributionModelsTests: XCTestCase {
         XCTAssertFalse(DistributionPathPolicy.isSafeRelativePath("bin/host\nwright"))
         XCTAssertTrue(DistributionPathPolicy.isSafeFileName("manifest.json"))
         XCTAssertFalse(DistributionPathPolicy.isSafeFileName("nested/manifest.json"))
+    }
+
+    func testSemanticVersionOrderingAndLifecycleTransitionPolicyFailClosed() throws {
+        let prior = try DistributionSemanticVersion(parsing: "0.0.1")
+        let candidate = try DistributionSemanticVersion(parsing: "0.0.2-dev")
+        let release = try DistributionSemanticVersion(parsing: "0.0.2")
+        let historicalAlpha = try DistributionSemanticVersion(parsing: "0.1.0-alpha.1")
+
+        XCTAssertLessThan(prior, candidate)
+        XCTAssertLessThan(candidate, release)
+        XCTAssertLessThan(release, historicalAlpha)
+        XCTAssertEqual(
+            try DistributionVersionTransition.classify(
+                installedVersion: prior.rawValue,
+                installedCommit: String(repeating: "a", count: 40),
+                candidateVersion: candidate.rawValue,
+                candidateCommit: String(repeating: "b", count: 40)
+            ),
+            .upgrade
+        )
+        XCTAssertEqual(
+            try DistributionVersionTransition.classify(
+                installedVersion: candidate.rawValue,
+                installedCommit: String(repeating: "a", count: 40),
+                candidateVersion: candidate.rawValue,
+                candidateCommit: String(repeating: "a", count: 40)
+            ),
+            .repair
+        )
+
+        XCTAssertThrowsError(
+            try DistributionVersionTransition.classify(
+                installedVersion: historicalAlpha.rawValue,
+                installedCommit: String(repeating: "a", count: 40),
+                candidateVersion: release.rawValue,
+                candidateCommit: String(repeating: "b", count: 40)
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? DistributionError,
+                .downgradeRefused(installed: "0.1.0-alpha.1", candidate: "0.0.2")
+            )
+        }
+        XCTAssertThrowsError(
+            try DistributionVersionTransition.classify(
+                installedVersion: candidate.rawValue,
+                installedCommit: String(repeating: "a", count: 40),
+                candidateVersion: candidate.rawValue,
+                candidateCommit: String(repeating: "b", count: 40)
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? DistributionError,
+                .versionConflict("Version 0.0.2-dev is already installed from a different source commit.")
+            )
+        }
+
+        for invalid in [
+            "v0.0.2", "00.0.2", "0.00.2", "0.0.02", "0.0", "0.0.2-01", "0.0.2+", "0.0.2\n"
+        ] {
+            XCTAssertThrowsError(try DistributionSemanticVersion(parsing: invalid), invalid)
+        }
+    }
+
+    func testGeneratedVersionPairsPreserveStrictTransitionProperties() throws {
+        let versions = [
+            "0.0.0-alpha", "0.0.0", "0.0.1-alpha.1", "0.0.1",
+            "0.0.2-dev", "0.0.2", "1.0.0"
+        ]
+        let installedCommit = String(repeating: "a", count: 40)
+        let candidateCommit = String(repeating: "b", count: 40)
+
+        for (installedIndex, installedVersion) in versions.enumerated() {
+            XCTAssertEqual(
+                try DistributionVersionTransition.classify(
+                    installedVersion: installedVersion,
+                    installedCommit: installedCommit,
+                    candidateVersion: installedVersion,
+                    candidateCommit: installedCommit
+                ),
+                .repair
+            )
+            XCTAssertThrowsError(
+                try DistributionVersionTransition.classify(
+                    installedVersion: installedVersion,
+                    installedCommit: installedCommit,
+                    candidateVersion: installedVersion,
+                    candidateCommit: candidateCommit
+                )
+            )
+
+            for (candidateIndex, candidateVersion) in versions.enumerated()
+                where candidateIndex != installedIndex {
+                if installedIndex < candidateIndex {
+                    XCTAssertEqual(
+                        try DistributionVersionTransition.classify(
+                            installedVersion: installedVersion,
+                            installedCommit: installedCommit,
+                            candidateVersion: candidateVersion,
+                            candidateCommit: candidateCommit
+                        ),
+                        .upgrade
+                    )
+                } else {
+                    XCTAssertThrowsError(
+                        try DistributionVersionTransition.classify(
+                            installedVersion: installedVersion,
+                            installedCommit: installedCommit,
+                            candidateVersion: candidateVersion,
+                            candidateCommit: candidateCommit
+                        )
+                    ) { error in
+                        guard case .downgradeRefused = error as? DistributionError else {
+                            return XCTFail("Expected downgrade refusal, received \(error)")
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    func testDistributionJSONRejectsUnknownAndNoncanonicalFields() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("hostwright-distribution-json-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("manifest.json")
+        let canonical = try DistributionJSON.encode(validManifest())
+        try canonical.write(to: url, options: .withoutOverwriting)
+        XCTAssertNoThrow(try DistributionJSON.decode(DistributionArtifactManifest.self, from: url))
+
+        let text = try XCTUnwrap(String(data: canonical, encoding: .utf8))
+        let unknown = text.replacingOccurrences(
+            of: "{\n",
+            with: "{\n  \"unexpected\" : true,\n",
+            options: .anchored
+        )
+        try Data(unknown.utf8).write(to: url, options: .atomic)
+        XCTAssertThrowsError(try DistributionJSON.decode(DistributionArtifactManifest.self, from: url)) {
+            XCTAssertEqual(
+                $0 as? DistributionError,
+                .invalidArtifact("JSON input is not the exact canonical schema encoding")
+            )
+        }
     }
 
     func testSPDXAndProvenanceMustBindExactArchiveAndSource() throws {
@@ -139,7 +296,7 @@ final class DistributionModelsTests: XCTestCase {
                     buildType: "urn:hostwright:buildtype:swiftpm-archive:v1",
                     externalParameters: ProvenanceExternalParameters(
                         configuration: "release",
-                        products: ["hostwright", "hostwrightd"],
+                        products: DistributionLayout.shippedExecutableNames,
                         platform: "macos",
                         architecture: "arm64"
                     ),

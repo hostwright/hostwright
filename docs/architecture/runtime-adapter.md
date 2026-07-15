@@ -102,6 +102,8 @@ The command result model records:
 - whether the command timed out;
 - whether the command was cancelled.
 
+Exit status is zero-only by default. The sole current exception is the exact read-only Apple `container system status --format json` contract: the [Apple 1.1.0 implementation](https://github.com/apple/container/blob/1.1.0/Sources/ContainerCommands/System/SystemStatus.swift) emits typed not-running or unregistered JSON with exit status 1, matching 1.0.0. A dedicated policy accepts only status 0 or 1 for that exact argument vector so the adapter can parse the state; the policy is rejected for mutations and unrelated read-only commands.
+
 The live runner enforces timeout and task cancellation by terminating the owned session process group and returning a distinct redacted error with bounded partial output. Output overflow, I/O failure, unexpected descendants, and cleanup non-convergence are separately typed. Foreground daemon shutdown still stops between loop iterations and during daemon sleep; the daemon does not yet hold and cancel an in-flight runtime task.
 
 ## Redaction Rules
@@ -124,7 +126,7 @@ The default policy redacts key/value patterns and sensitive key fragments such a
 - State code must not shell out.
 - Health code must not mutate runtime state.
 - Runtime-related process execution must not bypass `RuntimeAdapter`.
-- Safe local diagnostics, such as reading files, checking manifest presence, executable lookup, and current `swift --version` doctor behavior, may remain outside `RuntimeAdapter` when they are not runtime behavior.
+- Safe host diagnostics such as file reads, manifest presence, public interface/memory/thermal facts, signing assessment, and executable lookup may remain outside `RuntimeAdapter` when they are not runtime behavior. Doctor's Apple CLI version and structured service-status probes use `RuntimeAdapter.runtimeReadiness()`; no CLI or health layer may execute them directly.
 
 ## Parser Boundary
 

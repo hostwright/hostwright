@@ -73,7 +73,10 @@ let package = Package(
         ),
         .target(
             name: "HostwrightDistribution",
-            dependencies: ["HostwrightCore"]
+            dependencies: [
+                "HostwrightCore",
+                "HostwrightState"
+            ]
         ),
         .target(
             name: "HostwrightExtensions",
@@ -101,8 +104,15 @@ let package = Package(
             dependencies: [
                 "HostwrightCore",
                 "HostwrightManifest",
-                "HostwrightRuntime"
+                "HostwrightRuntime",
+                "HostwrightSQLiteSupport"
             ],
+            linkerSettings: [
+                .linkedLibrary("sqlite3")
+            ]
+        ),
+        .target(
+            name: "HostwrightSQLiteSupport",
             linkerSettings: [
                 .linkedLibrary("sqlite3")
             ]
@@ -198,7 +208,10 @@ let package = Package(
         ),
         .testTarget(
             name: "HostwrightDistributionTests",
-            dependencies: ["HostwrightDistribution"]
+            dependencies: [
+                "HostwrightDistribution",
+                "HostwrightState"
+            ]
         ),
         .testTarget(
             name: "HostwrightExtensionsTests",

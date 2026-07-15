@@ -18,6 +18,7 @@ public struct CLIEnvironment: @unchecked Sendable {
     public var platformSnapshot: () -> PlatformSnapshot
     public var operatingSystemDescription: () -> String
     public var resourceSnapshot: () -> ResourceIntelligenceSnapshot?
+    public var doctorSystemSnapshot: () -> DoctorSystemSnapshot
     public var benchmarkHostSnapshot: () -> BenchmarkHostSnapshot
     public var benchmarkDate: () -> Date
     public var benchmarkMonotonicNanoseconds: () -> UInt64
@@ -42,6 +43,7 @@ public struct CLIEnvironment: @unchecked Sendable {
         platformSnapshot: @escaping () -> PlatformSnapshot,
         operatingSystemDescription: @escaping () -> String,
         resourceSnapshot: @escaping () -> ResourceIntelligenceSnapshot? = { nil },
+        doctorSystemSnapshot: @escaping () -> DoctorSystemSnapshot = { .unavailable() },
         benchmarkHostSnapshot: @escaping () -> BenchmarkHostSnapshot = { .current },
         benchmarkDate: @escaping () -> Date = { Date() },
         benchmarkMonotonicNanoseconds: @escaping () -> UInt64 = { DispatchTime.now().uptimeNanoseconds },
@@ -61,6 +63,7 @@ public struct CLIEnvironment: @unchecked Sendable {
         self.platformSnapshot = platformSnapshot
         self.operatingSystemDescription = operatingSystemDescription
         self.resourceSnapshot = resourceSnapshot
+        self.doctorSystemSnapshot = doctorSystemSnapshot
         self.benchmarkHostSnapshot = benchmarkHostSnapshot
         self.benchmarkDate = benchmarkDate
         self.benchmarkMonotonicNanoseconds = benchmarkMonotonicNanoseconds
@@ -92,6 +95,14 @@ public struct CLIEnvironment: @unchecked Sendable {
                 operatingSystemDescription: operatingSystemDescription,
                 platform: platform,
                 appleContainerExecutablePath: ProcessLookup.executablePath(named: "container")
+            )
+        },
+        doctorSystemSnapshot: {
+            DoctorSystemProbe.current(
+                executablePath: CommandLine.arguments.first ?? "",
+                developmentBuild: HostwrightIdentity.version.contains("-dev"),
+                containerExecutablePath: ProcessLookup.executablePath(named: "container"),
+                swiftExecutablePath: ProcessLookup.executablePath(named: "swift")
             )
         },
         benchmarkHostSnapshot: { .current },

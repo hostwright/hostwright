@@ -300,6 +300,12 @@ enum CLIJSON {
         ])
     }
 
+    static func codable<T: Encodable>(_ value: T) -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        return String(data: try! encoder.encode(value), encoding: .utf8)! + "\n"
+    }
+
     static func capabilities(_ report: HostwrightCapabilityReport) -> String {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
@@ -504,13 +510,22 @@ enum CLIJSON {
     static func doctor(_ report: DoctorReport) -> String {
         var object: [String: Any] = [
             "kind": "doctor",
+            "schemaVersion": report.schemaVersion,
+            "readiness": report.readiness.rawValue,
             "hasFailures": report.hasFailures,
+            "hasExternalConstraints": report.hasExternalConstraints,
             "checks": report.checks.map { check in
                 [
                     "identifier": check.identifier.rawValue,
                     "status": check.status.rawValue,
-                    "message": RuntimeRedactionPolicy.default.redact(check.message)
-                ]
+                    "message": RuntimeRedactionPolicy.default.redact(check.message),
+                    "remediation": check.remediation.map {
+                        RuntimeRedactionPolicy.default.redact($0)
+                    } as Any,
+                    "details": check.details.mapValues {
+                        RuntimeRedactionPolicy.default.redact($0)
+                    }
+                ].compactNilValues()
             }
         ]
         if let resourceReport = report.resourceReport {

@@ -93,7 +93,7 @@ If live Apple container proof is approved for that release run, it must use only
 
 ## Upgrade, Downgrade, Backup, And Restore
 
-Beta requires current upgrade-safety tests and docs to pass. Automatic downgrade conversion is not implemented; downgrade remains an operator policy backed by explicit backups of the SQLite file and sidecar files.
+Beta requires current upgrade-safety tests and docs to pass. Automatic downgrade conversion is not implemented; before an upgrade, operators create a verified managed backup with `hostwright state backup`. Raw copying of a live SQLite file or its sidecars is not a supported backup or downgrade procedure.
 
 Before a beta tag, release notes must link the state-store backup/restore guidance and say whether the beta contains a schema change.
 

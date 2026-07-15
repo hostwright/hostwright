@@ -77,8 +77,18 @@ final class HostwrightCLITests: XCTestCase {
             try CLICommand.parse(arguments: ["diagnostics", "--state-db", "/tmp/state.sqlite", "--bundle", "/tmp/diagnostics.json", "--project", "demo", "--manifest", "custom.yaml"]),
             .diagnostics(stateDatabasePath: "/tmp/state.sqlite", bundlePath: "/tmp/diagnostics.json", projectName: "demo", manifestPath: "custom.yaml")
         )
-        XCTAssertEqual(try CLICommand.parse(arguments: ["doctor"]), .doctor(output: .text))
-        XCTAssertEqual(try CLICommand.parse(arguments: ["doctor", "--output", "json"]), .doctor(output: .json))
+        XCTAssertEqual(
+            try CLICommand.parse(arguments: ["doctor"]),
+            .doctor(stateDatabasePath: nil, output: .text)
+        )
+        XCTAssertEqual(
+            try CLICommand.parse(arguments: ["doctor", "--output", "json"]),
+            .doctor(stateDatabasePath: nil, output: .json)
+        )
+        XCTAssertEqual(
+            try CLICommand.parse(arguments: ["doctor", "--state-db", "/tmp/state.sqlite", "--json"]),
+            .doctor(stateDatabasePath: "/tmp/state.sqlite", output: .json)
+        )
         XCTAssertEqual(
             try CLICommand.parse(arguments: [
                 "extension", "check",
@@ -93,6 +103,8 @@ final class HostwrightCLITests: XCTestCase {
             )
         )
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["doctor", "--output", "yaml"]))
+        XCTAssertThrowsError(try CLICommand.parse(arguments: ["doctor", "--json", "--output", "text"]))
+        XCTAssertThrowsError(try CLICommand.parse(arguments: ["doctor", "--state-db"]))
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["import-stack"]))
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["import-stack", "compose.yaml", "--write"]))
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["events", "--state-db", "/tmp/state.sqlite", "--sort", "newest"]))
@@ -225,8 +237,8 @@ final class HostwrightCLITests: XCTestCase {
             XCTAssertTrue(
                 checks.contains {
                     $0["identifier"] as? String == "statePathPolicy" &&
-                        $0["status"] as? String == "fail" &&
-                        ($0["message"] as? String)?.contains("blocked-policy") == true
+                        $0["status"] as? String == "blocked" &&
+                        (($0["details"] as? [String: Any])?["readiness"] as? String) == "blocked-policy"
                 }
             )
         }
@@ -282,6 +294,17 @@ final class HostwrightCLITests: XCTestCase {
                 ofItemAtPath: resolution.legacyRootDirectory
             )
             try SQLiteStateStore(path: resolution.legacyStateDatabase).migrate()
+            let checkpoint = try SQLiteConnection(
+                path: resolution.legacyStateDatabase,
+                createIfNeeded: false,
+                profile: .portableArtifact
+            )
+            try checkpoint.close()
+            XCTAssertFalse(FileManager.default.fileExists(atPath: resolution.legacyStateDatabase + "-wal"))
+            let checkpointSharedMemory = resolution.legacyStateDatabase + "-shm"
+            if FileManager.default.fileExists(atPath: checkpointSharedMemory) {
+                try FileManager.default.removeItem(atPath: checkpointSharedMemory)
+            }
             for directory in resolution.layout.ownedDirectories {
                 try FileManager.default.createDirectory(
                     atPath: directory,
@@ -583,29 +606,36 @@ final class HostwrightCLITests: XCTestCase {
         XCTAssertTrue(issues.contains { $0["kind"] as? String == "secretRedacted" })
     }
 
-    func testDoctorReportsMissingAppleContainerAsWarning() {
+    func testDoctorReportsMissingAppleContainerAsExternalConstraint() {
         let result = HostwrightCLI.run(arguments: ["doctor"], environment: environment(files: FileBox()))
 
-        XCTAssertEqual(result.exitCode, 0)
-        XCTAssertTrue(result.standardOutput.contains("[warning] appleContainerCLI"))
+        XCTAssertEqual(result.exitCode, CLIExitCode.runtimeUnavailable.rawValue)
+        XCTAssertTrue(result.standardOutput.contains("Readiness: externally-constrained"))
+        XCTAssertTrue(result.standardOutput.contains("[externally-constrained] appleContainerCLI"))
+        XCTAssertTrue(result.standardOutput.contains("Remediation:"))
     }
 
     func testDoctorJSONOutputIncludesChecks() throws {
         let result = HostwrightCLI.run(arguments: ["doctor", "--output", "json"], environment: environment(files: FileBox()))
 
-        XCTAssertEqual(result.exitCode, 0)
+        XCTAssertEqual(result.exitCode, CLIExitCode.runtimeUnavailable.rawValue)
         let json = try jsonObject(result.standardOutput)
         XCTAssertEqual(json["kind"] as? String, "doctor")
+        XCTAssertEqual(json["schemaVersion"] as? Int, 2)
+        XCTAssertEqual(json["readiness"] as? String, "externally-constrained")
         XCTAssertEqual(json["hasFailures"] as? Bool, false)
+        XCTAssertEqual(json["hasExternalConstraints"] as? Bool, true)
         let checks = try XCTUnwrap(json["checks"] as? [[String: Any]])
-        XCTAssertTrue(checks.contains { $0["identifier"] as? String == "appleContainerCLI" && $0["status"] as? String == "warning" })
-        XCTAssertTrue(checks.contains { $0["identifier"] as? String == "telemetryPolicy" && $0["status"] as? String == "pass" })
-        XCTAssertTrue(checks.contains { $0["identifier"] as? String == "statePathPolicy" && $0["status"] as? String == "pass" })
-        XCTAssertTrue(checks.contains { $0["identifier"] as? String == "resourceIntelligence" && $0["status"] as? String == "warning" })
+        XCTAssertTrue(checks.contains { $0["identifier"] as? String == "appleContainerCLI" && $0["status"] as? String == "externally-constrained" })
+        XCTAssertTrue(checks.contains { $0["identifier"] as? String == "telemetryPolicy" && $0["status"] as? String == "ready" })
+        XCTAssertTrue(checks.contains { $0["identifier"] as? String == "statePathPolicy" && $0["status"] as? String == "ready" })
+        XCTAssertTrue(checks.contains { $0["identifier"] as? String == "stateIntegrity" && $0["status"] as? String == "degraded" })
+        XCTAssertTrue(checks.contains { $0["identifier"] as? String == "resourceIntelligence" && $0["status"] as? String == "degraded" })
+        XCTAssertTrue(checks.allSatisfy { $0["remediation"] != nil || $0["status"] as? String == "ready" })
         XCTAssertNil(json["resourceReport"])
     }
 
-    func testDoctorJSONOutputIncludesResourceReportWithoutRuntimeObservation() throws {
+    func testDoctorJSONOutputUsesReadinessWithoutRuntimeInventoryObservation() throws {
         let adapter = ScriptedApplyRuntimeAdapter(observeError: .runtimeUnavailable("doctor should not observe runtime"))
         let result = HostwrightCLI.run(
             arguments: ["doctor", "--output", "json"],
@@ -618,9 +648,11 @@ final class HostwrightCLITests: XCTestCase {
         )
 
         XCTAssertEqual(result.exitCode, 0)
+        XCTAssertTrue(adapter.observedDesiredStates.isEmpty)
         let json = try jsonObject(result.standardOutput)
         let checks = try XCTUnwrap(json["checks"] as? [[String: Any]])
-        XCTAssertTrue(checks.contains { $0["identifier"] as? String == "resourceIntelligence" && $0["status"] as? String == "pass" })
+        XCTAssertTrue(checks.contains { $0["identifier"] as? String == "appleContainerService" && $0["status"] as? String == "ready" })
+        XCTAssertTrue(checks.contains { $0["identifier"] as? String == "resourceIntelligence" && $0["status"] as? String == "ready" })
         let report = try XCTUnwrap(json["resourceReport"] as? [String: Any])
         XCTAssertEqual(report["measurementMethod"] as? String, "fixture")
         let hardware = try XCTUnwrap(report["hardware"] as? [String: Any])
@@ -656,6 +688,174 @@ final class HostwrightCLITests: XCTestCase {
         XCTAssertEqual(result.exitCode, CLIExitCode.validation.rawValue)
         let json = try jsonObject(result.standardOutput)
         XCTAssertEqual(json["hasFailures"] as? Bool, true)
+        XCTAssertEqual(json["readiness"] as? String, "unsupported")
+    }
+
+    func testDoctorMapsStoppedRuntimeToExternalConstraint() throws {
+        let adapter = ScriptedApplyRuntimeAdapter(
+            readinessReport: RuntimeReadinessReport(
+                runtimeName: "fake-runtime",
+                cliVersion: "1.1.0",
+                serviceState: .notRunning,
+                serviceVersion: nil,
+                serviceBuild: nil
+            )
+        )
+
+        let result = HostwrightCLI.run(
+            arguments: ["doctor", "--json"],
+            environment: environment(
+                files: FileBox(),
+                containerPath: "/usr/local/bin/container",
+                runtimeAdapter: adapter
+            )
+        )
+
+        XCTAssertEqual(result.exitCode, CLIExitCode.runtimeUnavailable.rawValue)
+        let json = try jsonObject(result.standardOutput)
+        let checks = try XCTUnwrap(json["checks"] as? [[String: Any]])
+        let service = try XCTUnwrap(checks.first {
+            $0["identifier"] as? String == "appleContainerService"
+        })
+        XCTAssertEqual(service["status"] as? String, "externally-constrained")
+        XCTAssertTrue((service["remediation"] as? String)?.contains("container system start") == true)
+    }
+
+    func testDoctorBoundsAndRedactsRuntimeProbeFailure() throws {
+        let adapter = ScriptedApplyRuntimeAdapter(
+            readinessError: .runtimeUnavailable(
+                "token=\(fakeSecret) " + String(repeating: "x", count: 4_096)
+            )
+        )
+        let result = HostwrightCLI.run(
+            arguments: ["doctor", "--json"],
+            environment: environment(
+                files: FileBox(),
+                containerPath: "/usr/local/bin/container",
+                runtimeAdapter: adapter
+            )
+        )
+
+        XCTAssertEqual(result.exitCode, CLIExitCode.runtimeUnavailable.rawValue)
+        XCTAssertFalse(result.standardOutput.contains(fakeSecret))
+        let json = try jsonObject(result.standardOutput)
+        let checks = try XCTUnwrap(json["checks"] as? [[String: Any]])
+        let service = try XCTUnwrap(checks.first {
+            $0["identifier"] as? String == "appleContainerService"
+        })
+        XCTAssertLessThanOrEqual((service["message"] as? String)?.count ?? .max, 512)
+    }
+
+    func testDoctorInspectsExistingStateWithoutChangingItsFileSet() throws {
+        try withTemporaryDatabase { databasePath in
+            let parent = (databasePath as NSString).deletingLastPathComponent
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o700],
+                ofItemAtPath: parent
+            )
+            let store = SQLiteStateStore(path: databasePath)
+            try store.migrate()
+            let resolution = try HostwrightLocalPathResolver.resolve(
+                explicitStateDatabasePath: databasePath,
+                homeDirectory: parent,
+                environment: [:]
+            )
+            let before = try doctorFileSetSnapshot(directory: parent)
+            var testEnvironment = environment(
+                files: FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest]),
+                containerPath: "/usr/local/bin/container",
+                localPathResolution: { _ in resolution }
+            )
+            testEnvironment.fileExists = { FileManager.default.fileExists(atPath: $0) }
+
+            let result = HostwrightCLI.run(
+                arguments: ["doctor", "--state-db", databasePath, "--json"],
+                environment: testEnvironment
+            )
+
+            XCTAssertEqual(result.exitCode, CLIExitCode.success.rawValue)
+            let json = try jsonObject(result.standardOutput)
+            let checks = try XCTUnwrap(json["checks"] as? [[String: Any]])
+            let state = try XCTUnwrap(checks.first {
+                $0["identifier"] as? String == "stateIntegrity"
+            })
+            XCTAssertEqual(state["status"] as? String, "ready")
+            XCTAssertEqual(
+                (state["details"] as? [String: Any])?["stateSchemaVersion"] as? String,
+                "7"
+            )
+            XCTAssertEqual(try doctorFileSetSnapshot(directory: parent), before)
+        }
+    }
+
+    func testDoctorReportsActiveStateWriteAsRetryableInspectionFailure() throws {
+        try withTemporaryDatabase { databasePath in
+            let parent = (databasePath as NSString).deletingLastPathComponent
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o700],
+                ofItemAtPath: parent
+            )
+            let store = SQLiteStateStore(path: databasePath)
+            try store.migrate()
+            let writer = try SQLiteConnection(
+                path: databasePath,
+                createIfNeeded: false,
+                profile: .authoritativeState
+            )
+            defer { try? writer.close() }
+            try writer.execute(
+                "CREATE TABLE doctor_active_write (id INTEGER PRIMARY KEY, value TEXT NOT NULL)"
+            )
+            try writer.execute("BEGIN IMMEDIATE TRANSACTION")
+            try writer.run(
+                "INSERT INTO doctor_active_write (id, value) VALUES (1, 'uncommitted')"
+            )
+            let resolution = try HostwrightLocalPathResolver.resolve(
+                explicitStateDatabasePath: databasePath,
+                homeDirectory: parent,
+                environment: [:]
+            )
+            let before = try doctorFileSetSnapshot(directory: parent)
+            var testEnvironment = environment(
+                files: FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest]),
+                containerPath: "/usr/local/bin/container",
+                localPathResolution: { _ in resolution }
+            )
+            testEnvironment.fileExists = { FileManager.default.fileExists(atPath: $0) }
+
+            let result = HostwrightCLI.run(
+                arguments: ["doctor", "--state-db", databasePath, "--json"],
+                environment: testEnvironment
+            )
+
+            XCTAssertEqual(result.exitCode, CLIExitCode.stateUnavailable.rawValue)
+            let json = try jsonObject(result.standardOutput)
+            let checks = try XCTUnwrap(json["checks"] as? [[String: Any]])
+            let state = try XCTUnwrap(checks.first {
+                $0["identifier"] as? String == "stateIntegrity"
+            })
+            XCTAssertEqual(state["status"] as? String, "blocked")
+            XCTAssertEqual(
+                (state["details"] as? [String: Any])?["availability"] as? String,
+                "inspection-failed"
+            )
+            XCTAssertTrue((state["remediation"] as? String)?.contains("Wait for the active state operation") == true)
+            XCTAssertEqual(try doctorFileSetSnapshot(directory: parent), before)
+
+            testEnvironment.platformSnapshot = {
+                PlatformSnapshot(macOSMajorVersion: 25, architecture: "x86_64")
+            }
+            let unsupported = HostwrightCLI.run(
+                arguments: ["doctor", "--state-db", databasePath, "--json"],
+                environment: testEnvironment
+            )
+            XCTAssertEqual(unsupported.exitCode, CLIExitCode.validation.rawValue)
+            XCTAssertEqual(
+                try jsonObject(unsupported.standardOutput)["readiness"] as? String,
+                "unsupported"
+            )
+            XCTAssertEqual(try doctorFileSetSnapshot(directory: parent), before)
+        }
     }
 
     func testJSONErrorsUseStableExitCodesAndEnvelope() throws {
@@ -2946,6 +3146,7 @@ final class HostwrightCLITests: XCTestCase {
         platform: PlatformSnapshot = PlatformSnapshot(macOSMajorVersion: 26, architecture: "arm64"),
         writeError: Error? = nil,
         resourceSnapshot: ResourceIntelligenceSnapshot? = nil,
+        doctorSnapshot: DoctorSystemSnapshot? = nil,
         localPathResolution: ((String?) throws -> HostwrightLocalPathResolution)? = nil
     ) -> CLIEnvironment {
         CLIEnvironment(
@@ -2984,7 +3185,59 @@ final class HostwrightCLITests: XCTestCase {
             swiftVersion: { "Swift 6.3.3" },
             platformSnapshot: { platform },
             operatingSystemDescription: { "macOS 26.5" },
-            resourceSnapshot: { resourceSnapshot }
+            resourceSnapshot: { resourceSnapshot },
+            doctorSystemSnapshot: {
+                doctorSnapshot ?? self.healthyDoctorSystemSnapshot(
+                    containerAvailable: containerPath != nil
+                )
+            }
+        )
+    }
+
+    private func healthyDoctorSystemSnapshot(
+        containerAvailable: Bool = true,
+        developmentBuild: Bool = false
+    ) -> DoctorSystemSnapshot {
+        DoctorSystemSnapshot(
+            localNetwork: DoctorLocalNetworkSnapshot(
+                loopbackAvailable: true,
+                activeNonLoopbackInterfaceCount: 1,
+                hasIPv4: true,
+                hasIPv6: true
+            ),
+            signingTrust: DoctorSigningTrustSnapshot(
+                codeSignature: .developerID,
+                gatekeeper: .accepted,
+                developmentBuild: developmentBuild
+            ),
+            resourcePressure: DoctorResourcePressureSnapshot(
+                physicalMemoryBytes: 16 * 1_024 * 1_024 * 1_024,
+                reclaimableMemoryBytes: 8 * 1_024 * 1_024 * 1_024,
+                reclaimableMemoryPercent: 50,
+                thermalState: .nominal
+            ),
+            tools: [
+                DoctorToolSnapshot(
+                    identifier: "apple-container-cli",
+                    available: containerAvailable,
+                    requiredForRuntime: true
+                ),
+                DoctorToolSnapshot(
+                    identifier: "codesign",
+                    available: true,
+                    requiredForRuntime: false
+                ),
+                DoctorToolSnapshot(
+                    identifier: "gatekeeper-spctl",
+                    available: true,
+                    requiredForRuntime: false
+                ),
+                DoctorToolSnapshot(
+                    identifier: "swift-toolchain",
+                    available: true,
+                    requiredForRuntime: false
+                )
+            ]
         )
     }
 
@@ -3034,6 +3287,16 @@ final class HostwrightCLITests: XCTestCase {
             try? FileManager.default.removeItem(at: directory)
         }
         try body(directory)
+    }
+
+    private func doctorFileSetSnapshot(directory: String) throws -> [String: Data] {
+        let names = try FileManager.default.contentsOfDirectory(atPath: directory).sorted()
+        return try Dictionary(uniqueKeysWithValues: names.map { name in
+            let path = URL(fileURLWithPath: directory, isDirectory: true)
+                .appendingPathComponent(name)
+                .path
+            return (name, try Data(contentsOf: URL(fileURLWithPath: path)))
+        })
     }
 
     private func permissions(_ path: String) throws -> Int {
@@ -3119,6 +3382,8 @@ final class HostwrightCLITests: XCTestCase {
         let observedState: ObservedRuntimeState
         let observeError: RuntimeAdapterError?
         let executeError: RuntimeAdapterError?
+        let readinessReport: RuntimeReadinessReport
+        let readinessError: RuntimeAdapterError?
         let logsText: String
         let onExecute: ExecuteHook?
         var executedActions: [PlannedRuntimeAction] = []
@@ -3131,6 +3396,14 @@ final class HostwrightCLITests: XCTestCase {
             observedState: ObservedRuntimeState? = nil,
             observeError: RuntimeAdapterError? = nil,
             executeError: RuntimeAdapterError? = nil,
+            readinessReport: RuntimeReadinessReport = RuntimeReadinessReport(
+                runtimeName: "fake-runtime",
+                cliVersion: "1.1.0",
+                serviceState: .running,
+                serviceVersion: "1.1.0",
+                serviceBuild: "test"
+            ),
+            readinessError: RuntimeAdapterError? = nil,
             logsText: String = "",
             onExecute: ExecuteHook? = nil
         ) {
@@ -3148,6 +3421,8 @@ final class HostwrightCLITests: XCTestCase {
             )
             self.observeError = observeError
             self.executeError = executeError
+            self.readinessReport = readinessReport
+            self.readinessError = readinessError
             self.logsText = logsText
             self.onExecute = onExecute
         }
@@ -3158,6 +3433,13 @@ final class HostwrightCLITests: XCTestCase {
 
         func capabilities() async throws -> [RuntimeCapability] {
             [.readOnlyObservation, .lifecycleMutation, .logStreaming, .cleanup]
+        }
+
+        func runtimeReadiness() async throws -> RuntimeReadinessReport {
+            if let readinessError {
+                throw readinessError
+            }
+            return readinessReport
         }
 
         func observe(desiredState: DesiredRuntimeState) async throws -> ObservedRuntimeState {

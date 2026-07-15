@@ -30,6 +30,7 @@ manifest="$workdir/hostwright.yaml"
 plan_json="$workdir/plan.json"
 status_json="$workdir/status.json"
 doctor_json="$workdir/doctor.json"
+doctor_state_json="$workdir/doctor-state.json"
 default_paths_json="$workdir/default-paths.json"
 paths_before_json="$workdir/paths-before.json"
 paths_after_json="$workdir/paths-after.json"
@@ -38,6 +39,17 @@ cache_directory="$workdir/Caches/Hostwright"
 log_directory="$workdir/Logs/Hostwright"
 state_directory="$workdir/state"
 state_database="$state_directory/state.sqlite"
+state_digest="$(printf '%s' "$state_database" | shasum -a 256 | awk '{print substr($1, 1, 16)}')"
+state_access_lock="$state_directory/.hostwright-$state_digest-access-v1.lock"
+state_writer_lock="$state_access_lock.writer"
+state_maintenance_journal="$state_directory/.hostwright-$state_digest-maintenance-v1.json"
+state_backups="$state_directory/.hostwright-$state_digest-backups"
+state_integrity_json="$workdir/state-integrity.json"
+state_backup_json="$workdir/state-backup.json"
+state_catalog_json="$workdir/state-catalog.json"
+state_restore_plan_json="$workdir/state-restore-plan.json"
+state_restore_result_json="$workdir/state-restore-result.json"
+state_recovery_json="$workdir/state-recovery.json"
 team_profile="$workdir/team-profile.json"
 team_plan_json="$workdir/team-plan.json"
 stack_file="$workdir/compose.yaml"
@@ -65,7 +77,16 @@ cleanup() {
   trap - EXIT
   set +e
   chmod 700 "$readonly_dir" 2>/dev/null
-  rm -f "$manifest" "$plan_json" "$status_json" "$doctor_json" "$default_paths_json" "$paths_before_json" "$paths_after_json" "$team_profile" "$team_plan_json" "$stack_file" "$team_import_json" "$invalid_profile" "$overwrite_stdout" "$overwrite_stderr" "$missing_stdout" "$missing_stderr" "$benchmark_existing_report" "$benchmark_absent_report" "$unexpected_distribution_report" "$extension_fixture" "$extension_declaration" "$extension_failure_declaration" "$extension_json" "$control_request" "$control_response" "$control_rejected_request" "$control_rejected_response" "$readonly_dir/hostwright.yaml" "$state_database" "$state_database-wal" "$state_database-shm" "$state_database-journal"
+  rm -f "$manifest" "$plan_json" "$status_json" "$doctor_json" "$doctor_state_json" "$default_paths_json" "$paths_before_json" "$paths_after_json" "$state_integrity_json" "$state_backup_json" "$state_catalog_json" "$state_restore_plan_json" "$state_restore_result_json" "$state_recovery_json" "$team_profile" "$team_plan_json" "$stack_file" "$team_import_json" "$invalid_profile" "$overwrite_stdout" "$overwrite_stderr" "$missing_stdout" "$missing_stderr" "$benchmark_existing_report" "$benchmark_absent_report" "$unexpected_distribution_report" "$extension_fixture" "$extension_declaration" "$extension_failure_declaration" "$extension_json" "$control_request" "$control_response" "$control_rejected_request" "$control_rejected_response" "$readonly_dir/hostwright.yaml" "$state_database" "$state_database-wal" "$state_database-shm" "$state_database-journal" "$state_access_lock" "$state_writer_lock" "$state_maintenance_journal"
+  if [[ -d "$state_backups" ]]; then
+    shopt -s nullglob
+    for backup_directory in "$state_backups"/backup-*; do
+      rm -f "$backup_directory/manifest.json" "$backup_directory/state.sqlite"
+      rmdir "$backup_directory" 2>/dev/null
+    done
+    shopt -u nullglob
+    rmdir "$state_backups" 2>/dev/null
+  fi
   rmdir "$readonly_dir" 2>/dev/null
   rmdir "$state_directory" 2>/dev/null
   rmdir "$workdir"
@@ -115,13 +136,27 @@ after_checksum="$(shasum -a 256 "$manifest" | awk '{print $1}')"
 
 "$hostwright" validate "$manifest" >/dev/null
 "$hostwright" plan "$manifest" --output json >"$plan_json"
-"$hostwright" doctor --output json >"$doctor_json"
+set +e
+(
+  cd "$workdir"
+  "$hostwright" doctor --state-db "$state_database" --json >"$doctor_json"
+)
+doctor_exit=$?
+set -e
+[[ "$doctor_exit" -eq 0 || "$doctor_exit" -eq 69 ]]
 
 for json_file in "$plan_json" "$doctor_json"; do
   plutil -convert json -o /dev/null "$json_file"
 done
 grep -q '"planHash"' "$plan_json"
 grep -q '"checks"' "$doctor_json"
+[[ "$(plutil -extract schemaVersion raw "$doctor_json")" == "2" ]]
+[[ "$(plutil -extract checks.7.identifier raw "$doctor_json")" == "stateIntegrity" ]]
+[[ "$(plutil -extract checks.7.status raw "$doctor_json")" == "degraded" ]]
+[[ ! -e "$state_database" ]]
+if [[ "$doctor_exit" -eq 69 ]]; then
+  [[ "$(plutil -extract hasExternalConstraints raw "$doctor_json")" == "true" ]]
+fi
 
 if command -v container >/dev/null 2>&1; then
   "$hostwright" status "$manifest" --output json >"$status_json"
@@ -146,6 +181,50 @@ grep -q '"readiness":"ready"' "$paths_after_json"
 [[ -f "$state_database" ]]
 [[ "$(stat -f '%Lp' "$state_directory")" == "700" ]]
 [[ "$(stat -f '%Lp' "$state_database")" == "600" ]]
+
+state_files_before_doctor="$(find "$state_directory" -type f | LC_ALL=C sort)"
+state_hashes_before_doctor="$(find "$state_directory" -type f -exec shasum -a 256 {} \; | LC_ALL=C sort)"
+set +e
+(
+  cd "$workdir"
+  "$hostwright" doctor --state-db "$state_database" --json >"$doctor_state_json"
+)
+doctor_state_exit=$?
+set -e
+[[ "$doctor_state_exit" -eq 0 || "$doctor_state_exit" -eq 69 ]]
+plutil -convert json -o /dev/null "$doctor_state_json"
+[[ "$(plutil -extract checks.7.identifier raw "$doctor_state_json")" == "stateIntegrity" ]]
+[[ "$(plutil -extract checks.7.status raw "$doctor_state_json")" == "ready" ]]
+[[ "$(find "$state_directory" -type f | LC_ALL=C sort)" == "$state_files_before_doctor" ]]
+[[ "$(find "$state_directory" -type f -exec shasum -a 256 {} \; | LC_ALL=C sort)" == "$state_hashes_before_doctor" ]]
+
+"$hostwright" state integrity --state-db "$state_database" --json >"$state_integrity_json"
+"$hostwright" state backup --state-db "$state_database" --json >"$state_backup_json"
+"$hostwright" state backups --state-db "$state_database" --json >"$state_catalog_json"
+for json_file in "$state_integrity_json" "$state_backup_json" "$state_catalog_json"; do
+  plutil -convert json -o /dev/null "$json_file"
+done
+grep -q '"kind":"stateIntegrityReport"' "$state_integrity_json"
+grep -q '"health":"healthy"' "$state_integrity_json"
+grep -q '"kind":"stateBackupRecord"' "$state_backup_json"
+grep -q '"restorable":true' "$state_backup_json"
+state_backup_id="$(plutil -extract backupID raw "$state_backup_json")"
+[[ "$state_backup_id" == backup-* ]]
+grep -Fq "\"backupID\":\"$state_backup_id\"" "$state_catalog_json"
+
+"$hostwright" state restore --backup "$state_backup_id" --dry-run --state-db "$state_database" --json >"$state_restore_plan_json"
+plutil -convert json -o /dev/null "$state_restore_plan_json"
+state_restore_token="$(plutil -extract confirmationToken raw "$state_restore_plan_json")"
+[[ "$state_restore_token" =~ ^[a-f0-9]{64}$ ]]
+"$hostwright" state restore --backup "$state_backup_id" --confirm-restore "$state_restore_token" --state-db "$state_database" --json >"$state_restore_result_json"
+plutil -convert json -o /dev/null "$state_restore_result_json"
+grep -q '"health":"healthy"' "$state_restore_result_json"
+grep -Fq "\"backupID\":\"$state_backup_id\"" "$state_restore_result_json"
+"$hostwright" state recover --state-db "$state_database" --json >"$state_recovery_json"
+plutil -convert json -o /dev/null "$state_recovery_json"
+grep -q '"recovered":false' "$state_recovery_json"
+[[ "$(stat -f '%Lp' "$state_backups")" == "700" ]]
+[[ "$(stat -f '%Lp' "$state_backups/$state_backup_id/state.sqlite")" == "600" ]]
 
 printf '%s\n' '{"apiVersion":2,"requestID":"integration-plan-1","operation":"plan"}' >"$control_request"
 "$hostwright_control" --manifest "$manifest" <"$control_request" >"$control_response" 2>"$missing_stderr"
@@ -254,8 +333,30 @@ benchmark_after_checksum="$(shasum -a 256 "$benchmark_existing_report" | awk '{p
 [[ "$benchmark_before_checksum" == "$benchmark_after_checksum" ]]
 
 "$hostwright_dist" --help >"$missing_stdout" 2>"$missing_stderr"
-grep -q 'developer distribution evidence tool' "$missing_stdout"
-grep -q 'never signs, notarizes, staples' "$missing_stdout"
+grep -q 'trusted and developer distribution tool' "$missing_stdout"
+grep -q 'hostwright-dist release' "$missing_stdout"
+grep -q 'hostwright-dist verify-release' "$missing_stdout"
+grep -q 'hostwright-dist homebrew-formula' "$missing_stdout"
+grep -q 'never accepts passwords, private keys, or tokens in argv' "$missing_stdout"
+
+for trusted_release_command in release verify-release homebrew-formula; do
+  set +e
+  "$hostwright_dist" "$trusted_release_command" --format json >"$missing_stdout" 2>"$missing_stderr"
+  trusted_release_error_exit=$?
+  set -e
+  [[ "$trusted_release_error_exit" -eq 64 ]]
+  [[ ! -s "$missing_stdout" ]]
+  plutil -convert json -o /dev/null "$missing_stderr"
+  [[ "$(plutil -extract kind raw "$missing_stderr")" == "distributionToolError" ]]
+  [[ "$(plutil -extract exitCode raw "$missing_stderr")" == "64" ]]
+done
+
+set +e
+"$hostwright_dist" homebrew-formula --output json >"$missing_stdout" 2>"$missing_stderr"
+formula_path_error_exit=$?
+set -e
+[[ "$formula_path_error_exit" -eq 64 ]]
+grep -q '^HW-DIST-001:' "$missing_stderr"
 
 /usr/bin/swiftc "$root/Tests/HostwrightExtensionsTests/Fixtures/ExtensionFixture.swift" -o "$extension_fixture"
 chmod 700 "$extension_fixture"
@@ -345,9 +446,22 @@ chmod 700 "$readonly_dir"
 [[ ! -s "$missing_stdout" ]]
 grep -q 'HW-CLI-005' "$missing_stderr"
 
-if find "$workdir" -name '*.sqlite*' ! -path "$state_database" -print -quit | grep -q .; then
-  echo "local integration created an unexpected state database or sidecar" >&2
-  exit 1
-fi
+while IFS= read -r sqlite_path; do
+  if [[ "$sqlite_path" == "$state_database" ]]; then
+    continue
+  fi
+  case "$sqlite_path" in
+    "$state_database-wal"|"$state_database-shm")
+      [[ "$(stat -f '%Lp' "$sqlite_path")" == "600" ]]
+      ;;
+    "$state_backups"/backup-*/state.sqlite)
+      ;;
+    *)
+      echo "local integration created an unexpected state database or sidecar: $sqlite_path" >&2
+      exit 1
+      ;;
+  esac
+done < <(find "$workdir" -name '*.sqlite*' -print)
+[[ ! -e "$state_database-journal" ]]
 
-echo "local-integration passed: built CLI, isolated path resolution and private state creation, one-shot control API, and distribution tool; reviewed-local extension subprocess handshake, team-profile/benchmark/distribution gates, JSON output/errors, real file failures, overwrite refusal, rejected control mutation, and no unexpected state writes"
+echo "local-integration passed: built CLI, isolated path resolution, private state creation, verified online backup/restore/recovery, one-shot control API, and distribution tool; reviewed-local extension subprocess handshake, team-profile/benchmark/distribution gates, JSON output/errors, real file failures, overwrite refusal, rejected control mutation, and no unexpected state writes"

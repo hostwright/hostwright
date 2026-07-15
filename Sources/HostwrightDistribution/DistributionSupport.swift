@@ -93,7 +93,10 @@ public enum DistributionHash {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
-    public static func sha256(fileURL: URL) throws -> String {
+    public static func sha256(
+        fileURL: URL,
+        cancellation: SecureSubprocessCancellation? = nil
+    ) throws -> String {
         guard try DistributionFileSystem.isRegularNonSymlink(fileURL) else {
             throw DistributionError.invalidArtifact("hash input is not a regular non-symlink file")
         }
@@ -101,6 +104,9 @@ public enum DistributionHash {
         defer { try? handle.close() }
         var hasher = SHA256()
         while true {
+            guard cancellation?.isCancelled != true else {
+                throw DistributionError.commandCancelled("hash distribution file")
+            }
             let chunk = try handle.read(upToCount: 1024 * 1024) ?? Data()
             guard !chunk.isEmpty else { break }
             hasher.update(data: chunk)
@@ -116,11 +122,22 @@ public enum DistributionJSON {
         return try encoder.encode(value) + Data("\n".utf8)
     }
 
-    public static func decode<T: Decodable>(_ type: T.Type, from url: URL) throws -> T {
+    public static func decode<T: Codable>(_ type: T.Type, from url: URL) throws -> T {
         guard try DistributionFileSystem.isRegularNonSymlink(url) else {
             throw DistributionError.invalidArtifact("JSON input is not a regular non-symlink file")
         }
-        return try JSONDecoder().decode(type, from: Data(contentsOf: url))
+        let size = try DistributionFileSystem.size(of: url)
+        guard size > 0, size <= 32 * 1_024 * 1_024 else {
+            throw DistributionError.invalidArtifact("JSON input is empty or oversized")
+        }
+        let data = try Data(contentsOf: url, options: .mappedIfSafe)
+        let value = try JSONDecoder().decode(type, from: data)
+        guard try encode(value) == data else {
+            throw DistributionError.invalidArtifact(
+                "JSON input is not the exact canonical schema encoding"
+            )
+        }
+        return value
     }
 }
 
@@ -131,6 +148,19 @@ public enum DistributionFileSystem {
         }
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: false)
         try FileManager.default.setAttributes([.posixPermissions: mode], ofItemAtPath: url.path)
+        try synchronizeDirectory(url)
+        try synchronizeDirectory(url.deletingLastPathComponent())
+    }
+
+    private static func synchronizeDirectory(_ url: URL) throws {
+        let descriptor = open(url.path, O_RDONLY | O_DIRECTORY | O_CLOEXEC)
+        guard descriptor >= 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+        defer { close(descriptor) }
+        guard fsync(descriptor) == 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
     }
 
     public static func writeNewFile(_ data: Data, to url: URL, mode: Int) throws {
@@ -178,6 +208,18 @@ public enum DistributionFileSystem {
         }
         try FileManager.default.copyItem(at: source, to: destination)
         try FileManager.default.setAttributes([.posixPermissions: mode], ofItemAtPath: destination.path)
+        let descriptor = open(destination.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+        guard descriptor >= 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+        defer { close(descriptor) }
+        var metadata = stat()
+        guard fstat(descriptor, &metadata) == 0,
+              metadata.st_mode & S_IFMT == S_IFREG,
+              fsync(descriptor) == 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+        try synchronizeDirectory(destination.deletingLastPathComponent())
     }
 
     public static func isRegularNonSymlink(_ url: URL) throws -> Bool {
@@ -224,6 +266,35 @@ public enum DistributionFileSystem {
         try DistributionTemporaryPathPolicy.validate(url, role: "temporary cleanup")
         if entryExists(url) {
             try FileManager.default.removeItem(at: url)
+        }
+    }
+}
+
+package enum DistributionTemporaryCleanupStatus: String, Codable, Equatable, Sendable {
+    case complete
+    case pending
+}
+
+package struct DistributionTemporaryCleanupReport: Codable, Equatable, Sendable {
+    package let status: DistributionTemporaryCleanupStatus
+    package let pendingPaths: [String]
+
+    package init(status: DistributionTemporaryCleanupStatus, pendingPaths: [String]) {
+        self.status = status
+        self.pendingPaths = pendingPaths
+    }
+}
+
+package enum DistributionPostCommitCleanup {
+    package static func removeOwnedTemporaryItem(
+        _ url: URL,
+        remover: (URL) throws -> Void = { try DistributionFileSystem.removeOwnedTemporaryItem($0) }
+    ) -> DistributionTemporaryCleanupReport {
+        do {
+            try remover(url)
+            return DistributionTemporaryCleanupReport(status: .complete, pendingPaths: [])
+        } catch {
+            return DistributionTemporaryCleanupReport(status: .pending, pendingPaths: [url.path])
         }
     }
 }

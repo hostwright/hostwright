@@ -2,23 +2,25 @@ import Darwin
 import Foundation
 import HostwrightCore
 
-public struct DistributionInstaller: Sendable {
+struct DistributionInstaller: Sendable {
     private let runner: DistributionProcessRunner
 
-    public init(runner: DistributionProcessRunner = DistributionProcessRunner()) {
+    init(runner: DistributionProcessRunner = DistributionProcessRunner()) {
         self.runner = runner
     }
 
     @discardableResult
-    public func install(
+    func install(
         artifact: VerifiedDistributionArtifact,
-        prefix: URL
+        prefix: URL,
+        cancellation: SecureSubprocessCancellation = SecureSubprocessCancellation()
     ) throws -> DistributionInstallManifest {
+        try requireNotCancelled(cancellation, operation: "distribution install preflight")
         try validatePrefix(prefix)
         let manifestURL = prefix.appendingPathComponent(DistributionLayout.installManifestFileName)
         let existing = try loadExistingManifest(manifestURL)
         if let existing {
-            try verifyOwnedFiles(existing, prefix: prefix)
+            try verifyOwnedFiles(existing, prefix: prefix, cancellation: cancellation)
         } else {
             for path in DistributionLayout.payloadModes.keys {
                 guard !DistributionFileSystem.entryExists(prefix.appendingPathComponent(path)) else {
@@ -48,6 +50,7 @@ public struct DistributionInstaller: Sendable {
         try FileManager.default.createDirectory(at: backup, withIntermediateDirectories: false)
 
         for file in artifact.manifest.files {
+            try requireNotCancelled(cancellation, operation: "stage distribution install")
             try DistributionFileSystem.copyRegularFile(
                 from: artifact.extractedRoot.appendingPathComponent(file.path),
                 to: staged.appendingPathComponent(file.path),
@@ -83,18 +86,20 @@ public struct DistributionInstaller: Sendable {
                 }
             }
             for file in nextManifest.files {
+                try requireNotCancelled(cancellation, operation: "publish distribution install")
                 try atomicMoveReplacing(
                     from: staged.appendingPathComponent(file.path),
                     to: prefix.appendingPathComponent(file.path)
                 )
                 appliedPaths.append(file.path)
             }
+            try requireNotCancelled(cancellation, operation: "publish distribution install manifest")
             try atomicMoveReplacing(
                 from: staged.appendingPathComponent(DistributionLayout.installManifestFileName),
                 to: manifestURL
             )
             appliedPaths.append(DistributionLayout.installManifestFileName)
-            try verifyOwnedFiles(nextManifest, prefix: prefix)
+            try verifyOwnedFiles(nextManifest, prefix: prefix, cancellation: cancellation)
         } catch {
             let applyError = error
             do {
@@ -134,9 +139,10 @@ public struct DistributionInstaller: Sendable {
         return nextManifest
     }
 
-    public func verifyInstalled(
+    func verifyInstalled(
         prefix: URL,
-        expectedManifest: DistributionInstallManifest
+        expectedManifest: DistributionInstallManifest,
+        cancellation: SecureSubprocessCancellation = SecureSubprocessCancellation()
     ) throws -> [HostwrightEvidenceCommand] {
         try validatePrefix(prefix)
         let installed = try DistributionJSON.decode(
@@ -147,22 +153,44 @@ public struct DistributionInstaller: Sendable {
         guard installed == expectedManifest else {
             throw DistributionError.installOwnershipMismatch(DistributionLayout.installManifestFileName)
         }
-        try verifyOwnedFiles(installed, prefix: prefix)
+        try verifyOwnedFiles(installed, prefix: prefix, cancellation: cancellation)
 
         let version = try runner.run(
             executablePath: prefix.appendingPathComponent("bin/hostwright").path,
             arguments: ["--version"],
             label: "run installed hostwright --version",
-            timeoutSeconds: 30
+            timeoutSeconds: 30,
+            cancellation: cancellation
         )
         guard version.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines) == installed.packageVersion else {
             throw DistributionError.lifecycleFailed("installed hostwright version output did not match its manifest")
+        }
+        let control = try runner.run(
+            executablePath: prefix.appendingPathComponent("bin/hostwright-control").path,
+            arguments: ["--version"],
+            label: "run installed hostwright-control --version",
+            timeoutSeconds: 30,
+            cancellation: cancellation
+        )
+        guard control.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines) == installed.packageVersion else {
+            throw DistributionError.lifecycleFailed("installed hostwright-control version output did not match its manifest")
+        }
+        let distribution = try runner.run(
+            executablePath: prefix.appendingPathComponent("bin/hostwright-dist").path,
+            arguments: ["--version"],
+            label: "run installed hostwright-dist --version",
+            timeoutSeconds: 30,
+            cancellation: cancellation
+        )
+        guard distribution.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines) == installed.packageVersion else {
+            throw DistributionError.lifecycleFailed("installed hostwright-dist version output did not match its manifest")
         }
         let daemon = try runner.run(
             executablePath: prefix.appendingPathComponent("bin/hostwrightd").path,
             arguments: ["--help"],
             label: "run installed hostwrightd --help",
-            timeoutSeconds: 30
+            timeoutSeconds: 30,
+            cancellation: cancellation
         )
         guard daemon.standardOutput.contains("Usage:"),
               daemon.standardOutput.contains("does not perform unattended runtime mutation") else {
@@ -170,17 +198,23 @@ public struct DistributionInstaller: Sendable {
         }
         return [
             evidenceCommand("installed hostwright --version", result: version),
+            evidenceCommand("installed hostwright-control --version", result: control),
+            evidenceCommand("installed hostwright-dist --version", result: distribution),
             evidenceCommand("installed hostwrightd --help", result: daemon)
         ]
     }
 
     @discardableResult
-    public func uninstall(prefix: URL) throws -> [String] {
+    func uninstall(
+        prefix: URL,
+        cancellation: SecureSubprocessCancellation = SecureSubprocessCancellation()
+    ) throws -> [String] {
+        try requireNotCancelled(cancellation, operation: "distribution uninstall preflight")
         try validatePrefix(prefix)
         let manifestURL = prefix.appendingPathComponent(DistributionLayout.installManifestFileName)
         let manifest = try DistributionJSON.decode(DistributionInstallManifest.self, from: manifestURL)
         try manifest.validate()
-        try verifyOwnedFiles(manifest, prefix: prefix)
+        try verifyOwnedFiles(manifest, prefix: prefix, cancellation: cancellation)
 
         let transaction = prefix.deletingLastPathComponent()
             .appendingPathComponent("hostwright-dist-uninstall-\(UUID().uuidString)", isDirectory: true)
@@ -195,6 +229,7 @@ public struct DistributionInstaller: Sendable {
         var removedDirectories: [String] = []
         do {
             for path in paths {
+                try requireNotCancelled(cancellation, operation: "remove distribution payload")
                 let backup = transaction.appendingPathComponent(path)
                 try FileManager.default.createDirectory(
                     at: backup.deletingLastPathComponent(),
@@ -204,6 +239,7 @@ public struct DistributionInstaller: Sendable {
                 moved.append(path)
             }
             for path in manifest.createdDirectories.sorted(by: directoryDepthDescending) {
+                try requireNotCancelled(cancellation, operation: "remove distribution directories")
                 let url = prefix.appendingPathComponent(path, isDirectory: true)
                 guard DistributionFileSystem.entryExists(url),
                       try DistributionFileSystem.isDirectoryNonSymlink(url) else { continue }
@@ -247,11 +283,16 @@ public struct DistributionInstaller: Sendable {
         return manifest
     }
 
-    private func verifyOwnedFiles(_ manifest: DistributionInstallManifest, prefix: URL) throws {
+    private func verifyOwnedFiles(
+        _ manifest: DistributionInstallManifest,
+        prefix: URL,
+        cancellation: SecureSubprocessCancellation = SecureSubprocessCancellation()
+    ) throws {
         for file in manifest.files {
+            try requireNotCancelled(cancellation, operation: "verify installed distribution payload")
             let url = prefix.appendingPathComponent(file.path)
             guard try DistributionFileSystem.isRegularNonSymlink(url),
-                  try DistributionHash.sha256(fileURL: url) == file.sha256,
+                  try DistributionHash.sha256(fileURL: url, cancellation: cancellation) == file.sha256,
                   try DistributionFileSystem.size(of: url) == file.sizeBytes,
                   try DistributionFileSystem.mode(of: url) == file.mode else {
                 throw DistributionError.installOwnershipMismatch(file.path)
@@ -357,26 +398,39 @@ public struct DistributionInstaller: Sendable {
             durationMilliseconds: result.durationMilliseconds
         )
     }
+
+    private func requireNotCancelled(
+        _ cancellation: SecureSubprocessCancellation,
+        operation: String
+    ) throws {
+        guard !cancellation.isCancelled else {
+            throw DistributionError.commandCancelled(operation)
+        }
+    }
 }
 
 public struct DistributionLifecycleRunner: Sendable {
     private let verifier: DistributionVerifier
-    private let installer: DistributionInstaller
+    private let lifecycle: DistributionInstalledLifecycle
 
     public init(
         verifier: DistributionVerifier = DistributionVerifier(),
-        installer: DistributionInstaller = DistributionInstaller()
+        lifecycle: DistributionInstalledLifecycle = DistributionInstalledLifecycle()
     ) {
         self.verifier = verifier
-        self.installer = installer
+        self.lifecycle = lifecycle
     }
 
     public func run(
         baselineDirectory: URL,
         candidateDirectory: URL,
         prefix: URL,
-        reportURL: URL
+        reportURL: URL,
+        cancellation: SecureSubprocessCancellation = SecureSubprocessCancellation()
     ) throws -> DistributionLifecycleReport {
+        guard !cancellation.isCancelled else {
+            throw DistributionError.commandCancelled("distribution lifecycle preflight")
+        }
         try DistributionTemporaryPathPolicy.validate(prefix, role: "lifecycle prefix")
         guard !DistributionFileSystem.entryExists(reportURL) else {
             throw DistributionError.existingOutput(reportURL.path)
@@ -412,18 +466,28 @@ public struct DistributionLifecycleRunner: Sendable {
         let baselineVerificationStart = DispatchTime.now().uptimeNanoseconds
         let baseline = try verifier.verify(
             distributionDirectory: baselineDirectory,
-            extractionDirectory: baselineExtraction
+            extractionDirectory: baselineExtraction,
+            cancellation: cancellation
         )
         let baselineVerificationDuration = elapsedMilliseconds(since: baselineVerificationStart)
         let candidateVerificationStart = DispatchTime.now().uptimeNanoseconds
         let candidate = try verifier.verify(
             distributionDirectory: candidateDirectory,
-            extractionDirectory: candidateExtraction
+            extractionDirectory: candidateExtraction,
+            cancellation: cancellation
         )
         let candidateVerificationDuration = elapsedMilliseconds(since: candidateVerificationStart)
         guard baseline.manifest.sourceCommit != candidate.manifest.sourceCommit,
               baseline.manifest.architecture == candidate.manifest.architecture else {
             throw DistributionError.lifecycleFailed("baseline and candidate must be distinct compatible source revisions")
+        }
+        guard try DistributionVersionTransition.classify(
+            installedVersion: baseline.manifest.packageVersion,
+            installedCommit: baseline.manifest.sourceCommit,
+            candidateVersion: candidate.manifest.packageVersion,
+            candidateCommit: candidate.manifest.sourceCommit
+        ) == .upgrade else {
+            throw DistributionError.lifecycleFailed("candidate must be a strict semantic-version upgrade")
         }
 
         do {
@@ -440,8 +504,17 @@ public struct DistributionLifecycleRunner: Sendable {
                     durationMilliseconds: candidateVerificationDuration
                 )
             ]
-            let baselineInstall = try installer.install(artifact: baseline, prefix: prefix)
-            commands.append(contentsOf: try installer.verifyInstalled(prefix: prefix, expectedManifest: baselineInstall))
+            let installStart = DispatchTime.now().uptimeNanoseconds
+            _ = try lifecycle.install(
+                artifact: baseline,
+                prefix: prefix,
+                cancellation: cancellation
+            )
+            commands.append(HostwrightEvidenceCommand(
+                command: "install and verify baseline generation",
+                exitCode: 0,
+                durationMilliseconds: elapsedMilliseconds(since: installStart)
+            ))
             stages.append(
                 DistributionStageRecord(
                     identifier: "install",
@@ -450,8 +523,17 @@ public struct DistributionLifecycleRunner: Sendable {
                 )
             )
 
-            let candidateInstall = try installer.install(artifact: candidate, prefix: prefix)
-            commands.append(contentsOf: try installer.verifyInstalled(prefix: prefix, expectedManifest: candidateInstall))
+            let upgradeStart = DispatchTime.now().uptimeNanoseconds
+            _ = try lifecycle.install(
+                artifact: candidate,
+                prefix: prefix,
+                cancellation: cancellation
+            )
+            commands.append(HostwrightEvidenceCommand(
+                command: "upgrade and verify candidate generation",
+                exitCode: 0,
+                durationMilliseconds: elapsedMilliseconds(since: upgradeStart)
+            ))
             stages.append(
                 DistributionStageRecord(
                     identifier: "upgrade",
@@ -460,17 +542,37 @@ public struct DistributionLifecycleRunner: Sendable {
                 )
             )
 
-            let downgradedInstall = try installer.install(artifact: baseline, prefix: prefix)
-            commands.append(contentsOf: try installer.verifyInstalled(prefix: prefix, expectedManifest: downgradedInstall))
+            let rollbackStart = DispatchTime.now().uptimeNanoseconds
+            let rolledBack = try lifecycle.rollback(prefix: prefix, cancellation: cancellation)
+            guard rolledBack.installedManifest.packageVersion == baseline.manifest.packageVersion,
+                  rolledBack.installedManifest.sourceCommit == baseline.manifest.sourceCommit else {
+                throw DistributionError.lifecycleFailed("verified rollback did not restore the baseline generation")
+            }
+            commands.append(HostwrightEvidenceCommand(
+                command: "restore and verify authorized rollback generation",
+                exitCode: 0,
+                durationMilliseconds: elapsedMilliseconds(since: rollbackStart)
+            ))
             stages.append(
                 DistributionStageRecord(
-                    identifier: "downgrade",
+                    identifier: "rollback",
                     status: .passed,
-                    detail: "Restored the exact baseline revision and executed it after candidate replacement."
+                    detail: "Restored the exact baseline only through the candidate generation's verified rollback record."
                 )
             )
 
-            let removedPaths = try installer.uninstall(prefix: prefix)
+            let uninstallStart = DispatchTime.now().uptimeNanoseconds
+            let uninstall = try lifecycle.uninstall(
+                prefix: prefix,
+                dataPolicy: .preserve,
+                cancellation: cancellation
+            )
+            let removedPaths = uninstall.removedPaths
+            commands.append(HostwrightEvidenceCommand(
+                command: "uninstall exact managed payload",
+                exitCode: 0,
+                durationMilliseconds: elapsedMilliseconds(since: uninstallStart)
+            ))
             stages.append(
                 DistributionStageRecord(
                     identifier: "uninstall",
@@ -535,15 +637,18 @@ public struct DistributionLifecycleRunner: Sendable {
             return report
         } catch {
             let primaryError = error
-            let installedManifest = prefix.appendingPathComponent(DistributionLayout.installManifestFileName)
-            if FileManager.default.fileExists(atPath: installedManifest.path) {
-                do {
-                    _ = try installer.uninstall(prefix: prefix)
-                } catch {
-                    throw DistributionError.lifecycleFailed(
-                        "lifecycle failed and exact installer-owned cleanup also failed"
-                    )
+            do {
+                let inspection = try lifecycle.inspect(prefix: prefix)
+                if inspection.readiness == .recoveryRequired {
+                    _ = try lifecycle.recover(prefix: prefix)
                 }
+                if try lifecycle.inspect(prefix: prefix).readiness == .ready {
+                    _ = try lifecycle.uninstall(prefix: prefix, dataPolicy: .preserve)
+                }
+            } catch {
+                throw DistributionError.lifecycleFailed(
+                    "lifecycle failed and exact installer-owned cleanup also failed"
+                )
             }
             throw primaryError
         }

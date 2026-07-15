@@ -49,6 +49,35 @@ public struct ScriptedRuntimeAdapter: RuntimeAdapter {
         }
     }
 
+    public func runtimeReadiness() async throws -> RuntimeReadinessReport {
+        switch scenario {
+        case .unavailable(let message):
+            throw RuntimeAdapterError.runtimeUnavailable(redactionPolicy.redact(message))
+        case .commandFailure(let error):
+            throw error.redacted(using: redactionPolicy)
+        case .timeout:
+            throw RuntimeAdapterError.commandTimedOut(
+                command: "scripted-runtime-readiness",
+                partialOutput: "",
+                partialError: ""
+            )
+        case .redactedFailure(let output):
+            throw RuntimeAdapterError.commandFailed(
+                exitStatus: 1,
+                message: "scripted readiness failed",
+                standardError: redactionPolicy.redact(output)
+            )
+        case .availableEmpty, .observed, .logs:
+            return RuntimeReadinessReport(
+                runtimeName: adapterMetadata.runtimeName,
+                cliVersion: adapterMetadata.runtimeVersion ?? "scripted-test-version",
+                serviceState: .running,
+                serviceVersion: adapterMetadata.runtimeVersion ?? "scripted-test-version",
+                serviceBuild: "scripted-test-build"
+            )
+        }
+    }
+
     public func observe(desiredState: DesiredRuntimeState) async throws -> ObservedRuntimeState {
         switch scenario {
         case .unavailable(let message):

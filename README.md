@@ -8,7 +8,7 @@ The repository is on the `0.0.2-dev` development line. The release target is `v0
 
 GA requires all 15 phases plus two clean release-candidate qualification runs; no partial or blocked phase is hidden behind the version number.
 
-Phase 01 of the all-in roadmap is establishing the breaking contracts and evidence system:
+Phase 01 established the breaking contracts and evidence system:
 
 - Manifest v2;
 - Control API v2;
@@ -19,13 +19,13 @@ Phase 01 of the all-in roadmap is establishing the breaking contracts and eviden
 - machine-readable capability truth through `hostwright capabilities --json`;
 - deterministic read-only v1/versionless manifest migration preview.
 
-The existing implementation remains intentionally narrower than the `v0.0.2` outcome. It includes a restricted manifest parser, deterministic planning, SQLite ledgers, Apple `container` observation, a few confirmation-gated lifecycle mutations, bounded logs/events/diagnostics, a foreground daemon loop, local policy/team profiles, a one-shot control process, advisory scheduling models, and unsigned developer distribution evidence. It does not yet provide complete lifecycle, trusted installation, Containerization, networking, persistent storage, HA, Kubernetes/Docker compatibility, GUI, or GA qualification.
+Phase 02 is active. The existing implementation remains narrower than the `v0.0.2` outcome. It includes a restricted manifest parser, deterministic planning, hardened schema-v7 SQLite ledgers and maintenance, Apple `container` observation, a few confirmation-gated lifecycle mutations, bounded logs/events/diagnostics, a foreground daemon loop, local policy/team profiles, a one-shot control process, advisory scheduling models, unsigned developer distribution evidence, and an implemented trusted ZIP/`.pkg`/SBOM/provenance/formula pipeline that still lacks real credentials and public-channel evidence. It does not yet provide an available trusted install channel, complete lifecycle, Containerization, networking, persistent storage, HA, Kubernetes/Docker compatibility, GUI, or GA qualification.
 
 The authoritative scope and every limitation-to-implementation mapping are in the [v0.0.2 implementation plan](docs/roadmap/v0.0.2/IMPLEMENTATION_PLAN.md). The [machine-readable issue manifest](docs/roadmap/v0.0.2/issues.json) tracks one master, 15 epics, and 167 workstreams. No research-only, blocked, fixture-only, mock-only, or dirty result closes an implementation gate.
 
 ## Installation Truth
 
-`brew install hostwright` does not exist today. Phase 02 owns a maintained vendor tap plus signed/notarized archives and a `.pkg`; Phase 15 owns Homebrew-core submission. Core acceptance is external, so the vendor tap is the guaranteed fallback.
+`brew install hostwright` does not exist today, and neither does the planned `hostwright/homebrew-tap` repository. Phase 02 implements the maintained vendor tap plus signed/notarized archives and a `.pkg`; the artifact/formula machinery exists but no credentialed release or tap install has passed. Phase 15 owns Homebrew-core submission. Core acceptance is external, so the vendor tap is the guaranteed fallback once its evidence gate closes.
 
 For current development, build from source:
 
@@ -52,6 +52,9 @@ See [installation](docs/reference/install.md) and [compatibility](docs/reference
 swift run hostwright --version
 swift run hostwright capabilities --json
 swift run hostwright paths --json
+swift run hostwright state integrity --json
+swift run hostwright state backup --json
+swift run hostwright state backups --json
 swift run hostwright init
 swift run hostwright migrate preview hostwright.yaml
 swift run hostwright validate
@@ -64,7 +67,7 @@ swift run hostwright doctor
 swift run hostwrightd --foreground --config hostwright.yaml --max-iterations 1
 ```
 
-State-backed commands now default to `~/Library/Application Support/Hostwright/state/state.sqlite`; `--state-db` remains an explicit override. Hostwright creates private `0700` local directories, requires `0600` sensitive files, and safely migrates a compatible `~/.hostwright/state.sqlite` through a resumable journal. See [local paths and migration](docs/reference/local-paths.md) for precedence, security checks, recovery, and the exact commands that create or only read state.
+State-backed commands default to `~/Library/Application Support/Hostwright/state/state.sqlite`; `--state-db` remains an explicit override. Hostwright creates private `0700` directories, requires `0600` sensitive files, and safely migrates a compatible `~/.hostwright/state.sqlite` through a resumable journal. `hostwright state` provides full integrity reports, SQLite online backup, verified catalogs, confirmation-bound atomic restore, reconstruction-only repair, and interrupted-maintenance recovery. See [state-store architecture](docs/architecture/state-store.md), [CLI reference](docs/reference/cli.md), and [local paths](docs/reference/local-paths.md).
 
 The current mutation surface still requires plan/cleanup confirmation tokens. `hostwrightd` is not yet installed as a LaunchAgent and does not yet perform the Phase 08 unattended reconciliation contract.
 

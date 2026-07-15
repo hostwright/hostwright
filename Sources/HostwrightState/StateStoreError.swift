@@ -6,6 +6,11 @@ public enum StateStoreError: Error, Equatable, CustomStringConvertible, Sendable
     case closeFailed(path: String, message: String)
     case databaseLocked(path: String, message: String)
     case corruptDatabase(path: String, message: String)
+    case storageFull(path: String, message: String)
+    case ioFailure(path: String, message: String)
+    case readOnlyViolation(path: String, message: String)
+    case operationCancelled(path: String)
+    case maintenanceRecoveryRequired(journalPath: String)
     case executeFailed(message: String)
     case prepareFailed(sql: String, message: String)
     case bindFailed(index: Int32, message: String)
@@ -13,6 +18,8 @@ public enum StateStoreError: Error, Equatable, CustomStringConvertible, Sendable
     case incompatibleSchema(foundVersion: Int?, latestSupported: Int, message: String)
     case migrationFailed(version: Int, message: String)
     case transactionFailed(message: String)
+    case transactionOutcomeUncertain(path: String, message: String)
+    case transactionInvariantViolation(message: String)
     case invalidRecord(String)
     case notFound(String)
 
@@ -32,6 +39,16 @@ public enum StateStoreError: Error, Equatable, CustomStringConvertible, Sendable
             return "State database at \(path) is locked by another process: \(message)"
         case .corruptDatabase(let path, let message):
             return "State database at \(path) appears corrupt or is not a SQLite database: \(message)"
+        case .storageFull(let path, let message):
+            return "State database at \(path) cannot commit because storage is full: \(message)"
+        case .ioFailure(let path, let message):
+            return "State database I/O failed at \(path): \(message)"
+        case .readOnlyViolation(let path, let message):
+            return "State database mutation was refused at \(path): \(message)"
+        case .operationCancelled(let path):
+            return "State database operation was cancelled at \(path); its transaction was rolled back."
+        case .maintenanceRecoveryRequired(let journalPath):
+            return "State maintenance recovery is required before opening the database. Run 'hostwright state recover'; pending journal: \(journalPath)"
         case .executeFailed(let message):
             return "SQLite execution failed: \(message)"
         case .prepareFailed(let sql, let message):
@@ -47,6 +64,10 @@ public enum StateStoreError: Error, Equatable, CustomStringConvertible, Sendable
             return "Migration \(version) failed: \(message)"
         case .transactionFailed(let message):
             return "SQLite transaction failed: \(message)"
+        case .transactionOutcomeUncertain(let path, let message):
+            return "SQLite transaction outcome is uncertain at \(path): \(message)"
+        case .transactionInvariantViolation(let message):
+            return "SQLite transaction invariant failed: \(message)"
         case .invalidRecord(let message):
             return "Invalid state record: \(message)"
         case .notFound(let message):

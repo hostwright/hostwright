@@ -113,6 +113,7 @@ public protocol RuntimeAdapter: Sendable {
     func plan(desiredState: DesiredRuntimeState, observedState: ObservedRuntimeState) async throws -> RuntimePlan
     func logs(for service: ObservedRuntimeService, tail: Int) async throws -> RuntimeLogResult
     func runtimeVersion() async throws -> String
+    func runtimeReadiness() async throws -> RuntimeReadinessReport
     func localImageEvidence(for imageReference: String) async throws -> RuntimeLocalImageEvidence
     func resourceUsage(for resourceIdentifier: String) async throws -> RuntimeResourceUsageSnapshot
     func execute(_ action: PlannedRuntimeAction, confirmation: RuntimeMutationConfirmation?) async throws -> RuntimeEvent
@@ -120,6 +121,10 @@ public protocol RuntimeAdapter: Sendable {
 
 public extension RuntimeAdapter {
     func runtimeVersion() async throws -> String {
+        throw RuntimeAdapterError.capabilityUnavailable(.readOnlyObservation)
+    }
+
+    func runtimeReadiness() async throws -> RuntimeReadinessReport {
         throw RuntimeAdapterError.capabilityUnavailable(.readOnlyObservation)
     }
 
@@ -169,6 +174,10 @@ public struct AppleContainerCLIAdapter: RuntimeAdapter {
 
     public func runtimeVersion() async throws -> String {
         try await applyAdapter.runtimeVersion()
+    }
+
+    public func runtimeReadiness() async throws -> RuntimeReadinessReport {
+        try await applyAdapter.runtimeReadiness()
     }
 
     public func resourceUsage(for resourceIdentifier: String) async throws -> RuntimeResourceUsageSnapshot {

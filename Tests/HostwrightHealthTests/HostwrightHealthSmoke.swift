@@ -26,19 +26,43 @@ final class HostwrightHealthTests: XCTestCase {
         XCTAssertEqual(checks.map(\.identifier), [.appleSilicon, .macOSVersion])
     }
 
-    func testDoctorReportsMissingAppleContainerAsWarning() {
+    func testDoctorReadinessStatesHaveStableValuesAndStrictPrecedence() {
+        XCTAssertEqual(
+            DoctorReadinessState.allCases.map(\.rawValue),
+            ["ready", "degraded", "blocked", "unsupported", "externally-constrained"]
+        )
+        let report = DoctorReport(
+            checks: [
+                DoctorCheck(identifier: .telemetryPolicy, status: .ready, message: "ready"),
+                DoctorCheck(identifier: .manifestPresence, status: .degraded, message: "degraded"),
+                DoctorCheck(identifier: .appleContainerService, status: .externallyConstrained, message: "external"),
+                DoctorCheck(identifier: .stateIntegrity, status: .blocked, message: "blocked"),
+                DoctorCheck(identifier: .macOSVersion, status: .unsupported, message: "unsupported")
+            ]
+        )
+
+        XCTAssertEqual(report.readiness, .unsupported)
+        XCTAssertTrue(report.hasFailures)
+        XCTAssertTrue(report.hasExternalConstraints)
+    }
+
+    func testDoctorReportsMissingAppleContainerAsExternalConstraint() {
         let report = HostwrightDoctor.report(
             inputs: DoctorInputs(
                 operatingSystemDescription: "macOS 26.5",
                 platform: PlatformSnapshot(macOSMajorVersion: 26, architecture: "arm64"),
-                swiftVersion: "Swift 6.3.3",
                 containerExecutablePath: nil,
-                manifestExists: false
+                manifestExists: false,
+                runtimeSnapshot: DoctorRuntimeSnapshot(availability: .cliMissing),
+                systemSnapshot: doctorSystemSnapshot(containerAvailable: false)
             )
         )
 
-        XCTAssertTrue(report.checks.contains { $0.identifier == .appleContainerCLI && $0.status == .warning })
+        XCTAssertTrue(report.checks.contains {
+            $0.identifier == .appleContainerCLI && $0.status == .externallyConstrained
+        })
         XCTAssertFalse(report.hasFailures)
+        XCTAssertTrue(report.hasExternalConstraints)
     }
 
     func testDoctorResourceIntelligenceWarnsOnSeriousThermalState() {
@@ -58,15 +82,120 @@ final class HostwrightHealthTests: XCTestCase {
             inputs: DoctorInputs(
                 operatingSystemDescription: "macOS 26.5",
                 platform: PlatformSnapshot(macOSMajorVersion: 26, architecture: "arm64"),
-                swiftVersion: "Swift 6.3.3",
                 containerExecutablePath: "/usr/local/bin/container",
                 manifestExists: true,
+                runtimeSnapshot: DoctorRuntimeSnapshot(
+                    availability: .ready,
+                    cliVersion: "1.1.0",
+                    serviceVersion: "1.1.0"
+                ),
+                systemSnapshot: doctorSystemSnapshot(thermalState: .serious),
                 resourceSnapshot: snapshot
             )
         )
 
-        XCTAssertTrue(report.checks.contains { $0.identifier == .resourceIntelligence && $0.status == .warning })
+        XCTAssertTrue(report.checks.contains {
+            $0.identifier == .resourcePressure && $0.status == .degraded
+        })
+        XCTAssertTrue(report.checks.contains {
+            $0.identifier == .resourceIntelligence && $0.status == .degraded
+        })
         XCTAssertFalse(report.hasFailures)
+    }
+
+    func testDoctorDoesNotRequireOptionalDeveloperToolchainForRuntimeReadiness() throws {
+        let base = doctorSystemSnapshot()
+        let snapshot = DoctorSystemSnapshot(
+            localNetwork: base.localNetwork,
+            signingTrust: base.signingTrust,
+            resourcePressure: base.resourcePressure,
+            tools: base.tools.map { tool in
+                tool.identifier == "swift-toolchain"
+                    ? DoctorToolSnapshot(
+                        identifier: tool.identifier,
+                        available: false,
+                        requiredForRuntime: false
+                    )
+                    : tool
+            }
+        )
+
+        let report = HostwrightDoctor.report(
+            inputs: DoctorInputs(
+                operatingSystemDescription: "macOS 26.5",
+                platform: PlatformSnapshot(macOSMajorVersion: 26, architecture: "arm64"),
+                containerExecutablePath: "/usr/local/bin/container",
+                manifestExists: true,
+                runtimeSnapshot: DoctorRuntimeSnapshot(
+                    availability: .ready,
+                    cliVersion: "1.1.0",
+                    serviceVersion: "1.1.0"
+                ),
+                systemSnapshot: snapshot,
+                resourceSnapshot: ResourceIntelligenceSnapshot(
+                    method: .fixture,
+                    operatingSystemDescription: "macOS 26.5",
+                    platform: PlatformSnapshot(macOSMajorVersion: 26, architecture: "arm64"),
+                    physicalMemoryBytes: 16 * 1_024 * 1_024 * 1_024,
+                    activeProcessorCount: 8,
+                    thermalState: .nominal,
+                    appleContainerExecutablePath: "/usr/local/bin/container",
+                    appleContainerVersion: "container 1.1.0",
+                    workloadProfile: .localContainersGeneral
+                )
+            )
+        )
+
+        let tools = try XCTUnwrap(report.checks.first { $0.identifier == .requiredTools })
+        XCTAssertEqual(tools.status, .ready)
+        XCTAssertEqual(tools.details["swift-toolchain"], "false")
+    }
+
+    private func doctorSystemSnapshot(
+        containerAvailable: Bool = true,
+        thermalState: ResourcePressureLevel = .nominal
+    ) -> DoctorSystemSnapshot {
+        DoctorSystemSnapshot(
+            localNetwork: DoctorLocalNetworkSnapshot(
+                loopbackAvailable: true,
+                activeNonLoopbackInterfaceCount: 1,
+                hasIPv4: true,
+                hasIPv6: true
+            ),
+            signingTrust: DoctorSigningTrustSnapshot(
+                codeSignature: .developerID,
+                gatekeeper: .accepted,
+                developmentBuild: false
+            ),
+            resourcePressure: DoctorResourcePressureSnapshot(
+                physicalMemoryBytes: 16 * 1_024 * 1_024 * 1_024,
+                reclaimableMemoryBytes: 8 * 1_024 * 1_024 * 1_024,
+                reclaimableMemoryPercent: 50,
+                thermalState: thermalState
+            ),
+            tools: [
+                DoctorToolSnapshot(
+                    identifier: "apple-container-cli",
+                    available: containerAvailable,
+                    requiredForRuntime: true
+                ),
+                DoctorToolSnapshot(
+                    identifier: "codesign",
+                    available: true,
+                    requiredForRuntime: false
+                ),
+                DoctorToolSnapshot(
+                    identifier: "gatekeeper-spctl",
+                    available: true,
+                    requiredForRuntime: false
+                ),
+                DoctorToolSnapshot(
+                    identifier: "swift-toolchain",
+                    available: true,
+                    requiredForRuntime: false
+                )
+            ]
+        )
     }
 
     func testResourceReportCapturesMeasurementMethodHardwareLimitsAndUnknowns() {

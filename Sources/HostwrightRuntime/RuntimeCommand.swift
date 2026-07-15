@@ -17,6 +17,20 @@ public enum RuntimeMutationCommandKind: String, Equatable, Sendable {
     case deleteManagedContainer
 }
 
+public enum RuntimeCommandExitStatusPolicy: Equatable, Sendable {
+    case zeroOnly
+    case appleContainerSystemStatus
+
+    public func accepts(_ exitStatus: Int32) -> Bool {
+        switch self {
+        case .zeroOnly:
+            return exitStatus == 0
+        case .appleContainerSystemStatus:
+            return exitStatus == 0 || exitStatus == 1
+        }
+    }
+}
+
 public struct RuntimeCommandTimeout: Equatable, Sendable {
     public static let defaultSeconds = 30
     public static let maximumSeconds = 300
@@ -38,6 +52,7 @@ public struct RuntimeCommandSpec: Equatable, Sendable {
     public let classification: RuntimeCommandClassification
     public let executableResolution: RuntimeExecutableResolution
     public let mutationKind: RuntimeMutationCommandKind?
+    public let exitStatusPolicy: RuntimeCommandExitStatusPolicy
     public let purpose: String
 
     public init(
@@ -50,6 +65,7 @@ public struct RuntimeCommandSpec: Equatable, Sendable {
         classification: RuntimeCommandClassification,
         executableResolution: RuntimeExecutableResolution = .unresolved,
         mutationKind: RuntimeMutationCommandKind? = nil,
+        exitStatusPolicy: RuntimeCommandExitStatusPolicy = .zeroOnly,
         purpose: String
     ) {
         self.executablePath = executablePath
@@ -61,6 +77,7 @@ public struct RuntimeCommandSpec: Equatable, Sendable {
         self.classification = classification
         self.executableResolution = executableResolution
         self.mutationKind = mutationKind
+        self.exitStatusPolicy = exitStatusPolicy
         self.purpose = purpose
     }
 
@@ -75,6 +92,7 @@ public struct RuntimeCommandSpec: Equatable, Sendable {
             classification: classification,
             executableResolution: executableResolution,
             mutationKind: mutationKind,
+            exitStatusPolicy: exitStatusPolicy,
             purpose: purpose
         )
     }
@@ -131,6 +149,7 @@ public enum RuntimeCommandPolicy {
                 message: "Read-only runtime execution refuses command specs whose executable was not resolved through RuntimeExecutableResolver."
             )
         }
+        try validateReadOnlyExitStatusPolicy(spec)
     }
 
     public static func validateExactResourceStats(_ spec: RuntimeCommandSpec, resourceIdentifier: String) throws {
@@ -156,6 +175,13 @@ public enum RuntimeCommandPolicy {
             throw RuntimeAdapterError.commandRejected(
                 classification: spec.classification,
                 message: "Create-missing-service mutation accepts only explicitly classified mutating specs."
+            )
+        }
+
+        guard spec.exitStatusPolicy == .zeroOnly else {
+            throw RuntimeAdapterError.commandRejected(
+                classification: spec.classification,
+                message: "Runtime mutations require a zero-only exit-status policy."
             )
         }
 
@@ -309,6 +335,21 @@ public enum RuntimeCommandPolicy {
         }
     }
 
+    private static func validateReadOnlyExitStatusPolicy(_ spec: RuntimeCommandSpec) throws {
+        switch spec.exitStatusPolicy {
+        case .zeroOnly:
+            return
+        case .appleContainerSystemStatus:
+            guard spec.mutationKind == nil,
+                  spec.arguments == ["system", "status", "--format", "json"] else {
+                throw RuntimeAdapterError.commandRejected(
+                    classification: spec.classification,
+                    message: "The Apple system-status exit policy accepts only the exact read-only JSON status command."
+                )
+            }
+        }
+    }
+
     private static func validateResolvedMutatingSpec(
         _ spec: RuntimeCommandSpec,
         expectedKind: RuntimeMutationCommandKind,
@@ -355,6 +396,13 @@ public enum RuntimeCommandPolicy {
             throw RuntimeAdapterError.commandRejected(
                 classification: spec.classification,
                 message: "\(commandName) mutation accepts only explicitly classified mutating specs."
+            )
+        }
+
+        guard spec.exitStatusPolicy == .zeroOnly else {
+            throw RuntimeAdapterError.commandRejected(
+                classification: spec.classification,
+                message: "Runtime mutations require a zero-only exit-status policy."
             )
         }
 

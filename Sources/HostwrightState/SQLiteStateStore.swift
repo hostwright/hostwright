@@ -85,10 +85,30 @@ public struct SQLiteStateStore: StateStore {
 
     func withConnection<T>(createIfNeeded: Bool = true, readOnly: Bool = false, _ body: (SQLiteConnection) throws -> T) throws -> T {
         try configuration.prepareStateAccessFoundation()
-        return try StateAccessCoordinator(configuration: configuration).withLock(.shared) {
-            try configuration.prepare(createIfNeeded: createIfNeeded)
-            let connection = try SQLiteConnection(path: configuration.databasePath, createIfNeeded: createIfNeeded, readOnly: readOnly)
+        let accessMode: StateAccessMode = readOnly ? .shared : .write
+        return try StateAccessCoordinator(configuration: configuration).withLock(accessMode) {
+            let databaseExisted = StateMaintenanceFileSupport.exists(configuration.databasePath)
+            let expectedIdentity = try configuration.prepare(createIfNeeded: createIfNeeded)
+            if !readOnly, databaseExisted {
+                try preflightExistingDatabaseForWrite(
+                    expectedIdentity: expectedIdentity,
+                    requireLatestSchema: false
+                )
+            }
+            let connection = try SQLiteConnection(
+                path: configuration.databasePath,
+                createIfNeeded: createIfNeeded,
+                readOnly: readOnly,
+                profile: .authoritativeState
+            )
             defer { try? connection.close() }
+            let openedIdentity = try configuration.validateSQLiteFileSet()
+            guard expectedIdentity == openedIdentity else {
+                throw StateStoreError.pathPolicyViolation(
+                    path: configuration.databasePath,
+                    message: "the state database identity changed while SQLite was opening it"
+                )
+            }
             let result = try body(connection)
             try connection.close()
             return result
@@ -97,14 +117,66 @@ public struct SQLiteStateStore: StateStore {
 
     func withValidatedConnection<T>(readOnly: Bool = false, _ body: (SQLiteConnection) throws -> T) throws -> T {
         try configuration.prepareStateAccessFoundation()
-        return try StateAccessCoordinator(configuration: configuration).withLock(.shared) {
-            try configuration.prepare(createIfNeeded: false)
-            let connection = try SQLiteConnection(path: configuration.databasePath, createIfNeeded: false, readOnly: readOnly)
+        let accessMode: StateAccessMode = readOnly ? .shared : .write
+        return try StateAccessCoordinator(configuration: configuration).withLock(accessMode) {
+            let expectedIdentity = try configuration.prepare(createIfNeeded: false)
+            if !readOnly {
+                try preflightExistingDatabaseForWrite(
+                    expectedIdentity: expectedIdentity,
+                    requireLatestSchema: true
+                )
+            }
+            let connection = try SQLiteConnection(
+                path: configuration.databasePath,
+                createIfNeeded: false,
+                readOnly: readOnly,
+                profile: .authoritativeState
+            )
             defer { try? connection.close() }
+            let openedIdentity = try configuration.validateSQLiteFileSet()
+            guard expectedIdentity == openedIdentity else {
+                throw StateStoreError.pathPolicyViolation(
+                    path: configuration.databasePath,
+                    message: "the state database identity changed while SQLite was opening it"
+                )
+            }
             try MigrationRunner().validateAppliedSchema(on: connection)
             let result = try body(connection)
             try connection.close()
             return result
+        }
+    }
+
+    private func preflightExistingDatabaseForWrite(
+        expectedIdentity: FileIdentity?,
+        requireLatestSchema: Bool
+    ) throws {
+        let connection = try SQLiteConnection(
+            path: configuration.databasePath,
+            createIfNeeded: false,
+            readOnly: true,
+            profile: .authoritativeState
+        )
+        defer { try? connection.close() }
+        let openedIdentity = try configuration.validateSQLiteFileSet()
+        guard expectedIdentity == openedIdentity else {
+            throw StateStoreError.pathPolicyViolation(
+                path: configuration.databasePath,
+                message: "the state database identity changed during the non-mutating compatibility preflight"
+            )
+        }
+        if requireLatestSchema {
+            try MigrationRunner().validateAppliedSchema(on: connection)
+        } else {
+            _ = try MigrationRunner().compatibleSchemaVersion(on: connection)
+        }
+        try connection.close()
+        let closedIdentity = try configuration.validateSQLiteFileSet()
+        guard expectedIdentity == closedIdentity else {
+            throw StateStoreError.pathPolicyViolation(
+                path: configuration.databasePath,
+                message: "the state database identity changed while completing the non-mutating compatibility preflight"
+            )
         }
     }
 }

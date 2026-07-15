@@ -38,6 +38,9 @@ jobs:
     permissions:
       contents: read
     env:
+      RELEASE_COMMIT: ${{ inputs.commit }}
+      RELEASE_VERSION: ${{ inputs.version }}
+      RELEASE_TAG: ${{ inputs.tag }}
       RELEASE_APPLICATION_IDENTITY: ${{ vars.RELEASE_APPLICATION_IDENTITY }}
       RELEASE_INSTALLER_IDENTITY: ${{ vars.RELEASE_INSTALLER_IDENTITY }}
       RELEASE_TEAM_ID: ${{ vars.RELEASE_TEAM_ID }}
@@ -54,20 +57,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          [[ "${{ inputs.commit }}" =~ ^[a-f0-9]{40}$ ]]
-          [[ "${{ inputs.version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]
-          [[ "${{ inputs.tag }}" == "v${{ inputs.version }}" ]]
+          [[ "$RELEASE_COMMIT" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]
+          [[ "$RELEASE_TAG" == "v$RELEASE_VERSION" ]]
           [[ "$RELEASE_APPLICATION_IDENTITY" =~ ^[A-F0-9]{40}$ ]]
           [[ "$RELEASE_INSTALLER_IDENTITY" =~ ^[A-F0-9]{40}$ ]]
           [[ "$RELEASE_APPLICATION_IDENTITY" != "$RELEASE_INSTALLER_IDENTITY" ]]
           [[ "$RELEASE_TEAM_ID" =~ ^[A-Z0-9]{10}$ ]]
           [[ "$RELEASE_NOTARY_PROFILE" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]]
           test "$GITHUB_REPOSITORY" = hostwright/hostwright
-          test "$(git rev-parse HEAD)" = "${{ inputs.commit }}"
+          test "$(git rev-parse HEAD)" = "$RELEASE_COMMIT"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
           git fetch --no-tags origin main
-          git merge-base --is-ancestor "${{ inputs.commit }}" origin/main
-          if git ls-remote --exit-code --tags origin "refs/tags/${{ inputs.tag }}" >/dev/null 2>&1; then
+          git merge-base --is-ancestor "$RELEASE_COMMIT" origin/main
+          if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
             echo "Release tag already exists; tags are immutable." >&2
             exit 65
           fi
@@ -101,9 +104,9 @@ jobs:
           swift run hostwright-dist release \
             --source-root "$GITHUB_WORKSPACE" \
             --output-dir "$release_dir" \
-            --expected-commit "${{ inputs.commit }}" \
-            --expected-version "${{ inputs.version }}" \
-            --release-tag "${{ inputs.tag }}" \
+            --expected-commit "$RELEASE_COMMIT" \
+            --expected-version "$RELEASE_VERSION" \
+            --release-tag "$RELEASE_TAG" \
             --application-identity "$RELEASE_APPLICATION_IDENTITY" \
             --installer-identity "$RELEASE_INSTALLER_IDENTITY" \
             --team-id "$RELEASE_TEAM_ID" \
@@ -113,7 +116,7 @@ jobs:
             --team-id "$RELEASE_TEAM_ID"
           archive_name="$(plutil -extract archive.fileName raw "$release_dir/release-manifest.json")"
           mkdir -p "$formula_dir"
-          artifact_url="https://github.com/$GITHUB_REPOSITORY/releases/download/${{ inputs.tag }}/$archive_name"
+          artifact_url="https://github.com/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG/$archive_name"
           swift run hostwright-dist homebrew-formula \
             --release-dir "$release_dir" \
             --team-id "$RELEASE_TEAM_ID" \
@@ -154,6 +157,10 @@ jobs:
       contents: read
       id-token: write
       attestations: write
+    env:
+      RELEASE_COMMIT: ${{ inputs.commit }}
+      RELEASE_VERSION: ${{ inputs.version }}
+      RELEASE_TAG: ${{ inputs.tag }}
     steps:
       - name: Download the verified release bundle
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -223,17 +230,20 @@ jobs:
       attestations: read
     env:
       GH_TOKEN: ${{ github.token }}
+      RELEASE_COMMIT: ${{ inputs.commit }}
+      RELEASE_VERSION: ${{ inputs.version }}
+      RELEASE_TAG: ${{ inputs.tag }}
     steps:
       - name: Recheck immutable publication inputs
         shell: bash
         run: |
           set -euo pipefail
           test "$GITHUB_REPOSITORY" = hostwright/hostwright
-          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/${{ inputs.tag }}" >/dev/null 2>&1; then
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" >/dev/null 2>&1; then
             echo "Release tag now exists; tags are immutable." >&2
             exit 65
           fi
-          if gh release view "${{ inputs.tag }}" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "GitHub release now exists; refusing duplicate publication." >&2
             exit 65
           fi
@@ -252,7 +262,7 @@ jobs:
           formula="$RUNNER_TEMP/hostwright-publish-bundle/Formula/hostwright.rb"
           test -d "$release_dir"
           test -f "$formula"
-          test "$(find "$release_dir" -mindepth 1 -maxdepth 1 -type f | wc -l | tr -d ' ')" = 11
+          test "$(find "$release_dir" -mindepth 1 -maxdepth 1 -type f | wc -l | tr -d ' ')" = 12
           test "$(find "$release_dir" -mindepth 1 -maxdepth 1 ! -type f | wc -l | tr -d ' ')" = 0
           (cd "$release_dir" && /usr/bin/shasum -a 256 -c SHA256SUMS)
           security cms -D -i "$release_dir/release-manifest.json.cms" \
@@ -261,33 +271,40 @@ jobs:
             -c "$release_dir/SHA256SUMS" -n -h 15 -u 6 >/dev/null
           security cms -D -i "$release_dir/provenance.intoto.json.cms" \
             -c "$release_dir/provenance.intoto.json" -n -h 15 -u 6 >/dev/null
+          security cms -D -i "$release_dir/release-evidence.json.cms" \
+            -c "$release_dir/release-evidence.json" -n -h 15 -u 6 >/dev/null
           brew ruby -- -c "$formula"
 
       - name: Publish immutable development prerelease
-        id: publish
         shell: bash
         run: |
           set -euo pipefail
+          ownership_file="$RUNNER_TEMP/hostwright-publication-ownership-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          test ! -e "$ownership_file"
+          ownership_marker="$(/usr/bin/uuidgen)"
+          [[ "$ownership_marker" =~ ^[A-F0-9-]{36}$ ]]
+          umask 077
+          printf '%s\n' "$ownership_marker" > "$ownership_file"
+          tag_message="Hostwright $RELEASE_VERSION trusted development release
+          hostwright-release-ownership:$ownership_marker"
           tag_object="$(gh api --method POST "repos/$GITHUB_REPOSITORY/git/tags" \
-            -f tag="${{ inputs.tag }}" \
-            -f message="Hostwright ${{ inputs.version }} trusted development release" \
-            -f object="${{ inputs.commit }}" \
+            -f tag="$RELEASE_TAG" \
+            -f message="$tag_message" \
+            -f object="$RELEASE_COMMIT" \
             -f type=commit \
             --jq .sha)"
           gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
-            -f ref="refs/tags/${{ inputs.tag }}" \
+            -f ref="refs/tags/$RELEASE_TAG" \
             -f sha="$tag_object" >/dev/null
-          echo "tag_created=true" >> "$GITHUB_OUTPUT"
-          gh release create "${{ inputs.tag }}" \
+          gh release create "$RELEASE_TAG" \
             "$RUNNER_TEMP/hostwright-publish-bundle/release"/* \
             "$RUNNER_TEMP/hostwright-publish-bundle/Formula/hostwright.rb" \
             --repo "$GITHUB_REPOSITORY" \
-            --target "${{ inputs.commit }}" \
-            --title "Hostwright ${{ inputs.version }}" \
+            --target "$RELEASE_COMMIT" \
+            --title "Hostwright $RELEASE_VERSION" \
             --notes "Trusted Phase 02 development channel artifact. This is not v0.0.2 GA." \
             --prerelease \
             --verify-tag
-          echo "release_created=true" >> "$GITHUB_OUTPUT"
 
       - name: Verify bytes downloaded from the published release
         shell: bash
@@ -295,7 +312,7 @@ jobs:
           set -euo pipefail
           download="$RUNNER_TEMP/hostwright-release-download-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           mkdir "$download"
-          gh release download "${{ inputs.tag }}" --repo "$GITHUB_REPOSITORY" --dir "$download"
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir "$download"
           expected="$RUNNER_TEMP/hostwright-publish-bundle"
           diff \
             <({ find "$expected/release" -mindepth 1 -maxdepth 1 -type f -exec basename {} \;; basename "$expected/Formula/hostwright.rb"; } | sort) \
@@ -304,22 +321,59 @@ jobs:
             cmp "$original" "$download/$(basename "$original")"
           done
           (cd "$download" && /usr/bin/shasum -a 256 -c SHA256SUMS)
+          security cms -D -i "$download/release-manifest.json.cms" \
+            -c "$download/release-manifest.json" -n -h 15 -u 6 >/dev/null
+          security cms -D -i "$download/SHA256SUMS.cms" \
+            -c "$download/SHA256SUMS" -n -h 15 -u 6 >/dev/null
+          security cms -D -i "$download/provenance.intoto.json.cms" \
+            -c "$download/provenance.intoto.json" -n -h 15 -u 6 >/dev/null
+          security cms -D -i "$download/release-evidence.json.cms" \
+            -c "$download/release-evidence.json" -n -h 15 -u 6 >/dev/null
           archive_name="$(plutil -extract archive.fileName raw "$download/release-manifest.json")"
           package_name="$(plutil -extract package.fileName raw "$download/release-manifest.json")"
           gh attestation verify "$download/$archive_name" --repo "$GITHUB_REPOSITORY"
           gh attestation verify "$download/$package_name" --repo "$GITHUB_REPOSITORY"
           gh attestation verify "$download/hostwright.rb" --repo "$GITHUB_REPOSITORY"
 
-      - name: Compensate a failed publication
-        if: ${{ failure() && steps.publish.outputs.tag_created == 'true' }}
+      - name: Compensate a failed or cancelled publication
+        if: ${{ failure() || cancelled() }}
         shell: bash
         run: |
           set -euo pipefail
-          if gh release view "${{ inputs.tag }}" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release delete "${{ inputs.tag }}" \
-              --repo "$GITHUB_REPOSITORY" \
-              --cleanup-tag \
-              --yes
-          else
-            gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/${{ inputs.tag }}"
+          ownership_file="$RUNNER_TEMP/hostwright-publication-ownership-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          if [[ ! -f "$ownership_file" || -L "$ownership_file" ]]; then
+            exit 0
           fi
+          test "$(stat -f '%Lp' "$ownership_file")" = 600
+          ownership_marker="$(cat "$ownership_file")"
+          [[ "$ownership_marker" =~ ^[A-F0-9-]{36}$ ]]
+          expected_tag_message="Hostwright $RELEASE_VERSION trusted development release
+          hostwright-release-ownership:$ownership_marker"
+          tag_ref="repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG"
+          if ! tag_object_sha="$(gh api "$tag_ref" --jq '.object.sha' 2>/dev/null)"; then
+            if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              echo "Refusing compensation: release exists without its exact owned tag." >&2
+              exit 70
+            fi
+            exit 0
+          fi
+          tag_object_type="$(gh api "$tag_ref" --jq '.object.type')"
+          test "$tag_object_type" = tag
+          tag_name="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$tag_object_sha" --jq '.tag')"
+          tag_message="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$tag_object_sha" --jq '.message')"
+          resolved_type="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$tag_object_sha" --jq '.object.type')"
+          resolved_commit="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$tag_object_sha" --jq '.object.sha')"
+          if [[ "$tag_name" != "$RELEASE_TAG" || "$tag_message" != "$expected_tag_message" || "$resolved_type" != commit || "$resolved_commit" != "$RELEASE_COMMIT" ]]; then
+            echo "Refusing compensation: tag ownership differs from the exact release commit." >&2
+            exit 70
+          fi
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release delete "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --yes
+          fi
+          current_object_sha="$(gh api "$tag_ref" --jq '.object.sha')"
+          current_commit="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$current_object_sha" --jq '.object.sha')"
+          if [[ "$current_object_sha" != "$tag_object_sha" || "$current_commit" != "$RELEASE_COMMIT" ]]; then
+            echo "Refusing compensation: tag changed before deletion." >&2
+            exit 70
+          fi
+          gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$RELEASE_TAG"

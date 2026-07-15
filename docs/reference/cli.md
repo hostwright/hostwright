@@ -31,18 +31,29 @@ hostwright cleanup [path] [--state-db <path>] --dry-run [--team-profile <path>]
 hostwright cleanup [path] [--state-db <path>] --confirm-cleanup <token> [--team-profile <path> --approval-record <path>]
 hostwright benchmark --image <local-image> --samples <3-10> --report <path> --source-commit <40-hex> --source-dirty <true|false> --expected-container-version <version> [--attended-sleep-wake-seconds <15-300>] --confirm-live
 hostwright extension check --declaration <absolute-path> --executable <absolute-path> [--output text|json]
-hostwright doctor [--output text|json]
+hostwright doctor [--state-db <path>] [--json | --output text|json]
 hostwright-control --version
 hostwright-control --manifest <absolute-path> [--state-db <absolute-path>] [--team-profile <absolute-path>]
 hostwrightd --foreground --config <hostwright.yaml> [--state-db <path>] [options]
+hostwright-dist --version
+hostwright-dist install <artifact-source> --prefix <path> [--state-db <path>] --output json
+hostwright-dist upgrade <artifact-source> --prefix <path> [--state-db <path>] --output json
+hostwright-dist repair <artifact-source> --prefix <path> [--state-db <path>] --output json
+hostwright-dist status --prefix <path> --output json
+hostwright-dist adopt-legacy --prefix <path> [--state-db <path>] --output json
+hostwright-dist recover --prefix <path> --output json
+hostwright-dist rollback --prefix <path> --output json
+hostwright-dist uninstall-plan --prefix <path> --data-policy <preserve|remove> --output json
+hostwright-dist uninstall --prefix <path> --data-policy preserve --output json
+hostwright-dist uninstall --prefix <path> --data-policy remove --confirmation <plan-token> --output json
 hostwright-dist help
 ```
 
 ## Output Modes
 
-Text output is the default for every command.
+Text output is the default for `hostwright` commands. Installed-lifecycle `hostwright-dist` commands require `--output json`; release and developer-evidence commands retain their documented text/report output.
 
-`capabilities`, `paths`, every `state` subcommand, `migrate preview`, `import-stack`, `plan`, `status`, `events`, `recovery`, `extension check`, and `doctor` also accept JSON output. `capabilities`, `paths`, every `state` subcommand, and `migrate preview` accept the convenience spelling `--json`. JSON output is intended for local scripts, conformance checks, and tests. It does not weaken mutation gates.
+`capabilities`, `paths`, every `state` subcommand, `migrate preview`, `import-stack`, `plan`, `status`, `events`, `recovery`, `extension check`, and `doctor` also accept JSON output. `capabilities`, `paths`, every `state` subcommand, `migrate preview`, and `doctor` accept the convenience spelling `--json`. JSON output is intended for local scripts, conformance checks, and tests. It does not weaken mutation gates.
 
 When JSON mode is requested and the CLI can classify the failure, stderr uses this envelope:
 
@@ -50,7 +61,7 @@ When JSON mode is requested and the CLI can classify the failure, stderr uses th
 {"code":"HW-CLI-001","exitCode":64,"kind":"error","message":"..."}
 ```
 
-Manifest failures use an `issues` array with stable Hostwright error codes. `doctor --output json` reports compatibility failures as a normal doctor JSON document on stdout with `hasFailures: true` and exit code 65, not as an error envelope.
+Manifest failures use an `issues` array with stable Hostwright error codes. Doctor readiness results are normal schema-v2 doctor documents on stdout rather than error envelopes: unsupported or blocked local policy exits 65, failed existing-state integrity exits 66, and an external runtime constraint exits 69. A `hostwright-dist` lifecycle failure requested with `--output json` uses `kind: distributionToolError`, code `HW-DIST-001`, the classified exit code, and a message on stderr.
 
 ## `hostwright-control --manifest <absolute-path> ...`
 
@@ -77,13 +88,13 @@ The API deliberately excludes apply, cleanup, logs, diagnostics export, benchmar
 | Exit code | Category | Typical commands |
 | ---: | --- | --- |
 | `0` | Success | All commands |
-| `64` | Usage | Unsupported flags, missing arguments, refused overwrite, or local non-manifest file I/O failure |
-| `65` | Validation | Missing/unreadable manifest, manifest/profile/approval/extension declaration validation, and compatibility failures |
+| `64` | Usage | Unsupported flags, missing arguments, refused overwrite, local non-manifest file I/O failure, or invalid distribution lifecycle arguments/path shape |
+| `65` | Validation | Missing/unreadable manifest, manifest/profile/approval/extension declaration validation, compatibility failure, invalid distribution evidence, downgrade refusal, or lifecycle version conflict |
 | `66` | State unavailable | Selected SQLite state path could not be resolved, opened, migrated, verified, locked, read, backed up, restored, repaired, or recovered; integrity also returns 66 for `degraded`/`unrecoverable` while preserving its report on stdout |
-| `69` | Runtime unavailable or evidence blocked | Runtime observation/mutation unavailable, or benchmark prerequisites/dimensions remain blocked |
+| `69` | Runtime/tool unavailable or evidence blocked | Runtime observation/mutation unavailable, a required distribution subprocess failed, or benchmark/distribution evidence remains blocked |
 | `70` | Confirmation mismatch | Plan, cleanup, state restore/repair, approval scope, or approval hash bindings do not match current state |
-| `71` | Unsafe operation | Planner/apply policy, state-repair authority boundary, or reviewed-local extension policy blocked execution |
-| `72` | Partial failure | Cleanup completed with mixed success/failure, benchmark command/identity/cleanup evidence failed, or an extension handshake process/protocol failed |
+| `71` | Unsafe operation | Planner/apply policy, state-repair authority boundary, reviewed-local extension policy, or distribution ownership verification blocked execution |
+| `72` | Partial failure | Cleanup completed with mixed success/failure, benchmark command/identity/cleanup evidence failed, an extension handshake process/protocol failed, or installed lifecycle/recovery could not complete safely |
 
 ## `hostwright --version`
 
@@ -95,21 +106,29 @@ Prints the current development version:
 
 The release target is `v0.0.2`. The binary does not report the release version until the GA gate passes.
 
-## `hostwright-dist` release and developer surfaces
+## `hostwright-dist` release, installed lifecycle, and developer surfaces
 
-The unsigned `build`, `assemble`, `verify`, and `lifecycle` commands remain local development evidence. They deliberately cannot return passing trusted-distribution evidence.
+The unsigned `build`, `assemble`, `verify`, and `lifecycle` commands remain local development evidence. They deliberately cannot return passing trusted-distribution evidence. `hostwright-dist --version` prints the same product version as the other shipped command tools.
 
 The trusted surface is:
 
 ```text
-hostwright-dist release --source-root <path> --output-dir <path> --expected-commit <40-hex> --expected-version <semver> --release-tag <v-semver> --application-identity <SHA-1> --installer-identity <SHA-1> --team-id <10-char> --notary-keychain-profile <name>
-hostwright-dist verify-release --release-dir <path> --team-id <10-char>
-hostwright-dist homebrew-formula --release-dir <path> --team-id <10-char> --artifact-url <immutable-https-url> --output <Formula/hostwright.rb>
+hostwright-dist release --source-root <path> --output-dir <path> --expected-commit <40-hex> --expected-version <semver> --release-tag <v-semver> --application-identity <SHA-1> --installer-identity <SHA-1> --team-id <10-char> --notary-keychain-profile <name> [--format text|json]
+hostwright-dist verify-release --release-dir <path> --team-id <10-char> [--format text|json]
+hostwright-dist homebrew-formula --release-dir <path> --team-id <10-char> --artifact-url <immutable-https-url> --output <Formula/hostwright.rb> [--format text|json]
 ```
 
 `release` creates no tag, GitHub release, or tap commit. It writes a new output directory only after all build, signature, notarization, package, Gatekeeper, SBOM, provenance, checksum, detached-CMS, cleanup, and independent-verification stages pass. `verify-release` requires the expected Developer ID team and refuses extra, missing, linked, wrong-mode, wrong-digest, wrong-signer, unsafe archive/package, or evidence-mismatched files. `homebrew-formula` operates only on a fully verified trusted release and only for the exact Hostwright GitHub release URL bound by its manifest.
 
+Text remains the default. `--format json` returns schema-1 `trustedRelease`, `trustedReleaseVerification`, or `homebrewFormula` output with exact commit, artifact descriptors, status, and applicable cleanup/retention evidence. Structured failures use `distributionToolError`; `homebrew-formula --output` remains the formula file path and is never interpreted as an output format.
+
 These commands are implemented but not yet an available package channel. See [Install and Upgrade](install.md) for the live evidence blockers.
+
+The installed lifecycle accepts either the fully verified trusted release plus its exact team identifier or a verified developer distribution. It exposes `install`, `upgrade`, `repair`, `status`, `adopt-legacy`, `recover`, `rollback`, `uninstall-plan`, and `uninstall`; all require structured JSON output. Upgrade is strict SemVer, repair requires the exact installed version and commit, arbitrary downgrade is refused, and rollback accepts only the one verified immediately prior generation retained by a successful upgrade.
+
+Lifecycle status is `not-installed`, `ready`, or `recovery-required`. A pending durable journal must be resolved with `recover` before another mutation. `uninstall --data-policy preserve` requires no confirmation and retains the bound state database. `remove` requires the exact current plan token and removes only the verified active SQLite file set in addition to owned installed payload. The lifecycle creates no LaunchAgent; it stops/restores only an exact existing Homebrew launchd record and refuses a running unmanaged installed `hostwrightd` rather than terminating it.
+
+The complete artifact-source grammar, prefix policy, JSON contracts, durable checkpoint flow, state behavior, legacy adoption, recovery actions, cleanup boundary, and troubleshooting are in [Installed Distribution Lifecycle](installed-lifecycle.md).
 
 ## `hostwright capabilities [--json | --output text|json]`
 
@@ -534,27 +553,23 @@ JSON success includes `kind: extensionHandshake`, `status: ready`, identity, cap
 
 A successful check proves only that the exact reviewed executable completed the exact handshake. The protocol provides no RuntimeAdapter, SQLite, state, secret, networking, tunnel, accelerator, or mutation capability. The process is not an operating-system sandbox: it retains the invoking account's ambient file, process, and network privileges, can invoke absolute-path tools, and can spawn descendants. The operator must review the exact digest rather than treat `reviewedLocal` as a technical confinement guarantee.
 
-## `hostwright doctor [--output text|json]`
+## `hostwright doctor [--state-db <path>] [--json | --output text|json]`
 
-Runs safe local checks only:
+Runs the non-mutating local readiness gate. The selected state path follows normal precedence: explicit `--state-db`, `HOSTWRIGHT_STATE_DB`, then the Application Support default.
 
-- OS version string;
-- architecture/macOS compatibility gate;
-- Swift toolchain version through a controlled `swift --version` process;
-- `container` executable lookup only;
-- `hostwright.yaml` presence;
-- resolved state origin/readiness plus actual existing-path ownership and mode policy;
-- local-only telemetry policy;
-- resource intelligence with local host facts and explicit unmeasured benchmark dimensions.
+The checks cover supported hardware/macOS, Apple CLI and service readiness, manifest presence, secure filesystem policy, immutable state integrity, permissions, loopback/external interfaces, code signature and Gatekeeper trust, reclaimable memory and thermal pressure, required tools, local-only telemetry, and the extended resource-intelligence report. Runtime readiness executes only bounded version and structured system-status probes through `RuntimeAdapter`; it does not inventory or mutate runtime resources.
 
-`doctor` does not run Apple container commands. In live output, Apple container version remains unavailable unless an injected or fixture-backed resource report supplies it.
+Each check is `ready`, `degraded`, `externally-constrained`, `blocked`, or `unsupported` and includes remediation when it is not ready. Overall readiness is the strictest check. Ready/degraded reports exit 0; external constraints exit 69; unsupported or blocked policy exits 65; an existing state database that passes path policy but fails or cannot safely complete immutable integrity inspection exits 66. A concurrent state writer is retryable and is not reported as proven corruption.
 
 JSON shape:
 
 ```json
 {
   "kind": "doctor",
+  "schemaVersion": 2,
+  "readiness": "degraded",
   "hasFailures": false,
+  "hasExternalConstraints": false,
   "resourceReport": {
     "measurementMethod": "localProcessInfoSnapshot",
     "memoryPressure": {
@@ -567,6 +582,8 @@ JSON shape:
   "checks": []
 }
 ```
+
+Doctor never creates or migrates state. Existing state must be checkpointed and free of rollback journals and nonempty WAL data; it is opened as an immutable read-only SQLite snapshot, using an existing Hostwright fence without creating one. Identity, content fingerprint, and checkpoint state are revalidated after inspection so concurrent change fails as a retryable inspection error. See [Doctor Checks](doctor-checks.md) for the complete classification, safety boundary, and remediation flow.
 
 ## `hostwrightd --foreground --config <path> [--state-db <path>] [options]`
 

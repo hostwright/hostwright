@@ -52,6 +52,51 @@ final class TrustedReleaseTests: XCTestCase {
         XCTAssertNoThrow(try manifest.validate())
         let provenance = makeProvenance(manifest: manifest)
         XCTAssertNoThrow(try provenance.validate(manifest: manifest))
+        let internalParameters = provenance.predicate.buildDefinition.internalParameters
+        XCTAssertEqual(internalParameters.externalSwiftPMDependencies, [])
+        XCTAssertEqual(internalParameters.packageLicenseSPDX, "Apache-2.0")
+        XCTAssertEqual(internalParameters.reproducibilityBuildCount, 2)
+        XCTAssertEqual(internalParameters.byteIdenticalUnsignedPayloads, true)
+        XCTAssertEqual(internalParameters.toolVersions, trustedToolVersions())
+        let expectedBuildMetadata = TrustedReleaseBuildMetadata(
+            externalSwiftPMDependencies: try XCTUnwrap(internalParameters.externalSwiftPMDependencies),
+            packageLicenseSPDX: try XCTUnwrap(internalParameters.packageLicenseSPDX),
+            reproducibilityBuildCount: try XCTUnwrap(internalParameters.reproducibilityBuildCount),
+            byteIdenticalUnsignedPayloads: try XCTUnwrap(
+                internalParameters.byteIdenticalUnsignedPayloads
+            ),
+            toolVersions: try XCTUnwrap(internalParameters.toolVersions)
+        )
+        XCTAssertNoThrow(
+            try provenance.validate(
+                manifest: manifest,
+                expectedBuildMetadata: expectedBuildMetadata
+            )
+        )
+        XCTAssertThrowsError(
+            try provenance.validate(
+                manifest: manifest,
+                expectedBuildMetadata: TrustedReleaseBuildMetadata(
+                    externalSwiftPMDependencies: [],
+                    packageLicenseSPDX: "Apache-2.0",
+                    reproducibilityBuildCount: 3,
+                    byteIdenticalUnsignedPayloads: true,
+                    toolVersions: trustedToolVersions()
+                )
+            )
+        )
+
+        let envelope = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: DistributionJSON.encode(provenance)) as? [String: Any]
+        )
+        XCTAssertEqual(Set(envelope.keys), Set(["_type", "subject", "predicateType", "predicate"]))
+        let predicate = try XCTUnwrap(envelope["predicate"] as? [String: Any])
+        let buildDefinition = try XCTUnwrap(predicate["buildDefinition"] as? [String: Any])
+        let encodedInternalParameters = try XCTUnwrap(
+            buildDefinition["internalParameters"] as? [String: Any]
+        )
+        XCTAssertEqual(encodedInternalParameters["externalSwiftPMDependencies"] as? [String], [])
+        XCTAssertNil(envelope["buildMetadata"])
 
         let wrongPackage = DistributionArtifactDescriptor(
             fileName: manifest.package.fileName,
@@ -79,6 +124,77 @@ final class TrustedReleaseTests: XCTestCase {
         )
         XCTAssertNoThrow(try changed.validate())
         XCTAssertThrowsError(try provenance.validate(manifest: changed))
+
+        let alteredMetadata = ProvenanceInternalParameters(
+            sourceDirty: false,
+            unsigned: false,
+            externalSwiftPMDependencies: ["https://example.invalid/unrecorded"],
+            packageLicenseSPDX: "Apache-2.0",
+            reproducibilityBuildCount: 2,
+            byteIdenticalUnsignedPayloads: true,
+            toolVersions: trustedToolVersions()
+        )
+        let alteredProvenance = TrustedReleaseProvenanceStatement(
+            statementType: provenance.statementType,
+            subject: provenance.subject,
+            predicateType: provenance.predicateType,
+            predicate: DistributionProvenancePredicate(
+                buildDefinition: ProvenanceBuildDefinition(
+                    buildType: provenance.predicate.buildDefinition.buildType,
+                    externalParameters: provenance.predicate.buildDefinition.externalParameters,
+                    internalParameters: alteredMetadata,
+                    resolvedDependencies: provenance.predicate.buildDefinition.resolvedDependencies
+                ),
+                runDetails: provenance.predicate.runDetails
+            )
+        )
+        XCTAssertThrowsError(try alteredProvenance.validate(manifest: manifest))
+
+        var driftedToolVersions = trustedToolVersions()
+        driftedToolVersions["swift"] = "Swift version changed during build"
+        XCTAssertThrowsError(
+            try provenance.validate(
+                manifest: manifest,
+                expectedBuildMetadata: TrustedReleaseBuildMetadata(
+                    externalSwiftPMDependencies: [],
+                    packageLicenseSPDX: "Apache-2.0",
+                    reproducibilityBuildCount: 2,
+                    byteIdenticalUnsignedPayloads: true,
+                    toolVersions: driftedToolVersions
+                )
+            )
+        )
+    }
+
+    func testTrustedReleaseRequiresMatchingActualToolVersionsFromBothCleanBuilds() throws {
+        let builder = TrustedReleaseBuilder()
+        var cleanBuildVersions = trustedToolVersions()
+        cleanBuildVersions["hostwright-dist"] = "1"
+        XCTAssertEqual(
+            try builder.requireMatchingToolVersions([cleanBuildVersions, cleanBuildVersions]),
+            trustedToolVersions()
+        )
+
+        var drifted = cleanBuildVersions
+        drifted["notarytool"] = "notarytool changed"
+        XCTAssertThrowsError(try builder.requireMatchingToolVersions([cleanBuildVersions, drifted]))
+
+        var unavailable = cleanBuildVersions
+        unavailable["tar"] = "unavailable"
+        XCTAssertThrowsError(try builder.requireMatchingToolVersions([cleanBuildVersions, unavailable]))
+    }
+
+    func testCleanBuildDependencyInventoryUsesParsedSwiftPMGraph() throws {
+        let builder = DistributionCleanBuilder()
+        XCTAssertEqual(
+            try builder.requireNoExternalDependencies(#"{"dependencies":[]}"#),
+            []
+        )
+        XCTAssertThrowsError(
+            try builder.requireNoExternalDependencies(
+                #"{"dependencies":[{"identity":"unapproved-package"}]}"#
+            )
+        )
     }
 
     func testTrustedSPDXInventoriesArchiveAndPackageWithLicense() throws {
@@ -117,7 +233,7 @@ final class TrustedReleaseTests: XCTestCase {
         )
         XCTAssertTrue(formula.contains("class Hostwright < Formula"))
         XCTAssertTrue(formula.contains("sha256 \"\(manifest.archive.sha256)\""))
-        XCTAssertTrue(formula.contains("%w[hostwright hostwright-control hostwrightd]"))
+        XCTAssertTrue(formula.contains("%w[hostwright hostwright-control hostwright-dist hostwrightd]"))
         XCTAssertTrue(formula.contains("service do"))
         XCTAssertTrue(formula.contains("depends_on arch: :arm64"))
         XCTAssertTrue(formula.contains("depends_on macos: :tahoe"))
@@ -204,6 +320,134 @@ final class TrustedReleaseTests: XCTestCase {
             XCTAssertEqual(error as? DistributionError, .commandCancelled("trusted release preflight"))
         }
         XCTAssertFalse(DistributionFileSystem.entryExists(output))
+    }
+
+    func testVerifierRejectsUntrustedTeamAndMissingReleaseInventory() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("hostwright-trusted-release-incomplete-\(UUID().uuidString)")
+        try DistributionFileSystem.createExclusiveDirectory(root)
+        defer { try? DistributionFileSystem.removeOwnedTemporaryItem(root) }
+        try DistributionFileSystem.writeNewFile(
+            try DistributionJSON.encode(makeManifest()),
+            to: root.appendingPathComponent(TrustedReleaseLayout.manifestFileName),
+            mode: 0o644
+        )
+
+        XCTAssertThrowsError(
+            try TrustedReleaseVerifier().verify(
+                releaseDirectory: root,
+                expectedTeamIdentifier: "Z9Y8X7W6V5"
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? DistributionError,
+                .invalidArtifact("release signer team does not match the verifier trust policy")
+            )
+        }
+        XCTAssertThrowsError(
+            try TrustedReleaseVerifier().verify(
+                releaseDirectory: root,
+                expectedTeamIdentifier: "A1B2C3D4E5"
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? DistributionError,
+                .invalidArtifact("release directory inventory is incomplete or contains unexpected entries")
+            )
+        }
+
+        for name in [
+            makeManifest().archive.fileName,
+            makeManifest().package.fileName,
+            makeManifest().archiveSBOM.fileName,
+            makeManifest().packageSBOM.fileName,
+            TrustedReleaseLayout.provenanceFileName,
+            TrustedReleaseLayout.manifestSignatureFileName,
+            TrustedReleaseLayout.checksumFileName,
+            TrustedReleaseLayout.checksumSignatureFileName,
+            TrustedReleaseLayout.provenanceSignatureFileName,
+            TrustedReleaseLayout.evidenceFileName
+        ] {
+            try DistributionFileSystem.writeNewFile(
+                Data("inventory-entry".utf8),
+                to: root.appendingPathComponent(name),
+                mode: name == TrustedReleaseLayout.evidenceFileName ? 0o600 : 0o644
+            )
+        }
+        XCTAssertThrowsError(
+            try TrustedReleaseVerifier().verify(
+                releaseDirectory: root,
+                expectedTeamIdentifier: "A1B2C3D4E5"
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? DistributionError,
+                .invalidArtifact("release directory inventory is incomplete or contains unexpected entries")
+            )
+        }
+    }
+
+    func testStructuredReleaseOutputsAndRetentionPolicyAreStable() throws {
+        let report = makeReport()
+        XCTAssertNoThrow(try report.retentionPolicy.validate())
+        XCTAssertEqual(report.retentionPolicy.workflowBundleDays, 90)
+        XCTAssertEqual(report.retentionPolicy.publishedReleaseAssets, "indefinite")
+        XCTAssertEqual(report.retentionPolicy.publishedReleaseEvidence, "indefinite")
+
+        let release = TrustedReleaseCommandOutput(
+            report: report,
+            releaseDirectory: "/tmp/hostwright-release-output"
+        )
+        let cleanup = HostwrightEvidenceCleanup(
+            status: .succeeded,
+            exactResourceIdentifiers: ["/tmp/hostwright-dist-release-verification"]
+        )
+        let verification = TrustedReleaseVerificationCommandOutput(
+            result: TrustedReleaseVerificationResult(
+                manifest: report.manifest,
+                commands: [HostwrightEvidenceCommand(command: "verify", exitCode: 0, durationMilliseconds: 1)],
+                cleanup: cleanup
+            )
+        )
+        let formula = HomebrewFormulaCommandOutput(
+            manifest: report.manifest,
+            outputFile: "/tmp/Formula/hostwright.rb"
+        )
+
+        let releaseJSON = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: DistributionJSON.encode(release)) as? [String: Any]
+        )
+        let verificationJSON = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: DistributionJSON.encode(verification)) as? [String: Any]
+        )
+        let formulaJSON = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: DistributionJSON.encode(formula)) as? [String: Any]
+        )
+        XCTAssertEqual(releaseJSON["schemaVersion"] as? Int, 1)
+        XCTAssertEqual(releaseJSON["kind"] as? String, "trustedRelease")
+        XCTAssertEqual(releaseJSON["sourceCommit"] as? String, report.manifest.sourceCommit)
+        XCTAssertNotNil(releaseJSON["retentionPolicy"] as? [String: Any])
+        XCTAssertEqual(verificationJSON["kind"] as? String, "trustedReleaseVerification")
+        XCTAssertEqual(verificationJSON["verificationCommandCount"] as? Int, 1)
+        XCTAssertEqual(formulaJSON["kind"] as? String, "homebrewFormula")
+        let formulaArchive = try XCTUnwrap(formulaJSON["archive"] as? [String: Any])
+        XCTAssertEqual(formulaArchive["sha256"] as? String, report.manifest.archive.sha256)
+
+        let workflow = try String(
+            contentsOf: packageRoot().appendingPathComponent(".github/workflows/trusted-release.yml"),
+            encoding: .utf8
+        )
+        XCTAssertEqual(workflow.components(separatedBy: "retention-days: 90").count - 1, 1)
+        let runScripts = workflowRunScriptBodies(workflow)
+        XCTAssertFalse(runScripts.contains("${{ inputs."))
+        XCTAssertEqual(workflow.components(separatedBy: "RELEASE_COMMIT: ${{ inputs.commit }}").count - 1, 3)
+        XCTAssertEqual(workflow.components(separatedBy: "RELEASE_VERSION: ${{ inputs.version }}").count - 1, 3)
+        XCTAssertEqual(workflow.components(separatedBy: "RELEASE_TAG: ${{ inputs.tag }}").count - 1, 3)
+        XCTAssertTrue(workflow.contains("release-evidence.json.cms"))
+        XCTAssertTrue(workflow.contains(")\" = 12"))
+        XCTAssertTrue(workflow.contains("failure() || cancelled()"))
+        XCTAssertFalse(workflow.contains("steps.publish.outputs.tag_created"))
+        XCTAssertTrue(workflow.contains("resolved_commit\" != \"$RELEASE_COMMIT"))
     }
 
     func testCMSSignerInspectorRejectsMalformedAndEmptyInputs() throws {
@@ -330,11 +574,19 @@ final class TrustedReleaseTests: XCTestCase {
                     buildType: "urn:hostwright:buildtype:swiftpm-developer-id:v1",
                     externalParameters: ProvenanceExternalParameters(
                         configuration: "release",
-                        products: ["hostwright", "hostwright-control", "hostwrightd"],
+                        products: DistributionLayout.shippedExecutableNames,
                         platform: "macos",
                         architecture: "arm64"
                     ),
-                    internalParameters: ProvenanceInternalParameters(sourceDirty: false, unsigned: false),
+                    internalParameters: ProvenanceInternalParameters(
+                        sourceDirty: false,
+                        unsigned: false,
+                        externalSwiftPMDependencies: [],
+                        packageLicenseSPDX: "Apache-2.0",
+                        reproducibilityBuildCount: 2,
+                        byteIdenticalUnsignedPayloads: true,
+                        toolVersions: trustedToolVersions()
+                    ),
                     resolvedDependencies: [
                         ProvenanceResolvedDependency(
                             uri: "git+https://github.com/hostwright/hostwright.git",
@@ -352,6 +604,89 @@ final class TrustedReleaseTests: XCTestCase {
                 )
             )
         )
+    }
+
+    private func makeReport() -> TrustedReleaseReport {
+        let manifest = makeManifest()
+        let descriptor = { (name: String) in
+            DistributionArtifactDescriptor(
+                fileName: name,
+                sha256: String(repeating: "9", count: 64),
+                sizeBytes: 10
+            )
+        }
+        return TrustedReleaseReport(
+            manifest: manifest,
+            manifestDescriptor: descriptor(TrustedReleaseLayout.manifestFileName),
+            checksumDescriptor: descriptor(TrustedReleaseLayout.checksumFileName),
+            manifestSignature: descriptor(TrustedReleaseLayout.manifestSignatureFileName),
+            checksumSignature: descriptor(TrustedReleaseLayout.checksumSignatureFileName),
+            provenanceSignature: descriptor(TrustedReleaseLayout.provenanceSignatureFileName),
+            stages: [],
+            evidence: HostwrightEvidenceReport(
+                evidenceClass: .distributionArtifact,
+                status: .passed,
+                recordedAt: manifest.createdAt,
+                source: HostwrightEvidenceSource(commit: manifest.sourceCommit, dirty: false),
+                environment: HostwrightEvidenceEnvironment(
+                    operatingSystem: "macOS 26",
+                    build: "test",
+                    architecture: "arm64",
+                    hardwareModel: "test",
+                    memoryBytes: 1,
+                    toolVersions: trustedToolVersions()
+                ),
+                commands: [HostwrightEvidenceCommand(command: "test", exitCode: 0, durationMilliseconds: 0)],
+                rawResults: HostwrightEvidenceCounts(executed: 1, passed: 1, failed: 0, blocked: 0),
+                failures: [],
+                blockers: [],
+                cleanup: HostwrightEvidenceCleanup(
+                    status: .succeeded,
+                    exactResourceIdentifiers: ["/tmp/hostwright-dist-release-test"]
+                )
+            )
+        )
+    }
+
+    private func packageRoot() -> URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+    }
+
+    private func trustedToolVersions() -> [String: String] {
+        [
+            "git": "git version 2.50.1",
+            "hostwright-dist": "2",
+            "notarytool": "notarytool version 1.1.2",
+            "swift": "Swift version 6.2",
+            "tar": "bsdtar 3.7.7"
+        ]
+    }
+
+    private func workflowRunScriptBodies(_ workflow: String) -> String {
+        let lines = workflow.components(separatedBy: "\n")
+        var scripts: [String] = []
+        var index = 0
+        while index < lines.count {
+            let line = lines[index]
+            guard line.trimmingCharacters(in: .whitespaces) == "run: |" else {
+                index += 1
+                continue
+            }
+            let runIndent = line.prefix { $0 == " " }.count
+            index += 1
+            while index < lines.count {
+                let bodyLine = lines[index]
+                let trimmed = bodyLine.trimmingCharacters(in: .whitespaces)
+                let indent = bodyLine.prefix { $0 == " " }.count
+                if !trimmed.isEmpty, indent <= runIndent { break }
+                scripts.append(bodyLine)
+                index += 1
+            }
+        }
+        return scripts.joined(separator: "\n")
     }
 
     private func run(_ executable: URL, arguments: [String]) throws -> (status: Int32, output: String) {

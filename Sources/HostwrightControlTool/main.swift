@@ -23,7 +23,8 @@ case .run(let configuration):
     let result: LocalControlRunResult
     do {
         let requestData = try LocalControlInputReader.read()
-        result = LocalControlAPI(configuration: configuration).run(requestData: requestData)
+        let api = LocalControlAPI(configuration: configuration)
+        result = api.run(requestData: requestData)
     } catch let diagnostic as HostwrightDiagnostic {
         result = LocalControlAPI.invalidInputResult(diagnostic)
     } catch {

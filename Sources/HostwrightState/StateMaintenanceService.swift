@@ -15,8 +15,15 @@ public struct StateMaintenanceService {
     }
 
     public func createBackup() throws -> StateBackupRecord {
-        try store.withValidatedConnection(readOnly: true) { connection in
-            try createBackup(source: connection, purpose: .manual)
+        guard !sqliteCurrentTaskIsCancelled() else {
+            throw StateMaintenanceError.cancelled
+        }
+        return try store.withValidatedConnection(readOnly: true) { connection in
+            try createBackup(
+                source: connection,
+                purpose: .manual,
+                shouldCancel: sqliteCurrentTaskIsCancelled
+            )
         }
     }
 
@@ -75,10 +82,7 @@ public struct StateMaintenanceService {
     public func restorePlan(backupID: String) throws -> StateRestorePlan {
         let backup = try restorableBackup(backupID)
         try store.configuration.prepareStateAccessFoundation()
-        return try StateAccessCoordinator(configuration: store.configuration).withLock(.shared) {
-            if StateMaintenanceFileSupport.exists(store.path) {
-                try rejectSQLiteSidecars(store.path)
-            }
+        return try StateAccessCoordinator(configuration: store.configuration).withLock(.exclusive) {
             let current = integrityWithoutFence()
             let currentFingerprint = try currentStateFingerprint()
             return StateRestorePlan(
@@ -204,12 +208,13 @@ public struct StateMaintenanceService {
 
     public func repairPlan() throws -> StateRepairPlan {
         try store.configuration.prepareStateAccessFoundation()
-        return try StateAccessCoordinator(configuration: store.configuration).withLock(.shared) {
-            try rejectSQLiteSidecars(store.path)
+        return try StateAccessCoordinator(configuration: store.configuration).withLock(.exclusive) {
+            try normalizeAuthoritativeStateForFilesystemOperation()
             let connection = try SQLiteConnection(
                 path: store.path,
                 createIfNeeded: false,
-                readOnly: true
+                readOnly: true,
+                profile: .authoritativeState
             )
             defer { try? connection.close() }
             let fingerprint = try StateMaintenanceFileSupport.fingerprint(store.path)
@@ -240,31 +245,42 @@ public struct StateMaintenanceService {
     public func repair(confirmationToken: String) throws -> StateRepairResult {
         try repair(
             confirmationToken: confirmationToken,
-            interruptAfterMutationBeforeJournal: false
+            interruptAfterMutationBeforeJournal: false,
+            failBeforeCommitForTesting: false,
+            rollbackForTesting: nil
         )
     }
 
     func repairForTesting(
         confirmationToken: String,
-        interruptAfterMutationBeforeJournal: Bool
+        interruptAfterMutationBeforeJournal: Bool,
+        failBeforeCommit: Bool = false,
+        rollbackForTesting: (() throws -> Void)? = nil
     ) throws -> StateRepairResult {
         try repair(
             confirmationToken: confirmationToken,
-            interruptAfterMutationBeforeJournal: interruptAfterMutationBeforeJournal
+            interruptAfterMutationBeforeJournal: interruptAfterMutationBeforeJournal,
+            failBeforeCommitForTesting: failBeforeCommit,
+            rollbackForTesting: rollbackForTesting
         )
     }
 
     private func repair(
         confirmationToken: String,
-        interruptAfterMutationBeforeJournal: Bool
+        interruptAfterMutationBeforeJournal: Bool,
+        failBeforeCommitForTesting: Bool,
+        rollbackForTesting: (() throws -> Void)?
     ) throws -> StateRepairResult {
         try StateAccessCoordinator(configuration: store.configuration).withLock(.exclusive) {
             guard !StateMaintenanceFileSupport.exists(paths.journalPath) else {
                 throw StateMaintenanceError.operationInProgress(paths.journalPath)
             }
-            try SecureStatePathManager().validateSensitiveRegularFile(store.path)
-            try rejectSQLiteSidecars(store.path)
-            let connection = try SQLiteConnection(path: store.path, createIfNeeded: false)
+            try normalizeAuthoritativeStateForFilesystemOperation()
+            let connection = try SQLiteConnection(
+                path: store.path,
+                createIfNeeded: false,
+                profile: .portableArtifact
+            )
             defer { try? connection.close() }
             let fingerprint = try StateMaintenanceFileSupport.fingerprint(store.path)
             let report = try StateIntegrityService(store: store).inspect(
@@ -295,7 +311,7 @@ public struct StateMaintenanceService {
             try writeNewJournal(journal)
             var mutationCommitted = false
             do {
-                try connection.transaction {
+                try connection.transaction(rollbackForTesting: rollbackForTesting) {
                     for table in Self.projectionDeleteOrder where counts[table] != nil {
                         try connection.execute("DELETE FROM \(table)")
                     }
@@ -306,6 +322,9 @@ public struct StateMaintenanceService {
                         message: "Rebuildable state projections were cleared after verified backup \(preRepair.backupID).",
                         payload: counts
                     )
+                    if failBeforeCommitForTesting {
+                        throw StateMaintenanceSimulatedRepairTransactionFailure()
+                    }
                 }
                 mutationCommitted = true
                 if interruptAfterMutationBeforeJournal {
@@ -327,7 +346,14 @@ public struct StateMaintenanceService {
                     health: post.health
                 )
             } catch {
-                if !mutationCommitted {
+                let outcomeUncertain: Bool
+                if let stateError = error as? StateStoreError,
+                   case .transactionOutcomeUncertain = stateError {
+                    outcomeUncertain = true
+                } else {
+                    outcomeUncertain = false
+                }
+                if !mutationCommitted, !outcomeUncertain {
                     try? removeJournal()
                 }
                 throw error
@@ -350,6 +376,7 @@ public struct StateMaintenanceService {
             }
             let journal = try readAndValidateJournal()
             try validateExistingJournalFiles(journal)
+            try normalizeAuthoritativeStateForFilesystemOperation()
             switch journal.operationKind {
             case .repair:
                 return try recoverRepair(journal)
@@ -363,7 +390,7 @@ public struct StateMaintenanceService {
         source: SQLiteConnection,
         purpose: StateBackupPurpose,
         destinationMaximumPages: Int32? = nil,
-        shouldCancel: () -> Bool = { false }
+        shouldCancel: () -> Bool = sqliteCurrentTaskIsCancelled
     ) throws -> StateBackupRecord {
         try ensureBackupRoot()
         let backupID = "backup-\(UUID().uuidString.lowercased())"
@@ -398,7 +425,8 @@ public struct StateMaintenanceService {
         let backupConnection = try SQLiteConnection(
             path: databasePath,
             createIfNeeded: false,
-            readOnly: true
+            readOnly: true,
+            profile: .portableArtifact
         )
         let report: StateIntegrityReport
         do {
@@ -514,7 +542,8 @@ public struct StateMaintenanceService {
         let connection = try SQLiteConnection(
             path: databasePath,
             createIfNeeded: false,
-            readOnly: true
+            readOnly: true,
+            profile: .portableArtifact
         )
         defer { try? connection.close() }
         let report = try StateIntegrityService(store: store).inspect(
@@ -607,6 +636,84 @@ public struct StateMaintenanceService {
         }
     }
 
+    private func normalizeAuthoritativeStateForFilesystemOperation() throws {
+        guard StateMaintenanceFileSupport.exists(store.path) else {
+            try removeEmptyOrphanedWALSidecars()
+            return
+        }
+        _ = try SecureStatePathManager().validateSQLiteFileSet(store.path)
+
+        do {
+            let reader = try SQLiteConnection(
+                path: store.path,
+                createIfNeeded: false,
+                readOnly: true,
+                profile: .authoritativeState
+            )
+            do {
+                try MigrationRunner().validateAppliedSchema(on: reader)
+                try reader.close()
+            } catch {
+                try? reader.close()
+                throw error
+            }
+
+            let normalizer = try SQLiteConnection(
+                path: store.path,
+                createIfNeeded: false,
+                profile: .portableArtifact
+            )
+            do {
+                try MigrationRunner().validateAppliedSchema(on: normalizer)
+                try normalizer.close()
+            } catch {
+                try? normalizer.close()
+                throw error
+            }
+        } catch let error as StateStoreError {
+            switch error {
+            case .corruptDatabase, .openFailed, .executeFailed, .prepareFailed, .stepFailed:
+                try removeEmptyOrphanedWALSidecars()
+            default:
+                throw error
+            }
+        }
+        try removeEmptyOrphanedWALSidecars()
+        try rejectSQLiteSidecars(store.path)
+    }
+
+    private func removeEmptyOrphanedWALSidecars() throws {
+        let journal = store.path + "-journal"
+        guard !StateMaintenanceFileSupport.exists(journal) else {
+            throw StateMaintenanceError.io(
+                path: journal,
+                message: "a rollback journal may contain recovery state and cannot be removed implicitly"
+            )
+        }
+
+        let wal = store.path + "-wal"
+        if StateMaintenanceFileSupport.exists(wal) {
+            try SecureStatePathManager().validateSensitiveRegularFile(wal)
+            var metadata = stat()
+            guard lstat(wal, &metadata) == 0, metadata.st_size == 0 else {
+                throw StateMaintenanceError.io(
+                    path: wal,
+                    message: "a non-empty orphaned WAL may contain committed state and cannot be removed implicitly"
+                )
+            }
+            try StateMaintenanceFileSupport.unlinkSensitiveFile(wal)
+        }
+
+        let sharedMemory = store.path + "-shm"
+        if StateMaintenanceFileSupport.exists(sharedMemory) {
+            try SecureStatePathManager().validateSensitiveRegularFile(sharedMemory)
+            try StateMaintenanceFileSupport.unlinkSensitiveFile(sharedMemory)
+        }
+        try StateMaintenanceFileSupport.synchronizeDirectory(
+            (store.path as NSString).deletingLastPathComponent
+        )
+    }
+
     private func timestamp() -> String {
         ISO8601DateFormatter().string(from: Date())
     }
@@ -627,6 +734,7 @@ public struct StateMaintenanceService {
     }
 
     private func currentStateFingerprint() throws -> StateFileFingerprint? {
+        try normalizeAuthoritativeStateForFilesystemOperation()
         guard StateMaintenanceFileSupport.exists(store.path) else { return nil }
         try SecureStatePathManager().validateSensitiveRegularFile(store.path)
         return try StateMaintenanceFileSupport.fingerprint(store.path)
@@ -834,6 +942,8 @@ private struct StateMaintenanceInjectedFailure: Error {
 
 private struct StateMaintenanceSimulatedRepairInterruption: Error {}
 
+private struct StateMaintenanceSimulatedRepairTransactionFailure: Error {}
+
 private extension StateMaintenanceService {
     func performRestore(
         backup: StateBackupRecord,
@@ -875,7 +985,12 @@ private extension StateMaintenanceService {
         var currentConnection: SQLiteConnection?
         if sourceExisted {
             do {
-                let opened = try SQLiteConnection(path: store.path, createIfNeeded: false, readOnly: true)
+                let opened = try SQLiteConnection(
+                    path: store.path,
+                    createIfNeeded: false,
+                    readOnly: true,
+                    profile: .authoritativeState
+                )
                 currentConnection = opened
                 currentReport = try StateIntegrityService(store: store).inspect(connection: opened)
             } catch {
@@ -919,25 +1034,26 @@ private extension StateMaintenanceService {
                 fileURLWithPath: backupDirectory(backup.backupID),
                 isDirectory: true
             ).appendingPathComponent("state.sqlite").path
-            let backupConnection = try SQLiteConnection(
-                path: backupDatabasePath,
-                createIfNeeded: false,
-                readOnly: true
+            try SecureStatePathManager().createExclusiveSensitiveFile(stagedPath)
+            try StateMaintenanceFileSupport.copyExactSensitiveFile(
+                from: backupDatabasePath,
+                to: stagedPath,
+                expectedSHA256: expectedBackupSHA256,
+                expectedBytes: expectedBackupBytes,
+                sourceChanged: { reason in
+                    StateMaintenanceError.backupNotRestorable(
+                        id: backup.backupID,
+                        reason: "the selected backup changed while its restore stage was being created: \(reason)"
+                    )
+                }
             )
-            do {
-                try SecureStatePathManager().createExclusiveSensitiveFile(stagedPath)
-                try backupConnection.onlineBackup(to: stagedPath)
-                try backupConnection.close()
-            } catch {
-                try? backupConnection.close()
-                throw error
-            }
             try rejectSQLiteSidecars(stagedPath)
             let stagedFingerprint = try StateMaintenanceFileSupport.fingerprint(stagedPath)
             let stagedConnection = try SQLiteConnection(
                 path: stagedPath,
                 createIfNeeded: false,
-                readOnly: true
+                readOnly: true,
+                profile: .portableArtifact
             )
             let stagedReport: StateIntegrityReport
             do {
@@ -1011,7 +1127,11 @@ private extension StateMaintenanceService {
             try replaceJournal(journal)
             try interruptIfRequested(.replacementPublished, selected: interruptAfter)
 
-            let restoredConnection = try SQLiteConnection(path: store.path, createIfNeeded: false)
+            let restoredConnection = try SQLiteConnection(
+                path: store.path,
+                createIfNeeded: false,
+                profile: .authoritativeState
+            )
             let cleared: [String: Int]
             do {
                 let before = try StateIntegrityService(store: store).inspect(connection: restoredConnection)
@@ -1225,10 +1345,22 @@ private extension StateMaintenanceService {
             try cleanupRestoreStage(stagedPath)
         }
 
-        let connection = try SQLiteConnection(path: store.path, createIfNeeded: false)
+        let fingerprint = try StateMaintenanceFileSupport.fingerprint(store.path)
+        let expectedIdentity = try store.configuration.validateSQLiteFileSet()
+        let connection = try SQLiteConnection(
+            path: store.path,
+            createIfNeeded: false,
+            profile: .authoritativeState
+        )
         let post: StateIntegrityReport
         do {
-            let fingerprint = try StateMaintenanceFileSupport.fingerprint(store.path)
+            let openedIdentity = try store.configuration.validateSQLiteFileSet()
+            guard expectedIdentity == openedIdentity else {
+                throw StateStoreError.pathPolicyViolation(
+                    path: store.path,
+                    message: "the repair rollback target identity changed while SQLite was opening it"
+                )
+            }
             let before = try StateIntegrityService(store: store).inspect(
                 connection: connection,
                 fingerprint: fingerprint
@@ -1302,18 +1434,17 @@ private extension StateMaintenanceService {
             fileURLWithPath: backupDirectory(artifact.record.backupID),
             isDirectory: true
         ).appendingPathComponent("state.sqlite").path
-        let backupConnection = try SQLiteConnection(
-            path: backupPath,
-            createIfNeeded: false,
-            readOnly: true
+        try StateMaintenanceFileSupport.copyExactSensitiveFile(
+            from: backupPath,
+            to: stagedPath,
+            expectedSHA256: expectedDigest,
+            expectedBytes: expectedBytes,
+            sourceChanged: { reason in
+                StateMaintenanceError.recoveryFailed(
+                    "the verified pre-repair snapshot changed while its rollback stage was being created: \(reason)"
+                )
+            }
         )
-        do {
-            try backupConnection.onlineBackup(to: stagedPath)
-            try backupConnection.close()
-        } catch {
-            try? backupConnection.close()
-            throw error
-        }
         let fingerprint = try StateMaintenanceFileSupport.fingerprint(stagedPath)
         guard fingerprint.sha256 == expectedDigest,
               fingerprint.bytes == expectedBytes else {
@@ -1324,7 +1455,8 @@ private extension StateMaintenanceService {
         let connection = try SQLiteConnection(
             path: stagedPath,
             createIfNeeded: false,
-            readOnly: true
+            readOnly: true,
+            profile: .portableArtifact
         )
         do {
             let report = try StateIntegrityService(store: store).inspect(
@@ -1377,7 +1509,8 @@ private extension StateMaintenanceService {
         let connection = try SQLiteConnection(
             path: store.path,
             createIfNeeded: false,
-            readOnly: true
+            readOnly: true,
+            profile: .authoritativeState
         )
         defer { try? connection.close() }
         guard try eventExists(repairRollbackEventID(journal), connection: connection) else {
@@ -1403,6 +1536,9 @@ private extension StateMaintenanceService {
         let failedPath = URL(fileURLWithPath: parent, isDirectory: true)
             .appendingPathComponent(".hostwright-restore-failed-\(journal.operationID).sqlite")
             .path
+        if StateMaintenanceFileSupport.exists(store.path) {
+            try normalizeAuthoritativeStateForFilesystemOperation()
+        }
         var currentExists = StateMaintenanceFileSupport.exists(store.path)
         let stagedExists = StateMaintenanceFileSupport.exists(stagedPath)
         var displacedExists = StateMaintenanceFileSupport.exists(displacedPath)
@@ -1521,18 +1657,17 @@ private extension StateMaintenanceService {
             fileURLWithPath: backupDirectory(backup.backupID),
             isDirectory: true
         ).appendingPathComponent("state.sqlite").path
-        let backupConnection = try SQLiteConnection(
-            path: backupPath,
-            createIfNeeded: false,
-            readOnly: true
+        try StateMaintenanceFileSupport.copyExactSensitiveFile(
+            from: backupPath,
+            to: rollbackStage,
+            expectedSHA256: expectedDigest,
+            expectedBytes: expectedBytes,
+            sourceChanged: { reason in
+                StateMaintenanceError.recoveryFailed(
+                    "the verified pre-operation backup changed while its rollback stage was being created: \(reason)"
+                )
+            }
         )
-        do {
-            try backupConnection.onlineBackup(to: rollbackStage)
-            try backupConnection.close()
-        } catch {
-            try? backupConnection.close()
-            throw error
-        }
         let fingerprint = try StateMaintenanceFileSupport.fingerprint(rollbackStage)
         guard fingerprint.sha256 == expectedDigest,
               fingerprint.bytes == expectedBytes else {
@@ -1543,7 +1678,8 @@ private extension StateMaintenanceService {
         let rollbackConnection = try SQLiteConnection(
             path: rollbackStage,
             createIfNeeded: false,
-            readOnly: true
+            readOnly: true,
+            profile: .portableArtifact
         )
         do {
             let report = try StateIntegrityService(store: store).inspect(
@@ -1721,8 +1857,23 @@ private extension StateMaintenanceService {
                     "the published restore still has an unexpected staged database"
                 )
             }
-            let connection = try SQLiteConnection(path: store.path, createIfNeeded: false)
+            let replacementMatchedBeforeOpen = journal.checkpoint == .replacementPublished
+                ? try replacementMatchesRestoreIntent(journal)
+                : false
+            let expectedIdentity = try store.configuration.validateSQLiteFileSet()
+            let connection = try SQLiteConnection(
+                path: store.path,
+                createIfNeeded: false,
+                profile: .authoritativeState
+            )
             do {
+                let openedIdentity = try store.configuration.validateSQLiteFileSet()
+                guard expectedIdentity == openedIdentity else {
+                    throw StateStoreError.pathPolicyViolation(
+                        path: store.path,
+                        message: "the restore target identity changed while SQLite was opening it"
+                    )
+                }
                 let report = try StateIntegrityService(store: store).inspect(connection: connection)
                 guard report.health == .healthy else {
                     try connection.close()
@@ -1735,7 +1886,7 @@ private extension StateMaintenanceService {
                 }
                 var finalizedJournal = journal
                 if journal.checkpoint == .replacementPublished {
-                    if try replacementMatchesRestoreIntent(journal) {
+                    if replacementMatchedBeforeOpen {
                         _ = try clearAllRebuildableProjections(
                             connection: connection,
                             eventID: "state-restore-\(journal.operationID)",
@@ -1813,7 +1964,8 @@ private extension StateMaintenanceService {
         let connection = try SQLiteConnection(
             path: store.path,
             createIfNeeded: false,
-            readOnly: true
+            readOnly: true,
+            profile: .authoritativeState
         )
         defer { try? connection.close() }
         guard try eventExists(
@@ -1918,7 +2070,8 @@ private extension StateMaintenanceService {
             let connection = try SQLiteConnection(
                 path: store.path,
                 createIfNeeded: false,
-                readOnly: true
+                readOnly: true,
+                profile: .authoritativeState
             )
             defer { try? connection.close() }
             let report = try StateIntegrityService(store: store).inspect(

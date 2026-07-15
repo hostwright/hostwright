@@ -131,7 +131,7 @@ public struct TrustedReleaseBuilder: Sendable {
         let firstOutput = scratch.appendingPathComponent("unsigned-first", isDirectory: true)
         let secondOutput = scratch.appendingPathComponent("unsigned-second", isDirectory: true)
         let cleanBuilder = DistributionCleanBuilder(runner: runner)
-        let firstReport = try cleanBuilder.build(
+        let firstBuild = try cleanBuilder.buildWithDependencyInventory(
             sourceRoot: request.sourceRoot,
             outputDirectory: firstOutput,
             expectedCommit: request.expectedCommit,
@@ -140,19 +140,32 @@ public struct TrustedReleaseBuilder: Sendable {
         guard !cancellation.isCancelled else {
             throw DistributionError.commandCancelled("trusted release reproducibility build")
         }
-        let secondReport = try cleanBuilder.build(
+        let secondBuild = try cleanBuilder.buildWithDependencyInventory(
             sourceRoot: request.sourceRoot,
             outputDirectory: secondOutput,
             expectedCommit: request.expectedCommit,
             cancellation: cancellation
         )
+        let firstReport = firstBuild.report
+        let secondReport = secondBuild.report
+        let cleanBuilds = [firstBuild, secondBuild]
         commands.append(contentsOf: firstReport.evidence.commands)
         commands.append(contentsOf: secondReport.evidence.commands)
+        let dependencyInventoriesMatch = cleanBuilds.dropFirst().allSatisfy {
+            $0.externalSwiftPMDependencies == firstBuild.externalSwiftPMDependencies
+        }
+        let toolVersions = try requireMatchingToolVersions(
+            cleanBuilds.map { $0.report.evidence.environment.toolVersions }
+        )
+        let unsignedPayloadsByteIdentical = cleanBuilds.dropFirst().allSatisfy {
+            $0.report.manifest.files == firstReport.manifest.files
+        }
         guard firstReport.manifest.packageVersion == request.expectedVersion,
               secondReport.manifest.packageVersion == request.expectedVersion,
               firstReport.manifest.sourceCommit == request.expectedCommit,
               secondReport.manifest.sourceCommit == request.expectedCommit,
-              firstReport.manifest.files == secondReport.manifest.files else {
+              dependencyInventoriesMatch,
+              unsignedPayloadsByteIdentical else {
             throw DistributionError.invalidArtifact("two isolated clean builds did not produce identical payload bytes")
         }
 
@@ -168,9 +181,18 @@ public struct TrustedReleaseBuilder: Sendable {
             extractionDirectory: secondExtraction,
             cancellation: cancellation
         )
-        guard firstVerified.manifest.files == secondVerified.manifest.files else {
+        let verifiedPayloadsByteIdentical = firstVerified.manifest.files == secondVerified.manifest.files
+        guard verifiedPayloadsByteIdentical else {
             throw DistributionError.invalidArtifact("verified reproducibility payloads differ")
         }
+        let buildMetadata = TrustedReleaseBuildMetadata(
+            externalSwiftPMDependencies: firstBuild.externalSwiftPMDependencies,
+            packageLicenseSPDX: "Apache-2.0",
+            reproducibilityBuildCount: cleanBuilds.count,
+            byteIdenticalUnsignedPayloads: unsignedPayloadsByteIdentical && verifiedPayloadsByteIdentical,
+            toolVersions: toolVersions
+        )
+        try buildMetadata.validate()
         commands.append(HostwrightEvidenceCommand(
             command: "compare two isolated verified release payloads",
             exitCode: 0,
@@ -399,7 +421,8 @@ public struct TrustedReleaseBuilder: Sendable {
             sourceCommit: request.expectedCommit,
             archive: archiveDescriptor,
             package: packageDescriptor,
-            createdAt: createdAt
+            createdAt: createdAt,
+            buildMetadata: buildMetadata
         )
         try DistributionFileSystem.writeNewFile(
             try DistributionJSON.encode(provenance),
@@ -427,7 +450,10 @@ public struct TrustedReleaseBuilder: Sendable {
             packageNotarization: packageNotarization
         )
         try manifest.validate()
-        try provenance.validate(manifest: manifest)
+        try provenance.validate(
+            manifest: manifest,
+            expectedBuildMetadata: buildMetadata
+        )
         let manifestURL = stagedOutput.appendingPathComponent(TrustedReleaseLayout.manifestFileName)
         try DistributionFileSystem.writeNewFile(
             try DistributionJSON.encode(manifest),
@@ -492,11 +518,7 @@ public struct TrustedReleaseBuilder: Sendable {
             status: .passed,
             recordedAt: DistributionTimestamp.string(Date()),
             source: HostwrightEvidenceSource(commit: request.expectedCommit, dirty: false),
-            environment: host.evidenceEnvironment(toolVersions: [
-                "hostwright-dist": "2",
-                "notarytool": "1.1.2",
-                "developer-id-team": request.teamIdentifier
-            ]),
+            environment: host.evidenceEnvironment(toolVersions: toolVersions),
             commands: commands,
             rawResults: HostwrightEvidenceCounts(
                 executed: stages.count,
@@ -523,10 +545,18 @@ public struct TrustedReleaseBuilder: Sendable {
             evidence: evidence
         )
         try report.validate()
+        let evidenceURL = stagedOutput.appendingPathComponent(TrustedReleaseLayout.evidenceFileName)
         try DistributionFileSystem.writeNewFile(
             try DistributionJSON.encode(report),
-            to: stagedOutput.appendingPathComponent(TrustedReleaseLayout.evidenceFileName),
+            to: evidenceURL,
             mode: 0o600
+        )
+        _ = try signDetachedCMS(
+            input: evidenceURL,
+            output: stagedOutput.appendingPathComponent(TrustedReleaseLayout.evidenceSignatureFileName),
+            identity: applicationResolution.identity,
+            cancellation: cancellation,
+            commands: &commands
         )
         _ = try TrustedReleaseVerifier(runner: runner).verify(
             releaseDirectory: stagedOutput,
@@ -539,9 +569,7 @@ public struct TrustedReleaseBuilder: Sendable {
         return report
     }
 
-    private var shippedBinaryPaths: [String] {
-        ["bin/hostwright", "bin/hostwright-control", "bin/hostwrightd"]
-    }
+    private var shippedBinaryPaths: [String] { DistributionLayout.shippedBinaryPaths }
 
     private var passingStages: [DistributionStageRecord] {
         [
@@ -556,7 +584,7 @@ public struct TrustedReleaseBuilder: Sendable {
             ("sbom", "Generated and validated separate SPDX 2.3 inventories for archive and package."),
             ("provenance", "Generated source- and digest-bound in-toto/SLSA-shaped release provenance."),
             ("checksums", "Generated an exact sorted SHA-256 inventory for every release artifact and unsigned sidecar."),
-            ("detached-signatures", "Developer ID CMS signatures cover checksums, release manifest, and provenance."),
+            ("detached-signatures", "Developer ID CMS signatures cover checksums, release manifest, provenance, and release evidence."),
             ("independent-verification", "A fresh extraction verified paths, payload bytes, signatures, tickets, SBOMs, provenance, and checksums.")
         ].map { DistributionStageRecord(identifier: $0.0, status: .passed, detail: $0.1) }
     }
@@ -667,7 +695,8 @@ public struct TrustedReleaseBuilder: Sendable {
         sourceCommit: String,
         archive: DistributionArtifactDescriptor,
         package: DistributionArtifactDescriptor,
-        createdAt: String
+        createdAt: String,
+        buildMetadata: TrustedReleaseBuildMetadata
     ) -> TrustedReleaseProvenanceStatement {
         TrustedReleaseProvenanceStatement(
             statementType: "https://in-toto.io/Statement/v1",
@@ -680,11 +709,19 @@ public struct TrustedReleaseBuilder: Sendable {
                     buildType: "urn:hostwright:buildtype:swiftpm-developer-id:v1",
                     externalParameters: ProvenanceExternalParameters(
                         configuration: "release",
-                        products: ["hostwright", "hostwright-control", "hostwrightd"],
+                        products: DistributionLayout.shippedExecutableNames,
                         platform: "macos",
                         architecture: "arm64"
                     ),
-                    internalParameters: ProvenanceInternalParameters(sourceDirty: false, unsigned: false),
+                    internalParameters: ProvenanceInternalParameters(
+                        sourceDirty: false,
+                        unsigned: false,
+                        externalSwiftPMDependencies: buildMetadata.externalSwiftPMDependencies,
+                        packageLicenseSPDX: buildMetadata.packageLicenseSPDX,
+                        reproducibilityBuildCount: buildMetadata.reproducibilityBuildCount,
+                        byteIdenticalUnsignedPayloads: buildMetadata.byteIdenticalUnsignedPayloads,
+                        toolVersions: buildMetadata.toolVersions
+                    ),
                     resolvedDependencies: [
                         ProvenanceResolvedDependency(
                             uri: "git+https://github.com/hostwright/hostwright.git",
@@ -713,6 +750,43 @@ public struct TrustedReleaseBuilder: Sendable {
             sha256: try DistributionHash.sha256(fileURL: url, cancellation: cancellation),
             sizeBytes: try DistributionFileSystem.size(of: url)
         )
+    }
+
+    func requireMatchingToolVersions(_ observedVersions: [[String: String]]) throws -> [String: String] {
+        let cleanBuildToolNames = ["git", "notarytool", "swift", "tar"]
+        guard observedVersions.count == 2 else {
+            throw DistributionError.invalidArtifact(
+                "trusted release requires tool-version evidence from exactly two clean builds"
+            )
+        }
+        let observed = try observedVersions.map { versions -> [String: String] in
+            guard versions["hostwright-dist"] == "1" else {
+                throw DistributionError.invalidArtifact(
+                    "clean-build hostwright-dist contract is missing or unsupported"
+                )
+            }
+            var selected: [String: String] = [:]
+            for name in cleanBuildToolNames {
+                guard let version = versions[name],
+                      !version.isEmpty,
+                      version.lowercased() != "unavailable" else {
+                    throw DistributionError.invalidArtifact(
+                        "clean-build tool-version evidence is incomplete"
+                    )
+                }
+                selected[name] = version
+            }
+            return selected
+        }
+        guard observed[0] == observed[1] else {
+            throw DistributionError.invalidArtifact(
+                "clean-build tool versions changed between reproducibility builds"
+            )
+        }
+        var trustedVersions = observed[0]
+        trustedVersions["hostwright-dist"] = "2"
+        try TrustedReleaseBuildMetadata.validateToolVersions(trustedVersions)
+        return trustedVersions
     }
 
     private func record(_ label: String, _ result: DistributionCommandResult) -> HostwrightEvidenceCommand {

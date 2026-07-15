@@ -3,6 +3,22 @@ import Foundation
 import XCTest
 @testable import HostwrightState
 
+private actor StateMaintenanceCancellationGate {
+    private var isOpen = false
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    func wait() async {
+        guard !isOpen else { return }
+        await withCheckedContinuation { continuation = $0 }
+    }
+
+    func open() {
+        isOpen = true
+        continuation?.resume()
+        continuation = nil
+    }
+}
+
 final class StateMaintenanceTests: XCTestCase {
     func testIntegrityAndVerifiedOnlineBackupRoundTrip() throws {
         try withStore { store, _ in
@@ -234,6 +250,51 @@ final class StateMaintenanceTests: XCTestCase {
         }
     }
 
+    func testRepairRollbackFailurePreservesJournalUntilSafeRecovery() throws {
+        try withStore { store, _ in
+            try appendEvent("repair-rollback-authority", to: store)
+            try insertInvalidObservedProjection(store.path)
+            let maintenance = try StateMaintenanceService(store: store)
+            let plan = try maintenance.repairPlan()
+
+            XCTAssertThrowsError(
+                try maintenance.repairForTesting(
+                    confirmationToken: plan.confirmationToken,
+                    interruptAfterMutationBeforeJournal: false,
+                    failBeforeCommit: true,
+                    rollbackForTesting: {
+                        throw StateStoreError.ioFailure(
+                            path: store.path,
+                            message: "injected rollback failure"
+                        )
+                    }
+                )
+            ) { error in
+                guard case .transactionOutcomeUncertain(let path, let message) = error as? StateStoreError else {
+                    return XCTFail("Expected transactionOutcomeUncertain, got \(error)")
+                }
+                XCTAssertEqual(path, store.path)
+                XCTAssertTrue(message.contains("mandatory rollback"))
+            }
+
+            XCTAssertTrue(FileManager.default.fileExists(atPath: maintenance.paths.journalPath))
+            XCTAssertThrowsError(try store.events.loadAll()) { error in
+                guard case .maintenanceRecoveryRequired(let journalPath) = error as? StateStoreError else {
+                    return XCTFail("Expected maintenanceRecoveryRequired, got \(error)")
+                }
+                XCTAssertEqual(journalPath, maintenance.paths.journalPath)
+            }
+
+            let recovery = try maintenance.recover()
+            XCTAssertTrue(recovery.recovered)
+            XCTAssertEqual(recovery.health, .degraded)
+            XCTAssertTrue(recovery.action.contains("Rolled back"))
+            XCTAssertFalse(FileManager.default.fileExists(atPath: maintenance.paths.journalPath))
+            XCTAssertEqual(try rowCount("observed_runtime_snapshots", path: store.path), 1)
+            XCTAssertEqual(try store.events.loadAll().map(\.id), ["repair-rollback-authority"])
+        }
+    }
+
     func testRepairRefusesAuthoritativeLogicalDamage() throws {
         try withStore { store, _ in
             try appendEvent("invalid-authoritative", payload: "not-json", to: store)
@@ -313,6 +374,42 @@ final class StateMaintenanceTests: XCTestCase {
             }
             XCTAssertEqual(try backupEntries(maintenance.paths.backupDirectory), [])
         }
+    }
+
+    func testPublicBackupObservesCurrentTaskCancellationWithoutArtifacts() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("hostwright-state-maintenance-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: false,
+            attributes: [.posixPermissions: 0o700]
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = SQLiteStateStore(path: directory.appendingPathComponent("state.sqlite").path)
+        try store.migrate()
+        try appendLargeEvent(to: store)
+        let maintenance = try StateMaintenanceService(store: store)
+        let gate = StateMaintenanceCancellationGate()
+        let databasePath = store.path
+        let task = Task.detached { () throws -> StateBackupRecord in
+            await gate.wait()
+            let service = try StateMaintenanceService(
+                store: SQLiteStateStore(path: databasePath)
+            )
+            return try service.createBackup()
+        }
+
+        task.cancel()
+        await gate.open()
+        do {
+            _ = try await task.value
+            XCTFail("Expected the public backup operation to observe Task cancellation")
+        } catch let error as StateMaintenanceError {
+            XCTAssertEqual(error, .cancelled)
+        } catch {
+            XCTFail("Expected StateMaintenanceError.cancelled, got \(error)")
+        }
+        XCTAssertEqual(try backupEntries(maintenance.paths.backupDirectory), [])
     }
 
     func testBackupRefusesLockedAndFutureSchemaSourcesWithoutPublishingArtifacts() throws {
@@ -555,7 +652,7 @@ final class StateMaintenanceTests: XCTestCase {
         }
     }
 
-    func testOnlineBackupIsConsistentDuringRealWALWriterAndReplacementMutationsRefuseSidecars() throws {
+    func testOnlineBackupIsConsistentDuringRealWALWriterAndReplacementMutationsRefuseOpenExternalHandle() throws {
         try withStore { store, _ in
             let writer = try SQLiteConnection(path: store.path, createIfNeeded: false)
             defer { try? writer.close() }
@@ -585,18 +682,18 @@ final class StateMaintenanceTests: XCTestCase {
 
             XCTAssertTrue(FileManager.default.fileExists(atPath: store.path + "-wal"))
             XCTAssertThrowsError(try maintenance.restorePlan(backupID: backup.backupID)) { error in
-                guard case .io(let path, let message) = error as? StateMaintenanceError else {
-                    return XCTFail("Expected sidecar I/O refusal, got \(error)")
+                guard case .databaseLocked(let path, let message) = error as? StateStoreError else {
+                    return XCTFail("Expected a bounded database lock refusal, got \(error)")
                 }
-                XCTAssertEqual(path, store.path + "-wal")
-                XCTAssertTrue(message.contains("sidecars are forbidden"))
+                XCTAssertEqual(path, store.path)
+                XCTAssertTrue(message.localizedCaseInsensitiveContains("locked"))
             }
             XCTAssertThrowsError(try maintenance.repairPlan()) { error in
-                guard case .io(let path, let message) = error as? StateMaintenanceError else {
-                    return XCTFail("Expected sidecar I/O refusal, got \(error)")
+                guard case .databaseLocked(let path, let message) = error as? StateStoreError else {
+                    return XCTFail("Expected a bounded database lock refusal, got \(error)")
                 }
-                XCTAssertEqual(path, store.path + "-wal")
-                XCTAssertTrue(message.contains("sidecars are forbidden"))
+                XCTAssertEqual(path, store.path)
+                XCTAssertTrue(message.localizedCaseInsensitiveContains("locked"))
             }
         }
     }

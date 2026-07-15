@@ -7,7 +7,7 @@ public struct VerifiedDistributionArtifact: Sendable {
     public let manifest: DistributionArtifactManifest
     public let report: DistributionBuildReport
 
-    public init(
+    init(
         distributionDirectory: URL,
         extractedRoot: URL,
         manifest: DistributionArtifactManifest,

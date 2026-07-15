@@ -4,6 +4,7 @@ import HostwrightCore
 public struct DistributionAssemblyRequest: Sendable {
     public let hostwrightBinary: URL
     public let hostwrightControlBinary: URL
+    public let hostwrightDistributionBinary: URL
     public let hostwrightDaemonBinary: URL
     public let exampleManifestFile: URL
     public let licenseFile: URL
@@ -21,6 +22,7 @@ public struct DistributionAssemblyRequest: Sendable {
     public init(
         hostwrightBinary: URL,
         hostwrightControlBinary: URL,
+        hostwrightDistributionBinary: URL,
         hostwrightDaemonBinary: URL,
         exampleManifestFile: URL,
         licenseFile: URL,
@@ -37,6 +39,7 @@ public struct DistributionAssemblyRequest: Sendable {
     ) {
         self.hostwrightBinary = hostwrightBinary
         self.hostwrightControlBinary = hostwrightControlBinary
+        self.hostwrightDistributionBinary = hostwrightDistributionBinary
         self.hostwrightDaemonBinary = hostwrightDaemonBinary
         self.exampleManifestFile = exampleManifestFile
         self.licenseFile = licenseFile
@@ -125,6 +128,14 @@ public struct DistributionAssembler: Sendable {
             cancellation: cancellation,
             commands: &commands
         )
+        try validateBinary(
+            request.hostwrightDistributionBinary,
+            versionArguments: ["--version"],
+            expectedVersion: request.packageVersion,
+            label: "validate hostwright-dist version",
+            cancellation: cancellation,
+            commands: &commands
+        )
         try validateArchitecture(
             request.hostwrightBinary,
             label: "validate hostwright architecture",
@@ -134,6 +145,12 @@ public struct DistributionAssembler: Sendable {
         try validateArchitecture(
             request.hostwrightControlBinary,
             label: "validate hostwright-control architecture",
+            cancellation: cancellation,
+            commands: &commands
+        )
+        try validateArchitecture(
+            request.hostwrightDistributionBinary,
+            label: "validate hostwright-dist architecture",
             cancellation: cancellation,
             commands: &commands
         )
@@ -166,6 +183,7 @@ public struct DistributionAssembler: Sendable {
         let inputs: [(String, URL)] = [
             ("bin/hostwright", request.hostwrightBinary),
             ("bin/hostwright-control", request.hostwrightControlBinary),
+            ("bin/hostwright-dist", request.hostwrightDistributionBinary),
             ("bin/hostwrightd", request.hostwrightDaemonBinary),
             ("share/hostwright/examples/hostwright.yaml", request.exampleManifestFile),
             ("share/doc/hostwright/LICENSE", request.licenseFile),
@@ -573,7 +591,7 @@ public struct DistributionAssembler: Sendable {
                     buildType: "urn:hostwright:buildtype:swiftpm-archive:v1",
                     externalParameters: ProvenanceExternalParameters(
                         configuration: "release",
-                        products: ["hostwright", "hostwright-control", "hostwrightd"],
+                        products: DistributionLayout.shippedExecutableNames,
                         platform: manifest.platform,
                         architecture: manifest.architecture
                     ),
@@ -601,6 +619,11 @@ public struct DistributionAssembler: Sendable {
     }
 }
 
+struct DistributionCleanBuildResult: Sendable {
+    let report: DistributionBuildReport
+    let externalSwiftPMDependencies: [String]
+}
+
 public struct DistributionCleanBuilder: Sendable {
     private let runner: DistributionProcessRunner
     private let assembler: DistributionAssembler
@@ -616,6 +639,20 @@ public struct DistributionCleanBuilder: Sendable {
         expectedCommit: String,
         cancellation: SecureSubprocessCancellation = SecureSubprocessCancellation()
     ) throws -> DistributionBuildReport {
+        try buildWithDependencyInventory(
+            sourceRoot: sourceRoot,
+            outputDirectory: outputDirectory,
+            expectedCommit: expectedCommit,
+            cancellation: cancellation
+        ).report
+    }
+
+    func buildWithDependencyInventory(
+        sourceRoot: URL,
+        outputDirectory: URL,
+        expectedCommit: String,
+        cancellation: SecureSubprocessCancellation = SecureSubprocessCancellation()
+    ) throws -> DistributionCleanBuildResult {
         guard !cancellation.isCancelled else {
             throw DistributionError.commandCancelled("clean distribution build preflight")
         }
@@ -678,9 +715,11 @@ public struct DistributionCleanBuilder: Sendable {
             cancellation: cancellation
         )
         commands.append(record("swift package show-dependencies --format json", dependencyResult))
-        try requireNoExternalDependencies(dependencyResult.standardOutput)
+        let externalSwiftPMDependencies = try requireNoExternalDependencies(
+            dependencyResult.standardOutput
+        )
 
-        for product in ["hostwright", "hostwright-control", "hostwrightd"] {
+        for product in DistributionLayout.shippedExecutableNames {
             let result = try runner.run(
                 executablePath: "/usr/bin/swift",
                 arguments: [
@@ -708,6 +747,7 @@ public struct DistributionCleanBuilder: Sendable {
         }
         let hostwright = URL(fileURLWithPath: binPath).appendingPathComponent("hostwright")
         let control = URL(fileURLWithPath: binPath).appendingPathComponent("hostwright-control")
+        let distribution = URL(fileURLWithPath: binPath).appendingPathComponent("hostwright-dist")
         let daemon = URL(fileURLWithPath: binPath).appendingPathComponent("hostwrightd")
         let versionResult = try runner.run(
             executablePath: hostwright.path,
@@ -752,10 +792,11 @@ public struct DistributionCleanBuilder: Sendable {
         commands.append(record("post-build git status --porcelain=v1 --ignored --untracked-files=normal", finalIgnoredStatusResult))
         try requireOnlyUnusedBuildDirectory(finalIgnoredStatusResult.standardOutput)
 
-        return try assembler.assemble(
+        let report = try assembler.assemble(
             DistributionAssemblyRequest(
                 hostwrightBinary: hostwright,
                 hostwrightControlBinary: control,
+                hostwrightDistributionBinary: distribution,
                 hostwrightDaemonBinary: daemon,
                 exampleManifestFile: sourceRoot.appendingPathComponent("examples/single-service/hostwright.yaml"),
                 licenseFile: sourceRoot.appendingPathComponent("LICENSE"),
@@ -766,20 +807,40 @@ public struct DistributionCleanBuilder: Sendable {
                 sourceDirty: false,
                 architecture: "arm64",
                 inputStageIdentifier: "release-build",
-                inputStageDetail: "Built all three shipped SwiftPM release products from the clean exact source commit with no external package dependencies.",
+                inputStageDetail: "Built all four shipped SwiftPM release products from the clean exact source commit with no external package dependencies.",
                 priorCommands: commands,
                 inputCleanupPaths: [scratch]
             ),
             cancellation: cancellation
         )
+        return DistributionCleanBuildResult(
+            report: report,
+            externalSwiftPMDependencies: externalSwiftPMDependencies
+        )
     }
 
-    private func requireNoExternalDependencies(_ json: String) throws {
+    func requireNoExternalDependencies(_ json: String) throws -> [String] {
         guard let object = try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any],
-              let dependencies = object["dependencies"] as? [Any],
-              dependencies.isEmpty else {
+              let dependencies = object["dependencies"] as? [Any] else {
             throw DistributionError.invalidArtifact("SwiftPM dependency inventory is malformed or contains external dependencies")
         }
+        let inventory = try dependencies.map { dependency -> String in
+            guard let object = dependency as? [String: Any],
+                  let identifier = ["identity", "name", "url", "path"]
+                    .compactMap({ object[$0] as? String })
+                    .first(where: { !$0.isEmpty }) else {
+                throw DistributionError.invalidArtifact(
+                    "SwiftPM dependency inventory is malformed or contains external dependencies"
+                )
+            }
+            return identifier
+        }.sorted()
+        guard inventory.isEmpty else {
+            throw DistributionError.invalidArtifact(
+                "SwiftPM dependency inventory is malformed or contains external dependencies"
+            )
+        }
+        return inventory
     }
 
     private func requireOnlyUnusedBuildDirectory(_ status: String) throws {

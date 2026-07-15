@@ -25,7 +25,7 @@ Stable error codes are used for CLI and manifest diagnostics.
 | `HW-BENCH-001` | Benchmark options or report contract are invalid. | Implemented before file or runtime access |
 | `HW-BENCH-002` | Hardware benchmark evidence is blocked by a missing capability or unmeasured required dimension. | Implemented with exit code 69 and a written blocked report |
 | `HW-BENCH-003` | Hardware benchmark command, version, identity, ownership, report, or cleanup evidence failed. | Implemented with exit code 72 and a written failed report when possible |
-| `HW-DIST-001` | Distribution arguments, source binding, artifact verification, command, ownership, or lifecycle failed. | Implemented by developer-only `hostwright-dist`; existing exit categories 64, 65, 69, 71, or 72 identify the failure class |
+| `HW-DIST-001` | Distribution arguments, source binding, artifact verification, command, ownership, installed lifecycle, or recovery failed. | Implemented by `hostwright-dist`; exit categories 64, 65, 69, 71, or 72 identify the failure class, including downgrade/version refusal, ownership refusal, and durable recovery failure |
 | `HW-DIST-002` | Unsigned artifact assembly or temp-prefix lifecycle succeeded, but required distribution trust stages remain blocked. | Implemented with exit code 69 and blocked `distribution-artifact` evidence |
 
 ## Process Exit Codes
@@ -33,12 +33,18 @@ Stable error codes are used for CLI and manifest diagnostics.
 | Exit code | Category | Used for |
 | ---: | --- | --- |
 | `0` | Success | Completed command. |
-| `64` | Usage | Invalid arguments, unsupported flags, missing required confirmation arguments, refused overwrite, or local non-manifest file I/O failure. |
-| `65` | Validation | Missing/unreadable manifest, manifest/profile/approval validation failure, unsupported manifest/import feature, stack-file import rejection, compatibility validation failure, or invalid distribution source/artifact evidence. |
+| `64` | Usage | Invalid arguments, unsupported flags, missing required confirmation arguments, refused overwrite, local non-manifest file I/O failure, or invalid distribution path/command shape. |
+| `65` | Validation | Missing/unreadable manifest, manifest/profile/approval validation failure, unsupported manifest/import feature, stack-file import rejection, compatibility validation failure, invalid distribution source/artifact evidence, downgrade refusal, or installed/candidate version conflict. |
 | `66` | State unavailable | Selected state database resolution, path policy, legacy migration, schema compatibility, locking, corruption, or read/write failed. |
-| `69` | Runtime/tool unavailable or evidence blocked | Runtime or required local tool execution failed, a benchmark dimension remains blocked, or unsigned distribution work completed without required trust stages. |
+| `69` | Runtime/tool unavailable or evidence blocked | Runtime or required local/distribution tool execution failed, a benchmark dimension remains blocked, or unsigned distribution work completed without required trust stages. |
 | `70` | Confirmation mismatch | Confirmed plan hash, cleanup token, approval scope, or approval hash binding does not match the current operation. |
-| `71` | Unsafe operation | Planner/apply safety policy blocked mutation or distribution ownership validation refused replacement/removal. |
-| `72` | Partial failure | Mixed cleanup outcome, failed benchmark command/identity/cleanup evidence, or failed distribution lifecycle/recovery. |
+| `71` | Unsafe operation | Planner/apply safety policy blocked mutation or distribution ownership validation refused replacement, repair, or removal. |
+| `72` | Partial failure | Mixed cleanup outcome, failed benchmark command/identity/cleanup evidence, or installed distribution lifecycle/recovery could not complete safely. |
 
-JSON mode uses the same process exit codes. Classified CLI, manifest, import, state, and runtime failures use a JSON error envelope on stderr. `doctor --output json` reports compatibility failures as a normal doctor report on stdout with `hasFailures: true` and exit code 65.
+JSON mode uses the same process exit codes. Classified CLI, manifest, import, state, and runtime failures use a JSON error envelope on stderr. Installed-lifecycle `hostwright-dist` commands require `--output json` and use this schema-1 stderr envelope:
+
+```json
+{"schemaVersion":1,"kind":"distributionToolError","code":"HW-DIST-001","message":"...","exitCode":72}
+```
+
+The `message` supplies the exact refusal or recovery instruction; automation should branch on `code` and `exitCode`, then inspect `hostwright-dist status` after interruption. `doctor --output json` reports readiness as a normal doctor document on stdout: unsupported/blocked policy exits 65, failed existing-state integrity exits 66, and an external runtime constraint exits 69.

@@ -33,14 +33,32 @@ public struct StateStoreConfiguration: Equatable, Sendable {
         }
     }
 
-    func prepare(createIfNeeded: Bool) throws {
+    @discardableResult
+    func prepare(createIfNeeded: Bool) throws -> FileIdentity? {
         try validate()
         do {
-            try SecureStatePathManager().prepare(configuration: self, createIfNeeded: createIfNeeded)
+            return try SecureStatePathManager().prepare(
+                configuration: self,
+                createIfNeeded: createIfNeeded
+            )
         } catch let error as StateStoreError {
             throw error
         } catch {
             throw StateStoreError.pathPolicyViolation(path: databasePath, message: String(describing: error))
+        }
+    }
+
+    func validateSQLiteFileSet() throws -> FileIdentity? {
+        try validate()
+        do {
+            return try SecureStatePathManager().validateSQLiteFileSet(databasePath)
+        } catch let error as StateStoreError {
+            throw error
+        } catch {
+            throw StateStoreError.pathPolicyViolation(
+                path: databasePath,
+                message: String(describing: error)
+            )
         }
     }
 

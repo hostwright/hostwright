@@ -9,7 +9,11 @@ struct SecureStatePathManager {
         self.effectiveUserID = effectiveUserID
     }
 
-    func prepare(configuration: StateStoreConfiguration, createIfNeeded: Bool) throws {
+    @discardableResult
+    func prepare(
+        configuration: StateStoreConfiguration,
+        createIfNeeded: Bool
+    ) throws -> FileIdentity? {
         if let resolution = configuration.localPathResolution,
            resolution.usesApplicationSupportState {
             if createIfNeeded {
@@ -30,6 +34,7 @@ struct SecureStatePathManager {
         }
         try validateDirectoryChain(parent)
         try prepareDatabaseFile(configuration.databasePath, createIfNeeded: createIfNeeded)
+        return try validateSQLiteFileSet(configuration.databasePath)
     }
 
     func prepareRuntimeSupport(_ layout: HostwrightLocalPathLayout) throws {
@@ -92,6 +97,52 @@ struct SecureStatePathManager {
 
     func validateSensitiveRegularFile(_ path: String) throws {
         _ = try validateRegularFile(path, requirePrivateMode: true)
+    }
+
+    func validateSQLiteFileSet(_ databasePath: String) throws -> FileIdentity? {
+        let databaseExists = pathExists(databasePath)
+        if !databaseExists {
+            for suffix in ["-journal", "-wal", "-shm"] where pathExists(databasePath + suffix) {
+                throw pathError(
+                    databasePath + suffix,
+                    "an orphaned SQLite sidecar exists without its authoritative database"
+                )
+            }
+            return nil
+        }
+
+        let identity = try validateRegularFile(databasePath, requirePrivateMode: true)
+        for suffix in ["-journal", "-wal", "-shm"] {
+            let sidecar = databasePath + suffix
+            if pathExists(sidecar) {
+                _ = try validateRegularFile(sidecar, requirePrivateMode: true)
+            }
+        }
+        return identity
+    }
+
+    func validateCheckpointedSQLiteFileSetForNonMutatingRead(_ databasePath: String) throws {
+        _ = try validateSQLiteFileSet(databasePath)
+        let journal = databasePath + "-journal"
+        if pathExists(journal) {
+            throw StateStoreError.databaseLocked(
+                path: databasePath,
+                message: "a rollback journal is present; doctor will not open a changing database"
+            )
+        }
+        let wal = databasePath + "-wal"
+        if pathExists(wal) {
+            var metadata = stat()
+            guard lstat(wal, &metadata) == 0 else {
+                throw pathError(wal, String(cString: strerror(errno)))
+            }
+            guard metadata.st_size == 0 else {
+                throw StateStoreError.databaseLocked(
+                    path: databasePath,
+                    message: "a nonempty WAL is present; doctor will not ignore uncheckpointed state"
+                )
+            }
+        }
     }
 
     func itemExists(_ path: String) -> Bool {
@@ -247,7 +298,7 @@ struct SecureStatePathManager {
         }
         try validateDirectoryChain(resolution.legacyRootDirectory)
         let identity = try validateRegularFile(source, requirePrivateMode: false)
-        try validateNoSQLiteSidecars(source, destination: destination)
+        try validateMigrationSidecars(source, destination: destination)
         try validateLegacyHostwrightDatabase(source)
         let destinationAncestor = try existingDirectoryIdentity(
             atOrAbove: databaseParent(destination)
@@ -309,8 +360,13 @@ struct SecureStatePathManager {
             )
         }
 
-        try validateNoSQLiteSidecars(record.source, destination: record.destination)
-        try validateLegacyHostwrightDatabase(currentPath)
+        try validateMigrationSidecars(record.source, destination: record.destination)
+        let canValidateWithoutChangingPermissions = try (
+            sourceExists || hasPrivateSensitiveFileMode(currentPath)
+        )
+        if canValidateWithoutChangingPermissions {
+            try validateLegacyHostwrightDatabase(currentPath)
+        }
 
         if sourceExists {
             let destinationAncestor = try existingDirectoryIdentity(
@@ -339,7 +395,7 @@ struct SecureStatePathManager {
         guard !pathExists(destination) else {
             throw migrationError(source, destination, "both legacy and destination databases exist; Hostwright will not choose one")
         }
-        try validateNoSQLiteSidecars(source, destination: destination)
+        try validateMigrationSidecars(source, destination: destination)
 
         try validateDirectoryChain(resolution.legacyRootDirectory)
         let identity = try validateRegularFile(source, requirePrivateMode: false)
@@ -396,6 +452,7 @@ struct SecureStatePathManager {
                         "the legacy database identity changed while acquiring the exclusive SQLite lock"
                     )
                 }
+                try removeCheckpointedWALSidecars(record.source)
                 try validateNoSQLiteSidecars(record.source, destination: record.destination)
                 do {
                     try MigrationRunner().validateMigrationLedger(on: connection)
@@ -424,10 +481,8 @@ struct SecureStatePathManager {
               UInt64(migratedIdentity.inode) == record.sourceInode else {
             throw migrationError(record.source, record.destination, "the destination identity does not match the recorded legacy database")
         }
-        guard chmod(record.destination, S_IRUSR | S_IWUSR) == 0 else {
-            throw migrationError(record.source, record.destination, "could not apply mode 0600 to the migrated database")
-        }
-        _ = try validateRegularFile(record.destination, requirePrivateMode: true)
+        try hardenMigratedDestination(record)
+        try validateLegacyHostwrightDatabase(record.destination)
         guard unlink(journalPath) == 0 else {
             throw migrationError(record.source, record.destination, "could not remove the completed migration journal")
         }
@@ -468,7 +523,12 @@ struct SecureStatePathManager {
 
     private func validateLegacyHostwrightDatabase(_ path: String) throws {
         do {
-            let connection = try SQLiteConnection(path: path, createIfNeeded: false, readOnly: true)
+            let connection = try SQLiteConnection(
+                path: path,
+                createIfNeeded: false,
+                readOnly: true,
+                profile: .portableArtifact
+            )
             try MigrationRunner().validateMigrationLedger(on: connection)
             try connection.close()
         } catch {
@@ -480,13 +540,91 @@ struct SecureStatePathManager {
         }
     }
 
+    private func hasPrivateSensitiveFileMode(_ path: String) throws -> Bool {
+        var metadata = stat()
+        guard lstat(path, &metadata) == 0 else {
+            throw pathError(path, String(cString: strerror(errno)))
+        }
+        return metadata.st_mode & 0o7777 == S_IRUSR | S_IWUSR
+    }
+
+    private func hardenMigratedDestination(_ record: LegacyStateMigrationRecord) throws {
+        let descriptor = open(
+            record.destination,
+            O_RDWR | O_NOFOLLOW | O_CLOEXEC
+        )
+        guard descriptor >= 0 else {
+            throw migrationError(
+                record.source,
+                record.destination,
+                "could not open the journal-bound destination for permission hardening: \(String(cString: strerror(errno)))"
+            )
+        }
+        defer { close(descriptor) }
+
+        let identity: FileIdentity
+        do {
+            identity = try validateDescriptor(
+                descriptor,
+                path: record.destination,
+                requirePrivateMode: false,
+                regularFile: true
+            )
+        } catch {
+            throw migrationError(record.source, record.destination, String(describing: error))
+        }
+        guard UInt64(identity.device) == record.sourceDevice,
+              UInt64(identity.inode) == record.sourceInode else {
+            throw migrationError(
+                record.source,
+                record.destination,
+                "the destination identity changed before permission hardening"
+            )
+        }
+        guard fchmod(descriptor, S_IRUSR | S_IWUSR) == 0,
+              fsync(descriptor) == 0 else {
+            throw migrationError(
+                record.source,
+                record.destination,
+                "could not durably apply mode 0600 to the migrated database: \(String(cString: strerror(errno)))"
+            )
+        }
+        do {
+            _ = try validateDescriptor(
+                descriptor,
+                path: record.destination,
+                requirePrivateMode: true,
+                regularFile: true
+            )
+            let currentIdentity = try validateRegularFile(
+                record.destination,
+                requirePrivateMode: true
+            )
+            guard currentIdentity == identity else {
+                throw migrationError(
+                    record.source,
+                    record.destination,
+                    "the destination path changed during permission hardening"
+                )
+            }
+        } catch let error as StateStoreError {
+            throw error
+        } catch {
+            throw migrationError(record.source, record.destination, String(describing: error))
+        }
+    }
+
     private func withExclusiveSQLiteLock<T>(
         _ path: String,
         _ body: (SQLiteConnection) throws -> T
     ) throws -> T {
         let connection: SQLiteConnection
         do {
-            connection = try SQLiteConnection(path: path, createIfNeeded: false)
+            connection = try SQLiteConnection(
+                path: path,
+                createIfNeeded: false,
+                profile: .portableArtifact
+            )
             try connection.execute("BEGIN EXCLUSIVE TRANSACTION")
         } catch {
             throw migrationError(path, path, "could not acquire an exclusive SQLite migration lock: \(error)")
@@ -656,7 +794,20 @@ struct SecureStatePathManager {
         let descriptor = open(path, O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC)
         guard descriptor >= 0 else { throw pathError(path, String(cString: strerror(errno))) }
         defer { close(descriptor) }
-        return try validateDescriptor(descriptor, path: path, requirePrivateMode: requirePrivateMode, regularFile: true)
+        let identity = try validateDescriptor(
+            descriptor,
+            path: path,
+            requirePrivateMode: requirePrivateMode,
+            regularFile: true
+        )
+        var pathMetadata = stat()
+        guard lstat(path, &pathMetadata) == 0,
+              pathMetadata.st_mode & S_IFMT == S_IFREG,
+              pathMetadata.st_dev == identity.device,
+              pathMetadata.st_ino == identity.inode else {
+            throw pathError(path, "the sensitive file path changed while it was being validated")
+        }
+        return identity
     }
 
     private func validateDescriptor(
@@ -734,6 +885,94 @@ struct SecureStatePathManager {
                 )
             }
         }
+    }
+
+    private func validateMigrationSidecars(
+        _ source: String,
+        destination: String
+    ) throws {
+        let sourceJournal = source + "-journal"
+        if pathExists(sourceJournal) {
+            throw migrationError(
+                source,
+                destination,
+                "legacy SQLite sidecar \(sourceJournal) exists; stop writers and recover the rollback journal first"
+            )
+        }
+        let sourceHasWALSidecar = pathExists(source + "-wal") || pathExists(source + "-shm")
+        if sourceHasWALSidecar, try !databaseHeaderUsesWAL(source) {
+            throw migrationError(
+                source,
+                destination,
+                "legacy SQLite sidecar exists for a database that is not in WAL mode"
+            )
+        }
+        for suffix in ["-wal", "-shm"] {
+            let sidecar = source + suffix
+            if pathExists(sidecar) {
+                _ = try validateRegularFile(sidecar, requirePrivateMode: true)
+            }
+        }
+        for suffix in ["-journal", "-wal", "-shm"] {
+            let sidecar = destination + suffix
+            if pathExists(sidecar) {
+                throw migrationError(
+                    source,
+                    destination,
+                    "destination SQLite sidecar \(sidecar) exists; stop writers and checkpoint the database first"
+                )
+            }
+        }
+    }
+
+    private func databaseHeaderUsesWAL(_ databasePath: String) throws -> Bool {
+        let descriptor = open(
+            databasePath,
+            O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC
+        )
+        guard descriptor >= 0 else {
+            throw pathError(databasePath, String(cString: strerror(errno)))
+        }
+        defer { close(descriptor) }
+        _ = try validateDescriptor(
+            descriptor,
+            path: databasePath,
+            requirePrivateMode: true,
+            regularFile: true
+        )
+        var header = [UInt8](repeating: 0, count: 20)
+        let count = header.withUnsafeMutableBytes { bytes in
+            pread(descriptor, bytes.baseAddress, bytes.count, 0)
+        }
+        guard count == header.count else {
+            throw pathError(databasePath, "the SQLite header is incomplete")
+        }
+        return header[18] == 2 && header[19] == 2
+    }
+
+    private func removeCheckpointedWALSidecars(_ databasePath: String) throws {
+        let wal = databasePath + "-wal"
+        if pathExists(wal) {
+            _ = try validateRegularFile(wal, requirePrivateMode: true)
+            var metadata = stat()
+            guard lstat(wal, &metadata) == 0, metadata.st_size == 0 else {
+                throw pathError(
+                    wal,
+                    "the WAL remained non-empty after the exclusive DELETE-mode checkpoint"
+                )
+            }
+            guard unlink(wal) == 0 else {
+                throw pathError(wal, String(cString: strerror(errno)))
+            }
+        }
+        let sharedMemory = databasePath + "-shm"
+        if pathExists(sharedMemory) {
+            _ = try validateRegularFile(sharedMemory, requirePrivateMode: true)
+            guard unlink(sharedMemory) == 0 else {
+                throw pathError(sharedMemory, String(cString: strerror(errno)))
+            }
+        }
+        try synchronizeDirectory((databasePath as NSString).deletingLastPathComponent)
     }
 
     private func databaseParent(_ path: String) throws -> String {
@@ -845,7 +1084,7 @@ struct SecureStatePathManager {
     }
 }
 
-private struct FileIdentity {
+struct FileIdentity: Equatable {
     let device: dev_t
     let inode: ino_t
 }

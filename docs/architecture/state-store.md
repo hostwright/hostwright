@@ -32,6 +32,10 @@ Implemented:
 - real temporary-database integration checks across multiple connections
 - migration checksums, contiguous-history validation, and future-version refusal
 - actionable corrupt/locked database failures
+- a fixed Hostwright `application_id` that rejects foreign SQLite databases before persistent configuration
+- authoritative `WAL`/`FULL` durability with macOS full-fsync barriers, defensive mode, untrusted schema, disabled double-quoted strings, no extension loading, and bounded resource limits
+- serialized Hostwright writers with concurrent readers and bounded cross-process lock acquisition
+- managed-transaction invariants that reject nested, external, or embedded transaction control and require rollback after cancellation, storage pressure, or execution failure
 - read paths validate schema without applying migrations
 - online SQLite backup with verified private catalogs
 - full integrity, foreign-key, migration-ledger, required-table/index, UUID, enum, JSON-shape, and logical-record checks
@@ -49,7 +53,7 @@ Not implemented:
 - runtime mutation beyond create-missing-service, restart-policy-allowed managed start, restart-policy-allowed managed restart, and exact cleanup-eligible managed container delete
 - broad cleanup, image cleanup, volume cleanup, or unmanaged cleanup
 - drift planner
-- GA durability SLO, extended disk-fault, and long-soak qualification
+- GA lifecycle-count, extended hardware-fault, and long-soak qualification
 - arbitrary SQLite page salvage or automatic repair of authoritative records
 - launch agent or background daemon service
 
@@ -78,6 +82,8 @@ The normative path table, environment hooks, command creation semantics, status 
 Schema version 7 is the latest supported state schema. A database migrated by a newer Hostwright release fails closed with an incompatible-schema error. Hostwright does not downgrade state databases or silently convert provider ownership.
 
 Each migration records a checksum in `schema_migrations`. Current builds accept the historical Phase 6 checksum for schema version 1 and record an algorithmic checksum for fresh migrations. If a known migration version has an unexpected checksum, Hostwright fails before reading or writing application records.
+
+Hostwright-owned databases use SQLite `application_id` `0x48575254` (`HWRT`). A compatible legacy database with application ID zero is claimed only inside the explicit migration transaction after its ledger has been validated. A nonzero foreign application ID is rejected before journal-mode or other persistent configuration, and its database and sidecars are not modified.
 
 Applied migration history must be a contiguous prefix beginning at version 1. A database that records a later migration while omitting an earlier version fails before schema-version reads, repository access, or migration. Hostwright does not infer, replay, or silently repair out-of-order migration history. A valid older contiguous prefix remains eligible for explicit forward migration.
 
@@ -181,9 +187,9 @@ flowchart LR
 
 Repair also requires dry-run plus exact token confirmation. It is allowed only for a `degraded` report whose failures are confined to `observed_services`, `observed_runtime_snapshots`, or `health_check_results`. Hostwright creates a verified rollback-only snapshot, records a maintenance journal, deletes only the declared projection tables in one SQLite transaction, appends an audit event, and reruns the full integrity suite. If the committed repair database becomes unrecoverable before journal finalization, recovery preserves its exact bytes as failed evidence, restores the verified pre-repair snapshot, clears only the same recorded reconstructible projections, appends a distinct rollback event, and verifies healthy state before removing the journal. Any pre-existing authoritative/schema/foreign-key/SQLite failure refuses repair and directs the operator to a verified restore.
 
-Ordinary repository access takes a shared per-database file fence. Restore and repair take the exclusive fence. Existing state, fence, journal, staged, and displaced files are validated without changing their permissions before they are opened, moved, or removed; unmanaged, hard-linked, wrong-owner, wrong-mode, ACL-granting, or path-swapped files fail closed without being repaired in place. Restore records staging intent before creating its temporary SQLite copy, so interruption during copy or verification has an exact cleanup path. A pending maintenance journal blocks every ordinary read, write, and migration—including creation of a missing database—until `hostwright state recover` completes or rolls back the exact recorded checkpoint. Journals and their paths are strict, bounded, `0600`, identity-derived contracts; unsupported, duplicated, or path-injected fields fail closed and remain for inspection.
+Ordinary repository access takes a shared per-database access fence, and writes additionally take the private writer fence. Restore and repair take the exclusive access fence. Existing state, fence, journal, staged, and displaced files are validated without changing their permissions before they are opened, moved, or removed; unmanaged, hard-linked, wrong-owner, wrong-mode, ACL-granting, or path-swapped files fail closed without being repaired in place. Restore records staging intent before creating its temporary SQLite copy, so interruption during copy or verification has an exact cleanup path. A pending maintenance journal blocks every ordinary read, write, and migration—including creation of a missing database—until `hostwright state recover` completes or rolls back the exact recorded checkpoint. Journals and their paths are strict, bounded, `0600`, identity-derived contracts; unsupported, duplicated, or path-injected fields fail closed and remain for inspection.
 
-Direct database writes by other programs are unsupported. Online backup can read a live WAL-mode source consistently, but filesystem-replacement restore and repair refuse any `-wal`, `-shm`, or `-journal` sidecar and require the external writer to stop and checkpoint first.
+Direct database writes by other programs are unsupported. Hostwright serializes all writers that use `SQLiteStateStore`; another process running as the same macOS account can bypass the Hostwright fence by opening SQLite directly. Online backup can read a live WAL-mode source consistently, but filesystem-replacement restore and repair require the external writer to stop so Hostwright can take the exclusive fence and normalize the database to a sidecar-free portable form.
 
 Diagnostics export is a local read-only command:
 
@@ -199,9 +205,17 @@ For corrupt or non-SQLite state, generate a restore dry-run against a verified c
 
 ## Concurrency And Locking
 
-Hostwright uses SQLite `FULLMUTEX`, a bounded busy timeout, `BEGIN IMMEDIATE` for transactional writes, and a persistent cross-process coordination file. Ordinary operations hold a shared coordination lock for the complete SQLite connection lifetime; restore/repair/recovery hold the exclusive lock across validation, journal, rename/transaction, verification, and cleanup. The contract remains single-writer. Real tests verify uncommitted-write isolation, committed cross-connection visibility, bounded SQLite and coordination-lock failure, non-mutating rejection of unmanaged hard links at both the fence and a state path that appears after a missing-state restore plan, one-winner operation-group acquisition, live WAL backup consistency, selected-backup replacement races, every durable checkpoint, ordinary-error rollback after publication, repair rollback after unrecoverable post-commit state, and the torn windows between a copy/rename/transaction and its next journal update.
+Hostwright uses SQLite `FULLMUTEX`, a 250 ms busy timeout, `BEGIN IMMEDIATE` for transactional writes, and persistent cross-process coordination files. Reads hold the shared access fence for the complete SQLite connection lifetime. Writes hold that shared access fence plus an exclusive writer fence, so readers can proceed while Hostwright writers and checkpointers are serialized. Restore, repair, and recovery hold the exclusive access fence across validation, journal, rename/transaction, verification, and cleanup. A single 250 ms deadline bounds acquisition of the complete lock set.
+
+Real tests verify concurrent readers, serialized writers, bounded lock refusal, uncommitted-write isolation, committed cross-connection visibility, mandatory rollback under cancellation and `SQLITE_FULL`, process termination with open and committed WAL transactions, 1,000 concurrent final-path symlink swaps, unsafe sidecar symlink/mode/hard-link refusal, non-mutating foreign-database refusal, live WAL backup consistency, selected-backup replacement races, every durable checkpoint, ordinary-error rollback after publication, repair rollback after unrecoverable post-commit state, and the torn windows between a copy/rename/transaction and its next journal update.
 
 Read commands validate schema through read-only connections. Write commands run explicit migration before persistence, then use transactions for grouped writes. If another process holds an exclusive or write lock beyond the bounded timeout, Hostwright reports a locked state database instead of waiting indefinitely.
+
+## SQLite Connection And Durability Policy
+
+Authoritative state uses WAL journaling, `synchronous=FULL`, `fullfsync=ON`, and `checkpoint_fullfsync=ON`. Verified backup, restore-stage, rollback, and migration artifacts use sidecar-free DELETE journaling with `synchronous=EXTRA`. Both profiles require foreign keys, cell-size checking, secure deletion, in-memory temporary storage, disabled memory mapping, bounded cache/SQL/value/column limits, zero attached databases, defensive mode, untrusted schema, disabled double-quoted string literals, and disabled loadable extensions when the system SQLite library exposes that switch.
+
+SQLite opens the final path with `NOFOLLOW`, records its validated device/inode identity before open, and revalidates the file set immediately after open. The database plus any `-journal`, `-wal`, and `-shm` sidecars must be invoking-user-owned, singly linked regular files with exact mode `0600` and no access-granting ACL. The policy is verified on every connection and is emitted by `state integrity` as `sqlite.connection-policy`; application ownership is emitted as `hostwright.application-identity`.
 
 ## Transaction Boundaries
 
@@ -218,6 +232,8 @@ Transactions wrap:
 - ownership record upserts
 
 No transaction performs runtime mutation. Apply and cleanup write intent first, leave the transaction, call `RuntimeAdapter`, then record success or failure.
+
+The connection authorizer denies transaction and savepoint opcodes inside a Hostwright-managed transaction. This prevents a multi-statement body from committing or replacing the outer boundary. Nested managed transactions and externally opened transactions are rejected. On cancellation, pressure, I/O failure, or body failure, Hostwright disables the cancellation callback long enough to perform mandatory rollback and verifies that the connection returned to autocommit mode before reporting the original error.
 
 ## Module Boundary
 

@@ -52,7 +52,7 @@ Roadmap manifest validation, issue-parent/label/assignee checks, final-PR eviden
 
 ## Distribution Readiness Gate
 
-Phase 02 turns the former unsigned developer lane into signed/notarized archives, a `.pkg`, vendor tap, secure install state, and reversible lifecycle. The trusted builder/verifier, Homebrew formula renderer, and protected two-job workflow are implemented, but this gate remains open until a credentialed run and public-channel/clean-Mac lifecycle evidence pass. Phase 15 repeats those checks from the final clean tag. The historical `distribution-readiness.md` does not satisfy this gate.
+Phase 02 turns the former unsigned developer lane into signed/notarized archives, a `.pkg`, vendor tap, secure install state, and the [strict reversible installed lifecycle](../reference/installed-lifecycle.md). The trusted builder/verifier, Homebrew formula renderer, protected release workflow, and explicit-prefix lifecycle are implemented, but this gate remains open until a credentialed run and public-channel/clean-Mac lifecycle evidence pass. Phase 15 repeats those checks from the final clean tag. The historical `distribution-readiness.md` does not satisfy this gate.
 
 ## Benchmark Gate
 
@@ -99,6 +99,8 @@ The release publishes only artifacts produced from the final clean tag by the re
 - vendor-tap formula bound to the released digest.
 
 Unsigned developer `hostwright-dist` output is useful local integration evidence, not a public release artifact.
+
+The protected workflow retains its exact verified bundle for 90 days. Published release assets and the corresponding checksums, SBOMs, provenance, manifest, detached signatures, and evidence are retained indefinitely and are not replaced in place. Exceptional removal is a separate reviewed repository action; it is never an automatic workflow cleanup step.
 
 `brew install hostwright` depends on Homebrew-core acceptance. Phase 15 submits the formula after GA artifact evidence passes. The Hostwright-controlled fallback is the vendor tap; documentation must not claim the unqualified command before core acceptance.
 

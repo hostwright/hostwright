@@ -9,7 +9,7 @@ Phase 26 adds resource intelligence as local diagnostic reporting, not capacity 
 - Measurement method: `localProcessInfoSnapshot` for live doctor facts, or `fixture` for parser tests and reviewed evidence.
 - Hardware: architecture, active processor count, physical memory bytes, and a unified-memory note.
 - Operating system: OS description and macOS major version.
-- Apple container: executable path and version evidence. Live `doctor` does not run Apple container commands, so version is unavailable unless supplied by an injected fixture.
+- Apple container: executable path and version evidence. The extended `resourceReport` keeps version unavailable unless supplied by explicit evidence; doctor reports its separate bounded RuntimeAdapter readiness version under `appleContainerService` details.
 - Workload profile: general local containers or local AI memory-pressure study.
 - Resource observations: memory pressure, boot latency, polling overhead, sleep/wake, battery, and thermal state.
 - Architecture warnings: non-arm64 image warnings only when a runtime or fixture reports image architecture evidence.
@@ -17,7 +17,7 @@ Phase 26 adds resource intelligence as local diagnostic reporting, not capacity 
 
 ## Live Proof Boundary
 
-Live `doctor` uses local process information only:
+The resource-intelligence portion of live `doctor` uses local process information only:
 
 - `ProcessInfo.physicalMemory`
 - `ProcessInfo.activeProcessorCount`
@@ -25,7 +25,7 @@ Live `doctor` uses local process information only:
 - OS version and architecture from the existing compatibility snapshot
 - Apple container executable lookup only
 
-It does not create, start, stop, delete, inspect, or observe containers. It does not run `container --version`, pull images, run benchmarks, or write state.
+The separate doctor readiness gate runs only bounded CLI-version and structured service-status commands through `RuntimeAdapter`. Neither path creates, starts, stops, deletes, lists, or observes workload containers. Doctor does not pull images, run benchmarks, or write state.
 
 ## Benchmark Methodology
 
@@ -46,7 +46,7 @@ Phase 36 adds a separate [Benchmark Lab](benchmark-lab.md). Historical schema ve
 
 The local runner measures bounded per-container memory use, boot latency, observation-call duration, available battery facts, thermal state, Apple container version drift, and optionally attended sleep/wake behavior. It does not measure runtime density, VM overhead, sustained battery efficiency, sustained thermal behavior, or production capacity.
 
-Apple container version drift remains unavailable in `doctor`. The benchmark command performs a reviewed RuntimeAdapter-backed version probe and compares it with an explicit expected version; mismatch fails that report rather than becoming a compatibility claim.
+Apple container version drift remains unavailable in the extended doctor resource report. Doctor readiness records the observed CLI/service versions but does not apply a benchmark compatibility claim. The benchmark command performs a reviewed RuntimeAdapter-backed version probe and compares it with an explicit expected version; mismatch fails that report rather than becoming a compatibility claim.
 
 Phase 31 advisory scheduling may consume resource reports as coarse local host facts, but it must keep capacity, memory pressure, density, and placement claims advisory. It does not turn resource intelligence into reservation, automatic placement, or production capacity planning.
 

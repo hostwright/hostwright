@@ -258,7 +258,7 @@ public enum HomebrewFormulaRenderer {
           depends_on macos: :tahoe
 
           def install
-            executables = %w[hostwright hostwright-control hostwrightd]
+            executables = %w[hostwright hostwright-control hostwright-dist hostwrightd]
             executables.each do |name|
               system "/usr/bin/codesign", "--verify", "--strict", "--verbose=2", "bin/#{name}"
             end
@@ -288,6 +288,7 @@ public enum HomebrewFormulaRenderer {
           test do
             assert_equal version.to_s, shell_output("#{bin}/hostwright --version").strip
             assert_equal version.to_s, shell_output("#{bin}/hostwright-control --version").strip
+            assert_equal version.to_s, shell_output("#{bin}/hostwright-dist --version").strip
             assert_equal version.to_s, shell_output("#{bin}/hostwrightd --version").strip
             capabilities = shell_output("#{bin}/hostwright capabilities --json")
             assert_match '"schemaVersion":1', capabilities

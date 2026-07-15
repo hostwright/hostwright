@@ -3,6 +3,7 @@ public enum AppleContainerCommand {
 
     public enum ReadOnlyKind: Equatable, Sendable {
         case version
+        case systemStatus
         case listContainers
         case listImages
         case logs(containerID: String, tail: Int)
@@ -28,6 +29,7 @@ public enum AppleContainerCommand {
             timeout: timeout,
             classification: .readOnly,
             executableResolution: .resolvedByRuntimeExecutableResolver,
+            exitStatusPolicy: kind == .systemStatus ? .appleContainerSystemStatus : .zeroOnly,
             purpose: purpose(for: kind)
         )
     }
@@ -71,6 +73,8 @@ public enum AppleContainerCommand {
         switch kind {
         case .version:
             return ["--version"]
+        case .systemStatus:
+            return ["system", "status", "--format", "json"]
         case .listContainers:
             return ["list", "--all", "--format", "json"]
         case .listImages:
@@ -129,6 +133,8 @@ public enum AppleContainerCommand {
         switch kind {
         case .version:
             return "Read Apple container CLI version."
+        case .systemStatus:
+            return "Read Apple container service readiness as JSON."
         case .listContainers:
             return "Read Apple container workload list as JSON."
         case .listImages:

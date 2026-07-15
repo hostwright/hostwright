@@ -86,6 +86,134 @@ enum StateMaintenanceFileSupport {
         }
     }
 
+    static func copyExactSensitiveFile(
+        from sourcePath: String,
+        to destinationPath: String,
+        expectedSHA256: String,
+        expectedBytes: UInt64,
+        sourceChanged: (String) -> any Error
+    ) throws {
+        let before = try fingerprint(sourcePath)
+        guard before.sha256 == expectedSHA256, before.bytes == expectedBytes else {
+            throw sourceChanged("the source digest or size changed before copying")
+        }
+        try SecureStatePathManager().validateSensitiveRegularFile(destinationPath)
+
+        let source = open(sourcePath, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+        guard source >= 0 else {
+            throw StateMaintenanceError.io(
+                path: sourcePath,
+                message: String(cString: strerror(errno))
+            )
+        }
+        defer { close(source) }
+        let destination = open(destinationPath, O_WRONLY | O_NOFOLLOW | O_CLOEXEC)
+        guard destination >= 0 else {
+            throw StateMaintenanceError.io(
+                path: destinationPath,
+                message: String(cString: strerror(errno))
+            )
+        }
+        defer { close(destination) }
+
+        var sourceMetadata = stat()
+        var destinationMetadata = stat()
+        guard fstat(source, &sourceMetadata) == 0 else {
+            throw StateMaintenanceError.io(
+                path: sourcePath,
+                message: String(cString: strerror(errno))
+            )
+        }
+        guard UInt64(sourceMetadata.st_dev) == before.device,
+              UInt64(sourceMetadata.st_ino) == before.inode,
+              sourceMetadata.st_mode & S_IFMT == S_IFREG,
+              sourceMetadata.st_uid == geteuid(),
+              sourceMetadata.st_nlink == 1,
+              sourceMetadata.st_mode & 0o7777 == S_IRUSR | S_IWUSR,
+              UInt64(sourceMetadata.st_size) == expectedBytes else {
+            throw sourceChanged("the source identity or security metadata changed while opening it")
+        }
+        guard fstat(destination, &destinationMetadata) == 0 else {
+            throw StateMaintenanceError.io(
+                path: destinationPath,
+                message: String(cString: strerror(errno))
+            )
+        }
+        guard destinationMetadata.st_mode & S_IFMT == S_IFREG,
+              destinationMetadata.st_uid == geteuid(),
+              destinationMetadata.st_nlink == 1,
+              destinationMetadata.st_mode & 0o7777 == S_IRUSR | S_IWUSR,
+              destinationMetadata.st_size == 0 else {
+            throw StateMaintenanceError.io(
+                path: destinationPath,
+                message: "exact copy descriptors do not match the verified private source and empty owned destination"
+            )
+        }
+
+        var copied: UInt64 = 0
+        var buffer = [UInt8](repeating: 0, count: 64 * 1_024)
+        while true {
+            let count = Darwin.read(source, &buffer, buffer.count)
+            if count < 0, errno == EINTR { continue }
+            guard count >= 0 else {
+                throw StateMaintenanceError.io(
+                    path: sourcePath,
+                    message: String(cString: strerror(errno))
+                )
+            }
+            if count == 0 { break }
+            copied += UInt64(count)
+            guard copied <= expectedBytes else {
+                throw sourceChanged("the source grew while it was being copied")
+            }
+            var offset = 0
+            while offset < count {
+                let written = buffer.withUnsafeBytes { bytes in
+                    Darwin.write(
+                        destination,
+                        bytes.baseAddress!.advanced(by: offset),
+                        count - offset
+                    )
+                }
+                if written < 0, errno == EINTR { continue }
+                guard written > 0 else {
+                    throw StateMaintenanceError.io(
+                        path: destinationPath,
+                        message: String(cString: strerror(errno))
+                    )
+                }
+                offset += written
+            }
+        }
+        guard copied == expectedBytes else {
+            throw sourceChanged("the source was truncated while it was being copied")
+        }
+        guard fsync(destination) == 0 else {
+            throw StateMaintenanceError.io(
+                path: destinationPath,
+                message: String(cString: strerror(errno))
+            )
+        }
+
+        let sourceAfter: StateFileFingerprint
+        do {
+            sourceAfter = try fingerprint(sourcePath)
+        } catch {
+            throw sourceChanged("the source could not be revalidated after copying")
+        }
+        let destinationAfter = try fingerprint(destinationPath)
+        guard sourceAfter == before else {
+            throw sourceChanged("the source changed while its copied bytes were being verified")
+        }
+        guard destinationAfter.sha256 == expectedSHA256,
+              destinationAfter.bytes == expectedBytes else {
+            throw StateMaintenanceError.io(
+                path: destinationPath,
+                message: "the copied file does not match the verified source digest and size"
+            )
+        }
+    }
+
     static func unlinkSensitiveFile(_ path: String, allowMissing: Bool = false) throws {
         if !exists(path), allowMissing { return }
         try SecureStatePathManager().validateSensitiveRegularFile(path)

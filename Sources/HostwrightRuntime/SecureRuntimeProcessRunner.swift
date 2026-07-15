@@ -68,7 +68,7 @@ public struct SecureRuntimeProcessRunner: RuntimeProcessRunning {
             standardError: standardError
         ).redacted(using: redactionPolicy)
 
-        guard result.exitStatus == 0 else {
+        guard spec.exitStatusPolicy.accepts(result.exitStatus) else {
             throw RuntimeAdapterError.commandFailed(
                 exitStatus: result.exitStatus,
                 message: "\(spec.classification.rawValue) runtime command failed.",

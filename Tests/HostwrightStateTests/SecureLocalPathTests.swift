@@ -97,6 +97,7 @@ final class SecureLocalPathTests: XCTestCase {
             try createPrivateDirectory(legacyRoot)
             let legacyStore = SQLiteStateStore(path: resolution.legacyStateDatabase)
             try legacyStore.migrate()
+            try normalizeForLegacyRename(resolution.legacyStateDatabase)
 
             for directory in resolution.layout.ownedDirectories {
                 try createPrivateDirectory(URL(fileURLWithPath: directory, isDirectory: true))
@@ -152,7 +153,11 @@ final class SecureLocalPathTests: XCTestCase {
             let legacyStore = SQLiteStateStore(path: resolution.legacyStateDatabase)
             try legacyStore.migrate()
 
-            let writer = try SQLiteConnection(path: resolution.legacyStateDatabase, createIfNeeded: false)
+            let writer = try SQLiteConnection(
+                path: resolution.legacyStateDatabase,
+                createIfNeeded: false,
+                profile: .authoritativeState
+            )
             try writer.execute("BEGIN IMMEDIATE TRANSACTION")
             let target = SQLiteStateStore(
                 configuration: StateStoreConfiguration(localPathResolution: resolution)
@@ -208,7 +213,7 @@ final class SecureLocalPathTests: XCTestCase {
             let resolution = try HostwrightLocalPathResolver.resolve(homeDirectory: home.path, environment: [:])
             try createPrivateDirectory(URL(fileURLWithPath: resolution.legacyRootDirectory, isDirectory: true))
             try SQLiteStateStore(path: resolution.legacyStateDatabase).migrate()
-            let sidecar = resolution.legacyStateDatabase + "-wal"
+            let sidecar = resolution.legacyStateDatabase + "-journal"
             let descriptor = open(sidecar, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, S_IRUSR | S_IWUSR)
             XCTAssertGreaterThanOrEqual(descriptor, 0)
             close(descriptor)
@@ -364,7 +369,7 @@ final class SecureLocalPathTests: XCTestCase {
                 let sidecarBase = useDestinationSidecar
                     ? resolution.stateDatabasePath
                     : resolution.legacyStateDatabase
-                let sidecar = sidecarBase + "-wal"
+                let sidecar = sidecarBase + (useDestinationSidecar ? "-wal" : "-journal")
                 let descriptor = open(
                     sidecar,
                     O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC,
@@ -436,6 +441,7 @@ final class SecureLocalPathTests: XCTestCase {
                 URL(fileURLWithPath: resolution.legacyRootDirectory, isDirectory: true)
             )
             try SQLiteStateStore(path: resolution.legacyStateDatabase).migrate()
+            try normalizeForLegacyRename(resolution.legacyStateDatabase)
             for directory in resolution.layout.ownedDirectories {
                 try createPrivateDirectory(URL(fileURLWithPath: directory, isDirectory: true))
             }
@@ -530,6 +536,21 @@ final class SecureLocalPathTests: XCTestCase {
     private func createPrivateDirectory(_ url: URL) throws {
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: url.path)
+    }
+
+    private func normalizeForLegacyRename(_ databasePath: String) throws {
+        let connection = try SQLiteConnection(
+            path: databasePath,
+            createIfNeeded: false,
+            profile: .portableArtifact
+        )
+        try connection.close()
+        for suffix in ["-wal", "-shm"] {
+            let sidecar = databasePath + suffix
+            if FileManager.default.fileExists(atPath: sidecar) {
+                try FileManager.default.removeItem(atPath: sidecar)
+            }
+        }
     }
 
     private func writeMigrationJournal(

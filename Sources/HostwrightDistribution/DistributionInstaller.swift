@@ -2,15 +2,15 @@ import Darwin
 import Foundation
 import HostwrightCore
 
-public struct DistributionInstaller: Sendable {
+struct DistributionInstaller: Sendable {
     private let runner: DistributionProcessRunner
 
-    public init(runner: DistributionProcessRunner = DistributionProcessRunner()) {
+    init(runner: DistributionProcessRunner = DistributionProcessRunner()) {
         self.runner = runner
     }
 
     @discardableResult
-    public func install(
+    func install(
         artifact: VerifiedDistributionArtifact,
         prefix: URL,
         cancellation: SecureSubprocessCancellation = SecureSubprocessCancellation()
@@ -139,7 +139,7 @@ public struct DistributionInstaller: Sendable {
         return nextManifest
     }
 
-    public func verifyInstalled(
+    func verifyInstalled(
         prefix: URL,
         expectedManifest: DistributionInstallManifest,
         cancellation: SecureSubprocessCancellation = SecureSubprocessCancellation()
@@ -175,6 +175,16 @@ public struct DistributionInstaller: Sendable {
         guard control.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines) == installed.packageVersion else {
             throw DistributionError.lifecycleFailed("installed hostwright-control version output did not match its manifest")
         }
+        let distribution = try runner.run(
+            executablePath: prefix.appendingPathComponent("bin/hostwright-dist").path,
+            arguments: ["--version"],
+            label: "run installed hostwright-dist --version",
+            timeoutSeconds: 30,
+            cancellation: cancellation
+        )
+        guard distribution.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines) == installed.packageVersion else {
+            throw DistributionError.lifecycleFailed("installed hostwright-dist version output did not match its manifest")
+        }
         let daemon = try runner.run(
             executablePath: prefix.appendingPathComponent("bin/hostwrightd").path,
             arguments: ["--help"],
@@ -189,12 +199,13 @@ public struct DistributionInstaller: Sendable {
         return [
             evidenceCommand("installed hostwright --version", result: version),
             evidenceCommand("installed hostwright-control --version", result: control),
+            evidenceCommand("installed hostwright-dist --version", result: distribution),
             evidenceCommand("installed hostwrightd --help", result: daemon)
         ]
     }
 
     @discardableResult
-    public func uninstall(
+    func uninstall(
         prefix: URL,
         cancellation: SecureSubprocessCancellation = SecureSubprocessCancellation()
     ) throws -> [String] {
@@ -400,14 +411,14 @@ public struct DistributionInstaller: Sendable {
 
 public struct DistributionLifecycleRunner: Sendable {
     private let verifier: DistributionVerifier
-    private let installer: DistributionInstaller
+    private let lifecycle: DistributionInstalledLifecycle
 
     public init(
         verifier: DistributionVerifier = DistributionVerifier(),
-        installer: DistributionInstaller = DistributionInstaller()
+        lifecycle: DistributionInstalledLifecycle = DistributionInstalledLifecycle()
     ) {
         self.verifier = verifier
-        self.installer = installer
+        self.lifecycle = lifecycle
     }
 
     public func run(
@@ -470,6 +481,14 @@ public struct DistributionLifecycleRunner: Sendable {
               baseline.manifest.architecture == candidate.manifest.architecture else {
             throw DistributionError.lifecycleFailed("baseline and candidate must be distinct compatible source revisions")
         }
+        guard try DistributionVersionTransition.classify(
+            installedVersion: baseline.manifest.packageVersion,
+            installedCommit: baseline.manifest.sourceCommit,
+            candidateVersion: candidate.manifest.packageVersion,
+            candidateCommit: candidate.manifest.sourceCommit
+        ) == .upgrade else {
+            throw DistributionError.lifecycleFailed("candidate must be a strict semantic-version upgrade")
+        }
 
         do {
             var stages: [DistributionStageRecord] = []
@@ -485,15 +504,16 @@ public struct DistributionLifecycleRunner: Sendable {
                     durationMilliseconds: candidateVerificationDuration
                 )
             ]
-            let baselineInstall = try installer.install(
+            let installStart = DispatchTime.now().uptimeNanoseconds
+            _ = try lifecycle.install(
                 artifact: baseline,
                 prefix: prefix,
                 cancellation: cancellation
             )
-            commands.append(contentsOf: try installer.verifyInstalled(
-                prefix: prefix,
-                expectedManifest: baselineInstall,
-                cancellation: cancellation
+            commands.append(HostwrightEvidenceCommand(
+                command: "install and verify baseline generation",
+                exitCode: 0,
+                durationMilliseconds: elapsedMilliseconds(since: installStart)
             ))
             stages.append(
                 DistributionStageRecord(
@@ -503,15 +523,16 @@ public struct DistributionLifecycleRunner: Sendable {
                 )
             )
 
-            let candidateInstall = try installer.install(
+            let upgradeStart = DispatchTime.now().uptimeNanoseconds
+            _ = try lifecycle.install(
                 artifact: candidate,
                 prefix: prefix,
                 cancellation: cancellation
             )
-            commands.append(contentsOf: try installer.verifyInstalled(
-                prefix: prefix,
-                expectedManifest: candidateInstall,
-                cancellation: cancellation
+            commands.append(HostwrightEvidenceCommand(
+                command: "upgrade and verify candidate generation",
+                exitCode: 0,
+                durationMilliseconds: elapsedMilliseconds(since: upgradeStart)
             ))
             stages.append(
                 DistributionStageRecord(
@@ -521,25 +542,37 @@ public struct DistributionLifecycleRunner: Sendable {
                 )
             )
 
-            let downgradedInstall = try installer.install(
-                artifact: baseline,
-                prefix: prefix,
-                cancellation: cancellation
-            )
-            commands.append(contentsOf: try installer.verifyInstalled(
-                prefix: prefix,
-                expectedManifest: downgradedInstall,
-                cancellation: cancellation
+            let rollbackStart = DispatchTime.now().uptimeNanoseconds
+            let rolledBack = try lifecycle.rollback(prefix: prefix, cancellation: cancellation)
+            guard rolledBack.installedManifest.packageVersion == baseline.manifest.packageVersion,
+                  rolledBack.installedManifest.sourceCommit == baseline.manifest.sourceCommit else {
+                throw DistributionError.lifecycleFailed("verified rollback did not restore the baseline generation")
+            }
+            commands.append(HostwrightEvidenceCommand(
+                command: "restore and verify authorized rollback generation",
+                exitCode: 0,
+                durationMilliseconds: elapsedMilliseconds(since: rollbackStart)
             ))
             stages.append(
                 DistributionStageRecord(
-                    identifier: "downgrade",
+                    identifier: "rollback",
                     status: .passed,
-                    detail: "Restored the exact baseline revision and executed it after candidate replacement."
+                    detail: "Restored the exact baseline only through the candidate generation's verified rollback record."
                 )
             )
 
-            let removedPaths = try installer.uninstall(prefix: prefix, cancellation: cancellation)
+            let uninstallStart = DispatchTime.now().uptimeNanoseconds
+            let uninstall = try lifecycle.uninstall(
+                prefix: prefix,
+                dataPolicy: .preserve,
+                cancellation: cancellation
+            )
+            let removedPaths = uninstall.removedPaths
+            commands.append(HostwrightEvidenceCommand(
+                command: "uninstall exact managed payload",
+                exitCode: 0,
+                durationMilliseconds: elapsedMilliseconds(since: uninstallStart)
+            ))
             stages.append(
                 DistributionStageRecord(
                     identifier: "uninstall",
@@ -604,15 +637,18 @@ public struct DistributionLifecycleRunner: Sendable {
             return report
         } catch {
             let primaryError = error
-            let installedManifest = prefix.appendingPathComponent(DistributionLayout.installManifestFileName)
-            if FileManager.default.fileExists(atPath: installedManifest.path) {
-                do {
-                    _ = try installer.uninstall(prefix: prefix)
-                } catch {
-                    throw DistributionError.lifecycleFailed(
-                        "lifecycle failed and exact installer-owned cleanup also failed"
-                    )
+            do {
+                let inspection = try lifecycle.inspect(prefix: prefix)
+                if inspection.readiness == .recoveryRequired {
+                    _ = try lifecycle.recover(prefix: prefix)
                 }
+                if try lifecycle.inspect(prefix: prefix).readiness == .ready {
+                    _ = try lifecycle.uninstall(prefix: prefix, dataPolicy: .preserve)
+                }
+            } catch {
+                throw DistributionError.lifecycleFailed(
+                    "lifecycle failed and exact installer-owned cleanup also failed"
+                )
             }
             throw primaryError
         }

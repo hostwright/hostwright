@@ -77,6 +77,10 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
         try await readOnlyAdapter.runtimeVersion()
     }
 
+    public func runtimeReadiness() async throws -> RuntimeReadinessReport {
+        try await readOnlyAdapter.runtimeReadiness()
+    }
+
     public func resourceUsage(for resourceIdentifier: String) async throws -> RuntimeResourceUsageSnapshot {
         try await readOnlyAdapter.resourceUsage(for: resourceIdentifier)
     }

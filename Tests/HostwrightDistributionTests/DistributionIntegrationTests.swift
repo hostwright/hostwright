@@ -16,6 +16,7 @@ final class DistributionIntegrationTests: XCTestCase {
             let common = [
                 "--hostwright-binary", binaries.appendingPathComponent("hostwright").path,
                 "--hostwright-control-binary", binaries.appendingPathComponent("hostwright-control").path,
+                "--hostwright-dist-binary", binaries.appendingPathComponent("hostwright-dist").path,
                 "--hostwrightd-binary", binaries.appendingPathComponent("hostwrightd").path,
                 "--example-manifest", repository.appendingPathComponent("examples/single-service/hostwright.yaml").path,
                 "--license", repository.appendingPathComponent("LICENSE").path,
@@ -47,6 +48,82 @@ final class DistributionIntegrationTests: XCTestCase {
                 "--source-commit", candidateCommit
             ] + common)
             XCTAssertEqual(candidate.status, 69)
+
+            let managedPrefix = root.appendingPathComponent("managed-prefix", isDirectory: true)
+            try FileManager.default.createDirectory(at: managedPrefix, withIntermediateDirectories: false)
+            let toolVersion = try runExecutable(tool, arguments: ["--version"])
+            XCTAssertEqual(toolVersion.status, 0)
+            XCTAssertEqual(toolVersion.output.trimmingCharacters(in: .whitespacesAndNewlines), HostwrightIdentity.version)
+
+            let installed = try runExecutable(tool, arguments: [
+                "install",
+                "--developer-distribution-dir", baselineDirectory.path,
+                "--prefix", managedPrefix.path,
+                "--output", "json"
+            ])
+            XCTAssertEqual(installed.status, 0, installed.error)
+            let installedJSON = try XCTUnwrap(
+                JSONSerialization.jsonObject(with: Data(installed.output.utf8)) as? [String: Any]
+            )
+            XCTAssertEqual(installedJSON["kind"] as? String, "distributionLifecycleMutation")
+            XCTAssertEqual(installedJSON["operation"] as? String, "install")
+            let installedCleanup = try XCTUnwrap(installedJSON["cleanup"] as? [String: Any])
+            XCTAssertEqual(installedCleanup["status"] as? String, "complete")
+            XCTAssertEqual(installedCleanup["pendingPaths"] as? [String], [])
+
+            let inspected = try runExecutable(tool, arguments: [
+                "status", "--prefix", managedPrefix.path, "--output", "json"
+            ])
+            XCTAssertEqual(inspected.status, 0, inspected.error)
+            let inspectedJSON = try XCTUnwrap(
+                JSONSerialization.jsonObject(with: Data(inspected.output.utf8)) as? [String: Any]
+            )
+            XCTAssertEqual(inspectedJSON["readiness"] as? String, "ready")
+
+            let duplicateInstall = try runExecutable(tool, arguments: [
+                "install",
+                "--developer-distribution-dir", baselineDirectory.path,
+                "--prefix", managedPrefix.path,
+                "--output", "json"
+            ])
+            XCTAssertEqual(duplicateInstall.status, 65)
+            let duplicateError = try XCTUnwrap(
+                JSONSerialization.jsonObject(with: Data(duplicateInstall.error.utf8)) as? [String: Any]
+            )
+            XCTAssertEqual(duplicateError["kind"] as? String, "distributionToolError")
+            XCTAssertEqual(duplicateError["code"] as? String, "HW-DIST-001")
+
+            let repaired = try runExecutable(tool, arguments: [
+                "repair",
+                "--developer-distribution-dir", baselineDirectory.path,
+                "--prefix", managedPrefix.path,
+                "--output", "json"
+            ])
+            XCTAssertEqual(repaired.status, 0, repaired.error)
+            let repairedJSON = try XCTUnwrap(
+                JSONSerialization.jsonObject(with: Data(repaired.output.utf8)) as? [String: Any]
+            )
+            XCTAssertEqual(repairedJSON["operation"] as? String, "repair")
+
+            let noRollback = try runExecutable(tool, arguments: [
+                "rollback", "--prefix", managedPrefix.path, "--output", "json"
+            ])
+            XCTAssertEqual(noRollback.status, 72)
+            let rollbackError = try XCTUnwrap(
+                JSONSerialization.jsonObject(with: Data(noRollback.error.utf8)) as? [String: Any]
+            )
+            XCTAssertEqual(rollbackError["kind"] as? String, "distributionToolError")
+
+            let uninstalled = try runExecutable(tool, arguments: [
+                "uninstall", "--prefix", managedPrefix.path,
+                "--data-policy", "preserve", "--output", "json"
+            ])
+            XCTAssertEqual(uninstalled.status, 0, uninstalled.error)
+            let uninstalledJSON = try XCTUnwrap(
+                JSONSerialization.jsonObject(with: Data(uninstalled.output.utf8)) as? [String: Any]
+            )
+            XCTAssertEqual(uninstalledJSON["kind"] as? String, "distributionUninstallResult")
+            XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: managedPrefix.path), [])
 
             let missing = try runExecutable(tool, arguments: [
                 "verify", "--distribution-dir", root.appendingPathComponent("missing-distribution").path
@@ -107,13 +184,10 @@ final class DistributionIntegrationTests: XCTestCase {
                 "--prefix", prefix.path,
                 "--report", reportURL.path
             ])
-            XCTAssertEqual(lifecycle.status, 69)
-            XCTAssertTrue(lifecycle.output.contains("Stages: 4/4"))
-            XCTAssertTrue(lifecycle.error.contains("HW-DIST-002"))
+            XCTAssertEqual(lifecycle.status, 65)
+            XCTAssertTrue(lifecycle.error.contains("different source commit"))
             XCTAssertEqual(try String(contentsOf: sentinel, encoding: .utf8), "keep")
-            let report = try DistributionJSON.decode(DistributionLifecycleReport.self, from: reportURL)
-            XCTAssertEqual(report.evidence.status, .blocked)
-            XCTAssertEqual(report.evidence.cleanup.status, .succeeded)
+            XCTAssertFalse(DistributionFileSystem.entryExists(reportURL))
         }
     }
 
@@ -137,7 +211,6 @@ final class DistributionIntegrationTests: XCTestCase {
             try FileManager.default.createDirectory(at: operatorDirectory, withIntermediateDirectories: false)
             let sentinel = operatorDirectory.appendingPathComponent("sentinel.txt")
             try Data("operator-owned\n".utf8).write(to: sentinel, options: .withoutOverwriting)
-            let reportURL = root.appendingPathComponent("lifecycle.json")
             XCTAssertThrowsError(
                 try DistributionLifecycleRunner().run(
                     baselineDirectory: root.appendingPathComponent("baseline"),
@@ -156,40 +229,19 @@ final class DistributionIntegrationTests: XCTestCase {
             ))
             XCTAssertEqual(try String(contentsOf: sentinel, encoding: .utf8), "operator-owned\n")
 
-            let report = try DistributionLifecycleRunner().run(
-                baselineDirectory: root.appendingPathComponent("baseline"),
-                candidateDirectory: root.appendingPathComponent("candidate"),
-                prefix: prefix,
-                reportURL: reportURL
+            let extraction = root.appendingPathComponent("hostwright-dist-real-lifecycle-extract")
+            let artifact = try DistributionVerifier().verify(
+                distributionDirectory: root.appendingPathComponent("baseline"),
+                extractionDirectory: extraction
             )
-
-            XCTAssertEqual(report.stages.map(\.identifier), ["install", "upgrade", "downgrade", "uninstall"])
-            XCTAssertTrue(report.stages.allSatisfy { $0.status == .passed })
-            XCTAssertEqual(report.evidence.status, .blocked)
-            XCTAssertEqual(report.evidence.cleanup.status, .succeeded)
-            XCTAssertTrue(
-                report.evidence.commands
-                    .filter { $0.command.hasPrefix("verify ") }
-                    .allSatisfy { $0.durationMilliseconds > 0 }
-            )
-            XCTAssertTrue(report.evidence.cleanup.exactResourceIdentifiers.contains(
-                prefix.appendingPathComponent("share/doc/hostwright").path
-            ))
+            let lifecycle = DistributionInstalledLifecycle()
+            _ = try lifecycle.install(artifact: artifact, prefix: prefix)
+            _ = try lifecycle.install(artifact: artifact, prefix: prefix)
+            _ = try lifecycle.uninstall(prefix: prefix, dataPolicy: .preserve)
             XCTAssertEqual(try String(contentsOf: sentinel, encoding: .utf8), "operator-owned\n")
             XCTAssertFalse(FileManager.default.fileExists(
                 atPath: prefix.appendingPathComponent(DistributionLayout.installManifestFileName).path
             ))
-            XCTAssertEqual(try DistributionFileSystem.mode(of: reportURL), 0o600)
-
-            let duplicateStageReport = DistributionLifecycleReport(
-                baselineCommit: report.baselineCommit,
-                candidateCommit: report.candidateCommit,
-                prefix: report.prefix,
-                stages: report.stages + [report.stages[0]],
-                preservedPaths: report.preservedPaths,
-                evidence: report.evidence
-            )
-            XCTAssertThrowsError(try duplicateStageReport.validate())
         }
     }
 
@@ -531,6 +583,7 @@ final class DistributionIntegrationTests: XCTestCase {
             DistributionAssemblyRequest(
                 hostwrightBinary: binaries.appendingPathComponent("hostwright"),
                 hostwrightControlBinary: binaries.appendingPathComponent("hostwright-control"),
+                hostwrightDistributionBinary: binaries.appendingPathComponent("hostwright-dist"),
                 hostwrightDaemonBinary: binaries.appendingPathComponent("hostwrightd"),
                 exampleManifestFile: repository.appendingPathComponent("examples/single-service/hostwright.yaml"),
                 licenseFile: repository.appendingPathComponent("LICENSE"),

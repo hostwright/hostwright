@@ -22,7 +22,7 @@ public enum CLICommand: Equatable, Sendable {
     case diagnostics(stateDatabasePath: String?, bundlePath: String, projectName: String?, manifestPath: String?)
     case benchmark(options: BenchmarkCLIOptions)
     case extensionCheck(declarationPath: String, executablePath: String, output: CLIOutputFormat)
-    case doctor(output: CLIOutputFormat)
+    case doctor(stateDatabasePath: String?, output: CLIOutputFormat)
     case help
 
     public static func parse(arguments: [String]) throws -> CLICommand {
@@ -634,18 +634,37 @@ public enum CLICommand: Equatable, Sendable {
     }
 
     private static func doctorCommand(arguments: [String]) throws -> CLICommand {
+        var stateDatabasePath: String?
         var output: CLIOutputFormat = .text
+        var outputSelected = false
         var index = 1
         while index < arguments.count {
             switch arguments[index] {
+            case "--state-db":
+                guard stateDatabasePath == nil, index + 1 < arguments.count else {
+                    throw CLIUsageError("doctor requires one value after --state-db.")
+                }
+                stateDatabasePath = arguments[index + 1]
+                index += 2
+            case "--json":
+                guard !outputSelected else {
+                    throw CLIUsageError("doctor output format may be selected only once.")
+                }
+                output = .json
+                outputSelected = true
+                index += 1
             case "--output":
+                guard !outputSelected else {
+                    throw CLIUsageError("doctor output format may be selected only once.")
+                }
                 output = try parseOutputValue(arguments: arguments, index: index, commandName: "doctor")
+                outputSelected = true
                 index += 2
             default:
-                throw CLIUsageError("doctor supports only --output.")
+                throw CLIUsageError("doctor supports only --state-db, --json, and --output.")
             }
         }
-        return .doctor(output: output)
+        return .doctor(stateDatabasePath: stateDatabasePath, output: output)
     }
 
     private static func benchmarkCommand(arguments: [String]) throws -> CLICommand {

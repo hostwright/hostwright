@@ -9,6 +9,7 @@ public enum TrustedReleaseLayout {
     public static let provenanceFileName = "provenance.intoto.json"
     public static let provenanceSignatureFileName = "provenance.intoto.json.cms"
     public static let evidenceFileName = "release-evidence.json"
+    public static let evidenceSignatureFileName = "release-evidence.json.cms"
 
     public static func archiveFileName(artifactID: String) -> String {
         "\(artifactID).zip"
@@ -24,6 +25,34 @@ public enum TrustedReleaseLayout {
 
     public static func packageSBOMFileName(artifactID: String) -> String {
         "\(artifactID).pkg.spdx.json"
+    }
+}
+
+public struct TrustedReleaseRetentionPolicy: Codable, Equatable, Sendable {
+    public static let current = TrustedReleaseRetentionPolicy(
+        workflowBundleDays: 90,
+        publishedReleaseAssets: "indefinite",
+        publishedReleaseEvidence: "indefinite"
+    )
+
+    public let workflowBundleDays: Int
+    public let publishedReleaseAssets: String
+    public let publishedReleaseEvidence: String
+
+    public init(
+        workflowBundleDays: Int,
+        publishedReleaseAssets: String,
+        publishedReleaseEvidence: String
+    ) {
+        self.workflowBundleDays = workflowBundleDays
+        self.publishedReleaseAssets = publishedReleaseAssets
+        self.publishedReleaseEvidence = publishedReleaseEvidence
+    }
+
+    public func validate() throws {
+        guard self == .current else {
+            throw DistributionError.invalidArtifact("trusted release retention policy is unsupported")
+        }
     }
 }
 
@@ -230,6 +259,66 @@ public struct TrustedReleaseManifest: Codable, Equatable, Sendable {
     }
 }
 
+public struct TrustedReleaseBuildMetadata: Equatable, Sendable {
+    public static let requiredToolVersionNames = [
+        "git",
+        "hostwright-dist",
+        "notarytool",
+        "swift",
+        "tar"
+    ]
+
+    public let externalSwiftPMDependencies: [String]
+    public let packageLicenseSPDX: String
+    public let reproducibilityBuildCount: Int
+    public let byteIdenticalUnsignedPayloads: Bool
+    public let toolVersions: [String: String]
+
+    public init(
+        externalSwiftPMDependencies: [String],
+        packageLicenseSPDX: String,
+        reproducibilityBuildCount: Int,
+        byteIdenticalUnsignedPayloads: Bool,
+        toolVersions: [String: String]
+    ) {
+        self.externalSwiftPMDependencies = externalSwiftPMDependencies
+        self.packageLicenseSPDX = packageLicenseSPDX
+        self.reproducibilityBuildCount = reproducibilityBuildCount
+        self.byteIdenticalUnsignedPayloads = byteIdenticalUnsignedPayloads
+        self.toolVersions = toolVersions
+    }
+
+    public func validate() throws {
+        guard externalSwiftPMDependencies.isEmpty,
+              packageLicenseSPDX == "Apache-2.0",
+              reproducibilityBuildCount == 2,
+              byteIdenticalUnsignedPayloads else {
+            throw DistributionError.invalidArtifact(
+                "trusted release dependency, license, or reproducibility evidence is invalid"
+            )
+        }
+        try Self.validateToolVersions(toolVersions)
+    }
+
+    public static func validateToolVersions(_ toolVersions: [String: String]) throws {
+        let expectedNames = Set(requiredToolVersionNames)
+        guard Set(toolVersions.keys) == expectedNames,
+              toolVersions["hostwright-dist"] == "2",
+              toolVersions.allSatisfy({ name, version in
+                  expectedNames.contains(name) &&
+                    !version.isEmpty &&
+                    version.utf8.count <= 512 &&
+                    !version.contains("\n") &&
+                    !version.contains("\r") &&
+                    version.lowercased() != "unavailable"
+              }) else {
+            throw DistributionError.invalidArtifact(
+                "trusted release tool-version evidence is incomplete or unsupported"
+            )
+        }
+    }
+}
+
 public struct TrustedReleaseProvenanceStatement: Codable, Equatable, Sendable {
     public let statementType: String
     public let subject: [ProvenanceSubject]
@@ -243,8 +332,34 @@ public struct TrustedReleaseProvenanceStatement: Codable, Equatable, Sendable {
         case predicate
     }
 
-    public func validate(manifest: TrustedReleaseManifest) throws {
+    public func validate(
+        manifest: TrustedReleaseManifest,
+        expectedBuildMetadata: TrustedReleaseBuildMetadata? = nil
+    ) throws {
         try manifest.validate()
+        let internalParameters = predicate.buildDefinition.internalParameters
+        guard let externalSwiftPMDependencies = internalParameters.externalSwiftPMDependencies,
+              let packageLicenseSPDX = internalParameters.packageLicenseSPDX,
+              let reproducibilityBuildCount = internalParameters.reproducibilityBuildCount,
+              let byteIdenticalUnsignedPayloads = internalParameters.byteIdenticalUnsignedPayloads,
+              let toolVersions = internalParameters.toolVersions else {
+            throw DistributionError.invalidArtifact(
+                "trusted provenance omits dependency, license, or reproducibility evidence"
+            )
+        }
+        let recordedBuildMetadata = TrustedReleaseBuildMetadata(
+            externalSwiftPMDependencies: externalSwiftPMDependencies,
+            packageLicenseSPDX: packageLicenseSPDX,
+            reproducibilityBuildCount: reproducibilityBuildCount,
+            byteIdenticalUnsignedPayloads: byteIdenticalUnsignedPayloads,
+            toolVersions: toolVersions
+        )
+        try recordedBuildMetadata.validate()
+        if let expectedBuildMetadata, recordedBuildMetadata != expectedBuildMetadata {
+            throw DistributionError.invalidArtifact(
+                "trusted provenance build evidence differs from the observed release build"
+            )
+        }
         let expectedSubjects = [manifest.archive, manifest.package]
             .sorted { $0.fileName < $1.fileName }
             .map { ProvenanceSubject(name: $0.fileName, digest: ["sha256": $0.sha256]) }
@@ -255,7 +370,7 @@ public struct TrustedReleaseProvenanceStatement: Codable, Equatable, Sendable {
               subject == expectedSubjects,
               predicate.buildDefinition.buildType == "urn:hostwright:buildtype:swiftpm-developer-id:v1",
               predicate.buildDefinition.externalParameters.configuration == "release",
-              predicate.buildDefinition.externalParameters.products == ["hostwright", "hostwright-control", "hostwrightd"],
+              predicate.buildDefinition.externalParameters.products == DistributionLayout.shippedExecutableNames,
               predicate.buildDefinition.externalParameters.platform == manifest.platform,
               predicate.buildDefinition.externalParameters.architecture == manifest.architecture,
               !predicate.buildDefinition.internalParameters.sourceDirty,
@@ -285,6 +400,7 @@ public struct TrustedReleaseReport: Codable, Equatable, Sendable {
     public let manifestSignature: DistributionArtifactDescriptor
     public let checksumSignature: DistributionArtifactDescriptor
     public let provenanceSignature: DistributionArtifactDescriptor
+    public let retentionPolicy: TrustedReleaseRetentionPolicy
     public let stages: [DistributionStageRecord]
     public let evidence: HostwrightEvidenceReport
 
@@ -296,6 +412,7 @@ public struct TrustedReleaseReport: Codable, Equatable, Sendable {
         manifestSignature: DistributionArtifactDescriptor,
         checksumSignature: DistributionArtifactDescriptor,
         provenanceSignature: DistributionArtifactDescriptor,
+        retentionPolicy: TrustedReleaseRetentionPolicy = .current,
         stages: [DistributionStageRecord],
         evidence: HostwrightEvidenceReport
     ) {
@@ -306,6 +423,7 @@ public struct TrustedReleaseReport: Codable, Equatable, Sendable {
         self.manifestSignature = manifestSignature
         self.checksumSignature = checksumSignature
         self.provenanceSignature = provenanceSignature
+        self.retentionPolicy = retentionPolicy
         self.stages = stages
         self.evidence = evidence
     }
@@ -320,6 +438,7 @@ public struct TrustedReleaseReport: Codable, Equatable, Sendable {
         try manifestSignature.validate(suffix: ".cms")
         try checksumSignature.validate(suffix: ".cms")
         try provenanceSignature.validate(suffix: ".cms")
+        try retentionPolicy.validate()
         let expectedStages = [
             "source-reproducibility",
             "developer-id-application-signing",
@@ -345,6 +464,7 @@ public struct TrustedReleaseReport: Codable, Equatable, Sendable {
             throw DistributionError.invalidArtifact("trusted release stages or sidecar identity are incomplete")
         }
         try evidence.validate()
+        try TrustedReleaseBuildMetadata.validateToolVersions(evidence.environment.toolVersions)
         guard evidence.evidenceClass == .distributionArtifact,
               evidence.status == .passed,
               evidence.source.commit == manifest.sourceCommit,
@@ -358,5 +478,93 @@ public struct TrustedReleaseReport: Codable, Equatable, Sendable {
               evidence.cleanup.status == .succeeded else {
             throw DistributionError.invalidArtifact("trusted release evidence is not a clean passing result")
         }
+    }
+}
+
+public struct TrustedReleaseCommandOutput: Codable, Equatable, Sendable {
+    public let schemaVersion: Int
+    public let kind: String
+    public let status: HostwrightEvidenceStatus
+    public let releaseDirectory: String
+    public let releaseTag: String
+    public let sourceCommit: String
+    public let signerTeamIdentifier: String
+    public let archive: DistributionArtifactDescriptor
+    public let package: DistributionArtifactDescriptor
+    public let archiveSBOM: DistributionArtifactDescriptor
+    public let packageSBOM: DistributionArtifactDescriptor
+    public let provenance: DistributionArtifactDescriptor
+    public let retentionPolicy: TrustedReleaseRetentionPolicy
+    public let cleanup: HostwrightEvidenceCleanup
+
+    public init(report: TrustedReleaseReport, releaseDirectory: String) {
+        self.schemaVersion = 1
+        self.kind = "trustedRelease"
+        self.status = report.evidence.status
+        self.releaseDirectory = releaseDirectory
+        self.releaseTag = report.manifest.releaseTag
+        self.sourceCommit = report.manifest.sourceCommit
+        self.signerTeamIdentifier = report.manifest.applicationSigner.teamIdentifier
+        self.archive = report.manifest.archive
+        self.package = report.manifest.package
+        self.archiveSBOM = report.manifest.archiveSBOM
+        self.packageSBOM = report.manifest.packageSBOM
+        self.provenance = report.manifest.provenance
+        self.retentionPolicy = report.retentionPolicy
+        self.cleanup = report.evidence.cleanup
+    }
+}
+
+public struct TrustedReleaseVerificationCommandOutput: Codable, Equatable, Sendable {
+    public let schemaVersion: Int
+    public let kind: String
+    public let status: HostwrightEvidenceStatus
+    public let packageVersion: String
+    public let releaseTag: String
+    public let sourceCommit: String
+    public let signerTeamIdentifier: String
+    public let archive: DistributionArtifactDescriptor
+    public let package: DistributionArtifactDescriptor
+    public let archiveSBOM: DistributionArtifactDescriptor
+    public let packageSBOM: DistributionArtifactDescriptor
+    public let provenance: DistributionArtifactDescriptor
+    public let verificationCommandCount: Int
+    public let cleanup: HostwrightEvidenceCleanup
+
+    public init(result: TrustedReleaseVerificationResult) {
+        self.schemaVersion = 1
+        self.kind = "trustedReleaseVerification"
+        self.status = .passed
+        self.packageVersion = result.manifest.packageVersion
+        self.releaseTag = result.manifest.releaseTag
+        self.sourceCommit = result.manifest.sourceCommit
+        self.signerTeamIdentifier = result.manifest.applicationSigner.teamIdentifier
+        self.archive = result.manifest.archive
+        self.package = result.manifest.package
+        self.archiveSBOM = result.manifest.archiveSBOM
+        self.packageSBOM = result.manifest.packageSBOM
+        self.provenance = result.manifest.provenance
+        self.verificationCommandCount = result.commands.count
+        self.cleanup = result.cleanup
+    }
+}
+
+public struct HomebrewFormulaCommandOutput: Codable, Equatable, Sendable {
+    public let schemaVersion: Int
+    public let kind: String
+    public let status: HostwrightEvidenceStatus
+    public let outputFile: String
+    public let releaseTag: String
+    public let sourceCommit: String
+    public let archive: DistributionArtifactDescriptor
+
+    public init(manifest: TrustedReleaseManifest, outputFile: String) {
+        self.schemaVersion = 1
+        self.kind = "homebrewFormula"
+        self.status = .passed
+        self.outputFile = outputFile
+        self.releaseTag = manifest.releaseTag
+        self.sourceCommit = manifest.sourceCommit
+        self.archive = manifest.archive
     }
 }

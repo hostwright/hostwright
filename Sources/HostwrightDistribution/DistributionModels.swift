@@ -8,10 +8,33 @@ public enum DistributionLayout {
     public static let checksumFileName = "SHA256SUMS"
     public static let evidenceFileName = "distribution-evidence.json"
     public static let installManifestFileName = ".hostwright-install-manifest.json"
+    public static let lifecycleDirectoryName = ".hostwright-lifecycle"
+    public static let lifecycleStatusFileName = "status.json"
+    public static let lifecycleJournalFileName = "journal.json"
+    public static let lifecycleLockFileName = "lifecycle.lock"
+    public static let lifecycleTransactionsDirectoryName = "transactions"
+    public static let lifecycleRollbackFileName = "rollback.json"
+    public static let lifecycleBackupInventoryFileName = "backup-inventory.json"
+    public static let shippedExecutableNames = [
+        "hostwright",
+        "hostwright-control",
+        "hostwright-dist",
+        "hostwrightd"
+    ]
+    public static let shippedBinaryPaths = shippedExecutableNames.map { "bin/\($0)" }
+    static let legacyPayloadModesV1: [String: Int] = [
+        "bin/hostwright": 0o755,
+        "bin/hostwright-control": 0o755,
+        "bin/hostwrightd": 0o755,
+        "share/hostwright/examples/hostwright.yaml": 0o644,
+        "share/doc/hostwright/LICENSE": 0o644,
+        "share/doc/hostwright/README.md": 0o644
+    ]
 
     public static let payloadModes: [String: Int] = [
         "bin/hostwright": 0o755,
         "bin/hostwright-control": 0o755,
+        "bin/hostwright-dist": 0o755,
         "bin/hostwrightd": 0o755,
         "share/hostwright/examples/hostwright.yaml": 0o644,
         "share/doc/hostwright/LICENSE": 0o644,
@@ -34,6 +57,8 @@ public enum DistributionError: Error, Equatable, CustomStringConvertible, Sendab
     case dirtySource
     case sourceCommitMismatch(expected: String, actual: String)
     case installOwnershipMismatch(String)
+    case downgradeRefused(installed: String, candidate: String)
+    case versionConflict(String)
     case lifecycleFailed(String)
 
     public var description: String {
@@ -54,8 +79,167 @@ public enum DistributionError: Error, Equatable, CustomStringConvertible, Sendab
             return "Source commit mismatch: expected \(expected), observed \(actual)."
         case .installOwnershipMismatch(let path):
             return "Installed file no longer matches its ownership manifest: \(path)."
+        case .downgradeRefused(let installed, let candidate):
+            return "Downgrade refused: installed version \(installed) is newer than candidate \(candidate). Use a verified Hostwright rollback record instead."
+        case .versionConflict(let message): return message
         case .lifecycleFailed(let message): return "Distribution lifecycle failed: \(message)"
         }
+    }
+}
+
+public struct DistributionSemanticVersion: Equatable, Comparable, Sendable {
+    private enum PrereleaseIdentifier: Equatable, Sendable {
+        case numeric(String)
+        case alphanumeric(String)
+    }
+
+    public let rawValue: String
+    private let major: String
+    private let minor: String
+    private let patch: String
+    private let prerelease: [PrereleaseIdentifier]
+
+    public init(parsing rawValue: String) throws {
+        guard !rawValue.isEmpty,
+              rawValue.utf8.count <= 128,
+              !rawValue.unicodeScalars.contains(where: { CharacterSet.whitespacesAndNewlines.contains($0) }) else {
+            throw DistributionError.invalidManifest("package version must be strict semantic version text")
+        }
+
+        let buildSplit = rawValue.split(separator: "+", omittingEmptySubsequences: false)
+        guard buildSplit.count <= 2,
+              !buildSplit[0].isEmpty,
+              buildSplit.dropFirst().allSatisfy({ Self.validIdentifiers(String($0), rejectNumericLeadingZero: false) }) else {
+            throw DistributionError.invalidManifest("package version must be strict semantic version text")
+        }
+        let precedence = String(buildSplit[0])
+        let prereleaseSplit = precedence.split(separator: "-", maxSplits: 1, omittingEmptySubsequences: false)
+        guard !prereleaseSplit[0].isEmpty,
+              prereleaseSplit.count == 1 || Self.validIdentifiers(
+                String(prereleaseSplit[1]),
+                rejectNumericLeadingZero: true
+              ) else {
+            throw DistributionError.invalidManifest("package version must be strict semantic version text")
+        }
+        let core = prereleaseSplit[0].split(separator: ".", omittingEmptySubsequences: false)
+        guard core.count == 3,
+              core.allSatisfy({ Self.validCoreNumber(String($0)) }) else {
+            throw DistributionError.invalidManifest("package version must be strict semantic version text")
+        }
+
+        self.rawValue = rawValue
+        self.major = String(core[0])
+        self.minor = String(core[1])
+        self.patch = String(core[2])
+        if prereleaseSplit.count == 2 {
+            self.prerelease = prereleaseSplit[1].split(separator: ".").map { identifier in
+                let value = String(identifier)
+                return value.allSatisfy(\.isNumber) ? .numeric(value) : .alphanumeric(value)
+            }
+        } else {
+            self.prerelease = []
+        }
+    }
+
+    public static func == (lhs: Self, rhs: Self) -> Bool {
+        compareCore(lhs.major, rhs.major) == 0
+            && compareCore(lhs.minor, rhs.minor) == 0
+            && compareCore(lhs.patch, rhs.patch) == 0
+            && comparePrerelease(lhs.prerelease, rhs.prerelease) == 0
+    }
+
+    public static func < (lhs: Self, rhs: Self) -> Bool {
+        for pair in [(lhs.major, rhs.major), (lhs.minor, rhs.minor), (lhs.patch, rhs.patch)] {
+            let comparison = compareCore(pair.0, pair.1)
+            if comparison != 0 { return comparison < 0 }
+        }
+        return comparePrerelease(lhs.prerelease, rhs.prerelease) < 0
+    }
+
+    private static func validCoreNumber(_ value: String) -> Bool {
+        !value.isEmpty
+            && value.allSatisfy(\.isNumber)
+            && (value == "0" || !value.hasPrefix("0"))
+    }
+
+    private static func validIdentifiers(_ value: String, rejectNumericLeadingZero: Bool) -> Bool {
+        let identifiers = value.split(separator: ".", omittingEmptySubsequences: false)
+        guard !identifiers.isEmpty else { return false }
+        return identifiers.allSatisfy { identifier in
+            guard !identifier.isEmpty,
+                  identifier.utf8.allSatisfy({ byte in
+                      (48...57).contains(byte) || (65...90).contains(byte) ||
+                        (97...122).contains(byte) || byte == 45
+                  }) else { return false }
+            let text = String(identifier)
+            return !rejectNumericLeadingZero || !text.allSatisfy(\.isNumber) ||
+                text == "0" || !text.hasPrefix("0")
+        }
+    }
+
+    private static func compareCore(_ lhs: String, _ rhs: String) -> Int {
+        if lhs.count != rhs.count { return lhs.count < rhs.count ? -1 : 1 }
+        if lhs == rhs { return 0 }
+        return lhs.lexicographicallyPrecedes(rhs) ? -1 : 1
+    }
+
+    private static func comparePrerelease(
+        _ lhs: [PrereleaseIdentifier],
+        _ rhs: [PrereleaseIdentifier]
+    ) -> Int {
+        if lhs.isEmpty || rhs.isEmpty {
+            if lhs.isEmpty, rhs.isEmpty { return 0 }
+            return lhs.isEmpty ? 1 : -1
+        }
+        for (left, right) in zip(lhs, rhs) {
+            let comparison: Int
+            switch (left, right) {
+            case (.numeric(let l), .numeric(let r)):
+                comparison = compareCore(l, r)
+            case (.numeric, .alphanumeric):
+                comparison = -1
+            case (.alphanumeric, .numeric):
+                comparison = 1
+            case (.alphanumeric(let l), .alphanumeric(let r)):
+                comparison = l == r ? 0 : (l.lexicographicallyPrecedes(r) ? -1 : 1)
+            }
+            if comparison != 0 { return comparison }
+        }
+        if lhs.count == rhs.count { return 0 }
+        return lhs.count < rhs.count ? -1 : 1
+    }
+}
+
+public enum DistributionVersionTransition: String, Codable, Equatable, Sendable {
+    case upgrade
+    case repair
+
+    public static func classify(
+        installedVersion: String,
+        installedCommit: String,
+        candidateVersion: String,
+        candidateCommit: String
+    ) throws -> DistributionVersionTransition {
+        guard installedCommit.range(of: "^[a-f0-9]{40}$", options: .regularExpression) != nil,
+              candidateCommit.range(of: "^[a-f0-9]{40}$", options: .regularExpression) != nil else {
+            throw DistributionError.versionConflict("Installed or candidate source identity is invalid.")
+        }
+        let installed = try DistributionSemanticVersion(parsing: installedVersion)
+        let candidate = try DistributionSemanticVersion(parsing: candidateVersion)
+        if candidate < installed {
+            throw DistributionError.downgradeRefused(
+                installed: installedVersion,
+                candidate: candidateVersion
+            )
+        }
+        if installed < candidate { return .upgrade }
+        guard installedVersion == candidateVersion,
+              installedCommit == candidateCommit else {
+            throw DistributionError.versionConflict(
+                "Version \(candidateVersion) is already installed from a different source commit."
+            )
+        }
+        return .repair
     }
 }
 
@@ -114,12 +298,7 @@ public struct DistributionArtifactManifest: Codable, Equatable, Sendable {
               sourceCommit != String(repeating: "0", count: 40) else {
             throw DistributionError.invalidManifest("source commit must be nonzero lowercase 40-hex")
         }
-        guard packageVersion.range(
-            of: "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$",
-            options: .regularExpression
-        ) != nil else {
-            throw DistributionError.invalidManifest("package version must be exact semantic version text")
-        }
+        _ = try DistributionSemanticVersion(parsing: packageVersion)
         let expectedArtifactID = "hostwright-\(packageVersion)-macos-arm64-\(sourceCommit.prefix(12))"
         guard artifactID == expectedArtifactID,
               platform == "macos",
@@ -418,6 +597,29 @@ public struct ProvenanceExternalParameters: Codable, Equatable, Sendable {
 public struct ProvenanceInternalParameters: Codable, Equatable, Sendable {
     public let sourceDirty: Bool
     public let unsigned: Bool
+    public let externalSwiftPMDependencies: [String]?
+    public let packageLicenseSPDX: String?
+    public let reproducibilityBuildCount: Int?
+    public let byteIdenticalUnsignedPayloads: Bool?
+    public let toolVersions: [String: String]?
+
+    public init(
+        sourceDirty: Bool,
+        unsigned: Bool,
+        externalSwiftPMDependencies: [String]? = nil,
+        packageLicenseSPDX: String? = nil,
+        reproducibilityBuildCount: Int? = nil,
+        byteIdenticalUnsignedPayloads: Bool? = nil,
+        toolVersions: [String: String]? = nil
+    ) {
+        self.sourceDirty = sourceDirty
+        self.unsigned = unsigned
+        self.externalSwiftPMDependencies = externalSwiftPMDependencies
+        self.packageLicenseSPDX = packageLicenseSPDX
+        self.reproducibilityBuildCount = reproducibilityBuildCount
+        self.byteIdenticalUnsignedPayloads = byteIdenticalUnsignedPayloads
+        self.toolVersions = toolVersions
+    }
 }
 
 public struct ProvenanceResolvedDependency: Codable, Equatable, Sendable {
@@ -475,7 +677,7 @@ public struct DistributionProvenanceStatement: Codable, Equatable, Sendable {
               subject == [ProvenanceSubject(name: archive.fileName, digest: ["sha256": archive.sha256])],
               predicate.buildDefinition.buildType == "urn:hostwright:buildtype:swiftpm-archive:v1",
               predicate.buildDefinition.externalParameters.configuration == "release",
-              predicate.buildDefinition.externalParameters.products == ["hostwright", "hostwright-control", "hostwrightd"],
+              predicate.buildDefinition.externalParameters.products == DistributionLayout.shippedExecutableNames,
               predicate.buildDefinition.externalParameters.platform == manifest.platform,
               predicate.buildDefinition.externalParameters.architecture == manifest.architecture,
               predicate.buildDefinition.internalParameters.sourceDirty == manifest.sourceDirty,
@@ -506,7 +708,7 @@ public struct DistributionInstallManifest: Codable, Equatable, Sendable {
     public let createdDirectories: [String]
 
     public init(artifact: DistributionArtifactManifest, createdDirectories: [String]) {
-        self.schemaVersion = 1
+        self.schemaVersion = 2
         self.artifactID = artifact.artifactID
         self.sourceCommit = artifact.sourceCommit
         self.packageVersion = artifact.packageVersion
@@ -514,8 +716,33 @@ public struct DistributionInstallManifest: Codable, Equatable, Sendable {
         self.createdDirectories = createdDirectories
     }
 
+    init(
+        schemaVersion: Int,
+        artifactID: String,
+        sourceCommit: String,
+        packageVersion: String,
+        files: [DistributionFileRecord],
+        createdDirectories: [String]
+    ) {
+        self.schemaVersion = schemaVersion
+        self.artifactID = artifactID
+        self.sourceCommit = sourceCommit
+        self.packageVersion = packageVersion
+        self.files = files
+        self.createdDirectories = createdDirectories
+    }
+
     public func validate() throws {
-        let allowedDirectories = Set(DistributionLayout.payloadModes.keys.flatMap { path -> [String] in
+        let expectedModes: [String: Int]
+        switch schemaVersion {
+        case 1:
+            expectedModes = DistributionLayout.legacyPayloadModesV1
+        case 2:
+            expectedModes = DistributionLayout.payloadModes
+        default:
+            throw DistributionError.invalidManifest("install ownership manifest schema is unsupported")
+        }
+        let allowedDirectories = Set(expectedModes.keys.flatMap { path -> [String] in
             let components = path.split(separator: "/").map(String.init)
             var result: [String] = []
             var current = ""
@@ -525,16 +752,12 @@ public struct DistributionInstallManifest: Codable, Equatable, Sendable {
             }
             return result
         })
-        guard schemaVersion == 1,
-              packageVersion.range(
-                of: "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$",
-                options: .regularExpression
-              ) != nil,
-              artifactID == "hostwright-\(packageVersion)-macos-arm64-\(sourceCommit.prefix(12))",
+        _ = try DistributionSemanticVersion(parsing: packageVersion)
+        guard artifactID == "hostwright-\(packageVersion)-macos-arm64-\(sourceCommit.prefix(12))",
               sourceCommit.range(of: "^[a-f0-9]{40}$", options: .regularExpression) != nil,
               sourceCommit != String(repeating: "0", count: 40),
               files.map(\.path) == files.map(\.path).sorted(),
-              Set(files.map(\.path)) == Set(DistributionLayout.payloadModes.keys),
+              Set(files.map(\.path)) == Set(expectedModes.keys),
               Set(files.map(\.path)).count == files.count,
               createdDirectories == createdDirectories.sorted(),
               Set(createdDirectories).count == createdDirectories.count,
@@ -546,7 +769,7 @@ public struct DistributionInstallManifest: Codable, Equatable, Sendable {
             guard DistributionPathPolicy.isSafeRelativePath(file.path),
                   file.sha256.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil,
                   file.sizeBytes > 0,
-                  DistributionLayout.payloadModes[file.path] == file.mode else {
+                  expectedModes[file.path] == file.mode else {
                 throw DistributionError.invalidManifest("install file metadata is invalid")
             }
         }
@@ -563,7 +786,7 @@ public struct DistributionLifecycleReport: Codable, Equatable, Sendable {
     public let evidence: HostwrightEvidenceReport
 
     public init(
-        schemaVersion: Int = 1,
+        schemaVersion: Int = 2,
         baselineCommit: String,
         candidateCommit: String,
         prefix: String,
@@ -599,13 +822,13 @@ public struct DistributionLifecycleReport: Codable, Equatable, Sendable {
             }
         )
         let recordedCleanupPaths = Set(evidence.cleanup.exactResourceIdentifiers)
-        guard schemaVersion == 1,
+        guard schemaVersion == 2,
               baselineCommit != candidateCommit,
               baselineCommit.range(of: "^[a-f0-9]{40}$", options: .regularExpression) != nil,
               candidateCommit.range(of: "^[a-f0-9]{40}$", options: .regularExpression) != nil,
               baselineCommit != String(repeating: "0", count: 40),
               candidateCommit != String(repeating: "0", count: 40),
-              stages.map(\.identifier) == ["install", "upgrade", "downgrade", "uninstall"],
+              stages.map(\.identifier) == ["install", "upgrade", "rollback", "uninstall"],
               stages.allSatisfy({ $0.status == .passed && !$0.detail.isEmpty }),
               preservedPaths == preservedPaths.sorted(),
               Set(preservedPaths).count == preservedPaths.count,
@@ -623,6 +846,310 @@ public struct DistributionLifecycleReport: Codable, Equatable, Sendable {
               recordedCleanupPaths.isSubset(of: allowedCleanupPaths),
               evidence.cleanup.status == .succeeded else {
             throw DistributionError.lifecycleFailed("evidence does not preserve the blocked distribution boundary")
+        }
+    }
+}
+
+public enum DistributionLifecycleOperation: String, Codable, Equatable, Sendable {
+    case install
+    case upgrade
+    case repair
+    case rollback
+    case uninstall
+}
+
+public enum DistributionLifecycleCheckpoint: String, Codable, Equatable, Sendable {
+    case intentRecorded = "intent-recorded"
+    case payloadStaged = "payload-staged"
+    case priorPayloadBackedUp = "prior-payload-backed-up"
+    case stateBackedUp = "state-backed-up"
+    case serviceStopped = "service-stopped"
+    case payloadPublishing = "payload-publishing"
+    case payloadPublished = "payload-published"
+    case stateMigrating = "state-migrating"
+    case stateMigrated = "state-migrated"
+    case serviceRestored = "service-restored"
+    case verifying
+    case statusPublished = "status-published"
+    case compensationPublished = "compensation-published"
+}
+
+public enum DistributionManagedServiceState: String, Codable, Equatable, Sendable {
+    case notInstalled = "not-installed"
+    case stopped
+    case running
+}
+
+public enum DistributionUninstallDataPolicy: String, Codable, Equatable, Sendable {
+    case preserve
+    case remove
+}
+
+public struct DistributionStateSnapshotRecord: Codable, Equatable, Sendable {
+    public let schemaVersion: Int
+    public let kind: String
+    public let databasePath: String
+    public let snapshotRelativePath: String
+    public let databaseSHA256: String
+    public let databaseBytes: UInt64
+    public let stateSchemaVersion: Int
+
+    public init(
+        schemaVersion: Int = 1,
+        databasePath: String,
+        snapshotRelativePath: String,
+        databaseSHA256: String,
+        databaseBytes: UInt64,
+        stateSchemaVersion: Int
+    ) {
+        self.schemaVersion = schemaVersion
+        self.kind = "distributionStateSnapshot"
+        self.databasePath = databasePath
+        self.snapshotRelativePath = snapshotRelativePath
+        self.databaseSHA256 = databaseSHA256
+        self.databaseBytes = databaseBytes
+        self.stateSchemaVersion = stateSchemaVersion
+    }
+
+    public func validate(transactionRelativePath: String) throws {
+        let normalizedDatabase = try HostwrightLocalPathResolver.normalizedAbsolutePath(
+            databasePath,
+            role: "distribution state database"
+        )
+        let expectedPrefix = transactionRelativePath + "/state/"
+        guard schemaVersion == 1,
+              kind == "distributionStateSnapshot",
+              normalizedDatabase == databasePath,
+              DistributionPathPolicy.isSafeRelativePath(snapshotRelativePath),
+              snapshotRelativePath.hasPrefix(expectedPrefix),
+              snapshotRelativePath == expectedPrefix + "state.sqlite",
+              databaseSHA256.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil,
+              databaseBytes > 0,
+              (0...HostwrightContractVersions.stateSchema).contains(stateSchemaVersion) else {
+            throw DistributionError.lifecycleFailed("state snapshot record is invalid or not transaction-bound")
+        }
+    }
+}
+
+public struct DistributionLifecycleJournal: Codable, Equatable, Sendable {
+    public let schemaVersion: Int
+    public let kind: String
+    public let operationID: String
+    public let operation: DistributionLifecycleOperation
+    public let checkpoint: DistributionLifecycleCheckpoint
+    public let prefix: String
+    public let transactionRelativePath: String
+    public let fromManifest: DistributionInstallManifest?
+    public let toManifest: DistributionInstallManifest?
+    public let stateSnapshot: DistributionStateSnapshotRecord?
+    public let serviceBefore: DistributionManagedServiceState
+    public let dataPolicy: DistributionUninstallDataPolicy
+    public let startedAt: String
+    public let authorizedRollbackOperationID: String?
+    public let priorStatus: DistributionInstallationStatus?
+
+    public init(
+        schemaVersion: Int = 1,
+        operationID: String,
+        operation: DistributionLifecycleOperation,
+        checkpoint: DistributionLifecycleCheckpoint,
+        prefix: String,
+        transactionRelativePath: String,
+        fromManifest: DistributionInstallManifest?,
+        toManifest: DistributionInstallManifest?,
+        stateSnapshot: DistributionStateSnapshotRecord?,
+        serviceBefore: DistributionManagedServiceState,
+        dataPolicy: DistributionUninstallDataPolicy,
+        startedAt: String,
+        authorizedRollbackOperationID: String? = nil,
+        priorStatus: DistributionInstallationStatus? = nil
+    ) {
+        self.schemaVersion = schemaVersion
+        self.kind = "distributionLifecycleJournal"
+        self.operationID = operationID
+        self.operation = operation
+        self.checkpoint = checkpoint
+        self.prefix = prefix
+        self.transactionRelativePath = transactionRelativePath
+        self.fromManifest = fromManifest
+        self.toManifest = toManifest
+        self.stateSnapshot = stateSnapshot
+        self.serviceBefore = serviceBefore
+        self.dataPolicy = dataPolicy
+        self.startedAt = startedAt
+        self.authorizedRollbackOperationID = authorizedRollbackOperationID
+        self.priorStatus = priorStatus
+    }
+
+    public func replacing(
+        checkpoint: DistributionLifecycleCheckpoint,
+        stateSnapshot: DistributionStateSnapshotRecord? = nil
+    ) -> DistributionLifecycleJournal {
+        DistributionLifecycleJournal(
+            operationID: operationID,
+            operation: operation,
+            checkpoint: checkpoint,
+            prefix: prefix,
+            transactionRelativePath: transactionRelativePath,
+            fromManifest: fromManifest,
+            toManifest: toManifest,
+            stateSnapshot: stateSnapshot ?? self.stateSnapshot,
+            serviceBefore: serviceBefore,
+            dataPolicy: dataPolicy,
+            startedAt: startedAt,
+            authorizedRollbackOperationID: authorizedRollbackOperationID,
+            priorStatus: priorStatus
+        )
+    }
+
+    public func validate() throws {
+        guard schemaVersion == 1,
+              kind == "distributionLifecycleJournal",
+              Self.isCanonicalUUID(operationID),
+              try HostwrightLocalPathResolver.normalizedAbsolutePath(
+                prefix,
+                role: "distribution lifecycle prefix"
+              ) == prefix,
+              transactionRelativePath == "\(DistributionLayout.lifecycleDirectoryName)/\(DistributionLayout.lifecycleTransactionsDirectoryName)/\(operationID)",
+              DistributionPathPolicy.isSafeRelativePath(transactionRelativePath),
+              ISO8601DateFormatter().date(from: startedAt) != nil else {
+            throw DistributionError.lifecycleFailed("lifecycle journal identity, path, or timestamp is invalid")
+        }
+        if checkpoint == .serviceStopped || checkpoint == .serviceRestored {
+            guard serviceBefore != .notInstalled, operation != .install else {
+                throw DistributionError.lifecycleFailed(
+                    "lifecycle service checkpoint is not bound to an existing managed service"
+                )
+            }
+        }
+        try fromManifest?.validate()
+        try toManifest?.validate()
+        try stateSnapshot?.validate(transactionRelativePath: transactionRelativePath)
+        try priorStatus?.validate()
+        if let priorStatus {
+            guard priorStatus.prefix == prefix,
+                  priorStatus.installedManifest == fromManifest else {
+                throw DistributionError.lifecycleFailed(
+                    "lifecycle journal prior status is not bound to its source generation"
+                )
+            }
+        }
+
+        switch operation {
+        case .install:
+            guard fromManifest == nil, toManifest != nil,
+                  stateSnapshot == nil, authorizedRollbackOperationID == nil,
+                  priorStatus == nil, dataPolicy == .preserve else {
+                throw DistributionError.lifecycleFailed("install journal shape is invalid")
+            }
+        case .upgrade:
+            guard let fromManifest, let toManifest,
+                  priorStatus != nil,
+                  authorizedRollbackOperationID == nil,
+                  dataPolicy == .preserve,
+                  try DistributionVersionTransition.classify(
+                    installedVersion: fromManifest.packageVersion,
+                    installedCommit: fromManifest.sourceCommit,
+                    candidateVersion: toManifest.packageVersion,
+                    candidateCommit: toManifest.sourceCommit
+                  ) == .upgrade else {
+                throw DistributionError.lifecycleFailed("upgrade journal shape is invalid")
+            }
+        case .repair:
+            guard let fromManifest, let toManifest,
+                  priorStatus != nil,
+                  authorizedRollbackOperationID == nil,
+                  dataPolicy == .preserve,
+                  try DistributionVersionTransition.classify(
+                    installedVersion: fromManifest.packageVersion,
+                    installedCommit: fromManifest.sourceCommit,
+                    candidateVersion: toManifest.packageVersion,
+                    candidateCommit: toManifest.sourceCommit
+                  ) == .repair else {
+                throw DistributionError.lifecycleFailed("repair journal shape is invalid")
+            }
+        case .rollback:
+            guard let fromManifest, let toManifest,
+                  let priorStatus,
+                  let authorizedRollbackOperationID,
+                  Self.isCanonicalUUID(authorizedRollbackOperationID),
+                  authorizedRollbackOperationID != operationID,
+                  priorStatus.rollbackOperationID == authorizedRollbackOperationID,
+                  dataPolicy == .preserve,
+                  try DistributionSemanticVersion(parsing: toManifest.packageVersion)
+                    < DistributionSemanticVersion(parsing: fromManifest.packageVersion) else {
+                throw DistributionError.lifecycleFailed("rollback journal is not bound to a prior verified generation")
+            }
+        case .uninstall:
+            guard fromManifest != nil, toManifest == nil,
+                  priorStatus != nil,
+                  authorizedRollbackOperationID == nil else {
+                throw DistributionError.lifecycleFailed("uninstall journal shape is invalid")
+            }
+        }
+    }
+
+    static func isCanonicalUUID(_ value: String) -> Bool {
+        UUID(uuidString: value) != nil && value == value.lowercased()
+    }
+}
+
+public struct DistributionInstallationStatus: Codable, Equatable, Sendable {
+    public let schemaVersion: Int
+    public let kind: String
+    public let installationID: String
+    public let generation: Int
+    public let prefix: String
+    public let installedManifest: DistributionInstallManifest
+    public let stateDatabasePath: String?
+    public let service: DistributionManagedServiceState
+    public let rollbackOperationID: String?
+    public let updatedAt: String
+
+    public init(
+        schemaVersion: Int = 1,
+        installationID: String,
+        generation: Int,
+        prefix: String,
+        installedManifest: DistributionInstallManifest,
+        stateDatabasePath: String?,
+        service: DistributionManagedServiceState,
+        rollbackOperationID: String?,
+        updatedAt: String
+    ) {
+        self.schemaVersion = schemaVersion
+        self.kind = "distributionInstallationStatus"
+        self.installationID = installationID
+        self.generation = generation
+        self.prefix = prefix
+        self.installedManifest = installedManifest
+        self.stateDatabasePath = stateDatabasePath
+        self.service = service
+        self.rollbackOperationID = rollbackOperationID
+        self.updatedAt = updatedAt
+    }
+
+    public func validate() throws {
+        guard schemaVersion == 1,
+              kind == "distributionInstallationStatus",
+              DistributionLifecycleJournal.isCanonicalUUID(installationID),
+              generation > 0,
+              try HostwrightLocalPathResolver.normalizedAbsolutePath(
+                prefix,
+                role: "distribution installation prefix"
+              ) == prefix,
+              rollbackOperationID.map(DistributionLifecycleJournal.isCanonicalUUID) ?? true,
+              ISO8601DateFormatter().date(from: updatedAt) != nil else {
+            throw DistributionError.lifecycleFailed("installation status identity, path, or timestamp is invalid")
+        }
+        try installedManifest.validate()
+        if let stateDatabasePath {
+            guard try HostwrightLocalPathResolver.normalizedAbsolutePath(
+                stateDatabasePath,
+                role: "distribution installation state database"
+            ) == stateDatabasePath else {
+                throw DistributionError.lifecycleFailed("installation state database path is invalid")
+            }
         }
     }
 }

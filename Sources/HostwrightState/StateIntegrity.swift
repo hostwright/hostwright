@@ -37,6 +37,52 @@ public struct StateIntegrityService: Sendable {
         }
     }
 
+    public func inspectNonMutating() throws -> StateIntegrityReport {
+        try store.configuration.validateExistingPath()
+        return try StateAccessCoordinator(configuration: store.configuration)
+            .withExistingSharedLockIfPresent {
+                let expectedIdentity = try store.configuration.validateSQLiteFileSet()
+                guard expectedIdentity != nil else {
+                    throw StateStoreError.openFailed(
+                        path: store.path,
+                        message: "the selected state database does not exist"
+                    )
+                }
+                let pathManager = SecureStatePathManager()
+                try pathManager.validateCheckpointedSQLiteFileSetForNonMutatingRead(store.path)
+                let connection = try SQLiteConnection(
+                    path: store.path,
+                    createIfNeeded: false,
+                    readOnly: true,
+                    profile: .nonMutatingInspection
+                )
+                defer { try? connection.close() }
+                let openedIdentity = try store.configuration.validateSQLiteFileSet()
+                guard expectedIdentity == openedIdentity else {
+                    throw StateStoreError.pathPolicyViolation(
+                        path: store.path,
+                        message: "the state database identity changed while doctor was opening it"
+                    )
+                }
+                let fingerprint = try StateMaintenanceFileSupport.fingerprint(connection.path)
+                let report = try inspect(
+                    connection: connection,
+                    fingerprint: fingerprint
+                )
+                try connection.close()
+                try pathManager.validateCheckpointedSQLiteFileSetForNonMutatingRead(store.path)
+                let finalIdentity = try store.configuration.validateSQLiteFileSet()
+                let finalFingerprint = try StateMaintenanceFileSupport.fingerprint(store.path)
+                guard expectedIdentity == finalIdentity, fingerprint == finalFingerprint else {
+                    throw StateStoreError.databaseLocked(
+                        path: store.path,
+                        message: "state changed during immutable doctor inspection; retry after active state operations finish"
+                    )
+                }
+                return report
+            }
+    }
+
     func inspect(
         connection: SQLiteConnection,
         fingerprint: StateFileFingerprint? = nil
@@ -45,6 +91,45 @@ public struct StateIntegrityService: Sendable {
         var checks: [StateIntegrityCheck] = []
         var unrecoverable = false
         var repairableTables = Set<String>()
+
+        let policy = try connection.policyReport()
+        let policyMessage: String
+        if policy.usesLegacyJournalMode {
+            policyMessage = "SQLite \(policy.libraryVersion) uses a compatible legacy journal; the next state-writing migration upgrades it to WAL with FULL synchronization."
+        } else if policy.profile == .portableArtifact {
+            policyMessage = "SQLite \(policy.libraryVersion) verifies this sidecar-free portable artifact with DELETE/EXTRA durability and macOS full-fsync barriers."
+        } else if policy.profile == .nonMutatingInspection {
+            policyMessage = "SQLite \(policy.libraryVersion) verifies a checkpointed immutable state snapshot without creating or changing SQLite coordination artifacts."
+        } else {
+            policyMessage = "SQLite \(policy.libraryVersion) enforces NOFOLLOW, defensive and untrusted-schema modes, bounded waits, private in-memory temporary storage, WAL/FULL durability, and macOS full-fsync barriers."
+        }
+        checks.append(.init(
+            identifier: "sqlite.connection-policy",
+            status: policy.usesLegacyJournalMode ? .warning : .passed,
+            message: policyMessage
+        ))
+
+        let applicationID = try MigrationRunner().applicationIdentity(on: connection)
+        if applicationID == MigrationRunner.applicationID {
+            checks.append(.init(
+                identifier: "hostwright.application-identity",
+                status: .passed,
+                message: "SQLite application_id is bound to Hostwright ownership."
+            ))
+        } else if applicationID == 0 {
+            checks.append(.init(
+                identifier: "hostwright.application-identity",
+                status: .warning,
+                message: "Legacy unclaimed state is compatible; the next explicit migration records Hostwright ownership."
+            ))
+        } else {
+            unrecoverable = true
+            checks.append(.init(
+                identifier: "hostwright.application-identity",
+                status: .failed,
+                message: "SQLite application_id belongs to another application."
+            ))
+        }
 
         let integrityRows = try connection.query("PRAGMA integrity_check(100)")
             .compactMap { $0.first ?? nil }

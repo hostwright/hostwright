@@ -69,6 +69,7 @@ public struct SchemaMigration: Equatable, Sendable {
 
 public struct MigrationRunner: Sendable {
     public static let latestSchemaVersion = HostwrightContractVersions.stateSchema
+    static let applicationID = 0x48575254
 
     public init() {}
 
@@ -101,6 +102,21 @@ public struct MigrationRunner: Sendable {
         }
     }
 
+    public func compatibleSchemaVersion(in store: SQLiteStateStore) throws -> Int {
+        try store.withConnection(createIfNeeded: false, readOnly: true) { connection in
+            try compatibleSchemaVersion(on: connection)
+        }
+    }
+
+    func compatibleSchemaVersion(on connection: SQLiteConnection) throws -> Int {
+        try validateApplicationIdentity(on: connection, allowUnclaimed: true)
+        try ensureDatabaseIsMigratable(on: connection)
+        guard try migrationTableExists(on: connection) else { return 0 }
+        let applied = try appliedMigrations(on: connection)
+        try validateCompatibility(applied, requireLatest: false)
+        return applied.keys.max() ?? 0
+    }
+
     func apply(on connection: SQLiteConnection) throws {
         try apply(on: connection, throughVersion: Self.latestSchemaVersion)
     }
@@ -108,9 +124,11 @@ public struct MigrationRunner: Sendable {
     func apply(on connection: SQLiteConnection, throughVersion: Int) throws {
         precondition((1...Self.latestSchemaVersion).contains(throughVersion))
         try connection.transaction {
+            try validateApplicationIdentity(on: connection, allowUnclaimed: true)
             try ensureDatabaseIsMigratable(on: connection)
             let applied = try appliedMigrations(on: connection)
             try validateCompatibility(applied, requireLatest: false)
+            try connection.execute("PRAGMA application_id = \(Self.applicationID)")
 
             for migration in Self.migrations where migration.version <= throughVersion {
                 if let checksum = applied[migration.version] {
@@ -147,10 +165,12 @@ public struct MigrationRunner: Sendable {
                     ]
                 )
             }
+            try validateApplicationIdentity(on: connection, allowUnclaimed: false)
         }
     }
 
     func validateMigrationLedger(on connection: SQLiteConnection) throws {
+        try validateApplicationIdentity(on: connection, allowUnclaimed: true)
         guard try migrationTableExists(on: connection) else {
             throw StateStoreError.incompatibleSchema(
                 foundVersion: nil,
@@ -316,6 +336,7 @@ public struct MigrationRunner: Sendable {
     }
 
     func validateAppliedSchema(on connection: SQLiteConnection) throws {
+        try validateApplicationIdentity(on: connection, allowUnclaimed: true)
         guard try migrationTableExists(on: connection) else {
             let existingTables = try userTables(on: connection)
             if existingTables.isEmpty {
@@ -335,6 +356,32 @@ public struct MigrationRunner: Sendable {
 
         let applied = try appliedMigrations(on: connection)
         try validateCompatibility(applied, requireLatest: true)
+    }
+
+    func applicationIdentity(on connection: SQLiteConnection) throws -> Int {
+        guard let value = try connection.query("PRAGMA application_id").first?.first ?? nil,
+              let applicationID = Int(value) else {
+            throw StateStoreError.incompatibleSchema(
+                foundVersion: nil,
+                latestSupported: Self.latestSchemaVersion,
+                message: "SQLite application ownership identity could not be read."
+            )
+        }
+        return applicationID
+    }
+
+    private func validateApplicationIdentity(
+        on connection: SQLiteConnection,
+        allowUnclaimed: Bool
+    ) throws {
+        let applicationID = try applicationIdentity(on: connection)
+        guard applicationID == Self.applicationID || (allowUnclaimed && applicationID == 0) else {
+            throw StateStoreError.incompatibleSchema(
+                foundVersion: nil,
+                latestSupported: Self.latestSchemaVersion,
+                message: "SQLite application_id \(applicationID) is not owned by Hostwright; refusing to read, claim, or mutate it."
+            )
+        }
     }
 
     private func ensureMigrationTable(on connection: SQLiteConnection) throws {

@@ -5,10 +5,35 @@ import HostwrightCore
 public struct TrustedReleaseVerificationResult: Sendable {
     public let manifest: TrustedReleaseManifest
     public let commands: [HostwrightEvidenceCommand]
+    public let cleanup: HostwrightEvidenceCleanup
 
-    public init(manifest: TrustedReleaseManifest, commands: [HostwrightEvidenceCommand]) {
+    public init(
+        manifest: TrustedReleaseManifest,
+        commands: [HostwrightEvidenceCommand],
+        cleanup: HostwrightEvidenceCleanup
+    ) {
         self.manifest = manifest
         self.commands = commands
+        self.cleanup = cleanup
+    }
+}
+
+public struct VerifiedTrustedReleaseArtifact: Sendable {
+    public let releaseDirectory: URL
+    public let extractedRoot: URL
+    public let manifest: DistributionArtifactManifest
+    public let trustedManifest: TrustedReleaseManifest
+
+    init(
+        releaseDirectory: URL,
+        extractedRoot: URL,
+        manifest: DistributionArtifactManifest,
+        trustedManifest: TrustedReleaseManifest
+    ) {
+        self.releaseDirectory = releaseDirectory
+        self.extractedRoot = extractedRoot
+        self.manifest = manifest
+        self.trustedManifest = trustedManifest
     }
 }
 
@@ -51,6 +76,7 @@ public struct TrustedReleaseVerifier: Sendable {
         ]
         if requireEvidenceReport {
             expectedFiles.insert(TrustedReleaseLayout.evidenceFileName)
+            expectedFiles.insert(TrustedReleaseLayout.evidenceSignatureFileName)
         }
         let entries = try FileManager.default.contentsOfDirectory(atPath: releaseDirectory.path)
         guard Set(entries) == expectedFiles, entries.count == expectedFiles.count else {
@@ -178,11 +204,32 @@ public struct TrustedReleaseVerifier: Sendable {
         )
 
         if requireEvidenceReport {
+            let evidenceURL = releaseDirectory.appendingPathComponent(TrustedReleaseLayout.evidenceFileName)
+            try verifyDetachedCMS(
+                content: evidenceURL,
+                signature: releaseDirectory.appendingPathComponent(
+                    TrustedReleaseLayout.evidenceSignatureFileName
+                ),
+                signer: manifest.applicationSigner,
+                cancellation: cancellation,
+                commands: &commands
+            )
             let report = try DistributionJSON.decode(
                 TrustedReleaseReport.self,
-                from: releaseDirectory.appendingPathComponent(TrustedReleaseLayout.evidenceFileName)
+                from: evidenceURL
             )
             try report.validate()
+            let expectedBuildMetadata = TrustedReleaseBuildMetadata(
+                externalSwiftPMDependencies: [],
+                packageLicenseSPDX: "Apache-2.0",
+                reproducibilityBuildCount: 2,
+                byteIdenticalUnsignedPayloads: true,
+                toolVersions: report.evidence.environment.toolVersions
+            )
+            try provenance.validate(
+                manifest: manifest,
+                expectedBuildMetadata: expectedBuildMetadata
+            )
             let actualManifestSignature = try descriptor(
                 releaseDirectory.appendingPathComponent(TrustedReleaseLayout.manifestSignatureFileName),
                 cancellation: cancellation
@@ -211,7 +258,71 @@ public struct TrustedReleaseVerifier: Sendable {
             exitCode: 0,
             durationMilliseconds: 0
         ))
-        return TrustedReleaseVerificationResult(manifest: manifest, commands: commands)
+        return TrustedReleaseVerificationResult(
+            manifest: manifest,
+            commands: commands,
+            cleanup: HostwrightEvidenceCleanup(
+                status: .succeeded,
+                exactResourceIdentifiers: [verificationRoot.path],
+                message: "The exact private trusted-release verification root was removed."
+            )
+        )
+    }
+
+    public func verifyForInstallation(
+        releaseDirectory: URL,
+        expectedTeamIdentifier: String,
+        extractionDirectory: URL,
+        cancellation: SecureSubprocessCancellation = SecureSubprocessCancellation()
+    ) throws -> VerifiedTrustedReleaseArtifact {
+        let verified = try verify(
+            releaseDirectory: releaseDirectory,
+            expectedTeamIdentifier: expectedTeamIdentifier,
+            requireEvidenceReport: true,
+            cancellation: cancellation
+        )
+        try DistributionTemporaryPathPolicy.validate(
+            extractionDirectory,
+            role: "trusted release lifecycle extraction"
+        )
+        guard !DistributionFileSystem.entryExists(extractionDirectory) else {
+            throw DistributionError.existingOutput(extractionDirectory.path)
+        }
+        var commands = verified.commands
+        var retained = false
+        defer {
+            if !retained, DistributionFileSystem.entryExists(extractionDirectory) {
+                try? DistributionFileSystem.removeOwnedTemporaryItem(extractionDirectory)
+            }
+        }
+        try verifyArchive(
+            manifest: verified.manifest,
+            releaseDirectory: releaseDirectory,
+            extractionRoot: extractionDirectory,
+            cancellation: cancellation,
+            commands: &commands
+        )
+        let payloadManifest = DistributionArtifactManifest(
+            artifactID: verified.manifest.artifactID,
+            packageVersion: verified.manifest.packageVersion,
+            sourceCommit: verified.manifest.sourceCommit,
+            sourceDirty: false,
+            architecture: verified.manifest.architecture,
+            createdAt: verified.manifest.createdAt,
+            files: verified.manifest.payloadFiles
+        )
+        try payloadManifest.validate()
+        let extractedRoot = extractionDirectory.appendingPathComponent(
+            verified.manifest.artifactID,
+            isDirectory: true
+        )
+        retained = true
+        return VerifiedTrustedReleaseArtifact(
+            releaseDirectory: releaseDirectory,
+            extractedRoot: extractedRoot,
+            manifest: payloadManifest,
+            trustedManifest: verified.manifest
+        )
     }
 
     private func verifyArchive(
@@ -393,7 +504,7 @@ public struct TrustedReleaseVerifier: Sendable {
         cancellation: SecureSubprocessCancellation,
         commands: inout [HostwrightEvidenceCommand]
     ) throws {
-        for relativePath in ["bin/hostwright", "bin/hostwright-control", "bin/hostwrightd"] {
+        for relativePath in DistributionLayout.shippedBinaryPaths {
             let binary = root.appendingPathComponent(relativePath)
             let signature = try runner.run(
                 executablePath: "/usr/bin/codesign",

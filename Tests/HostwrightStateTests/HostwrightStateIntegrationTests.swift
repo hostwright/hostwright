@@ -118,12 +118,25 @@ final class HostwrightStateIntegrationTests: XCTestCase {
         try store.migrate()
         try store.events.append([event(id: "event-before-backup", timestamp: "2026-07-12T10:03:00Z")])
 
+        let firstCheckpoint = try SQLiteConnection(
+            path: databaseURL.path,
+            createIfNeeded: false,
+            profile: .portableArtifact
+        )
+        try firstCheckpoint.close()
+
         try FileManager.default.copyItem(at: databaseURL, to: backupURL)
         let backupStore = SQLiteStateStore(path: backupURL.path)
         try backupStore.validateSchema()
         XCTAssertEqual(try backupStore.events.loadAll().map(\.id), ["event-before-backup"])
 
         try store.events.append([event(id: "event-after-backup", timestamp: "2026-07-12T10:03:01Z")])
+        let secondCheckpoint = try SQLiteConnection(
+            path: databaseURL.path,
+            createIfNeeded: false,
+            profile: .portableArtifact
+        )
+        try secondCheckpoint.close()
         try FileManager.default.copyItem(at: databaseURL, to: restoredURL)
         let targetBeforeRestore = SQLiteStateStore(path: restoredURL.path)
         XCTAssertEqual(

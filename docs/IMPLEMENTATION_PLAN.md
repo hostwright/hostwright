@@ -344,7 +344,7 @@ Phase 25 does not add registry lookup, image pull, registry credentials, signatu
 
 - Added `ResourceIntelligenceReport` models for measurement method, hardware, OS, Apple container version evidence, workload profile, memory pressure, boot latency, polling overhead, sleep/wake, battery, thermal state, architecture warnings, and limits.
 - `hostwright doctor --output json` can include a resource report from local ProcessInfo-backed host facts or deterministic test fixtures.
-- Live doctor keeps Apple container version unavailable unless supplied by injected report data; it does not run Apple container commands.
+- Phase 26 historically kept the extended doctor resource report's Apple container version unavailable. Phase 02 issue #117 later added a separate bounded RuntimeAdapter CLI/service readiness probe; it does not list or inspect workload resources.
 - Architecture warnings are evidence-based and non-blocking, including Rosetta-risk wording only when a reported non-arm64 image architecture exists.
 - Added fixture parser coverage and tests for unmeasured benchmark dimensions, no-capacity limits, and local-only/no-telemetry boundaries.
 - Added a resource-intelligence methodology document with benchmark input requirements, blocked evidence, and rejected claims.

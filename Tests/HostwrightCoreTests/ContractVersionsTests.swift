@@ -40,6 +40,26 @@ final class ContractVersionsTests: XCTestCase {
         }
         XCTAssertEqual(secureSubprocess.state, .stable)
         XCTAssertEqual(secureSubprocess.issue, 116)
+
+        guard let installedLifecycle = report.capabilities.first(where: {
+            $0.identifier == "distribution.installed-lifecycle"
+        }) else {
+            return XCTFail("Installed distribution lifecycle capability is missing.")
+        }
+        XCTAssertEqual(installedLifecycle.state, .stable)
+        XCTAssertEqual(installedLifecycle.issue, 118)
+
+        guard let releaseEvidence = report.capabilities.first(where: {
+            $0.identifier == "distribution.release-evidence"
+        }) else {
+            return XCTFail("Release evidence capability is missing.")
+        }
+        XCTAssertEqual(releaseEvidence.state, .experimental)
+        XCTAssertEqual(releaseEvidence.issue, 119)
+        XCTAssertEqual(
+            Set(releaseEvidence.requiredEvidence),
+            Set([.unitContract, .localIntegration, .liveRuntime, .migrationUpgrade, .securityAssessment, .resilienceChaos])
+        )
     }
 
     func testVerificationConstitutionIncludesEveryV002EvidenceClass() {

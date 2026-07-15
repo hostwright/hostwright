@@ -21,10 +21,11 @@ enum HostwrightDistributionCLI {
             }
             exit(result.exitCode)
         } catch let error as DistributionError {
-            FileHandle.standardError.write(Data("HW-DIST-001: \(error.description)\n".utf8))
-            exit(errorExitCode(error))
+            let exitCode = errorExitCode(error)
+            writeError(error, exitCode: exitCode)
+            exit(exitCode)
         } catch {
-            FileHandle.standardError.write(Data("HW-DIST-001: Unexpected distribution-tool failure.\n".utf8))
+            writeUnexpectedError()
             exit(72)
         }
     }
@@ -38,12 +39,18 @@ enum HostwrightDistributionCLI {
         }
         let values = Array(arguments.dropFirst())
         switch command {
+        case "--version":
+            guard values.isEmpty else {
+                throw DistributionError.invalidArguments("--version does not accept arguments.")
+            }
+            return ToolResult(output: "\(HostwrightIdentity.version)\n", exitCode: 0)
         case "release":
             let options = try parse(values, required: [
                 "--source-root", "--output-dir", "--expected-commit", "--expected-version",
                 "--release-tag", "--application-identity", "--installer-identity",
                 "--team-id", "--notary-keychain-profile"
-            ])
+            ], optional: ["--format"])
+            let format = try outputFormat(options)
             let report = try TrustedReleaseBuilder().build(
                 TrustedReleaseBuildRequest(
                     sourceRoot: fileURL(options["--source-root"]!),
@@ -58,17 +65,39 @@ enum HostwrightDistributionCLI {
                 ),
                 cancellation: cancellation
             )
+            if format == .json {
+                return ToolResult(
+                    output: try jsonLine(
+                        TrustedReleaseCommandOutput(
+                            report: report,
+                            releaseDirectory: fileURL(options["--output-dir"]!).path
+                        )
+                    ),
+                    exitCode: 0
+                )
+            }
             return ToolResult(
                 output: "Trusted release output: \(options["--output-dir"]!)\nArchive: \(report.manifest.archive.fileName)\nPackage: \(report.manifest.package.fileName)\nStatus: \(report.evidence.status.rawValue)\n",
                 exitCode: 0
             )
         case "verify-release":
-            let options = try parse(values, required: ["--release-dir", "--team-id"])
+            let options = try parse(
+                values,
+                required: ["--release-dir", "--team-id"],
+                optional: ["--format"]
+            )
+            let format = try outputFormat(options)
             let result = try TrustedReleaseVerifier().verify(
                 releaseDirectory: fileURL(options["--release-dir"]!),
                 expectedTeamIdentifier: options["--team-id"]!,
                 cancellation: cancellation
             )
+            if format == .json {
+                return ToolResult(
+                    output: try jsonLine(TrustedReleaseVerificationCommandOutput(result: result)),
+                    exitCode: 0
+                )
+            }
             return ToolResult(
                 output: "Verified trusted release\nVersion: \(result.manifest.packageVersion)\nCommit: \(result.manifest.sourceCommit)\nTeam: \(result.manifest.applicationSigner.teamIdentifier)\nStatus: passed\n",
                 exitCode: 0
@@ -76,8 +105,10 @@ enum HostwrightDistributionCLI {
         case "homebrew-formula":
             let options = try parse(
                 values,
-                required: ["--release-dir", "--team-id", "--artifact-url", "--output"]
+                required: ["--release-dir", "--team-id", "--artifact-url", "--output"],
+                optional: ["--format"]
             )
+            let format = try outputFormat(options)
             let verified = try TrustedReleaseVerifier().verify(
                 releaseDirectory: fileURL(options["--release-dir"]!),
                 expectedTeamIdentifier: options["--team-id"]!,
@@ -96,6 +127,17 @@ enum HostwrightDistributionCLI {
                 throw DistributionError.invalidArguments("Homebrew formula output parent must be a non-symlink directory.")
             }
             try DistributionFileSystem.writeNewFile(Data(formula.utf8), to: output, mode: 0o644)
+            if format == .json {
+                return ToolResult(
+                    output: try jsonLine(
+                        HomebrewFormulaCommandOutput(
+                            manifest: verified.manifest,
+                            outputFile: output.path
+                        )
+                    ),
+                    exitCode: 0
+                )
+            }
             return ToolResult(
                 output: "Homebrew formula: \(output.path)\nArchive SHA-256: \(verified.manifest.archive.sha256)\nStatus: passed\n",
                 exitCode: 0
@@ -111,7 +153,8 @@ enum HostwrightDistributionCLI {
             return blockedResult(report: report, outputDirectory: options["--output-dir"]!)
         case "assemble":
             let required = [
-                "--hostwright-binary", "--hostwright-control-binary", "--hostwrightd-binary", "--example-manifest", "--license", "--readme",
+                "--hostwright-binary", "--hostwright-control-binary", "--hostwright-dist-binary",
+                "--hostwrightd-binary", "--example-manifest", "--license", "--readme",
                 "--output-dir", "--version", "--source-commit", "--source-dirty", "--architecture"
             ]
             let options = try parse(values, required: required)
@@ -127,6 +170,7 @@ enum HostwrightDistributionCLI {
                 DistributionAssemblyRequest(
                     hostwrightBinary: fileURL(options["--hostwright-binary"]!),
                     hostwrightControlBinary: fileURL(options["--hostwright-control-binary"]!),
+                    hostwrightDistributionBinary: fileURL(options["--hostwright-dist-binary"]!),
                     hostwrightDaemonBinary: fileURL(options["--hostwrightd-binary"]!),
                     exampleManifestFile: fileURL(options["--example-manifest"]!),
                     licenseFile: fileURL(options["--license"]!),
@@ -152,6 +196,101 @@ enum HostwrightDistributionCLI {
                 output: "Verified unsigned distribution artifact\nCommit: \(report.manifest.sourceCommit)\nArchive: \(report.archive.fileName)\nStatus: \(report.evidence.status.rawValue)\n",
                 exitCode: 0
             )
+        case "install", "upgrade", "repair":
+            return try lifecycleMutation(
+                command: command,
+                arguments: values,
+                cancellation: cancellation
+            )
+        case "status":
+            let options = try parse(
+                values,
+                required: ["--prefix", "--output"]
+            )
+            try requireJSONOutput(options)
+            let inspection = try DistributionInstalledLifecycle().inspect(
+                prefix: fileURL(options["--prefix"]!)
+            )
+            return ToolResult(output: try jsonLine(inspection), exitCode: 0)
+        case "adopt-legacy":
+            let options = try parse(
+                values,
+                required: ["--prefix", "--output"],
+                optional: ["--state-db"]
+            )
+            try requireJSONOutput(options)
+            let status = try DistributionInstalledLifecycle().adoptLegacyInstallation(
+                prefix: fileURL(options["--prefix"]!),
+                stateDatabasePath: options["--state-db"],
+                cancellation: cancellation
+            )
+            return ToolResult(
+                output: try jsonLine(DistributionLegacyAdoptionOutput(status: status)),
+                exitCode: 0
+            )
+        case "recover":
+            let options = try parse(
+                values,
+                required: ["--prefix", "--output"]
+            )
+            try requireJSONOutput(options)
+            let result = try DistributionInstalledLifecycle().recover(
+                prefix: fileURL(options["--prefix"]!),
+                cancellation: cancellation
+            )
+            return ToolResult(output: try jsonLine(result), exitCode: 0)
+        case "rollback":
+            let options = try parse(
+                values,
+                required: ["--prefix", "--output"]
+            )
+            try requireJSONOutput(options)
+            let status = try DistributionInstalledLifecycle().rollback(
+                prefix: fileURL(options["--prefix"]!),
+                cancellation: cancellation
+            )
+            return ToolResult(
+                output: try jsonLine(
+                    DistributionLifecycleMutationOutput(operation: .rollback, status: status)
+                ),
+                exitCode: 0
+            )
+        case "uninstall-plan":
+            let options = try parse(
+                values,
+                required: ["--prefix", "--data-policy", "--output"]
+            )
+            try requireJSONOutput(options)
+            guard let policy = DistributionUninstallDataPolicy(rawValue: options["--data-policy"]!) else {
+                throw DistributionError.invalidArguments(
+                    "uninstall-plan --data-policy supports only preserve or remove."
+                )
+            }
+            let plan = try DistributionInstalledLifecycle().uninstallPlan(
+                prefix: fileURL(options["--prefix"]!),
+                dataPolicy: policy,
+                cancellation: cancellation
+            )
+            return ToolResult(output: try jsonLine(plan), exitCode: 0)
+        case "uninstall":
+            let options = try parse(
+                values,
+                required: ["--prefix", "--data-policy", "--output"],
+                optional: ["--confirmation"]
+            )
+            try requireJSONOutput(options)
+            guard let policy = DistributionUninstallDataPolicy(rawValue: options["--data-policy"]!) else {
+                throw DistributionError.invalidArguments(
+                    "uninstall --data-policy supports only preserve or remove."
+                )
+            }
+            let result = try DistributionInstalledLifecycle().uninstall(
+                prefix: fileURL(options["--prefix"]!),
+                dataPolicy: policy,
+                confirmationToken: options["--confirmation"],
+                cancellation: cancellation
+            )
+            return ToolResult(output: try jsonLine(result), exitCode: 0)
         case "lifecycle":
             let options = try parse(
                 values,
@@ -179,12 +318,17 @@ enum HostwrightDistributionCLI {
         }
     }
 
-    private static func parse(_ arguments: [String], required: [String]) throws -> [String: String] {
+    private static func parse(
+        _ arguments: [String],
+        required: [String],
+        optional: [String] = []
+    ) throws -> [String: String] {
+        let allowed = Set(required + optional)
         var values: [String: String] = [:]
         var index = 0
         while index < arguments.count {
             let flag = arguments[index]
-            guard required.contains(flag), values[flag] == nil, index + 1 < arguments.count else {
+            guard allowed.contains(flag), values[flag] == nil, index + 1 < arguments.count else {
                 throw DistributionError.invalidArguments("Invalid, duplicate, or unsupported distribution argument \(flag).")
             }
             let value = arguments[index + 1]
@@ -199,6 +343,115 @@ enum HostwrightDistributionCLI {
             throw DistributionError.invalidArguments("Missing required distribution arguments: \(missing.joined(separator: ", ")).")
         }
         return values
+    }
+
+    private static func lifecycleMutation(
+        command: String,
+        arguments: [String],
+        cancellation: SecureSubprocessCancellation
+    ) throws -> ToolResult {
+        let options = try parse(
+            arguments,
+            required: ["--prefix", "--output"],
+            optional: [
+                "--state-db", "--trusted-release-dir", "--team-id",
+                "--developer-distribution-dir"
+            ]
+        )
+        try requireJSONOutput(options)
+        let hasTrusted = options["--trusted-release-dir"] != nil
+        let hasDeveloper = options["--developer-distribution-dir"] != nil
+        guard hasTrusted != hasDeveloper else {
+            throw DistributionError.invalidArguments(
+                "\(command) requires exactly one of --trusted-release-dir or --developer-distribution-dir."
+            )
+        }
+        guard hasTrusted == (options["--team-id"] != nil) else {
+            throw DistributionError.invalidArguments(
+                "--team-id is required only with --trusted-release-dir."
+            )
+        }
+
+        let prefix = fileURL(options["--prefix"]!)
+        let extraction = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-dist-lifecycle-extract-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        var extractionRemoved = false
+        defer {
+            if !extractionRemoved, DistributionFileSystem.entryExists(extraction) {
+                try? DistributionFileSystem.removeOwnedTemporaryItem(extraction)
+            }
+        }
+        let lifecycle = DistributionInstalledLifecycle()
+        let operation = DistributionLifecycleOperation(rawValue: command)!
+        let statePath = options["--state-db"]
+        let status: DistributionInstallationStatus
+        if let releaseDirectory = options["--trusted-release-dir"] {
+            let artifact = try TrustedReleaseVerifier().verifyForInstallation(
+                releaseDirectory: fileURL(releaseDirectory),
+                expectedTeamIdentifier: options["--team-id"]!,
+                extractionDirectory: extraction,
+                cancellation: cancellation
+            )
+            status = try lifecycle.install(
+                artifact: artifact,
+                prefix: prefix,
+                stateDatabasePath: statePath,
+                requiredOperation: operation,
+                cancellation: cancellation
+            )
+        } else {
+            let artifact = try DistributionVerifier().verify(
+                distributionDirectory: fileURL(options["--developer-distribution-dir"]!),
+                extractionDirectory: extraction,
+                cancellation: cancellation
+            )
+            status = try lifecycle.install(
+                artifact: artifact,
+                prefix: prefix,
+                stateDatabasePath: statePath,
+                requiredOperation: operation,
+                cancellation: cancellation
+            )
+        }
+        let cleanup = DistributionPostCommitCleanup.removeOwnedTemporaryItem(extraction)
+        extractionRemoved = true
+        let cleanupWarning = cleanup.status == .pending
+            ? "HW-DIST-W001: committed lifecycle mutation completed, but verified temporary extraction cleanup remains pending.\n"
+            : ""
+        return ToolResult(
+            output: try jsonLine(
+                DistributionLifecycleMutationOutput(
+                    operation: operation,
+                    status: status,
+                    cleanup: cleanup
+                )
+            ),
+            error: cleanupWarning,
+            exitCode: 0
+        )
+    }
+
+    private static func requireJSONOutput(_ options: [String: String]) throws {
+        guard options["--output"] == "json" else {
+            throw DistributionError.invalidArguments("Lifecycle commands currently require --output json.")
+        }
+    }
+
+    private static func outputFormat(_ options: [String: String]) throws -> ToolOutputFormat {
+        guard let value = options["--format"] else { return .text }
+        guard let format = ToolOutputFormat(rawValue: value) else {
+            throw DistributionError.invalidArguments("--format supports only text or json.")
+        }
+        return format
+    }
+
+    private static func jsonLine<T: Encodable>(_ value: T) throws -> String {
+        guard let text = String(data: try DistributionJSON.encode(value), encoding: .utf8) else {
+            throw DistributionError.lifecycleFailed("structured lifecycle output was not UTF-8")
+        }
+        return text
     }
 
     private static func blockedResult(
@@ -224,6 +477,8 @@ enum HostwrightDistributionCLI {
             return 65
         case .installOwnershipMismatch:
             return 71
+        case .downgradeRefused, .versionConflict:
+            return 65
         case .commandFailed, .commandTimedOut, .commandCancelled,
              .commandOutputLimitExceeded, .commandProcessTreeViolation:
             return 69
@@ -232,16 +487,70 @@ enum HostwrightDistributionCLI {
         }
     }
 
+    private static func writeError(_ error: DistributionError, exitCode: Int32) {
+        if requestsJSONOutput(CommandLine.arguments) {
+            let payload = DistributionToolErrorOutput(
+                code: "HW-DIST-001",
+                message: error.description,
+                exitCode: exitCode
+            )
+            if let data = try? DistributionJSON.encode(payload) {
+                FileHandle.standardError.write(data)
+                return
+            }
+        }
+        FileHandle.standardError.write(Data("HW-DIST-001: \(error.description)\n".utf8))
+    }
+
+    private static func writeUnexpectedError() {
+        if requestsJSONOutput(CommandLine.arguments) {
+            let payload = DistributionToolErrorOutput(
+                code: "HW-DIST-001",
+                message: "Unexpected distribution-tool failure.",
+                exitCode: 72
+            )
+            if let data = try? DistributionJSON.encode(payload) {
+                FileHandle.standardError.write(data)
+                return
+            }
+        }
+        FileHandle.standardError.write(
+            Data("HW-DIST-001: Unexpected distribution-tool failure.\n".utf8)
+        )
+    }
+
+    private static func requestsJSONOutput(_ arguments: [String]) -> Bool {
+        guard arguments.count >= 2 else { return false }
+        let command = arguments[1]
+        let structuredReleaseCommands = ["release", "verify-release", "homebrew-formula"]
+        let outputFlag = structuredReleaseCommands.contains(command) ? "--format" : "--output"
+        return zip(arguments, arguments.dropFirst()).contains { flag, value in
+            flag == outputFlag && value == "json"
+        }
+    }
+
     private static let helpText = """
     hostwright-dist trusted and developer distribution tool
 
     Usage:
-      hostwright-dist release --source-root <path> --output-dir <path> --expected-commit <40-hex> --expected-version <semver> --release-tag <v-semver> --application-identity <SHA-1> --installer-identity <SHA-1> --team-id <10-char> --notary-keychain-profile <name>
-      hostwright-dist verify-release --release-dir <path> --team-id <10-char>
-      hostwright-dist homebrew-formula --release-dir <path> --team-id <10-char> --artifact-url <immutable-https-url> --output <Formula/hostwright.rb>
+      hostwright-dist release --source-root <path> --output-dir <path> --expected-commit <40-hex> --expected-version <semver> --release-tag <v-semver> --application-identity <SHA-1> --installer-identity <SHA-1> --team-id <10-char> --notary-keychain-profile <name> [--format text|json]
+      hostwright-dist verify-release --release-dir <path> --team-id <10-char> [--format text|json]
+      hostwright-dist homebrew-formula --release-dir <path> --team-id <10-char> --artifact-url <immutable-https-url> --output <Formula/hostwright.rb> [--format text|json]
       hostwright-dist build --source-root <path> --output-dir <path> --expected-commit <40-hex>
-      hostwright-dist assemble --hostwright-binary <path> --hostwright-control-binary <path> --hostwrightd-binary <path> --example-manifest <path> --license <path> --readme <path> --output-dir <path> --version <semver> --source-commit <40-hex> --source-dirty <true|false> --architecture arm64
+      hostwright-dist --version
+      hostwright-dist assemble --hostwright-binary <path> --hostwright-control-binary <path> --hostwright-dist-binary <path> --hostwrightd-binary <path> --example-manifest <path> --license <path> --readme <path> --output-dir <path> --version <semver> --source-commit <40-hex> --source-dirty <true|false> --architecture arm64
       hostwright-dist verify --distribution-dir <path>
+      hostwright-dist install --trusted-release-dir <path> --team-id <10-char> --prefix <path> [--state-db <path>] --output json
+      hostwright-dist install --developer-distribution-dir <path> --prefix <path> [--state-db <path>] --output json
+      hostwright-dist upgrade --trusted-release-dir <path> --team-id <10-char> --prefix <path> [--state-db <path>] --output json
+      hostwright-dist repair --trusted-release-dir <path> --team-id <10-char> --prefix <path> [--state-db <path>] --output json
+      hostwright-dist status --prefix <path> --output json
+      hostwright-dist adopt-legacy --prefix <path> [--state-db <path>] --output json
+      hostwright-dist recover --prefix <path> --output json
+      hostwright-dist rollback --prefix <path> --output json
+      hostwright-dist uninstall-plan --prefix <path> --data-policy <preserve|remove> --output json
+      hostwright-dist uninstall --prefix <path> --data-policy preserve --output json
+      hostwright-dist uninstall --prefix <path> --data-policy remove --confirmation <plan-token> --output json
       hostwright-dist lifecycle --baseline-dir <path> --candidate-dir <path> --prefix <hostwright-dist-* temp-path> --report <path>
 
     `release` requires exact Developer ID identities and a preconfigured notarytool
@@ -293,4 +602,44 @@ private struct ToolResult {
         self.error = error
         self.exitCode = exitCode
     }
+}
+
+private enum ToolOutputFormat: String {
+    case text
+    case json
+}
+
+private struct DistributionLifecycleMutationOutput: Encodable {
+    let schemaVersion = 1
+    let kind = "distributionLifecycleMutation"
+    let operation: DistributionLifecycleOperation
+    let status: DistributionInstallationStatus
+    let cleanup: DistributionTemporaryCleanupReport
+
+    init(
+        operation: DistributionLifecycleOperation,
+        status: DistributionInstallationStatus,
+        cleanup: DistributionTemporaryCleanupReport = DistributionTemporaryCleanupReport(
+            status: .complete,
+            pendingPaths: []
+        )
+    ) {
+        self.operation = operation
+        self.status = status
+        self.cleanup = cleanup
+    }
+}
+
+private struct DistributionToolErrorOutput: Encodable {
+    let schemaVersion = 1
+    let kind = "distributionToolError"
+    let code: String
+    let message: String
+    let exitCode: Int32
+}
+
+private struct DistributionLegacyAdoptionOutput: Encodable {
+    let schemaVersion = 1
+    let kind = "distributionLegacyAdoption"
+    let status: DistributionInstallationStatus
 }

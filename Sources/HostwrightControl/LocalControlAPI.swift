@@ -81,7 +81,12 @@ public struct LocalControlAPI: Sendable {
             arguments += ["--output", "json"]
             return arguments
         case .doctor:
-            return ["doctor", "--output", "json"]
+            var arguments = ["doctor"]
+            if let stateDatabasePath = configuration.stateDatabasePath {
+                arguments += ["--state-db", stateDatabasePath]
+            }
+            arguments += ["--output", "json"]
+            return arguments
         }
     }
 

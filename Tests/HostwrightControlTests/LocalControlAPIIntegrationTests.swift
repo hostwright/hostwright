@@ -1,6 +1,7 @@
 import Foundation
 import HostwrightCLI
 import HostwrightCore
+import HostwrightHealth
 import HostwrightManifest
 import HostwrightState
 import HostwrightTestSupport
@@ -122,7 +123,16 @@ final class LocalControlAPIIntegrationTests: XCTestCase {
             XCTAssertEqual(string("kind", in: recovery.result), "recovery")
             XCTAssertEqual(array("operationGroups", in: recovery.result)?.count, 1)
 
-            let doctor = try run(api, LocalControlRequest(requestID: "doctor-1", operation: .doctor))
+            let doctor = try run(
+                isolatedAPI(
+                    configuration: LocalControlConfiguration(
+                        manifestPath: workspace.manifest.path,
+                        stateDatabasePath: workspace.database.path
+                    ),
+                    workspace: workspace
+                ),
+                LocalControlRequest(requestID: "doctor-1", operation: .doctor)
+            )
             XCTAssertTrue(doctor.success)
             XCTAssertEqual(string("kind", in: doctor.result), "doctor")
 
@@ -261,6 +271,38 @@ final class LocalControlAPIIntegrationTests: XCTestCase {
             )
         }
         environment.runtimeAdapter = { ScriptedRuntimeAdapter(scenario: .availableEmpty) }
+        let executablePath = environment.executablePath
+        environment.executablePath = { name in
+            name == "container" ? "/usr/local/bin/container" : executablePath(name)
+        }
+        environment.doctorSystemSnapshot = {
+            DoctorSystemSnapshot(
+                localNetwork: DoctorLocalNetworkSnapshot(
+                    loopbackAvailable: true,
+                    activeNonLoopbackInterfaceCount: 1,
+                    hasIPv4: true,
+                    hasIPv6: true
+                ),
+                signingTrust: DoctorSigningTrustSnapshot(
+                    codeSignature: .adHoc,
+                    gatekeeper: .rejected,
+                    developmentBuild: true
+                ),
+                resourcePressure: DoctorResourcePressureSnapshot(
+                    physicalMemoryBytes: 16 * 1_024 * 1_024 * 1_024,
+                    reclaimableMemoryBytes: 8 * 1_024 * 1_024 * 1_024,
+                    reclaimableMemoryPercent: 50,
+                    thermalState: .nominal
+                ),
+                tools: [
+                    DoctorToolSnapshot(
+                        identifier: "apple-container-cli",
+                        available: true,
+                        requiredForRuntime: true
+                    )
+                ]
+            )
+        }
         return LocalControlAPI(configuration: configuration, environment: environment)
     }
 

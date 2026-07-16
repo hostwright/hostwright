@@ -184,6 +184,83 @@ final class TrustedReleaseTests: XCTestCase {
         XCTAssertThrowsError(try builder.requireMatchingToolVersions([cleanBuildVersions, unavailable]))
     }
 
+    func testCleanBuildArgumentsUseOneDeterministicReleaseContract() {
+        let source = URL(fileURLWithPath: "/private/tmp/source with space", isDirectory: true)
+        let scratch = URL(fileURLWithPath: "/private/tmp/scratch with space", isDirectory: true)
+
+        let productArguments = DistributionCleanBuilder.deterministicReleaseBuildArguments(
+            sourceRoot: source,
+            scratch: scratch,
+            additionalArguments: ["--product", "hostwright"]
+        )
+        XCTAssertEqual(
+            productArguments,
+            [
+                "build",
+                "--package-path", source.path,
+                "--scratch-path", scratch.path,
+                "-c", "release",
+                "-debug-info-format", "none",
+                "--product", "hostwright"
+            ]
+        )
+
+        let binPathArguments = DistributionCleanBuilder.deterministicReleaseBuildArguments(
+            sourceRoot: source,
+            scratch: scratch,
+            additionalArguments: ["--show-bin-path"]
+        )
+        XCTAssertEqual(Array(binPathArguments.prefix(8)), Array(productArguments.prefix(8)))
+        XCTAssertEqual(Array(binPathArguments.suffix(1)), ["--show-bin-path"])
+    }
+
+    func testCleanBuildCommandEvidenceRecordsExactDeterministicInvocation() {
+        let arguments = DistributionCleanBuilder.deterministicReleaseBuildArguments(
+            sourceRoot: URL(fileURLWithPath: "/private/tmp/source with space", isDirectory: true),
+            scratch: URL(fileURLWithPath: "/private/tmp/scratch with space", isDirectory: true),
+            additionalArguments: ["--product", "hostwright"]
+        )
+
+        let command = DistributionCleanBuilder.evidenceCommand(
+            executablePath: "/usr/bin/swift",
+            arguments: arguments
+        )
+        XCTAssertTrue(command.hasPrefix("/usr/bin/swift build --package-path "))
+        XCTAssertFalse(command.contains("'-debug-info-format'"))
+        XCTAssertTrue(command.contains("-debug-info-format none"))
+        XCTAssertTrue(command.contains("'/private/tmp/source with space'"))
+        XCTAssertTrue(command.contains("'/private/tmp/scratch with space'"))
+        XCTAssertTrue(command.hasSuffix("--product hostwright"))
+    }
+
+    func testReproducibilityMismatchNamesSortedDifferingPayloadPaths() throws {
+        let builder = TrustedReleaseBuilder()
+        let first = [
+            fileRecord(path: "bin/changed", sha256: String(repeating: "a", count: 64), sizeBytes: 10, mode: 0o755),
+            fileRecord(path: "bin/missing", sha256: String(repeating: "b", count: 64), sizeBytes: 11, mode: 0o755),
+            fileRecord(path: "share/same", sha256: String(repeating: "c", count: 64), sizeBytes: 12, mode: 0o644)
+        ]
+        let second = [
+            fileRecord(path: "bin/changed", sha256: String(repeating: "d", count: 64), sizeBytes: 13, mode: 0o644),
+            fileRecord(path: "bin/extra", sha256: String(repeating: "e", count: 64), sizeBytes: 14, mode: 0o755),
+            fileRecord(path: "share/same", sha256: String(repeating: "c", count: 64), sizeBytes: 12, mode: 0o644)
+        ]
+
+        let description = try XCTUnwrap(builder.payloadMismatchDescription(first: first, second: second))
+        XCTAssertTrue(description.contains("missing from second: bin/missing"))
+        XCTAssertTrue(description.contains("extra in second: bin/extra"))
+        XCTAssertTrue(description.contains(
+            "bin/changed: first(size=10, sha256=\(String(repeating: "a", count: 64)), mode=0o755)"
+        ))
+        XCTAssertTrue(description.contains(
+            "second(size=13, sha256=\(String(repeating: "d", count: 64)), mode=0o644)"
+        ))
+        XCTAssertLessThan(
+            try XCTUnwrap(description.range(of: "missing from second")?.lowerBound),
+            try XCTUnwrap(description.range(of: "extra in second")?.lowerBound)
+        )
+    }
+
     func testCleanBuildDependencyInventoryUsesParsedSwiftPMGraph() throws {
         let builder = DistributionCleanBuilder()
         XCTAssertEqual(
@@ -663,6 +740,10 @@ final class TrustedReleaseTests: XCTestCase {
             "swift": "Swift version 6.2",
             "tar": "bsdtar 3.7.7"
         ]
+    }
+
+    private func fileRecord(path: String, sha256: String, sizeBytes: Int, mode: Int) -> DistributionFileRecord {
+        DistributionFileRecord(path: path, sha256: sha256, sizeBytes: sizeBytes, mode: mode)
     }
 
     private func workflowRunScriptBodies(_ workflow: String) -> String {

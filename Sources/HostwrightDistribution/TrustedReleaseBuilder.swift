@@ -158,16 +158,20 @@ public struct TrustedReleaseBuilder: Sendable {
         let toolVersions = try requireMatchingToolVersions(
             cleanBuilds.map { $0.report.evidence.environment.toolVersions }
         )
-        let unsignedPayloadsByteIdentical = cleanBuilds.dropFirst().allSatisfy {
-            $0.report.manifest.files == firstReport.manifest.files
-        }
+        let unsignedPayloadMismatch = payloadMismatchDescription(
+            first: firstReport.manifest.files,
+            second: secondReport.manifest.files
+        )
+        let unsignedPayloadsByteIdentical = unsignedPayloadMismatch == nil
         guard firstReport.manifest.packageVersion == request.expectedVersion,
               secondReport.manifest.packageVersion == request.expectedVersion,
               firstReport.manifest.sourceCommit == request.expectedCommit,
               secondReport.manifest.sourceCommit == request.expectedCommit,
               dependencyInventoriesMatch,
               unsignedPayloadsByteIdentical else {
-            throw DistributionError.invalidArtifact("two isolated clean builds did not produce identical payload bytes")
+            throw DistributionError.invalidArtifact(
+                "two isolated clean builds did not produce identical payload bytes: \(unsignedPayloadMismatch ?? "release metadata differed")"
+            )
         }
 
         let firstExtraction = scratch.appendingPathComponent("hostwright-dist-release-first-extract", isDirectory: true)
@@ -182,9 +186,15 @@ public struct TrustedReleaseBuilder: Sendable {
             extractionDirectory: secondExtraction,
             cancellation: cancellation
         )
-        let verifiedPayloadsByteIdentical = firstVerified.manifest.files == secondVerified.manifest.files
+        let verifiedPayloadMismatch = payloadMismatchDescription(
+            first: firstVerified.manifest.files,
+            second: secondVerified.manifest.files
+        )
+        let verifiedPayloadsByteIdentical = verifiedPayloadMismatch == nil
         guard verifiedPayloadsByteIdentical else {
-            throw DistributionError.invalidArtifact("verified reproducibility payloads differ")
+            throw DistributionError.invalidArtifact(
+                "verified reproducibility payloads differ: \(verifiedPayloadMismatch ?? "release metadata differed")"
+            )
         }
         let buildMetadata = TrustedReleaseBuildMetadata(
             externalSwiftPMDependencies: firstBuild.externalSwiftPMDependencies,
@@ -817,11 +827,51 @@ public struct TrustedReleaseBuilder: Sendable {
         return trustedVersions
     }
 
+    func payloadMismatchDescription(first: [DistributionFileRecord], second: [DistributionFileRecord]) -> String? {
+        guard first != second else { return nil }
+        let firstByPath = Dictionary(uniqueKeysWithValues: first.map { ($0.path, $0) })
+        let secondByPath = Dictionary(uniqueKeysWithValues: second.map { ($0.path, $0) })
+        let firstPaths = Set(firstByPath.keys)
+        let secondPaths = Set(secondByPath.keys)
+        var differences: [String] = []
+
+        let missingFromSecond = firstPaths.subtracting(secondPaths).sorted()
+        if !missingFromSecond.isEmpty {
+            differences.append("missing from second: \(missingFromSecond.joined(separator: ", "))")
+        }
+        let extraInSecond = secondPaths.subtracting(firstPaths).sorted()
+        if !extraInSecond.isEmpty {
+            differences.append("extra in second: \(extraInSecond.joined(separator: ", "))")
+        }
+        for path in firstPaths.intersection(secondPaths).sorted() {
+            guard let firstRecord = firstByPath[path],
+                  let secondRecord = secondByPath[path],
+                  firstRecord != secondRecord else {
+                continue
+            }
+            differences.append(
+                "\(path): first(\(describe(firstRecord))) second(\(describe(secondRecord)))"
+            )
+        }
+        if differences.isEmpty {
+            let firstOrder = first.map(\.path).joined(separator: ", ")
+            let secondOrder = second.map(\.path).joined(separator: ", ")
+            differences.append(
+                "payload order differed: first=\(firstOrder) second=\(secondOrder)"
+            )
+        }
+        return differences.joined(separator: "; ")
+    }
+
     private func record(_ label: String, _ result: DistributionCommandResult) -> HostwrightEvidenceCommand {
         HostwrightEvidenceCommand(
             command: label,
             exitCode: Int(result.exitStatus),
             durationMilliseconds: result.durationMilliseconds
         )
+    }
+
+    private func describe(_ record: DistributionFileRecord) -> String {
+        "size=\(record.sizeBytes), sha256=\(record.sha256), mode=\(String(format: "0o%03o", record.mode))"
     }
 }

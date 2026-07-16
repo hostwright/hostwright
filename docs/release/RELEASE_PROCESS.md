@@ -1,26 +1,28 @@
 # Release Process
 
-The active release target is `v0.0.2`. The working binary reports `0.0.2-dev` until release qualification is complete.
+The active release target is `v0.0.2`. The working binary remains on the
+`0.0.2-dev` line until release qualification is complete. Phase 02 preserves
+exact `0.0.2-dev.1` and `0.0.2-dev.2` builds for upgrade evidence.
 
 ## Tag Policy
 
 - `phase-*` tags are optional internal engineering checkpoints and never receive GitHub Releases.
 - `v*` tags are public releases or explicitly marked release candidates.
-- Phase 02 may create one immutable `v0.0.2-dev` GitHub prerelease through the protected trusted-release workflow solely to qualify signed public bytes and the vendor-tap install path. It remains unsupported, cannot be moved or replaced, and does not advance the release ladder.
+- Phase 02 may create the immutable `v0.0.2-dev.1` and `v0.0.2-dev.2` GitHub prereleases through the protected trusted-release workflow solely to qualify signed public bytes and the vendor-tap upgrade path. They remain unsupported, cannot be moved or replaced, and do not advance the release ladder.
 - Do not create `v0.0.2`, publish a supported package/channel claim, or change the binary to `0.0.2` before the Phase 15 gate.
 - Never tag from a dirty tree, an unreviewed commit, or a commit whose required evidence is blocked.
 - Never force-move a public release tag.
 
 ## Release Ladder
 
-1. `0.0.2-dev` throughout implementation;
+1. the `0.0.2-dev` line throughout implementation, including the two preserved Phase 02 qualification builds;
 2. `v0.0.2-rc.1` only after all 15 phase epics and child issues reach verification;
 3. `v0.0.2-rc.2` or later after every defect from the prior clean RC run is fixed and the entire qualification run is repeated;
 4. `v0.0.2` only after two clean complete RC qualification runs and final maintainer approval.
 
 An RC tag is a pre-release, not a partial implementation escape hatch. It uses the same supported-scope contract as GA and may differ only by resolved defects and repeated evidence.
 
-The one Phase 02 `v0.0.2-dev` qualification artifact is not an RC or beta and is never promoted in place. Its only purpose is to prove the real distribution path that Phase 02 must close; later implementation continues on `0.0.2-dev`, and Phase 15 produces new immutable RC/GA artifacts from their exact qualified commits.
+The two Phase 02 `v0.0.2-dev.1` and `v0.0.2-dev.2` qualification artifacts are not RCs or betas and are never promoted in place. Their only purpose is to prove the real installation and upgrade path that Phase 02 must close; later implementation continues on the `0.0.2-dev` line, and Phase 15 produces new immutable RC/GA artifacts from its exact qualified commits.
 
 ## Active Roadmap Authority
 

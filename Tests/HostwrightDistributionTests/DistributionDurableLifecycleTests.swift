@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import HostwrightCore
 @testable import HostwrightState
@@ -7,6 +8,319 @@ import XCTest
 final class DistributionDurableLifecycleTests: XCTestCase {
     private let baselineCommit = String(repeating: "a", count: 40)
     private let candidateCommit = String(repeating: "b", count: 40)
+
+    func testPackageLifecycleUsesExistingRepairUpgradeRollbackAndDowngradeRules() throws {
+        try withTemporaryRoot { root in
+            let baseline = try makeVerifiedArtifact(
+                root: root,
+                name: "package-baseline",
+                version: "0.0.2-dev.1",
+                commit: baselineCommit
+            )
+            let candidate = try makeVerifiedArtifact(
+                root: root,
+                name: "package-candidate",
+                version: "0.0.2-dev.2",
+                commit: candidateCommit
+            )
+            let prefix = root.appendingPathComponent("package-prefix", isDirectory: true)
+            try FileManager.default.createDirectory(at: prefix, withIntermediateDirectories: false)
+            let lifecycle = DistributionInstalledLifecycle()
+            let baselineOrigin = DistributionPackageOrigin(
+                packageIdentifier: DistributionLayout.packageIdentifier,
+                packageVersion: "0.0.2.1",
+                mostRecentPackageReceiptVersion: "0.0.2.1"
+            )
+            let candidateOrigin = DistributionPackageOrigin(
+                packageIdentifier: DistributionLayout.packageIdentifier,
+                packageVersion: "0.0.2.2",
+                mostRecentPackageReceiptVersion: "0.0.2.2"
+            )
+
+            let installed = try lifecycle.installPackage(
+                manifest: baseline.manifest,
+                sourceRoot: baseline.extractedRoot,
+                prefix: prefix,
+                requiredOperation: .install,
+                packageOrigin: baselineOrigin,
+                cancellation: SecureSubprocessCancellation()
+            )
+            XCTAssertEqual(installed.packageOrigin, baselineOrigin)
+
+            let repaired = try lifecycle.install(
+                artifact: baseline,
+                prefix: prefix,
+                requiredOperation: .repair,
+                cancellation: SecureSubprocessCancellation()
+            )
+            XCTAssertEqual(repaired.generation, 2)
+            XCTAssertEqual(repaired.packageOrigin, baselineOrigin)
+
+            XCTAssertThrowsError(
+                try lifecycle.install(
+                    artifact: candidate,
+                    prefix: prefix,
+                    requiredOperation: .upgrade
+                )
+            ) { error in
+                guard case let DistributionError.versionConflict(message) = error else {
+                    return XCTFail("expected package upgrade fence, received \(error)")
+                }
+                XCTAssertTrue(message.contains("hostwright-dist package-apply"))
+            }
+
+            let upgraded = try lifecycle.installPackage(
+                manifest: candidate.manifest,
+                sourceRoot: candidate.extractedRoot,
+                prefix: prefix,
+                requiredOperation: .upgrade,
+                packageOrigin: candidateOrigin,
+                cancellation: SecureSubprocessCancellation()
+            )
+            XCTAssertEqual(upgraded.generation, 3)
+            XCTAssertEqual(upgraded.packageOrigin, candidateOrigin)
+
+            let rolledBack = try lifecycle.rollback(prefix: prefix)
+            XCTAssertEqual(rolledBack.installedManifest.packageVersion, "0.0.2-dev.1")
+            XCTAssertEqual(rolledBack.packageVersion, "0.0.2.1")
+            XCTAssertEqual(rolledBack.mostRecentPackageReceiptVersion, "0.0.2.2")
+
+            let upgradedAgain = try lifecycle.installPackage(
+                manifest: candidate.manifest,
+                sourceRoot: candidate.extractedRoot,
+                prefix: prefix,
+                requiredOperation: .upgrade,
+                packageOrigin: candidateOrigin,
+                cancellation: SecureSubprocessCancellation()
+            )
+            XCTAssertEqual(upgradedAgain.installedManifest.packageVersion, "0.0.2-dev.2")
+            XCTAssertThrowsError(
+                try lifecycle.installPackage(
+                    manifest: baseline.manifest,
+                    sourceRoot: baseline.extractedRoot,
+                    prefix: prefix,
+                    requiredOperation: .upgrade,
+                    packageOrigin: baselineOrigin,
+                    cancellation: SecureSubprocessCancellation()
+                )
+            ) { error in
+                XCTAssertEqual(
+                    error as? DistributionError,
+                    .downgradeRefused(
+                        installed: "0.0.2-dev.2",
+                        candidate: "0.0.2-dev.1"
+                    )
+                )
+            }
+            XCTAssertThrowsError(
+                try lifecycle.uninstall(prefix: prefix, dataPolicy: .preserve)
+            ) { error in
+                guard case let DistributionError.versionConflict(message) = error else {
+                    return XCTFail("expected package uninstall fence, received \(error)")
+                }
+                XCTAssertTrue(message.contains("hostwright-dist package-uninstall"))
+            }
+        }
+    }
+
+    func testPackageUninstallPersistsReceiptCleanupAndRecoverRetriesExactly() throws {
+        try withTemporaryRoot { root in
+            let artifact = try makeVerifiedArtifact(
+                root: root,
+                name: "package-uninstall",
+                version: "0.0.2-dev.2",
+                commit: candidateCommit
+            )
+            let prefix = root.appendingPathComponent("package-uninstall-prefix", isDirectory: true)
+            try FileManager.default.createDirectory(at: prefix, withIntermediateDirectories: false)
+            let staging = root.appendingPathComponent("InstallerPayload", isDirectory: true)
+            try makePackageStaging(artifact: artifact, at: staging)
+
+            let receiptMarker = root.appendingPathComponent("receipt-present")
+            let failForgetMarker = root.appendingPathComponent("fail-forget")
+            let blockReceiptMarker = root.appendingPathComponent("block-receipt")
+            try Data().write(to: receiptMarker, options: .withoutOverwriting)
+            try Data().write(to: failForgetMarker, options: .withoutOverwriting)
+            let pkgutil = root.appendingPathComponent("pkgutil-fixture")
+            let pkgutilSource = root.appendingPathComponent("pkgutil-fixture.swift")
+            let program = """
+            import Foundation
+            let arguments = Array(CommandLine.arguments.dropFirst())
+            let receipt = "\(receiptMarker.path)"
+            let failForget = "\(failForgetMarker.path)"
+            let blockReceipt = "\(blockReceiptMarker.path)"
+            switch arguments.first {
+            case "--pkgs":
+                if FileManager.default.fileExists(atPath: blockReceipt) {
+                    Thread.sleep(forTimeInterval: 5)
+                }
+                if FileManager.default.fileExists(atPath: receipt) {
+                    print("dev.hostwright.cli")
+                }
+            case "--pkg-info-plist":
+                print("<?xml version=\\\"1.0\\\" encoding=\\\"UTF-8\\\"?><plist version=\\\"1.0\\\"><dict><key>pkgid</key><string>dev.hostwright.cli</string><key>pkg-version</key><string>0.0.2.2</string><key>install-location</key><string>/</string><key>volume</key><string>/</string></dict></plist>")
+            case "--forget":
+                if FileManager.default.fileExists(atPath: failForget) {
+                    exit(1)
+                }
+                try FileManager.default.removeItem(atPath: receipt)
+            default:
+                exit(64)
+            }
+            """ + "\n"
+            try Data(program.utf8).write(to: pkgutilSource, options: .withoutOverwriting)
+            let compile = Process()
+            compile.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
+            compile.arguments = ["swiftc", pkgutilSource.path, "-o", pkgutil.path]
+            try compile.run()
+            compile.waitUntilExit()
+            XCTAssertEqual(compile.terminationStatus, 0)
+
+            let owner = geteuid()
+            let receipts = DistributionPackageReceiptController(
+                executablePath: pkgutil.path,
+                stagingRoot: staging,
+                stagingOwnerUID: owner
+            )
+            let lifecycle = DistributionInstalledLifecycle(
+                packageReceiptController: receipts
+            )
+            let packageLifecycle = DistributionPackageLifecycle(
+                receiptController: receipts,
+                lifecycle: lifecycle,
+                expectedPrefix: prefix,
+                expectedStagingRoot: staging,
+                expectedOwnerUID: owner,
+                effectiveUserID: 0,
+                verifyExecutableSignatures: false
+            )
+            XCTAssertThrowsError(
+                try packageLifecycle.apply(
+                    stagedRoot: staging,
+                    prefix: prefix,
+                    packageIdentifier: DistributionLayout.packageIdentifier,
+                    packageVersion: "0.0.2.2",
+                    teamIdentifier: "TOO-SHORT"
+                )
+            ) { error in
+                XCTAssertEqual(
+                    error as? DistributionError,
+                    .invalidArguments(
+                        "package-apply requires an exact 10-character Developer Team ID."
+                    )
+                )
+            }
+            XCTAssertThrowsError(
+                try packageLifecycle.apply(
+                    stagedRoot: staging,
+                    prefix: prefix,
+                    packageIdentifier: DistributionLayout.packageIdentifier,
+                    packageVersion: "0.0.2.2",
+                    teamIdentifier: "OTHERTEAM1"
+                )
+            ) { error in
+                XCTAssertEqual(
+                    error as? DistributionError,
+                    .invalidArtifact(
+                        "staged executable signer team does not match the package trust policy"
+                    )
+                )
+            }
+            XCTAssertEqual(try lifecycle.inspect(prefix: prefix).readiness, .notInstalled)
+            let applied = try packageLifecycle.apply(
+                stagedRoot: staging,
+                prefix: prefix,
+                packageIdentifier: DistributionLayout.packageIdentifier,
+                packageVersion: "0.0.2.2",
+                teamIdentifier: "TESTTEAM01"
+            )
+            XCTAssertEqual(applied.operation, .install)
+            XCTAssertEqual(applied.signerTeamIdentifier, "TESTTEAM01")
+            XCTAssertEqual(applied.status.packageVersion, "0.0.2.2")
+            XCTAssertNil(applied.status.stateDatabasePath)
+
+            let inspectionBeforeRemoveRefusal = try lifecycle.inspect(prefix: prefix)
+            let prefixBeforeRemoveRefusal = try regularFileTreeContents(in: prefix)
+            let stagingBeforeRemoveRefusal = try regularFileTreeContents(in: staging)
+            let receiptBeforeRemoveRefusal = try Data(contentsOf: receiptMarker)
+            let expectedRemoveRefusal = DistributionError.invalidArguments(
+                DistributionPackagePolicy.removeDataUnsupportedMessage
+            )
+
+            XCTAssertThrowsError(
+                try lifecycle.uninstallPlan(prefix: prefix, dataPolicy: .remove)
+            ) { error in
+                XCTAssertEqual(error as? DistributionError, expectedRemoveRefusal)
+            }
+
+            let cancelled = SecureSubprocessCancellation()
+            cancelled.cancel()
+            XCTAssertThrowsError(
+                try packageLifecycle.uninstall(
+                    prefix: prefix,
+                    dataPolicy: .remove,
+                    confirmationToken: String(repeating: "a", count: 64),
+                    cancellation: cancelled
+                )
+            ) { error in
+                XCTAssertEqual(error as? DistributionError, expectedRemoveRefusal)
+            }
+            XCTAssertThrowsError(
+                try packageLifecycle.uninstall(
+                    prefix: prefix,
+                    dataPolicy: .preserve,
+                    confirmationToken: String(repeating: "a", count: 64)
+                )
+            ) { error in
+                XCTAssertEqual(
+                    error as? DistributionError,
+                    .invalidArguments(
+                        DistributionPackagePolicy.preserveConfirmationUnsupportedMessage
+                    )
+                )
+            }
+            XCTAssertEqual(try lifecycle.inspect(prefix: prefix), inspectionBeforeRemoveRefusal)
+            XCTAssertEqual(try regularFileTreeContents(in: prefix), prefixBeforeRemoveRefusal)
+            XCTAssertEqual(try regularFileTreeContents(in: staging), stagingBeforeRemoveRefusal)
+            XCTAssertEqual(try Data(contentsOf: receiptMarker), receiptBeforeRemoveRefusal)
+
+            XCTAssertThrowsError(
+                try packageLifecycle.uninstall(
+                    prefix: prefix,
+                    dataPolicy: .preserve
+                )
+            )
+            let pending = try lifecycle.inspect(prefix: prefix)
+            XCTAssertEqual(pending.readiness, .recoveryRequired)
+            XCTAssertEqual(pending.pendingOperation?.operation, .uninstall)
+            XCTAssertEqual(pending.pendingOperation?.dataPolicy, .preserve)
+            XCTAssertEqual(pending.status?.pendingReceiptCleanup, true)
+            XCTAssertTrue(FileManager.default.fileExists(atPath: staging.path))
+
+            try FileManager.default.removeItem(at: failForgetMarker)
+            try Data().write(to: blockReceiptMarker, options: .withoutOverwriting)
+            let cancellation = SecureSubprocessCancellation()
+            DispatchQueue.global().asyncAfter(deadline: .now() + 0.1) {
+                cancellation.cancel()
+            }
+            XCTAssertThrowsError(
+                try lifecycle.recover(prefix: prefix, cancellation: cancellation)
+            ) { error in
+                guard case let DistributionError.commandCancelled(command) = error else {
+                    return XCTFail("expected receipt cleanup cancellation, received \(error)")
+                }
+                XCTAssertEqual(command, "list Apple Installer receipts")
+            }
+            try FileManager.default.removeItem(at: blockReceiptMarker)
+            XCTAssertEqual(try lifecycle.inspect(prefix: prefix).readiness, .recoveryRequired)
+
+            let recovered = try lifecycle.recover(prefix: prefix)
+            XCTAssertEqual(recovered.action, .completedUninstall)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: receiptMarker.path))
+            XCTAssertFalse(FileManager.default.fileExists(atPath: staging.path))
+            XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: prefix.path).isEmpty)
+        }
+    }
 
     func testInterruptedUpgradeRecoversThenUpgradeAndVerifiedRollbackRestoreBinaryAndState() throws {
         try withTemporaryRoot { root in
@@ -1872,6 +2186,29 @@ final class DistributionDurableLifecycleTests: XCTestCase {
         )
     }
 
+    private func makePackageStaging(
+        artifact: VerifiedDistributionArtifact,
+        at staging: URL
+    ) throws {
+        try FileManager.default.createDirectory(
+            at: staging,
+            withIntermediateDirectories: false,
+            attributes: [.posixPermissions: 0o700]
+        )
+        for file in artifact.manifest.files {
+            try DistributionFileSystem.copyRegularFile(
+                from: artifact.extractedRoot.appendingPathComponent(file.path),
+                to: staging.appendingPathComponent(file.path),
+                mode: file.mode
+            )
+        }
+        try DistributionFileSystem.writeNewFile(
+            try DistributionJSON.encode(artifact.manifest),
+            to: staging.appendingPathComponent(DistributionLayout.manifestFileName),
+            mode: 0o644
+        )
+    }
+
     private func installLegacyPayload(
         artifact: VerifiedDistributionArtifact,
         prefix: URL
@@ -1932,6 +2269,17 @@ final class DistributionDurableLifecycleTests: XCTestCase {
             let file = directory.appendingPathComponent(name)
             if try DistributionFileSystem.isRegularNonSymlink(file) {
                 contents[name] = try Data(contentsOf: file)
+            }
+        }
+        return contents
+    }
+
+    private func regularFileTreeContents(in directory: URL) throws -> [String: Data] {
+        var contents: [String: Data] = [:]
+        for path in try FileManager.default.subpathsOfDirectory(atPath: directory.path).sorted() {
+            let file = directory.appendingPathComponent(path)
+            if try DistributionFileSystem.isRegularNonSymlink(file) {
+                contents[path] = try Data(contentsOf: file)
             }
         }
         return contents

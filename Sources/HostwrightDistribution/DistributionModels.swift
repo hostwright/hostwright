@@ -15,6 +15,9 @@ public enum DistributionLayout {
     public static let lifecycleTransactionsDirectoryName = "transactions"
     public static let lifecycleRollbackFileName = "rollback.json"
     public static let lifecycleBackupInventoryFileName = "backup-inventory.json"
+    public static let packageIdentifier = "dev.hostwright.cli"
+    public static let packageStagingPath = "/Library/Application Support/Hostwright/InstallerPayload"
+    public static let packageInstallPrefix = "/usr/local"
     public static let shippedExecutableNames = [
         "hostwright",
         "hostwright-control",
@@ -40,6 +43,58 @@ public enum DistributionLayout {
         "share/doc/hostwright/LICENSE": 0o644,
         "share/doc/hostwright/README.md": 0o644
     ]
+}
+
+public enum DistributionInstallationSource: String, Codable, Equatable, Sendable {
+    case package
+}
+
+public struct DistributionPackageOrigin: Codable, Equatable, Sendable {
+    public let installationSource: DistributionInstallationSource
+    public let packageIdentifier: String
+    public let packageVersion: String
+    public let mostRecentPackageReceiptVersion: String
+    public let pendingReceiptCleanup: Bool
+
+    public init(
+        packageIdentifier: String,
+        packageVersion: String,
+        mostRecentPackageReceiptVersion: String,
+        pendingReceiptCleanup: Bool = false
+    ) {
+        self.installationSource = .package
+        self.packageIdentifier = packageIdentifier
+        self.packageVersion = packageVersion
+        self.mostRecentPackageReceiptVersion = mostRecentPackageReceiptVersion
+        self.pendingReceiptCleanup = pendingReceiptCleanup
+    }
+
+    public func validate() throws {
+        guard installationSource == .package,
+              packageIdentifier == DistributionLayout.packageIdentifier,
+              DistributionPackageVersion.isValid(packageVersion),
+              DistributionPackageVersion.isValid(mostRecentPackageReceiptVersion),
+              DistributionPackageVersion.compare(
+                packageVersion,
+                mostRecentPackageReceiptVersion
+              ) != .orderedDescending else {
+            throw DistributionError.lifecycleFailed("package installation origin is invalid")
+        }
+    }
+
+    func replacing(
+        packageVersion: String? = nil,
+        mostRecentPackageReceiptVersion: String? = nil,
+        pendingReceiptCleanup: Bool? = nil
+    ) -> Self {
+        Self(
+            packageIdentifier: packageIdentifier,
+            packageVersion: packageVersion ?? self.packageVersion,
+            mostRecentPackageReceiptVersion: mostRecentPackageReceiptVersion
+                ?? self.mostRecentPackageReceiptVersion,
+            pendingReceiptCleanup: pendingReceiptCleanup ?? self.pendingReceiptCleanup
+        )
+    }
 }
 
 public enum DistributionError: Error, Equatable, CustomStringConvertible, Sendable {
@@ -947,6 +1002,7 @@ public struct DistributionLifecycleJournal: Codable, Equatable, Sendable {
     public let startedAt: String
     public let authorizedRollbackOperationID: String?
     public let priorStatus: DistributionInstallationStatus?
+    public let packageReceiptCleanup: Bool?
 
     public init(
         schemaVersion: Int = 1,
@@ -962,7 +1018,8 @@ public struct DistributionLifecycleJournal: Codable, Equatable, Sendable {
         dataPolicy: DistributionUninstallDataPolicy,
         startedAt: String,
         authorizedRollbackOperationID: String? = nil,
-        priorStatus: DistributionInstallationStatus? = nil
+        priorStatus: DistributionInstallationStatus? = nil,
+        packageReceiptCleanup: Bool? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.kind = "distributionLifecycleJournal"
@@ -979,6 +1036,7 @@ public struct DistributionLifecycleJournal: Codable, Equatable, Sendable {
         self.startedAt = startedAt
         self.authorizedRollbackOperationID = authorizedRollbackOperationID
         self.priorStatus = priorStatus
+        self.packageReceiptCleanup = packageReceiptCleanup
     }
 
     public func replacing(
@@ -998,7 +1056,8 @@ public struct DistributionLifecycleJournal: Codable, Equatable, Sendable {
             dataPolicy: dataPolicy,
             startedAt: startedAt,
             authorizedRollbackOperationID: authorizedRollbackOperationID,
-            priorStatus: priorStatus
+            priorStatus: priorStatus,
+            packageReceiptCleanup: packageReceiptCleanup
         )
     }
 
@@ -1026,6 +1085,11 @@ public struct DistributionLifecycleJournal: Codable, Equatable, Sendable {
         try toManifest?.validate()
         try stateSnapshot?.validate(transactionRelativePath: transactionRelativePath)
         try priorStatus?.validate()
+        guard packageReceiptCleanup != false else {
+            throw DistributionError.lifecycleFailed(
+                "lifecycle journal must omit a disabled package receipt marker"
+            )
+        }
         if let priorStatus {
             guard priorStatus.prefix == prefix,
                   priorStatus.installedManifest == fromManifest else {
@@ -1039,7 +1103,8 @@ public struct DistributionLifecycleJournal: Codable, Equatable, Sendable {
         case .install:
             guard fromManifest == nil, toManifest != nil,
                   stateSnapshot == nil, authorizedRollbackOperationID == nil,
-                  priorStatus == nil, dataPolicy == .preserve else {
+                  priorStatus == nil, dataPolicy == .preserve,
+                  packageReceiptCleanup == nil else {
                 throw DistributionError.lifecycleFailed("install journal shape is invalid")
             }
         case .upgrade:
@@ -1047,6 +1112,7 @@ public struct DistributionLifecycleJournal: Codable, Equatable, Sendable {
                   priorStatus != nil,
                   authorizedRollbackOperationID == nil,
                   dataPolicy == .preserve,
+                  packageReceiptCleanup == nil,
                   try DistributionVersionTransition.classify(
                     installedVersion: fromManifest.packageVersion,
                     installedCommit: fromManifest.sourceCommit,
@@ -1060,6 +1126,7 @@ public struct DistributionLifecycleJournal: Codable, Equatable, Sendable {
                   priorStatus != nil,
                   authorizedRollbackOperationID == nil,
                   dataPolicy == .preserve,
+                  packageReceiptCleanup == nil,
                   try DistributionVersionTransition.classify(
                     installedVersion: fromManifest.packageVersion,
                     installedCommit: fromManifest.sourceCommit,
@@ -1076,6 +1143,7 @@ public struct DistributionLifecycleJournal: Codable, Equatable, Sendable {
                   authorizedRollbackOperationID != operationID,
                   priorStatus.rollbackOperationID == authorizedRollbackOperationID,
                   dataPolicy == .preserve,
+                  packageReceiptCleanup == nil,
                   try DistributionSemanticVersion(parsing: toManifest.packageVersion)
                     < DistributionSemanticVersion(parsing: fromManifest.packageVersion) else {
                 throw DistributionError.lifecycleFailed("rollback journal is not bound to a prior verified generation")
@@ -1085,6 +1153,13 @@ public struct DistributionLifecycleJournal: Codable, Equatable, Sendable {
                   priorStatus != nil,
                   authorizedRollbackOperationID == nil else {
                 throw DistributionError.lifecycleFailed("uninstall journal shape is invalid")
+            }
+            if packageReceiptCleanup == true {
+                guard priorStatus?.packageOrigin?.pendingReceiptCleanup == false else {
+                    throw DistributionError.lifecycleFailed(
+                        "package receipt cleanup is not bound to a package-owned generation"
+                    )
+                }
             }
         }
     }
@@ -1104,6 +1179,11 @@ public struct DistributionInstallationStatus: Codable, Equatable, Sendable {
     public let stateDatabasePath: String?
     public let service: DistributionManagedServiceState
     public let rollbackOperationID: String?
+    public let installationSource: DistributionInstallationSource?
+    public let packageIdentifier: String?
+    public let packageVersion: String?
+    public let mostRecentPackageReceiptVersion: String?
+    public let pendingReceiptCleanup: Bool?
     public let updatedAt: String
 
     public init(
@@ -1115,6 +1195,7 @@ public struct DistributionInstallationStatus: Codable, Equatable, Sendable {
         stateDatabasePath: String?,
         service: DistributionManagedServiceState,
         rollbackOperationID: String?,
+        packageOrigin: DistributionPackageOrigin? = nil,
         updatedAt: String
     ) {
         self.schemaVersion = schemaVersion
@@ -1126,6 +1207,11 @@ public struct DistributionInstallationStatus: Codable, Equatable, Sendable {
         self.stateDatabasePath = stateDatabasePath
         self.service = service
         self.rollbackOperationID = rollbackOperationID
+        self.installationSource = packageOrigin?.installationSource
+        self.packageIdentifier = packageOrigin?.packageIdentifier
+        self.packageVersion = packageOrigin?.packageVersion
+        self.mostRecentPackageReceiptVersion = packageOrigin?.mostRecentPackageReceiptVersion
+        self.pendingReceiptCleanup = packageOrigin?.pendingReceiptCleanup
         self.updatedAt = updatedAt
     }
 
@@ -1151,6 +1237,41 @@ public struct DistributionInstallationStatus: Codable, Equatable, Sendable {
                 throw DistributionError.lifecycleFailed("installation state database path is invalid")
             }
         }
+        let packageFields: [Any?] = [
+            installationSource,
+            packageIdentifier,
+            packageVersion,
+            mostRecentPackageReceiptVersion,
+            pendingReceiptCleanup
+        ]
+        guard packageFields.allSatisfy({ $0 == nil }) || packageFields.allSatisfy({ $0 != nil }) else {
+            throw DistributionError.lifecycleFailed("installation status package origin is incomplete")
+        }
+        if let packageOrigin {
+            try packageOrigin.validate()
+            guard try DistributionPackageVersion.make(from: installedManifest.packageVersion)
+                == packageOrigin.packageVersion else {
+                throw DistributionError.lifecycleFailed(
+                    "installation status package version does not match installed manifest"
+                )
+            }
+        }
+    }
+
+    public var packageOrigin: DistributionPackageOrigin? {
+        guard installationSource == .package,
+              let packageIdentifier,
+              let packageVersion,
+              let mostRecentPackageReceiptVersion,
+              let pendingReceiptCleanup else {
+            return nil
+        }
+        return DistributionPackageOrigin(
+            packageIdentifier: packageIdentifier,
+            packageVersion: packageVersion,
+            mostRecentPackageReceiptVersion: mostRecentPackageReceiptVersion,
+            pendingReceiptCleanup: pendingReceiptCleanup
+        )
     }
 }
 

@@ -60,6 +60,7 @@ public struct TrustedReleaseBuildRequest: Sendable {
               outputDirectory.path.hasPrefix("/") else {
             throw DistributionError.invalidArguments("Trusted release inputs are incomplete or not exact immutable identifiers.")
         }
+        _ = try DistributionPackageVersion.make(from: expectedVersion)
         guard try DistributionFileSystem.isDirectoryNonSymlink(sourceRoot),
               try DistributionFileSystem.isRegularNonSymlink(sourceRoot.appendingPathComponent("Package.swift")),
               try DistributionFileSystem.isDirectoryNonSymlink(
@@ -306,6 +307,35 @@ public struct TrustedReleaseBuilder: Sendable {
                 mode: file.mode
             )
         }
+        let packageStagingRoot = packageRoot.appendingPathComponent(
+            packageStagingRelativePath,
+            isDirectory: true
+        )
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: packageStagingRoot.path
+        )
+        try DistributionFileSystem.writeNewFile(
+            try DistributionJSON.encode(payloadManifest),
+            to: packageStagingRoot.appendingPathComponent(DistributionLayout.manifestFileName),
+            mode: 0o644
+        )
+        let installerPackageVersion = try DistributionPackageVersion.make(
+            from: request.expectedVersion
+        )
+        let packageScripts = scratch.appendingPathComponent(
+            "hostwright-dist-release-package-scripts",
+            isDirectory: true
+        )
+        try DistributionFileSystem.createExclusiveDirectory(packageScripts)
+        try DistributionFileSystem.writeNewFile(
+            Data(DistributionPackageScripts.postinstall(
+                packageVersion: installerPackageVersion,
+                teamIdentifier: request.teamIdentifier
+            ).utf8),
+            to: packageScripts.appendingPathComponent("postinstall"),
+            mode: 0o755
+        )
         let packageURL = stagedOutput.appendingPathComponent(
             TrustedReleaseLayout.packageFileName(artifactID: artifactID)
         )
@@ -314,8 +344,9 @@ public struct TrustedReleaseBuilder: Sendable {
             arguments: [
                 "--root", packageRoot.path,
                 "--identifier", "dev.hostwright.cli",
-                "--version", packageVersion(request.expectedVersion),
+                "--version", installerPackageVersion,
                 "--install-location", "/",
+                "--scripts", packageScripts.path,
                 "--ownership", "recommended",
                 "--sign", installerResolution.identity.sha1Fingerprint,
                 packageURL.path
@@ -680,14 +711,11 @@ public struct TrustedReleaseBuilder: Sendable {
     }
 
     private func packageInstalledPath(for archivePath: String) -> String {
-        if archivePath.hasPrefix("bin/") {
-            return "usr/local/\(archivePath)"
-        }
-        return "usr/local/\(archivePath)"
+        "\(packageStagingRelativePath)/\(archivePath)"
     }
 
-    private func packageVersion(_ semanticVersion: String) -> String {
-        semanticVersion.split(whereSeparator: { $0 == "-" || $0 == "+" }).first.map(String.init) ?? semanticVersion
+    private var packageStagingRelativePath: String {
+        String(DistributionLayout.packageStagingPath.dropFirst())
     }
 
     private func makeProvenance(

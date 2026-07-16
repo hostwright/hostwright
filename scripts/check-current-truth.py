@@ -60,15 +60,7 @@ def main() -> int:
     roadmap = read("docs/roadmap/v0.0.2/IMPLEMENTATION_PLAN.md")
     historical_plan = read("docs/IMPLEMENTATION_PLAN.md")
 
-    version_match = re.search(r'version = "(0\.0\.2-dev\.[12])"', identity)
-    require(version_match is not None, "HostwrightIdentity version is not a Phase 02 qualification build", errors)
-    if version_match is not None:
-        version_golden = json.loads(read("contracts/v0.0.2/versions.json"))
-        require(
-            version_golden.get("productVersion") == version_match.group(1),
-            "HostwrightIdentity and the version golden disagree",
-            errors,
-        )
+    require('version = "0.0.2-dev"' in identity, "HostwrightIdentity version is not 0.0.2-dev", errors)
     require('releaseTarget = "v0.0.2"' in identity, "HostwrightIdentity release target is not v0.0.2", errors)
     for fragment in ["manifest = 2", "controlAPI = 2", "runtimeProviderAPI = 2", "pluginABI = 1", "stateSchema = 7"]:
         require(fragment in contracts, f"missing contract truth: {fragment}", errors)

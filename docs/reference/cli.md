@@ -100,9 +100,9 @@ The API deliberately excludes apply, cleanup, logs, diagnostics export, benchmar
 
 Prints the current development version:
 
-The exact output matches `contracts/v0.0.2/versions.json`. The two preserved
-Phase 02 qualification commits report `0.0.2-dev.1` and `0.0.2-dev.2`; both
-belong to the `0.0.2-dev` development line and neither is a supported release.
+```text
+0.0.2-dev
+```
 
 The release target is `v0.0.2`. The binary does not report the release version until the GA gate passes.
 

@@ -1,6 +1,6 @@
 # Installed Distribution Lifecycle
 
-Status: implemented in `0.0.2-dev` for an explicit local install prefix and a verifier-produced trusted, developer, or staged Apple Installer artifact. This does not make a Homebrew, `.pkg`, or public binary channel supported; those channels still require their own real signing, publication, and clean-Mac evidence.
+Status: implemented in `0.0.2-dev` for an explicit local install prefix and a verifier-produced trusted or developer artifact. This does not make a Homebrew, `.pkg`, or public binary channel supported; those channels still require their own real signing, publication, and clean-Mac evidence.
 
 ## Boundary
 
@@ -23,7 +23,7 @@ Installed lifecycle metadata is private to the prefix:
 | Path relative to `--prefix` | Purpose |
 | --- | --- |
 | `.hostwright-install-manifest.json` | Exact payload ownership manifest. |
-| `.hostwright-lifecycle/status.json` | Installation UUID, generation, version/source identity, optional package origin and receipt-cleanup state, optional state binding, service state, and rollback authorization. |
+| `.hostwright-lifecycle/status.json` | Installation UUID, generation, version/source identity, optional state binding, service state, and rollback authorization. |
 | `.hostwright-lifecycle/journal.json` | Pending operation, checkpoint, prior generation, and recovery binding. Present only while recovery may be required. |
 | `.hostwright-lifecycle/lifecycle.lock` | Private bounded exclusive lifecycle fence. |
 | `.hostwright-lifecycle/transactions/<operation-uuid>/` | Staged payload, exact prior-payload backup, optional verified state snapshot, and the one-generation rollback record. |
@@ -43,8 +43,6 @@ The trusted source passes the complete trusted-release verifier before installat
 
 Installed lifecycle commands currently require `--output json`.
 
-An Apple Installer package uses a narrower bridge into the same lifecycle. Its payload is installed only into the private root-owned `/Library/Application Support/Hostwright/InstallerPayload` staging directory. The package `postinstall` runs `hostwright-dist package-apply`, which requires elevated authority and exact `/usr/local`, verifies the `dev.hostwright.cli` receipt and version, the complete staged manifest and file digests, root ownership and modes, and Developer ID Application signatures from the exact Team ID embedded by the trusted release build before mutation. It then selects only `install`, a strictly newer `upgrade`, or an exact-version-and-commit `repair`; downgrade and same-version/different-commit candidates are refused.
-
 ## Commands
 
 ```bash
@@ -58,11 +56,7 @@ hostwright-dist rollback --prefix <path> --output json
 hostwright-dist uninstall-plan --prefix <path> --data-policy <preserve|remove> --output json
 hostwright-dist uninstall --prefix <path> --data-policy preserve --output json
 hostwright-dist uninstall --prefix <path> --data-policy remove --confirmation <plan-token> --output json
-hostwright-dist package-apply --staged-root '/Library/Application Support/Hostwright/InstallerPayload' --prefix /usr/local --package-id dev.hostwright.cli --package-version <version> --team-id <10-char> --output json
-hostwright-dist package-uninstall --prefix /usr/local --data-policy preserve --output json
 ```
-
-`package-apply` is the package `postinstall` entrypoint, not a general artifact installer. A package-owned generation must continue through the package lifecycle rather than a generic archive upgrade or uninstall. `package-uninstall` supports only `--data-policy preserve`: it re-verifies lifecycle ownership, the exact receipt, and the staged payload before removing the package-owned generation. After the uninstall commits, it forgets only `dev.hostwright.cli` and removes only the verified staging payload. If that final receipt/staging cleanup is interrupted, durable package-origin state records it and `hostwright-dist recover --prefix /usr/local --output json` retries the exact cleanup. Package remove-data planning and uninstall fail before state or package mutation because the system-wide package cannot safely infer or search for a per-user state database.
 
 `--state-db` is optional and has no implicit default in `hostwright-dist`. Once recorded, the normalized absolute path is bound to the installation and cannot be changed during upgrade or repair. A present database must be a compatible Hostwright database. Install verifies compatibility without migrating it. Upgrade and repair create a verified transaction-bound snapshot before migrating it to the latest supported schema. Verified rollback restores the exact pre-upgrade snapshot when one exists. Rollback is refused before mutation if current state-database presence no longer matches the verified rollback record.
 
@@ -108,7 +102,7 @@ An ordinary failure attempts exact compensation before returning. A process inte
 hostwright-dist recover --prefix <path> --output json
 ```
 
-Recovery either finalizes an already committed `status-published` generation, finalizes a committed uninstall with action `completed-uninstall`, completes a recorded package-receipt/staging cleanup, restores the exact prior generation, removes an interrupted initial install, or reports `no-action`. A durable `compensation-published` marker lets recovery verify and finish cleanup when interruption occurs after the prior generation was restored and its transaction was removed. Do not delete or edit lifecycle metadata or transaction files to clear a failure.
+Recovery either finalizes an already committed `status-published` generation, finalizes a committed uninstall with action `completed-uninstall`, restores the exact prior generation, removes an interrupted initial install, or reports `no-action`. A durable `compensation-published` marker lets recovery verify and finish cleanup when interruption occurs after the prior generation was restored and its transaction was removed. Do not delete or edit lifecycle metadata or transaction files to clear a failure.
 
 ## Repair And Legacy Adoption
 
@@ -124,7 +118,7 @@ For an accepted existing record, lifecycle mutation captures `running` or `stopp
 
 ## Uninstall Data Choices
 
-Generic archive uninstall first verifies the current manifest and every owned payload file. Modified or ambiguous ownership blocks removal.
+Both uninstall paths first verify the current manifest and every owned payload file. Modified or ambiguous ownership blocks removal.
 
 | Policy | Confirmation | Effect |
 | --- | --- | --- |
@@ -134,8 +128,6 @@ Generic archive uninstall first verifies the current manifest and every owned pa
 Both plan policies expose `stateDatabasePath` and `stateDatabaseExists`. A preserve-data plan leaves `stateDatabaseSHA256`, `stateDatabaseBytes`, and `stateSchemaVersion` unset. It checks only the bound path and existence: the SQLite database and existing sidecar bytes, identities, and metadata remain unchanged, and its token must not be passed to preserve-data uninstall.
 
 Remove-data planning additionally exposes the complete verified state revision. Its token binds the prefix, installation UUID, generation, status timestamp, data policy, state path, and that revision. Any repair, upgrade, rollback, generation change, or state existence/content/size/schema change makes an earlier remove token stale. Remove-data planning and uninstall require an installation-bound state database path; an unbound path is refused, and Hostwright never searches for other data.
-
-These two choices apply to a generic installation whose state path was explicitly bound under the same user authority. A package-origin installation supports preserve only. `uninstall-plan --data-policy remove` and `package-uninstall --data-policy remove` return a usage error before payload, receipt, staging, or state mutation; Hostwright does not derive a user state path from the elevated package process.
 
 `--data-policy remove` does not remove backup catalogs, configuration, caches, logs, unrelated Application Support files, Apple container workloads, images, networks, volumes, or arbitrary files next to the database. Review and remove those resources through their owning commands and policies.
 
@@ -165,7 +157,6 @@ Exit categories are documented in [Error Codes](error-codes.md). Deterministic c
 | No verified rollback generation | Rollback is unavailable until one successful strict upgrade retained its prior generation. |
 | Installed `hostwrightd` is running | An exact accepted Homebrew launchd record is stopped and restored automatically. Otherwise stop the unmanaged process explicitly; Hostwright will not adopt or terminate it. |
 | State verification or migration fails | Preserve the database and lifecycle transaction. Use `hostwright state integrity`, `state backups`, and `state recover` as applicable before retrying. |
-| Package receipt cleanup is pending | Preserve `/usr/local` lifecycle metadata and the private staging directory, then run `hostwright-dist recover --prefix /usr/local --output json`. Do not forget other receipts or delete staging manually. |
 
 ## Qualification Boundary
 

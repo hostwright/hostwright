@@ -82,15 +82,13 @@ Install and upgrade require complete verified artifacts and refuse payload colli
 
 Uninstall re-verifies every owned payload path. `preserve` removes only verified installed payload and lifecycle metadata and leaves the bound state database. `remove` additionally requires a generation-bound plan token, snapshots the compatible Hostwright database, and removes only that database plus its existing SQLite sidecars. Backup catalogs, configuration, caches, logs, unrelated prefix content, and Apple container resources are not deleted. Interrupted mutations remain journaled for deterministic `hostwright-dist recover`; operators must not delete recovery metadata manually.
 
-The Apple Installer bridge does not write package payload directly into `/usr/local`. It stages only beneath the private root-owned `/Library/Application Support/Hostwright/InstallerPayload`; its elevated `package-apply` boundary verifies the exact `dev.hostwright.cli` receipt/version, staged manifest and file identities, executable signatures against the Team ID embedded by the trusted release build, package-origin status, and normalized `/usr/local` prefix before delegating to the existing fenced lifecycle. Package uninstall supports preserve only, forgets only that receipt after commit, and records interrupted receipt/staging cleanup for `recover`. Package remove-data planning and uninstall fail before mutation rather than inferring or searching for per-user state from an elevated process. Generic archive mutation is refused for package-owned generations, and no privileged daemon or automatic uninstaller is introduced.
-
 The lifecycle does not create, register, or autostart a LaunchAgent. It stops and restores only an exact safe current-user Homebrew launchd record bound to the installed prefix, and fails closed on record or live-service ambiguity. An unmanaged installed `hostwrightd` is never terminated or adopted. The complete contract is in [Installed Distribution Lifecycle](installed-lifecycle.md).
 
 The trusted path requires exact non-ambiguous Developer ID Application and Installer fingerprints from one team, a preconfigured `notarytool` Keychain profile, two byte-identical clean payload builds, hardened-runtime signatures, Apple acceptance, online ZIP tickets, a stapled package ticket, Gatekeeper acceptance, exact payload/package inventories, per-artifact SPDX, source/digest-bound provenance, sorted checksums, exact single-signer CMS verification, and final independent extraction/expansion verification. Secrets are not accepted in argv. SIGINT/SIGTERM and explicit cancellation use the same bounded process-tree cleanup path.
 
 The protected release workflow separates build/sign, attestation, and publication. Repository code runs with read-only contents permission and no OIDC or publication authority. A GitHub-hosted no-checkout job receives only OIDC/attestation authority for the retained signed files. Only the final no-checkout publication job receives contents write permission. Actions are commit-pinned, tags are immutable, published bytes are downloaded and compared, GitHub attestations are verified, and a failure after tag creation removes the release/tag.
 
-Current public Hostwright releases nevertheless remain source-only. Local unsigned artifacts are non-publishable, and no trusted artifact is called supported until real Developer ID identities, notarization, Gatekeeper, signed `.pkg`, system lifecycle, vendor-tap publication/install, and clean-Mac evidence pass. No usable identities or release variables are configured on the reviewed machine/repository. The vendor-tap repository exists, but it has no qualified formula until immutable signed public artifacts are available.
+Current public Hostwright releases nevertheless remain source-only. Local unsigned artifacts are non-publishable, and no trusted artifact is called supported until real Developer ID identities, notarization, Gatekeeper, signed `.pkg`, system lifecycle, vendor-tap publication/install, and clean-Mac evidence pass. No usable identities or release variables are configured on the reviewed machine/repository, and the vendor tap does not yet exist.
 
 ## Control Surface Boundary
 
@@ -162,7 +160,7 @@ Phase 10 implements a host-native accelerator service only with a threat model, 
 The current development build does not yet include the following. Their v0.0.2 implementations are owned by Phases 02–15; this list is a present-tense safety boundary, not a non-goal list:
 
 - privileged helper;
-- supported/qualified installer channel or launch agent;
+- installer or launch agent;
 - unattended daemon mutation;
 - DNS or tunnel management;
 - cloud control plane;

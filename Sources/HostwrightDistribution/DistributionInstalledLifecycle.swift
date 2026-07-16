@@ -198,7 +198,6 @@ private struct DistributionRollbackRecord: Codable, Equatable {
     let backupRelativePath: String
     let stateSnapshot: DistributionStateSnapshotRecord?
     let serviceBefore: DistributionManagedServiceState
-    let priorPackageOrigin: DistributionPackageOrigin?
     let createdAt: String
 
     init(
@@ -209,7 +208,6 @@ private struct DistributionRollbackRecord: Codable, Equatable {
         backupRelativePath: String,
         stateSnapshot: DistributionStateSnapshotRecord?,
         serviceBefore: DistributionManagedServiceState,
-        priorPackageOrigin: DistributionPackageOrigin? = nil,
         createdAt: String
     ) {
         self.schemaVersion = 1
@@ -221,7 +219,6 @@ private struct DistributionRollbackRecord: Codable, Equatable {
         self.backupRelativePath = backupRelativePath
         self.stateSnapshot = stateSnapshot
         self.serviceBefore = serviceBefore
-        self.priorPackageOrigin = priorPackageOrigin
         self.createdAt = createdAt
     }
 
@@ -244,15 +241,6 @@ private struct DistributionRollbackRecord: Codable, Equatable {
         try priorManifest.validate()
         try installedManifest.validate()
         try stateSnapshot?.validate(transactionRelativePath: transaction)
-        try priorPackageOrigin?.validate()
-        if let priorPackageOrigin {
-            guard try DistributionPackageVersion.make(from: priorManifest.packageVersion)
-                == priorPackageOrigin.packageVersion else {
-                throw DistributionError.lifecycleFailed(
-                    "rollback package origin is not bound to the prior manifest"
-                )
-            }
-        }
     }
 }
 
@@ -324,7 +312,6 @@ private struct DistributionManagedLaunchdServiceRecord {
 
 public struct DistributionInstalledLifecycle: Sendable {
     private let runner: DistributionProcessRunner
-    private let packageReceiptController: DistributionPackageReceiptController
     private let managedService: DistributionManagedLaunchdServiceConfiguration
     private let interruptAfter: DistributionLifecycleCheckpoint?
     private let cancelAfter: DistributionLifecycleCheckpoint?
@@ -337,7 +324,6 @@ public struct DistributionInstalledLifecycle: Sendable {
 
     public init(runner: DistributionProcessRunner = DistributionProcessRunner()) {
         self.runner = runner
-        self.packageReceiptController = DistributionPackageReceiptController(runner: runner)
         self.managedService = .currentUserHomebrew()
         self.interruptAfter = nil
         self.cancelAfter = nil
@@ -351,7 +337,6 @@ public struct DistributionInstalledLifecycle: Sendable {
 
     init(
         runner: DistributionProcessRunner = DistributionProcessRunner(),
-        packageReceiptController: DistributionPackageReceiptController? = nil,
         managedService: DistributionManagedLaunchdServiceConfiguration = .currentUserHomebrew(),
         interruptAfter: DistributionLifecycleCheckpoint? = nil,
         cancelAfter: DistributionLifecycleCheckpoint? = nil,
@@ -363,8 +348,6 @@ public struct DistributionInstalledLifecycle: Sendable {
         interruptAfterPublishedTransactionCleanup: Bool = false
     ) {
         self.runner = runner
-        self.packageReceiptController = packageReceiptController
-            ?? DistributionPackageReceiptController(runner: runner)
         self.managedService = managedService
         self.interruptAfter = interruptAfter
         self.cancelAfter = cancelAfter
@@ -479,7 +462,6 @@ public struct DistributionInstalledLifecycle: Sendable {
             prefix: prefix,
             stateDatabasePath: stateDatabasePath,
             requiredOperation: requiredOperation,
-            packageOrigin: nil,
             cancellation: cancellation
         )
     }
@@ -497,36 +479,6 @@ public struct DistributionInstalledLifecycle: Sendable {
             prefix: prefix,
             stateDatabasePath: stateDatabasePath,
             requiredOperation: requiredOperation,
-            packageOrigin: nil,
-            cancellation: cancellation
-        )
-    }
-
-    func installPackage(
-        manifest: DistributionArtifactManifest,
-        sourceRoot: URL,
-        prefix: URL,
-        requiredOperation: DistributionLifecycleOperation,
-        packageOrigin: DistributionPackageOrigin,
-        cancellation: SecureSubprocessCancellation
-    ) throws -> DistributionInstallationStatus {
-        try packageOrigin.validate()
-        guard try DistributionPackageVersion.make(from: manifest.packageVersion)
-            == packageOrigin.packageVersion,
-              packageOrigin.packageVersion
-                == packageOrigin.mostRecentPackageReceiptVersion,
-              !packageOrigin.pendingReceiptCleanup else {
-            throw DistributionError.lifecycleFailed(
-                "package origin is not bound to the candidate manifest and current receipt"
-            )
-        }
-        return try install(
-            manifest: manifest,
-            sourceRoot: sourceRoot,
-            prefix: prefix,
-            stateDatabasePath: nil,
-            requiredOperation: requiredOperation,
-            packageOrigin: packageOrigin,
             cancellation: cancellation
         )
     }
@@ -537,7 +489,6 @@ public struct DistributionInstalledLifecycle: Sendable {
         prefix: URL,
         stateDatabasePath: String?,
         requiredOperation: DistributionLifecycleOperation?,
-        packageOrigin: DistributionPackageOrigin?,
         cancellation: SecureSubprocessCancellation
     ) throws -> DistributionInstallationStatus {
         try requireNotCancelled(cancellation, operation: "installed lifecycle preflight")
@@ -597,13 +548,6 @@ public struct DistributionInstalledLifecycle: Sendable {
             case .upgrade: .upgrade
             case .repair: .repair
             }
-            if operation == .upgrade,
-               existingStatus?.packageOrigin != nil,
-               packageOrigin == nil {
-                throw DistributionError.versionConflict(
-                    "Package-managed installations must be upgraded with hostwright-dist package-apply."
-                )
-            }
             if operation == .upgrade {
                 try verifyOwnedFiles(existingManifest, prefix: prefix, cancellation: cancellation)
             } else {
@@ -658,7 +602,6 @@ public struct DistributionInstalledLifecycle: Sendable {
             stateDatabasePath: selectedStatePath,
             targetStateSnapshot: nil,
             authorizedRollbackOperationID: nil,
-            packageOrigin: packageOrigin,
             cancellation: cancellation
         )
     }
@@ -764,11 +707,7 @@ public struct DistributionInstalledLifecycle: Sendable {
         }
         if journal.operation == .uninstall, journal.checkpoint == .statusPublished {
             try withJournalStateFence(journal, operation: "finalize the committed uninstall") {
-                try finalizeCommittedUninstall(
-                    journal: journal,
-                    prefix: prefix,
-                    cancellation: cancellation
-                )
+                try finalizeCommittedUninstall(journal: journal, prefix: prefix)
             }
             return DistributionRecoveryResult(
                 action: .completedUninstall,
@@ -865,17 +804,6 @@ public struct DistributionInstalledLifecycle: Sendable {
         } else {
             targetSnapshot = nil
         }
-        var rollbackPackageOrigin = record.priorPackageOrigin
-        if let priorOrigin = rollbackPackageOrigin,
-           let currentOrigin = status.packageOrigin,
-           DistributionPackageVersion.compare(
-            priorOrigin.mostRecentPackageReceiptVersion,
-            currentOrigin.mostRecentPackageReceiptVersion
-           ) == .orderedAscending {
-            rollbackPackageOrigin = priorOrigin.replacing(
-                mostRecentPackageReceiptVersion: currentOrigin.mostRecentPackageReceiptVersion
-            )
-        }
         let result = try performTransition(
             operation: .rollback,
             sourceRoot: sourceRoot,
@@ -887,7 +815,6 @@ public struct DistributionInstalledLifecycle: Sendable {
             stateDatabasePath: status.stateDatabasePath,
             targetStateSnapshot: targetSnapshot,
             authorizedRollbackOperationID: rollbackOperationID,
-            packageOrigin: rollbackPackageOrigin,
             cancellation: cancellation
         )
         try removeTransaction(prefix, operationID: rollbackOperationID)
@@ -907,11 +834,6 @@ public struct DistributionInstalledLifecycle: Sendable {
         try refuseCanonicalWriteStage(prefix)
         try refusePendingJournal(prefix)
         let status = try requiredStatus(prefix)
-        if dataPolicy == .remove, status.packageOrigin != nil {
-            throw DistributionError.invalidArguments(
-                DistributionPackagePolicy.removeDataUnsupportedMessage
-            )
-        }
         try verifyOwnedFiles(status.installedManifest, prefix: prefix, cancellation: cancellation)
         if dataPolicy == .preserve {
             let stateExists = status.stateDatabasePath.map {
@@ -952,37 +874,6 @@ public struct DistributionInstalledLifecycle: Sendable {
         confirmationToken: String? = nil,
         cancellation: SecureSubprocessCancellation = SecureSubprocessCancellation()
     ) throws -> DistributionUninstallResult {
-        try uninstall(
-            prefix: prefix,
-            dataPolicy: dataPolicy,
-            confirmationToken: confirmationToken,
-            packageReceiptCleanup: false,
-            cancellation: cancellation
-        )
-    }
-
-    func uninstallPackage(
-        prefix: URL,
-        dataPolicy: DistributionUninstallDataPolicy,
-        confirmationToken: String?,
-        cancellation: SecureSubprocessCancellation
-    ) throws -> DistributionUninstallResult {
-        try uninstall(
-            prefix: prefix,
-            dataPolicy: dataPolicy,
-            confirmationToken: confirmationToken,
-            packageReceiptCleanup: true,
-            cancellation: cancellation
-        )
-    }
-
-    private func uninstall(
-        prefix: URL,
-        dataPolicy: DistributionUninstallDataPolicy,
-        confirmationToken: String?,
-        packageReceiptCleanup: Bool,
-        cancellation: SecureSubprocessCancellation
-    ) throws -> DistributionUninstallResult {
         try requireNotCancelled(cancellation, operation: "uninstall preflight")
         try validatePrefix(prefix)
         try validateFoundation(prefix)
@@ -991,25 +882,12 @@ public struct DistributionInstalledLifecycle: Sendable {
         try cleanupCanonicalWriteStages(prefix)
         try refusePendingJournal(prefix)
         let recordedStatus = try requiredStatus(prefix)
-        if !packageReceiptCleanup, recordedStatus.packageOrigin != nil {
-            throw DistributionError.versionConflict(
-                "Package-managed installations must be removed with hostwright-dist package-uninstall."
-            )
-        }
         try verifyOwnedFiles(recordedStatus.installedManifest, prefix: prefix, cancellation: cancellation)
         let serviceState = try captureManagedServiceState(
             prefix: prefix,
             cancellation: cancellation
         )
         let status = replacingServiceState(in: recordedStatus, with: serviceState)
-        if packageReceiptCleanup {
-            guard let origin = status.packageOrigin,
-                  !origin.pendingReceiptCleanup else {
-                throw DistributionError.installOwnershipMismatch(
-                    "package lifecycle origin"
-                )
-            }
-        }
         switch dataPolicy {
         case .preserve:
             guard confirmationToken == nil else {
@@ -1022,7 +900,6 @@ public struct DistributionInstalledLifecycle: Sendable {
                 prefix: prefix,
                 dataPolicy: dataPolicy,
                 stateService: nil,
-                packageReceiptCleanup: packageReceiptCleanup,
                 cancellation: cancellation
             )
         case .remove:
@@ -1051,7 +928,6 @@ public struct DistributionInstalledLifecycle: Sendable {
                         prefix: prefix,
                         dataPolicy: dataPolicy,
                         stateService: stateService,
-                        packageReceiptCleanup: packageReceiptCleanup,
                         cancellation: cancellation
                     )
                 }
@@ -1064,7 +940,6 @@ public struct DistributionInstalledLifecycle: Sendable {
         prefix: URL,
         dataPolicy: DistributionUninstallDataPolicy,
         stateService: StateUpgradeService?,
-        packageReceiptCleanup: Bool,
         cancellation: SecureSubprocessCancellation
     ) throws -> DistributionUninstallResult {
         let operationID = UUID().uuidString.lowercased()
@@ -1080,8 +955,7 @@ public struct DistributionInstalledLifecycle: Sendable {
             serviceBefore: status.service,
             dataPolicy: dataPolicy,
             startedAt: DistributionTimestamp.string(Date()),
-            priorStatus: status,
-            packageReceiptCleanup: packageReceiptCleanup ? true : nil
+            priorStatus: status
         )
         try writeJournal(journal, prefix: prefix)
         try checkpointReached(.intentRecorded, cancellation: cancellation)
@@ -1167,32 +1041,11 @@ public struct DistributionInstalledLifecycle: Sendable {
             let removed = (status.installedManifest.files.map(\.path)
                 + [DistributionLayout.installManifestFileName]
                 + removedDirectories).sorted()
-            if packageReceiptCleanup {
-                guard let origin = status.packageOrigin else {
-                    throw DistributionError.lifecycleFailed(
-                        "package receipt cleanup lost its package origin"
-                    )
-                }
-                let pendingStatus = replacingPackageOrigin(
-                    in: status,
-                    with: origin.replacing(pendingReceiptCleanup: true)
-                )
-                try pendingStatus.validate()
-                try writeCanonicalReplacing(
-                    pendingStatus,
-                    to: statusURL(prefix),
-                    mode: 0o600
-                )
-            }
             currentJournal = currentJournal.replacing(checkpoint: .statusPublished)
             try writeJournal(currentJournal, prefix: prefix)
             uninstallCommitted = true
             try checkpointReached(.statusPublished, cancellation: cancellation)
-            try finalizeCommittedUninstall(
-                journal: currentJournal,
-                prefix: prefix,
-                cancellation: cancellation
-            )
+            try finalizeCommittedUninstall(journal: currentJournal, prefix: prefix)
             return DistributionUninstallResult(
                 dataPolicy: dataPolicy,
                 removedPaths: removed,
@@ -1258,8 +1111,7 @@ public struct DistributionInstalledLifecycle: Sendable {
 
     private func finalizeCommittedUninstall(
         journal: DistributionLifecycleJournal,
-        prefix: URL,
-        cancellation: SecureSubprocessCancellation
+        prefix: URL
     ) throws {
         guard journal.operation == .uninstall,
               journal.checkpoint == .statusPublished,
@@ -1281,7 +1133,7 @@ public struct DistributionInstalledLifecycle: Sendable {
         if journal.serviceBefore != .notInstalled {
             guard try captureManagedServiceState(
                 prefix: prefix,
-                cancellation: cancellation
+                cancellation: SecureSubprocessCancellation()
             ) == .stopped else {
                 throw DistributionError.lifecycleFailed(
                     "committed uninstall left the managed Hostwright service running"
@@ -1295,34 +1147,12 @@ public struct DistributionInstalledLifecycle: Sendable {
                 "committed uninstall state path reappeared before finalization"
             )
         }
-        let recordedStatus = try loadOptional(
+        if let status = try loadOptional(
             DistributionInstallationStatus.self,
             from: statusURL(prefix)
-        )
-        var expectedStatus = journal.priorStatus
-        if journal.packageReceiptCleanup == true,
-           let status = expectedStatus,
-           let origin = status.packageOrigin {
-            expectedStatus = replacingPackageOrigin(
-                in: status,
-                with: origin.replacing(pendingReceiptCleanup: true)
-            )
-        }
-        if let recordedStatus, recordedStatus != expectedStatus {
+        ), status != journal.priorStatus {
             throw DistributionError.lifecycleFailed(
                 "committed uninstall status no longer matches its prior generation"
-            )
-        }
-        if journal.packageReceiptCleanup == true {
-            guard recordedStatus == expectedStatus, let recordedStatus else {
-                throw DistributionError.lifecycleFailed(
-                    "committed package uninstall lost its receipt cleanup marker"
-                )
-            }
-            try DistributionPackageStagingCleanup.finalize(
-                status: recordedStatus,
-                receiptController: packageReceiptController,
-                cancellation: cancellation
             )
         }
         try removeAllLifecycleContent(prefix: prefix)
@@ -1339,7 +1169,6 @@ public struct DistributionInstalledLifecycle: Sendable {
         stateDatabasePath: String?,
         targetStateSnapshot: StateUpgradeSnapshot?,
         authorizedRollbackOperationID: String?,
-        packageOrigin: DistributionPackageOrigin?,
         cancellation: SecureSubprocessCancellation
     ) throws -> DistributionInstallationStatus {
         if operation == .rollback {
@@ -1360,7 +1189,6 @@ public struct DistributionInstalledLifecycle: Sendable {
                     stateDatabasePath: nil,
                     targetStateSnapshot: nil,
                     authorizedRollbackOperationID: authorizedRollbackOperationID,
-                    packageOrigin: packageOrigin,
                     cancellation: cancellation
                 )
             }
@@ -1386,7 +1214,6 @@ public struct DistributionInstalledLifecycle: Sendable {
                             stateDatabasePath: stateDatabasePath,
                             targetStateSnapshot: targetStateSnapshot,
                             authorizedRollbackOperationID: authorizedRollbackOperationID,
-                            packageOrigin: packageOrigin,
                             cancellation: cancellation
                         )
                     }
@@ -1403,7 +1230,6 @@ public struct DistributionInstalledLifecycle: Sendable {
             stateDatabasePath: stateDatabasePath,
             targetStateSnapshot: targetStateSnapshot,
             authorizedRollbackOperationID: authorizedRollbackOperationID,
-            packageOrigin: packageOrigin,
             cancellation: cancellation
         )
     }
@@ -1419,7 +1245,6 @@ public struct DistributionInstalledLifecycle: Sendable {
         stateDatabasePath: String?,
         targetStateSnapshot: StateUpgradeSnapshot?,
         authorizedRollbackOperationID: String?,
-        packageOrigin: DistributionPackageOrigin?,
         cancellation: SecureSubprocessCancellation
     ) throws -> DistributionInstallationStatus {
         if operation == .rollback, let stateDatabasePath {
@@ -1432,9 +1257,6 @@ public struct DistributionInstalledLifecycle: Sendable {
                 )
             }
         }
-        let selectedPackageOrigin = packageOrigin
-            ?? (operation == .repair ? existingStatus?.packageOrigin : nil)
-        try selectedPackageOrigin?.validate()
         try verifyPayload(toManifest, root: sourceRoot, cancellation: cancellation)
         let operationID = UUID().uuidString.lowercased()
         var journal = DistributionLifecycleJournal(
@@ -1594,7 +1416,6 @@ public struct DistributionInstalledLifecycle: Sendable {
                     backupRelativePath: "\(transactionRelativePath(operationID))/backup",
                     stateSnapshot: journal.stateSnapshot,
                     serviceBefore: journal.serviceBefore,
-                    priorPackageOrigin: existingStatus.packageOrigin,
                     createdAt: DistributionTimestamp.string(Date())
                 )
                 try rollback.validate()
@@ -1616,7 +1437,6 @@ public struct DistributionInstalledLifecycle: Sendable {
                 stateDatabasePath: stateDatabasePath,
                 service: journal.serviceBefore,
                 rollbackOperationID: rollbackOperationID,
-                packageOrigin: selectedPackageOrigin,
                 updatedAt: DistributionTimestamp.string(Date())
             )
             try status.validate()
@@ -2175,24 +1995,6 @@ public struct DistributionInstalledLifecycle: Sendable {
             stateDatabasePath: status.stateDatabasePath,
             service: service,
             rollbackOperationID: status.rollbackOperationID,
-            packageOrigin: status.packageOrigin,
-            updatedAt: status.updatedAt
-        )
-    }
-
-    private func replacingPackageOrigin(
-        in status: DistributionInstallationStatus,
-        with packageOrigin: DistributionPackageOrigin
-    ) -> DistributionInstallationStatus {
-        DistributionInstallationStatus(
-            installationID: status.installationID,
-            generation: status.generation,
-            prefix: status.prefix,
-            installedManifest: status.installedManifest,
-            stateDatabasePath: status.stateDatabasePath,
-            service: status.service,
-            rollbackOperationID: status.rollbackOperationID,
-            packageOrigin: packageOrigin,
             updatedAt: status.updatedAt
         )
     }

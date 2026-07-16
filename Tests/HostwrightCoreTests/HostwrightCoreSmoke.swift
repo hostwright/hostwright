@@ -104,12 +104,7 @@ final class HostwrightCoreTests: XCTestCase {
         XCTAssertEqual(HostwrightIdentity.daemonName, "hostwrightd")
         XCTAssertEqual(HostwrightIdentity.manifestFileName, "hostwright.yaml")
         XCTAssertEqual(HostwrightIdentity.domain, "hostwright.dev")
-        XCTAssertNotNil(
-            HostwrightIdentity.version.range(
-                of: #"^0\.0\.2-dev\.[12]$"#,
-                options: .regularExpression
-            )
-        )
+        XCTAssertEqual(HostwrightIdentity.version, "0.0.2-dev")
     }
 
     func testCompatibilityGateRejectsUnsupportedPlatform() {
@@ -133,7 +128,7 @@ final class HostwrightCoreTests: XCTestCase {
         let v002Plan = try read("docs/roadmap/v0.0.2/IMPLEMENTATION_PLAN.md", root: root)
 
         XCTAssertTrue(releaseProcess.contains("active release target is `v0.0.2`"))
-        XCTAssertTrue(releaseProcess.contains("the `0.0.2-dev` line throughout implementation"))
+        XCTAssertTrue(releaseProcess.contains("`0.0.2-dev` throughout implementation"))
         XCTAssertTrue(releaseProcess.contains("`v*` tags are public releases or explicitly marked release candidates."))
         XCTAssertTrue(releaseProcess.contains("two complete clean RC qualification runs"))
         XCTAssertTrue(releaseProcess.contains("`brew install hostwright` depends on Homebrew-core acceptance"))

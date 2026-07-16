@@ -4,12 +4,7 @@ import XCTest
 
 final class ContractVersionsTests: XCTestCase {
     func testReleaseAndBreakingContractVersionsHaveOneAuthority() {
-        XCTAssertNotNil(
-            HostwrightIdentity.version.range(
-                of: #"^0\.0\.2-dev\.[12]$"#,
-                options: .regularExpression
-            )
-        )
+        XCTAssertEqual(HostwrightIdentity.version, "0.0.2-dev")
         XCTAssertEqual(HostwrightIdentity.releaseTarget, "v0.0.2")
         XCTAssertEqual(HostwrightContractVersions.manifest, 2)
         XCTAssertEqual(HostwrightContractVersions.controlAPI, 2)

@@ -202,49 +202,6 @@ enum HostwrightDistributionCLI {
                 arguments: values,
                 cancellation: cancellation
             )
-        case "package-apply":
-            let options = try parse(
-                values,
-                required: [
-                    "--staged-root", "--prefix", "--package-id",
-                    "--package-version", "--team-id", "--output"
-                ]
-            )
-            try requireJSONOutput(options)
-            let result = try DistributionPackageLifecycle().apply(
-                stagedRoot: fileURL(options["--staged-root"]!),
-                prefix: fileURL(options["--prefix"]!),
-                packageIdentifier: options["--package-id"]!,
-                packageVersion: options["--package-version"]!,
-                teamIdentifier: options["--team-id"]!,
-                cancellation: cancellation
-            )
-            return ToolResult(output: try jsonLine(result), exitCode: 0)
-        case "package-uninstall":
-            let options = try parse(
-                values,
-                required: ["--prefix", "--data-policy", "--output"],
-                optional: ["--confirmation"]
-            )
-            try requireJSONOutput(options)
-            guard options["--data-policy"]
-                == DistributionUninstallDataPolicy.preserve.rawValue else {
-                throw DistributionError.invalidArguments(
-                    DistributionPackagePolicy.removeDataUnsupportedMessage
-                )
-            }
-            guard options["--confirmation"] == nil else {
-                throw DistributionError.invalidArguments(
-                    DistributionPackagePolicy.preserveConfirmationUnsupportedMessage
-                )
-            }
-            let result = try DistributionPackageLifecycle().uninstall(
-                prefix: fileURL(options["--prefix"]!),
-                dataPolicy: .preserve,
-                confirmationToken: nil,
-                cancellation: cancellation
-            )
-            return ToolResult(output: try jsonLine(result), exitCode: 0)
         case "status":
             let options = try parse(
                 values,
@@ -587,8 +544,6 @@ enum HostwrightDistributionCLI {
       hostwright-dist install --developer-distribution-dir <path> --prefix <path> [--state-db <path>] --output json
       hostwright-dist upgrade --trusted-release-dir <path> --team-id <10-char> --prefix <path> [--state-db <path>] --output json
       hostwright-dist repair --trusted-release-dir <path> --team-id <10-char> --prefix <path> [--state-db <path>] --output json
-      hostwright-dist package-apply --staged-root '/Library/Application Support/Hostwright/InstallerPayload' --prefix /usr/local --package-id dev.hostwright.cli --package-version <version> --team-id <10-char> --output json
-      hostwright-dist package-uninstall --prefix /usr/local --data-policy preserve --output json
       hostwright-dist status --prefix <path> --output json
       hostwright-dist adopt-legacy --prefix <path> [--state-db <path>] --output json
       hostwright-dist recover --prefix <path> --output json

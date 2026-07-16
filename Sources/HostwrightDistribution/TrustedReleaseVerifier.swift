@@ -457,9 +457,7 @@ public struct TrustedReleaseVerifier: Sendable {
             (packageInstalledPath(for: $0.path), $0)
         })
         let actualFiles = try regularFileInventory(payloadRoot)
-        let packageManifestPath = "\(packageStagingRelativePath)/\(DistributionLayout.manifestFileName)"
-        let expectedPaths = Set(expected.keys).union([packageManifestPath])
-        guard Set(actualFiles) == expectedPaths, actualFiles.count == expectedPaths.count else {
+        guard Set(actualFiles) == Set(expected.keys), actualFiles.count == expected.count else {
             throw DistributionError.invalidArtifact("trusted package payload contains unexpected or missing files")
         }
         for (path, file) in expected {
@@ -473,45 +471,6 @@ public struct TrustedReleaseVerifier: Sendable {
                   try linkCount(url) == 1 else {
                 throw DistributionError.checksumMismatch(path)
             }
-        }
-        let packageManifest = try DistributionJSON.decode(
-            DistributionArtifactManifest.self,
-            from: payloadRoot.appendingPathComponent(packageManifestPath)
-        )
-        let expectedManifest = DistributionArtifactManifest(
-            artifactID: manifest.artifactID,
-            packageVersion: manifest.packageVersion,
-            sourceCommit: manifest.sourceCommit,
-            sourceDirty: false,
-            architecture: manifest.architecture,
-            createdAt: manifest.createdAt,
-            files: manifest.payloadFiles
-        )
-        guard packageManifest == expectedManifest else {
-            throw DistributionError.invalidArtifact(
-                "trusted package staging manifest differs from the signed release manifest"
-            )
-        }
-        let scriptsRoot = expansionRoot.appendingPathComponent("Scripts", isDirectory: true)
-        guard try DistributionFileSystem.isDirectoryNonSymlink(scriptsRoot),
-              try regularFileInventory(scriptsRoot) == ["postinstall"] else {
-            throw DistributionError.invalidArtifact(
-                "trusted package must contain exactly one postinstall entrypoint"
-            )
-        }
-        let postinstall = scriptsRoot.appendingPathComponent("postinstall")
-        let expectedPackageVersion = try DistributionPackageVersion.make(
-            from: manifest.packageVersion
-        )
-        guard try DistributionFileSystem.mode(of: postinstall) == 0o755,
-              try String(contentsOf: postinstall, encoding: .utf8)
-                == DistributionPackageScripts.postinstall(
-                    packageVersion: expectedPackageVersion,
-                    teamIdentifier: manifest.applicationSigner.teamIdentifier
-                ) else {
-            throw DistributionError.invalidArtifact(
-                "trusted package postinstall entrypoint is not the exact lifecycle bridge"
-            )
         }
     }
 
@@ -632,11 +591,7 @@ public struct TrustedReleaseVerifier: Sendable {
     }
 
     private func packageInstalledPath(for archivePath: String) -> String {
-        "\(packageStagingRelativePath)/\(archivePath)"
-    }
-
-    private var packageStagingRelativePath: String {
-        String(DistributionLayout.packageStagingPath.dropFirst())
+        "usr/local/\(archivePath)"
     }
 
     private func linkCount(_ url: URL) throws -> UInt64 {

@@ -532,6 +532,42 @@ final class DistributionIntegrationTests: XCTestCase {
         }
     }
 
+    func testCleanBuilderProducesIdenticalPayloadManifestFromIsolatedReleaseBuilds() throws {
+        try withTemporaryRoot { root in
+            let repository = repositoryRoot()
+            let source = root.appendingPathComponent("source", isDirectory: true)
+            let runner = DistributionProcessRunner()
+            _ = try runner.run(
+                executablePath: "/usr/bin/git",
+                arguments: ["clone", "--quiet", "--local", "--no-hardlinks", repository.path, source.path],
+                label: "clone clean source snapshot"
+            )
+            let commit = try runner.run(
+                executablePath: "/usr/bin/git",
+                arguments: ["-C", source.path, "rev-parse", "HEAD"],
+                label: "read clean source snapshot commit"
+            ).standardOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            let builder = DistributionCleanBuilder()
+            let first = try builder.buildWithDependencyInventory(
+                sourceRoot: source,
+                outputDirectory: root.appendingPathComponent("first-output", isDirectory: true),
+                expectedCommit: commit
+            )
+            let second = try builder.buildWithDependencyInventory(
+                sourceRoot: source,
+                outputDirectory: root.appendingPathComponent("second-output", isDirectory: true),
+                expectedCommit: commit
+            )
+
+            XCTAssertEqual(first.externalSwiftPMDependencies, [])
+            XCTAssertEqual(second.externalSwiftPMDependencies, [])
+            XCTAssertEqual(first.report.manifest.files, second.report.manifest.files)
+            let payloadPaths = Set(first.report.manifest.files.map(\.path))
+            XCTAssertTrue(Set(DistributionLayout.shippedBinaryPaths).isSubset(of: payloadPaths))
+        }
+    }
+
     func testDistributionToolSignalCancelsBuildWithoutPublishingOutput() throws {
         try withTemporaryRoot { root in
             let repository = repositoryRoot()

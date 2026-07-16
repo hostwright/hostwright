@@ -633,6 +633,24 @@ public struct DistributionCleanBuilder: Sendable {
         self.assembler = DistributionAssembler(runner: runner)
     }
 
+    static func deterministicReleaseBuildArguments(
+        sourceRoot: URL,
+        scratch: URL,
+        additionalArguments: [String]
+    ) -> [String] {
+        [
+            "build",
+            "--package-path", sourceRoot.path,
+            "--scratch-path", scratch.path,
+            "-c", "release",
+            "-debug-info-format", "none"
+        ] + additionalArguments
+    }
+
+    static func evidenceCommand(executablePath: String, arguments: [String]) -> String {
+        ([executablePath] + arguments).map(shellQuote).joined(separator: " ")
+    }
+
     public func build(
         sourceRoot: URL,
         outputDirectory: URL,
@@ -720,27 +738,37 @@ public struct DistributionCleanBuilder: Sendable {
         )
 
         for product in DistributionLayout.shippedExecutableNames {
+            let arguments = Self.deterministicReleaseBuildArguments(
+                sourceRoot: sourceRoot,
+                scratch: scratch,
+                additionalArguments: ["--product", product]
+            )
             let result = try runner.run(
                 executablePath: "/usr/bin/swift",
-                arguments: [
-                    "build", "--package-path", sourceRoot.path, "--scratch-path", scratch.path,
-                    "-c", "release", "--product", product
-                ],
+                arguments: arguments,
                 label: "build release product \(product)",
                 cancellation: cancellation
             )
-            commands.append(record("swift build -c release --product \(product)", result))
+            commands.append(record(
+                Self.evidenceCommand(executablePath: "/usr/bin/swift", arguments: arguments),
+                result
+            ))
         }
+        let binPathArguments = Self.deterministicReleaseBuildArguments(
+            sourceRoot: sourceRoot,
+            scratch: scratch,
+            additionalArguments: ["--show-bin-path"]
+        )
         let binPathResult = try runner.run(
             executablePath: "/usr/bin/swift",
-            arguments: [
-                "build", "--package-path", sourceRoot.path, "--scratch-path", scratch.path,
-                "-c", "release", "--show-bin-path"
-            ],
+            arguments: binPathArguments,
             label: "read release binary path",
             cancellation: cancellation
         )
-        commands.append(record("swift build -c release --show-bin-path", binPathResult))
+        commands.append(record(
+            Self.evidenceCommand(executablePath: "/usr/bin/swift", arguments: binPathArguments),
+            binPathResult
+        ))
         let binPath = binPathResult.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines)
         guard binPath.hasPrefix("/") else {
             throw DistributionError.invalidArtifact("SwiftPM did not return an absolute release binary path")
@@ -856,5 +884,13 @@ public struct DistributionCleanBuilder: Sendable {
             exitCode: Int(result.exitStatus),
             durationMilliseconds: result.durationMilliseconds
         )
+    }
+
+    private static func shellQuote(_ value: String) -> String {
+        guard !value.isEmpty,
+              value.rangeOfCharacter(from: CharacterSet(charactersIn: " \t\n\r'\"\\$`!#&();<>|*?[]{}")) == nil else {
+            return "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+        }
+        return value
     }
 }

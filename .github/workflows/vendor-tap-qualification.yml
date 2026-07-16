@@ -81,6 +81,7 @@ jobs:
       HOSTWRIGHT_CANDIDATE_RELEASE_COMMIT: ${{ inputs.candidate_release_commit }}
       HOSTWRIGHT_BASELINE_TAP_COMMIT: ${{ inputs.baseline_tap_commit }}
       HOSTWRIGHT_CANDIDATE_TAP_COMMIT: ${{ inputs.candidate_tap_commit }}
+      RELEASE_TEAM_ID: ${{ vars.RELEASE_TEAM_ID }}
     steps:
       - name: Check out reviewed qualification code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -95,8 +96,13 @@ jobs:
           QUALIFICATION_STAGE: ${{ inputs.stage }}
         run: |
           set -euo pipefail
-          export HOSTWRIGHT_QUALIFICATION_ROOT="$HOME/Library/Application Support/Hostwright/phase02-vendor-tap"
-          test -d "$HOSTWRIGHT_QUALIFICATION_ROOT"
+          export HOSTWRIGHT_QUALIFICATION_ROOT="$HOME/.hostwright-phase02-vendor-tap"
+          if [[ "$QUALIFICATION_STAGE" == prepare ]]; then
+            test ! -e "$HOSTWRIGHT_QUALIFICATION_ROOT"
+            install -d -m 700 "$HOSTWRIGHT_QUALIFICATION_ROOT"
+          else
+            test -d "$HOSTWRIGHT_QUALIFICATION_ROOT"
+          fi
           scripts/release/qualify-vendor-tap.sh "$QUALIFICATION_STAGE"
 
       - name: Retain bounded qualification evidence
@@ -105,9 +111,9 @@ jobs:
         with:
           name: vendor-tap-${{ inputs.stage }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            ~/Library/Application Support/Hostwright/phase02-vendor-tap/evidence.log
-            ~/Library/Application Support/Hostwright/phase02-vendor-tap/*-capabilities.json
-            ~/Library/Application Support/Hostwright/phase02-vendor-tap/*-doctor.json
-            ~/Library/Application Support/Hostwright/phase02-vendor-tap/service.json
+            ~/.hostwright-phase02-vendor-tap/evidence.log
+            ~/.hostwright-phase02-vendor-tap/*.json
+            ~/.hostwright-phase02-vendor-tap/*.plist
           if-no-files-found: error
+          include-hidden-files: true
           retention-days: 90

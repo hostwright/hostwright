@@ -57,6 +57,11 @@ final class VendorTapQualificationTests: XCTestCase {
         XCTAssertTrue(workflow.contains("runs-on: [self-hosted, macOS, ARM64, hostwright-clean-install]"))
         XCTAssertTrue(workflow.contains("environment: release"))
         XCTAssertTrue(workflow.contains("attestations: read"))
+        XCTAssertTrue(workflow.contains("RELEASE_TEAM_ID: ${{ vars.RELEASE_TEAM_ID }}"))
+        XCTAssertTrue(workflow.contains("$HOME/.hostwright-phase02-vendor-tap"))
+        XCTAssertTrue(workflow.contains("include-hidden-files: true"))
+        XCTAssertTrue(workflow.contains("install -d -m 700 \"$HOSTWRIGHT_QUALIFICATION_ROOT\""))
+        XCTAssertFalse(workflow.contains("Application Support/Hostwright/phase02-vendor-tap"))
         XCTAssertFalse(workflow.contains("contents: write"))
 
         for fragment in [
@@ -70,6 +75,29 @@ final class VendorTapQualificationTests: XCTestCase {
             "write_state preparing \"$boot\" \"$config_path\" \"$config_digest\"",
             "validate_qualification_install",
             "validate_existing_tap",
+            "The qualification root must be empty before prepare.",
+            "$home/Library/Application Support/Hostwright",
+            "$home/Library/LaunchAgents/homebrew.mxcl.hostwright.plist",
+            "/bin/launchctl print \"gui/$(id -u)/homebrew.mxcl.hostwright\"",
+            "The clean-host cell already contains the Hostwright tap.",
+            "ensure_tap_checkout absent",
+            "ensure_tap_checkout present",
+            "qualify_package_lifecycle",
+            "install-dev1",
+            "repair-dev1",
+            "upgrade-dev2",
+            "rollback-dev1",
+            "repair-after-rollback-dev1",
+            "upgrade-again-dev2",
+            "package-downgrade-refusal-passed",
+            "package_downgrade_refusal",
+            "package-remove-plan-refusal",
+            "package-remove-uninstall-refusal",
+            "package-preserve-uninstall-result.json",
+            "require_package_absent \"after package preserve uninstall\"",
+            "cleanup_qualified_package",
+            "files.2.sha256",
+            "status.installedManifest.sourceCommit",
             "stage-$command-failed-exit-$status",
             "Homebrew removed or changed user configuration during uninstall",
             "brew untap \"$tap_name\""
@@ -79,6 +107,10 @@ final class VendorTapQualificationTests: XCTestCase {
         XCTAssertFalse(script.contains("rm -rf"))
         XCTAssertFalse(script.contains("brew install hostwright\n"))
         XCTAssertFalse(script.contains("brew install hostwright\r\n"))
+
+        let preflight = try XCTUnwrap(script.range(of: "validate_prepare_preflight\nfi"))
+        let firstEvidenceWrite = try XCTUnwrap(script.range(of: "record \"inputs baselineReleaseCommit="))
+        XCTAssertLessThan(preflight.lowerBound, firstEvidenceWrite.lowerBound)
     }
 
     private func read(_ path: String) throws -> String {

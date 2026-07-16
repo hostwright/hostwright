@@ -8,6 +8,54 @@ final class DistributionIntegrationTests: XCTestCase {
     private let baselineCommit = String(repeating: "a", count: 40)
     private let candidateCommit = String(repeating: "b", count: 40)
 
+    func testPackageRemoveCLIRefusesBeforeInspectingOrMutatingPrefix() throws {
+        try withTemporaryRoot { root in
+            let tool = repositoryRoot().appendingPathComponent(".build/debug/hostwright-dist")
+            let absentPrefix = root.appendingPathComponent("package-remove-must-not-create")
+
+            let result = try runExecutable(tool, arguments: [
+                "package-uninstall",
+                "--prefix", absentPrefix.path,
+                "--data-policy", "remove",
+                "--confirmation", String(repeating: "a", count: 64),
+                "--output", "json"
+            ])
+
+            XCTAssertEqual(result.status, 64)
+            XCTAssertTrue(result.output.isEmpty)
+            let error = try XCTUnwrap(
+                JSONSerialization.jsonObject(with: Data(result.error.utf8)) as? [String: Any]
+            )
+            XCTAssertEqual(error["kind"] as? String, "distributionToolError")
+            XCTAssertEqual(error["code"] as? String, "HW-DIST-001")
+            XCTAssertEqual(error["exitCode"] as? Int, 64)
+            XCTAssertEqual(
+                error["message"] as? String,
+                DistributionPackagePolicy.removeDataUnsupportedMessage
+            )
+            XCTAssertFalse(DistributionFileSystem.entryExists(absentPrefix))
+
+            let ignoredConfirmation = try runExecutable(tool, arguments: [
+                "package-uninstall",
+                "--prefix", absentPrefix.path,
+                "--data-policy", "preserve",
+                "--confirmation", String(repeating: "a", count: 64),
+                "--output", "json"
+            ])
+            XCTAssertEqual(ignoredConfirmation.status, 64)
+            let confirmationError = try XCTUnwrap(
+                JSONSerialization.jsonObject(
+                    with: Data(ignoredConfirmation.error.utf8)
+                ) as? [String: Any]
+            )
+            XCTAssertEqual(
+                confirmationError["message"] as? String,
+                DistributionPackagePolicy.preserveConfirmationUnsupportedMessage
+            )
+            XCTAssertFalse(DistributionFileSystem.entryExists(absentPrefix))
+        }
+    }
+
     func testBuiltDistributionToolRunsBlockedArtifactAndLifecycleEvidence() throws {
         try withTemporaryRoot { root in
             let repository = repositoryRoot()

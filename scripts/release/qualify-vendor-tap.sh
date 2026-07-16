@@ -9,6 +9,26 @@ readonly tap_name="hostwright/tap"
 readonly formula_reference="$tap_name/hostwright"
 readonly hostwright_repository="https://github.com/hostwright/hostwright.git"
 readonly tap_repository_url="https://github.com/hostwright/homebrew-tap.git"
+readonly package_identifier="dev.hostwright.cli"
+readonly package_prefix="/usr/local"
+readonly package_staging_root="/Library/Application Support/Hostwright/InstallerPayload"
+readonly package_remove_refusal="Package-managed installations support only --data-policy preserve because Hostwright does not infer or search for per-user state databases."
+readonly package_downgrade_refusal="Downgrade refused: installed version $candidate_version is newer than candidate $baseline_version. Use a verified Hostwright rollback record instead."
+readonly -a package_owned_paths=(
+  "$package_staging_root"
+  "$package_prefix/.hostwright-lifecycle"
+  "$package_prefix/.hostwright-install-manifest.json"
+  "$package_prefix/bin/hostwright"
+  "$package_prefix/bin/hostwright-control"
+  "$package_prefix/bin/hostwright-dist"
+  "$package_prefix/bin/hostwrightd"
+  "$package_prefix/share/hostwright"
+  "$package_prefix/share/hostwright/examples"
+  "$package_prefix/share/hostwright/examples/hostwright.yaml"
+  "$package_prefix/share/doc/hostwright"
+  "$package_prefix/share/doc/hostwright/LICENSE"
+  "$package_prefix/share/doc/hostwright/README.md"
+)
 
 die() {
   printf '%s\n' "$1" >&2
@@ -41,6 +61,11 @@ validate_host() {
     || die "Vendor-tap qualification requires macOS 26 or newer." 69
   command -v brew >/dev/null || die "Homebrew is required." 69
   command -v gh >/dev/null || die "GitHub CLI is required for attestation verification." 69
+  [[ "${RELEASE_TEAM_ID:-}" =~ ^[A-Z0-9]{10}$ ]] \
+    || die "RELEASE_TEAM_ID must be the independently configured Developer Team ID." 69
+  [[ -x /usr/bin/sudo && -x /usr/sbin/installer && -x /usr/sbin/pkgutil \
+      && -x /usr/sbin/spctl && -x /usr/bin/shasum ]] \
+    || die "Apple package qualification tools are unavailable." 69
 }
 
 validate_qualification_root() {
@@ -152,11 +177,22 @@ verify_release_ref() {
 }
 
 ensure_tap_checkout() {
-  local brew_binary tap_repository remote
+  local expected_state="$1"
+  local brew_binary taps tap_repository remote
   brew_binary="$(command -v brew)"
-  if ! "$brew_binary" tap | grep -Fxq "$tap_name"; then
-    "$brew_binary" tap "$tap_name" "$tap_repository_url" >&2
-  fi
+  taps="$("$brew_binary" tap)" || die "Unable to inventory Homebrew taps." 70
+  case "$expected_state" in
+    absent)
+      if grep -Fxq "$tap_name" <<< "$taps"; then
+        die "The clean-host cell already contains the Hostwright tap." 70
+      fi
+      "$brew_binary" tap "$tap_name" "$tap_repository_url" >&2
+      ;;
+    present)
+      grep -Fxq "$tap_name" <<< "$taps" || die "The qualification tap is missing." 70
+      ;;
+    *) die "Invalid qualification tap expectation." 70 ;;
+  esac
   tap_repository="$("$brew_binary" --repository "$tap_name")"
   [[ -d "$tap_repository/.git" && ! -L "$tap_repository" ]] \
     || die "Homebrew tap checkout is unsafe." 70
@@ -272,25 +308,329 @@ validate_existing_tap() {
     || die "Homebrew tap checkout is dirty; refusing ambiguous cleanup." 70
 }
 
-prepare() {
-  [[ ! -e "$state_file" ]] || die "Qualification state already exists; resume or clean it first." 70
+validate_prepare_preflight() {
+  local -a root_entries
+  local home application_support launch_agent launchd_status taps brew_prefix config_dir log_path error_log_path
+  shopt -s nullglob dotglob
+  root_entries=("$HOSTWRIGHT_QUALIFICATION_ROOT"/*)
+  shopt -u nullglob dotglob
+  [[ "${#root_entries[@]}" -eq 0 ]] \
+    || die "The qualification root must be empty before prepare." 70
+  home="${HOME:-}"
+  [[ "$home" == /* && "$home" != *$'\n'* ]] \
+    || die "HOME must identify one safe absolute directory." 70
+  application_support="$home/Library/Application Support/Hostwright"
+  launch_agent="$home/Library/LaunchAgents/homebrew.mxcl.hostwright.plist"
+  [[ ! -e "$application_support" && ! -L "$application_support" ]] \
+    || die "The clean-host cell contains pre-existing Hostwright Application Support state." 70
+  [[ ! -e "$launch_agent" && ! -L "$launch_agent" ]] \
+    || die "The clean-host cell contains a pre-existing Hostwright LaunchAgent." 70
+  launchd_status=0
+  /bin/launchctl print "gui/$(id -u)/homebrew.mxcl.hostwright" >/dev/null 2>&1 \
+    || launchd_status=$?
+  case "$launchd_status" in
+    0) die "The clean-host cell contains a loaded Hostwright service." 70 ;;
+    113) ;;
+    *) die "Unable to prove the Hostwright service is absent." 70 ;;
+  esac
   if brew list --formula hostwright >/dev/null 2>&1 || command -v hostwright >/dev/null 2>&1; then
     die "The clean-host cell already contains Hostwright." 70
   fi
+  taps="$(brew tap)" || die "Unable to inventory Homebrew taps." 70
+  if grep -Fxq "$tap_name" <<< "$taps"; then
+    die "The clean-host cell already contains the Hostwright tap." 70
+  fi
+  brew_prefix="$(brew --prefix)"
+  config_dir="$brew_prefix/etc/hostwright"
+  log_path="$brew_prefix/var/log/hostwrightd.log"
+  error_log_path="$brew_prefix/var/log/hostwrightd.error.log"
+  [[ ! -e "$config_dir" && ! -e "$log_path" && ! -e "$error_log_path" ]] \
+    || die "The clean-host cell contains pre-existing Hostwright config or logs." 70
+  require_package_absent "before package qualification"
+}
+
+require_package_absent() {
+  local label="$1"
+  local receipt_status=0 path
+  /usr/sbin/pkgutil --pkg-info "$package_identifier" >/dev/null 2>&1 || receipt_status=$?
+  [[ "$receipt_status" -eq 1 ]] \
+    || die "The exact Hostwright package receipt is not absent $label." 70
+  for path in "${package_owned_paths[@]}"; do
+    [[ ! -e "$path" && ! -L "$path" ]] \
+      || die "A Hostwright package-owned path is not absent $label: $path" 70
+  done
+}
+
+downloaded_package=""
+downloaded_team_id=""
+
+download_qualified_package() {
+  local tag="$1"
+  local version="$2"
+  local commit="$3"
+  local directory="$4"
+  local expected_name manifest actual_sha expected_sha signature
+  expected_name="hostwright-$version-macos-arm64-${commit:0:12}.pkg"
+  mkdir -m 700 "$directory"
+  gh release download "$tag" \
+    --repo hostwright/hostwright \
+    --pattern release-manifest.json \
+    --pattern "$expected_name" \
+    --dir "$directory"
+  manifest="$directory/release-manifest.json"
+  downloaded_package="$directory/$expected_name"
+  [[ -f "$manifest" && ! -L "$manifest" \
+      && -f "$downloaded_package" && ! -L "$downloaded_package" ]] \
+    || die "$tag did not provide one safe manifest and package." 70
+  [[ "$(plutil -extract releaseTag raw "$manifest")" == "$tag" \
+      && "$(plutil -extract packageVersion raw "$manifest")" == "$version" \
+      && "$(plutil -extract sourceCommit raw "$manifest")" == "$commit" \
+      && "$(plutil -extract sourceDirty raw "$manifest")" == false \
+      && "$(plutil -extract package.fileName raw "$manifest")" == "$expected_name" ]] \
+    || die "$tag manifest is not bound to the expected package and commit." 70
+  downloaded_team_id="$(plutil -extract installerSigner.teamIdentifier raw "$manifest")"
+  [[ "$downloaded_team_id" == "$RELEASE_TEAM_ID" \
+      && "$(plutil -extract applicationSigner.teamIdentifier raw "$manifest")" == "$downloaded_team_id" ]] \
+    || die "$tag signer Team IDs do not match the protected release Team ID." 70
+  expected_sha="$(plutil -extract package.sha256 raw "$manifest")"
+  actual_sha="$(/usr/bin/shasum -a 256 "$downloaded_package" | awk '{ print $1 }')"
+  [[ "$expected_sha" == "$actual_sha" ]] || die "$tag package digest differs from its manifest." 70
+  gh attestation verify "$downloaded_package" --repo hostwright/hostwright >/dev/null
+  signature="$(/usr/sbin/pkgutil --check-signature "$downloaded_package" 2>&1)" \
+    || die "$tag package signature verification failed." 70
+  [[ "$signature" == *"$downloaded_team_id"* ]] \
+    || die "$tag package signature uses an unexpected Team ID." 70
+  /usr/sbin/spctl --assess --type install --verbose=4 "$downloaded_package"
+}
+
+package_installation_id=""
+
+verify_package_state() {
+  local label="$1"
+  local version="$2"
+  local commit="$3"
+  local generation="$4"
+  local package_version="$5"
+  local recent_receipt="$6"
+  local receipt_version="$7"
+  local status_file receipt_file executable observed_id
+  status_file="$HOSTWRIGHT_QUALIFICATION_ROOT/$label-package-status.json"
+  receipt_file="$HOSTWRIGHT_QUALIFICATION_ROOT/$label-package-receipt.plist"
+  executable="$package_prefix/bin/hostwright-dist"
+  [[ -x "$executable" && ! -L "$executable" ]] \
+    || die "$label did not install a safe hostwright-dist executable." 70
+  sudo -n "$executable" status --prefix "$package_prefix" --output json > "$status_file"
+  /usr/sbin/pkgutil --pkg-info-plist "$package_identifier" > "$receipt_file"
+  [[ "$(plutil -extract readiness raw "$status_file")" == ready \
+      && "$(plutil -extract status.generation raw "$status_file")" == "$generation" \
+      && "$(plutil -extract status.installedManifest.packageVersion raw "$status_file")" == "$version" \
+      && "$(plutil -extract status.installedManifest.sourceCommit raw "$status_file")" == "$commit" \
+      && "$(plutil -extract status.packageIdentifier raw "$status_file")" == "$package_identifier" \
+      && "$(plutil -extract status.packageVersion raw "$status_file")" == "$package_version" \
+      && "$(plutil -extract status.mostRecentPackageReceiptVersion raw "$status_file")" == "$recent_receipt" \
+      && "$(plutil -extract status.pendingReceiptCleanup raw "$status_file")" == false \
+      && "$(plutil -extract pkg-version raw "$receipt_file")" == "$receipt_version" ]] \
+    || die "$label did not produce the expected durable package generation." 70
+  observed_id="$(plutil -extract status.installationID raw "$status_file")"
+  if [[ -z "$package_installation_id" ]]; then
+    package_installation_id="$observed_id"
+  fi
+  [[ "$observed_id" == "$package_installation_id" ]] \
+    || die "$label changed the package installation identity." 70
+  for executable in hostwright hostwright-control hostwright-dist hostwrightd; do
+    [[ "$("$package_prefix/bin/$executable" --version)" == "$version" ]] \
+      || die "$label installed an unexpected $executable version." 70
+  done
+  record "$label-passed generation=$generation version=$version"
+}
+
+package_snapshot_digest() {
+  local work="$1"
+  local distribution="$package_prefix/bin/hostwright-dist"
+  local -a staged_paths=(
+    "$package_staging_root/manifest.json"
+    "$package_staging_root/bin/hostwright"
+    "$package_staging_root/bin/hostwright-control"
+    "$package_staging_root/bin/hostwright-dist"
+    "$package_staging_root/bin/hostwrightd"
+    "$package_staging_root/share/hostwright/examples/hostwright.yaml"
+    "$package_staging_root/share/doc/hostwright/LICENSE"
+    "$package_staging_root/share/doc/hostwright/README.md"
+  )
+  sudo -n "$distribution" status --prefix "$package_prefix" --output json > "$work/snapshot-status.json"
+  /usr/sbin/pkgutil --pkg-info-plist "$package_identifier" > "$work/snapshot-receipt.plist"
+  /usr/bin/shasum -a 256 \
+    "$package_prefix/bin/hostwright" \
+    "$package_prefix/bin/hostwright-control" \
+    "$package_prefix/bin/hostwright-dist" \
+    "$package_prefix/bin/hostwrightd" > "$work/snapshot-binaries.sha256"
+  sudo -n /usr/bin/shasum -a 256 "${staged_paths[@]}" > "$work/snapshot-staging.sha256"
+  /usr/bin/shasum -a 256 \
+    "$work/snapshot-status.json" \
+    "$work/snapshot-receipt.plist" \
+    "$work/snapshot-binaries.sha256" \
+    "$work/snapshot-staging.sha256" \
+    | /usr/bin/shasum -a 256 | awk '{ print $1 }'
+}
+
+expect_package_refusal() {
+  local label="$1"
+  shift
+  local output status=0
+  output="$("$@" 2>&1)" || status=$?
+  [[ "$status" -eq 64 && "$output" == *"$package_remove_refusal"* ]] \
+    || die "$label did not return the exact package remove-data refusal." 70
+  record "$label-passed"
+}
+
+qualify_package_lifecycle() {
+  local work baseline_package candidate_package baseline_team candidate_team
+  local distribution before after downgrade_output downgrade_status=0
+  require_package_absent "before package qualification"
+  umask 077
+  work="$(mktemp -d "$HOSTWRIGHT_QUALIFICATION_ROOT/package-lifecycle.XXXXXX")"
+  [[ -d "$work" && ! -L "$work" && "$(stat -f '%u:%Lp' "$work")" == "$(id -u):700" ]] \
+    || die "Package qualification workspace is unsafe." 70
+
+  download_qualified_package "$baseline_tag" "$baseline_version" \
+    "$HOSTWRIGHT_BASELINE_RELEASE_COMMIT" "$work/baseline"
+  baseline_package="$downloaded_package"
+  baseline_team="$downloaded_team_id"
+  download_qualified_package "$candidate_tag" "$candidate_version" \
+    "$HOSTWRIGHT_CANDIDATE_RELEASE_COMMIT" "$work/candidate"
+  candidate_package="$downloaded_package"
+  candidate_team="$downloaded_team_id"
+  [[ "$baseline_team" == "$candidate_team" ]] \
+    || die "The two qualification packages use different Developer Team IDs." 70
+
+  sudo -n /usr/sbin/installer -pkg "$baseline_package" -target /
+  verify_package_state install-dev1 "$baseline_version" "$HOSTWRIGHT_BASELINE_RELEASE_COMMIT" 1 0.0.2.1 0.0.2.1 0.0.2.1
+  sudo -n /usr/sbin/installer -pkg "$baseline_package" -target /
+  verify_package_state repair-dev1 "$baseline_version" "$HOSTWRIGHT_BASELINE_RELEASE_COMMIT" 2 0.0.2.1 0.0.2.1 0.0.2.1
+  sudo -n /usr/sbin/installer -pkg "$candidate_package" -target /
+  verify_package_state upgrade-dev2 "$candidate_version" "$HOSTWRIGHT_CANDIDATE_RELEASE_COMMIT" 3 0.0.2.2 0.0.2.2 0.0.2.2
+
+  distribution="$package_prefix/bin/hostwright-dist"
+  sudo -n "$distribution" rollback --prefix "$package_prefix" --output json \
+    > "$HOSTWRIGHT_QUALIFICATION_ROOT/rollback-dev1-package-result.json"
+  verify_package_state rollback-dev1 "$baseline_version" "$HOSTWRIGHT_BASELINE_RELEASE_COMMIT" 4 0.0.2.1 0.0.2.2 0.0.2.2
+  sudo -n /usr/sbin/installer -pkg "$baseline_package" -target /
+  verify_package_state repair-after-rollback-dev1 "$baseline_version" "$HOSTWRIGHT_BASELINE_RELEASE_COMMIT" 5 0.0.2.1 0.0.2.1 0.0.2.1
+  sudo -n /usr/sbin/installer -pkg "$candidate_package" -target /
+  verify_package_state upgrade-again-dev2 "$candidate_version" "$HOSTWRIGHT_CANDIDATE_RELEASE_COMMIT" 6 0.0.2.2 0.0.2.2 0.0.2.2
+
+  before="$(package_snapshot_digest "$work")"
+  downgrade_output="$(sudo -n /usr/sbin/installer -pkg "$baseline_package" -target / 2>&1)" \
+    || downgrade_status=$?
+  [[ "$downgrade_status" -eq 1 ]] || die "The dev.1 package downgrade was not refused." 70
+  [[ "$downgrade_output" == *"$package_downgrade_refusal"* ]] \
+    || die "The dev.1 package failure did not prove Hostwright's semantic downgrade refusal." 70
+  after="$(package_snapshot_digest "$work")"
+  [[ "$before" == "$after" ]] || die "The rejected package downgrade changed installed state." 70
+  record "package-downgrade-refusal-passed"
+
+  expect_package_refusal package-remove-plan-refusal \
+    sudo -n "$distribution" uninstall-plan --prefix "$package_prefix" --data-policy remove --output json
+  after="$(package_snapshot_digest "$work")"
+  [[ "$before" == "$after" ]] || die "Rejected package remove planning changed installed state." 70
+  expect_package_refusal package-remove-uninstall-refusal \
+    sudo -n "$distribution" package-uninstall --prefix "$package_prefix" --data-policy remove --output json
+  after="$(package_snapshot_digest "$work")"
+  [[ "$before" == "$after" ]] || die "Rejected package remove uninstall changed installed state." 70
+
+  sudo -n "$distribution" package-uninstall --prefix "$package_prefix" \
+    --data-policy preserve --output json \
+    > "$HOSTWRIGHT_QUALIFICATION_ROOT/package-preserve-uninstall-result.json"
+  [[ "$(plutil -extract kind raw "$HOSTWRIGHT_QUALIFICATION_ROOT/package-preserve-uninstall-result.json")" \
+      == distributionPackageUninstall \
+      && "$(plutil -extract lifecycle.dataPolicy raw "$HOSTWRIGHT_QUALIFICATION_ROOT/package-preserve-uninstall-result.json")" \
+      == preserve ]] \
+    || die "Package preserve uninstall returned an unexpected result." 70
+  require_package_absent "after package preserve uninstall"
+
+  /usr/bin/find "$work" -depth -delete
+  [[ ! -e "$work" ]] || die "Package qualification downloads were not cleaned up." 70
+  printf '{"schemaVersion":1,"kind":"phase02PackageLifecycle","status":"passed","baselineCommit":"%s","candidateCommit":"%s","teamIdentifier":"%s","transitions":6,"failures":0,"cleanup":"succeeded"}\n' \
+    "$HOSTWRIGHT_BASELINE_RELEASE_COMMIT" "$HOSTWRIGHT_CANDIDATE_RELEASE_COMMIT" "$candidate_team" \
+    > "$HOSTWRIGHT_QUALIFICATION_ROOT/package-lifecycle-summary.json"
+  record "signed-package-lifecycle-and-exact-cleanup-passed"
+}
+
+cleanup_qualified_package() {
+  local receipt_status=0 path found=false distribution manifest status_file package_version
+  local expected_commit expected_version expected_digest actual_digest signature team_id
+  /usr/sbin/pkgutil --pkg-info "$package_identifier" >/dev/null 2>&1 || receipt_status=$?
+  [[ "$receipt_status" -eq 0 || "$receipt_status" -eq 1 ]] \
+    || die "Unable to classify the Hostwright package receipt during cleanup." 70
+  [[ "$receipt_status" -eq 0 ]] && found=true
+  for path in "${package_owned_paths[@]}"; do
+    if [[ -e "$path" || -L "$path" ]]; then found=true; fi
+  done
+  [[ "$found" == true ]] || return 0
+
+  if [[ -x "$package_prefix/bin/hostwright-dist" && ! -L "$package_prefix/bin/hostwright-dist" ]]; then
+    distribution="$package_prefix/bin/hostwright-dist"
+    manifest="$package_prefix/.hostwright-install-manifest.json"
+  elif [[ -x "$package_staging_root/bin/hostwright-dist" && ! -L "$package_staging_root/bin/hostwright-dist" ]]; then
+    distribution="$package_staging_root/bin/hostwright-dist"
+    manifest="$package_staging_root/manifest.json"
+  else
+    die "Package cleanup cannot prove an exact Hostwright recovery executable." 70
+  fi
+  [[ -f "$distribution" && ! -L "$distribution" \
+      && "$(stat -f '%u:%l' "$distribution")" == "0:1" \
+      && -f "$manifest" && ! -L "$manifest" \
+      && "$(stat -f '%u:%l' "$manifest")" == "0:1" ]] \
+    || die "Package cleanup executable or manifest lacks exact root-owned regular-file identity." 70
+  expected_commit="$(plutil -extract sourceCommit raw "$manifest")"
+  expected_version="$(plutil -extract packageVersion raw "$manifest")"
+  [[ "$expected_commit:$expected_version" == "$HOSTWRIGHT_BASELINE_RELEASE_COMMIT:$baseline_version" \
+      || "$expected_commit:$expected_version" == "$HOSTWRIGHT_CANDIDATE_RELEASE_COMMIT:$candidate_version" ]] \
+    || die "Package cleanup manifest is not bound to this qualification pair." 70
+  [[ "$(plutil -extract files.2.path raw "$manifest")" == bin/hostwright-dist ]] \
+    || die "Package cleanup manifest does not identify the recovery executable." 70
+  expected_digest="$(plutil -extract files.2.sha256 raw "$manifest")"
+  actual_digest="$(/usr/bin/shasum -a 256 "$distribution" | awk '{ print $1 }')"
+  [[ "$expected_digest" =~ ^[a-f0-9]{64}$ && "$actual_digest" == "$expected_digest" ]] \
+    || die "Package cleanup executable does not match its exact manifest digest." 70
+  /usr/bin/codesign --verify --strict --verbose=2 "$distribution"
+  signature="$(/usr/bin/codesign -d --verbose=4 "$distribution" 2>&1)"
+  team_id="$(printf '%s\n' "$signature" | awk -F= '$1 == "TeamIdentifier" { print $2 }')"
+  [[ "$team_id" == "$RELEASE_TEAM_ID" ]] \
+    || die "Package cleanup executable does not match the protected release Team ID." 70
+  status_file="$HOSTWRIGHT_QUALIFICATION_ROOT/package-cleanup-status.json"
+  sudo -n "$distribution" status --prefix "$package_prefix" --output json > "$status_file"
+  package_version="$(plutil -extract status.packageVersion raw "$status_file")"
+  [[ "$(plutil -extract status.packageIdentifier raw "$status_file")" == "$package_identifier" \
+      && "$package_version" =~ ^0\.0\.2\.[12]$ \
+      && "$(plutil -extract status.installedManifest.sourceCommit raw "$status_file")" == "$expected_commit" \
+      && "$(plutil -extract status.installedManifest.packageVersion raw "$status_file")" == "$expected_version" ]] \
+    || die "Package cleanup status is not owned by this qualification pair." 70
+  sudo -n "$distribution" recover --prefix "$package_prefix" --output json \
+    > "$HOSTWRIGHT_QUALIFICATION_ROOT/package-cleanup-recovery.json"
+  if [[ -x "$distribution" && ! -L "$distribution" ]]; then
+    sudo -n "$distribution" package-uninstall \
+      --prefix "$package_prefix" --data-policy preserve --output json \
+      > "$HOSTWRIGHT_QUALIFICATION_ROOT/package-cleanup-uninstall.json"
+  fi
+  require_package_absent "after failed-run package cleanup"
+  record "failed-run-package-cleanup-completed"
+}
+
+prepare() {
   local tap_repository brew_prefix config_dir config_path config_source config_digest log_path error_log_path boot
   brew_prefix="$(brew --prefix)"
   config_dir="$brew_prefix/etc/hostwright"
   config_path="$config_dir/hostwright.yaml"
   log_path="$brew_prefix/var/log/hostwrightd.log"
   error_log_path="$brew_prefix/var/log/hostwrightd.error.log"
-  [[ ! -e "$config_dir" && ! -e "$log_path" && ! -e "$error_log_path" ]] \
-    || die "The clean-host cell contains pre-existing Hostwright config or logs." 70
   verify_release_ref "$baseline_tag" "$HOSTWRIGHT_BASELINE_RELEASE_COMMIT"
   verify_release_ref "$candidate_tag" "$HOSTWRIGHT_CANDIDATE_RELEASE_COMMIT"
   boot="$(boot_epoch)"
   write_state preparing "$boot"
   record "prepare-intent"
-  tap_repository="$(ensure_tap_checkout)"
+  qualify_package_lifecycle
+  tap_repository="$(ensure_tap_checkout absent)"
   checkout_formula "$tap_repository" "$HOSTWRIGHT_BASELINE_TAP_COMMIT" \
     "$baseline_version" "$baseline_tag" "$HOSTWRIGHT_BASELINE_RELEASE_COMMIT"
   brew install "$formula_reference"
@@ -328,7 +668,7 @@ resume() {
   [[ -f "$config_path" && ! -L "$config_path" \
       && "$(shasum -a 256 "$config_path" | awk '{ print $1 }')" == "$config_digest" ]] \
     || die "Qualification config changed across reboot." 70
-  tap_repository="$(ensure_tap_checkout)"
+  tap_repository="$(ensure_tap_checkout present)"
   checkout_formula "$tap_repository" "$HOSTWRIGHT_BASELINE_TAP_COMMIT" \
     "$baseline_version" "$baseline_tag" "$HOSTWRIGHT_BASELINE_RELEASE_COMMIT"
   verify_installed "$baseline_version" post-reboot-baseline
@@ -373,6 +713,7 @@ cleanup_failed_run() {
   config_digest="$(state_value configDigest)"
   brew_prefix="$(brew --prefix)"
   expected_config="$brew_prefix/etc/hostwright/hostwright.yaml"
+  cleanup_qualified_package
   if [[ "$config_path" != none ]]; then
     [[ "$config_path" == "$expected_config" && "$config_digest" =~ ^[a-f0-9]{64}$ ]] \
       || die "Refusing cleanup for an unexpected config ownership record." 70
@@ -422,6 +763,9 @@ case "$command" in
   prepare|resume|cleanup) ;;
   *) die "Usage: qualify-vendor-tap.sh validate-contract|prepare|resume|cleanup" ;;
 esac
+if [[ "$command" == prepare ]]; then
+  validate_prepare_preflight
+fi
 record_stage_failure() {
   local status=$?
   trap - EXIT

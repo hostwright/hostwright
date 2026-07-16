@@ -105,6 +105,33 @@ final class DistributionPackageLifecycleTests: XCTestCase {
         XCTAssertNil(legacy.packageOrigin)
     }
 
+    func testPackageOriginRejectsInstalledPayloadVersionMismatch() throws {
+        let status = DistributionInstallationStatus(
+            installationID: "33333333-3333-3333-3333-333333333333",
+            generation: 1,
+            prefix: "/usr/local",
+            installedManifest: makeInstallManifest(version: "0.0.2-dev.1"),
+            stateDatabasePath: nil,
+            service: .notInstalled,
+            rollbackOperationID: nil,
+            packageOrigin: DistributionPackageOrigin(
+                packageIdentifier: DistributionLayout.packageIdentifier,
+                packageVersion: "0.0.2.2",
+                mostRecentPackageReceiptVersion: "0.0.2.2"
+            ),
+            updatedAt: "2026-07-15T12:00:00Z"
+        )
+
+        XCTAssertThrowsError(try status.validate()) { error in
+            XCTAssertEqual(
+                error as? DistributionError,
+                .lifecycleFailed(
+                    "installation status package version does not match installed manifest"
+                )
+            )
+        }
+    }
+
     func testPostinstallEntrypointUsesOnlyLockedPackageLifecycleArguments() {
         let script = DistributionPackageScripts.postinstall(
             packageVersion: "0.0.2.2",

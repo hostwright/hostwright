@@ -227,17 +227,21 @@ enum HostwrightDistributionCLI {
                 optional: ["--confirmation"]
             )
             try requireJSONOutput(options)
-            guard let policy = DistributionUninstallDataPolicy(
-                rawValue: options["--data-policy"]!
-            ) else {
+            guard options["--data-policy"]
+                == DistributionUninstallDataPolicy.preserve.rawValue else {
                 throw DistributionError.invalidArguments(
-                    "package-uninstall --data-policy supports only preserve or remove."
+                    DistributionPackagePolicy.removeDataUnsupportedMessage
+                )
+            }
+            guard options["--confirmation"] == nil else {
+                throw DistributionError.invalidArguments(
+                    DistributionPackagePolicy.preserveConfirmationUnsupportedMessage
                 )
             }
             let result = try DistributionPackageLifecycle().uninstall(
                 prefix: fileURL(options["--prefix"]!),
-                dataPolicy: policy,
-                confirmationToken: options["--confirmation"],
+                dataPolicy: .preserve,
+                confirmationToken: nil,
                 cancellation: cancellation
             )
             return ToolResult(output: try jsonLine(result), exitCode: 0)
@@ -585,7 +589,6 @@ enum HostwrightDistributionCLI {
       hostwright-dist repair --trusted-release-dir <path> --team-id <10-char> --prefix <path> [--state-db <path>] --output json
       hostwright-dist package-apply --staged-root '/Library/Application Support/Hostwright/InstallerPayload' --prefix /usr/local --package-id dev.hostwright.cli --package-version <version> --team-id <10-char> --output json
       hostwright-dist package-uninstall --prefix /usr/local --data-policy preserve --output json
-      hostwright-dist package-uninstall --prefix /usr/local --data-policy remove --confirmation <plan-token> --output json
       hostwright-dist status --prefix <path> --output json
       hostwright-dist adopt-legacy --prefix <path> [--state-db <path>] --output json
       hostwright-dist recover --prefix <path> --output json

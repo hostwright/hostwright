@@ -237,6 +237,52 @@ final class DistributionDurableLifecycleTests: XCTestCase {
             XCTAssertEqual(applied.operation, .install)
             XCTAssertEqual(applied.signerTeamIdentifier, "TESTTEAM01")
             XCTAssertEqual(applied.status.packageVersion, "0.0.2.2")
+            XCTAssertNil(applied.status.stateDatabasePath)
+
+            let inspectionBeforeRemoveRefusal = try lifecycle.inspect(prefix: prefix)
+            let prefixBeforeRemoveRefusal = try regularFileTreeContents(in: prefix)
+            let stagingBeforeRemoveRefusal = try regularFileTreeContents(in: staging)
+            let receiptBeforeRemoveRefusal = try Data(contentsOf: receiptMarker)
+            let expectedRemoveRefusal = DistributionError.invalidArguments(
+                DistributionPackagePolicy.removeDataUnsupportedMessage
+            )
+
+            XCTAssertThrowsError(
+                try lifecycle.uninstallPlan(prefix: prefix, dataPolicy: .remove)
+            ) { error in
+                XCTAssertEqual(error as? DistributionError, expectedRemoveRefusal)
+            }
+
+            let cancelled = SecureSubprocessCancellation()
+            cancelled.cancel()
+            XCTAssertThrowsError(
+                try packageLifecycle.uninstall(
+                    prefix: prefix,
+                    dataPolicy: .remove,
+                    confirmationToken: String(repeating: "a", count: 64),
+                    cancellation: cancelled
+                )
+            ) { error in
+                XCTAssertEqual(error as? DistributionError, expectedRemoveRefusal)
+            }
+            XCTAssertThrowsError(
+                try packageLifecycle.uninstall(
+                    prefix: prefix,
+                    dataPolicy: .preserve,
+                    confirmationToken: String(repeating: "a", count: 64)
+                )
+            ) { error in
+                XCTAssertEqual(
+                    error as? DistributionError,
+                    .invalidArguments(
+                        DistributionPackagePolicy.preserveConfirmationUnsupportedMessage
+                    )
+                )
+            }
+            XCTAssertEqual(try lifecycle.inspect(prefix: prefix), inspectionBeforeRemoveRefusal)
+            XCTAssertEqual(try regularFileTreeContents(in: prefix), prefixBeforeRemoveRefusal)
+            XCTAssertEqual(try regularFileTreeContents(in: staging), stagingBeforeRemoveRefusal)
+            XCTAssertEqual(try Data(contentsOf: receiptMarker), receiptBeforeRemoveRefusal)
 
             XCTAssertThrowsError(
                 try packageLifecycle.uninstall(
@@ -247,6 +293,7 @@ final class DistributionDurableLifecycleTests: XCTestCase {
             let pending = try lifecycle.inspect(prefix: prefix)
             XCTAssertEqual(pending.readiness, .recoveryRequired)
             XCTAssertEqual(pending.pendingOperation?.operation, .uninstall)
+            XCTAssertEqual(pending.pendingOperation?.dataPolicy, .preserve)
             XCTAssertEqual(pending.status?.pendingReceiptCleanup, true)
             XCTAssertTrue(FileManager.default.fileExists(atPath: staging.path))
 
@@ -2222,6 +2269,17 @@ final class DistributionDurableLifecycleTests: XCTestCase {
             let file = directory.appendingPathComponent(name)
             if try DistributionFileSystem.isRegularNonSymlink(file) {
                 contents[name] = try Data(contentsOf: file)
+            }
+        }
+        return contents
+    }
+
+    private func regularFileTreeContents(in directory: URL) throws -> [String: Data] {
+        var contents: [String: Data] = [:]
+        for path in try FileManager.default.subpathsOfDirectory(atPath: directory.path).sorted() {
+            let file = directory.appendingPathComponent(path)
+            if try DistributionFileSystem.isRegularNonSymlink(file) {
+                contents[path] = try Data(contentsOf: file)
             }
         }
         return contents

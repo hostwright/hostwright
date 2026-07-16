@@ -101,14 +101,14 @@ The complete precedence, `0700`/`0600` policy, migration failure behavior, and r
 
 This is installed-lifecycle behavior, not an available package channel. The prefix is always explicit; no published Homebrew formula, public signed archive, or supported `.pkg` install is available yet. The `.pkg` implementation stages its payload only in the private root-owned `/Library/Application Support/Hostwright/InstallerPayload` directory. Its `postinstall` entrypoint runs elevated `hostwright-dist package-apply`, which verifies the exact `dev.hostwright.cli` receipt/version, staged manifest and digests, executable signatures against the trusted release's exact Team ID, package-origin status, and `/usr/local` prefix before using the existing durable install/upgrade/repair lifecycle. It does not create/register/autostart a LaunchAgent, edit `PATH` or shell profiles, or mutate Apple container workloads. It stops and restores only an exact existing Homebrew launchd record bound to this prefix; an unmanaged installed `hostwrightd` is refused instead of killed or adopted.
 
-Uninstall offers two exact choices:
+Generic explicitly bound installs offer two exact choices:
 
 1. `preserve` removes verified payload and lifecycle ownership metadata while leaving the bound state database untouched;
 2. `remove` requires a current plan token and removes the verified bound SQLite database and existing SQLite sidecars after taking a recovery snapshot.
 
 Neither choice removes backup catalogs, configuration, caches, logs, unrelated prefix content, or Apple container resources. Modified, linked, symlinked, wrong-owner, or otherwise ambiguous owned paths fail closed. See [Installed Distribution Lifecycle](installed-lifecycle.md) for commands, checkpoints, recovery, rollback, legacy adoption, service limitations, and troubleshooting.
 
-A package-owned installation uses elevated `hostwright-dist package-uninstall` for the same preserve/remove choice. It re-verifies lifecycle ownership, the receipt, and the staged payload; after the uninstall transaction commits, it forgets only `dev.hostwright.cli` and removes only verified staging content. A bounded pending-cleanup marker lets `hostwright-dist recover --prefix /usr/local --output json` finish an interrupted receipt cleanup. Generic archive upgrade or uninstall is refused for a package-owned generation.
+A package-owned installation uses elevated `hostwright-dist package-uninstall --prefix /usr/local --data-policy preserve --output json`. It re-verifies lifecycle ownership, the receipt, and the staged payload; after the uninstall transaction commits, it forgets only `dev.hostwright.cli` and removes only verified staging content. Package remove-data planning and uninstall are refused before mutation because the system-wide package lifecycle does not infer or search for a per-user state database. A bounded pending-cleanup marker lets `hostwright-dist recover --prefix /usr/local --output json` finish an interrupted receipt cleanup. Generic archive upgrade or uninstall is refused for a package-owned generation.
 
 A source checkout remains separate from an installed prefix. Deleting the checkout does not run `hostwright-dist uninstall` and does not remove Application Support data or runtime resources.
 

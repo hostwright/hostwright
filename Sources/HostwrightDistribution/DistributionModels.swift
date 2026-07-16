@@ -1247,7 +1247,15 @@ public struct DistributionInstallationStatus: Codable, Equatable, Sendable {
         guard packageFields.allSatisfy({ $0 == nil }) || packageFields.allSatisfy({ $0 != nil }) else {
             throw DistributionError.lifecycleFailed("installation status package origin is incomplete")
         }
-        try packageOrigin?.validate()
+        if let packageOrigin {
+            try packageOrigin.validate()
+            guard try DistributionPackageVersion.make(from: installedManifest.packageVersion)
+                == packageOrigin.packageVersion else {
+                throw DistributionError.lifecycleFailed(
+                    "installation status package version does not match installed manifest"
+                )
+            }
+        }
     }
 
     public var packageOrigin: DistributionPackageOrigin? {

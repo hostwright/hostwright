@@ -64,6 +64,13 @@ enum DistributionPackageScripts {
     }
 }
 
+package enum DistributionPackagePolicy {
+    package static let removeDataUnsupportedMessage =
+        "Package-managed installations support only --data-policy preserve because Hostwright does not infer or search for per-user state databases."
+    package static let preserveConfirmationUnsupportedMessage =
+        "package-uninstall --data-policy preserve does not accept --confirmation."
+}
+
 public struct DistributionPackageReceipt: Codable, Equatable, Sendable {
     public let identifier: String
     public let version: String
@@ -337,6 +344,16 @@ public struct DistributionPackageLifecycle: Sendable {
         try requireElevatedAuthority()
         guard prefix.standardizedFileURL.path == expectedPrefix.path else {
             throw DistributionError.unsafePath("package-uninstall requires the exact /usr/local prefix.")
+        }
+        guard dataPolicy == .preserve else {
+            throw DistributionError.invalidArguments(
+                DistributionPackagePolicy.removeDataUnsupportedMessage
+            )
+        }
+        guard confirmationToken == nil else {
+            throw DistributionError.invalidArguments(
+                DistributionPackagePolicy.preserveConfirmationUnsupportedMessage
+            )
         }
         let inspection = try lifecycle.inspect(prefix: prefix)
         guard inspection.readiness == .ready,

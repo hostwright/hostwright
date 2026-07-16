@@ -907,6 +907,11 @@ public struct DistributionInstalledLifecycle: Sendable {
         try refuseCanonicalWriteStage(prefix)
         try refusePendingJournal(prefix)
         let status = try requiredStatus(prefix)
+        if dataPolicy == .remove, status.packageOrigin != nil {
+            throw DistributionError.invalidArguments(
+                DistributionPackagePolicy.removeDataUnsupportedMessage
+            )
+        }
         try verifyOwnedFiles(status.installedManifest, prefix: prefix, cancellation: cancellation)
         if dataPolicy == .preserve {
             let stateExists = status.stateDatabasePath.map {

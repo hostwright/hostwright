@@ -60,10 +60,9 @@ hostwright-dist uninstall --prefix <path> --data-policy preserve --output json
 hostwright-dist uninstall --prefix <path> --data-policy remove --confirmation <plan-token> --output json
 hostwright-dist package-apply --staged-root '/Library/Application Support/Hostwright/InstallerPayload' --prefix /usr/local --package-id dev.hostwright.cli --package-version <version> --team-id <10-char> --output json
 hostwright-dist package-uninstall --prefix /usr/local --data-policy preserve --output json
-hostwright-dist package-uninstall --prefix /usr/local --data-policy remove --confirmation <plan-token> --output json
 ```
 
-`package-apply` is the package `postinstall` entrypoint, not a general artifact installer. A package-owned generation must continue through the package lifecycle rather than a generic archive upgrade or uninstall. `package-uninstall` re-verifies lifecycle ownership, the exact receipt, and the staged payload, then uses the same preserve/remove uninstall transaction. After the uninstall commits, it forgets only `dev.hostwright.cli` and removes only the verified staging payload. If that final receipt/staging cleanup is interrupted, durable package-origin state records it and `hostwright-dist recover --prefix /usr/local --output json` retries the exact cleanup.
+`package-apply` is the package `postinstall` entrypoint, not a general artifact installer. A package-owned generation must continue through the package lifecycle rather than a generic archive upgrade or uninstall. `package-uninstall` supports only `--data-policy preserve`: it re-verifies lifecycle ownership, the exact receipt, and the staged payload before removing the package-owned generation. After the uninstall commits, it forgets only `dev.hostwright.cli` and removes only the verified staging payload. If that final receipt/staging cleanup is interrupted, durable package-origin state records it and `hostwright-dist recover --prefix /usr/local --output json` retries the exact cleanup. Package remove-data planning and uninstall fail before state or package mutation because the system-wide package cannot safely infer or search for a per-user state database.
 
 `--state-db` is optional and has no implicit default in `hostwright-dist`. Once recorded, the normalized absolute path is bound to the installation and cannot be changed during upgrade or repair. A present database must be a compatible Hostwright database. Install verifies compatibility without migrating it. Upgrade and repair create a verified transaction-bound snapshot before migrating it to the latest supported schema. Verified rollback restores the exact pre-upgrade snapshot when one exists. Rollback is refused before mutation if current state-database presence no longer matches the verified rollback record.
 
@@ -125,7 +124,7 @@ For an accepted existing record, lifecycle mutation captures `running` or `stopp
 
 ## Uninstall Data Choices
 
-Both uninstall paths first verify the current manifest and every owned payload file. Modified or ambiguous ownership blocks removal.
+Generic archive uninstall first verifies the current manifest and every owned payload file. Modified or ambiguous ownership blocks removal.
 
 | Policy | Confirmation | Effect |
 | --- | --- | --- |
@@ -135,6 +134,8 @@ Both uninstall paths first verify the current manifest and every owned payload f
 Both plan policies expose `stateDatabasePath` and `stateDatabaseExists`. A preserve-data plan leaves `stateDatabaseSHA256`, `stateDatabaseBytes`, and `stateSchemaVersion` unset. It checks only the bound path and existence: the SQLite database and existing sidecar bytes, identities, and metadata remain unchanged, and its token must not be passed to preserve-data uninstall.
 
 Remove-data planning additionally exposes the complete verified state revision. Its token binds the prefix, installation UUID, generation, status timestamp, data policy, state path, and that revision. Any repair, upgrade, rollback, generation change, or state existence/content/size/schema change makes an earlier remove token stale. Remove-data planning and uninstall require an installation-bound state database path; an unbound path is refused, and Hostwright never searches for other data.
+
+These two choices apply to a generic installation whose state path was explicitly bound under the same user authority. A package-origin installation supports preserve only. `uninstall-plan --data-policy remove` and `package-uninstall --data-policy remove` return a usage error before payload, receipt, staging, or state mutation; Hostwright does not derive a user state path from the elevated package process.
 
 `--data-policy remove` does not remove backup catalogs, configuration, caches, logs, unrelated Application Support files, Apple container workloads, images, networks, volumes, or arbitrary files next to the database. Review and remove those resources through their owning commands and policies.
 

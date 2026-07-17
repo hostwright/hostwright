@@ -439,6 +439,7 @@ public struct TrustedReleaseBuilder: Sendable {
             attachment: .stapled,
             gatekeeperSource: packageGatekeeperSource
         )
+        try FileManager.default.removeItem(at: signedRoot)
 
         let archiveSBOMURL = stagedOutput.appendingPathComponent(
             TrustedReleaseLayout.archiveSBOMFileName(artifactID: artifactID)

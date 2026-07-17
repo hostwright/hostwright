@@ -566,7 +566,8 @@ final class TrustedReleaseTests: XCTestCase {
             TrustedReleaseLayout.checksumFileName,
             TrustedReleaseLayout.checksumSignatureFileName,
             TrustedReleaseLayout.provenanceSignatureFileName,
-            TrustedReleaseLayout.evidenceFileName
+            TrustedReleaseLayout.evidenceFileName,
+            TrustedReleaseLayout.evidenceSignatureFileName
         ] {
             try DistributionFileSystem.writeNewFile(
                 Data("inventory-entry".utf8),
@@ -574,6 +575,10 @@ final class TrustedReleaseTests: XCTestCase {
                 mode: name == TrustedReleaseLayout.evidenceFileName ? 0o600 : 0o644
             )
         }
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent(makeManifest().artifactID, isDirectory: true),
+            withIntermediateDirectories: false
+        )
         XCTAssertThrowsError(
             try TrustedReleaseVerifier().verify(
                 releaseDirectory: root,

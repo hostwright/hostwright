@@ -569,18 +569,6 @@ public struct TrustedReleaseVerifier: Sendable {
                 throw DistributionError.invalidArtifact("extracted executable signer or hardened-runtime flags differ")
             }
             commands.append(record("inspect extracted Developer ID signature for \(binary.lastPathComponent)", details))
-            let gatekeeper = try runner.run(
-                executablePath: "/usr/sbin/spctl",
-                arguments: ["--assess", "--verbose=4", "--type", "execute", binary.path],
-                label: "assess extracted executable with Gatekeeper",
-                timeoutSeconds: 60,
-                cancellation: cancellation
-            )
-            guard (gatekeeper.standardOutput + gatekeeper.standardError)
-                .contains("source=Notarized Developer ID") else {
-                throw DistributionError.invalidArtifact("Gatekeeper did not accept an extracted executable as notarized")
-            }
-            commands.append(record("assess extracted \(binary.lastPathComponent) with Gatekeeper", gatekeeper))
         }
     }
 

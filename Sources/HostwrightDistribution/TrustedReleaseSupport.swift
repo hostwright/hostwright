@@ -156,6 +156,67 @@ public enum NotarytoolOutputParser {
     }
 }
 
+struct TrustedNotaryTicketExpectation: Equatable, Sendable {
+    let path: String
+    let cdHash: String
+    let architecture: String
+
+    init(path: String, cdHash: String, architecture: String = "arm64") {
+        self.path = path
+        self.cdHash = cdHash.lowercased()
+        self.architecture = architecture
+    }
+}
+
+public enum NotarytoolLogParser {
+    static func requireAcceptedTicketContents(
+        output: String,
+        archiveFileName: String,
+        expectedTickets: [TrustedNotaryTicketExpectation]
+    ) throws {
+        guard let data = output.data(using: .utf8),
+              let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              object["status"] as? String == "Accepted",
+              object["archiveFilename"] as? String == archiveFileName,
+              let ticketContents = object["ticketContents"] as? [[String: Any]] else {
+            throw DistributionError.invalidArtifact("notarytool log did not describe an accepted archive ticket")
+        }
+        guard !expectedTickets.isEmpty,
+              ticketContents.count == expectedTickets.count else {
+            throw DistributionError.invalidArtifact("notarytool archive ticket contents do not match the signed executables")
+        }
+
+        var actualByPath: [String: TrustedNotaryTicketExpectation] = [:]
+        for entry in ticketContents {
+            guard let path = entry["path"] as? String,
+                  let digestAlgorithm = entry["digestAlgorithm"] as? String,
+                  let cdHash = entry["cdhash"] as? String,
+                  let architecture = entry["arch"] as? String,
+                  digestAlgorithm == "SHA-256",
+                  cdHash.range(of: "^[a-f0-9]{40}$", options: .regularExpression) != nil else {
+                throw DistributionError.invalidArtifact("notarytool archive ticket content is malformed")
+            }
+            guard actualByPath[path] == nil else {
+                throw DistributionError.invalidArtifact("notarytool archive ticket contains duplicate executable paths")
+            }
+            actualByPath[path] = TrustedNotaryTicketExpectation(
+                path: path,
+                cdHash: cdHash,
+                architecture: architecture
+            )
+        }
+
+        guard Set(actualByPath.keys) == Set(expectedTickets.map(\.path)) else {
+            throw DistributionError.invalidArtifact("notarytool archive ticket paths do not match the signed executables")
+        }
+        for expected in expectedTickets {
+            guard actualByPath[expected.path] == expected else {
+                throw DistributionError.invalidArtifact("notarytool archive ticket hash or architecture differs for \(expected.path)")
+            }
+        }
+    }
+}
+
 public enum TrustedReleaseSPDXFactory {
     public static func make(
         payloadManifest: DistributionArtifactManifest,

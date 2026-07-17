@@ -47,6 +47,103 @@ final class TrustedReleaseTests: XCTestCase {
         )
     }
 
+    func testNotarytoolLogParserRequiresExactArchiveTicketContents() throws {
+        let archiveName = "hostwright-0.0.2-dev.1-macos-arm64-640e54d43d3f.zip"
+        let hostwrightPath = "\(archiveName)/hostwright-0.0.2-dev.1-macos-arm64-640e54d43d3f/bin/hostwright"
+        let controlPath = "\(archiveName)/hostwright-0.0.2-dev.1-macos-arm64-640e54d43d3f/bin/hostwright-control"
+        let hostwrightHash = String(repeating: "a", count: 40)
+        let controlHash = String(repeating: "b", count: 40)
+        let output = """
+        {
+          "status": "Accepted",
+          "archiveFilename": "\(archiveName)",
+          "ticketContents": [
+            {
+              "path": "\(controlPath)",
+              "digestAlgorithm": "SHA-256",
+              "cdhash": "\(controlHash)",
+              "arch": "arm64"
+            },
+            {
+              "path": "\(hostwrightPath)",
+              "digestAlgorithm": "SHA-256",
+              "cdhash": "\(hostwrightHash)",
+              "arch": "arm64"
+            }
+          ]
+        }
+        """
+
+        XCTAssertNoThrow(try NotarytoolLogParser.requireAcceptedTicketContents(
+            output: output,
+            archiveFileName: archiveName,
+            expectedTickets: [
+                TrustedNotaryTicketExpectation(path: hostwrightPath, cdHash: hostwrightHash),
+                TrustedNotaryTicketExpectation(path: controlPath, cdHash: controlHash)
+            ]
+        ))
+    }
+
+    func testNotarytoolLogParserRejectsIncompleteOrMismatchedArchiveTickets() throws {
+        let archiveName = "hostwright.zip"
+        let executablePath = "hostwright.zip/hostwright/bin/hostwright"
+        let expected = [
+            TrustedNotaryTicketExpectation(path: executablePath, cdHash: String(repeating: "a", count: 40))
+        ]
+        let mismatchedHash = """
+        {
+          "status": "Accepted",
+          "archiveFilename": "\(archiveName)",
+          "ticketContents": [
+            {
+              "path": "\(executablePath)",
+              "digestAlgorithm": "SHA-256",
+              "cdhash": "\(String(repeating: "b", count: 40))",
+              "arch": "arm64"
+            }
+          ]
+        }
+        """
+        XCTAssertThrowsError(try NotarytoolLogParser.requireAcceptedTicketContents(
+            output: mismatchedHash,
+            archiveFileName: archiveName,
+            expectedTickets: expected
+        ))
+
+        let missingTicket = """
+        {
+          "status": "Accepted",
+          "archiveFilename": "\(archiveName)",
+          "ticketContents": []
+        }
+        """
+        XCTAssertThrowsError(try NotarytoolLogParser.requireAcceptedTicketContents(
+            output: missingTicket,
+            archiveFileName: archiveName,
+            expectedTickets: expected
+        ))
+
+        let malformedTicket = """
+        {
+          "status": "Accepted",
+          "archiveFilename": "\(archiveName)",
+          "ticketContents": [
+            {
+              "path": "\(executablePath)",
+              "digestAlgorithm": "SHA-1",
+              "cdhash": "\(String(repeating: "a", count: 40))",
+              "arch": "arm64"
+            }
+          ]
+        }
+        """
+        XCTAssertThrowsError(try NotarytoolLogParser.requireAcceptedTicketContents(
+            output: malformedTicket,
+            archiveFileName: archiveName,
+            expectedTickets: expected
+        ))
+    }
+
     func testTrustedManifestAndProvenanceBindEveryPublishedArtifact() throws {
         let manifest = makeManifest()
         XCTAssertNoThrow(try manifest.validate())

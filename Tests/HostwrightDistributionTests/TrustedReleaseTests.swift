@@ -142,6 +142,32 @@ final class TrustedReleaseTests: XCTestCase {
             archiveFileName: archiveName,
             expectedTickets: expected
         ))
+
+        let duplicateTicket = """
+        {
+          "status": "Accepted",
+          "archiveFilename": "\(archiveName)",
+          "ticketContents": [
+            {
+              "path": "\(executablePath)",
+              "digestAlgorithm": "SHA-256",
+              "cdhash": "\(String(repeating: "a", count: 40))",
+              "arch": "arm64"
+            },
+            {
+              "path": "\(executablePath)",
+              "digestAlgorithm": "SHA-256",
+              "cdhash": "\(String(repeating: "a", count: 40))",
+              "arch": "arm64"
+            }
+          ]
+        }
+        """
+        XCTAssertThrowsError(try NotarytoolLogParser.requireAcceptedTicketContents(
+            output: duplicateTicket,
+            archiveFileName: archiveName,
+            expectedTickets: expected
+        ))
     }
 
     func testTrustedManifestAndProvenanceBindEveryPublishedArtifact() throws {

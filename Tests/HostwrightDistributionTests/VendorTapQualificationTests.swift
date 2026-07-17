@@ -36,13 +36,13 @@ final class VendorTapQualificationTests: XCTestCase {
     func testReleaseWorkflowLocksTheTwoImmutableQualificationBuilds() throws {
         let workflow = try read(".github/workflows/trusted-release.yml")
 
-        XCTAssertTrue(workflow.contains("default: 0.0.2-dev.1"))
-        XCTAssertTrue(workflow.contains("default: v0.0.2-dev.1"))
-        XCTAssertTrue(workflow.contains(#"^0\.0\.2-dev\.[12]$"#))
+        XCTAssertTrue(workflow.contains("default: 0.0.2-dev.3"))
+        XCTAssertTrue(workflow.contains("default: v0.0.2-dev.3"))
+        XCTAssertTrue(workflow.contains(#"^0\.0\.2-dev\.[34]$"#))
         XCTAssertTrue(workflow.contains("github.ref == 'refs/heads/main'"))
         XCTAssertTrue(workflow.contains("name: Validate reviewed release inputs"))
         XCTAssertTrue(workflow.contains("needs: validate"))
-        XCTAssertTrue(workflow.contains("refs/tags/v0.0.2-dev.1^{}"))
+        XCTAssertTrue(workflow.contains("refs/tags/v0.0.2-dev.3^{}"))
         XCTAssertTrue(workflow.contains("git merge-base --is-ancestor \"$baseline_commit\" \"$RELEASE_COMMIT\""))
         XCTAssertTrue(workflow.contains("swift run hostwright --version"))
         XCTAssertTrue(workflow.contains("contracts/v0.0.2/versions.json"))
@@ -65,8 +65,8 @@ final class VendorTapQualificationTests: XCTestCase {
         XCTAssertFalse(workflow.contains("contents: write"))
 
         for fragment in [
-            "0.0.2-dev.1",
-            "0.0.2-dev.2",
+            "0.0.2-dev.3",
+            "0.0.2-dev.4",
             "reboot-required",
             "A real reboot has not occurred",
             "brew upgrade \"$formula_reference\"",
@@ -83,12 +83,12 @@ final class VendorTapQualificationTests: XCTestCase {
             "ensure_tap_checkout absent",
             "ensure_tap_checkout present",
             "qualify_package_lifecycle",
-            "install-dev1",
-            "repair-dev1",
-            "upgrade-dev2",
-            "rollback-dev1",
-            "repair-after-rollback-dev1",
-            "upgrade-again-dev2",
+            "install-dev3",
+            "repair-dev3",
+            "upgrade-dev4",
+            "rollback-dev3",
+            "repair-after-rollback-dev3",
+            "upgrade-again-dev4",
             "package-downgrade-refusal-passed",
             "package_downgrade_refusal",
             "package-remove-plan-refusal",

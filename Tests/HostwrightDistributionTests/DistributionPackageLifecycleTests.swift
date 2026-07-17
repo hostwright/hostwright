@@ -5,15 +5,15 @@ import XCTest
 final class DistributionPackageLifecycleTests: XCTestCase {
     func testQualificationVersionsMapMonotonicallyToApplePackageVersions() throws {
         XCTAssertEqual(
-            try DistributionPackageVersion.make(from: "0.0.2-dev.1"),
-            "0.0.2.1"
+            try DistributionPackageVersion.make(from: "0.0.2-dev.3"),
+            "0.0.2.3"
         )
         XCTAssertEqual(
-            try DistributionPackageVersion.make(from: "0.0.2-dev.2"),
-            "0.0.2.2"
+            try DistributionPackageVersion.make(from: "0.0.2-dev.4"),
+            "0.0.2.4"
         )
         XCTAssertEqual(
-            DistributionPackageVersion.compare("0.0.2.1", "0.0.2.2"),
+            DistributionPackageVersion.compare("0.0.2.3", "0.0.2.4"),
             .orderedAscending
         )
         XCTAssertThrowsError(

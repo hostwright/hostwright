@@ -221,6 +221,7 @@ public struct TrustedReleaseBuilder: Sendable {
             )
         }
 
+        var signedBinaryCDHashes: [String: String] = [:]
         for binaryPath in shippedBinaryPaths {
             let binary = signedRoot.appendingPathComponent(binaryPath)
             let sign = try runner.run(
@@ -243,6 +244,15 @@ public struct TrustedReleaseBuilder: Sendable {
                 cancellation: cancellation
             )
             commands.append(record("verify Developer ID signature for \(binary.lastPathComponent)", verify))
+            let details = try runner.run(
+                executablePath: "/usr/bin/codesign",
+                arguments: ["--display", "--verbose=4", binary.path],
+                label: "inspect Developer ID signature for \(binary.lastPathComponent)",
+                timeoutSeconds: 30,
+                cancellation: cancellation
+            )
+            signedBinaryCDHashes[binaryPath] = try requireSignedExecutableCDHash(details)
+            commands.append(record("inspect Developer ID signature for \(binary.lastPathComponent)", details))
         }
 
         let createdAt = DistributionTimestamp.string(Date())
@@ -287,6 +297,7 @@ public struct TrustedReleaseBuilder: Sendable {
         )
         commands.append(record("create exact signed ZIP archive", archiveResult))
         try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: archiveURL.path)
+        let archiveDescriptor = try descriptor(archiveURL, cancellation: cancellation)
         let archiveNotaryResult = try notarize(
             archiveURL,
             profile: request.notaryKeychainProfile,
@@ -294,18 +305,28 @@ public struct TrustedReleaseBuilder: Sendable {
             cancellation: cancellation,
             commands: &commands
         )
-        let archiveGatekeeperSource = try assessArchiveBinaries(
-            signedRoot,
+        let acceptedArchiveNotarization = try NotarytoolOutputParser.acceptedRecord(
+            output: archiveNotaryResult.standardOutput,
+            artifactFileName: archiveDescriptor.fileName,
+            attachment: .online
+        )
+        let archiveGatekeeperSource = try verifyArchiveNotaryTicketContents(
+            submissionID: acceptedArchiveNotarization.submissionID,
+            profile: request.notaryKeychainProfile,
+            archiveFileName: archiveDescriptor.fileName,
+            artifactID: artifactID,
+            signedBinaryCDHashes: signedBinaryCDHashes,
             cancellation: cancellation,
             commands: &commands
         )
-        let archiveDescriptor = try descriptor(archiveURL, cancellation: cancellation)
-        let archiveNotarization = try NotarytoolOutputParser.acceptedRecord(
-            output: archiveNotaryResult.standardOutput,
-            artifactFileName: archiveDescriptor.fileName,
-            attachment: .online,
+        let archiveNotarization = TrustedNotarizationRecord(
+            artifactFileName: acceptedArchiveNotarization.artifactFileName,
+            submissionID: acceptedArchiveNotarization.submissionID,
+            status: acceptedArchiveNotarization.status,
+            ticketAttachment: acceptedArchiveNotarization.ticketAttachment,
             gatekeeperSource: archiveGatekeeperSource
         )
+        try archiveNotarization.validate(expectedFileName: archiveDescriptor.fileName, expectedAttachment: .online)
 
         let packageRoot = scratch.appendingPathComponent("hostwright-dist-release-package-root", isDirectory: true)
         try DistributionFileSystem.createExclusiveDirectory(packageRoot)
@@ -617,16 +638,16 @@ public struct TrustedReleaseBuilder: Sendable {
             ("source-reproducibility", "Two isolated clean builds produced byte-identical shipped payloads."),
             ("developer-id-application-signing", "All shipped Mach-O executables use hardened-runtime Developer ID signatures."),
             ("archive", "Created one exact signed ZIP archive with a manifest-bound payload."),
-            ("archive-notarization", "Apple accepted the exact signed ZIP; its nested executable tickets are available online."),
+            ("archive-notarization", "Apple accepted the exact signed ZIP and published matching tickets for every signed executable."),
             ("installer-package", "Built a flat package signed by the exact Developer ID Installer identity."),
             ("package-notarization", "Apple accepted the exact signed installer package."),
             ("package-stapling", "Stapled and independently validated the package ticket for offline Gatekeeper use."),
-            ("gatekeeper", "Gatekeeper accepted the archive executables and package as Notarized Developer ID software."),
+            ("gatekeeper", "Gatekeeper accepted the signed package as Notarized Developer ID software."),
             ("sbom", "Generated and validated separate SPDX 2.3 inventories for archive and package."),
             ("provenance", "Generated source- and digest-bound in-toto/SLSA-shaped release provenance."),
             ("checksums", "Generated an exact sorted SHA-256 inventory for every release artifact and unsigned sidecar."),
             ("detached-signatures", "Developer ID CMS signatures cover checksums, release manifest, provenance, and release evidence."),
-            ("independent-verification", "A fresh extraction verified paths, payload bytes, signatures, tickets, SBOMs, provenance, and checksums.")
+            ("independent-verification", "A fresh extraction verified paths, payload bytes, signatures, package ticket, SBOMs, provenance, and checksums.")
         ].map { DistributionStageRecord(identifier: $0.0, status: .passed, detail: $0.1) }
     }
 
@@ -658,24 +679,51 @@ public struct TrustedReleaseBuilder: Sendable {
         return result
     }
 
-    private func assessArchiveBinaries(
-        _ signedRoot: URL,
+    private func verifyArchiveNotaryTicketContents(
+        submissionID: String,
+        profile: String,
+        archiveFileName: String,
+        artifactID: String,
+        signedBinaryCDHashes: [String: String],
         cancellation: SecureSubprocessCancellation,
         commands: inout [HostwrightEvidenceCommand]
     ) throws -> String {
-        for binaryPath in shippedBinaryPaths {
-            let binary = signedRoot.appendingPathComponent(binaryPath)
-            let result = try runner.run(
-                executablePath: "/usr/sbin/spctl",
-                arguments: ["--assess", "--verbose=4", "--type", "execute", binary.path],
-                label: "assess notarized \(binary.lastPathComponent)",
-                timeoutSeconds: 60,
-                cancellation: cancellation
+        let expectedTickets = try shippedBinaryPaths.map { binaryPath in
+            guard let cdHash = signedBinaryCDHashes[binaryPath] else {
+                throw DistributionError.invalidArtifact("signed executable CDHash is missing for \(binaryPath)")
+            }
+            return TrustedNotaryTicketExpectation(
+                path: "\(archiveFileName)/\(artifactID)/\(binaryPath)",
+                cdHash: cdHash
             )
-            _ = try requireNotarizedGatekeeperSource(result)
-            commands.append(record("assess notarized \(binary.lastPathComponent)", result))
         }
+        let result = try runner.run(
+            executablePath: "/usr/bin/xcrun",
+            arguments: ["notarytool", "log", submissionID, "--keychain-profile", profile],
+            label: "verify archive notary ticket contents",
+            timeoutSeconds: 300,
+            cancellation: cancellation
+        )
+        try NotarytoolLogParser.requireAcceptedTicketContents(
+            output: result.standardOutput,
+            archiveFileName: archiveFileName,
+            expectedTickets: expectedTickets
+        )
+        commands.append(record("verify archive notary ticket contents", result))
         return "Notarized Developer ID"
+    }
+
+    private func requireSignedExecutableCDHash(_ result: DistributionCommandResult) throws -> String {
+        let output = result.standardOutput + result.standardError
+        for line in output.split(separator: "\n") {
+            guard line.hasPrefix("CDHash=") else { continue }
+            let cdHash = String(line.dropFirst("CDHash=".count)).lowercased()
+            guard cdHash.range(of: "^[a-f0-9]{40}$", options: .regularExpression) != nil else {
+                break
+            }
+            return cdHash
+        }
+        throw DistributionError.invalidArtifact("Developer ID signature details did not expose a stable CDHash")
     }
 
     private func requireNotarizedGatekeeperSource(_ result: DistributionCommandResult) throws -> String {

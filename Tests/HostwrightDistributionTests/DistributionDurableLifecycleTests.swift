@@ -125,21 +125,26 @@ final class DistributionDurableLifecycleTests: XCTestCase {
 
     func testPackageUninstallPersistsReceiptCleanupAndRecoverRetriesExactly() throws {
         try withTemporaryRoot { root in
-            let artifact = try makeVerifiedArtifact(
+            let baseline = try makeVerifiedArtifact(
                 root: root,
-                name: "package-uninstall",
-                version: "0.0.2-dev.2",
+                name: "package-baseline",
+                version: "0.0.2-dev.3",
+                commit: baselineCommit
+            )
+            let candidate = try makeVerifiedArtifact(
+                root: root,
+                name: "package-candidate",
+                version: "0.0.2-dev.4",
                 commit: candidateCommit
             )
             let prefix = root.appendingPathComponent("package-uninstall-prefix", isDirectory: true)
             try FileManager.default.createDirectory(at: prefix, withIntermediateDirectories: false)
             let staging = root.appendingPathComponent("InstallerPayload", isDirectory: true)
-            try makePackageStaging(artifact: artifact, at: staging)
+            try makePackageStaging(artifact: baseline, at: staging)
 
             let receiptMarker = root.appendingPathComponent("receipt-present")
             let failForgetMarker = root.appendingPathComponent("fail-forget")
             let blockReceiptMarker = root.appendingPathComponent("block-receipt")
-            try Data().write(to: receiptMarker, options: .withoutOverwriting)
             try Data().write(to: failForgetMarker, options: .withoutOverwriting)
             let pkgutil = root.appendingPathComponent("pkgutil-fixture")
             let pkgutilSource = root.appendingPathComponent("pkgutil-fixture.swift")
@@ -158,7 +163,9 @@ final class DistributionDurableLifecycleTests: XCTestCase {
                     print("dev.hostwright.cli")
                 }
             case "--pkg-info-plist":
-                print("<?xml version=\\\"1.0\\\" encoding=\\\"UTF-8\\\"?><plist version=\\\"1.0\\\"><dict><key>pkgid</key><string>dev.hostwright.cli</string><key>pkg-version</key><string>0.0.2.2</string><key>install-location</key><string>/</string><key>volume</key><string>/</string></dict></plist>")
+                let version = try String(contentsOfFile: receipt, encoding: .utf8)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                print("<?xml version=\\\"1.0\\\" encoding=\\\"UTF-8\\\"?><plist version=\\\"1.0\\\"><dict><key>pkgid</key><string>dev.hostwright.cli</string><key>pkg-version</key><string>\\(version)</string><key>install-location</key><string>/</string><key>volume</key><string>/</string></dict></plist>")
             case "--forget":
                 if FileManager.default.fileExists(atPath: failForget) {
                     exit(1)
@@ -199,7 +206,7 @@ final class DistributionDurableLifecycleTests: XCTestCase {
                     stagedRoot: staging,
                     prefix: prefix,
                     packageIdentifier: DistributionLayout.packageIdentifier,
-                    packageVersion: "0.0.2.2",
+                    packageVersion: "0.0.2.3",
                     teamIdentifier: "TOO-SHORT"
                 )
             ) { error in
@@ -215,7 +222,7 @@ final class DistributionDurableLifecycleTests: XCTestCase {
                     stagedRoot: staging,
                     prefix: prefix,
                     packageIdentifier: DistributionLayout.packageIdentifier,
-                    packageVersion: "0.0.2.2",
+                    packageVersion: "0.0.2.3",
                     teamIdentifier: "OTHERTEAM1"
                 )
             ) { error in
@@ -227,17 +234,126 @@ final class DistributionDurableLifecycleTests: XCTestCase {
                 )
             }
             XCTAssertEqual(try lifecycle.inspect(prefix: prefix).readiness, .notInstalled)
+            try Data("0.0.2.3\n".utf8).write(
+                to: receiptMarker,
+                options: .withoutOverwriting
+            )
+            XCTAssertThrowsError(
+                try packageLifecycle.apply(
+                    stagedRoot: staging,
+                    prefix: prefix,
+                    packageIdentifier: DistributionLayout.packageIdentifier,
+                    packageVersion: "0.0.2.3",
+                    teamIdentifier: "TESTTEAM01"
+                )
+            ) { error in
+                XCTAssertEqual(
+                    error as? DistributionError,
+                    .installOwnershipMismatch("package receipt")
+                )
+            }
+            try FileManager.default.removeItem(at: receiptMarker)
+            XCTAssertEqual(try lifecycle.inspect(prefix: prefix).readiness, .notInstalled)
+
             let applied = try packageLifecycle.apply(
                 stagedRoot: staging,
                 prefix: prefix,
                 packageIdentifier: DistributionLayout.packageIdentifier,
-                packageVersion: "0.0.2.2",
+                packageVersion: "0.0.2.3",
                 teamIdentifier: "TESTTEAM01"
             )
             XCTAssertEqual(applied.operation, .install)
             XCTAssertEqual(applied.signerTeamIdentifier, "TESTTEAM01")
-            XCTAssertEqual(applied.status.packageVersion, "0.0.2.2")
+            XCTAssertEqual(applied.status.packageVersion, "0.0.2.3")
             XCTAssertNil(applied.status.stateDatabasePath)
+            XCTAssertThrowsError(try lifecycle.inspect(prefix: prefix)) { error in
+                XCTAssertEqual(
+                    error as? DistributionError,
+                    .installOwnershipMismatch("package receipt")
+                )
+            }
+            let retried = try packageLifecycle.apply(
+                stagedRoot: staging,
+                prefix: prefix,
+                packageIdentifier: DistributionLayout.packageIdentifier,
+                packageVersion: "0.0.2.3",
+                teamIdentifier: "TESTTEAM01"
+            )
+            XCTAssertEqual(retried.operation, .repair)
+            try Data("0.0.2.1\n".utf8).write(
+                to: receiptMarker,
+                options: .withoutOverwriting
+            )
+            XCTAssertThrowsError(try lifecycle.inspect(prefix: prefix)) { error in
+                XCTAssertEqual(
+                    error as? DistributionError,
+                    .installOwnershipMismatch("package receipt")
+                )
+            }
+            try Data("0.0.2.3\n".utf8).write(to: receiptMarker, options: .atomic)
+
+            let baselineInspection = try lifecycle.inspect(prefix: prefix)
+            let baselinePrefix = try regularFileTreeContents(in: prefix)
+            try FileManager.default.removeItem(at: staging)
+            try makePackageStaging(artifact: candidate, at: staging)
+
+            try FileManager.default.removeItem(at: receiptMarker)
+            XCTAssertThrowsError(
+                try packageLifecycle.apply(
+                    stagedRoot: staging,
+                    prefix: prefix,
+                    packageIdentifier: DistributionLayout.packageIdentifier,
+                    packageVersion: "0.0.2.4",
+                    teamIdentifier: "TESTTEAM01"
+                )
+            ) { error in
+                XCTAssertEqual(
+                    error as? DistributionError,
+                    .installOwnershipMismatch("package receipt")
+                )
+            }
+            try Data("0.0.2.3\n".utf8).write(
+                to: receiptMarker,
+                options: .withoutOverwriting
+            )
+            XCTAssertEqual(try lifecycle.inspect(prefix: prefix), baselineInspection)
+            XCTAssertEqual(try regularFileTreeContents(in: prefix), baselinePrefix)
+
+            try Data("0.0.2.2\n".utf8).write(to: receiptMarker, options: .atomic)
+            XCTAssertThrowsError(
+                try packageLifecycle.apply(
+                    stagedRoot: staging,
+                    prefix: prefix,
+                    packageIdentifier: DistributionLayout.packageIdentifier,
+                    packageVersion: "0.0.2.4",
+                    teamIdentifier: "TESTTEAM01"
+                )
+            ) { error in
+                XCTAssertEqual(
+                    error as? DistributionError,
+                    .installOwnershipMismatch("package receipt")
+                )
+            }
+            try Data("0.0.2.3\n".utf8).write(to: receiptMarker, options: .atomic)
+            XCTAssertEqual(try lifecycle.inspect(prefix: prefix), baselineInspection)
+            XCTAssertEqual(try regularFileTreeContents(in: prefix), baselinePrefix)
+
+            let upgraded = try packageLifecycle.apply(
+                stagedRoot: staging,
+                prefix: prefix,
+                packageIdentifier: DistributionLayout.packageIdentifier,
+                packageVersion: "0.0.2.4",
+                teamIdentifier: "TESTTEAM01"
+            )
+            XCTAssertEqual(upgraded.operation, .upgrade)
+            XCTAssertEqual(upgraded.status.packageVersion, "0.0.2.4")
+            XCTAssertThrowsError(try lifecycle.inspect(prefix: prefix)) { error in
+                XCTAssertEqual(
+                    error as? DistributionError,
+                    .installOwnershipMismatch("package receipt")
+                )
+            }
+            try Data("0.0.2.4\n".utf8).write(to: receiptMarker, options: .atomic)
 
             let inspectionBeforeRemoveRefusal = try lifecycle.inspect(prefix: prefix)
             let prefixBeforeRemoveRefusal = try regularFileTreeContents(in: prefix)

@@ -289,16 +289,18 @@ public struct DistributionPackageLifecycle: Sendable {
         try requireElevatedAuthority()
         try requireExactLocations(stagedRoot: stagedRoot, prefix: prefix)
         guard packageIdentifier == DistributionLayout.packageIdentifier,
-              DistributionPackageVersion.isValid(packageVersion),
-              let receipt = try receiptController.receipt(
-                identifier: packageIdentifier,
-                cancellation: cancellation
-              ),
-              receipt.version == packageVersion else {
+              DistributionPackageVersion.isValid(packageVersion) else {
             throw DistributionError.invalidArtifact(
-                "package-apply requires the exact installed Hostwright package receipt"
+                "package-apply requires the exact Hostwright package identity"
             )
         }
+        let receipt = DistributionPackageReceipt(
+            identifier: packageIdentifier,
+            version: packageVersion,
+            installLocation: "/",
+            volume: "/"
+        )
+        try receipt.validate()
         let verified = try verifyStagedPayload(
             stagedRoot,
             receipt: receipt,
@@ -309,9 +311,17 @@ public struct DistributionPackageLifecycle: Sendable {
                 "staged executable signer team does not match the package trust policy"
             )
         }
+        let inspection = try lifecycle.inspectForPackageApply(prefix: prefix)
         let operation = try requiredOperation(
-            prefix: prefix,
+            inspection: inspection,
             manifest: verified.manifest
+        )
+        try requireValidPriorReceipt(
+            inspection: inspection,
+            operation: operation,
+            candidateManifest: verified.manifest,
+            targetReceipt: receipt,
+            cancellation: cancellation
         )
         let origin = DistributionPackageOrigin(
             packageIdentifier: receipt.identifier,
@@ -384,10 +394,9 @@ public struct DistributionPackageLifecycle: Sendable {
     }
 
     private func requiredOperation(
-        prefix: URL,
+        inspection: DistributionLifecycleInspection,
         manifest: DistributionArtifactManifest
     ) throws -> DistributionLifecycleOperation {
-        let inspection = try lifecycle.inspect(prefix: prefix)
         switch inspection.readiness {
         case .notInstalled:
             return .install
@@ -408,6 +417,47 @@ public struct DistributionPackageLifecycle: Sendable {
             case .upgrade: .upgrade
             case .repair: .repair
             }
+        }
+    }
+
+    private func requireValidPriorReceipt(
+        inspection: DistributionLifecycleInspection,
+        operation: DistributionLifecycleOperation,
+        candidateManifest: DistributionArtifactManifest,
+        targetReceipt: DistributionPackageReceipt,
+        cancellation: SecureSubprocessCancellation
+    ) throws {
+        let observed = try receiptController.receipt(
+            identifier: targetReceipt.identifier,
+            cancellation: cancellation
+        )
+        guard let status = inspection.status else {
+            guard observed == nil else {
+                throw DistributionError.installOwnershipMismatch("package receipt")
+            }
+            return
+        }
+        guard let origin = status.packageOrigin else {
+            guard observed == nil else {
+                throw DistributionError.installOwnershipMismatch("package receipt")
+            }
+            return
+        }
+        if observed?.identifier == origin.packageIdentifier,
+           observed?.version == origin.mostRecentPackageReceiptVersion {
+            return
+        }
+        let candidateInstallManifest = DistributionInstallManifest(
+            artifact: candidateManifest,
+            createdDirectories: status.installedManifest.createdDirectories
+        )
+        guard operation == .repair,
+              status.installedManifest == candidateInstallManifest,
+              !origin.pendingReceiptCleanup,
+              origin.packageIdentifier == targetReceipt.identifier,
+              origin.packageVersion == targetReceipt.version,
+              origin.mostRecentPackageReceiptVersion == targetReceipt.version else {
+            throw DistributionError.installOwnershipMismatch("package receipt")
         }
     }
 

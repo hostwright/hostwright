@@ -664,6 +664,17 @@ public struct DistributionInstalledLifecycle: Sendable {
     }
 
     public func inspect(prefix: URL) throws -> DistributionLifecycleInspection {
+        try inspect(prefix: prefix, verifyPackageReceipt: true)
+    }
+
+    func inspectForPackageApply(prefix: URL) throws -> DistributionLifecycleInspection {
+        try inspect(prefix: prefix, verifyPackageReceipt: false)
+    }
+
+    private func inspect(
+        prefix: URL,
+        verifyPackageReceipt: Bool
+    ) throws -> DistributionLifecycleInspection {
         try validatePrefix(prefix)
         let root = lifecycleRoot(prefix)
         guard DistributionFileSystem.entryExists(root) else {
@@ -717,6 +728,16 @@ public struct DistributionInstalledLifecycle: Sendable {
             throw DistributionError.lifecycleFailed(
                 "installed manifest does not match lifecycle status"
             )
+        }
+        if verifyPackageReceipt, let origin = status.packageOrigin {
+            let receipt = try packageReceiptController.receipt(
+                identifier: origin.packageIdentifier,
+                cancellation: SecureSubprocessCancellation()
+            )
+            guard receipt?.identifier == origin.packageIdentifier,
+                  receipt?.version == origin.mostRecentPackageReceiptVersion else {
+                throw DistributionError.installOwnershipMismatch("package receipt")
+            }
         }
         return DistributionLifecycleInspection(readiness: .ready, status: status, pendingOperation: nil)
     }

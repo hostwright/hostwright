@@ -5,15 +5,15 @@ import XCTest
 final class DistributionPackageLifecycleTests: XCTestCase {
     func testQualificationVersionsMapMonotonicallyToApplePackageVersions() throws {
         XCTAssertEqual(
-            try DistributionPackageVersion.make(from: "0.0.2-dev.5"),
-            "0.0.2.5"
+            try DistributionPackageVersion.make(from: "0.0.2-dev.7"),
+            "0.0.2.7"
         )
         XCTAssertEqual(
-            try DistributionPackageVersion.make(from: "0.0.2-dev.6"),
-            "0.0.2.6"
+            try DistributionPackageVersion.make(from: "0.0.2-dev.8"),
+            "0.0.2.8"
         )
         XCTAssertEqual(
-            DistributionPackageVersion.compare("0.0.2.5", "0.0.2.6"),
+            DistributionPackageVersion.compare("0.0.2.7", "0.0.2.8"),
             .orderedAscending
         )
         XCTAssertThrowsError(
@@ -44,6 +44,23 @@ final class DistributionPackageLifecycleTests: XCTestCase {
             )
         )
 
+        var appleRootReceipt = receipt
+        appleRootReceipt["install-location"] = ""
+        let appleRootData = try PropertyListSerialization.data(
+            fromPropertyList: appleRootReceipt,
+            format: .xml,
+            options: 0
+        )
+        XCTAssertEqual(
+            try DistributionPackageReceiptParser.parse(appleRootData),
+            DistributionPackageReceipt(
+                identifier: DistributionLayout.packageIdentifier,
+                version: "0.0.2.2",
+                installLocation: "/",
+                volume: "/"
+            )
+        )
+
         for (key, value) in [
             ("pkgid", "dev.attacker.hostwright"),
             ("pkg-version", "0.0.2-dev.2"),
@@ -62,6 +79,23 @@ final class DistributionPackageLifecycleTests: XCTestCase {
                 "tampered receipt field \(key) must be rejected"
             )
         }
+
+        appleRootReceipt["volume"] = "/Volumes/Other"
+        let nonRootVolumeData = try PropertyListSerialization.data(
+            fromPropertyList: appleRootReceipt,
+            format: .xml,
+            options: 0
+        )
+        XCTAssertThrowsError(try DistributionPackageReceiptParser.parse(nonRootVolumeData))
+
+        appleRootReceipt["install-location"] = " "
+        appleRootReceipt["volume"] = "/"
+        let whitespaceLocationData = try PropertyListSerialization.data(
+            fromPropertyList: appleRootReceipt,
+            format: .xml,
+            options: 0
+        )
+        XCTAssertThrowsError(try DistributionPackageReceiptParser.parse(whitespaceLocationData))
     }
 
     func testPackageOriginIsAdditiveAndBindsCurrentPayloadToNewestReceipt() throws {

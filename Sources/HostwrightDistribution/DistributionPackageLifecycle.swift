@@ -104,10 +104,13 @@ public enum DistributionPackageReceiptParser {
               ) as? [String: Any],
               let identifier = object["pkgid"] as? String,
               let version = object["pkg-version"] as? String,
-              let installLocation = object["install-location"] as? String,
+              let rawInstallLocation = object["install-location"] as? String,
               let volume = object["volume"] as? String else {
             throw DistributionError.invalidArtifact("Apple Installer receipt plist is malformed")
         }
+        let installLocation = rawInstallLocation.isEmpty && volume == "/"
+            ? "/"
+            : rawInstallLocation
         let receipt = DistributionPackageReceipt(
             identifier: identifier,
             version: version,

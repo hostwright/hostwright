@@ -466,6 +466,7 @@ def state_command(args: argparse.Namespace) -> int:
             ("0.0.2-dev.1", "0.0.2-dev.2"),
             ("0.0.2-dev.3", "0.0.2-dev.4"),
             ("0.0.2-dev.5", "0.0.2-dev.6"),
+            ("0.0.2-dev.7", "0.0.2-dev.8"),
         }
         recorder.assertion(
             "earlier contract and candidate versions match a Phase 02 transition",

@@ -6,7 +6,7 @@ final class ContractVersionsTests: XCTestCase {
     func testReleaseAndBreakingContractVersionsHaveOneAuthority() {
         XCTAssertNotNil(
             HostwrightIdentity.version.range(
-                of: #"^0\.0\.2-dev\.[56]$"#,
+                of: #"^0\.0\.2-dev\.[78]$"#,
                 options: .regularExpression
             )
         )

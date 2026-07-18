@@ -25,7 +25,29 @@ final class DistributionDurableLifecycleTests: XCTestCase {
             )
             let prefix = root.appendingPathComponent("package-prefix", isDirectory: true)
             try FileManager.default.createDirectory(at: prefix, withIntermediateDirectories: false)
-            let lifecycle = DistributionInstalledLifecycle()
+            let receiptFixture = try makePackageReceiptFixture(root: root)
+            let lifecycle = DistributionInstalledLifecycle(
+                packageReceiptController: receiptFixture.controller
+            )
+            let packageLifecycle = DistributionPackageLifecycle(
+                receiptController: receiptFixture.controller,
+                lifecycle: lifecycle,
+                expectedPrefix: prefix,
+                expectedStagingRoot: root.appendingPathComponent("unused-package-staging"),
+                expectedOwnerUID: geteuid(),
+                effectiveUserID: 0,
+                verifyExecutableSignatures: false
+            )
+            let baselineCandidateManifest = try writePackageCandidateManifest(
+                baseline.manifest,
+                name: "baseline-candidate",
+                root: root
+            )
+            let candidateManifest = try writePackageCandidateManifest(
+                candidate.manifest,
+                name: "upgrade-candidate",
+                root: root
+            )
             let baselineOrigin = DistributionPackageOrigin(
                 packageIdentifier: DistributionLayout.packageIdentifier,
                 packageVersion: "0.0.2.1",
@@ -37,6 +59,17 @@ final class DistributionDurableLifecycleTests: XCTestCase {
                 mostRecentPackageReceiptVersion: "0.0.2.2"
             )
 
+            XCTAssertEqual(
+                try packageLifecycle.preflight(
+                    candidateManifest: baselineCandidateManifest,
+                    prefix: prefix,
+                    packageIdentifier: DistributionLayout.packageIdentifier,
+                    packageVersion: "0.0.2.1"
+                ).operation,
+                .install
+            )
+            XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: prefix.path).isEmpty)
+
             let installed = try lifecycle.installPackage(
                 manifest: baseline.manifest,
                 sourceRoot: baseline.extractedRoot,
@@ -46,6 +79,55 @@ final class DistributionDurableLifecycleTests: XCTestCase {
                 cancellation: SecureSubprocessCancellation()
             )
             XCTAssertEqual(installed.packageOrigin, baselineOrigin)
+            try Data("0.0.2.1\n".utf8).write(
+                to: receiptFixture.marker,
+                options: .withoutOverwriting
+            )
+            XCTAssertEqual(
+                try packageLifecycle.preflight(
+                    candidateManifest: baselineCandidateManifest,
+                    prefix: prefix,
+                    packageIdentifier: DistributionLayout.packageIdentifier,
+                    packageVersion: "0.0.2.1"
+                ).operation,
+                .repair
+            )
+            XCTAssertEqual(
+                try packageLifecycle.preflight(
+                    candidateManifest: candidateManifest,
+                    prefix: prefix,
+                    packageIdentifier: DistributionLayout.packageIdentifier,
+                    packageVersion: "0.0.2.2"
+                ).operation,
+                .upgrade
+            )
+
+            let differentCommitManifest = DistributionArtifactManifest(
+                artifactID: "hostwright-0.0.2-dev.1-macos-arm64-\(candidateCommit.prefix(12))",
+                packageVersion: "0.0.2-dev.1",
+                sourceCommit: candidateCommit,
+                sourceDirty: false,
+                architecture: "arm64",
+                createdAt: baseline.manifest.createdAt,
+                files: baseline.manifest.files
+            )
+            let differentCommitCandidate = try writePackageCandidateManifest(
+                differentCommitManifest,
+                name: "same-version-different-commit",
+                root: root
+            )
+            XCTAssertThrowsError(
+                try packageLifecycle.preflight(
+                    candidateManifest: differentCommitCandidate,
+                    prefix: prefix,
+                    packageIdentifier: DistributionLayout.packageIdentifier,
+                    packageVersion: "0.0.2.1"
+                )
+            ) { error in
+                guard case DistributionError.versionConflict = error else {
+                    return XCTFail("expected same-version source conflict, received \(error)")
+                }
+            }
 
             let repaired = try lifecycle.install(
                 artifact: baseline,
@@ -79,6 +161,30 @@ final class DistributionDurableLifecycleTests: XCTestCase {
             )
             XCTAssertEqual(upgraded.generation, 3)
             XCTAssertEqual(upgraded.packageOrigin, candidateOrigin)
+            try Data("0.0.2.2\n".utf8).write(to: receiptFixture.marker, options: .atomic)
+
+            let beforeDowngradeRefusal = try regularFileTreeContents(in: prefix)
+            XCTAssertThrowsError(
+                try packageLifecycle.preflight(
+                    candidateManifest: baselineCandidateManifest,
+                    prefix: prefix,
+                    packageIdentifier: DistributionLayout.packageIdentifier,
+                    packageVersion: "0.0.2.1"
+                )
+            ) { error in
+                XCTAssertEqual(
+                    error as? DistributionError,
+                    .downgradeRefused(
+                        installed: "0.0.2-dev.2",
+                        candidate: "0.0.2-dev.1"
+                    )
+                )
+            }
+            XCTAssertEqual(try regularFileTreeContents(in: prefix), beforeDowngradeRefusal)
+            XCTAssertEqual(
+                try String(contentsOf: receiptFixture.marker, encoding: .utf8),
+                "0.0.2.2\n"
+            )
 
             let rolledBack = try {
                 let previousMask = umask(0o077)
@@ -93,6 +199,71 @@ final class DistributionDurableLifecycleTests: XCTestCase {
                     of: prefix.appendingPathComponent(DistributionLayout.installManifestFileName)
                 ),
                 0o644
+            )
+            XCTAssertEqual(
+                try packageLifecycle.preflight(
+                    candidateManifest: baselineCandidateManifest,
+                    prefix: prefix,
+                    packageIdentifier: DistributionLayout.packageIdentifier,
+                    packageVersion: "0.0.2.1"
+                ).operation,
+                .repair
+            )
+
+            let beforeReceiptRefusal = try regularFileTreeContents(in: prefix)
+            try Data("0.0.2.7\n".utf8).write(to: receiptFixture.marker, options: .atomic)
+            XCTAssertThrowsError(
+                try packageLifecycle.preflight(
+                    candidateManifest: baselineCandidateManifest,
+                    prefix: prefix,
+                    packageIdentifier: DistributionLayout.packageIdentifier,
+                    packageVersion: "0.0.2.1"
+                )
+            ) { error in
+                XCTAssertEqual(
+                    error as? DistributionError,
+                    .installOwnershipMismatch("package receipt")
+                )
+            }
+            XCTAssertEqual(try regularFileTreeContents(in: prefix), beforeReceiptRefusal)
+            try Data("0.0.2.2\n".utf8).write(to: receiptFixture.marker, options: .atomic)
+
+            XCTAssertThrowsError(
+                try DistributionInstalledLifecycle(
+                    packageReceiptController: receiptFixture.controller,
+                    interruptAfter: .intentRecorded
+                ).install(
+                    artifact: baseline,
+                    prefix: prefix,
+                    requiredOperation: .repair
+                )
+            ) { error in
+                XCTAssertEqual(
+                    error as? DistributionLifecycleInterruption,
+                    .after(.intentRecorded)
+                )
+            }
+            let beforeRecoveryRefusal = try regularFileTreeContents(in: prefix)
+            XCTAssertThrowsError(
+                try packageLifecycle.preflight(
+                    candidateManifest: baselineCandidateManifest,
+                    prefix: prefix,
+                    packageIdentifier: DistributionLayout.packageIdentifier,
+                    packageVersion: "0.0.2.1"
+                )
+            ) { error in
+                XCTAssertEqual(
+                    error as? DistributionError,
+                    .lifecycleFailed(
+                        "package apply requires hostwright-dist recover before mutation"
+                    )
+                )
+            }
+            XCTAssertEqual(try regularFileTreeContents(in: prefix), beforeRecoveryRefusal)
+
+            XCTAssertEqual(
+                try lifecycle.recover(prefix: prefix).action,
+                .restoredPriorGeneration
             )
 
             let upgradedAgain = try lifecycle.installPackage(
@@ -2385,6 +2556,60 @@ final class DistributionDurableLifecycleTests: XCTestCase {
             to: staging.appendingPathComponent(DistributionLayout.manifestFileName),
             mode: 0o644
         )
+    }
+
+    private func makePackageReceiptFixture(
+        root: URL
+    ) throws -> (controller: DistributionPackageReceiptController, marker: URL) {
+        let marker = root.appendingPathComponent("package-receipt-version")
+        let source = root.appendingPathComponent("package-receipt-fixture.swift")
+        let executable = root.appendingPathComponent("package-receipt-fixture")
+        let program = """
+        import Foundation
+        let arguments = Array(CommandLine.arguments.dropFirst())
+        let marker = "\(marker.path)"
+        switch arguments.first {
+        case "--pkgs":
+            if FileManager.default.fileExists(atPath: marker) {
+                print("dev.hostwright.cli")
+            }
+        case "--pkg-info-plist":
+            let version = try String(contentsOfFile: marker, encoding: .utf8)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            print("<?xml version=\\\"1.0\\\" encoding=\\\"UTF-8\\\"?><plist version=\\\"1.0\\\"><dict><key>pkgid</key><string>dev.hostwright.cli</string><key>pkg-version</key><string>\\(version)</string><key>install-location</key><string></string><key>volume</key><string>/</string></dict></plist>")
+        default:
+            exit(64)
+        }
+        """ + "\n"
+        try Data(program.utf8).write(to: source, options: .withoutOverwriting)
+        let compile = Process()
+        compile.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
+        compile.arguments = ["swiftc", source.path, "-o", executable.path]
+        try compile.run()
+        compile.waitUntilExit()
+        XCTAssertEqual(compile.terminationStatus, 0)
+        return (
+            DistributionPackageReceiptController(
+                executablePath: executable.path,
+                stagingRoot: root.appendingPathComponent("unused-package-staging"),
+                stagingOwnerUID: geteuid()
+            ),
+            marker
+        )
+    }
+
+    private func writePackageCandidateManifest(
+        _ manifest: DistributionArtifactManifest,
+        name: String,
+        root: URL
+    ) throws -> URL {
+        let url = root.appendingPathComponent("\(name)-manifest.json")
+        try DistributionFileSystem.writeNewFile(
+            try DistributionJSON.encode(manifest),
+            to: url,
+            mode: 0o644
+        )
+        return url
     }
 
     private func installLegacyPayload(

@@ -60,7 +60,7 @@ def main() -> int:
     roadmap = read("docs/roadmap/v0.0.2/IMPLEMENTATION_PLAN.md")
     historical_plan = read("docs/IMPLEMENTATION_PLAN.md")
 
-    version_match = re.search(r'version = "(0\.0\.2-dev\.[89])"', identity)
+    version_match = re.search(r'version = "(0\.0\.2-dev\.1[01])"', identity)
     require(version_match is not None, "HostwrightIdentity version is not a Phase 02 qualification build", errors)
     if version_match is not None:
         version_golden = json.loads(read("contracts/v0.0.2/versions.json"))

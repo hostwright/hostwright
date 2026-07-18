@@ -359,6 +359,23 @@ public struct TrustedReleaseBuilder: Sendable {
             isDirectory: true
         )
         try DistributionFileSystem.createExclusiveDirectory(packageScripts)
+        try DistributionFileSystem.copyRegularFile(
+            from: signedRoot.appendingPathComponent("bin/hostwright-dist"),
+            to: packageScripts.appendingPathComponent("hostwright-dist"),
+            mode: 0o755
+        )
+        try DistributionFileSystem.writeNewFile(
+            try DistributionJSON.encode(payloadManifest),
+            to: packageScripts.appendingPathComponent(DistributionLayout.manifestFileName),
+            mode: 0o644
+        )
+        try DistributionFileSystem.writeNewFile(
+            Data(DistributionPackageScripts.preinstall(
+                packageVersion: installerPackageVersion
+            ).utf8),
+            to: packageScripts.appendingPathComponent("preinstall"),
+            mode: 0o755
+        )
         try DistributionFileSystem.writeNewFile(
             Data(DistributionPackageScripts.postinstall(
                 packageVersion: installerPackageVersion,

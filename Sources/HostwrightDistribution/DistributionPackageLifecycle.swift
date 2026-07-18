@@ -49,6 +49,21 @@ public enum DistributionPackageVersion {
 }
 
 enum DistributionPackageScripts {
+    static func preinstall(packageVersion: String) -> String {
+        """
+        #!/bin/sh
+        set -eu
+        script_directory=$(/usr/bin/dirname "$0")
+        script_directory=$(CDPATH= cd -- "$script_directory" && /bin/pwd -P)
+        exec "$script_directory/hostwright-dist" package-preflight \
+          --candidate-manifest "$script_directory/manifest.json" \
+          --prefix '/usr/local' \
+          --package-id 'dev.hostwright.cli' \
+          --package-version '\(packageVersion)' \
+          --output json
+        """ + "\n"
+    }
+
     static func postinstall(packageVersion: String, teamIdentifier: String) -> String {
         """
         #!/bin/sh
@@ -216,6 +231,28 @@ public struct DistributionPackageApplyResult: Codable, Equatable, Sendable {
     }
 }
 
+public struct DistributionPackagePreflightResult: Codable, Equatable, Sendable {
+    public let schemaVersion: Int
+    public let kind: String
+    public let operation: DistributionLifecycleOperation
+    public let receipt: DistributionPackageReceipt
+    public let artifactID: String
+    public let sourceCommit: String
+
+    init(
+        operation: DistributionLifecycleOperation,
+        receipt: DistributionPackageReceipt,
+        manifest: DistributionArtifactManifest
+    ) {
+        self.schemaVersion = 1
+        self.kind = "distributionPackagePreflight"
+        self.operation = operation
+        self.receipt = receipt
+        self.artifactID = manifest.artifactID
+        self.sourceCommit = manifest.sourceCommit
+    }
+}
+
 public struct DistributionPackageUninstallResult: Codable, Equatable, Sendable {
     public let schemaVersion: Int
     public let kind: String
@@ -348,6 +385,48 @@ public struct DistributionPackageLifecycle: Sendable {
         )
     }
 
+    public func preflight(
+        candidateManifest: URL,
+        prefix: URL,
+        packageIdentifier: String,
+        packageVersion: String,
+        cancellation: SecureSubprocessCancellation = SecureSubprocessCancellation()
+    ) throws -> DistributionPackagePreflightResult {
+        guard !cancellation.isCancelled else {
+            throw DistributionError.commandCancelled("package preflight")
+        }
+        try requireElevatedAuthority()
+        try requireExactPrefix(prefix)
+        let receipt = try candidateReceipt(
+            packageIdentifier: packageIdentifier,
+            packageVersion: packageVersion,
+            command: "package-preflight"
+        )
+        let manifest = try readCandidateManifest(candidateManifest)
+        guard try DistributionPackageVersion.make(from: manifest.packageVersion) == receipt.version else {
+            throw DistributionError.invalidArtifact(
+                "candidate manifest version does not match the requested package version"
+            )
+        }
+        let inspection = try lifecycle.inspectForPackageApply(prefix: prefix)
+        let operation = try requiredOperation(
+            inspection: inspection,
+            manifest: manifest
+        )
+        try requireValidPriorReceipt(
+            inspection: inspection,
+            operation: operation,
+            candidateManifest: manifest,
+            targetReceipt: receipt,
+            cancellation: cancellation
+        )
+        return DistributionPackagePreflightResult(
+            operation: operation,
+            receipt: receipt,
+            manifest: manifest
+        )
+    }
+
     public func uninstall(
         prefix: URL,
         dataPolicy: DistributionUninstallDataPolicy,
@@ -472,6 +551,35 @@ public struct DistributionPackageLifecycle: Sendable {
         }
     }
 
+    private func candidateReceipt(
+        packageIdentifier: String,
+        packageVersion: String,
+        command: String
+    ) throws -> DistributionPackageReceipt {
+        guard packageIdentifier == DistributionLayout.packageIdentifier,
+              DistributionPackageVersion.isValid(packageVersion) else {
+            throw DistributionError.invalidArtifact(
+                "\(command) requires the exact Hostwright package identity"
+            )
+        }
+        let receipt = DistributionPackageReceipt(
+            identifier: packageIdentifier,
+            version: packageVersion,
+            installLocation: "/",
+            volume: "/"
+        )
+        try receipt.validate()
+        return receipt
+    }
+
+    private func requireExactPrefix(_ prefix: URL) throws {
+        guard prefix.standardizedFileURL.resolvingSymlinksInPath().path == expectedPrefix.path else {
+            throw DistributionError.unsafePath(
+                "Package lifecycle commands require the exact /usr/local prefix."
+            )
+        }
+    }
+
     private func requireExactLocations(stagedRoot: URL, prefix: URL) throws {
         guard prefix.standardizedFileURL.resolvingSymlinksInPath().path == expectedPrefix.path,
               stagedRoot.standardizedFileURL.resolvingSymlinksInPath().path
@@ -480,6 +588,70 @@ public struct DistributionPackageLifecycle: Sendable {
                 "Package lifecycle paths must be the exact package staging root and /usr/local prefix."
             )
         }
+    }
+
+    private func readCandidateManifest(_ url: URL) throws -> DistributionArtifactManifest {
+        guard url.path.hasPrefix("/"), url.standardizedFileURL.path == url.path else {
+            throw DistributionError.unsafePath(
+                "Package candidate manifest must use a normalized absolute path."
+            )
+        }
+        let descriptor = open(url.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+        guard descriptor >= 0 else {
+            throw DistributionError.unsafePath(
+                "Package candidate manifest must be a root-owned regular file."
+            )
+        }
+        let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+        var metadata = stat()
+        guard fstat(descriptor, &metadata) == 0,
+              metadata.st_mode & S_IFMT == S_IFREG,
+              metadata.st_uid == expectedOwnerUID,
+              metadata.st_nlink == 1,
+              metadata.st_mode & 0o7000 == 0,
+              Int(metadata.st_mode & 0o777) == 0o644,
+              metadata.st_size > 0,
+              metadata.st_size <= 32 * 1_024 * 1_024 else {
+            try? handle.close()
+            throw DistributionError.unsafePath(
+                "Package candidate manifest must be a root-owned regular file."
+            )
+        }
+        do {
+            try HostwrightLocalFilesystemPolicy.validateNoAccessGrantingACL(
+                fileDescriptor: descriptor,
+                path: url.path,
+                role: "package candidate manifest"
+            )
+        } catch {
+            try? handle.close()
+            throw DistributionError.unsafePath(
+                "Package candidate manifest grants access through an ACL."
+            )
+        }
+        let data = try handle.readToEnd() ?? Data()
+        try handle.close()
+        var namedMetadata = stat()
+        guard data.count == Int(metadata.st_size),
+              lstat(url.path, &namedMetadata) == 0,
+              namedMetadata.st_mode & S_IFMT == S_IFREG,
+              namedMetadata.st_dev == metadata.st_dev,
+              namedMetadata.st_ino == metadata.st_ino,
+              namedMetadata.st_uid == metadata.st_uid,
+              namedMetadata.st_nlink == metadata.st_nlink,
+              namedMetadata.st_size == metadata.st_size else {
+            throw DistributionError.unsafePath(
+                "Package candidate manifest changed while it was being read."
+            )
+        }
+        let manifest = try JSONDecoder().decode(DistributionArtifactManifest.self, from: data)
+        guard try DistributionJSON.encode(manifest) == data else {
+            throw DistributionError.invalidArtifact(
+                "package candidate manifest is not the exact canonical schema encoding"
+            )
+        }
+        try manifest.validate()
+        return manifest
     }
 
     private func verifyStagedPayload(

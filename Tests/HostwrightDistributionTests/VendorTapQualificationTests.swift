@@ -36,13 +36,13 @@ final class VendorTapQualificationTests: XCTestCase {
     func testReleaseWorkflowLocksTheTwoImmutableQualificationBuilds() throws {
         let workflow = try read(".github/workflows/trusted-release.yml")
 
-        XCTAssertTrue(workflow.contains("default: 0.0.2-dev.10"))
-        XCTAssertTrue(workflow.contains("default: v0.0.2-dev.10"))
-        XCTAssertTrue(workflow.contains(#"^0\.0\.2-dev\.1[01]$"#))
+        XCTAssertTrue(workflow.contains("default: 0.0.2-dev.12"))
+        XCTAssertTrue(workflow.contains("default: v0.0.2-dev.12"))
+        XCTAssertTrue(workflow.contains(#"^0\.0\.2-dev\.12$"#))
         XCTAssertTrue(workflow.contains("github.ref == 'refs/heads/main'"))
         XCTAssertTrue(workflow.contains("name: Validate reviewed release inputs"))
         XCTAssertTrue(workflow.contains("needs: validate"))
-        XCTAssertTrue(workflow.contains("refs/tags/v0.0.2-dev.10^{}"))
+        XCTAssertTrue(workflow.contains("refs/tags/v0.0.2-dev.11^{}"))
         XCTAssertTrue(workflow.contains("git merge-base --is-ancestor \"$baseline_commit\" \"$RELEASE_COMMIT\""))
         XCTAssertTrue(workflow.contains("swift run hostwright --version"))
         XCTAssertTrue(workflow.contains("contracts/v0.0.2/versions.json"))
@@ -65,8 +65,8 @@ final class VendorTapQualificationTests: XCTestCase {
         XCTAssertFalse(workflow.contains("contents: write"))
 
         for fragment in [
-            "0.0.2-dev.10",
             "0.0.2-dev.11",
+            "0.0.2-dev.12",
             "reboot-required",
             "A real reboot has not occurred",
             "brew upgrade \"$formula_reference\"",
@@ -83,12 +83,12 @@ final class VendorTapQualificationTests: XCTestCase {
             "ensure_tap_checkout absent",
             "ensure_tap_checkout present",
             "qualify_package_lifecycle",
-            "install-dev10",
-            "repair-dev10",
-            "upgrade-dev11",
-            "rollback-dev10",
-            "repair-after-rollback-dev10",
-            "upgrade-again-dev11",
+            "install-dev11",
+            "repair-dev11",
+            "upgrade-dev12",
+            "rollback-dev11",
+            "repair-after-rollback-dev11",
+            "upgrade-again-dev12",
             "package-downgrade-refusal-passed",
             "package_downgrade_refusal",
             "installer_log_checkpoint",
@@ -101,6 +101,8 @@ final class VendorTapQualificationTests: XCTestCase {
             "cleanup_qualified_package",
             "files.2.sha256",
             "status.installedManifest.sourceCommit",
+            "/usr/bin/codesign --verify --verbose=2 -R=notarized --check-notarization",
+            "/usr/sbin/spctl --assess --type install --verbose=4",
             "stage-$command-failed-exit-$status",
             "Homebrew removed or changed user configuration during uninstall",
             "brew untap \"$tap_name\""
@@ -110,6 +112,7 @@ final class VendorTapQualificationTests: XCTestCase {
         XCTAssertFalse(script.contains("rm -rf"))
         XCTAssertFalse(script.contains("brew install hostwright\n"))
         XCTAssertFalse(script.contains("brew install hostwright\r\n"))
+        XCTAssertFalse(script.contains("spctl --assess --type execute"))
 
         let preflight = try XCTUnwrap(script.range(of: "validate_prepare_preflight\nfi"))
         let firstEvidenceWrite = try XCTUnwrap(script.range(of: "record \"inputs baselineReleaseCommit="))

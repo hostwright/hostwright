@@ -10,12 +10,12 @@ on:
       version:
         description: Exact binary semantic version
         required: true
-        default: 0.0.2-dev.10
+        default: 0.0.2-dev.12
         type: string
       tag:
         description: Exact immutable release tag
         required: true
-        default: v0.0.2-dev.10
+        default: v0.0.2-dev.12
         type: string
       publish:
         description: Create the annotated tag and GitHub prerelease after all local gates pass
@@ -47,7 +47,7 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$VALIDATION_COMMIT" =~ ^[a-f0-9]{40}$ ]]
-          [[ "$VALIDATION_VERSION" =~ ^0\.0\.2-dev\.1[01]$ ]]
+          [[ "$VALIDATION_VERSION" =~ ^0\.0\.2-dev\.12$ ]]
           [[ "$VALIDATION_TAG" == "v$VALIDATION_VERSION" ]]
           test "$GITHUB_REPOSITORY" = hostwright/hostwright
 
@@ -65,13 +65,11 @@ jobs:
           test "$(git rev-parse HEAD)" = "$VALIDATION_COMMIT"
           git fetch --no-tags origin main
           git merge-base --is-ancestor "$VALIDATION_COMMIT" origin/main
-          if [[ "$VALIDATION_VERSION" == 0.0.2-dev.11 ]]; then
-            baseline_commit="$(git ls-remote origin 'refs/tags/v0.0.2-dev.10^{}' | awk '{ print $1 }')"
-            [[ "$baseline_commit" =~ ^[a-f0-9]{40}$ ]]
-            test "$baseline_commit" != "$VALIDATION_COMMIT"
-            git cat-file -e "$baseline_commit^{commit}"
-            git merge-base --is-ancestor "$baseline_commit" "$VALIDATION_COMMIT"
-          fi
+          baseline_commit="$(git ls-remote origin 'refs/tags/v0.0.2-dev.11^{}' | awk '{ print $1 }')"
+          [[ "$baseline_commit" =~ ^[a-f0-9]{40}$ ]]
+          test "$baseline_commit" != "$VALIDATION_COMMIT"
+          git cat-file -e "$baseline_commit^{commit}"
+          git merge-base --is-ancestor "$baseline_commit" "$VALIDATION_COMMIT"
           if git ls-remote --exit-code --tags origin "refs/tags/$VALIDATION_TAG" >/dev/null 2>&1; then
             echo "Release tag already exists; tags are immutable." >&2
             exit 65
@@ -106,7 +104,7 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$RELEASE_COMMIT" =~ ^[a-f0-9]{40}$ ]]
-          [[ "$RELEASE_VERSION" =~ ^0\.0\.2-dev\.1[01]$ ]]
+          [[ "$RELEASE_VERSION" =~ ^0\.0\.2-dev\.12$ ]]
           [[ "$RELEASE_TAG" == "v$RELEASE_VERSION" ]]
           [[ "$RELEASE_APPLICATION_IDENTITY" =~ ^[A-F0-9]{40}$ ]]
           [[ "$RELEASE_INSTALLER_IDENTITY" =~ ^[A-F0-9]{40}$ ]]
@@ -118,13 +116,11 @@ jobs:
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
           git fetch --no-tags origin main
           git merge-base --is-ancestor "$RELEASE_COMMIT" origin/main
-          if [[ "$RELEASE_VERSION" == 0.0.2-dev.11 ]]; then
-            baseline_commit="$(git ls-remote origin 'refs/tags/v0.0.2-dev.10^{}' | awk '{ print $1 }')"
-            [[ "$baseline_commit" =~ ^[a-f0-9]{40}$ ]]
-            test "$baseline_commit" != "$RELEASE_COMMIT"
-            git cat-file -e "$baseline_commit^{commit}"
-            git merge-base --is-ancestor "$baseline_commit" "$RELEASE_COMMIT"
-          fi
+          baseline_commit="$(git ls-remote origin 'refs/tags/v0.0.2-dev.11^{}' | awk '{ print $1 }')"
+          [[ "$baseline_commit" =~ ^[a-f0-9]{40}$ ]]
+          test "$baseline_commit" != "$RELEASE_COMMIT"
+          git cat-file -e "$baseline_commit^{commit}"
+          git merge-base --is-ancestor "$baseline_commit" "$RELEASE_COMMIT"
           if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
             echo "Release tag already exists; tags are immutable." >&2
             exit 65

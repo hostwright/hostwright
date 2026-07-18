@@ -467,7 +467,7 @@ def state_command(args: argparse.Namespace) -> int:
             ("0.0.2-dev.3", "0.0.2-dev.4"),
             ("0.0.2-dev.5", "0.0.2-dev.6"),
             ("0.0.2-dev.8", "0.0.2-dev.9"),
-            ("0.0.2-dev.10", "0.0.2-dev.11"),
+            ("0.0.2-dev.11", "0.0.2-dev.12"),
         }
         recorder.assertion(
             "earlier contract and candidate versions match a Phase 02 transition",
@@ -770,8 +770,15 @@ def doctor_command(args: argparse.Namespace) -> int:
         recorder=recorder,
     )
     run(
-        ["/usr/sbin/spctl", "--assess", "--verbose=4", "--type", "execute", hostwright],
-        "assess installed Hostwright with Gatekeeper",
+        [
+            "/usr/bin/codesign",
+            "--verify",
+            "--verbose=4",
+            "-R=notarized",
+            "--check-notarization",
+            hostwright,
+        ],
+        "check installed Hostwright notarization",
         recorder=recorder,
     )
     state_root = state.parent

@@ -115,6 +115,17 @@ public struct DoctorSystemSnapshot: Codable, Equatable, Sendable {
 }
 
 public enum DoctorSystemProbe {
+    struct SigningCommand: Equatable, Sendable {
+        let executablePath: String
+        let arguments: [String]
+    }
+
+    struct SigningCommandResult: Equatable, Sendable {
+        let exitStatus: Int32
+        let standardOutput: Data
+        let standardError: Data
+    }
+
     public static func current(
         executablePath: String,
         developmentBuild: Bool,
@@ -250,6 +261,31 @@ public enum DoctorSystemProbe {
         executablePath: String,
         developmentBuild: Bool
     ) -> DoctorSigningTrustSnapshot {
+        signingSnapshot(
+            executablePath: executablePath,
+            developmentBuild: developmentBuild,
+            codesignExecutablePath: "/usr/bin/codesign"
+        ) { command in
+            let result = try SecureSubprocessRunner().run(
+                signingRequest(
+                    executablePath: command.executablePath,
+                    arguments: command.arguments
+                )
+            )
+            return SigningCommandResult(
+                exitStatus: result.exitStatus,
+                standardOutput: result.standardOutput,
+                standardError: result.standardError
+            )
+        }
+    }
+
+    static func signingSnapshot(
+        executablePath: String,
+        developmentBuild: Bool,
+        codesignExecutablePath: String,
+        execute: (SigningCommand) throws -> SigningCommandResult
+    ) -> DoctorSigningTrustSnapshot {
         let resolvedPath = URL(fileURLWithPath: executablePath)
             .resolvingSymlinksInPath()
             .standardizedFileURL
@@ -262,8 +298,7 @@ public enum DoctorSystemProbe {
                 probeError: "the running executable path could not be resolved"
             )
         }
-        guard FileManager.default.isExecutableFile(atPath: "/usr/bin/codesign"),
-              FileManager.default.isExecutableFile(atPath: "/usr/sbin/spctl") else {
+        guard FileManager.default.isExecutableFile(atPath: codesignExecutablePath) else {
             return DoctorSigningTrustSnapshot(
                 codeSignature: .unavailable,
                 gatekeeper: .unavailable,
@@ -273,23 +308,27 @@ public enum DoctorSystemProbe {
         }
 
         do {
-            let runner = SecureSubprocessRunner()
-            let verification = try runner.run(
-                signingRequest(
-                    executablePath: "/usr/bin/codesign",
+            let verification = try execute(
+                SigningCommand(
+                    executablePath: codesignExecutablePath,
                     arguments: ["--verify", "--strict", "--verbose=2", resolvedPath]
                 )
             )
-            let display = try runner.run(
-                signingRequest(
-                    executablePath: "/usr/bin/codesign",
+            let display = try execute(
+                SigningCommand(
+                    executablePath: codesignExecutablePath,
                     arguments: ["--display", "--verbose=4", resolvedPath]
                 )
             )
-            let assessment = try runner.run(
-                signingRequest(
-                    executablePath: "/usr/sbin/spctl",
-                    arguments: ["--assess", "--type", "execute", "--verbose=4", resolvedPath]
+            let notarization = try execute(
+                SigningCommand(
+                    executablePath: codesignExecutablePath,
+                    arguments: [
+                        "-R=notarized",
+                        "--check-notarization",
+                        "--verify", "--verbose=2",
+                        resolvedPath
+                    ]
                 )
             )
             let displayText = String(decoding: display.standardOutput + display.standardError, as: UTF8.self)
@@ -313,7 +352,7 @@ public enum DoctorSystemProbe {
             }
             return DoctorSigningTrustSnapshot(
                 codeSignature: signature,
-                gatekeeper: assessment.exitStatus == 0 ? .accepted : .rejected,
+                gatekeeper: notarization.exitStatus == 0 ? .accepted : .rejected,
                 developmentBuild: developmentBuild
             )
         } catch {

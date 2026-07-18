@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly baseline_version="0.0.2-dev.10"
-readonly candidate_version="0.0.2-dev.11"
+readonly baseline_version="0.0.2-dev.11"
+readonly candidate_version="0.0.2-dev.12"
 readonly baseline_tag="v$baseline_version"
 readonly candidate_tag="v$candidate_version"
 readonly tap_name="hostwright/tap"
@@ -243,7 +243,8 @@ verify_installed() {
     [[ "$("$prefix/bin/$executable" --version)" == "$version" ]] \
       || die "$executable does not report $version." 70
     /usr/bin/codesign --verify --strict --verbose=2 "$prefix/bin/$executable"
-    /usr/sbin/spctl --assess --type execute --verbose=2 "$prefix/bin/$executable"
+    /usr/bin/codesign --verify --verbose=2 -R=notarized --check-notarization \
+      "$prefix/bin/$executable"
   done
   "$prefix/bin/hostwright" capabilities --json > "$HOSTWRIGHT_QUALIFICATION_ROOT/$label-capabilities.json"
   [[ "$(plutil -extract productVersion raw "$HOSTWRIGHT_QUALIFICATION_ROOT/$label-capabilities.json")" == "$version" ]] \
@@ -533,30 +534,30 @@ qualify_package_lifecycle() {
     || die "The two qualification packages use different Developer Team IDs." 70
 
   sudo -n /usr/sbin/installer -pkg "$baseline_package" -target /
-  verify_package_state install-dev10 "$baseline_version" "$HOSTWRIGHT_BASELINE_RELEASE_COMMIT" 1 0.0.2.10 0.0.2.10 0.0.2.10
+  verify_package_state install-dev11 "$baseline_version" "$HOSTWRIGHT_BASELINE_RELEASE_COMMIT" 1 0.0.2.11 0.0.2.11 0.0.2.11
   sudo -n /usr/sbin/installer -pkg "$baseline_package" -target /
-  verify_package_state repair-dev10 "$baseline_version" "$HOSTWRIGHT_BASELINE_RELEASE_COMMIT" 2 0.0.2.10 0.0.2.10 0.0.2.10
+  verify_package_state repair-dev11 "$baseline_version" "$HOSTWRIGHT_BASELINE_RELEASE_COMMIT" 2 0.0.2.11 0.0.2.11 0.0.2.11
   sudo -n /usr/sbin/installer -pkg "$candidate_package" -target /
-  verify_package_state upgrade-dev11 "$candidate_version" "$HOSTWRIGHT_CANDIDATE_RELEASE_COMMIT" 3 0.0.2.11 0.0.2.11 0.0.2.11
+  verify_package_state upgrade-dev12 "$candidate_version" "$HOSTWRIGHT_CANDIDATE_RELEASE_COMMIT" 3 0.0.2.12 0.0.2.12 0.0.2.12
 
   distribution="$package_prefix/bin/hostwright-dist"
   sudo -n "$distribution" rollback --prefix "$package_prefix" --output json \
-    > "$HOSTWRIGHT_QUALIFICATION_ROOT/rollback-dev10-package-result.json"
-  verify_package_state rollback-dev10 "$baseline_version" "$HOSTWRIGHT_BASELINE_RELEASE_COMMIT" 4 0.0.2.10 0.0.2.11 0.0.2.11
+    > "$HOSTWRIGHT_QUALIFICATION_ROOT/rollback-dev11-package-result.json"
+  verify_package_state rollback-dev11 "$baseline_version" "$HOSTWRIGHT_BASELINE_RELEASE_COMMIT" 4 0.0.2.11 0.0.2.12 0.0.2.12
   sudo -n /usr/sbin/installer -pkg "$baseline_package" -target /
-  verify_package_state repair-after-rollback-dev10 "$baseline_version" "$HOSTWRIGHT_BASELINE_RELEASE_COMMIT" 5 0.0.2.10 0.0.2.10 0.0.2.10
+  verify_package_state repair-after-rollback-dev11 "$baseline_version" "$HOSTWRIGHT_BASELINE_RELEASE_COMMIT" 5 0.0.2.11 0.0.2.11 0.0.2.11
   sudo -n /usr/sbin/installer -pkg "$candidate_package" -target /
-  verify_package_state upgrade-again-dev11 "$candidate_version" "$HOSTWRIGHT_CANDIDATE_RELEASE_COMMIT" 6 0.0.2.11 0.0.2.11 0.0.2.11
+  verify_package_state upgrade-again-dev12 "$candidate_version" "$HOSTWRIGHT_CANDIDATE_RELEASE_COMMIT" 6 0.0.2.12 0.0.2.12 0.0.2.12
 
   before="$(package_snapshot_digest "$work")"
   downgrade_log_checkpoint="$(installer_log_checkpoint)"
   downgrade_output="$(sudo -n /usr/sbin/installer -pkg "$baseline_package" -target / 2>&1)" \
     || downgrade_status=$?
-  [[ "$downgrade_status" -eq 1 ]] || die "The dev.10 package downgrade was not refused." 70
+  [[ "$downgrade_status" -eq 1 ]] || die "The dev.11 package downgrade was not refused." 70
   downgrade_log="$(installer_log_since "$downgrade_log_checkpoint")"
   [[ "$downgrade_output$downgrade_log" == *"$package_downgrade_refusal"* \
       && "$downgrade_log" == *"${baseline_package##*/}"* ]] \
-    || die "The dev.10 package failure did not prove Hostwright's semantic downgrade refusal." 70
+    || die "The dev.11 package failure did not prove Hostwright's semantic downgrade refusal." 70
   after="$(package_snapshot_digest "$work")"
   [[ "$before" == "$after" ]] || die "The rejected package downgrade changed installed state." 70
   record "package-downgrade-refusal-passed"
@@ -634,7 +635,7 @@ cleanup_qualified_package() {
   sudo -n "$distribution" status --prefix "$package_prefix" --output json > "$status_file"
   package_version="$(plutil -extract status.packageVersion raw "$status_file")"
   [[ "$(plutil -extract status.packageIdentifier raw "$status_file")" == "$package_identifier" \
-      && "$package_version" =~ ^0\.0\.2\.1[01]$ \
+      && "$package_version" =~ ^0\.0\.2\.1[12]$ \
       && "$(plutil -extract status.installedManifest.sourceCommit raw "$status_file")" == "$expected_commit" \
       && "$(plutil -extract status.installedManifest.packageVersion raw "$status_file")" == "$expected_version" ]] \
     || die "Package cleanup status is not owned by this qualification pair." 70

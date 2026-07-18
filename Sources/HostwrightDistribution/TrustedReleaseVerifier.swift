@@ -493,38 +493,59 @@ public struct TrustedReleaseVerifier: Sendable {
             )
         }
         let scriptsRoot = expansionRoot.appendingPathComponent("Scripts", isDirectory: true)
+        let expectedScriptFiles = ["hostwright-dist", "manifest.json", "postinstall", "preinstall"]
         guard try DistributionFileSystem.isDirectoryNonSymlink(scriptsRoot),
-              try regularFileInventory(scriptsRoot) == ["postinstall", "preinstall"] else {
+              try regularFileInventory(scriptsRoot) == expectedScriptFiles else {
             throw DistributionError.invalidArtifact(
-                "trusted package must contain exactly the locked preinstall and postinstall entrypoints"
+                "trusted package scripts contain unexpected or missing files"
             )
         }
+        let preflightHelper = scriptsRoot.appendingPathComponent("hostwright-dist")
+        let preflightManifest = scriptsRoot.appendingPathComponent("manifest.json")
         let preinstall = scriptsRoot.appendingPathComponent("preinstall")
         let postinstall = scriptsRoot.appendingPathComponent("postinstall")
         let expectedPackageVersion = try DistributionPackageVersion.make(
             from: manifest.packageVersion
         )
-        guard try DistributionFileSystem.mode(of: preinstall) == 0o755,
-              try String(contentsOf: preinstall, encoding: .utf8)
-                == DistributionPackageScripts.preinstall(
-                    packageVersion: expectedPackageVersion,
-                    semanticVersion: manifest.packageVersion,
-                    sourceCommit: manifest.sourceCommit
-                ) else {
+        guard let distributionRecord = manifest.payloadFiles.first(where: {
+            $0.path == "bin/hostwright-dist"
+        }) else {
             throw DistributionError.invalidArtifact(
-                "trusted package preinstall entrypoint is not the exact downgrade guard"
+                "trusted release manifest omits hostwright-dist"
             )
         }
-        guard try DistributionFileSystem.mode(of: postinstall) == 0o755,
+        let expectedManifestData = try DistributionJSON.encode(expectedManifest)
+        guard try DistributionFileSystem.mode(of: preflightHelper) == 0o755,
+              try DistributionFileSystem.size(of: preflightHelper) == distributionRecord.sizeBytes,
+              try DistributionHash.sha256(fileURL: preflightHelper, cancellation: cancellation)
+                == distributionRecord.sha256,
+              try linkCount(preflightHelper) == 1,
+              try DistributionFileSystem.mode(of: preflightManifest) == 0o644,
+              try Data(contentsOf: preflightManifest) == expectedManifestData,
+              try linkCount(preflightManifest) == 1,
+              try DistributionFileSystem.mode(of: preinstall) == 0o755,
+              try String(contentsOf: preinstall, encoding: .utf8)
+                == DistributionPackageScripts.preinstall(
+                    packageVersion: expectedPackageVersion
+                ),
+              try linkCount(preinstall) == 1,
+              try DistributionFileSystem.mode(of: postinstall) == 0o755,
               try String(contentsOf: postinstall, encoding: .utf8)
                 == DistributionPackageScripts.postinstall(
                     packageVersion: expectedPackageVersion,
                     teamIdentifier: manifest.applicationSigner.teamIdentifier
-                ) else {
+                ),
+              try linkCount(postinstall) == 1 else {
             throw DistributionError.invalidArtifact(
-                "trusted package postinstall entrypoint is not the exact lifecycle bridge"
+                "trusted package scripts are not the exact preflight and lifecycle bridge"
             )
         }
+        try verifyExecutableTrust(
+            preflightHelper,
+            signer: manifest.applicationSigner,
+            cancellation: cancellation,
+            commands: &commands
+        )
     }
 
     private func verifyPayloadFiles(
@@ -558,30 +579,45 @@ public struct TrustedReleaseVerifier: Sendable {
         commands: inout [HostwrightEvidenceCommand]
     ) throws {
         for relativePath in DistributionLayout.shippedBinaryPaths {
-            let binary = root.appendingPathComponent(relativePath)
-            let signature = try runner.run(
-                executablePath: "/usr/bin/codesign",
-                arguments: ["--verify", "--strict", "--verbose=4", binary.path],
-                label: "verify extracted Developer ID signature",
-                timeoutSeconds: 60,
-                cancellation: cancellation
+            try verifyExecutableTrust(
+                root.appendingPathComponent(relativePath),
+                signer: signer,
+                cancellation: cancellation,
+                commands: &commands
             )
-            commands.append(record("verify extracted Developer ID signature for \(binary.lastPathComponent)", signature))
-            let details = try runner.run(
-                executablePath: "/usr/bin/codesign",
-                arguments: ["--display", "--verbose=4", binary.path],
-                label: "inspect extracted Developer ID signature",
-                timeoutSeconds: 60,
-                cancellation: cancellation
-            )
-            let detailText = details.standardOutput + details.standardError
-            guard detailText.contains("Authority=\(signer.commonName)"),
-                  detailText.contains("TeamIdentifier=\(signer.teamIdentifier)"),
-                  detailText.contains("runtime") else {
-                throw DistributionError.invalidArtifact("extracted executable signer or hardened-runtime flags differ")
-            }
-            commands.append(record("inspect extracted Developer ID signature for \(binary.lastPathComponent)", details))
         }
+    }
+
+    private func verifyExecutableTrust(
+        _ binary: URL,
+        signer: TrustedReleaseIdentity,
+        cancellation: SecureSubprocessCancellation,
+        commands: inout [HostwrightEvidenceCommand]
+    ) throws {
+        let signature = try runner.run(
+            executablePath: "/usr/bin/codesign",
+            arguments: ["--verify", "--strict", "--verbose=4", binary.path],
+            label: "verify extracted Developer ID signature",
+            timeoutSeconds: 60,
+            cancellation: cancellation
+        )
+        commands.append(record("verify extracted Developer ID signature for \(binary.lastPathComponent)", signature))
+        let details = try runner.run(
+            executablePath: "/usr/bin/codesign",
+            arguments: ["--display", "--verbose=4", binary.path],
+            label: "inspect extracted Developer ID signature",
+            timeoutSeconds: 60,
+            cancellation: cancellation
+        )
+        let detailText = details.standardOutput + details.standardError
+        guard detailText.contains("Authority=\(signer.commonName)"),
+              detailText.contains("TeamIdentifier=\(signer.teamIdentifier)"),
+              detailText.contains("runtime") else {
+            throw DistributionError.invalidArtifact(
+                "extracted executable signer or hardened-runtime flags differ"
+            )
+        }
+        commands.append(record("inspect extracted Developer ID signature for \(binary.lastPathComponent)", details))
     }
 
     private func verifyDetachedCMS(

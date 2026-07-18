@@ -182,20 +182,17 @@ final class DistributionPackageLifecycleTests: XCTestCase {
         XCTAssertFalse(script.contains("PASSWORD"))
     }
 
-    func testPreinstallEntrypointUsesOnlyLockedPackageLifecycleArguments() {
-        let commit = String(repeating: "a", count: 40)
-        let script = DistributionPackageScripts.preinstall(
-            packageVersion: "0.0.2.2",
-            semanticVersion: "0.0.2-dev.2",
-            sourceCommit: commit
-        )
+    func testPreinstallEntrypointUsesArchivedCompanionAndLockedReadOnlyArguments() {
+        let script = DistributionPackageScripts.preinstall(packageVersion: "0.0.2.9")
         XCTAssertTrue(script.hasPrefix("#!/bin/sh\nset -eu\n"))
-        XCTAssertTrue(script.contains("hostwright-dist' package-preflight"))
+        XCTAssertTrue(script.contains("script_directory=$(/usr/bin/dirname \"$0\")"))
+        XCTAssertTrue(script.contains("\"$script_directory/hostwright-dist\" package-preflight"))
+        XCTAssertTrue(script.contains("--candidate-manifest \"$script_directory/manifest.json\""))
         XCTAssertTrue(script.contains("--prefix '/usr/local'"))
         XCTAssertTrue(script.contains("--package-id 'dev.hostwright.cli'"))
-        XCTAssertTrue(script.contains("--package-version '0.0.2.2'"))
-        XCTAssertTrue(script.contains("--semantic-version '0.0.2-dev.2'"))
-        XCTAssertTrue(script.contains("--source-commit '\(commit)'"))
+        XCTAssertTrue(script.contains("--package-version '0.0.2.9'"))
+        XCTAssertFalse(script.contains("InstallerPayload"))
+        XCTAssertFalse(script.contains("package-apply"))
         XCTAssertFalse(script.contains("TOKEN"))
         XCTAssertFalse(script.contains("PASSWORD"))
     }

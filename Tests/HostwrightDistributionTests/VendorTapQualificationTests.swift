@@ -36,13 +36,13 @@ final class VendorTapQualificationTests: XCTestCase {
     func testReleaseWorkflowLocksTheTwoImmutableQualificationBuilds() throws {
         let workflow = try read(".github/workflows/trusted-release.yml")
 
-        XCTAssertTrue(workflow.contains("default: 0.0.2-dev.9"))
-        XCTAssertTrue(workflow.contains("default: v0.0.2-dev.9"))
-        XCTAssertTrue(workflow.contains(#"^0\.0\.2-dev\.[89]$"#))
+        XCTAssertTrue(workflow.contains("default: 0.0.2-dev.10"))
+        XCTAssertTrue(workflow.contains("default: v0.0.2-dev.10"))
+        XCTAssertTrue(workflow.contains(#"^0\.0\.2-dev\.1[01]$"#))
         XCTAssertTrue(workflow.contains("github.ref == 'refs/heads/main'"))
         XCTAssertTrue(workflow.contains("name: Validate reviewed release inputs"))
         XCTAssertTrue(workflow.contains("needs: validate"))
-        XCTAssertTrue(workflow.contains("refs/tags/v0.0.2-dev.8^{}"))
+        XCTAssertTrue(workflow.contains("refs/tags/v0.0.2-dev.10^{}"))
         XCTAssertTrue(workflow.contains("git merge-base --is-ancestor \"$baseline_commit\" \"$RELEASE_COMMIT\""))
         XCTAssertTrue(workflow.contains("swift run hostwright --version"))
         XCTAssertTrue(workflow.contains("contracts/v0.0.2/versions.json"))
@@ -65,8 +65,8 @@ final class VendorTapQualificationTests: XCTestCase {
         XCTAssertFalse(workflow.contains("contents: write"))
 
         for fragment in [
-            "0.0.2-dev.8",
-            "0.0.2-dev.9",
+            "0.0.2-dev.10",
+            "0.0.2-dev.11",
             "reboot-required",
             "A real reboot has not occurred",
             "brew upgrade \"$formula_reference\"",
@@ -83,14 +83,17 @@ final class VendorTapQualificationTests: XCTestCase {
             "ensure_tap_checkout absent",
             "ensure_tap_checkout present",
             "qualify_package_lifecycle",
-            "install-dev8",
-            "repair-dev8",
-            "upgrade-dev9",
-            "rollback-dev8",
-            "repair-after-rollback-dev8",
-            "upgrade-again-dev9",
+            "install-dev10",
+            "repair-dev10",
+            "upgrade-dev11",
+            "rollback-dev10",
+            "repair-after-rollback-dev10",
+            "upgrade-again-dev11",
             "package-downgrade-refusal-passed",
             "package_downgrade_refusal",
+            "installer_log_checkpoint",
+            "installer_log_since",
+            "/var/log/install.log",
             "package-remove-plan-refusal",
             "package-remove-uninstall-refusal",
             "package-preserve-uninstall-result.json",

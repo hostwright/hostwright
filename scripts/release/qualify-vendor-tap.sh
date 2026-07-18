@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly baseline_version="0.0.2-dev.8"
-readonly candidate_version="0.0.2-dev.9"
+readonly baseline_version="0.0.2-dev.10"
+readonly candidate_version="0.0.2-dev.11"
 readonly baseline_tag="v$baseline_version"
 readonly candidate_tag="v$candidate_version"
 readonly tap_name="hostwright/tap"
@@ -12,6 +12,7 @@ readonly tap_repository_url="https://github.com/hostwright/homebrew-tap.git"
 readonly package_identifier="dev.hostwright.cli"
 readonly package_prefix="/usr/local"
 readonly package_staging_root="/Library/Application Support/Hostwright/InstallerPayload"
+readonly installer_log="/var/log/install.log"
 readonly package_remove_refusal="Package-managed installations support only --data-policy preserve because Hostwright does not infer or search for per-user state databases."
 readonly package_downgrade_refusal="Downgrade refused: installed version $candidate_version is newer than candidate $baseline_version. Use a verified Hostwright rollback record instead."
 readonly -a package_owned_paths=(
@@ -483,9 +484,37 @@ expect_package_refusal() {
   record "$label-passed"
 }
 
+installer_log_checkpoint() {
+  local metadata owner links device inode size
+  [[ -f "$installer_log" && ! -L "$installer_log" ]] \
+    || die "The Apple Installer log is not one regular file." 70
+  metadata="$(sudo -n /usr/bin/stat -f '%u:%l:%d:%i:%z' "$installer_log")" \
+    || die "Unable to inspect the Apple Installer log." 70
+  IFS=: read -r owner links device inode size <<< "$metadata"
+  [[ "$owner" == 0 && "$links" == 1 \
+      && "$device" =~ ^[0-9]+$ && "$inode" =~ ^[0-9]+$ && "$size" =~ ^[0-9]+$ ]] \
+    || die "The Apple Installer log has unsafe identity metadata." 70
+  printf '%s:%s:%s\n' "$device" "$inode" "$size"
+}
+
+installer_log_since() {
+  local checkpoint="$1" current device inode offset current_device current_inode current_size
+  IFS=: read -r device inode offset <<< "$checkpoint"
+  [[ "$device" =~ ^[0-9]+$ && "$inode" =~ ^[0-9]+$ && "$offset" =~ ^[0-9]+$ ]] \
+    || die "The Apple Installer log checkpoint is invalid." 70
+  current="$(installer_log_checkpoint)"
+  IFS=: read -r current_device current_inode current_size <<< "$current"
+  [[ "$current_device" == "$device" && "$current_inode" == "$inode" ]] \
+    || die "The Apple Installer log changed identity during qualification." 70
+  (( current_size >= offset )) \
+    || die "The Apple Installer log was truncated during qualification." 70
+  sudo -n /usr/bin/tail -c "+$((offset + 1))" "$installer_log"
+}
+
 qualify_package_lifecycle() {
   local work baseline_package candidate_package baseline_team candidate_team
-  local distribution before after downgrade_output downgrade_status=0
+  local distribution before after downgrade_output downgrade_log downgrade_log_checkpoint
+  local downgrade_status=0
   require_package_absent "before package qualification"
   umask 077
   work="$(mktemp -d "$HOSTWRIGHT_QUALIFICATION_ROOT/package-lifecycle.XXXXXX")"
@@ -504,27 +533,30 @@ qualify_package_lifecycle() {
     || die "The two qualification packages use different Developer Team IDs." 70
 
   sudo -n /usr/sbin/installer -pkg "$baseline_package" -target /
-  verify_package_state install-dev8 "$baseline_version" "$HOSTWRIGHT_BASELINE_RELEASE_COMMIT" 1 0.0.2.8 0.0.2.8 0.0.2.8
+  verify_package_state install-dev10 "$baseline_version" "$HOSTWRIGHT_BASELINE_RELEASE_COMMIT" 1 0.0.2.10 0.0.2.10 0.0.2.10
   sudo -n /usr/sbin/installer -pkg "$baseline_package" -target /
-  verify_package_state repair-dev8 "$baseline_version" "$HOSTWRIGHT_BASELINE_RELEASE_COMMIT" 2 0.0.2.8 0.0.2.8 0.0.2.8
+  verify_package_state repair-dev10 "$baseline_version" "$HOSTWRIGHT_BASELINE_RELEASE_COMMIT" 2 0.0.2.10 0.0.2.10 0.0.2.10
   sudo -n /usr/sbin/installer -pkg "$candidate_package" -target /
-  verify_package_state upgrade-dev9 "$candidate_version" "$HOSTWRIGHT_CANDIDATE_RELEASE_COMMIT" 3 0.0.2.9 0.0.2.9 0.0.2.9
+  verify_package_state upgrade-dev11 "$candidate_version" "$HOSTWRIGHT_CANDIDATE_RELEASE_COMMIT" 3 0.0.2.11 0.0.2.11 0.0.2.11
 
   distribution="$package_prefix/bin/hostwright-dist"
   sudo -n "$distribution" rollback --prefix "$package_prefix" --output json \
-    > "$HOSTWRIGHT_QUALIFICATION_ROOT/rollback-dev8-package-result.json"
-  verify_package_state rollback-dev8 "$baseline_version" "$HOSTWRIGHT_BASELINE_RELEASE_COMMIT" 4 0.0.2.8 0.0.2.9 0.0.2.9
+    > "$HOSTWRIGHT_QUALIFICATION_ROOT/rollback-dev10-package-result.json"
+  verify_package_state rollback-dev10 "$baseline_version" "$HOSTWRIGHT_BASELINE_RELEASE_COMMIT" 4 0.0.2.10 0.0.2.11 0.0.2.11
   sudo -n /usr/sbin/installer -pkg "$baseline_package" -target /
-  verify_package_state repair-after-rollback-dev8 "$baseline_version" "$HOSTWRIGHT_BASELINE_RELEASE_COMMIT" 5 0.0.2.8 0.0.2.8 0.0.2.8
+  verify_package_state repair-after-rollback-dev10 "$baseline_version" "$HOSTWRIGHT_BASELINE_RELEASE_COMMIT" 5 0.0.2.10 0.0.2.10 0.0.2.10
   sudo -n /usr/sbin/installer -pkg "$candidate_package" -target /
-  verify_package_state upgrade-again-dev9 "$candidate_version" "$HOSTWRIGHT_CANDIDATE_RELEASE_COMMIT" 6 0.0.2.9 0.0.2.9 0.0.2.9
+  verify_package_state upgrade-again-dev11 "$candidate_version" "$HOSTWRIGHT_CANDIDATE_RELEASE_COMMIT" 6 0.0.2.11 0.0.2.11 0.0.2.11
 
   before="$(package_snapshot_digest "$work")"
+  downgrade_log_checkpoint="$(installer_log_checkpoint)"
   downgrade_output="$(sudo -n /usr/sbin/installer -pkg "$baseline_package" -target / 2>&1)" \
     || downgrade_status=$?
-  [[ "$downgrade_status" -eq 1 ]] || die "The dev.8 package downgrade was not refused." 70
-  [[ "$downgrade_output" == *"$package_downgrade_refusal"* ]] \
-    || die "The dev.8 package failure did not prove Hostwright's semantic downgrade refusal." 70
+  [[ "$downgrade_status" -eq 1 ]] || die "The dev.10 package downgrade was not refused." 70
+  downgrade_log="$(installer_log_since "$downgrade_log_checkpoint")"
+  [[ "$downgrade_output$downgrade_log" == *"$package_downgrade_refusal"* \
+      && "$downgrade_log" == *"${baseline_package##*/}"* ]] \
+    || die "The dev.10 package failure did not prove Hostwright's semantic downgrade refusal." 70
   after="$(package_snapshot_digest "$work")"
   [[ "$before" == "$after" ]] || die "The rejected package downgrade changed installed state." 70
   record "package-downgrade-refusal-passed"
@@ -602,7 +634,7 @@ cleanup_qualified_package() {
   sudo -n "$distribution" status --prefix "$package_prefix" --output json > "$status_file"
   package_version="$(plutil -extract status.packageVersion raw "$status_file")"
   [[ "$(plutil -extract status.packageIdentifier raw "$status_file")" == "$package_identifier" \
-      && "$package_version" =~ ^0\.0\.2\.[89]$ \
+      && "$package_version" =~ ^0\.0\.2\.1[01]$ \
       && "$(plutil -extract status.installedManifest.sourceCommit raw "$status_file")" == "$expected_commit" \
       && "$(plutil -extract status.installedManifest.packageVersion raw "$status_file")" == "$expected_version" ]] \
     || die "Package cleanup status is not owned by this qualification pair." 70
@@ -683,7 +715,7 @@ resume() {
   verify_installed "$candidate_version" candidate
   brew services restart "$formula_reference"
   wait_for_service
-  record "dev8-to-dev9-brew-upgrade-and-service-restart-passed"
+  record "dev10-to-dev11-brew-upgrade-and-service-restart-passed"
 
   brew services stop "$formula_reference"
   brew uninstall "$formula_reference"

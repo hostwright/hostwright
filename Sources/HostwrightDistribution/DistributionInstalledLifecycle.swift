@@ -1887,7 +1887,10 @@ public struct DistributionInstalledLifecycle: Sendable {
     ) throws -> DistributionManagedServiceState {
         try requireNotCancelled(cancellation, operation: "inspect managed Hostwright service")
         let record = try managedServiceRecord(prefix: prefix)
-        let printed = try launchctlPrint(cancellation: cancellation)
+        let printed = try launchctlPrint(
+            cancellation: cancellation,
+            allowUnavailableRootUserDomain: record == nil
+        )
         let daemonPath = resolvedPath(prefix.appendingPathComponent("bin/hostwrightd").path)
 
         guard let record else {
@@ -2115,7 +2118,8 @@ public struct DistributionInstalledLifecycle: Sendable {
     }
 
     private func launchctlPrint(
-        cancellation: SecureSubprocessCancellation
+        cancellation: SecureSubprocessCancellation,
+        allowUnavailableRootUserDomain: Bool = false
     ) throws -> String? {
         do {
             return try runner.run(
@@ -2126,6 +2130,11 @@ public struct DistributionInstalledLifecycle: Sendable {
                 cancellation: cancellation
             ).standardOutput
         } catch let DistributionError.commandFailed(_, status) where status == 113 {
+            return nil
+        } catch let DistributionError.commandFailed(_, status)
+            where status == 125
+                && allowUnavailableRootUserDomain
+                && managedService.domain == "gui/0" {
             return nil
         }
     }

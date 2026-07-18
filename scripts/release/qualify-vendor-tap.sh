@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly baseline_version="0.0.2-dev.3"
-readonly candidate_version="0.0.2-dev.4"
+readonly baseline_version="0.0.2-dev.5"
+readonly candidate_version="0.0.2-dev.6"
 readonly baseline_tag="v$baseline_version"
 readonly candidate_tag="v$candidate_version"
 readonly tap_name="hostwright/tap"
@@ -504,27 +504,27 @@ qualify_package_lifecycle() {
     || die "The two qualification packages use different Developer Team IDs." 70
 
   sudo -n /usr/sbin/installer -pkg "$baseline_package" -target /
-  verify_package_state install-dev3 "$baseline_version" "$HOSTWRIGHT_BASELINE_RELEASE_COMMIT" 1 0.0.2.3 0.0.2.3 0.0.2.3
+  verify_package_state install-dev5 "$baseline_version" "$HOSTWRIGHT_BASELINE_RELEASE_COMMIT" 1 0.0.2.5 0.0.2.5 0.0.2.5
   sudo -n /usr/sbin/installer -pkg "$baseline_package" -target /
-  verify_package_state repair-dev3 "$baseline_version" "$HOSTWRIGHT_BASELINE_RELEASE_COMMIT" 2 0.0.2.3 0.0.2.3 0.0.2.3
+  verify_package_state repair-dev5 "$baseline_version" "$HOSTWRIGHT_BASELINE_RELEASE_COMMIT" 2 0.0.2.5 0.0.2.5 0.0.2.5
   sudo -n /usr/sbin/installer -pkg "$candidate_package" -target /
-  verify_package_state upgrade-dev4 "$candidate_version" "$HOSTWRIGHT_CANDIDATE_RELEASE_COMMIT" 3 0.0.2.4 0.0.2.4 0.0.2.4
+  verify_package_state upgrade-dev6 "$candidate_version" "$HOSTWRIGHT_CANDIDATE_RELEASE_COMMIT" 3 0.0.2.6 0.0.2.6 0.0.2.6
 
   distribution="$package_prefix/bin/hostwright-dist"
   sudo -n "$distribution" rollback --prefix "$package_prefix" --output json \
-    > "$HOSTWRIGHT_QUALIFICATION_ROOT/rollback-dev3-package-result.json"
-  verify_package_state rollback-dev3 "$baseline_version" "$HOSTWRIGHT_BASELINE_RELEASE_COMMIT" 4 0.0.2.3 0.0.2.4 0.0.2.4
+    > "$HOSTWRIGHT_QUALIFICATION_ROOT/rollback-dev5-package-result.json"
+  verify_package_state rollback-dev5 "$baseline_version" "$HOSTWRIGHT_BASELINE_RELEASE_COMMIT" 4 0.0.2.5 0.0.2.6 0.0.2.6
   sudo -n /usr/sbin/installer -pkg "$baseline_package" -target /
-  verify_package_state repair-after-rollback-dev3 "$baseline_version" "$HOSTWRIGHT_BASELINE_RELEASE_COMMIT" 5 0.0.2.3 0.0.2.3 0.0.2.3
+  verify_package_state repair-after-rollback-dev5 "$baseline_version" "$HOSTWRIGHT_BASELINE_RELEASE_COMMIT" 5 0.0.2.5 0.0.2.5 0.0.2.5
   sudo -n /usr/sbin/installer -pkg "$candidate_package" -target /
-  verify_package_state upgrade-again-dev4 "$candidate_version" "$HOSTWRIGHT_CANDIDATE_RELEASE_COMMIT" 6 0.0.2.4 0.0.2.4 0.0.2.4
+  verify_package_state upgrade-again-dev6 "$candidate_version" "$HOSTWRIGHT_CANDIDATE_RELEASE_COMMIT" 6 0.0.2.6 0.0.2.6 0.0.2.6
 
   before="$(package_snapshot_digest "$work")"
   downgrade_output="$(sudo -n /usr/sbin/installer -pkg "$baseline_package" -target / 2>&1)" \
     || downgrade_status=$?
-  [[ "$downgrade_status" -eq 1 ]] || die "The dev.3 package downgrade was not refused." 70
+  [[ "$downgrade_status" -eq 1 ]] || die "The dev.5 package downgrade was not refused." 70
   [[ "$downgrade_output" == *"$package_downgrade_refusal"* ]] \
-    || die "The dev.3 package failure did not prove Hostwright's semantic downgrade refusal." 70
+    || die "The dev.5 package failure did not prove Hostwright's semantic downgrade refusal." 70
   after="$(package_snapshot_digest "$work")"
   [[ "$before" == "$after" ]] || die "The rejected package downgrade changed installed state." 70
   record "package-downgrade-refusal-passed"
@@ -602,7 +602,7 @@ cleanup_qualified_package() {
   sudo -n "$distribution" status --prefix "$package_prefix" --output json > "$status_file"
   package_version="$(plutil -extract status.packageVersion raw "$status_file")"
   [[ "$(plutil -extract status.packageIdentifier raw "$status_file")" == "$package_identifier" \
-      && "$package_version" =~ ^0\.0\.2\.[34]$ \
+      && "$package_version" =~ ^0\.0\.2\.[56]$ \
       && "$(plutil -extract status.installedManifest.sourceCommit raw "$status_file")" == "$expected_commit" \
       && "$(plutil -extract status.installedManifest.packageVersion raw "$status_file")" == "$expected_version" ]] \
     || die "Package cleanup status is not owned by this qualification pair." 70
@@ -683,7 +683,7 @@ resume() {
   verify_installed "$candidate_version" candidate
   brew services restart "$formula_reference"
   wait_for_service
-  record "dev3-to-dev4-brew-upgrade-and-service-restart-passed"
+  record "dev5-to-dev6-brew-upgrade-and-service-restart-passed"
 
   brew services stop "$formula_reference"
   brew uninstall "$formula_reference"

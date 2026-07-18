@@ -1831,6 +1831,58 @@ final class DistributionDurableLifecycleTests: XCTestCase {
         }
     }
 
+    func testUnavailableRootGUIDomainIsAbsentOnlyWithoutOwnershipRecord() throws {
+        try withTemporaryRoot { root in
+            let baseline = try makeVerifiedArtifact(
+                root: root,
+                name: "root-domain-baseline",
+                version: "0.0.1",
+                commit: baselineCommit
+            )
+            let candidate = try makeVerifiedArtifact(
+                root: root,
+                name: "root-domain-candidate",
+                version: "0.0.2-dev",
+                commit: candidateCommit
+            )
+            let prefix = root.appendingPathComponent("root-domain-prefix", isDirectory: true)
+            try FileManager.default.createDirectory(at: prefix, withIntermediateDirectories: false)
+            let service = DistributionManagedLaunchdServiceConfiguration(
+                domain: "gui/0",
+                label: "dev.hostwright.root-domain-tests.\(UUID().uuidString.lowercased())",
+                propertyListURL: root.appendingPathComponent("root-domain-service.plist")
+            )
+            let lifecycle = DistributionInstalledLifecycle(managedService: service)
+
+            let installed = try lifecycle.install(artifact: baseline, prefix: prefix)
+            XCTAssertEqual(installed.service, .notInstalled)
+            XCTAssertEqual(try lifecycle.inspect(prefix: prefix).readiness, .ready)
+
+            let config = root.appendingPathComponent("hostwright.yaml")
+            try Data("services: {}\n".utf8).write(to: config, options: .withoutOverwriting)
+            try writeManagedServicePropertyList(
+                service,
+                executable: prefix.appendingPathComponent("bin/hostwrightd"),
+                config: config
+            )
+            let before = try regularFileTreeContents(in: prefix)
+
+            XCTAssertThrowsError(
+                try lifecycle.install(artifact: candidate, prefix: prefix)
+            ) { error in
+                XCTAssertEqual(
+                    error as? DistributionError,
+                    .commandFailed("inspect exact managed Hostwright service", 125)
+                )
+            }
+            XCTAssertEqual(try regularFileTreeContents(in: prefix), before)
+
+            try FileManager.default.removeItem(at: service.propertyListURL)
+            _ = try lifecycle.uninstall(prefix: prefix, dataPolicy: .preserve)
+            XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: prefix.path), [])
+        }
+    }
+
     func testExactExistingLaunchdServiceIsStoppedReplacedRestoredAndRecovered() throws {
         try withTemporaryRoot { root in
             let baseline = try makeVerifiedArtifact(

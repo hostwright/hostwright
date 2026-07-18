@@ -106,7 +106,7 @@ final class HostwrightCoreTests: XCTestCase {
         XCTAssertEqual(HostwrightIdentity.domain, "hostwright.dev")
         XCTAssertNotNil(
             HostwrightIdentity.version.range(
-                of: #"^0\.0\.2-dev\.[34]$"#,
+                of: #"^0\.0\.2-dev\.[56]$"#,
                 options: .regularExpression
             )
         )

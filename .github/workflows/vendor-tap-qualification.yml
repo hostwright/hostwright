@@ -12,19 +12,19 @@ on:
           - resume
           - cleanup
       baseline_release_commit:
-        description: Exact reviewed main ancestor for v0.0.2-dev.7
-        required: true
-        type: string
-      candidate_release_commit:
         description: Exact reviewed main ancestor for v0.0.2-dev.8
         required: true
         type: string
+      candidate_release_commit:
+        description: Exact reviewed main ancestor for v0.0.2-dev.9
+        required: true
+        type: string
       baseline_tap_commit:
-        description: Exact reviewed tap commit containing the dev.7 formula
+        description: Exact reviewed tap commit containing the dev.8 formula
         required: true
         type: string
       candidate_tap_commit:
-        description: Exact reviewed tap commit containing the dev.8 formula
+        description: Exact reviewed tap commit containing the dev.9 formula
         required: true
         type: string
 

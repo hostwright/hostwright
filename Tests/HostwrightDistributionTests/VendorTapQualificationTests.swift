@@ -36,13 +36,13 @@ final class VendorTapQualificationTests: XCTestCase {
     func testReleaseWorkflowLocksTheTwoImmutableQualificationBuilds() throws {
         let workflow = try read(".github/workflows/trusted-release.yml")
 
-        XCTAssertTrue(workflow.contains("default: 0.0.2-dev.7"))
-        XCTAssertTrue(workflow.contains("default: v0.0.2-dev.7"))
-        XCTAssertTrue(workflow.contains(#"^0\.0\.2-dev\.[78]$"#))
+        XCTAssertTrue(workflow.contains("default: 0.0.2-dev.9"))
+        XCTAssertTrue(workflow.contains("default: v0.0.2-dev.9"))
+        XCTAssertTrue(workflow.contains(#"^0\.0\.2-dev\.[89]$"#))
         XCTAssertTrue(workflow.contains("github.ref == 'refs/heads/main'"))
         XCTAssertTrue(workflow.contains("name: Validate reviewed release inputs"))
         XCTAssertTrue(workflow.contains("needs: validate"))
-        XCTAssertTrue(workflow.contains("refs/tags/v0.0.2-dev.7^{}"))
+        XCTAssertTrue(workflow.contains("refs/tags/v0.0.2-dev.8^{}"))
         XCTAssertTrue(workflow.contains("git merge-base --is-ancestor \"$baseline_commit\" \"$RELEASE_COMMIT\""))
         XCTAssertTrue(workflow.contains("swift run hostwright --version"))
         XCTAssertTrue(workflow.contains("contracts/v0.0.2/versions.json"))
@@ -65,8 +65,8 @@ final class VendorTapQualificationTests: XCTestCase {
         XCTAssertFalse(workflow.contains("contents: write"))
 
         for fragment in [
-            "0.0.2-dev.7",
             "0.0.2-dev.8",
+            "0.0.2-dev.9",
             "reboot-required",
             "A real reboot has not occurred",
             "brew upgrade \"$formula_reference\"",
@@ -83,12 +83,12 @@ final class VendorTapQualificationTests: XCTestCase {
             "ensure_tap_checkout absent",
             "ensure_tap_checkout present",
             "qualify_package_lifecycle",
-            "install-dev7",
-            "repair-dev7",
-            "upgrade-dev8",
-            "rollback-dev7",
-            "repair-after-rollback-dev7",
-            "upgrade-again-dev8",
+            "install-dev8",
+            "repair-dev8",
+            "upgrade-dev9",
+            "rollback-dev8",
+            "repair-after-rollback-dev8",
+            "upgrade-again-dev9",
             "package-downgrade-refusal-passed",
             "package_downgrade_refusal",
             "package-remove-plan-refusal",

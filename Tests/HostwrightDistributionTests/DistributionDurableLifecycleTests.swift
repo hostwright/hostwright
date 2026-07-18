@@ -80,10 +80,20 @@ final class DistributionDurableLifecycleTests: XCTestCase {
             XCTAssertEqual(upgraded.generation, 3)
             XCTAssertEqual(upgraded.packageOrigin, candidateOrigin)
 
-            let rolledBack = try lifecycle.rollback(prefix: prefix)
+            let rolledBack = try {
+                let previousMask = umask(0o077)
+                defer { _ = umask(previousMask) }
+                return try lifecycle.rollback(prefix: prefix)
+            }()
             XCTAssertEqual(rolledBack.installedManifest.packageVersion, "0.0.2-dev.1")
             XCTAssertEqual(rolledBack.packageVersion, "0.0.2.1")
             XCTAssertEqual(rolledBack.mostRecentPackageReceiptVersion, "0.0.2.2")
+            XCTAssertEqual(
+                try DistributionFileSystem.mode(
+                    of: prefix.appendingPathComponent(DistributionLayout.installManifestFileName)
+                ),
+                0o644
+            )
 
             let upgradedAgain = try lifecycle.installPackage(
                 manifest: candidate.manifest,

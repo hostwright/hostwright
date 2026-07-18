@@ -165,7 +165,7 @@ final class DistributionDurableLifecycleTests: XCTestCase {
             case "--pkg-info-plist":
                 let version = try String(contentsOfFile: receipt, encoding: .utf8)
                     .trimmingCharacters(in: .whitespacesAndNewlines)
-                print("<?xml version=\\\"1.0\\\" encoding=\\\"UTF-8\\\"?><plist version=\\\"1.0\\\"><dict><key>pkgid</key><string>dev.hostwright.cli</string><key>pkg-version</key><string>\\(version)</string><key>install-location</key><string>/</string><key>volume</key><string>/</string></dict></plist>")
+                print("<?xml version=\\\"1.0\\\" encoding=\\\"UTF-8\\\"?><plist version=\\\"1.0\\\"><dict><key>pkgid</key><string>dev.hostwright.cli</string><key>pkg-version</key><string>\\(version)</string><key>install-location</key><string></string><key>volume</key><string>/</string></dict></plist>")
             case "--forget":
                 if FileManager.default.fileExists(atPath: failForget) {
                     exit(1)

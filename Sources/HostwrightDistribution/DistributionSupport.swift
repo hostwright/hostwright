@@ -174,6 +174,9 @@ public enum DistributionFileSystem {
             close(descriptor)
             if !complete { unlink(url.path) }
         }
+        guard fchmod(descriptor, mode_t(mode)) == 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
         try data.withUnsafeBytes { rawBuffer in
             var offset = 0
             while offset < rawBuffer.count {

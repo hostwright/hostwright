@@ -104,12 +104,7 @@ final class HostwrightCoreTests: XCTestCase {
         XCTAssertEqual(HostwrightIdentity.daemonName, "hostwrightd")
         XCTAssertEqual(HostwrightIdentity.manifestFileName, "hostwright.yaml")
         XCTAssertEqual(HostwrightIdentity.domain, "hostwright.dev")
-        XCTAssertNotNil(
-            HostwrightIdentity.version.range(
-                of: #"^0\.0\.2-dev\.1[01]$"#,
-                options: .regularExpression
-            )
-        )
+        XCTAssertEqual(HostwrightIdentity.version, "0.0.2-dev.12")
     }
 
     func testCompatibilityGateRejectsUnsupportedPlatform() {

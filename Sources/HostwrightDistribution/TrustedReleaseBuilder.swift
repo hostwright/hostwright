@@ -360,6 +360,15 @@ public struct TrustedReleaseBuilder: Sendable {
         )
         try DistributionFileSystem.createExclusiveDirectory(packageScripts)
         try DistributionFileSystem.writeNewFile(
+            Data(DistributionPackageScripts.preinstall(
+                packageVersion: installerPackageVersion,
+                semanticVersion: request.expectedVersion,
+                sourceCommit: request.expectedCommit
+            ).utf8),
+            to: packageScripts.appendingPathComponent("preinstall"),
+            mode: 0o755
+        )
+        try DistributionFileSystem.writeNewFile(
             Data(DistributionPackageScripts.postinstall(
                 packageVersion: installerPackageVersion,
                 teamIdentifier: request.teamIdentifier

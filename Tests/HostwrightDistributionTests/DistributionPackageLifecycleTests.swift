@@ -182,6 +182,24 @@ final class DistributionPackageLifecycleTests: XCTestCase {
         XCTAssertFalse(script.contains("PASSWORD"))
     }
 
+    func testPreinstallEntrypointUsesOnlyLockedPackageLifecycleArguments() {
+        let commit = String(repeating: "a", count: 40)
+        let script = DistributionPackageScripts.preinstall(
+            packageVersion: "0.0.2.2",
+            semanticVersion: "0.0.2-dev.2",
+            sourceCommit: commit
+        )
+        XCTAssertTrue(script.hasPrefix("#!/bin/sh\nset -eu\n"))
+        XCTAssertTrue(script.contains("hostwright-dist' package-preflight"))
+        XCTAssertTrue(script.contains("--prefix '/usr/local'"))
+        XCTAssertTrue(script.contains("--package-id 'dev.hostwright.cli'"))
+        XCTAssertTrue(script.contains("--package-version '0.0.2.2'"))
+        XCTAssertTrue(script.contains("--semantic-version '0.0.2-dev.2'"))
+        XCTAssertTrue(script.contains("--source-commit '\(commit)'"))
+        XCTAssertFalse(script.contains("TOKEN"))
+        XCTAssertFalse(script.contains("PASSWORD"))
+    }
+
     private func makeInstallManifest(version: String) -> DistributionInstallManifest {
         let commit = String(repeating: "a", count: 40)
         let artifact = DistributionArtifactManifest(

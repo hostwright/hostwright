@@ -662,6 +662,86 @@ final class DistributionDurableLifecycleTests: XCTestCase {
         }
     }
 
+    func testPackagePreflightRefusesDowngradeBeforeInstallerMutation() throws {
+        try withTemporaryRoot { root in
+            let baseline = try makeVerifiedArtifact(
+                root: root,
+                name: "package-preflight-baseline",
+                version: "0.0.2-dev.1",
+                commit: baselineCommit
+            )
+            let candidate = try makeVerifiedArtifact(
+                root: root,
+                name: "package-preflight-candidate",
+                version: "0.0.2-dev.2",
+                commit: candidateCommit
+            )
+            let prefix = root.appendingPathComponent("package-preflight-prefix", isDirectory: true)
+            try FileManager.default.createDirectory(at: prefix, withIntermediateDirectories: false)
+            let lifecycle = DistributionInstalledLifecycle()
+            let receipts = DistributionPackageReceiptController()
+            let packageLifecycle = DistributionPackageLifecycle(
+                receiptController: receipts,
+                lifecycle: lifecycle,
+                expectedPrefix: prefix,
+                expectedStagingRoot: root.appendingPathComponent("unused-staging", isDirectory: true),
+                expectedOwnerUID: getuid(),
+                effectiveUserID: 0,
+                verifyExecutableSignatures: false
+            )
+            let baselineOrigin = DistributionPackageOrigin(
+                packageIdentifier: DistributionLayout.packageIdentifier,
+                packageVersion: "0.0.2.1",
+                mostRecentPackageReceiptVersion: "0.0.2.1"
+            )
+            let candidateOrigin = DistributionPackageOrigin(
+                packageIdentifier: DistributionLayout.packageIdentifier,
+                packageVersion: "0.0.2.2",
+                mostRecentPackageReceiptVersion: "0.0.2.2"
+            )
+
+            _ = try lifecycle.installPackage(
+                manifest: baseline.manifest,
+                sourceRoot: baseline.extractedRoot,
+                prefix: prefix,
+                requiredOperation: .install,
+                packageOrigin: baselineOrigin,
+                cancellation: SecureSubprocessCancellation()
+            )
+            _ = try lifecycle.installPackage(
+                manifest: candidate.manifest,
+                sourceRoot: candidate.extractedRoot,
+                prefix: prefix,
+                requiredOperation: .upgrade,
+                packageOrigin: candidateOrigin,
+                cancellation: SecureSubprocessCancellation()
+            )
+            let inspectionBefore = try lifecycle.inspectForPackageApply(prefix: prefix)
+            let prefixBefore = try regularFileTreeContents(in: prefix)
+
+            XCTAssertThrowsError(
+                try packageLifecycle.preflight(
+                    prefix: prefix,
+                    packageIdentifier: DistributionLayout.packageIdentifier,
+                    packageVersion: "0.0.2.1",
+                    candidateSemanticVersion: "0.0.2-dev.1",
+                    candidateCommit: baselineCommit
+                )
+            ) { error in
+                XCTAssertEqual(
+                    error as? DistributionError,
+                    .downgradeRefused(
+                        installed: "0.0.2-dev.2",
+                        candidate: "0.0.2-dev.1"
+                    )
+                )
+            }
+
+            XCTAssertEqual(try lifecycle.inspectForPackageApply(prefix: prefix), inspectionBefore)
+            XCTAssertEqual(try regularFileTreeContents(in: prefix), prefixBefore)
+        }
+    }
+
     func testEveryDurableUpgradeCheckpointRecoversOrFinalizesOneConsistentGeneration() throws {
         try withTemporaryRoot { root in
             let baseline = try makeVerifiedArtifact(

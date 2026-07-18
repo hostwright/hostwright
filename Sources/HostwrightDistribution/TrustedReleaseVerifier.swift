@@ -494,15 +494,27 @@ public struct TrustedReleaseVerifier: Sendable {
         }
         let scriptsRoot = expansionRoot.appendingPathComponent("Scripts", isDirectory: true)
         guard try DistributionFileSystem.isDirectoryNonSymlink(scriptsRoot),
-              try regularFileInventory(scriptsRoot) == ["postinstall"] else {
+              try regularFileInventory(scriptsRoot) == ["postinstall", "preinstall"] else {
             throw DistributionError.invalidArtifact(
-                "trusted package must contain exactly one postinstall entrypoint"
+                "trusted package must contain exactly the locked preinstall and postinstall entrypoints"
             )
         }
+        let preinstall = scriptsRoot.appendingPathComponent("preinstall")
         let postinstall = scriptsRoot.appendingPathComponent("postinstall")
         let expectedPackageVersion = try DistributionPackageVersion.make(
             from: manifest.packageVersion
         )
+        guard try DistributionFileSystem.mode(of: preinstall) == 0o755,
+              try String(contentsOf: preinstall, encoding: .utf8)
+                == DistributionPackageScripts.preinstall(
+                    packageVersion: expectedPackageVersion,
+                    semanticVersion: manifest.packageVersion,
+                    sourceCommit: manifest.sourceCommit
+                ) else {
+            throw DistributionError.invalidArtifact(
+                "trusted package preinstall entrypoint is not the exact downgrade guard"
+            )
+        }
         guard try DistributionFileSystem.mode(of: postinstall) == 0o755,
               try String(contentsOf: postinstall, encoding: .utf8)
                 == DistributionPackageScripts.postinstall(

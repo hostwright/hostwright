@@ -220,6 +220,22 @@ enum HostwrightDistributionCLI {
                 cancellation: cancellation
             )
             return ToolResult(output: try jsonLine(result), exitCode: 0)
+        case "package-preflight":
+            let options = try parse(
+                values,
+                required: [
+                    "--prefix", "--package-id", "--package-version",
+                    "--semantic-version", "--source-commit"
+                ]
+            )
+            try DistributionPackageLifecycle().preflight(
+                prefix: fileURL(options["--prefix"]!),
+                packageIdentifier: options["--package-id"]!,
+                packageVersion: options["--package-version"]!,
+                candidateSemanticVersion: options["--semantic-version"]!,
+                candidateCommit: options["--source-commit"]!
+            )
+            return ToolResult(output: "", exitCode: 0)
         case "package-uninstall":
             let options = try parse(
                 values,
@@ -587,6 +603,7 @@ enum HostwrightDistributionCLI {
       hostwright-dist install --developer-distribution-dir <path> --prefix <path> [--state-db <path>] --output json
       hostwright-dist upgrade --trusted-release-dir <path> --team-id <10-char> --prefix <path> [--state-db <path>] --output json
       hostwright-dist repair --trusted-release-dir <path> --team-id <10-char> --prefix <path> [--state-db <path>] --output json
+      hostwright-dist package-preflight --prefix /usr/local --package-id dev.hostwright.cli --package-version <version> --semantic-version <semver> --source-commit <40-hex>
       hostwright-dist package-apply --staged-root '/Library/Application Support/Hostwright/InstallerPayload' --prefix /usr/local --package-id dev.hostwright.cli --package-version <version> --team-id <10-char> --output json
       hostwright-dist package-uninstall --prefix /usr/local --data-policy preserve --output json
       hostwright-dist status --prefix <path> --output json

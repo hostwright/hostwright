@@ -49,6 +49,26 @@ public enum DistributionPackageVersion {
 }
 
 enum DistributionPackageScripts {
+    static func preinstall(
+        packageVersion: String,
+        semanticVersion: String,
+        sourceCommit: String
+    ) -> String {
+        """
+        #!/bin/sh
+        set -eu
+        if [ -x '/usr/local/bin/hostwright-dist' ] && [ ! -L '/usr/local/bin/hostwright-dist' ]; then
+          exec '/usr/local/bin/hostwright-dist' package-preflight \\
+            --prefix '/usr/local' \\
+            --package-id 'dev.hostwright.cli' \\
+            --package-version '\(packageVersion)' \\
+            --semantic-version '\(semanticVersion)' \\
+            --source-commit '\(sourceCommit)'
+        fi
+        exit 0
+        """ + "\n"
+    }
+
     static func postinstall(packageVersion: String, teamIdentifier: String) -> String {
         """
         #!/bin/sh
@@ -345,6 +365,42 @@ public struct DistributionPackageLifecycle: Sendable {
             receipt: receipt,
             signerTeamIdentifier: verified.teamIdentifier,
             status: status
+        )
+    }
+
+    public func preflight(
+        prefix: URL,
+        packageIdentifier: String,
+        packageVersion: String,
+        candidateSemanticVersion: String,
+        candidateCommit: String
+    ) throws {
+        try requireElevatedAuthority()
+        guard prefix.standardizedFileURL.resolvingSymlinksInPath().path == expectedPrefix.path else {
+            throw DistributionError.unsafePath("package-preflight requires the exact /usr/local prefix.")
+        }
+        guard packageIdentifier == DistributionLayout.packageIdentifier,
+              DistributionPackageVersion.isValid(packageVersion) else {
+            throw DistributionError.invalidArtifact(
+                "package-preflight requires the exact Hostwright package identity"
+            )
+        }
+        guard candidateCommit.range(of: "^[a-f0-9]{40}$", options: .regularExpression) != nil else {
+            throw DistributionError.invalidArguments(
+                "package-preflight requires one exact lowercase source commit."
+            )
+        }
+        _ = try DistributionSemanticVersion(parsing: candidateSemanticVersion)
+        let inspection = try lifecycle.inspectForPackageApply(prefix: prefix)
+        guard inspection.readiness == .ready,
+              let installed = inspection.status?.installedManifest else {
+            return
+        }
+        _ = try DistributionVersionTransition.classify(
+            installedVersion: installed.packageVersion,
+            installedCommit: installed.sourceCommit,
+            candidateVersion: candidateSemanticVersion,
+            candidateCommit: candidateCommit
         )
     }
 

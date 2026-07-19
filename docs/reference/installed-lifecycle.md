@@ -1,6 +1,6 @@
 # Installed Distribution Lifecycle
 
-Status: implemented in `0.0.2-dev` for an explicit local install prefix and a verifier-produced trusted, developer, or staged Apple Installer artifact. This does not make a Homebrew, `.pkg`, or public binary channel supported; those channels still require their own real signing, publication, and clean-Mac evidence.
+Status: implemented and qualified in `0.0.2-dev` for an explicit local install prefix and a verifier-produced trusted, developer, or staged Apple Installer artifact. The vendor tap, signed `.pkg`, and public qualification artifacts passed signing, publication, and clean-Mac evidence. They remain unsupported prerelease channels, not `v0.0.2` GA.
 
 ## Boundary
 
@@ -169,4 +169,4 @@ Exit categories are documented in [Error Codes](error-codes.md). Deterministic c
 
 ## Qualification Boundary
 
-The installed lifecycle is executable and tested with real artifacts, files, subprocesses, SQLite databases, every reachable mid-mutation cancellation checkpoint, a real current-user launchd service, service replacement/recovery, rollback, legacy adoption, and exact ownership refusal. The supported distribution gate remains open until real Developer ID signing/notarization, public-byte verification, vendor-tap installation, Gatekeeper/reboot coverage, clean-Mac upgrade/repair/rollback/uninstall, and the aggregate Phase 02 evidence gate all pass.
+The installed lifecycle is executable and tested with real artifacts, files, subprocesses, SQLite databases, every reachable mid-mutation cancellation checkpoint, a real current-user launchd service, service replacement/recovery, rollback, legacy adoption, and exact ownership refusal. Phase 02 qualification passed real Developer ID signing/notarization, public-byte verification, vendor-tap installation, Gatekeeper and reboot coverage, clean-Mac upgrade/repair/rollback/uninstall, state and doctor checks, abrupt-power recovery, and exact cleanup. Phase 15 repeats the distribution gate for GA.

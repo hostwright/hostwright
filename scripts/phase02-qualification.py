@@ -919,6 +919,7 @@ def cleanup_power_workspace(record: Path, state: Path) -> None:
         state.name + "-shm",
         state.name + "-wal",
         f".hostwright-{digest}-access-v1.lock",
+        f".hostwright-{digest}-access-v1.lock.writer",
     }
     entries = list(parent.iterdir())
     unexpected = sorted(path.name for path in entries if path.name not in allowed)
@@ -1265,7 +1266,18 @@ def self_test() -> int:
         )
         if failed_cleanup["status"] != "failed" or not failed_cleanup["failures"]:
             raise QualificationFailure("cleanup failure was reported as passing evidence")
-    print(json.dumps({"kind": "phase02QualificationSelfTest", "passed": 6, "failed": 0}, sort_keys=True))
+        power_root = root / "power-cleanup"
+        power_root.mkdir(mode=0o700)
+        power_record = power_root / "session.json"
+        power_state = power_root / "state.sqlite"
+        power_record.write_text("{}\n", encoding="utf-8")
+        power_state.write_bytes(b"state")
+        power_digest = hashlib.sha256(str(power_state).encode()).digest()[:8].hex()
+        (power_root / f".hostwright-{power_digest}-access-v1.lock").write_bytes(b"")
+        (power_root / f".hostwright-{power_digest}-access-v1.lock.writer").write_bytes(b"")
+        cleanup_power_workspace(power_record, power_state)
+        recorder.assertion("power cleanup accepts its owned writer lock", not power_root.exists())
+    print(json.dumps({"kind": "phase02QualificationSelfTest", "passed": 7, "failed": 0}, sort_keys=True))
     return 0
 
 

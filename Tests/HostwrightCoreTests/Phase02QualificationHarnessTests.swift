@@ -11,7 +11,7 @@ final class Phase02QualificationHarnessTests: XCTestCase {
             JSONSerialization.jsonObject(with: Data(selfTest.output.utf8)) as? [String: Any]
         )
         XCTAssertEqual(document["kind"] as? String, "phase02QualificationSelfTest")
-        XCTAssertEqual(document["passed"] as? Int, 6)
+        XCTAssertEqual(document["passed"] as? Int, 7)
         XCTAssertEqual(document["failed"] as? Int, 0)
 
         let help = try runPython([script.path, "--help"])

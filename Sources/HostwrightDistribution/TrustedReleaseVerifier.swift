@@ -219,8 +219,14 @@ public struct TrustedReleaseVerifier: Sendable {
                 from: evidenceURL
             )
             try report.validate()
+            guard let recordedDependencies = provenance.predicate.buildDefinition
+                .internalParameters.externalSwiftPMDependencies else {
+                throw DistributionError.invalidArtifact(
+                    "trusted provenance omits pinned SwiftPM dependencies"
+                )
+            }
             let expectedBuildMetadata = TrustedReleaseBuildMetadata(
-                externalSwiftPMDependencies: [],
+                externalSwiftPMDependencies: recordedDependencies,
                 packageLicenseSPDX: "Apache-2.0",
                 reproducibilityBuildCount: 2,
                 byteIdenticalUnsignedPayloads: true,

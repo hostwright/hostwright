@@ -223,7 +223,39 @@ public enum RuntimeCommandPolicy {
                   identity: identity,
                   resourceIdentifier: resourceIdentifier
               ),
-              labels == RuntimeManagedResourceIdentity.labels(for: identity) else {
+              let providerValue = labels[RuntimeManagedResourceIdentity.providerIDLabel],
+              let providerID = RuntimeProviderID.knownValues.first(where: {
+                  $0.rawValue == providerValue
+              }) else {
+            throw RuntimeAdapterError.commandRejected(
+                classification: spec.classification,
+                message: "Create-missing-service command specs require complete ownership labels bound to the exact container identifier."
+            )
+        }
+        let ownership: RuntimeInventoryOwnershipEvidence?
+        do {
+            ownership = try RuntimeManagedResourceIdentity.ownershipEvidence(
+                from: labels,
+                expectedProviderID: providerID
+            )
+        } catch {
+            throw RuntimeAdapterError.commandRejected(
+                classification: spec.classification,
+                message: "Create-missing-service command specs require complete ownership labels bound to the exact container identifier."
+            )
+        }
+        let ownershipKeys: Set<String> = [
+            RuntimeManagedResourceIdentity.resourceUUIDLabel,
+            RuntimeManagedResourceIdentity.projectUUIDLabel,
+            RuntimeManagedResourceIdentity.resourceGenerationLabel,
+            RuntimeManagedResourceIdentity.projectGenerationLabel,
+            RuntimeManagedResourceIdentity.providerIDLabel,
+            RuntimeManagedResourceIdentity.providerGenerationLabel,
+            RuntimeManagedResourceIdentity.fencingTokenLabel
+        ]
+        let expectedKeys = Set(RuntimeManagedResourceIdentity.labels(for: identity).keys)
+            .union(ownershipKeys)
+        guard ownership != nil, Set(labels.keys) == expectedKeys else {
             throw RuntimeAdapterError.commandRejected(
                 classification: spec.classification,
                 message: "Create-missing-service command specs require complete ownership labels bound to the exact container identifier."

@@ -1,0 +1,14 @@
+[
+  {
+    "id": "hostwright-v2-demo-api-8022a4342ff931db15cdc03b748de2b6",
+    "cpuUsageUsec": 1100,
+    "memoryUsageBytes": 2200,
+    "memoryLimitBytes": 4400,
+    "networkRxBytes": 11,
+    "networkTxBytes": 22,
+    "blockReadBytes": 33,
+    "blockWriteBytes": 44,
+    "numProcesses": 3,
+    "futureStatsField": "ignored"
+  }
+]

@@ -2,6 +2,20 @@ import Foundation
 import HostwrightRuntime
 
 enum StateJSON {
+    private static let nonSecretIdentityKeys: Set<String> = [
+        "capabilitySHA256",
+        "checkpoint",
+        "confirmationToken",
+        "fencingToken",
+        "operationID",
+        "planHash",
+        "projectResourceUUID",
+        "projectUUID",
+        "resourceFencingToken",
+        "resourceUUID",
+        "verification"
+    ]
+
     static func encode(_ object: Any) throws -> String {
         guard JSONSerialization.isValidJSONObject(object) else {
             throw StateStoreError.invalidRecord("State JSON payload is not a valid JSON object.")
@@ -51,18 +65,29 @@ enum StateJSON {
         if let object = value as? [String: Any] {
             var redacted: [String: Any] = [:]
             for (key, nested) in object {
-                redacted[key] = policy.isSensitiveKey(key)
-                    ? policy.replacement
-                    : redact(nested, using: policy)
+                if nonSecretIdentityKeys.contains(key), let string = nested as? String {
+                    redacted[key] = string
+                } else {
+                    redacted[key] = policy.isSensitiveKey(key)
+                        ? policy.replacement
+                        : redact(nested, key: key, using: policy)
+                }
             }
             return redacted
         }
         if let array = value as? [Any] {
-            return array.map { redact($0, using: policy) }
+            return array.map { redact($0, key: nil, using: policy) }
         }
         if let string = value as? String {
             return policy.redact(string)
         }
         return value
+    }
+
+    private static func redact(_ value: Any, key: String?, using policy: RuntimeRedactionPolicy) -> Any {
+        if let key, nonSecretIdentityKeys.contains(key), let string = value as? String {
+            return string
+        }
+        return redact(value, using: policy)
     }
 }

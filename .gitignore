@@ -4,7 +4,6 @@
 DerivedData/
 *.xcodeproj/
 *.xcworkspace/
-Package.resolved
 __pycache__/
 *.pyc
 

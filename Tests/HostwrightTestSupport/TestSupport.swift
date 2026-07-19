@@ -3,6 +3,41 @@ import HostwrightRuntime
 import HostwrightSecrets
 
 public struct ScriptedRuntimeAdapter: RuntimeAdapter {
+    public static let testCapabilitySnapshot = RuntimeCapabilitySnapshot(
+        descriptor: RuntimeProviderDescriptor(
+            providerID: .appleContainerCLI,
+            components: [
+                RuntimeProviderComponent(
+                    identifier: .appleContainerCLI,
+                    version: "1.1.0",
+                    build: "test",
+                    fingerprint: "abcdef0"
+                ),
+                RuntimeProviderComponent(
+                    identifier: .appleContainerAPIService,
+                    version: "1.1.0",
+                    build: "test",
+                    fingerprint: "abcdef0"
+                )
+            ],
+            minimumMacOSVersion: RuntimeProviderCapabilityContract.minimumMacOSVersion,
+            supportedArchitectures: [.arm64]
+        ),
+        host: RuntimeProviderHostPlatform(
+            macOSVersion: RuntimeProviderMacOSVersion(major: 26),
+            macOSBuild: "25A123",
+            architecture: .arm64
+        ),
+        features: RuntimeProviderFeature.knownValues.map {
+            RuntimeProviderFeatureStatus(
+                feature: $0,
+                state: .available,
+                reason: .implemented
+            )
+        }
+    )
+    public static let testCapabilitySHA256 = testCapabilitySnapshot.canonicalSHA256
+
     public enum Scenario: Sendable {
         case unavailable(String)
         case availableEmpty
@@ -28,6 +63,7 @@ public struct ScriptedRuntimeAdapter: RuntimeAdapter {
     }
 
     public static let defaultMetadata = RuntimeAdapterMetadata(
+        providerID: .appleContainerCLI,
         adapterName: "ScriptedRuntimeAdapter",
         adapterVersion: HostwrightIdentity.version,
         runtimeName: "scripted-test-runtime",
@@ -46,6 +82,15 @@ public struct ScriptedRuntimeAdapter: RuntimeAdapter {
             throw RuntimeAdapterError.runtimeUnavailable(redactionPolicy.redact(message))
         default:
             return adapterMetadata.capabilities
+        }
+    }
+
+    public func capabilitySnapshot() async throws -> RuntimeCapabilitySnapshot {
+        switch scenario {
+        case .unavailable(let message):
+            throw RuntimeAdapterError.runtimeUnavailable(redactionPolicy.redact(message))
+        default:
+            return Self.testCapabilitySnapshot
         }
     }
 
@@ -83,9 +128,19 @@ public struct ScriptedRuntimeAdapter: RuntimeAdapter {
         case .unavailable(let message):
             throw RuntimeAdapterError.runtimeUnavailable(redactionPolicy.redact(message))
         case .availableEmpty:
-            return ObservedRuntimeState(projectName: desiredState.projectName, services: [], adapterMetadata: adapterMetadata)
+            return ObservedRuntimeState(
+                projectName: desiredState.projectName,
+                services: [],
+                adapterMetadata: adapterMetadata,
+                capabilitySHA256: Self.testCapabilitySHA256
+            )
         case .observed(let services):
-            return ObservedRuntimeState(projectName: desiredState.projectName, services: services, adapterMetadata: adapterMetadata)
+            return ObservedRuntimeState(
+                projectName: desiredState.projectName,
+                services: services,
+                adapterMetadata: adapterMetadata,
+                capabilitySHA256: Self.testCapabilitySHA256
+            )
         case .commandFailure(let error):
             throw error.redacted(using: redactionPolicy)
         case .timeout:
@@ -93,7 +148,12 @@ public struct ScriptedRuntimeAdapter: RuntimeAdapter {
         case .redactedFailure(let output):
             throw RuntimeAdapterError.commandFailed(exitStatus: 1, message: "scripted command failed", standardError: redactionPolicy.redact(output))
         case .logs:
-            return ObservedRuntimeState(projectName: desiredState.projectName, services: [], adapterMetadata: adapterMetadata)
+            return ObservedRuntimeState(
+                projectName: desiredState.projectName,
+                services: [],
+                adapterMetadata: adapterMetadata,
+                capabilitySHA256: Self.testCapabilitySHA256
+            )
         }
     }
 
@@ -111,7 +171,7 @@ public struct ScriptedRuntimeAdapter: RuntimeAdapter {
                 )
             }
 
-        return RuntimePlan(actions: actions)
+        return RuntimePlan(actions: actions, capabilitySHA256: observedState.capabilitySHA256)
     }
 
     public func execute(_ action: PlannedRuntimeAction, confirmation: RuntimeMutationConfirmation?) async throws -> RuntimeEvent {
@@ -159,6 +219,17 @@ public struct ScriptedRuntimeProcessRunner: RuntimeProcessRunning {
 
         switch behavior {
         case .result(let result):
+            if spec.arguments == ["--version"] {
+                let output = AppleContainerVersionParser.parseCLIIdentity(result.standardOutput) == nil
+                    ? "container CLI version 1.1.0 (build: release, commit: 5973b9c)\n"
+                    : result.standardOutput
+                return RuntimeCommandResult(
+                    spec: spec,
+                    exitStatus: 0,
+                    standardOutput: output,
+                    standardError: ""
+                )
+            }
             return result.redacted(using: redactionPolicy)
         case .failure(let error):
             throw error.redacted(using: redactionPolicy)

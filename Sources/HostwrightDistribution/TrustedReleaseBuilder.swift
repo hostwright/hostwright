@@ -75,10 +75,15 @@ public struct TrustedReleaseBuildRequest: Sendable {
 public struct TrustedReleaseBuilder: Sendable {
     private let runner: DistributionProcessRunner
     private let identityResolver: DeveloperIDIdentityResolver
+    private let containerizationAssets: DistributionContainerizationAssetBundle?
 
-    public init(runner: DistributionProcessRunner = DistributionProcessRunner()) {
+    public init(
+        runner: DistributionProcessRunner = DistributionProcessRunner(),
+        containerizationAssets: DistributionContainerizationAssetBundle? = nil
+    ) {
         self.runner = runner
         self.identityResolver = DeveloperIDIdentityResolver(runner: runner)
+        self.containerizationAssets = containerizationAssets
     }
 
     public func build(
@@ -131,7 +136,10 @@ public struct TrustedReleaseBuilder: Sendable {
 
         let firstOutput = scratch.appendingPathComponent("unsigned-first", isDirectory: true)
         let secondOutput = scratch.appendingPathComponent("unsigned-second", isDirectory: true)
-        let cleanBuilder = DistributionCleanBuilder(runner: runner)
+        let cleanBuilder = DistributionCleanBuilder(
+            runner: runner,
+            containerizationAssets: containerizationAssets
+        )
         let firstBuild = try cleanBuilder.buildWithDependencyInventory(
             sourceRoot: request.sourceRoot,
             outputDirectory: firstOutput,
@@ -826,12 +834,22 @@ public struct TrustedReleaseBuilder: Sendable {
                         byteIdenticalUnsignedPayloads: buildMetadata.byteIdenticalUnsignedPayloads,
                         toolVersions: buildMetadata.toolVersions
                     ),
-                    resolvedDependencies: [
+                    resolvedDependencies: ([
                         ProvenanceResolvedDependency(
                             uri: "git+https://github.com/hostwright/hostwright.git",
                             digest: ["gitCommit": sourceCommit]
                         )
-                    ]
+                    ] + buildMetadata.externalSwiftPMDependencies.map { dependency in
+                        let fields = dependency.split(
+                            separator: "|",
+                            maxSplits: 3,
+                            omittingEmptySubsequences: false
+                        ).map(String.init)
+                        return ProvenanceResolvedDependency(
+                            uri: "git+\(fields[1])@\(fields[2])",
+                            digest: ["gitCommit": fields[3]]
+                        )
+                    }).sorted { $0.uri < $1.uri }
                 ),
                 runDetails: ProvenanceRunDetails(
                     builder: ProvenanceBuilder(id: "urn:hostwright:builder:release-macos:v1"),

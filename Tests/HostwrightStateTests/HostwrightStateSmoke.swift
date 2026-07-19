@@ -1180,6 +1180,7 @@ final class HostwrightStateTests: XCTestCase {
                 )
             ],
             adapterMetadata: RuntimeAdapterMetadata(
+                providerID: .appleContainerCLI,
                 adapterName: "apple-container-read-only",
                 adapterVersion: HostwrightIdentity.version,
                 runtimeName: "apple-container",

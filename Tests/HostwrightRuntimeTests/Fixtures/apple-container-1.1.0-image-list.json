@@ -1,0 +1,21 @@
+[
+  {
+    "id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "configuration": {
+      "name": "ghcr.io/example/api:1.1.0",
+      "descriptor": {
+        "digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "futureDescriptorField": "ignored"
+      },
+      "futureConfigurationField": true
+    },
+    "variants": [
+      {
+        "digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "platform": {"architecture": "arm64", "os": "linux", "futurePlatformField": "ignored"},
+        "futureVariantField": 1
+      }
+    ],
+    "futureImageField": "ignored"
+  }
+]

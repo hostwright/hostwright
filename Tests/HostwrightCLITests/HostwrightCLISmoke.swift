@@ -27,22 +27,30 @@ final class HostwrightCLITests: XCTestCase {
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["paths", "--output", "text", "--json"]))
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["paths", "--output", "text", "--output", "json"]))
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["paths", "--state-db", "/tmp/a.sqlite", "--state-db", "/tmp/b.sqlite"]))
-        XCTAssertEqual(try CLICommand.parse(arguments: ["status"]), .status(path: "hostwright.yaml", stateDatabasePath: nil, output: .text))
+        XCTAssertEqual(try CLICommand.parse(arguments: ["status"]), .status(path: "hostwright.yaml", stateDatabasePath: nil, output: .text, runtimeProvider: .automatic))
         XCTAssertEqual(
             try CLICommand.parse(arguments: ["status", "--state-db", "/tmp/state.sqlite"]),
-            .status(path: "hostwright.yaml", stateDatabasePath: "/tmp/state.sqlite", output: .text)
+            .status(path: "hostwright.yaml", stateDatabasePath: "/tmp/state.sqlite", output: .text, runtimeProvider: .automatic)
         )
         XCTAssertEqual(
             try CLICommand.parse(arguments: ["status", "custom.yaml", "--state-db", "/tmp/state.sqlite", "--output", "json"]),
-            .status(path: "custom.yaml", stateDatabasePath: "/tmp/state.sqlite", output: .json)
+            .status(path: "custom.yaml", stateDatabasePath: "/tmp/state.sqlite", output: .json, runtimeProvider: .automatic)
+        )
+        XCTAssertEqual(
+            try CLICommand.parse(arguments: ["status", "--runtime-provider", "containerization"]),
+            .status(path: "hostwright.yaml", stateDatabasePath: nil, output: .text, runtimeProvider: .containerization)
         )
         XCTAssertEqual(
             try CLICommand.parse(arguments: ["apply", "--state-db", "/tmp/state.sqlite", "--confirm-plan", "abc123"]),
-            .apply(path: "hostwright.yaml", stateDatabasePath: "/tmp/state.sqlite", confirmedPlanHash: "abc123", teamProfilePath: nil, approvalRecordPath: nil)
+            .apply(path: "hostwright.yaml", stateDatabasePath: "/tmp/state.sqlite", confirmedPlanHash: "abc123", teamProfilePath: nil, approvalRecordPath: nil, runtimeProvider: .automatic)
         )
         XCTAssertEqual(
             try CLICommand.parse(arguments: ["apply", "custom.yaml", "--state-db", "/tmp/state.sqlite", "--confirm-plan", "abc123"]),
-            .apply(path: "custom.yaml", stateDatabasePath: "/tmp/state.sqlite", confirmedPlanHash: "abc123", teamProfilePath: nil, approvalRecordPath: nil)
+            .apply(path: "custom.yaml", stateDatabasePath: "/tmp/state.sqlite", confirmedPlanHash: "abc123", teamProfilePath: nil, approvalRecordPath: nil, runtimeProvider: .automatic)
+        )
+        XCTAssertEqual(
+            try CLICommand.parse(arguments: ["apply", "--confirm-plan", "abc123", "--runtime-provider", "apple-cli"]),
+            .apply(path: "hostwright.yaml", stateDatabasePath: nil, confirmedPlanHash: "abc123", teamProfilePath: nil, approvalRecordPath: nil, runtimeProvider: .appleCLI)
         )
         XCTAssertEqual(
             try CLICommand.parse(arguments: ["logs", "api", "--tail", "25", "--state-db", "/tmp/state.sqlite"]),
@@ -109,6 +117,9 @@ final class HostwrightCLITests: XCTestCase {
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["import-stack", "compose.yaml", "--write"]))
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["events", "--state-db", "/tmp/state.sqlite", "--sort", "newest"]))
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["diagnostics", "--state-db", "/tmp/state.sqlite"]))
+        XCTAssertThrowsError(try CLICommand.parse(arguments: ["status", "--runtime-provider", "other"]))
+        XCTAssertThrowsError(try CLICommand.parse(arguments: ["status", "--runtime-provider", "auto", "--runtime-provider", "apple-cli"]))
+        XCTAssertThrowsError(try CLICommand.parse(arguments: ["apply", "--confirm-plan", "abc123", "--runtime-provider", "other"]))
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["extension"]))
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["extension", "run"]))
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["extension", "check", "--declaration", "relative.json", "--executable", "/tmp/extension"]))
@@ -118,7 +129,7 @@ final class HostwrightCLITests: XCTestCase {
     func testApplyDefaultsStateDBAndRequiresConfirmedPlanHash() throws {
         XCTAssertEqual(
             try CLICommand.parse(arguments: ["apply", "--confirm-plan", "abc123"]),
-            .apply(path: "hostwright.yaml", stateDatabasePath: nil, confirmedPlanHash: "abc123", teamProfilePath: nil, approvalRecordPath: nil)
+            .apply(path: "hostwright.yaml", stateDatabasePath: nil, confirmedPlanHash: "abc123", teamProfilePath: nil, approvalRecordPath: nil, runtimeProvider: .automatic)
         )
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["apply", "--state-db", "/tmp/state.sqlite"]))
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["apply", "--state-db", "/tmp/state.sqlite", "--confirm-plan", "abc123", "--force"]))
@@ -1005,6 +1016,7 @@ final class HostwrightCLITests: XCTestCase {
                 services: [],
                 adapterMetadata: RuntimeAdapterMetadata(
                     providerAPIVersion: 1,
+                    providerID: .appleContainerCLI,
                     adapterName: "legacy-provider",
                     adapterVersion: "1.0.0",
                     runtimeName: "legacy-runtime",
@@ -1062,12 +1074,13 @@ final class HostwrightCLITests: XCTestCase {
             XCTAssertEqual(adapter.executedActions.map(\.kind), [.start])
             let context = try XCTUnwrap(adapter.confirmations.first?.context)
             XCTAssertEqual(context.resourceUUID, originalOwnership.resourceUUID)
-            XCTAssertNotEqual(context.fencingToken, originalOwnership.fencingToken)
+            XCTAssertEqual(context.fencingToken, originalOwnership.fencingToken)
             let operationGroup = try XCTUnwrap(store.operationGroups.loadAll().first)
             let intent = try jsonObject(operationGroup.intentJSONRedacted)
             XCTAssertEqual(intent["resourceUUID"] as? String, context.resourceUUID)
-            XCTAssertEqual(operationGroup.fencingToken, context.fencingToken)
-            XCTAssertEqual(try XCTUnwrap(store.ownership.loadAll().first).fencingToken, context.fencingToken)
+            XCTAssertEqual(intent["resourceFencingToken"] as? String, context.fencingToken)
+            XCTAssertNotEqual(operationGroup.fencingToken, context.fencingToken)
+            XCTAssertEqual(try XCTUnwrap(store.ownership.loadAll().first).fencingToken, originalOwnership.fencingToken)
 
             let states = try store.restartPolicies.loadProject(projectID: "project-demo")
             XCTAssertEqual(states.count, 1)
@@ -1115,7 +1128,7 @@ final class HostwrightCLITests: XCTestCase {
                     resourceType: "container",
                     projectID: "project-v2-a-b",
                     serviceName: serviceName,
-                    runtimeAdapter: fakeAdapterMetadata.adapterName,
+                    runtimeAdapter: RuntimeProviderID.appleContainerCLI.rawValue,
                     createdAt: "2026-07-01T00:00:00Z",
                     observedAt: "2026-07-01T00:00:00Z",
                     cleanupEligible: true,
@@ -1693,7 +1706,7 @@ final class HostwrightCLITests: XCTestCase {
             let manifest = try ManifestValidator.validated(restartableServiceManifest)
             let expectedHash = ReconciliationPlanner().plan(
                 manifest: manifest,
-                observedState: observed,
+                observedState: adapter.observedState,
                 restartPolicyStates: [RuntimeServiceIdentity(projectName: "demo", serviceName: "api"): crashLoopState],
                 currentTimestamp: "2026-07-01T00:00:01Z"
             ).planHash
@@ -2334,7 +2347,7 @@ final class HostwrightCLITests: XCTestCase {
                     resourceType: "container",
                     projectID: "project-demo",
                     serviceName: "api",
-                    runtimeAdapter: "fake-apply-adapter",
+                    runtimeAdapter: RuntimeProviderID.appleContainerCLI.rawValue,
                     createdAt: "2026-07-01T00:00:00Z",
                     observedAt: "2026-07-01T00:00:00Z",
                     cleanupEligible: true,
@@ -2393,7 +2406,7 @@ final class HostwrightCLITests: XCTestCase {
             let ownership = try SQLiteStateStore(path: databasePath).ownership.loadAll()
             XCTAssertEqual(ownership.count, 1)
             XCTAssertFalse(ownership[0].cleanupEligible)
-            XCTAssertEqual(ownership[0].fencingToken, cleanupContext.fencingToken)
+            XCTAssertNotEqual(ownership[0].fencingToken, cleanupContext.fencingToken)
         }
     }
 
@@ -2409,7 +2422,7 @@ final class HostwrightCLITests: XCTestCase {
                 resourceIdentifier: String,
                 resourceType: String = "container",
                 serviceName: String,
-                runtimeAdapter: String = "fake-apply-adapter",
+                runtimeAdapter: String = RuntimeProviderID.appleContainerCLI.rawValue,
                 cleanupEligible: Bool = true
             ) -> OwnershipRecord {
                 OwnershipRecord(
@@ -2515,7 +2528,7 @@ final class HostwrightCLITests: XCTestCase {
             XCTAssertEqual(apply.exitCode, 0)
             let ownership = try SQLiteStateStore(path: databasePath).ownership.loadAll()
             XCTAssertEqual(ownership.count, 1)
-            XCTAssertEqual(ownership[0].runtimeAdapter, "fake-apply-adapter")
+            XCTAssertEqual(ownership[0].runtimeAdapter, RuntimeProviderID.appleContainerCLI.rawValue)
             let resourceIdentifier = RuntimeServiceIdentity(projectName: "demo", serviceName: "api").managedResourceIdentifier
 
             let stoppedObserved = ObservedRuntimeState(
@@ -2536,6 +2549,7 @@ final class HostwrightCLITests: XCTestCase {
             XCTAssertTrue(eligibleDryRun.standardOutput.contains("[eligible] \(resourceIdentifier)"))
 
             let otherMetadata = RuntimeAdapterMetadata(
+                providerID: .appleContainerization,
                 adapterName: "other-apply-adapter",
                 adapterVersion: "test",
                 runtimeName: "other-runtime",
@@ -2602,6 +2616,7 @@ final class HostwrightCLITests: XCTestCase {
                 """
             )
             let appleApplyMetadata = RuntimeAdapterMetadata(
+                providerID: .appleContainerCLI,
                 adapterName: "AppleContainerApplyAdapter",
                 adapterVersion: "test",
                 runtimeName: "Apple container CLI",
@@ -2646,7 +2661,7 @@ final class HostwrightCLITests: XCTestCase {
                     resourceType: "container",
                     projectID: "project-demo",
                     serviceName: "api",
-                    runtimeAdapter: "fake-apply-adapter",
+                    runtimeAdapter: RuntimeProviderID.appleContainerCLI.rawValue,
                     createdAt: "2026-07-01T00:00:00Z",
                     observedAt: "2026-07-01T00:00:00Z",
                     cleanupEligible: true,
@@ -2978,7 +2993,7 @@ final class HostwrightCLITests: XCTestCase {
                         resourceType: "container",
                         projectID: "project-demo",
                         serviceName: service,
-                        runtimeAdapter: "fake-apply-adapter",
+                        runtimeAdapter: RuntimeProviderID.appleContainerCLI.rawValue,
                         createdAt: "2026-07-01T00:00:00Z",
                         observedAt: "2026-07-01T00:00:00Z",
                         cleanupEligible: true,
@@ -3129,6 +3144,7 @@ final class HostwrightCLITests: XCTestCase {
 
     private var fakeAdapterMetadata: RuntimeAdapterMetadata {
         RuntimeAdapterMetadata(
+            providerID: .appleContainerCLI,
             adapterName: "fake-apply-adapter",
             adapterVersion: "test",
             runtimeName: "fake-runtime",
@@ -3263,7 +3279,15 @@ final class HostwrightCLITests: XCTestCase {
 
     private func planHash(for manifestText: String, observed: ObservedRuntimeState) throws -> String {
         let manifest = try ManifestValidator.validated(manifestText)
-        return ReconciliationPlanner().plan(manifest: manifest, observedState: observed).planHash
+        let capabilityBound = ObservedRuntimeState(
+            projectName: observed.projectName,
+            services: observed.services,
+            adapterMetadata: observed.adapterMetadata,
+            capabilitySHA256: observed.adapterMetadata == nil
+                ? observed.capabilitySHA256
+                : observed.capabilitySHA256 ?? ScriptedApplyRuntimeAdapter.testCapabilitySnapshot.canonicalSHA256
+        )
+        return ReconciliationPlanner().plan(manifest: manifest, observedState: capabilityBound).planHash
     }
 
     private func planHash(fromStatusOutput output: String) throws -> String {
@@ -3324,7 +3348,7 @@ final class HostwrightCLITests: XCTestCase {
                 resourceType: "container",
                 projectID: "project-demo",
                 serviceName: "api",
-                runtimeAdapter: fakeAdapterMetadata.adapterName,
+                runtimeAdapter: RuntimeProviderID.appleContainerCLI.rawValue,
                 createdAt: "2026-07-01T00:00:00Z",
                 observedAt: "2026-07-01T00:00:00Z",
                 cleanupEligible: true,
@@ -3367,7 +3391,8 @@ final class HostwrightCLITests: XCTestCase {
                     healthState: healthState
                 )
             ],
-            adapterMetadata: fakeAdapterMetadata
+            adapterMetadata: fakeAdapterMetadata,
+            capabilitySHA256: ScriptedApplyRuntimeAdapter.testCapabilitySnapshot.canonicalSHA256
         )
     }
 
@@ -3378,6 +3403,40 @@ final class HostwrightCLITests: XCTestCase {
 
     private final class ScriptedApplyRuntimeAdapter: RuntimeAdapter, @unchecked Sendable {
         typealias ExecuteHook = @Sendable (PlannedRuntimeAction) throws -> Void
+
+        static let testCapabilitySnapshot = RuntimeCapabilitySnapshot(
+            descriptor: RuntimeProviderDescriptor(
+                providerID: .appleContainerCLI,
+                components: [
+                    RuntimeProviderComponent(
+                        identifier: .appleContainerCLI,
+                        version: "1.1.0",
+                        build: "109",
+                        fingerprint: "099d8db0"
+                    ),
+                    RuntimeProviderComponent(
+                        identifier: .appleContainerAPIService,
+                        version: "1.1.0",
+                        build: "109",
+                        fingerprint: "099d8db0"
+                    )
+                ],
+                minimumMacOSVersion: RuntimeProviderCapabilityContract.minimumMacOSVersion,
+                supportedArchitectures: [.arm64]
+            ),
+            host: RuntimeProviderHostPlatform(
+                macOSVersion: RuntimeProviderMacOSVersion(major: 26, minor: 5, patch: 0),
+                macOSBuild: "25F90",
+                architecture: .arm64
+            ),
+            features: RuntimeProviderFeature.knownValues.map {
+                RuntimeProviderFeatureStatus(
+                    feature: $0,
+                    state: .available,
+                    reason: .implemented
+                )
+            }
+        )
 
         let observedState: ObservedRuntimeState
         let observeError: RuntimeAdapterError?
@@ -3407,10 +3466,11 @@ final class HostwrightCLITests: XCTestCase {
             logsText: String = "",
             onExecute: ExecuteHook? = nil
         ) {
-            self.observedState = observedState ?? ObservedRuntimeState(
+            let source = observedState ?? ObservedRuntimeState(
                 projectName: "demo",
                 services: [],
                 adapterMetadata: RuntimeAdapterMetadata(
+                    providerID: .appleContainerCLI,
                     adapterName: "fake-apply-adapter",
                     adapterVersion: "test",
                     runtimeName: "fake-runtime",
@@ -3418,6 +3478,14 @@ final class HostwrightCLITests: XCTestCase {
                     supportsMutation: true,
                     capabilities: [.readOnlyObservation, .lifecycleMutation, .logStreaming, .cleanup]
                 )
+            )
+            self.observedState = ObservedRuntimeState(
+                projectName: source.projectName,
+                services: source.services,
+                adapterMetadata: source.adapterMetadata,
+                capabilitySHA256: source.adapterMetadata == nil
+                    ? source.capabilitySHA256
+                    : source.capabilitySHA256 ?? Self.testCapabilitySnapshot.canonicalSHA256
             )
             self.observeError = observeError
             self.executeError = executeError
@@ -3433,6 +3501,10 @@ final class HostwrightCLITests: XCTestCase {
 
         func capabilities() async throws -> [RuntimeCapability] {
             [.readOnlyObservation, .lifecycleMutation, .logStreaming, .cleanup]
+        }
+
+        func capabilitySnapshot() async throws -> RuntimeCapabilitySnapshot {
+            Self.testCapabilitySnapshot
         }
 
         func runtimeReadiness() async throws -> RuntimeReadinessReport {

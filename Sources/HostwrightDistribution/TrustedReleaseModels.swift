@@ -289,15 +289,57 @@ public struct TrustedReleaseBuildMetadata: Equatable, Sendable {
     }
 
     public func validate() throws {
-        guard externalSwiftPMDependencies.isEmpty,
-              packageLicenseSPDX == "Apache-2.0",
+        guard packageLicenseSPDX == "Apache-2.0",
               reproducibilityBuildCount == 2,
               byteIdenticalUnsignedPayloads else {
             throw DistributionError.invalidArtifact(
                 "trusted release dependency, license, or reproducibility evidence is invalid"
             )
         }
+        try Self.validateExternalDependencies(externalSwiftPMDependencies)
         try Self.validateToolVersions(toolVersions)
+    }
+
+    public static func validateExternalDependencies(_ dependencies: [String]) throws {
+        guard dependencies == dependencies.sorted(),
+              Set(dependencies).count == dependencies.count,
+              !dependencies.isEmpty else {
+            throw DistributionError.invalidArtifact(
+                "trusted release dependency inventory is incomplete"
+            )
+        }
+        var hasPinnedContainerization = false
+        for dependency in dependencies {
+            let fields = dependency.split(
+                separator: "|",
+                maxSplits: 3,
+                omittingEmptySubsequences: false
+            ).map(String.init)
+            guard fields.count == 4,
+                  fields[0].range(of: "^[a-z0-9-]+$", options: .regularExpression) != nil,
+                  fields[1].hasPrefix("https://github.com/"),
+                  fields[1].hasSuffix(".git"),
+                  fields[2].range(
+                    of: "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$",
+                    options: .regularExpression
+                  ) != nil,
+                  fields[3].range(of: "^[a-f0-9]{40}$", options: .regularExpression) != nil else {
+                throw DistributionError.invalidArtifact(
+                    "trusted release dependency inventory is malformed"
+                )
+            }
+            if fields[0] == "containerization" {
+                hasPinnedContainerization = fields[1] ==
+                    "https://github.com/apple/containerization.git" &&
+                    fields[2] == DistributionContainerizationAssets.frameworkVersion &&
+                    fields[3] == DistributionContainerizationAssets.frameworkRevision
+            }
+        }
+        guard hasPinnedContainerization else {
+            throw DistributionError.invalidArtifact(
+                "trusted release dependency inventory omits pinned Containerization"
+            )
+        }
     }
 
     public static func validateToolVersions(_ toolVersions: [String: String]) throws {
@@ -363,6 +405,22 @@ public struct TrustedReleaseProvenanceStatement: Codable, Equatable, Sendable {
         let expectedSubjects = [manifest.archive, manifest.package]
             .sorted { $0.fileName < $1.fileName }
             .map { ProvenanceSubject(name: $0.fileName, digest: ["sha256": $0.sha256]) }
+        let expectedResolvedDependencies = ([
+            ProvenanceResolvedDependency(
+                uri: "git+https://github.com/hostwright/hostwright.git",
+                digest: ["gitCommit": manifest.sourceCommit]
+            )
+        ] + externalSwiftPMDependencies.map { dependency in
+            let fields = dependency.split(
+                separator: "|",
+                maxSplits: 3,
+                omittingEmptySubsequences: false
+            ).map(String.init)
+            return ProvenanceResolvedDependency(
+                uri: "git+\(fields[1])@\(fields[2])",
+                digest: ["gitCommit": fields[3]]
+            )
+        }).sorted { $0.uri < $1.uri }
         let started = ISO8601DateFormatter().date(from: predicate.runDetails.metadata.startedOn)
         let finished = ISO8601DateFormatter().date(from: predicate.runDetails.metadata.finishedOn)
         guard statementType == "https://in-toto.io/Statement/v1",
@@ -375,12 +433,7 @@ public struct TrustedReleaseProvenanceStatement: Codable, Equatable, Sendable {
               predicate.buildDefinition.externalParameters.architecture == manifest.architecture,
               !predicate.buildDefinition.internalParameters.sourceDirty,
               !predicate.buildDefinition.internalParameters.unsigned,
-              predicate.buildDefinition.resolvedDependencies == [
-                ProvenanceResolvedDependency(
-                    uri: "git+https://github.com/hostwright/hostwright.git",
-                    digest: ["gitCommit": manifest.sourceCommit]
-                )
-              ],
+              predicate.buildDefinition.resolvedDependencies == expectedResolvedDependencies,
               predicate.runDetails.builder.id == "urn:hostwright:builder:release-macos:v1",
               UUID(uuidString: predicate.runDetails.metadata.invocationId) != nil,
               predicate.runDetails.metadata.startedOn == manifest.createdAt,

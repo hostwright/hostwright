@@ -564,7 +564,8 @@ public struct DaemonLoopRunner {
         return ObservedRuntimeState(
             projectName: observedState.projectName,
             services: services,
-            adapterMetadata: observedState.adapterMetadata
+            adapterMetadata: observedState.adapterMetadata,
+            capabilitySHA256: observedState.capabilitySHA256
         )
     }
 

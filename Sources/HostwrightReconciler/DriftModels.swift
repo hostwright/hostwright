@@ -247,6 +247,7 @@ public struct PlanningInput: Equatable, Sendable {
 public struct ReconciliationPlan: Equatable, Sendable {
     public let projectName: String
     public let observationConnected: Bool
+    public let capabilitySHA256: String?
     public let issues: [PlanIssue]
     public let drift: [DriftRecord]
     public let actions: [PlannedAction]
@@ -255,18 +256,21 @@ public struct ReconciliationPlan: Equatable, Sendable {
     public init(
         projectName: String,
         observationConnected: Bool,
+        capabilitySHA256: String? = nil,
         issues: [PlanIssue],
         drift: [DriftRecord],
         actions: [PlannedAction]
     ) {
         self.projectName = projectName
         self.observationConnected = observationConnected
+        self.capabilitySHA256 = capabilitySHA256
         self.issues = issues.sorted { $0.orderingKey < $1.orderingKey }
         self.drift = drift.sorted { $0.orderingKey < $1.orderingKey }
         self.actions = actions.sorted { $0.orderingKey < $1.orderingKey }
         self.planHash = PlanHasher.hash(
             projectName: projectName,
             observationConnected: observationConnected,
+            capabilitySHA256: capabilitySHA256,
             issues: self.issues,
             drift: self.drift,
             actions: self.actions
@@ -283,10 +287,18 @@ public struct ReconciliationPlan: Equatable, Sendable {
 }
 
 enum PlanHasher {
-    static func hash(projectName: String, observationConnected: Bool, issues: [PlanIssue], drift: [DriftRecord], actions: [PlannedAction]) -> String {
+    static func hash(
+        projectName: String,
+        observationConnected: Bool,
+        capabilitySHA256: String?,
+        issues: [PlanIssue],
+        drift: [DriftRecord],
+        actions: [PlannedAction]
+    ) -> String {
         var parts: [String] = [
             "project=\(projectName)",
-            "observed=\(observationConnected)"
+            "observed=\(observationConnected)",
+            "capability=\(capabilitySHA256 ?? "unbound")"
         ]
 
         parts += issues.map { issue in

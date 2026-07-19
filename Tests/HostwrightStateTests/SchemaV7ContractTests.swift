@@ -2,6 +2,7 @@ import Foundation
 import XCTest
 @testable import HostwrightCore
 @testable import HostwrightManifest
+@testable import HostwrightRuntime
 @testable import HostwrightState
 
 final class SchemaV7ContractTests: XCTestCase {
@@ -34,13 +35,13 @@ final class SchemaV7ContractTests: XCTestCase {
                 "INSERT INTO projects (id, name, manifest_path, manifest_hash, created_at, updated_at) VALUES ('project-legacy-2', 'demo-2', NULL, 'hash-2', 'now', 'now')"
             )
             try connection.run(
-                "INSERT INTO ownership_records (id, resource_identifier, resource_type, project_id, service_name, runtime_adapter, created_at, observed_at, cleanup_eligible, metadata_json_redacted, identity_version) VALUES ('ownership-legacy', 'runtime-name', 'container', 'project-legacy', 'api', 'provider', 'now', 'now', 0, '{}', 1)"
+                "INSERT INTO ownership_records (id, resource_identifier, resource_type, project_id, service_name, runtime_adapter, created_at, observed_at, cleanup_eligible, metadata_json_redacted, identity_version) VALUES ('ownership-legacy', 'hostwright-demo-api', 'container', 'project-legacy', 'api', 'AppleContainerApplyAdapter', 'now', 'now', 0, '{}', 1)"
             )
             try connection.run(
-                "INSERT INTO ownership_records (id, resource_identifier, resource_type, project_id, service_name, runtime_adapter, created_at, observed_at, cleanup_eligible, metadata_json_redacted, identity_version) VALUES ('ownership-legacy-2', 'runtime-name-2', 'container', 'project-legacy-2', 'worker', 'provider', 'now', 'now', 0, '{}', 1)"
+                "INSERT INTO ownership_records (id, resource_identifier, resource_type, project_id, service_name, runtime_adapter, created_at, observed_at, cleanup_eligible, metadata_json_redacted, identity_version) VALUES ('ownership-legacy-2', 'hostwright-demo-2-worker-a', 'container', 'project-legacy-2', 'worker', 'AppleContainerReadOnlyAdapter', 'now', 'now', 0, '{}', 1)"
             )
             try connection.run(
-                "INSERT INTO ownership_records (id, resource_identifier, resource_type, project_id, service_name, runtime_adapter, created_at, observed_at, cleanup_eligible, metadata_json_redacted, identity_version) VALUES ('ownership-legacy-3', 'runtime-name-3', 'container', 'project-legacy-2', 'worker', 'provider-2', 'now', 'now', 0, '{}', 1)"
+                "INSERT INTO ownership_records (id, resource_identifier, resource_type, project_id, service_name, runtime_adapter, created_at, observed_at, cleanup_eligible, metadata_json_redacted, identity_version) VALUES ('ownership-legacy-3', 'hostwright-demo-2-worker-b', 'container', 'project-legacy-2', 'worker', 'apple-container-cli', 'now', 'now', 0, '{}', 1)"
             )
             try connection.run(
                 "INSERT INTO operation_groups (id, operation_id, group_kind, project_id, service_name, planned_action_type, status, group_idempotency_key, plan_hash, checkpoint, rollback_available, manual_recovery_hint_redacted, created_at, updated_at, metadata_json_redacted) VALUES ('group-legacy', 'operation-legacy', 'apply', 'project-legacy', 'api', 'create', 'active', 'key', 'plan', 'intent', 1, '', 'now', 'now', '{}')"
@@ -73,20 +74,29 @@ final class SchemaV7ContractTests: XCTestCase {
                 "fencing_token", "intent_json_redacted", "compensation_json_redacted", "verification_json_redacted"
             ]))
 
-            let project = try XCTUnwrap(try connection.query("SELECT resource_uuid, manifest_version, provider_generation FROM projects WHERE id = 'project-legacy'").first)
+            let project = try XCTUnwrap(try connection.query("SELECT resource_uuid, manifest_version, mutation_provider, provider_generation FROM projects WHERE id = 'project-legacy'").first)
             XCTAssertNotNil(UUID(uuidString: try XCTUnwrap(project[0])))
             XCTAssertEqual(project[1], "1")
-            XCTAssertEqual(project[2], "0")
+            XCTAssertEqual(project[2], RuntimeProviderID.appleContainerCLI.rawValue)
+            XCTAssertEqual(project[3], "1")
+            let secondProjectBinding = try XCTUnwrap(
+                try connection.query(
+                    "SELECT mutation_provider, provider_generation FROM projects WHERE id = 'project-legacy-2'"
+                ).first
+            )
+            XCTAssertEqual(secondProjectBinding[0], RuntimeProviderID.appleContainerCLI.rawValue)
+            XCTAssertEqual(secondProjectBinding[1], "1")
             let ownership = try XCTUnwrap(try connection.query("SELECT resource_uuid, resource_generation FROM ownership_records WHERE id = 'ownership-legacy'").first)
             XCTAssertNotNil(UUID(uuidString: try XCTUnwrap(ownership[0])))
             XCTAssertEqual(ownership[1], "1")
 
-            let desired = try XCTUnwrap(try connection.query("SELECT resource_uuid, resource_generation FROM desired_services WHERE id = 'desired-legacy'").first)
+            let desired = try XCTUnwrap(try connection.query("SELECT resource_uuid, resource_generation, mutation_provider FROM desired_services WHERE id = 'desired-legacy'").first)
             XCTAssertEqual(
                 desired[0],
                 HostwrightResourceUUID.legacy(kind: "service", identifier: "project-legacy:api")
             )
             XCTAssertEqual(desired[1], "1")
+            XCTAssertEqual(desired[2], RuntimeProviderID.appleContainerCLI.rawValue)
             XCTAssertEqual(ownership[0], desired[0])
             let ownershipBinding = try XCTUnwrap(try connection.query("SELECT project_resource_uuid, project_generation, provider_generation, fencing_token FROM ownership_records WHERE id = 'ownership-legacy'").first)
             XCTAssertEqual(ownershipBinding[0], project[0])
@@ -110,6 +120,107 @@ final class SchemaV7ContractTests: XCTestCase {
             XCTAssertEqual(fencingTokens.count, 2)
             XCTAssertEqual(Set(fencingTokens).count, 2)
             XCTAssertTrue(fencingTokens.allSatisfy { UUID(uuidString: $0) != nil })
+
+            let hints = try store.ownership.runtimeHints(
+                projectID: "project-legacy",
+                projectName: "demo",
+                providerID: .appleContainerCLI
+            )
+            let hint = try XCTUnwrap(hints.first)
+            let evidence = try XCTUnwrap(hint.ownership)
+            XCTAssertEqual(hints.count, 1)
+            XCTAssertEqual(evidence.projectUUID, project[0])
+            XCTAssertEqual(evidence.projectGeneration, 1)
+            XCTAssertEqual(evidence.providerID, .appleContainerCLI)
+            XCTAssertEqual(evidence.providerGeneration, 1)
+            XCTAssertEqual(evidence.resourceUUID, desired[0])
+
+            XCTAssertEqual(
+                try store.desiredStates.commitRuntimeProviderMigration(
+                    projectResourceUUID: try XCTUnwrap(project[0]),
+                    projectGeneration: evidence.projectGeneration,
+                    expectedSourceProviderID: .appleContainerCLI,
+                    expectedSourceProviderGeneration: evidence.providerGeneration,
+                    targetProviderID: .appleContainerization,
+                    targetProviderGeneration: evidence.providerGeneration + 1,
+                    targetFencingToken: "44444444-4444-4444-8444-444444444444",
+                    resources: [
+                        RuntimeProviderMigrationStateResource(
+                            resourceIdentifier: hint.resourceIdentifier,
+                            serviceName: hint.identity.serviceName,
+                            identityVersion: hint.identityVersion,
+                            resourceUUID: evidence.resourceUUID,
+                            resourceGeneration: evidence.resourceGeneration
+                        )
+                    ],
+                    timestamp: "2026-07-19T12:00:00Z"
+                ),
+                .committed(projectID: "project-legacy")
+            )
+        }
+    }
+
+    func testSchemaV7MigrationRejectsConflictingLegacyProjectProviders() throws {
+        try withTemporaryStore { store, databaseURL in
+            try MigrationRunner().apply(to: store, throughVersion: 6)
+            let connection = try SQLiteConnection(path: databaseURL.path)
+            try connection.run(
+                "INSERT INTO projects (id, name, manifest_path, manifest_hash, created_at, updated_at) VALUES ('project-conflict', 'conflict', NULL, 'hash', 'now', 'now')"
+            )
+            try connection.run(
+                "INSERT INTO ownership_records (id, resource_identifier, resource_type, project_id, service_name, runtime_adapter, created_at, observed_at, cleanup_eligible, metadata_json_redacted, identity_version) VALUES ('ownership-cli', 'hostwright-conflict-api', 'container', 'project-conflict', 'api', 'AppleContainerApplyAdapter', 'now', 'now', 0, '{}', 1)"
+            )
+            try connection.run(
+                "INSERT INTO ownership_records (id, resource_identifier, resource_type, project_id, service_name, runtime_adapter, created_at, observed_at, cleanup_eligible, metadata_json_redacted, identity_version) VALUES ('ownership-containerization', 'hostwright-conflict-worker', 'container', 'project-conflict', 'worker', 'AppleContainerizationAdapter', 'now', 'now', 0, '{}', 1)"
+            )
+
+            XCTAssertThrowsError(try store.migrate()) { error in
+                guard case .migrationFailed(let version, let message) = error as? StateStoreError else {
+                    return XCTFail("Expected migrationFailed, got \(error).")
+                }
+                XCTAssertEqual(version, 7)
+                XCTAssertTrue(message.contains("project-conflict"), message)
+                XCTAssertTrue(message.contains("conflicting runtime providers"), message)
+            }
+            XCTAssertEqual(try store.schemaVersion(), 6)
+            XCTAssertFalse(try columns(in: "projects", connection: connection).contains("mutation_provider"))
+        }
+    }
+
+    func testPreviouslyAppliedSchemaV7RunsProviderBindingRevisionTransactionally() throws {
+        try withTemporaryStore { store, databaseURL in
+            try MigrationRunner().apply(to: store, throughVersion: 6)
+            let connection = try SQLiteConnection(path: databaseURL.path)
+            try connection.run(
+                "INSERT INTO projects (id, name, manifest_path, manifest_hash, created_at, updated_at) VALUES ('project-applied-v7', 'applied-v7', NULL, 'hash', 'now', 'now')"
+            )
+            try connection.run(
+                "INSERT INTO ownership_records (id, resource_identifier, resource_type, project_id, service_name, runtime_adapter, created_at, observed_at, cleanup_eligible, metadata_json_redacted, identity_version) VALUES ('ownership-applied-v7', 'hostwright-applied-v7-api', 'container', 'project-applied-v7', 'api', 'AppleContainerApplyAdapter', 'now', 'now', 0, '{}', 1)"
+            )
+            try store.migrate()
+
+            try connection.execute(
+                "UPDATE projects SET mutation_provider = NULL, provider_generation = 0 WHERE id = 'project-applied-v7'"
+            )
+            try connection.execute(
+                "UPDATE schema_migrations SET checksum = 'fnv1a64:5bf70e7832651a2' WHERE version = 7"
+            )
+
+            try store.migrate()
+
+            let binding = try XCTUnwrap(
+                try connection.query(
+                    "SELECT mutation_provider, provider_generation FROM projects WHERE id = 'project-applied-v7'"
+                ).first
+            )
+            XCTAssertEqual(binding[0], RuntimeProviderID.appleContainerCLI.rawValue)
+            XCTAssertEqual(binding[1], "1")
+            let recordedChecksum = try XCTUnwrap(
+                try connection.query("SELECT checksum FROM schema_migrations WHERE version = 7")
+                    .first?.first ?? nil
+            )
+            XCTAssertNotEqual(recordedChecksum, "fnv1a64:5bf70e7832651a2")
+            XCTAssertNoThrow(try MigrationRunner().validateAppliedSchema(in: store))
         }
     }
 

@@ -6,6 +6,9 @@ public enum AppleContainerCommand {
         case systemStatus
         case listContainers
         case listImages
+        case listNetworks
+        case listVolumes
+        case listMachines
         case logs(containerID: String, tail: Int)
         case stats(containerID: String)
     }
@@ -35,14 +38,62 @@ public enum AppleContainerCommand {
     }
 
     public static func spec(
-        kind: MutatingKind,
+        kind: ReadOnlyKind,
+        codec: AppleContainerCLICodec,
         executable: ResolvedRuntimeExecutable,
-        desiredService: DesiredRuntimeService,
         timeout: RuntimeCommandTimeout = RuntimeCommandTimeout()
     ) -> RuntimeCommandSpec {
         RuntimeCommandSpec(
             executablePath: executable.path,
-            arguments: arguments(for: kind, desiredService: desiredService),
+            arguments: arguments(for: kind, codec: codec),
+            timeout: timeout,
+            classification: .readOnly,
+            executableResolution: .resolvedByRuntimeExecutableResolver,
+            exitStatusPolicy: kind == .systemStatus ? .appleContainerSystemStatus : .zeroOnly,
+            purpose: purpose(for: kind)
+        )
+    }
+
+    public static func spec(
+        kind: MutatingKind,
+        executable: ResolvedRuntimeExecutable,
+        desiredService: DesiredRuntimeService,
+        mutationContext: RuntimeMutationContext,
+        timeout: RuntimeCommandTimeout = RuntimeCommandTimeout()
+    ) throws -> RuntimeCommandSpec {
+        RuntimeCommandSpec(
+            executablePath: executable.path,
+            arguments: try arguments(
+                for: kind,
+                desiredService: desiredService,
+                mutationContext: mutationContext
+            ),
+            environment: inheritedSensitiveEnvironment(for: desiredService),
+            sensitiveValues: desiredService.environment.filter(\.isSensitive).map(\.value),
+            timeout: timeout,
+            classification: .mutating,
+            executableResolution: .resolvedByRuntimeExecutableResolver,
+            mutationKind: mutationKind(for: kind),
+            purpose: purpose(for: kind, desiredService: desiredService)
+        )
+    }
+
+    public static func spec(
+        kind: MutatingKind,
+        codec: AppleContainerCLICodec,
+        executable: ResolvedRuntimeExecutable,
+        desiredService: DesiredRuntimeService,
+        mutationContext: RuntimeMutationContext,
+        timeout: RuntimeCommandTimeout = RuntimeCommandTimeout()
+    ) throws -> RuntimeCommandSpec {
+        RuntimeCommandSpec(
+            executablePath: executable.path,
+            arguments: try arguments(
+                for: kind,
+                desiredService: desiredService,
+                mutationContext: mutationContext,
+                codec: codec
+            ),
             environment: inheritedSensitiveEnvironment(for: desiredService),
             sensitiveValues: desiredService.environment.filter(\.isSensitive).map(\.value),
             timeout: timeout,
@@ -69,6 +120,23 @@ public enum AppleContainerCommand {
         )
     }
 
+    public static func spec(
+        kind: MutatingKind,
+        codec: AppleContainerCLICodec,
+        executable: ResolvedRuntimeExecutable,
+        timeout: RuntimeCommandTimeout = RuntimeCommandTimeout()
+    ) -> RuntimeCommandSpec {
+        RuntimeCommandSpec(
+            executablePath: executable.path,
+            arguments: arguments(for: kind, codec: codec),
+            timeout: timeout,
+            classification: .mutating,
+            executableResolution: .resolvedByRuntimeExecutableResolver,
+            mutationKind: mutationKind(for: kind),
+            purpose: purpose(for: kind)
+        )
+    }
+
     public static func arguments(for kind: ReadOnlyKind) -> [String] {
         switch kind {
         case .version:
@@ -79,6 +147,12 @@ public enum AppleContainerCommand {
             return ["list", "--all", "--format", "json"]
         case .listImages:
             return ["image", "list", "--format", "json"]
+        case .listNetworks:
+            return ["network", "list", "--format", "json"]
+        case .listVolumes:
+            return ["volume", "list", "--format", "json"]
+        case .listMachines:
+            return ["machine", "list", "--format", "json"]
         case .logs(let containerID, let tail):
             return ["logs", "-n", String(clampedTail(tail)), containerID]
         case .stats(let containerID):
@@ -86,7 +160,21 @@ public enum AppleContainerCommand {
         }
     }
 
-    public static func arguments(for kind: MutatingKind, desiredService: DesiredRuntimeService) -> [String] {
+    public static func arguments(
+        for kind: ReadOnlyKind,
+        codec: AppleContainerCLICodec
+    ) -> [String] {
+        switch codec {
+        case .v1_0_0, .v1_1_0:
+            return arguments(for: kind)
+        }
+    }
+
+    public static func arguments(
+        for kind: MutatingKind,
+        desiredService: DesiredRuntimeService,
+        mutationContext: RuntimeMutationContext
+    ) throws -> [String] {
         switch kind {
         case .createContainer:
             var arguments = [
@@ -94,7 +182,10 @@ public enum AppleContainerCommand {
                 "--name",
                 containerName(for: desiredService.identity)
             ]
-            for (key, value) in RuntimeManagedResourceIdentity.labels(for: desiredService.identity).sorted(by: { $0.key < $1.key }) {
+            for (key, value) in try RuntimeManagedResourceIdentity.labels(
+                for: desiredService.identity,
+                context: mutationContext
+            ).sorted(by: { $0.key < $1.key }) {
                 arguments += ["--label", "\(key)=\(value)"]
             }
             for value in desiredService.environment.sorted(by: { $0.name < $1.name }) {
@@ -114,6 +205,22 @@ public enum AppleContainerCommand {
         }
     }
 
+    public static func arguments(
+        for kind: MutatingKind,
+        desiredService: DesiredRuntimeService,
+        mutationContext: RuntimeMutationContext,
+        codec: AppleContainerCLICodec
+    ) throws -> [String] {
+        switch codec {
+        case .v1_0_0, .v1_1_0:
+            return try arguments(
+                for: kind,
+                desiredService: desiredService,
+                mutationContext: mutationContext
+            )
+        }
+    }
+
     public static func arguments(for kind: MutatingKind) -> [String] {
         switch kind {
         case .createContainer:
@@ -129,6 +236,16 @@ public enum AppleContainerCommand {
         }
     }
 
+    public static func arguments(
+        for kind: MutatingKind,
+        codec: AppleContainerCLICodec
+    ) -> [String] {
+        switch codec {
+        case .v1_0_0, .v1_1_0:
+            return arguments(for: kind)
+        }
+    }
+
     public static func purpose(for kind: ReadOnlyKind) -> String {
         switch kind {
         case .version:
@@ -139,6 +256,12 @@ public enum AppleContainerCommand {
             return "Read Apple container workload list as JSON."
         case .listImages:
             return "Read local Apple container image list as JSON before confirmed create."
+        case .listNetworks:
+            return "Read Apple container network list as JSON."
+        case .listVolumes:
+            return "Read Apple container volume list as JSON."
+        case .listMachines:
+            return "Read Apple container machine list as JSON."
         case .logs(let containerID, let tail):
             return "Read last \(clampedTail(tail)) log lines for Hostwright-managed container \(containerID)."
         case .stats(let containerID):

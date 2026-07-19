@@ -8,6 +8,7 @@ struct StatusCommandRunner {
     let manifestPath: String
     let stateStoreConfiguration: StateStoreConfiguration
     let output: CLIOutputFormat
+    let runtimeProvider: RuntimeProviderSelection
     let environment: CLIEnvironment
 
     func run() -> CLIRunResult {
@@ -28,14 +29,29 @@ struct StatusCommandRunner {
             let mapping = ManifestRuntimeMapper.map(manifest)
             let projectName = mapping.desiredState.projectName
             let projectID = "project-\(projectName)"
+            let selectedProvider = try hostwrightSelectRuntimeProvider(
+                requested: runtimeProvider,
+                store: store,
+                projectID: projectID,
+                requiredFeatures: [.observation],
+                environment: environment
+            )
             let observationDesiredState = try hostwrightDesiredStateWithOwnershipHints(
                 mapping.desiredState,
                 store: store,
-                projectID: projectID
+                projectID: projectID,
+                providerID: selectedProvider.selection.providerID
             )
-            let adapter = environment.runtimeAdapter()
+            let adapter = selectedProvider.adapter
             let observed = try hostwrightWaitForAsync {
                 try await adapter.observe(desiredState: observationDesiredState)
+            }
+            guard observed.adapterMetadata?.providerID == selectedProvider.selection.providerID,
+                  observed.capabilitySHA256 == selectedProvider.selection.capabilitySHA256 else {
+                throw RuntimeProviderSelectionError.staleCapability(
+                    expectedSHA256: selectedProvider.selection.capabilitySHA256,
+                    currentSHA256: observed.capabilitySHA256 ?? "missing"
+                )
             }
             let timestamp = hostwrightTimestamp()
             let restartPolicyStates = try hostwrightRestartPolicyStateMap(store: store, projectID: projectID, projectName: projectName)
@@ -65,7 +81,7 @@ struct StatusCommandRunner {
                 snapshotID: hostwrightUniqueID(prefix: "status-snapshot"),
                 projectID: projectID,
                 observedState: observedForPlanning,
-                runtimeAdapter: observed.adapterMetadata?.adapterName ?? "runtime-adapter",
+                runtimeAdapter: selectedProvider.selection.providerID.rawValue,
                 parserVersion: "status-observation-v1",
                 rawOutputHash: nil,
                 redactedSummary: PlanRenderer.render(plan, mode: .compact),
@@ -80,7 +96,7 @@ struct StatusCommandRunner {
                     source: "hostwright-cli",
                     projectID: projectID,
                     serviceName: nil,
-                    runtimeAdapter: observed.adapterMetadata?.adapterName,
+                    runtimeAdapter: selectedProvider.selection.providerID.rawValue,
                     message: "Status observed \(observed.services.count) runtime service(s).",
                     payloadJSONRedacted: #"{"planHash":"\#(plan.planHash)"}"#
                 )
@@ -121,6 +137,7 @@ struct StatusCommandRunner {
             "State DB: \(stateDatabasePath)",
             "Runtime: observed through \(observed.adapterMetadata?.adapterName ?? "runtime-adapter")",
             "Runtime parser: status-observation-v1",
+            "Capability digest: \(plan.capabilitySHA256 ?? "unbound")",
             "Telemetry: local-only; no upload",
             "Plan hash: \(plan.planHash)",
             ""

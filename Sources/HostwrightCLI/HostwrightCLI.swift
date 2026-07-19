@@ -60,6 +60,16 @@ public enum HostwrightCLI {
                     ? CLIJSON.capabilities(report)
                     : renderCapabilities(report)
             )
+        case .runtimeProviders(let output):
+            return try RuntimeProvidersCommandRunner(
+                output: output,
+                environment: environment
+            ).run()
+        case .runtimeMigrate(let options):
+            return RuntimeProviderMigrationCommandRunner(
+                options: options,
+                environment: environment
+            ).run()
         case .paths(let stateDatabasePath, let output):
             let resolution = try hostwrightLocalPathResolution(
                 explicitPath: stateDatabasePath,
@@ -124,7 +134,7 @@ public enum HostwrightCLI {
                 ? CLIJSON.plan(plan, teamBinding: binding)
                 : PlanRenderer.render(plan) + hostwrightTeamProfileText(validated, planHash: plan.planHash)
             return CLIRunResult(standardOutput: standardOutput)
-        case .status(let path, let stateDatabasePath, let output):
+        case .status(let path, let stateDatabasePath, let output, let runtimeProvider):
             return StatusCommandRunner(
                 manifestPath: path,
                 stateStoreConfiguration: try hostwrightStateStoreConfiguration(
@@ -132,9 +142,17 @@ public enum HostwrightCLI {
                     environment: environment
                 ),
                 output: output,
+                runtimeProvider: runtimeProvider,
                 environment: environment
             ).run()
-        case .apply(let path, let stateDatabasePath, let confirmedPlanHash, let teamProfilePath, let approvalRecordPath):
+        case .apply(
+            let path,
+            let stateDatabasePath,
+            let confirmedPlanHash,
+            let teamProfilePath,
+            let approvalRecordPath,
+            let runtimeProvider
+        ):
             return ApplyCommandRunner(
                 manifestPath: path,
                 stateStoreConfiguration: try hostwrightStateStoreConfiguration(
@@ -144,6 +162,7 @@ public enum HostwrightCLI {
                 confirmedPlanHash: confirmedPlanHash,
                 teamProfilePath: teamProfilePath,
                 approvalRecordPath: approvalRecordPath,
+                runtimeProvider: runtimeProvider,
                 environment: environment
             ).run()
         case .logs(let serviceName, let path, let tail, let stateDatabasePath):
@@ -222,6 +241,9 @@ public enum HostwrightCLI {
     Usage:
       hostwright --version
       hostwright capabilities [--json|--output text|json]
+      hostwright runtime providers [--json]
+      hostwright runtime migrate [path] --to apple-cli|containerization --dry-run [--state-db <path>] [--json|--output text|json]
+      hostwright runtime migrate [path] --to apple-cli|containerization --confirm-migration <token> [--state-db <path>] [--json|--output text|json]
       hostwright paths [--state-db <path>] [--json|--output text|json]
       hostwright state integrity [--state-db <path>] [--json|--output text|json]
       hostwright state backup [--state-db <path>] [--json|--output text|json]
@@ -236,8 +258,8 @@ public enum HostwrightCLI {
       hostwright import-stack <path> [--output text|json] [--team-profile <path>]
       hostwright validate [path] [--team-profile <path>]
       hostwright plan [path] [--output text|json] [--team-profile <path>]
-      hostwright status [path] [--state-db <path>] [--output text|json]
-      hostwright apply [path] [--state-db <path>] --confirm-plan <hash> [--team-profile <path> --approval-record <path>]
+      hostwright status [path] [--state-db <path>] [--output text|json] [--runtime-provider auto|apple-cli|containerization]
+      hostwright apply [path] [--state-db <path>] --confirm-plan <hash> [--runtime-provider auto|apple-cli|containerization] [--team-profile <path> --approval-record <path>]
       hostwright logs <service> [path] [--tail <n>] [--state-db <path>]
       hostwright events [--state-db <path>] [--project <name>] [--type <event>] [--service <name>] [--severity info|warning|error] [--limit <n>] [--sort asc|desc] [--output text|json]
       hostwright recovery [--state-db <path>] [--project <name>] [--output text|json]
@@ -249,6 +271,7 @@ public enum HostwrightCLI {
       hostwright doctor [--state-db <path>] [--json|--output text|json]
 
     Most commands are read-only. capabilities reports tested maturity without probing or mutating the host.
+    runtime providers negotiates immutable provider capabilities without changing runtime or state.
     paths reports the resolved macOS-native layout and override origin without creating files.
     state integrity performs SQLite, foreign-key, migration, schema-object, and logical contract checks.
     state backup uses SQLite's online backup API and publishes only a verified private catalog entry.
@@ -269,6 +292,7 @@ public enum HostwrightCLI {
 
     Examples:
       hostwright plan --output json
+      hostwright runtime providers --json
       hostwright import-stack compose.yaml --output json
       hostwright paths --json
       hostwright state integrity --json

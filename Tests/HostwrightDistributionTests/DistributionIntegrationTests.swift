@@ -64,8 +64,11 @@ final class DistributionIntegrationTests: XCTestCase {
             let common = [
                 "--hostwright-binary", binaries.appendingPathComponent("hostwright").path,
                 "--hostwright-control-binary", binaries.appendingPathComponent("hostwright-control").path,
+                "--hostwright-containerization-helper-binary",
+                binaries.appendingPathComponent("hostwright-containerization-helper").path,
                 "--hostwright-dist-binary", binaries.appendingPathComponent("hostwright-dist").path,
                 "--hostwrightd-binary", binaries.appendingPathComponent("hostwrightd").path,
+                "--containerization-asset-root", root.appendingPathComponent("unused-assets").path,
                 "--example-manifest", repository.appendingPathComponent("examples/single-service/hostwright.yaml").path,
                 "--license", repository.appendingPathComponent("LICENSE").path,
                 "--readme", repository.appendingPathComponent("README.md").path,
@@ -85,17 +88,10 @@ final class DistributionIntegrationTests: XCTestCase {
             XCTAssertTrue(rejected.error.contains("use build for clean-source evidence"))
             XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("false-clean").path))
 
-            let baseline = try runExecutable(tool, arguments: [
-                "assemble", "--output-dir", baselineDirectory.path,
-                "--source-commit", baselineCommit
-            ] + common)
-            XCTAssertEqual(baseline.status, 69)
-            XCTAssertTrue(baseline.error.contains("HW-DIST-002"))
-            let candidate = try runExecutable(tool, arguments: [
-                "assemble", "--output-dir", candidateDirectory.path,
-                "--source-commit", candidateCommit
-            ] + common)
-            XCTAssertEqual(candidate.status, 69)
+            let baseline = try makeArtifact(root: root, name: "baseline", commit: baselineCommit)
+            let candidate = try makeArtifact(root: root, name: "candidate", commit: candidateCommit)
+            XCTAssertEqual(baseline.evidence.status, .blocked)
+            XCTAssertEqual(candidate.evidence.status, .blocked)
 
             let managedPrefix = root.appendingPathComponent("managed-prefix", isDirectory: true)
             try FileManager.default.createDirectory(at: managedPrefix, withIntermediateDirectories: false)
@@ -548,7 +544,9 @@ final class DistributionIntegrationTests: XCTestCase {
                 label: "read clean source snapshot commit"
             ).standardOutput.trimmingCharacters(in: .whitespacesAndNewlines)
 
-            let builder = DistributionCleanBuilder()
+            let builder = DistributionCleanBuilder(
+                containerizationAssets: try makeDistributionTestContainerizationAssets(at: root)
+            )
             let first = try builder.buildWithDependencyInventory(
                 sourceRoot: source,
                 outputDirectory: root.appendingPathComponent("first-output", isDirectory: true),
@@ -560,8 +558,16 @@ final class DistributionIntegrationTests: XCTestCase {
                 expectedCommit: commit
             )
 
-            XCTAssertEqual(first.externalSwiftPMDependencies, [])
-            XCTAssertEqual(second.externalSwiftPMDependencies, [])
+            XCTAssertEqual(first.externalSwiftPMDependencies, second.externalSwiftPMDependencies)
+            XCTAssertEqual(
+                first.externalSwiftPMDependencies,
+                first.externalSwiftPMDependencies.sorted()
+            )
+            XCTAssertTrue(
+                first.externalSwiftPMDependencies.contains {
+                    $0 == "containerization|https://github.com/apple/containerization.git|\(DistributionContainerizationAssets.frameworkVersion)|\(DistributionContainerizationAssets.frameworkRevision)"
+                }
+            )
             XCTAssertEqual(first.report.manifest.files, second.report.manifest.files)
             let payloadPaths = Set(first.report.manifest.files.map(\.path))
             XCTAssertTrue(Set(DistributionLayout.shippedBinaryPaths).isSubset(of: payloadPaths))
@@ -667,8 +673,11 @@ final class DistributionIntegrationTests: XCTestCase {
             DistributionAssemblyRequest(
                 hostwrightBinary: binaries.appendingPathComponent("hostwright"),
                 hostwrightControlBinary: binaries.appendingPathComponent("hostwright-control"),
+                hostwrightContainerizationHelperBinary: binaries
+                    .appendingPathComponent("hostwright-containerization-helper"),
                 hostwrightDistributionBinary: binaries.appendingPathComponent("hostwright-dist"),
                 hostwrightDaemonBinary: binaries.appendingPathComponent("hostwrightd"),
+                containerizationAssets: try makeDistributionTestContainerizationAssets(at: root),
                 exampleManifestFile: repository.appendingPathComponent("examples/single-service/hostwright.yaml"),
                 licenseFile: repository.appendingPathComponent("LICENSE"),
                 readmeFile: repository.appendingPathComponent("README.md"),

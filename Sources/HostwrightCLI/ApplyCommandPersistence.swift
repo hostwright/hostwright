@@ -196,9 +196,23 @@ extension ApplyCommandRunner {
         planHash: String,
         projectID: String,
         timestamp: String,
-        teamBinding: TeamWorkflowBinding?
+        teamBinding: TeamWorkflowBinding?,
+        normalizedFailure: RuntimeNormalizedFailure? = nil
     ) throws {
         let redactedError = RuntimeRedactionPolicy.default.redact(String(describing: error))
+        var failurePayload: [String: Any] = ["error": redactedError]
+        if let normalizedFailure {
+            failurePayload.merge([
+                "category": normalizedFailure.category.rawValue,
+                "diagnostic": normalizedFailure.diagnostic,
+                "guidance": normalizedFailure.guidance,
+                "operationID": normalizedFailure.operationID,
+                "providerID": normalizedFailure.providerID,
+                "providerVersion": normalizedFailure.providerVersion,
+                "recoveryDisposition": normalizedFailure.recoveryDisposition.rawValue,
+                "retryDisposition": normalizedFailure.retryDisposition.rawValue
+            ]) { current, _ in current }
+        }
         try store.operations.record(
             OperationRecord(
                 id: "\(operationID)-failed",
@@ -211,7 +225,7 @@ extension ApplyCommandRunner {
                 idempotencyKey: idempotencyKey,
                 planHash: planHash,
                 payloadJSONRedacted: jsonPayload(
-                    ["error": redactedError].merging(hostwrightTeamBindingPayload(teamBinding)) { current, _ in current }
+                    failurePayload.merging(hostwrightTeamBindingPayload(teamBinding)) { current, _ in current }
                 )
             )
         )
@@ -227,7 +241,11 @@ extension ApplyCommandRunner {
                 runtimeAdapter: nil,
                 message: "Apply failed for \(action.identity.displayName): \(redactedError)",
                 payloadJSONRedacted: jsonPayload(
-                    ["planHash": planHash].merging(hostwrightTeamBindingPayload(teamBinding)) { current, _ in current }
+                    [
+                        "category": normalizedFailure?.category.rawValue ?? "untyped",
+                        "planHash": planHash,
+                        "retryDisposition": normalizedFailure?.retryDisposition.rawValue ?? RuntimeRetryDisposition.never.rawValue
+                    ].merging(hostwrightTeamBindingPayload(teamBinding)) { current, _ in current }
                 )
             )
         ])

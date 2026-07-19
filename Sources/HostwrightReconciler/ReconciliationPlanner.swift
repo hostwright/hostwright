@@ -58,7 +58,11 @@ public struct ReconciliationPlanner: Sendable {
             .sorted { $0.identity.displayName < $1.identity.displayName }
             .map { "Observed service '\($0.identity.displayName)' is unhealthy; bounded health results require operator review." }
 
-        return RuntimePlan(actions: createActions, warnings: unmanagedObserved + unhealthyObserved)
+        return RuntimePlan(
+            actions: createActions,
+            warnings: unmanagedObserved + unhealthyObserved,
+            capabilitySHA256: observed.capabilitySHA256
+        )
     }
 }
 

@@ -3,7 +3,7 @@ import HostwrightManifest
 import HostwrightRuntime
 
 public struct DesiredStateRepository: Sendable {
-    private let store: SQLiteStateStore
+    let store: SQLiteStateStore
 
     public init(store: SQLiteStateStore) {
         self.store = store
@@ -235,7 +235,11 @@ public struct ObservedStateRepository: Sendable {
         observedAt: String
     ) throws {
         let metadata = observedState.adapterMetadata
-        let capabilities = metadata?.capabilities.map(\.rawValue).sorted() ?? []
+        let capabilityNames = metadata?.capabilities.map(\.rawValue).sorted() ?? []
+        let capabilities = try RuntimeProviderMetadataEvidence.appendingCurrentEvidence(
+            to: capabilityNames,
+            capabilitySHA256: observedState.capabilitySHA256
+        )
         let snapshot = ObservedRuntimeSnapshotRecord(
             id: snapshotID,
             projectID: projectID ?? "",
@@ -290,6 +294,30 @@ public struct ObservedStateRepository: Sendable {
                 )
             }
             return try rows.map(observedSnapshotRecord(from:))
+        }
+    }
+
+    public func loadLatestSnapshot(
+        projectID: String,
+        providerID: RuntimeProviderID
+    ) throws -> ObservedRuntimeSnapshotRecord? {
+        let persistedValues = RuntimeProviderBinding.persistedValues(for: providerID)
+        let placeholders = Array(repeating: "?", count: persistedValues.count).joined(separator: ", ")
+        let bindings: [SQLiteValue] = [.text(projectID)] + persistedValues.map(SQLiteValue.text)
+        return try store.withValidatedConnection(readOnly: true) { connection in
+            let rows = try connection.query(
+                """
+                SELECT id, project_id, runtime_adapter, runtime_name, runtime_version, observed_at,
+                       parser_version, raw_output_hash, redacted_summary, capabilities_json
+                FROM observed_runtime_snapshots
+                WHERE project_id = ?
+                  AND runtime_adapter IN (\(placeholders))
+                ORDER BY observed_at DESC, id DESC
+                LIMIT 1
+                """,
+                bindings: bindings
+            )
+            return try rows.first.map(observedSnapshotRecord(from:))
         }
     }
 

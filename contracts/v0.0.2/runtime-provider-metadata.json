@@ -1,5 +1,6 @@
 {
   "providerAPIVersion": 2,
+  "providerID": "apple-container-cli",
   "adapterName": "golden-provider",
   "adapterVersion": "0.0.2",
   "runtimeName": "golden-runtime",

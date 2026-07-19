@@ -35,7 +35,8 @@ final class TeamWorkflowCLITests: XCTestCase {
                 stateDatabasePath: "state.sqlite",
                 confirmedPlanHash: "plan",
                 teamProfilePath: "team.json",
-                approvalRecordPath: "approval.json"
+                approvalRecordPath: "approval.json",
+                runtimeProvider: .automatic
             )
         )
         XCTAssertEqual(
@@ -71,7 +72,8 @@ final class TeamWorkflowCLITests: XCTestCase {
                     stateDatabasePath: databasePath,
                     confirmedPlanHash: "plan",
                     teamProfilePath: directory.appendingPathComponent("team.json").path,
-                    approvalRecordPath: nil
+                    approvalRecordPath: nil,
+                    runtimeProvider: .automatic
                 ),
                 environment: .live
             )
@@ -302,7 +304,7 @@ final class TeamWorkflowCLITests: XCTestCase {
                     resourceType: "container",
                     projectID: "project-demo",
                     serviceName: "api",
-                    runtimeAdapter: adapter.adapterMetadata.adapterName,
+                    runtimeAdapter: RuntimeProviderID.appleContainerCLI.rawValue,
                     createdAt: "2026-07-12T12:00:00Z",
                     observedAt: "2026-07-12T12:00:00Z",
                     cleanupEligible: true,
@@ -592,7 +594,41 @@ final class TeamWorkflowCLITests: XCTestCase {
 }
 
 private final class CapturingRuntimeAdapter: RuntimeAdapter, @unchecked Sendable {
+    private static let testCapabilitySnapshot = RuntimeCapabilitySnapshot(
+        descriptor: RuntimeProviderDescriptor(
+            providerID: .appleContainerCLI,
+            components: [
+                RuntimeProviderComponent(
+                    identifier: .appleContainerCLI,
+                    version: "1.1.0",
+                    build: "test",
+                    fingerprint: "abcdef0"
+                ),
+                RuntimeProviderComponent(
+                    identifier: .appleContainerAPIService,
+                    version: "1.1.0",
+                    build: "test",
+                    fingerprint: "abcdef0"
+                )
+            ],
+            minimumMacOSVersion: RuntimeProviderCapabilityContract.minimumMacOSVersion,
+            supportedArchitectures: [.arm64]
+        ),
+        host: RuntimeProviderHostPlatform(
+            macOSVersion: RuntimeProviderMacOSVersion(major: 26),
+            macOSBuild: "25A123",
+            architecture: .arm64
+        ),
+        features: RuntimeProviderFeature.knownValues.map {
+            RuntimeProviderFeatureStatus(
+                feature: $0,
+                state: .available,
+                reason: .implemented
+            )
+        }
+    )
     let adapterMetadata = RuntimeAdapterMetadata(
+        providerID: .appleContainerCLI,
         adapterName: "TeamWorkflowTestAdapter",
         adapterVersion: "1",
         runtimeName: "test-runtime",
@@ -609,7 +645,8 @@ private final class CapturingRuntimeAdapter: RuntimeAdapter, @unchecked Sendable
         observedState = ObservedRuntimeState(
             projectName: "demo",
             services: observedServices,
-            adapterMetadata: adapterMetadata
+            adapterMetadata: adapterMetadata,
+            capabilitySHA256: Self.testCapabilitySnapshot.canonicalSHA256
         )
     }
 
@@ -627,6 +664,10 @@ private final class CapturingRuntimeAdapter: RuntimeAdapter, @unchecked Sendable
 
     func capabilities() async throws -> [RuntimeCapability] {
         adapterMetadata.capabilities
+    }
+
+    func capabilitySnapshot() async throws -> RuntimeCapabilitySnapshot {
+        Self.testCapabilitySnapshot
     }
 
     func observe(desiredState: DesiredRuntimeState) async throws -> ObservedRuntimeState {

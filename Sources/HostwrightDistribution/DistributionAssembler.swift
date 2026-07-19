@@ -4,8 +4,10 @@ import HostwrightCore
 public struct DistributionAssemblyRequest: Sendable {
     public let hostwrightBinary: URL
     public let hostwrightControlBinary: URL
+    public let hostwrightContainerizationHelperBinary: URL
     public let hostwrightDistributionBinary: URL
     public let hostwrightDaemonBinary: URL
+    public let containerizationAssets: DistributionContainerizationAssetBundle
     public let exampleManifestFile: URL
     public let licenseFile: URL
     public let readmeFile: URL
@@ -22,8 +24,10 @@ public struct DistributionAssemblyRequest: Sendable {
     public init(
         hostwrightBinary: URL,
         hostwrightControlBinary: URL,
+        hostwrightContainerizationHelperBinary: URL,
         hostwrightDistributionBinary: URL,
         hostwrightDaemonBinary: URL,
+        containerizationAssets: DistributionContainerizationAssetBundle,
         exampleManifestFile: URL,
         licenseFile: URL,
         readmeFile: URL,
@@ -39,8 +43,10 @@ public struct DistributionAssemblyRequest: Sendable {
     ) {
         self.hostwrightBinary = hostwrightBinary
         self.hostwrightControlBinary = hostwrightControlBinary
+        self.hostwrightContainerizationHelperBinary = hostwrightContainerizationHelperBinary
         self.hostwrightDistributionBinary = hostwrightDistributionBinary
         self.hostwrightDaemonBinary = hostwrightDaemonBinary
+        self.containerizationAssets = containerizationAssets
         self.exampleManifestFile = exampleManifestFile
         self.licenseFile = licenseFile
         self.readmeFile = readmeFile
@@ -129,6 +135,14 @@ public struct DistributionAssembler: Sendable {
             commands: &commands
         )
         try validateBinary(
+            request.hostwrightContainerizationHelperBinary,
+            versionArguments: ["--version"],
+            expectedVersion: request.packageVersion,
+            label: "validate hostwright-containerization-helper version",
+            cancellation: cancellation,
+            commands: &commands
+        )
+        try validateBinary(
             request.hostwrightDistributionBinary,
             versionArguments: ["--version"],
             expectedVersion: request.packageVersion,
@@ -145,6 +159,12 @@ public struct DistributionAssembler: Sendable {
         try validateArchitecture(
             request.hostwrightControlBinary,
             label: "validate hostwright-control architecture",
+            cancellation: cancellation,
+            commands: &commands
+        )
+        try validateArchitecture(
+            request.hostwrightContainerizationHelperBinary,
+            label: "validate hostwright-containerization-helper architecture",
             cancellation: cancellation,
             commands: &commands
         )
@@ -180,15 +200,20 @@ public struct DistributionAssembler: Sendable {
 
         let artifactRoot = temporaryOutput.appendingPathComponent(artifactID, isDirectory: true)
         try FileManager.default.createDirectory(at: artifactRoot, withIntermediateDirectories: false)
-        let inputs: [(String, URL)] = [
+        var inputs: [(String, URL)] = [
             ("bin/hostwright", request.hostwrightBinary),
             ("bin/hostwright-control", request.hostwrightControlBinary),
+            ("bin/hostwright-containerization-helper", request.hostwrightContainerizationHelperBinary),
             ("bin/hostwright-dist", request.hostwrightDistributionBinary),
             ("bin/hostwrightd", request.hostwrightDaemonBinary),
             ("share/hostwright/examples/hostwright.yaml", request.exampleManifestFile),
             ("share/doc/hostwright/LICENSE", request.licenseFile),
             ("share/doc/hostwright/README.md", request.readmeFile)
         ]
+        inputs.append(contentsOf: request.containerizationAssets.filesByPayloadPath.map {
+            ($0.key, $0.value)
+        })
+        inputs.sort { $0.0 < $1.0 }
         for (path, source) in inputs {
             guard !cancellation.isCancelled else {
                 throw DistributionError.commandCancelled("distribution payload copy")
@@ -627,10 +652,15 @@ struct DistributionCleanBuildResult: Sendable {
 public struct DistributionCleanBuilder: Sendable {
     private let runner: DistributionProcessRunner
     private let assembler: DistributionAssembler
+    private let configuredContainerizationAssets: DistributionContainerizationAssetBundle?
 
-    public init(runner: DistributionProcessRunner = DistributionProcessRunner()) {
+    public init(
+        runner: DistributionProcessRunner = DistributionProcessRunner(),
+        containerizationAssets: DistributionContainerizationAssetBundle? = nil
+    ) {
         self.runner = runner
         self.assembler = DistributionAssembler(runner: runner)
+        self.configuredContainerizationAssets = containerizationAssets
     }
 
     static func deterministicReleaseBuildArguments(
@@ -638,12 +668,19 @@ public struct DistributionCleanBuilder: Sendable {
         scratch: URL,
         additionalArguments: [String]
     ) -> [String] {
-        [
+        let prefixMap = "\(scratch.path)=/hostwright-build"
+        return [
             "build",
             "--package-path", sourceRoot.path,
             "--scratch-path", scratch.path,
             "-c", "release",
-            "-debug-info-format", "none"
+            "-debug-info-format", "none",
+            "-Xswiftc", "-file-prefix-map",
+            "-Xswiftc", prefixMap,
+            "-Xcc", "-ffile-prefix-map=\(prefixMap)",
+            "-Xcc", "-fmacro-prefix-map=\(prefixMap)",
+            "-Xcxx", "-ffile-prefix-map=\(prefixMap)",
+            "-Xcxx", "-fmacro-prefix-map=\(prefixMap)"
         ] + additionalArguments
     }
 
@@ -733,8 +770,9 @@ public struct DistributionCleanBuilder: Sendable {
             cancellation: cancellation
         )
         commands.append(record("swift package show-dependencies --format json", dependencyResult))
-        let externalSwiftPMDependencies = try requireNoExternalDependencies(
-            dependencyResult.standardOutput
+        let externalSwiftPMDependencies = try requirePinnedExternalDependencies(
+            dependencyResult.standardOutput,
+            resolvedFile: sourceRoot.appendingPathComponent("Package.resolved")
         )
 
         for product in DistributionLayout.shippedExecutableNames {
@@ -775,8 +813,15 @@ public struct DistributionCleanBuilder: Sendable {
         }
         let hostwright = URL(fileURLWithPath: binPath).appendingPathComponent("hostwright")
         let control = URL(fileURLWithPath: binPath).appendingPathComponent("hostwright-control")
+        let helper = URL(fileURLWithPath: binPath)
+            .appendingPathComponent("hostwright-containerization-helper")
         let distribution = URL(fileURLWithPath: binPath).appendingPathComponent("hostwright-dist")
         let daemon = URL(fileURLWithPath: binPath).appendingPathComponent("hostwrightd")
+        let containerizationAssets = try configuredContainerizationAssets ??
+            DistributionContainerizationAssets.load(
+                root: DistributionContainerizationAssets.configuredRoot(),
+                cancellation: cancellation
+            )
         let versionResult = try runner.run(
             executablePath: hostwright.path,
             arguments: ["--version"],
@@ -824,8 +869,10 @@ public struct DistributionCleanBuilder: Sendable {
             DistributionAssemblyRequest(
                 hostwrightBinary: hostwright,
                 hostwrightControlBinary: control,
+                hostwrightContainerizationHelperBinary: helper,
                 hostwrightDistributionBinary: distribution,
                 hostwrightDaemonBinary: daemon,
+                containerizationAssets: containerizationAssets,
                 exampleManifestFile: sourceRoot.appendingPathComponent("examples/single-service/hostwright.yaml"),
                 licenseFile: sourceRoot.appendingPathComponent("LICENSE"),
                 readmeFile: sourceRoot.appendingPathComponent("README.md"),
@@ -835,7 +882,7 @@ public struct DistributionCleanBuilder: Sendable {
                 sourceDirty: false,
                 architecture: "arm64",
                 inputStageIdentifier: "release-build",
-                inputStageDetail: "Built all four shipped SwiftPM release products from the clean exact source commit with no external package dependencies.",
+                inputStageDetail: "Built all five shipped SwiftPM release products from the clean exact source commit with pinned Containerization 0.35.0 dependencies and verified runtime bootstrap assets.",
                 priorCommands: commands,
                 inputCleanupPaths: [scratch]
             ),
@@ -847,28 +894,89 @@ public struct DistributionCleanBuilder: Sendable {
         )
     }
 
-    func requireNoExternalDependencies(_ json: String) throws -> [String] {
+    func requirePinnedExternalDependencies(
+        _ json: String,
+        resolvedFile: URL
+    ) throws -> [String] {
         guard let object = try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any],
               let dependencies = object["dependencies"] as? [Any] else {
-            throw DistributionError.invalidArtifact("SwiftPM dependency inventory is malformed or contains external dependencies")
+            throw DistributionError.invalidArtifact("SwiftPM dependency inventory is malformed")
         }
-        let inventory = try dependencies.map { dependency -> String in
-            guard let object = dependency as? [String: Any],
-                  let identifier = ["identity", "name", "url", "path"]
-                    .compactMap({ object[$0] as? String })
-                    .first(where: { !$0.isEmpty }) else {
-                throw DistributionError.invalidArtifact(
-                    "SwiftPM dependency inventory is malformed or contains external dependencies"
-                )
+        var observed: [String: (url: String, version: String)] = [:]
+        func visit(_ values: [Any]) throws {
+            for value in values {
+                guard let dependency = value as? [String: Any],
+                      let identity = dependency["identity"] as? String,
+                      let url = dependency["url"] as? String,
+                      let version = dependency["version"] as? String,
+                      !identity.isEmpty,
+                      url.hasPrefix("https://github.com/"),
+                      url.hasSuffix(".git"),
+                      version.range(
+                        of: "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$",
+                        options: .regularExpression
+                      ) != nil,
+                      let children = dependency["dependencies"] as? [Any] else {
+                    throw DistributionError.invalidArtifact("SwiftPM dependency inventory is not exact")
+                }
+                if let current = observed[identity],
+                   current.url != url || current.version != version {
+                    throw DistributionError.invalidArtifact("SwiftPM dependency inventory conflicts")
+                }
+                observed[identity] = (url, version)
+                try visit(children)
             }
-            return identifier
-        }.sorted()
-        guard inventory.isEmpty else {
-            throw DistributionError.invalidArtifact(
-                "SwiftPM dependency inventory is malformed or contains external dependencies"
-            )
         }
-        return inventory
+        try visit(dependencies)
+
+        let pins = try dependencyPins(resolvedFile: resolvedFile)
+        guard Set(observed.keys) == Set(pins.keys),
+              let containerization = pins["containerization"],
+              containerization.location == "https://github.com/apple/containerization.git",
+              containerization.state.version == DistributionContainerizationAssets.frameworkVersion,
+              containerization.state.revision == DistributionContainerizationAssets.frameworkRevision else {
+            throw DistributionError.invalidArtifact("Containerization 0.35.0 dependency resolution is incomplete")
+        }
+
+        let serializedDependencies = try observed.keys.map { identity in
+            guard let dependency = observed[identity],
+                  let pin = pins[identity],
+                  pin.location == dependency.url,
+                  pin.state.version == dependency.version else {
+                throw DistributionError.invalidArtifact("SwiftPM dependency differs from Package.resolved")
+            }
+            return [identity, dependency.url, dependency.version, pin.state.revision]
+                .joined(separator: "|")
+        }
+        return serializedDependencies.sorted()
+    }
+
+    private func dependencyPins(
+        resolvedFile: URL
+    ) throws -> [String: DistributionResolvedPackagePin] {
+        guard try DistributionFileSystem.isRegularNonSymlink(resolvedFile) else {
+            throw DistributionError.invalidArtifact("Package.resolved is missing from the clean source snapshot")
+        }
+        let resolvedData = try Data(contentsOf: resolvedFile, options: [.mappedIfSafe])
+        let resolved = try JSONDecoder().decode(DistributionResolvedPackageFile.self, from: resolvedData)
+        return Dictionary(uniqueKeysWithValues: try resolved.pins.map(parseDependencyPin))
+    }
+
+    private func parseDependencyPin(
+        _ pin: DistributionResolvedPackagePin
+    ) throws -> (String, DistributionResolvedPackagePin) {
+        guard pin.kind == "remoteSourceControl",
+              pin.location.hasPrefix("https://github.com/"),
+              pin.location.hasSuffix(".git"),
+              let version = pin.state.version,
+              version.range(
+                of: "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$",
+                options: .regularExpression
+              ) != nil,
+              pin.state.revision.range(of: "^[a-f0-9]{40}$", options: .regularExpression) != nil else {
+            throw DistributionError.invalidArtifact("Package.resolved contains an unpinned dependency")
+        }
+        return (pin.identity, pin)
     }
 
     private func requireOnlyUnusedBuildDirectory(_ status: String) throws {
@@ -893,4 +1001,20 @@ public struct DistributionCleanBuilder: Sendable {
         }
         return value
     }
+}
+
+private struct DistributionResolvedPackageFile: Decodable {
+    let pins: [DistributionResolvedPackagePin]
+}
+
+private struct DistributionResolvedPackagePin: Decodable {
+    struct State: Decodable {
+        let revision: String
+        let version: String?
+    }
+
+    let identity: String
+    let kind: String
+    let location: String
+    let state: State
 }

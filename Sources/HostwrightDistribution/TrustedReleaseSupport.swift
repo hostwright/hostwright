@@ -319,13 +319,14 @@ public enum HomebrewFormulaRenderer {
           depends_on macos: :tahoe
 
           def install
-            executables = %w[hostwright hostwright-control hostwright-dist hostwrightd]
+            executables = %w[hostwright hostwright-control hostwright-containerization-helper hostwright-dist hostwrightd]
             executables.each do |name|
               system "/usr/bin/codesign", "--verify", "--strict", "--verbose=2", "bin/#{name}"
             end
             bin.install executables.map { |name| "bin/#{name}" }
             doc.install "share/doc/hostwright/LICENSE", "share/doc/hostwright/README.md"
             pkgshare.install "share/hostwright/examples/hostwright.yaml"
+            pkgshare.install "share/hostwright/containerization"
           end
 
           service do
@@ -349,8 +350,11 @@ public enum HomebrewFormulaRenderer {
           test do
             assert_equal version.to_s, shell_output("#{bin}/hostwright --version").strip
             assert_equal version.to_s, shell_output("#{bin}/hostwright-control --version").strip
+            assert_equal version.to_s, shell_output("#{bin}/hostwright-containerization-helper --version").strip
             assert_equal version.to_s, shell_output("#{bin}/hostwright-dist --version").strip
             assert_equal version.to_s, shell_output("#{bin}/hostwrightd --version").strip
+            assert_path_exists pkgshare/"containerization/kernel/\(DistributionContainerizationAssets.kernelFileName)"
+            assert_path_exists pkgshare/"containerization/vminit/index.json"
             capabilities = shell_output("#{bin}/hostwright capabilities --json")
             assert_match '"schemaVersion":1', capabilities
             assert_match '"productVersion":"\(version)"', capabilities

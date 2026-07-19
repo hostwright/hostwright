@@ -2512,8 +2512,10 @@ final class DistributionDurableLifecycleTests: XCTestCase {
             DistributionAssemblyRequest(
                 hostwrightBinary: binary,
                 hostwrightControlBinary: binary,
+                hostwrightContainerizationHelperBinary: binary,
                 hostwrightDistributionBinary: binary,
                 hostwrightDaemonBinary: binary,
+                containerizationAssets: try makeDistributionTestContainerizationAssets(at: fixture),
                 exampleManifestFile: repository.appendingPathComponent("examples/single-service/hostwright.yaml"),
                 licenseFile: repository.appendingPathComponent("LICENSE"),
                 readmeFile: repository.appendingPathComponent("README.md"),

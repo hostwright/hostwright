@@ -1,6 +1,8 @@
 import Foundation
 
 public enum AppleContainerImageEvidenceParser {
+    public static let maximumBytes = AppleContainerImageListOutputParser.maximumBytes
+
     public static func parse(
         _ text: String,
         expectedReference: String,
@@ -8,7 +10,12 @@ public enum AppleContainerImageEvidenceParser {
         redactionPolicy: RuntimeRedactionPolicy = .default
     ) throws -> RuntimeLocalImageEvidence {
         do {
-            let images = try JSONDecoder().decode([ImagePayload].self, from: Data(text.utf8))
+            let data = try AppleContainerStructuredOutput.validatedJSONData(
+                text,
+                operation: "Apple container image evidence",
+                maximumBytes: maximumBytes
+            )
+            let images = try JSONDecoder().decode([ImagePayload].self, from: data)
             let matches = images.filter { $0.configuration.name == expectedReference }
             guard matches.count == 1, let image = matches.first else {
                 throw RuntimeAdapterError.capabilityUnavailable(.lifecycleMutation)
@@ -16,8 +23,22 @@ public enum AppleContainerImageEvidenceParser {
             guard digestIsValid(image.configuration.descriptor.digest) else {
                 throw RuntimeAdapterError.outputParseFailed("Local image descriptor digest is missing or invalid.")
             }
-            let variant = image.variants.first(where: { $0.platform.architecture == preferredArchitecture }) ?? image.variants.first
-            guard let variant,
+            let preferredVariants = image.variants.filter {
+                $0.platform.architecture == preferredArchitecture
+            }
+            let variant: Variant
+            if preferredVariants.count == 1, let preferred = preferredVariants.first {
+                variant = preferred
+            } else if preferredVariants.isEmpty,
+                      image.variants.count == 1,
+                      let onlyVariant = image.variants.first {
+                variant = onlyVariant
+            } else {
+                throw RuntimeAdapterError.outputParseFailed(
+                    "Local image platform evidence was missing or ambiguous."
+                )
+            }
+            guard
                   digestIsValid(variant.digest),
                   !variant.platform.architecture.isEmpty,
                   !variant.platform.os.isEmpty else {

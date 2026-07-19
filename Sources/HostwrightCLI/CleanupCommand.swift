@@ -148,7 +148,7 @@ struct CleanupCommandRunner {
         for observedService in observed.services {
             observedByIdentifier[observedService.resourceIdentifier, default: []].append(observedService)
         }
-        let observedAdapterName = observed.adapterMetadata?.adapterName
+        let observedAdapterName = observed.adapterMetadata?.providerID.rawValue
 
         let ownershipRecords = try store.ownership.loadAll()
         let ownershipIdentifiers = Set(ownershipRecords.map(\.resourceIdentifier))
@@ -195,7 +195,8 @@ struct CleanupCommandRunner {
                 expectedProjectID: projectID,
                 resourceIdentifier: ownership.resourceIdentifier,
                 serviceName: ownership.serviceName,
-                ownershipRuntimeAdapter: ownership.runtimeAdapter,
+                ownershipRuntimeAdapter: RuntimeProviderBinding.stableID(for: ownership.runtimeAdapter)?.rawValue
+                    ?? ownership.runtimeAdapter,
                 ownershipIdentityVersion: ownership.identityVersion,
                 observedAdapterName: observedAdapterName,
                 observedServices: observedServices
@@ -288,7 +289,18 @@ struct CleanupCommandRunner {
     ) throws -> CLIRunResult {
         let timestamp = hostwrightTimestamp()
         let projectID = "project-\(projectName)"
-        let runtimeAdapter = observed.adapterMetadata?.adapterName
+        let runtimeAdapter = observed.adapterMetadata?.providerID.rawValue
+        guard let providerID = observed.adapterMetadata?.providerID,
+              let capabilitySHA256 = observed.capabilitySHA256,
+              capabilitySHA256.range(
+                  of: "^[a-f0-9]{64}$",
+                  options: .regularExpression
+              ) != nil else {
+            return failure(
+                code: .runtimeUnavailable,
+                message: "Runtime observation did not include an immutable provider identity and capability digest. No cleanup mutation was attempted."
+            )
+        }
         var hadFailure = false
         var lines = [
             "Hostwright cleanup",
@@ -325,7 +337,7 @@ struct CleanupCommandRunner {
             }
 
             let operationID = hostwrightUniqueID(prefix: "operation-cleanup")
-            let fencingToken = HostwrightResourceUUID.generate()
+            let operationFencingToken = HostwrightResourceUUID.generate()
             try store.operations.record(
                 OperationRecord(
                     id: "\(operationID)-recorded",
@@ -339,7 +351,7 @@ struct CleanupCommandRunner {
                     planHash: token,
                     payloadJSONRedacted: jsonPayload(
                         [
-                            "fencingToken": fencingToken,
+                            "fencingToken": operationFencingToken,
                             "resourceIdentifier": candidate.resourceIdentifier,
                             "resourceUUID": candidate.ownership.resourceUUID
                         ]
@@ -357,7 +369,7 @@ struct CleanupCommandRunner {
                     runtimeAdapter: candidate.runtimeAdapter,
                     expectedResourceUUID: candidate.ownership.resourceUUID,
                     expectedFencingToken: candidate.ownership.fencingToken,
-                    newFencingToken: fencingToken,
+                    newFencingToken: operationFencingToken,
                     observedAt: timestamp
                 ) != nil else {
                     throw StateStoreError.invalidRecord(
@@ -365,13 +377,15 @@ struct CleanupCommandRunner {
                     )
                 }
                 let context = RuntimeMutationContext(
+                    providerID: providerID,
+                    capabilitySHA256: capabilitySHA256,
                     operationID: operationID,
                     resourceUUID: candidate.ownership.resourceUUID,
                     resourceGeneration: candidate.ownership.resourceGeneration,
                     projectResourceUUID: projectResourceUUID,
                     projectGeneration: candidate.ownership.projectGeneration,
                     providerGeneration: candidate.ownership.providerGeneration,
-                    fencingToken: fencingToken
+                    fencingToken: candidate.ownership.fencingToken
                 )
                 if let issue = context.validationIssue {
                     throw StateStoreError.invalidRecord(issue)
@@ -533,7 +547,7 @@ struct CleanupCommandRunner {
                 source: "hostwright-cli",
                 projectID: "project-\(projectName)",
                 serviceName: nil,
-                runtimeAdapter: observed.adapterMetadata?.adapterName,
+                runtimeAdapter: observed.adapterMetadata?.providerID.rawValue,
                 message: "Cleanup planned \(eligibleCount) eligible Hostwright-owned container(s).",
                 payloadJSONRedacted: jsonPayload(
                     ["token": token, "eligible": eligibleCount, "total": assessments.count]
@@ -551,7 +565,7 @@ struct CleanupCommandRunner {
                     source: "hostwright-cli",
                     projectID: "project-\(projectName)",
                     serviceName: nil,
-                    runtimeAdapter: observed.adapterMetadata?.adapterName,
+                    runtimeAdapter: observed.adapterMetadata?.providerID.rawValue,
                     message: "Local team profile \(teamBinding.profileIdentifier) selected for cleanup dry-run.",
                     payloadJSONRedacted: jsonPayload(hostwrightTeamBindingPayload(teamBinding))
                 )

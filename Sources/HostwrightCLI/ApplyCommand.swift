@@ -15,6 +15,7 @@ struct ApplyCommandRunner {
     let confirmedPlanHash: String
     let teamProfilePath: String?
     let approvalRecordPath: String?
+    let runtimeProvider: RuntimeProviderSelection
     let environment: CLIEnvironment
 
     init(
@@ -23,6 +24,7 @@ struct ApplyCommandRunner {
         confirmedPlanHash: String,
         teamProfilePath: String? = nil,
         approvalRecordPath: String? = nil,
+        runtimeProvider: RuntimeProviderSelection = .automatic,
         environment: CLIEnvironment
     ) {
         self.manifestPath = manifestPath
@@ -30,6 +32,7 @@ struct ApplyCommandRunner {
         self.confirmedPlanHash = confirmedPlanHash
         self.teamProfilePath = teamProfilePath
         self.approvalRecordPath = approvalRecordPath
+        self.runtimeProvider = runtimeProvider
         self.environment = environment
     }
 
@@ -54,13 +57,29 @@ struct ApplyCommandRunner {
             let timestamp = hostwrightTimestamp()
             let projectName = mapping.desiredState.projectName
             let projectID = "project-\(projectName)"
+            let selectedProvider: HostwrightSelectedRuntimeProvider
+            do {
+                selectedProvider = try hostwrightSelectRuntimeProvider(
+                    requested: runtimeProvider,
+                    store: store,
+                    projectID: projectID,
+                    requiredFeatures: [.observation, .lifecycle],
+                    environment: environment
+                )
+            } catch let selectionError as RuntimeProviderSelectionError {
+                return failure(
+                    code: .runtimeUnavailable,
+                    message: "Runtime provider selection failed: \(selectionError). \(selectionError.guidance) No mutation was attempted."
+                )
+            }
             let observationDesiredState = try hostwrightDesiredStateWithOwnershipHints(
                 mapping.desiredState,
                 store: store,
-                projectID: projectID
+                projectID: projectID,
+                providerID: selectedProvider.selection.providerID
             )
             let restartPolicyStates = try hostwrightRestartPolicyStateMap(store: store, projectID: projectID, projectName: projectName)
-            let adapter = environment.runtimeAdapter()
+            let adapter = selectedProvider.adapter
             let observed: ObservedRuntimeState
             do {
                 observed = try waitForAsync {
@@ -82,19 +101,28 @@ struct ApplyCommandRunner {
                     message: "Runtime observation did not include adapter metadata. No mutation was attempted."
                 )
             }
+            guard observedMetadata.providerID == selectedProvider.selection.providerID,
+                  observedForPlanning.capabilitySHA256 == selectedProvider.selection.capabilitySHA256 else {
+                return failure(
+                    code: .runtimeUnavailable,
+                    message: "Runtime provider capability changed during observation. Generate a new plan from a fresh capability snapshot. No mutation was attempted."
+                )
+            }
             if let incompatibility = RuntimeProviderCompatibility.mutationIncompatibility(observedMetadata) {
                 return failure(
                     code: .runtimeUnavailable,
                     message: "\(incompatibility) No mutation was attempted."
                 )
             }
-            let observedRuntimeAdapter = observedMetadata.adapterName
-            guard
-                  !observedRuntimeAdapter.isEmpty
-            else {
+            let observedRuntimeAdapter = observedMetadata.providerID.rawValue
+            guard let capabilitySHA256 = observedForPlanning.capabilitySHA256,
+                  capabilitySHA256.range(
+                      of: "^[a-f0-9]{64}$",
+                      options: .regularExpression
+                  ) != nil else {
                 return failure(
                     code: .runtimeUnavailable,
-                    message: "Runtime observation did not include adapter metadata. No mutation was attempted."
+                    message: "Runtime observation did not include a valid immutable capability digest. No mutation was attempted."
                 )
             }
             let plan = ReconciliationPlanner().plan(
@@ -217,15 +245,39 @@ struct ApplyCommandRunner {
                 }
             }
 
+            do {
+                let freshCapability = try waitForAsync {
+                    try await adapter.capabilitySnapshot()
+                }
+                guard freshCapability.descriptor.providerID == observedMetadata.providerID else {
+                    return failure(
+                        code: .runtimeUnavailable,
+                        message: "The runtime provider identity changed after planning. No state or runtime mutation was attempted."
+                    )
+                }
+                try RuntimeProviderSelector.requireFreshCapability(
+                    expectedSHA256: capabilitySHA256,
+                    currentSnapshot: freshCapability
+                )
+            } catch {
+                return failure(
+                    code: .runtimeUnavailable,
+                    message: "Runtime capability revalidation failed before mutation: \(RuntimeRedactionPolicy.default.redact(String(describing: error))). No state or runtime mutation was attempted."
+                )
+            }
+
             let operationID = hostwrightUniqueID(prefix: "operation-apply")
             let operationGroupID = hostwrightUniqueID(prefix: "operation-group")
+            let operationFencingToken = HostwrightResourceUUID.generate()
             let existingOwnership = try store.ownership.loadAll().first { record in
                 record.resourceIdentifier == action.resourceIdentifier &&
-                record.runtimeAdapter == observedRuntimeAdapter &&
+                RuntimeProviderBinding.stableID(for: record.runtimeAdapter) == observedMetadata.providerID &&
                 record.projectID == projectID &&
                 record.serviceName == action.identity.serviceName
             }
             let mutationContext = RuntimeMutationContext(
+                providerID: observedMetadata.providerID,
+                capabilitySHA256: capabilitySHA256,
                 operationID: operationID,
                 resourceUUID: existingOwnership?.resourceUUID ?? HostwrightResourceUUID.legacy(
                     kind: "service", identifier: "\(projectID):\(action.identity.serviceName)"
@@ -236,7 +288,7 @@ struct ApplyCommandRunner {
                 ),
                 projectGeneration: existingOwnership?.projectGeneration ?? 1,
                 providerGeneration: existingOwnership?.providerGeneration ?? 1,
-                fencingToken: HostwrightResourceUUID.generate()
+                fencingToken: existingOwnership?.fencingToken ?? operationFencingToken
             )
             if let issue = mutationContext.validationIssue {
                 return failure(code: .stateStoreUnavailable, message: "\(issue) No mutation was attempted.")
@@ -259,7 +311,8 @@ struct ApplyCommandRunner {
                     action: action
                 ),
                 runtimeAdapter: observedRuntimeAdapter,
-                mutationContext: mutationContext
+                mutationContext: mutationContext,
+                operationFencingToken: operationFencingToken
             )
             let groupAcquire = try store.operationGroups.acquire(
                 preparedOperationGroup
@@ -276,7 +329,7 @@ struct ApplyCommandRunner {
                     message: "Operation group acquisition returned neither an acquired nor an existing group. No mutation was attempted."
                 )
             }
-            guard acquiredGroup.fencingToken == mutationContext.fencingToken else {
+            guard acquiredGroup.fencingToken == operationFencingToken else {
                 try? finishOperationGroup(
                     store: store,
                     groupID: operationGroupID,
@@ -291,6 +344,7 @@ struct ApplyCommandRunner {
                     message: "Acquired operation fencing did not match the prepared mutation context. No mutation was attempted."
                 )
             }
+            var ownershipFenceAdvanced = false
             do {
                 try recordRollbackUnsupportedStep(
                     store: store,
@@ -320,13 +374,14 @@ struct ApplyCommandRunner {
                         runtimeAdapter: existingOwnership.runtimeAdapter,
                         expectedResourceUUID: existingOwnership.resourceUUID,
                         expectedFencingToken: existingOwnership.fencingToken,
-                        newFencingToken: mutationContext.fencingToken,
+                        newFencingToken: operationFencingToken,
                         observedAt: timestamp
                     ) != nil else {
                         throw StateStoreError.invalidRecord(
                             "Ownership fencing changed before runtime execution; refusing stale mutation."
                         )
                     }
+                    ownershipFenceAdvanced = true
                 }
                 try recordOperationGroupStep(
                     store: store,
@@ -342,6 +397,16 @@ struct ApplyCommandRunner {
                     hint: "Runtime mutation started for \(action.identity.displayName). If this process is interrupted, inspect the exact runtime resource and rerun apply only after confirming the current plan."
                 )
             } catch {
+                if ownershipFenceAdvanced, let existingOwnership {
+                    _ = try? store.ownership.advanceFencingToken(
+                        resourceIdentifier: existingOwnership.resourceIdentifier,
+                        runtimeAdapter: existingOwnership.runtimeAdapter,
+                        expectedResourceUUID: existingOwnership.resourceUUID,
+                        expectedFencingToken: operationFencingToken,
+                        newFencingToken: existingOwnership.fencingToken,
+                        observedAt: timestamp
+                    )
+                }
                 try? finishOperationGroup(
                     store: store,
                     groupID: operationGroupID,
@@ -381,7 +446,35 @@ struct ApplyCommandRunner {
                 }
             } catch {
                 let runtimeErrorDescription = RuntimeRedactionPolicy.default.redact(String(describing: error))
-                do {
+                let normalizedFailure = normalizedRuntimeFailure(
+                    error,
+                    metadata: observedMetadata,
+                    operationID: operationID
+                )
+                let reobservation = reobserveUncertainMutation(
+                    adapter: adapter,
+                    action: action,
+                    desiredState: observationDesiredState,
+                    providerID: observedMetadata.providerID,
+                    capabilitySHA256: capabilitySHA256,
+                    failure: normalizedFailure
+                )
+                if let recoveredEvent = reobservation.recoveredEvent {
+                    event = recoveredEvent
+                } else {
+                    if reobservation.provedNoEffect,
+                       ownershipFenceAdvanced,
+                       let existingOwnership {
+                        _ = try? store.ownership.advanceFencingToken(
+                            resourceIdentifier: existingOwnership.resourceIdentifier,
+                            runtimeAdapter: existingOwnership.runtimeAdapter,
+                            expectedResourceUUID: existingOwnership.resourceUUID,
+                            expectedFencingToken: operationFencingToken,
+                            newFencingToken: existingOwnership.fencingToken,
+                            observedAt: timestamp
+                        )
+                    }
+                    do {
                     if restartStopSucceededBeforeFailure(error) {
                         try recordOperationGroupStep(
                             store: store,
@@ -428,7 +521,8 @@ struct ApplyCommandRunner {
                         planHash: plan.planHash,
                         projectID: projectID,
                         timestamp: timestamp,
-                        teamBinding: teamBinding
+                        teamBinding: teamBinding,
+                        normalizedFailure: normalizedFailure
                     )
                     try recordManagedStartAttempt(
                         store: store,
@@ -446,30 +540,38 @@ struct ApplyCommandRunner {
                         action: action,
                         timestamp: timestamp,
                         metadata: [
+                            "category": normalizedFailure.category.rawValue,
                             "error": runtimeErrorDescription,
+                            "recoveryDisposition": normalizedFailure.recoveryDisposition.rawValue,
+                            "retryDisposition": normalizedFailure.retryDisposition.rawValue,
                             "rollback": "unsupported"
                         ]
                     )
-                } catch {
-                    try? finishOperationGroup(
-                        store: store,
-                        groupID: operationGroupID,
-                        status: .failed,
-                        checkpoint: "runtime-failed",
-                        action: action,
-                        timestamp: timestamp,
-                        metadata: [
-                            "error": runtimeErrorDescription,
-                            "persistenceError": RuntimeRedactionPolicy.default.redact(String(describing: error)),
-                            "rollback": "unsupported"
-                        ]
-                    )
+                    } catch {
+                        try? finishOperationGroup(
+                            store: store,
+                            groupID: operationGroupID,
+                            status: .failed,
+                            checkpoint: "runtime-failed",
+                            action: action,
+                            timestamp: timestamp,
+                            metadata: [
+                                "category": normalizedFailure.category.rawValue,
+                                "error": runtimeErrorDescription,
+                                "persistenceError": RuntimeRedactionPolicy.default.redact(String(describing: error)),
+                                "rollback": "unsupported"
+                            ]
+                        )
+                        return failure(
+                            code: .runtimeUnavailable,
+                            message: "Runtime mutation failed after operation intent was recorded: \(runtimeErrorDescription). Failure state persistence also failed: \(RuntimeRedactionPolicy.default.redact(String(describing: error)))"
+                        )
+                    }
                     return failure(
                         code: .runtimeUnavailable,
-                        message: "Runtime mutation failed after operation intent was recorded: \(runtimeErrorDescription). Failure state persistence also failed: \(RuntimeRedactionPolicy.default.redact(String(describing: error)))"
+                        message: "Runtime mutation failed after operation intent was recorded: \(runtimeErrorDescription)"
                     )
                 }
-                return failure(code: .runtimeUnavailable, message: "Runtime mutation failed after operation intent was recorded: \(runtimeErrorDescription)")
             }
 
             do {
@@ -499,6 +601,20 @@ struct ApplyCommandRunner {
                     teamBinding: teamBinding,
                     mutationContext: mutationContext
                 )
+                if ownershipFenceAdvanced, let existingOwnership {
+                    guard try store.ownership.advanceFencingToken(
+                        resourceIdentifier: existingOwnership.resourceIdentifier,
+                        runtimeAdapter: existingOwnership.runtimeAdapter,
+                        expectedResourceUUID: existingOwnership.resourceUUID,
+                        expectedFencingToken: operationFencingToken,
+                        newFencingToken: existingOwnership.fencingToken,
+                        observedAt: timestamp
+                    ) != nil else {
+                        throw StateStoreError.invalidRecord(
+                            "Runtime mutation succeeded, but the operation fence could not be released back to the verified resource fence."
+                        )
+                    }
+                }
                 try recordManagedStartAttempt(
                     store: store,
                     action: action,

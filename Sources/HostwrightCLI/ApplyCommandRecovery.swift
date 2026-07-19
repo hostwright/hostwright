@@ -3,7 +3,100 @@ import HostwrightReconciler
 import HostwrightRuntime
 import HostwrightState
 
+struct RuntimeMutationReobservation {
+    let recoveredEvent: RuntimeEvent?
+    let provedNoEffect: Bool
+}
+
 extension ApplyCommandRunner {
+    func normalizedRuntimeFailure(
+        _ error: Error,
+        metadata: RuntimeAdapterMetadata,
+        operationID: String
+    ) -> RuntimeNormalizedFailure {
+        if let runtimeError = error as? RuntimeAdapterError {
+            return RuntimeNormalizedFailure.normalize(
+                runtimeError,
+                providerID: metadata.providerID.rawValue,
+                providerVersion: metadata.runtimeVersion ?? metadata.adapterVersion,
+                operationID: operationID
+            )
+        }
+        return RuntimeNormalizedFailure(
+            category: .ambiguousEffect,
+            retryDisposition: .safeAfterObservation,
+            recoveryDisposition: .reobserve,
+            providerID: metadata.providerID.rawValue,
+            providerVersion: metadata.runtimeVersion ?? metadata.adapterVersion,
+            operationID: operationID,
+            diagnostic: "The runtime provider returned an untyped failure after durable intent was recorded.",
+            guidance: "Re-observe the exact owned resource before deciding whether to retry."
+        )
+    }
+
+    func reobserveUncertainMutation(
+        adapter: any RuntimeAdapter,
+        action: PlannedAction,
+        desiredState: DesiredRuntimeState,
+        providerID: RuntimeProviderID,
+        capabilitySHA256: String,
+        failure: RuntimeNormalizedFailure
+    ) -> RuntimeMutationReobservation {
+        guard failure.requiresObservationBeforeRetry else {
+            return RuntimeMutationReobservation(recoveredEvent: nil, provedNoEffect: true)
+        }
+        let observed: ObservedRuntimeState
+        do {
+            observed = try waitForAsync {
+                try await adapter.observe(desiredState: desiredState)
+            }
+        } catch {
+            return RuntimeMutationReobservation(recoveredEvent: nil, provedNoEffect: false)
+        }
+        guard observed.adapterMetadata?.providerID == providerID,
+              observed.capabilitySHA256 == capabilitySHA256 else {
+            return RuntimeMutationReobservation(recoveredEvent: nil, provedNoEffect: false)
+        }
+        let matching = observed.services.filter {
+            $0.identity == action.identity && $0.resourceIdentifier == action.resourceIdentifier
+        }
+        guard matching.count <= 1 else {
+            return RuntimeMutationReobservation(recoveredEvent: nil, provedNoEffect: false)
+        }
+
+        let postconditionSatisfied: Bool
+        let provedNoEffect: Bool
+        switch action.executionAvailability {
+        case .availableForCreateMissingService:
+            postconditionSatisfied = matching.first?.lifecycleState != nil &&
+                matching.first?.lifecycleState != .missing
+            provedNoEffect = matching.isEmpty
+        case .availableForStartManagedService:
+            postconditionSatisfied = matching.first?.lifecycleState == .running
+            provedNoEffect = matching.first.map {
+                $0.lifecycleState == .stopped || $0.lifecycleState == .exited
+            } ?? false
+        case .availableForRestartManagedService:
+            postconditionSatisfied = failure.category != .partialEffect &&
+                matching.first?.lifecycleState == .running
+            provedNoEffect = false
+        case .unavailable:
+            postconditionSatisfied = false
+            provedNoEffect = false
+        }
+
+        let event = postconditionSatisfied ? RuntimeEvent(
+            identity: action.identity,
+            severity: .warning,
+            message: "The provider reported \(failure.category.rawValue), but exact structured re-observation verified the requested runtime postcondition.",
+            resourceIdentifier: action.resourceIdentifier
+        ) : nil
+        return RuntimeMutationReobservation(
+            recoveredEvent: event,
+            provedNoEffect: provedNoEffect
+        )
+    }
+
     func failure(code: HostwrightErrorCode, message: String) -> CLIRunResult {
         let exitCode = CLIExitCode.mapped(from: code)
         let redactedMessage = RuntimeRedactionPolicy.default.redact(message)
@@ -22,7 +115,7 @@ extension ApplyCommandRunner {
         } else {
             recovery = "If the prior process was interrupted, retry after lease expiry; acquisition will mark the expired group interrupted."
         }
-        return "Operation group with the same idempotency key is already active at checkpoint \(group.checkpoint), owner \(owner); lease expires at \(expiry). No mutation was attempted. \(recovery) Run recovery --state-db <path> to inspect manual recovery guidance."
+        return "A conflicting operation group is already active for this project at checkpoint \(group.checkpoint), owner \(owner); lease expires at \(expiry). No mutation was attempted. \(recovery) Run recovery --state-db <path> to inspect manual recovery guidance."
     }
 
     func blockingOperation(store: SQLiteStateStore, idempotencyKey: String) throws -> OperationRecord? {
@@ -237,7 +330,7 @@ extension ApplyCommandRunner {
             record.resourceIdentifier == action.resourceIdentifier &&
             record.projectID == projectID &&
             record.serviceName == action.identity.serviceName &&
-            record.runtimeAdapter == runtimeAdapter &&
+            RuntimeProviderBinding.stableID(for: record.runtimeAdapter)?.rawValue == runtimeAdapter &&
             identityBindingMatches
         }
         guard ownership != nil else {
@@ -286,7 +379,8 @@ extension ApplyCommandRunner {
         lockExpiresAt: String?,
         manualRecoveryHint: String,
         runtimeAdapter: String,
-        mutationContext: RuntimeMutationContext
+        mutationContext: RuntimeMutationContext,
+        operationFencingToken: String
     ) -> OperationGroupRecord {
         return OperationGroupRecord(
             id: id,
@@ -311,7 +405,7 @@ extension ApplyCommandRunner {
                 "resourceIdentifier": action.resourceIdentifier,
                 "rollback": "unsupported"
             ]),
-            fencingToken: mutationContext.fencingToken,
+            fencingToken: operationFencingToken,
             intentJSONRedacted: jsonPayload([
                 "action": action.kind.rawValue,
                 "planHash": planHash,
@@ -323,7 +417,8 @@ extension ApplyCommandRunner {
                 "providerGeneration": mutationContext.providerGeneration,
                 "resourceIdentifier": action.resourceIdentifier,
                 "resourceGeneration": mutationContext.resourceGeneration,
-                "resourceUUID": mutationContext.resourceUUID
+                "resourceUUID": mutationContext.resourceUUID,
+                "resourceFencingToken": mutationContext.fencingToken
             ]),
             compensationJSONRedacted: "[]",
             verificationJSONRedacted: jsonPayload([

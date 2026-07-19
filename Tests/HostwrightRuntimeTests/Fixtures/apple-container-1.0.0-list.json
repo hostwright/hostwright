@@ -1,0 +1,25 @@
+[
+  {
+    "id": "hostwright-v2-demo-api-8022a4342ff931db15cdc03b748de2b6",
+    "configuration": {
+      "id": "hostwright-v2-demo-api-8022a4342ff931db15cdc03b748de2b6",
+      "image": {"reference": "ghcr.io/example/api:1.0.0"},
+      "labels": {
+        "dev.hostwright.managed": "true",
+        "dev.hostwright.identity-version": "2",
+        "dev.hostwright.project": "demo",
+        "dev.hostwright.service": "api",
+        "dev.hostwright.resource-id": "hostwright-v2-demo-api-8022a4342ff931db15cdc03b748de2b6"
+      },
+      "publishedPorts": [
+        {"hostPort": 8080, "containerPort": 8080, "hostAddress": "127.0.0.1", "proto": "tcp"}
+      ]
+    },
+    "status": {
+      "state": "running",
+      "networks": [
+        {"network": "default", "ipv4Address": "192.168.64.2", "ipv4Gateway": "192.168.64.1"}
+      ]
+    }
+  }
+]

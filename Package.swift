@@ -10,6 +10,10 @@ let package = Package(
     products: [
         .executable(name: "hostwright", targets: ["HostwrightCommand"]),
         .executable(name: "hostwright-control", targets: ["HostwrightControlTool"]),
+        .executable(
+            name: "hostwright-containerization-helper",
+            targets: ["HostwrightContainerizationHelper"]
+        ),
         .executable(name: "hostwrightd", targets: ["HostwrightDaemon"]),
         .executable(name: "hostwright-dist", targets: ["HostwrightDistributionTool"]),
         .library(name: "HostwrightCore", targets: ["HostwrightCore"]),
@@ -26,6 +30,12 @@ let package = Package(
         .library(name: "HostwrightObservability", targets: ["HostwrightObservability"]),
         .library(name: "HostwrightPolicy", targets: ["HostwrightPolicy"]),
         .library(name: "HostwrightSecrets", targets: ["HostwrightSecrets"])
+    ],
+    dependencies: [
+        .package(
+            url: "https://github.com/apple/containerization.git",
+            exact: "0.35.0"
+        )
     ],
     targets: [
         .target(
@@ -50,6 +60,15 @@ let package = Package(
         .executableTarget(
             name: "HostwrightControlTool",
             dependencies: ["HostwrightControl"]
+        ),
+        .executableTarget(
+            name: "HostwrightContainerizationHelper",
+            dependencies: [
+                "HostwrightCore",
+                "HostwrightRuntime",
+                .product(name: "Containerization", package: "containerization"),
+                .product(name: "ContainerizationOCI", package: "containerization")
+            ]
         ),
         .executableTarget(
             name: "HostwrightDaemon",
@@ -236,6 +255,13 @@ let package = Package(
             ],
             resources: [
                 .process("Fixtures")
+            ]
+        ),
+        .testTarget(
+            name: "HostwrightContainerizationHelperTests",
+            dependencies: [
+                "HostwrightContainerizationHelper",
+                "HostwrightRuntime"
             ]
         ),
         .testTarget(

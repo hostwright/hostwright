@@ -14,6 +14,7 @@ public enum RuntimeAdapterError: Error, Equatable, Sendable {
     case redactionFailure(String)
     case capabilityUnavailable(RuntimeCapability)
     case mutationUnavailableByPolicy(String)
+    case normalizedFailure(RuntimeNormalizedFailure)
 
     public func redacted(using policy: RuntimeRedactionPolicy = .default) -> RuntimeAdapterError {
         redacted(using: policy, exactValues: [])
@@ -74,6 +75,10 @@ public enum RuntimeAdapterError: Error, Equatable, Sendable {
             return .capabilityUnavailable(capability)
         case .mutationUnavailableByPolicy(let message):
             return .mutationUnavailableByPolicy(policy.redact(message, exactValues: exactValues))
+        case .normalizedFailure(let failure):
+            return .normalizedFailure(
+                failure.redacted(using: policy, exactValues: exactValues)
+            )
         }
     }
 }
@@ -109,6 +114,8 @@ public struct RuntimeMutationConfirmation: Equatable, Sendable {
 public protocol RuntimeAdapter: Sendable {
     func metadata() async -> RuntimeAdapterMetadata
     func capabilities() async throws -> [RuntimeCapability]
+    func capabilitySnapshot() async throws -> RuntimeCapabilitySnapshot
+    func inventory() async throws -> RuntimeInventory
     func observe(desiredState: DesiredRuntimeState) async throws -> ObservedRuntimeState
     func plan(desiredState: DesiredRuntimeState, observedState: ObservedRuntimeState) async throws -> RuntimePlan
     func logs(for service: ObservedRuntimeService, tail: Int) async throws -> RuntimeLogResult
@@ -120,6 +127,14 @@ public protocol RuntimeAdapter: Sendable {
 }
 
 public extension RuntimeAdapter {
+    func capabilitySnapshot() async throws -> RuntimeCapabilitySnapshot {
+        throw RuntimeAdapterError.capabilityUnavailable(.readOnlyObservation)
+    }
+
+    func inventory() async throws -> RuntimeInventory {
+        throw RuntimeAdapterError.capabilityUnavailable(.readOnlyObservation)
+    }
+
     func runtimeVersion() async throws -> String {
         throw RuntimeAdapterError.capabilityUnavailable(.readOnlyObservation)
     }
@@ -158,6 +173,14 @@ public struct AppleContainerCLIAdapter: RuntimeAdapter {
 
     public func capabilities() async throws -> [RuntimeCapability] {
         try await applyAdapter.capabilities()
+    }
+
+    public func capabilitySnapshot() async throws -> RuntimeCapabilitySnapshot {
+        try await applyAdapter.capabilitySnapshot()
+    }
+
+    public func inventory() async throws -> RuntimeInventory {
+        try await applyAdapter.inventory()
     }
 
     public func observe(desiredState: DesiredRuntimeState) async throws -> ObservedRuntimeState {

@@ -27,6 +27,7 @@ public enum DriftDetector {
             return ReconciliationPlan(
                 projectName: input.desiredState.projectName,
                 observationConnected: false,
+                capabilitySHA256: nil,
                 issues: issues,
                 drift: drift,
                 actions: actions
@@ -80,6 +81,7 @@ public enum DriftDetector {
         return ReconciliationPlan(
             projectName: input.desiredState.projectName,
             observationConnected: true,
+            capabilitySHA256: observedState.capabilitySHA256,
             issues: issues,
             drift: drift,
             actions: actions

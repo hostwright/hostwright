@@ -11,7 +11,8 @@ public enum RuntimeProviderMetadataEvidenceError: Error, Equatable, Sendable {
 }
 
 public struct RuntimeProviderMetadataEvidence: Equatable, Sendable {
-    public static let currentRevision = 1
+    public static let currentRevision = 2
+    public static let legacyRevision = 1
     public static let maximumEncodedBytes = 128 * 1_024
     public static let maximumEntryCount = 64
     public static let maximumEntryBytes = 256
@@ -95,7 +96,7 @@ public struct RuntimeProviderMetadataEvidence: Equatable, Sendable {
         case (nil, nil):
             return Self(
                 capabilitySHA256: nil,
-                providerMetadataRevision: currentRevision,
+                providerMetadataRevision: legacyRevision,
                 isLegacy: true
             )
         case (.some(let capabilitySHA256), .some(let revision)):

@@ -37,14 +37,14 @@ final class RuntimeProviderMetadataEvidenceStateTests: XCTestCase {
                 Array(entries.suffix(2)),
                 [
                     RuntimeProviderMetadataEvidence.capabilitySHA256MarkerPrefix + digest,
-                    RuntimeProviderMetadataEvidence.providerMetadataRevisionMarkerPrefix + "1"
+                    RuntimeProviderMetadataEvidence.providerMetadataRevisionMarkerPrefix + "2"
                 ]
             )
             let evidence = try RuntimeProviderMetadataEvidence.parse(
                 capabilitiesJSON: record.capabilitiesJSON
             )
             XCTAssertEqual(evidence.capabilitySHA256, digest)
-            XCTAssertEqual(evidence.providerMetadataRevision, 1)
+            XCTAssertEqual(evidence.providerMetadataRevision, 2)
             XCTAssertFalse(evidence.isLegacy)
         }
     }

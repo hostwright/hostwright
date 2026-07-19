@@ -26,18 +26,18 @@ final class RuntimeProviderMetadataEvidenceTests: XCTestCase {
             entries.suffix(2),
             [
                 RuntimeProviderMetadataEvidence.capabilitySHA256MarkerPrefix + digest,
-                RuntimeProviderMetadataEvidence.providerMetadataRevisionMarkerPrefix + "1"
+                RuntimeProviderMetadataEvidence.providerMetadataRevisionMarkerPrefix + "2"
             ]
         )
         let evidence = try RuntimeProviderMetadataEvidence.parse(entries: entries)
         XCTAssertFalse(evidence.isLegacy)
-        XCTAssertEqual(evidence.providerMetadataRevision, 1)
+        XCTAssertEqual(evidence.providerMetadataRevision, 2)
         XCTAssertEqual(evidence.capabilitySHA256, digest)
     }
 
     func testDuplicateIncompleteAndMalformedReservedEvidenceIsRejected() throws {
         let capabilityMarker = RuntimeProviderMetadataEvidence.capabilitySHA256MarkerPrefix + digest
-        let revisionMarker = RuntimeProviderMetadataEvidence.providerMetadataRevisionMarkerPrefix + "1"
+        let revisionMarker = RuntimeProviderMetadataEvidence.providerMetadataRevisionMarkerPrefix + "2"
 
         XCTAssertThrowsError(
             try RuntimeProviderMetadataEvidence.parse(

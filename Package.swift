@@ -16,6 +16,10 @@ let package = Package(
         ),
         .executable(name: "hostwrightd", targets: ["HostwrightDaemon"]),
         .executable(name: "hostwright-dist", targets: ["HostwrightDistributionTool"]),
+        .executable(
+            name: "hostwright-runtime-conformance",
+            targets: ["HostwrightRuntimeConformanceTool"]
+        ),
         .library(name: "HostwrightCore", targets: ["HostwrightCore"]),
         .library(name: "HostwrightControl", targets: ["HostwrightControl"]),
         .library(name: "HostwrightManifest", targets: ["HostwrightManifest"]),
@@ -81,6 +85,15 @@ let package = Package(
         .executableTarget(
             name: "HostwrightDistributionTool",
             dependencies: ["HostwrightDistribution"]
+        ),
+        .executableTarget(
+            name: "HostwrightRuntimeConformanceTool",
+            dependencies: [
+                "HostwrightCLI",
+                "HostwrightCore",
+                "HostwrightRuntime",
+                "HostwrightState"
+            ]
         ),
         .target(name: "HostwrightCore"),
         .target(
@@ -262,6 +275,16 @@ let package = Package(
             dependencies: [
                 "HostwrightContainerizationHelper",
                 "HostwrightRuntime"
+            ]
+        ),
+        .testTarget(
+            name: "HostwrightRuntimeConformanceToolTests",
+            dependencies: [
+                "HostwrightCLI",
+                "HostwrightCore",
+                "HostwrightRuntime",
+                "HostwrightRuntimeConformanceTool",
+                "HostwrightState"
             ]
         ),
         .testTarget(

@@ -107,7 +107,7 @@ final class RuntimeProviderRecoverySelectionCLITests: XCTestCase {
             let data = try XCTUnwrap(record.capabilitiesJSON.data(using: .utf8))
             var entries = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String])
             entries[entries.count - 1] =
-                RuntimeProviderMetadataEvidence.providerMetadataRevisionMarkerPrefix + "2"
+                RuntimeProviderMetadataEvidence.providerMetadataRevisionMarkerPrefix + "3"
             let updatedData = try JSONSerialization.data(withJSONObject: entries, options: [.sortedKeys])
             let updatedJSON = try XCTUnwrap(String(data: updatedData, encoding: .utf8))
             let connection = try SQLiteConnection(path: databaseURL.path)
@@ -120,8 +120,8 @@ final class RuntimeProviderRecoverySelectionCLITests: XCTestCase {
                 XCTAssertEqual(
                     error as? RuntimeProviderSelectionError,
                     .unsupportedProviderMetadataDowngrade(
-                        persistedRevision: 2,
-                        currentRevision: 1
+                        persistedRevision: 3,
+                        currentRevision: 2
                     )
                 )
             }
@@ -195,7 +195,7 @@ final class RuntimeProviderRecoverySelectionCLITests: XCTestCase {
             let data = try XCTUnwrap(record.capabilitiesJSON.data(using: .utf8))
             var entries = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String])
             entries[entries.count - 1] =
-                RuntimeProviderMetadataEvidence.providerMetadataRevisionMarkerPrefix + "2"
+                RuntimeProviderMetadataEvidence.providerMetadataRevisionMarkerPrefix + "3"
             let updatedData = try JSONSerialization.data(withJSONObject: entries, options: [.sortedKeys])
             let updatedJSON = try XCTUnwrap(String(data: updatedData, encoding: .utf8))
             let connection = try SQLiteConnection(path: databaseURL.path)
@@ -208,11 +208,51 @@ final class RuntimeProviderRecoverySelectionCLITests: XCTestCase {
                 XCTAssertEqual(
                     error as? RuntimeProviderSelectionError,
                     .unsupportedProviderMetadataDowngrade(
-                        persistedRevision: 2,
-                        currentRevision: 1
+                        persistedRevision: 3,
+                        currentRevision: 2
                     )
                 )
             }
+        }
+    }
+
+    func testH1EvidenceIsNotRewrittenUntilFreshObservationIsPersisted() throws {
+        try withStore { store, databaseURL in
+            try seedProject(store)
+            try saveSnapshot(
+                store,
+                id: "cli-h1",
+                providerID: .appleContainerCLI,
+                runtimeAdapter: RuntimeProviderID.appleContainerCLI.rawValue,
+                digest: currentSnapshot.canonicalSHA256,
+                observedAt: "2026-07-19T12:00:00Z"
+            )
+            try replaceRevision(
+                store: store,
+                databaseURL: databaseURL,
+                snapshotID: "cli-h1",
+                revision: 1
+            )
+
+            let selected = try select(store: store)
+            XCTAssertFalse(selected.selection.requiresReobservation)
+            XCTAssertEqual(
+                try persistedRevision(store: store, snapshotID: "cli-h1"),
+                1
+            )
+
+            try saveSnapshot(
+                store,
+                id: "cli-h2-observation",
+                providerID: .appleContainerCLI,
+                runtimeAdapter: RuntimeProviderID.appleContainerCLI.rawValue,
+                digest: currentSnapshot.canonicalSHA256,
+                observedAt: "2026-07-19T12:01:00Z"
+            )
+            XCTAssertEqual(
+                try persistedRevision(store: store, snapshotID: "cli-h2-observation"),
+                2
+            )
         }
     }
 
@@ -343,6 +383,44 @@ final class RuntimeProviderRecoverySelectionCLITests: XCTestCase {
             redactedSummary: "bounded summary",
             observedAt: observedAt
         )
+    }
+
+    private func replaceRevision(
+        store: SQLiteStateStore,
+        databaseURL: URL,
+        snapshotID: String,
+        revision: Int
+    ) throws {
+        let record = try XCTUnwrap(
+            try store.observedStates.loadSnapshots(projectID: projectID).first {
+                $0.id == snapshotID
+            }
+        )
+        let data = try XCTUnwrap(record.capabilitiesJSON.data(using: .utf8))
+        var entries = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String])
+        entries[entries.count - 1] =
+            RuntimeProviderMetadataEvidence.providerMetadataRevisionMarkerPrefix + String(revision)
+        let updated = try JSONSerialization.data(withJSONObject: entries, options: [.sortedKeys])
+        let updatedJSON = try XCTUnwrap(String(data: updated, encoding: .utf8))
+        let connection = try SQLiteConnection(path: databaseURL.path)
+        try connection.run(
+            "UPDATE observed_runtime_snapshots SET capabilities_json = ? WHERE id = ?",
+            bindings: [.text(updatedJSON), .text(snapshotID)]
+        )
+    }
+
+    private func persistedRevision(
+        store: SQLiteStateStore,
+        snapshotID: String
+    ) throws -> Int {
+        let record = try XCTUnwrap(
+            try store.observedStates.loadSnapshots(projectID: projectID).first {
+                $0.id == snapshotID
+            }
+        )
+        return try RuntimeProviderMetadataEvidence.parse(
+            capabilitiesJSON: record.capabilitiesJSON
+        ).providerMetadataRevision
     }
 
     private func withStore(

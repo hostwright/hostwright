@@ -267,7 +267,8 @@ prepare() {
   [[ "$(/usr/bin/stat -f '%z' "$token_response")" -le 16384 ]] \
     || die "GHCR token response is oversized."
   token="$(/usr/bin/plutil -extract token raw -o - "$token_response")"
-  [[ ${#token} -ge 16 && ${#token} -le 8192 && "$token" =~ ^[A-Za-z0-9._~-]+$ ]] \
+  [[ ${#token} -ge 16 && ${#token} -le 8192 \
+      && "$token" =~ ^[A-Za-z0-9._~+/-]+={0,2}$ ]] \
     || die "GHCR returned an invalid bearer token."
   auth_config="$downloads/curl-auth.conf"
   printf 'header = "Authorization: Bearer %s"\n' "$token" > "$auth_config"

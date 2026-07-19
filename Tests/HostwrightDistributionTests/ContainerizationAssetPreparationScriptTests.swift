@@ -66,6 +66,10 @@ final class ContainerizationAssetPreparationScriptTests: XCTestCase {
         }
         XCTAssertFalse(source.contains("HOSTWRIGHT_CONTAINERIZATION_ASSET_URL"))
         XCTAssertFalse(source.contains("curl -H \"Authorization:"))
+        XCTAssertTrue(
+            source.contains(#"^[A-Za-z0-9._~+/-]+={0,2}$"#),
+            "The GHCR token contract must accept only bounded base64-token characters and terminal padding."
+        )
     }
 
     private func scriptURL() -> URL {

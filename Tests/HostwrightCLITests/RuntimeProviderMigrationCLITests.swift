@@ -8,6 +8,73 @@ import XCTest
 @testable import HostwrightCLI
 
 final class RuntimeProviderMigrationCLITests: XCTestCase {
+    func testConfirmRefusesStaleTokenAfterDurableOwnershipFenceChanges() throws {
+        try withFixture { fixture in
+            let dryRun = HostwrightCLI.run(
+                arguments: fixture.arguments(mode: ["--dry-run", "--json"]),
+                environment: fixture.environment
+            )
+            XCTAssertEqual(dryRun.exitCode, 0, dryRun.standardError)
+            let plan = try JSONDecoder().decode(
+                RuntimeProviderMigrationPlan.self,
+                from: Data(dryRun.standardOutput.utf8)
+            )
+            XCTAssertTrue(try fixture.store.operationGroups.loadAll().isEmpty)
+            XCTAssertTrue(try fixture.store.operationGroupSteps.loadAll().isEmpty)
+
+            let replacementFence = "44444444-4444-4444-8444-444444444444"
+            let advanced = try fixture.store.ownership.advanceFencingToken(
+                resourceIdentifier: try XCTUnwrap(plan.resources.first).resourceIdentifier,
+                runtimeAdapter: RuntimeProviderID.appleContainerCLI.rawValue,
+                expectedResourceUUID: fixture.resourceUUID,
+                expectedFencingToken: fixture.sourceFence,
+                newFencingToken: replacementFence,
+                observedAt: "2026-07-19T12:01:00Z"
+            )
+            XCTAssertEqual(advanced?.fencingToken, replacementFence)
+            try hostwrightWaitForAsync {
+                try await fixture.source.replaceFencingToken(
+                    expected: fixture.sourceFence,
+                    replacement: replacementFence
+                )
+            }
+
+            let result = HostwrightCLI.run(
+                arguments: fixture.arguments(
+                    mode: ["--confirm-migration", plan.confirmationToken, "--json"]
+                ),
+                environment: fixture.environment
+            )
+
+            XCTAssertEqual(result.exitCode, CLIExitCode.confirmationMismatch.rawValue)
+            XCTAssertEqual(result.standardOutput, "")
+            let error = try jsonObject(result.standardError)
+            XCTAssertEqual(error["kind"] as? String, "error")
+            XCTAssertEqual(error["code"] as? String, HostwrightErrorCode.confirmationMismatch.rawValue)
+            XCTAssertEqual(error["exitCode"] as? Int, Int(CLIExitCode.confirmationMismatch.rawValue))
+            XCTAssertEqual(
+                error["message"] as? String,
+                "Migration confirmation token does not match the current dry-run."
+            )
+
+            XCTAssertEqual(try adapterSnapshot(fixture.source).mutations, [])
+            XCTAssertEqual(try adapterSnapshot(fixture.target).mutations, [])
+            XCTAssertTrue(try fixture.store.operationGroups.loadAll().isEmpty)
+            XCTAssertTrue(try fixture.store.operationGroupSteps.loadAll().isEmpty)
+
+            let project = try fixture.store.desiredStates.loadProject(id: fixture.projectID)
+            XCTAssertEqual(project.mutationProvider, RuntimeProviderID.appleContainerCLI.rawValue)
+            XCTAssertEqual(project.providerGeneration, 1)
+            let ownership = try XCTUnwrap(
+                fixture.store.ownership.loadAll().first { $0.resourceUUID == fixture.resourceUUID }
+            )
+            XCTAssertEqual(ownership.fencingToken, replacementFence)
+            XCTAssertEqual(ownership.runtimeAdapter, RuntimeProviderID.appleContainerCLI.rawValue)
+            XCTAssertEqual(ownership.providerGeneration, 1)
+            XCTAssertEqual(ownership.resourceGeneration, 1)
+        }
+    }
+
     func testDryRunThenConfirmTransfersBindingAndRetiresOnlyTheExactSource() throws {
         try withFixture { fixture in
             let dryRun = HostwrightCLI.run(
@@ -476,6 +543,25 @@ private actor RuntimeProviderMigrationCLIAdapter: RuntimeAdapter {
                     providerGeneration: $0.ownership?.providerGeneration
                 )
             }
+        )
+    }
+
+    func replaceFencingToken(expected: String, replacement: String) throws {
+        guard let index = resources.firstIndex(where: {
+            $0.ownership?.resourceUUID != nil && $0.ownership?.fencingToken == expected
+        }), let ownership = resources[index].ownership else {
+            throw RuntimeAdapterError.outputParseFailed(
+                "Expected source ownership fence was unavailable."
+            )
+        }
+        resources[index].ownership = RuntimeInventoryOwnershipEvidence(
+            resourceUUID: ownership.resourceUUID,
+            projectUUID: ownership.projectUUID,
+            resourceGeneration: ownership.resourceGeneration,
+            projectGeneration: ownership.projectGeneration,
+            providerID: ownership.providerID,
+            providerGeneration: ownership.providerGeneration,
+            fencingToken: replacement
         )
     }
 

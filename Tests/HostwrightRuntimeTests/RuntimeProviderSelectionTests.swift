@@ -137,7 +137,7 @@ final class RuntimeProviderSelectionTests: XCTestCase {
         let newerEvidence = try RuntimeProviderMetadataEvidence.parse(
             entries: [
                 RuntimeProviderMetadataEvidence.capabilitySHA256MarkerPrefix + current.canonicalSHA256,
-                RuntimeProviderMetadataEvidence.providerMetadataRevisionMarkerPrefix + "2"
+                RuntimeProviderMetadataEvidence.providerMetadataRevisionMarkerPrefix + "3"
             ]
         )
 
@@ -151,7 +151,7 @@ final class RuntimeProviderSelectionTests: XCTestCase {
         ) { error in
             XCTAssertEqual(
                 error as? RuntimeProviderSelectionError,
-                .unsupportedProviderMetadataDowngrade(persistedRevision: 2, currentRevision: 1)
+                .unsupportedProviderMetadataDowngrade(persistedRevision: 3, currentRevision: 2)
             )
         }
     }

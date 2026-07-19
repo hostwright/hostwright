@@ -340,6 +340,64 @@ final class DistributionIntegrationTests: XCTestCase {
         }
     }
 
+    func testVerifierAcceptsExactArchiveUnderRestrictiveUmask() throws {
+        try withTemporaryRoot { root in
+            let report = try makeArtifact(root: root, name: "restrictive-umask", commit: baselineCommit)
+            let previousMask = umask(0o077)
+            defer { _ = umask(previousMask) }
+
+            let verified = try DistributionVerifier().verifyAndCleanup(
+                distributionDirectory: root.appendingPathComponent("restrictive-umask")
+            )
+
+            XCTAssertEqual(verified.manifest, report.manifest)
+        }
+    }
+
+    func testArchiveTableRejectsRegularFileModeThatDiffersFromManifest() throws {
+        try withTemporaryRoot { root in
+            let report = try makeArtifact(root: root, name: "mode-source", commit: baselineCommit)
+            let distribution = root.appendingPathComponent("mode-source")
+            let extracted = root.appendingPathComponent("mode-tree", isDirectory: true)
+            try DistributionFileSystem.createExclusiveDirectory(extracted)
+            let runner = DistributionProcessRunner()
+            _ = try runner.run(
+                executablePath: "/usr/bin/tar",
+                arguments: [
+                    "-xzf", distribution.appendingPathComponent(report.archive.fileName).path,
+                    "-C", extracted.path
+                ],
+                label: "extract archive for mode rejection"
+            )
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o777],
+                ofItemAtPath: extracted.appendingPathComponent(
+                    "\(report.manifest.artifactID)/bin/hostwright"
+                ).path
+            )
+            let archive = root.appendingPathComponent("wrong-mode.tar.gz")
+            _ = try runner.run(
+                executablePath: "/usr/bin/tar",
+                arguments: [
+                    "-czf", archive.path, "-C", extracted.path, report.manifest.artifactID
+                ],
+                label: "create wrong-mode archive"
+            )
+
+            XCTAssertThrowsError(
+                try DistributionVerifier().validateArchiveTable(
+                    archiveURL: archive,
+                    manifest: report.manifest
+                )
+            ) { error in
+                guard case let DistributionError.invalidArtifact(message) = error else {
+                    return XCTFail("Expected invalidArtifact, received \(error)")
+                }
+                XCTAssertTrue(message.contains("regular-file mode"))
+            }
+        }
+    }
+
     func testAtomicUpgradeFailureRestoresVerifiedBaseline() throws {
         try withTemporaryRoot { root in
             _ = try makeArtifact(root: root, name: "baseline", commit: baselineCommit)

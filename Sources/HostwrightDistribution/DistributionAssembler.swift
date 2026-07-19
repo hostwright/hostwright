@@ -678,6 +678,7 @@ public struct DistributionCleanBuilder: Sendable {
             "--scratch-path", scratch.path,
             "-c", "release",
             "-debug-info-format", "none",
+            "-Xlinker", "-reproducible",
             "-Xswiftc", "-file-prefix-map",
             "-Xswiftc", prefixMap,
             "-Xcc", "-ffile-prefix-map=\(prefixMap)",

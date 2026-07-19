@@ -75,8 +75,16 @@ def main() -> int:
 
     require("0.0.2-dev" in readme and "v0.0.2" in readme, "README lacks current version/release truth", errors)
     require("`brew install hostwright` does not exist today" in readme, "README must state the unqualified brew command does not exist", errors)
+    require("Phase 02 qualification is complete" in readme, "README does not record completed Phase 02 qualification", errors)
+    require("brew install hostwright/tap/hostwright" in readme, "README lacks the available vendor-tap command", errors)
     require("`brew install hostwright` does not exist today" in install, "install docs must state the unqualified brew command does not exist", errors)
-    require("source development workflow only" in install, "install docs must identify current source-only development workflow", errors)
+    require(
+        "source development and the Hostwright-controlled `0.0.2-dev` qualification channel are available" in install,
+        "install docs do not identify the available source and vendor qualification channels",
+        errors,
+    )
+    require("brew install hostwright/tap/hostwright" in install, "install docs lack the available vendor-tap command", errors)
+    require("v0.0.2-dev.11" in install and "v0.0.2-dev.12" in install, "install docs lack the immutable Phase 02 qualification pair", errors)
     require("exact development evidence" in compatibility, "compatibility docs must distinguish evidence from GA claims", errors)
     require("version: 2" in manifest_doc and "migrate preview" in manifest_doc, "manifest docs lack v2/migration truth", errors)
     require("0.0.2-dev" in cli and "apiVersion\":2" in cli, "CLI docs lack product/API v2 truth", errors)

@@ -100,9 +100,11 @@ The API deliberately excludes apply, cleanup, logs, diagnostics export, benchmar
 
 Prints the current development version:
 
-The exact output matches `contracts/v0.0.2/versions.json`. The two preserved
-Phase 02 qualification commits report `0.0.2-dev.1` and `0.0.2-dev.2`; both
-belong to the `0.0.2-dev` development line and neither is a supported release.
+The exact output matches `contracts/v0.0.2/versions.json`. The two immutable
+Phase 02 qualification prereleases are `0.0.2-dev.11` at
+`7d97d6c9ff878ec567c88e6993d4543ab8f0ad95` and `0.0.2-dev.12` at
+`71414005104933d8ee3591e8c91bc831bce2e2a2`. Both belong to the `0.0.2-dev`
+development line and neither is a supported release.
 
 The release target is `v0.0.2`. The binary does not report the release version until the GA gate passes.
 
@@ -122,7 +124,7 @@ hostwright-dist homebrew-formula --release-dir <path> --team-id <10-char> --arti
 
 Text remains the default. `--format json` returns schema-1 `trustedRelease`, `trustedReleaseVerification`, or `homebrewFormula` output with exact commit, artifact descriptors, status, and applicable cleanup/retention evidence. Structured failures use `distributionToolError`; `homebrew-formula --output` remains the formula file path and is never interpreted as an output format.
 
-These commands are implemented but not yet an available package channel. See [Install and Upgrade](install.md) for the live evidence blockers.
+These commands produced and independently verified the immutable dev.11 and dev.12 qualification releases. The vendor-tap command and signed `.pkg` are available qualification channels; neither is a `v0.0.2` GA support claim. See [Install and Upgrade](install.md) for the exact boundary.
 
 The installed lifecycle accepts either the fully verified trusted release plus its exact team identifier or a verified developer distribution. It exposes `install`, `upgrade`, `repair`, `status`, `adopt-legacy`, `recover`, `rollback`, `uninstall-plan`, and `uninstall`; all require structured JSON output. Upgrade is strict SemVer, repair requires the exact installed version and commit, arbitrary downgrade is refused, and rollback accepts only the one verified immediately prior generation retained by a successful upgrade.
 

@@ -19,13 +19,19 @@ Phase 01 established the breaking contracts and evidence system:
 - machine-readable capability truth through `hostwright capabilities --json`;
 - deterministic read-only v1/versionless manifest migration preview.
 
-Phase 02 is active. The existing implementation remains narrower than the `v0.0.2` outcome. It includes a restricted manifest parser, deterministic planning, hardened schema-v7 SQLite ledgers and maintenance, Apple `container` observation, a few confirmation-gated lifecycle mutations, bounded logs/events/diagnostics, a foreground daemon loop, local policy/team profiles, a one-shot control process, advisory scheduling models, unsigned developer distribution evidence, and an implemented trusted ZIP/`.pkg`/SBOM/provenance/formula pipeline that still lacks real credentials and public-channel evidence. It does not yet provide an available trusted install channel, complete lifecycle, Containerization, networking, persistent storage, HA, Kubernetes/Docker compatibility, GUI, or GA qualification.
+Phase 02 qualification is complete. The existing implementation remains narrower than the `v0.0.2` outcome. It includes a restricted manifest parser, deterministic planning, hardened schema-v7 SQLite ledgers and maintenance, Apple `container` observation, a few confirmation-gated lifecycle mutations, bounded logs/events/diagnostics, a foreground daemon loop, local policy/team profiles, a one-shot control process, advisory scheduling models, signed/notarized qualification ZIP and `.pkg` artifacts, SBOMs, provenance and attestations, and a published vendor tap. Clean macOS 26 qualification passed package and tap install, upgrade, repair, rollback, reboot, uninstall, state recovery, signed doctor, abrupt-power recovery, and exact cleanup. It does not yet provide complete workload lifecycle, Containerization, networking, persistent storage, HA, Kubernetes/Docker compatibility, GUI, or GA qualification. Phase 03 has not started.
 
 The authoritative scope and every limitation-to-implementation mapping are in the [v0.0.2 implementation plan](docs/roadmap/v0.0.2/IMPLEMENTATION_PLAN.md). The [machine-readable issue manifest](docs/roadmap/v0.0.2/issues.json) tracks one master, 15 epics, and 167 workstreams. No research-only, blocked, fixture-only, mock-only, or dirty result closes an implementation gate.
 
 ## Installation Truth
 
-`brew install hostwright` does not exist today, and neither does the planned `hostwright/homebrew-tap` repository. Phase 02 implements the maintained vendor tap plus signed/notarized archives and a `.pkg`; the artifact/formula machinery exists but no credentialed release or tap install has passed. Phase 15 owns Homebrew-core submission. Core acceptance is external, so the vendor tap is the guaranteed fallback once its evidence gate closes.
+`brew install hostwright` does not exist today. The Hostwright-controlled qualification channel is available from the maintained [`hostwright/homebrew-tap`](https://github.com/hostwright/homebrew-tap) repository:
+
+```bash
+brew install hostwright/tap/hostwright
+```
+
+The tap installs immutable signed/notarized `0.0.2-dev` qualification artifacts. It is not a `v0.0.2` GA or production-readiness claim. Phase 15 owns Homebrew-core submission; unqualified installation remains subject to external Homebrew acceptance.
 
 For current development, build from source:
 

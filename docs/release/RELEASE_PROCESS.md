@@ -2,27 +2,29 @@
 
 The active release target is `v0.0.2`. The working binary remains on the
 `0.0.2-dev` line until release qualification is complete. Phase 02 preserves
-exact `0.0.2-dev.1` and `0.0.2-dev.2` builds for upgrade evidence.
+immutable `v0.0.2-dev.11` (`7d97d6c9ff878ec567c88e6993d4543ab8f0ad95`)
+and `v0.0.2-dev.12` (`71414005104933d8ee3591e8c91bc831bce2e2a2`)
+qualification builds for upgrade evidence.
 
 ## Tag Policy
 
 - `phase-*` tags are optional internal engineering checkpoints and never receive GitHub Releases.
 - `v*` tags are public releases or explicitly marked release candidates.
-- Phase 02 may create the immutable `v0.0.2-dev.1` and `v0.0.2-dev.2` GitHub prereleases through the protected trusted-release workflow solely to qualify signed public bytes and the vendor-tap upgrade path. They remain unsupported, cannot be moved or replaced, and do not advance the release ladder.
+- Phase 02 created the immutable `v0.0.2-dev.11` and `v0.0.2-dev.12` GitHub prereleases through the protected trusted-release workflow solely to qualify signed public bytes and the vendor-tap upgrade path. They remain unsupported, cannot be moved or replaced, and do not advance the release ladder.
 - Do not create `v0.0.2`, publish a supported package/channel claim, or change the binary to `0.0.2` before the Phase 15 gate.
 - Never tag from a dirty tree, an unreviewed commit, or a commit whose required evidence is blocked.
 - Never force-move a public release tag.
 
 ## Release Ladder
 
-1. the `0.0.2-dev` line throughout implementation, including the two preserved Phase 02 qualification builds;
+1. the `0.0.2-dev` line throughout implementation, including the preserved Phase 02 dev.11 and dev.12 qualification builds;
 2. `v0.0.2-rc.1` only after all 15 phase epics and child issues reach verification;
 3. `v0.0.2-rc.2` or later after every defect from the prior clean RC run is fixed and the entire qualification run is repeated;
 4. `v0.0.2` only after two clean complete RC qualification runs and final maintainer approval.
 
 An RC tag is a pre-release, not a partial implementation escape hatch. It uses the same supported-scope contract as GA and may differ only by resolved defects and repeated evidence.
 
-The two Phase 02 `v0.0.2-dev.1` and `v0.0.2-dev.2` qualification artifacts are not RCs or betas and are never promoted in place. Their only purpose is to prove the real installation and upgrade path that Phase 02 must close; later implementation continues on the `0.0.2-dev` line, and Phase 15 produces new immutable RC/GA artifacts from its exact qualified commits.
+The two Phase 02 `v0.0.2-dev.11` and `v0.0.2-dev.12` qualification artifacts are not RCs or betas and are never promoted in place. Their only purpose is to prove the real installation and upgrade path required for Phase 02 qualification; later implementation continues on the `0.0.2-dev` line, and Phase 15 produces new immutable RC/GA artifacts from its exact qualified commits.
 
 ## Active Roadmap Authority
 
@@ -54,7 +56,7 @@ Roadmap manifest validation, issue-parent/label/assignee checks, final-PR eviden
 
 ## Distribution Readiness Gate
 
-Phase 02 turns the former unsigned developer lane into signed/notarized archives, a `.pkg`, vendor tap, secure install state, and the [strict reversible installed lifecycle](../reference/installed-lifecycle.md). The trusted builder/verifier, Homebrew formula renderer, protected release workflow, and explicit-prefix lifecycle are implemented, but this gate remains open until a credentialed run and public-channel/clean-Mac lifecycle evidence pass. Phase 15 repeats those checks from the final clean tag. The historical `distribution-readiness.md` does not satisfy this gate.
+Phase 02 turned the former unsigned developer lane into signed/notarized archives, a `.pkg`, vendor tap, secure install state, and the [strict reversible installed lifecycle](../reference/installed-lifecycle.md). Its credentialed dev.11/dev.12 releases, public-byte verification, vendor-tap install/upgrade, clean macOS 26 lifecycle, state, doctor, abrupt-power, and exact-cleanup gates passed. Phase 15 repeats those checks from the final clean tag. The historical `distribution-readiness.md` does not satisfy the GA gate.
 
 ## Benchmark Gate
 
@@ -104,7 +106,7 @@ Unsigned developer `hostwright-dist` output is useful local integration evidence
 
 The protected workflow retains its exact verified bundle for 90 days. Published release assets and the corresponding checksums, SBOMs, provenance, manifest, detached signatures, and evidence are retained indefinitely and are not replaced in place. Exceptional removal is a separate reviewed repository action; it is never an automatic workflow cleanup step.
 
-`brew install hostwright` depends on Homebrew-core acceptance. Phase 15 submits the formula after GA artifact evidence passes. The Hostwright-controlled fallback is the vendor tap; documentation must not claim the unqualified command before core acceptance.
+`brew install hostwright` depends on Homebrew-core acceptance. Phase 15 submits the formula after GA artifact evidence passes. The Hostwright-controlled qualification channel is available now as `brew install hostwright/tap/hostwright`; documentation must not claim the unqualified command before core acceptance.
 
 ## Final Evidence Record
 

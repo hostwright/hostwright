@@ -330,8 +330,11 @@ final class TrustedReleaseTests: XCTestCase {
                 "--package-path", source.path,
                 "--scratch-path", scratch.path,
                 "-c", "release",
+                "--jobs", "1",
                 "-debug-info-format", "none",
                 "-Xlinker", "-reproducible",
+                "-Xswiftc", "-num-threads",
+                "-Xswiftc", "1",
                 "-Xswiftc", "-file-prefix-map",
                 "-Xswiftc", prefixMap,
                 "-Xcc", "-ffile-prefix-map=\(prefixMap)",
@@ -368,7 +371,8 @@ final class TrustedReleaseTests: XCTestCase {
             command,
             "/usr/bin/swift build --package-path '/private/tmp/source with space' " +
                 "--scratch-path '/private/tmp/scratch with space' -c release " +
-                "-debug-info-format none -Xlinker -reproducible -Xswiftc -file-prefix-map " +
+                "--jobs 1 -debug-info-format none -Xlinker -reproducible " +
+                "-Xswiftc -num-threads -Xswiftc 1 -Xswiftc -file-prefix-map " +
                 "-Xswiftc '/private/tmp/scratch with space=/hostwright-build' " +
                 "-Xcc '-ffile-prefix-map=/private/tmp/scratch with space=/hostwright-build' " +
                 "-Xcc '-fmacro-prefix-map=/private/tmp/scratch with space=/hostwright-build' " +

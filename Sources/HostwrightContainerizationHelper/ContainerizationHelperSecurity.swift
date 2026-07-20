@@ -93,8 +93,10 @@ enum ContainerizationHelperSecurity {
             throw ContainerizationHelperAuthenticationError.peerIdentifierRejected
         }
 
-        let requirementText =
-            #"identifier \"\#(identifier)\" and anchor apple generic and certificate leaf[subject.OU] = \"\#(teamIdentifier)\""#
+        let requirementText = ContainerizationHelperPeerIdentityPolicy.codeRequirementSource(
+            identifier: identifier,
+            teamIdentifier: teamIdentifier
+        )
         var requirement: SecRequirement?
         guard SecRequirementCreateWithString(
             requirementText as CFString,

@@ -540,6 +540,13 @@ public struct ContainerizationHelperPeerIdentityPolicy: Equatable, Sendable {
     public static let expectedDesignatedRequirement =
         #"identifier "dev.hostwright.containerization-helper" and anchor apple generic and certificate leaf[subject.OU] = "993YC3JY4Q""#
 
+    package static func codeRequirementSource(
+        identifier: String,
+        teamIdentifier: String = expectedTeamIdentifier
+    ) -> String {
+        "identifier \"\(identifier)\" and anchor apple generic and certificate leaf[subject.OU] = \"\(teamIdentifier)\""
+    }
+
     public let expectedUserID: UInt32
 
     public init(expectedUserID: UInt32) {

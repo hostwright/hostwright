@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import Security
 import XCTest
 @testable import HostwrightCore
 @testable import HostwrightRuntime
@@ -8,6 +9,24 @@ final class ContainerizationHelperClientTests: XCTestCase {
     private let resourceUUID = "11111111-1111-4111-8111-111111111111"
     private let projectUUID = "22222222-2222-4222-8222-222222222222"
     private let fencingToken = "33333333-3333-4333-8333-333333333333"
+
+    func testHelperCodeRequirementSourceIsCanonicalAndParseable() {
+        let source = ContainerizationHelperPeerIdentityPolicy.codeRequirementSource(
+            identifier: "hostwright-containerization-helper"
+        )
+        XCTAssertEqual(
+            source,
+            #"identifier "hostwright-containerization-helper" and anchor apple generic and certificate leaf[subject.OU] = "993YC3JY4Q""#
+        )
+        XCTAssertFalse(source.contains(#"\""#))
+
+        var requirement: SecRequirement?
+        XCTAssertEqual(
+            SecRequirementCreateWithString(source as CFString, [], &requirement),
+            errSecSuccess
+        )
+        XCTAssertNotNil(requirement)
+    }
 
     func testClientLaunchesHelperWithoutShellAndNegotiatesCanonicalProtocol() async throws {
         let fixture = try ClientFixture()

@@ -27,6 +27,37 @@ final class RuntimeProviderCapabilityProbeTests: XCTestCase {
         XCTAssertEqual(RuntimeProviderCapabilityNegotiator.validationFindings(for: first), [])
     }
 
+    func testSupportedAppleCLIMinorsAdvertiseOnlyImplementedLiveQualificationFeatures() async throws {
+        let supportedEvidence = [
+            ProbeEvidence(
+                cliVersion: "container CLI version 1.0.0 (build: release, commit: ee848e3)\n",
+                systemStatus: #"{"status":"running","apiServerVersion":"container-apiserver version 1.0.0 (build: release, commit: ee848e3)","apiServerBuild":"release","apiServerCommit":"ee848e3","apiServerAppName":"container-apiserver"}"#
+            ),
+            ProbeEvidence.supported
+        ]
+
+        for evidence in supportedEvidence {
+            let snapshot = try await makeProbe(
+                runner: RecordingProcessRunner(evidence: evidence)
+            ).probeAppleContainerCLI()
+            let available = Set(snapshot.features.compactMap { status in
+                status.state == .available ? status.feature : nil
+            })
+
+            XCTAssertEqual(
+                available,
+                [
+                    .observation, .lifecycle, .processControl, .streaming, .images,
+                    .cancellation, .timeouts, .errors, .cleanup
+                ]
+            )
+            XCTAssertEqual(
+                snapshot.features.filter { $0.state == .unavailable }.map(\.feature),
+                [.networks, .storage]
+            )
+        }
+    }
+
     func testMissingExecutableAndAPIServiceFailClosedWithoutPartialSnapshot() async throws {
         let missingRunner = RecordingProcessRunner(evidence: .supported)
         let missingProbe = makeProbe(

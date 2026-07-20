@@ -18,6 +18,10 @@ final class ContainerizationHelperClientTests: XCTestCase {
             source,
             #"identifier "hostwright-containerization-helper" and anchor apple generic and certificate leaf[subject.OU] = "993YC3JY4Q""#
         )
+        XCTAssertEqual(
+            ContainerizationHelperPeerIdentityPolicy.expectedDesignatedRequirement,
+            source
+        )
         XCTAssertFalse(source.contains(#"\""#))
 
         var requirement: SecRequirement?

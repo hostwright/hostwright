@@ -718,6 +718,7 @@ public struct DistributionCleanBuilder: Sendable {
             "-Xlinker", "-reproducible",
             "-Xswiftc", "-num-threads",
             "-Xswiftc", "1",
+            "-Xswiftc", "-no-whole-module-optimization",
             "-Xswiftc", "-file-prefix-map",
             "-Xswiftc", prefixMap,
             "-Xcc", "-ffile-prefix-map=\(prefixMap)",
@@ -727,8 +728,15 @@ public struct DistributionCleanBuilder: Sendable {
         ] + additionalArguments
     }
 
-    static func evidenceCommand(executablePath: String, arguments: [String]) -> String {
-        ([executablePath] + arguments).map(shellQuote).joined(separator: " ")
+    static func evidenceCommand(
+        executablePath: String,
+        arguments: [String],
+        environment: [String: String] = [:]
+    ) -> String {
+        let assignments = environment.keys.sorted().map { key in
+            "\(key)=\(environment[key]!)"
+        }
+        return (assignments + [executablePath] + arguments).map(shellQuote).joined(separator: " ")
     }
 
     public func build(
@@ -822,6 +830,7 @@ public struct DistributionCleanBuilder: Sendable {
             dependencyResult.standardOutput,
             resolvedFile: sourceRoot.appendingPathComponent("Package.resolved")
         )
+        let deterministicSwiftEnvironment = DistributionDeterministicSwiftEnvironment.values
 
         for product in DistributionLayout.shippedExecutableNames {
             let arguments = Self.deterministicReleaseBuildArguments(
@@ -833,10 +842,15 @@ public struct DistributionCleanBuilder: Sendable {
                 executablePath: "/usr/bin/swift",
                 arguments: arguments,
                 label: "build release product \(product)",
-                cancellation: cancellation
+                cancellation: cancellation,
+                trustedEnvironmentOverrides: deterministicSwiftEnvironment
             )
             commands.append(record(
-                Self.evidenceCommand(executablePath: "/usr/bin/swift", arguments: arguments),
+                Self.evidenceCommand(
+                    executablePath: "/usr/bin/swift",
+                    arguments: arguments,
+                    environment: deterministicSwiftEnvironment
+                ),
                 result
             ))
         }
@@ -849,10 +863,15 @@ public struct DistributionCleanBuilder: Sendable {
             executablePath: "/usr/bin/swift",
             arguments: binPathArguments,
             label: "read release binary path",
-            cancellation: cancellation
+            cancellation: cancellation,
+            trustedEnvironmentOverrides: deterministicSwiftEnvironment
         )
         commands.append(record(
-            Self.evidenceCommand(executablePath: "/usr/bin/swift", arguments: binPathArguments),
+            Self.evidenceCommand(
+                executablePath: "/usr/bin/swift",
+                arguments: binPathArguments,
+                environment: deterministicSwiftEnvironment
+            ),
             binPathResult
         ))
         let binPath = binPathResult.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines)

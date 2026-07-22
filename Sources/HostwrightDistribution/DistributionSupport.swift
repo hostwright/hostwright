@@ -33,6 +33,31 @@ public struct DistributionProcessRunner: Sendable {
         timeoutSeconds: Int = 900,
         cancellation: SecureSubprocessCancellation = SecureSubprocessCancellation()
     ) throws -> DistributionCommandResult {
+        try run(
+            executablePath: executablePath,
+            arguments: arguments,
+            workingDirectory: workingDirectory,
+            label: label,
+            timeoutSeconds: timeoutSeconds,
+            cancellation: cancellation,
+            trustedEnvironmentOverrides: [:]
+        )
+    }
+
+    func run(
+        executablePath: String,
+        arguments: [String],
+        workingDirectory: URL? = nil,
+        label: String,
+        timeoutSeconds: Int = 900,
+        cancellation: SecureSubprocessCancellation = SecureSubprocessCancellation(),
+        trustedEnvironmentOverrides: [String: String]
+    ) throws -> DistributionCommandResult {
+        guard trustedEnvironmentOverrides.isEmpty ||
+                (executablePath == "/usr/bin/swift" &&
+                    trustedEnvironmentOverrides == DistributionDeterministicSwiftEnvironment.values) else {
+            throw DistributionError.invalidArguments("Distribution command environment override is not permitted.")
+        }
         guard executablePath.hasPrefix("/"), (1...86_400).contains(timeoutSeconds) else {
             throw DistributionError.invalidArguments("Distribution command executable or timeout is invalid.")
         }
@@ -43,6 +68,7 @@ public struct DistributionProcessRunner: Sendable {
         environment["GIT_TERMINAL_PROMPT"] = "0"
         environment["PAGER"] = "cat"
         environment["TERM"] = "dumb"
+        environment.merge(trustedEnvironmentOverrides) { _, trusted in trusted }
         let request = SecureSubprocessRequest(
             executablePath: executablePath,
             arguments: arguments,
@@ -86,6 +112,10 @@ public struct DistributionProcessRunner: Sendable {
         }
         return result
     }
+}
+
+enum DistributionDeterministicSwiftEnvironment {
+    static let values = ["SWIFT_DETERMINISTIC_HASHING": "1"]
 }
 
 public enum DistributionHash {

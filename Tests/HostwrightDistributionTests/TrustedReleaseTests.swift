@@ -335,6 +335,7 @@ final class TrustedReleaseTests: XCTestCase {
                 "-Xlinker", "-reproducible",
                 "-Xswiftc", "-num-threads",
                 "-Xswiftc", "1",
+                "-Xswiftc", "-no-whole-module-optimization",
                 "-Xswiftc", "-file-prefix-map",
                 "-Xswiftc", prefixMap,
                 "-Xcc", "-ffile-prefix-map=\(prefixMap)",
@@ -354,6 +355,10 @@ final class TrustedReleaseTests: XCTestCase {
             binPathArguments,
             Array(productArguments.dropLast(2)) + ["--show-bin-path"]
         )
+        XCTAssertEqual(
+            DistributionDeterministicSwiftEnvironment.values,
+            ["SWIFT_DETERMINISTIC_HASHING": "1"]
+        )
     }
 
     func testCleanBuildCommandEvidenceRecordsExactDeterministicInvocation() {
@@ -365,20 +370,47 @@ final class TrustedReleaseTests: XCTestCase {
 
         let command = DistributionCleanBuilder.evidenceCommand(
             executablePath: "/usr/bin/swift",
-            arguments: arguments
+            arguments: arguments,
+            environment: DistributionDeterministicSwiftEnvironment.values
         )
         XCTAssertEqual(
             command,
-            "/usr/bin/swift build --package-path '/private/tmp/source with space' " +
+            "SWIFT_DETERMINISTIC_HASHING=1 /usr/bin/swift build " +
+                "--package-path '/private/tmp/source with space' " +
                 "--scratch-path '/private/tmp/scratch with space' -c release " +
                 "--jobs 1 -debug-info-format none -Xlinker -reproducible " +
-                "-Xswiftc -num-threads -Xswiftc 1 -Xswiftc -file-prefix-map " +
+                "-Xswiftc -num-threads -Xswiftc 1 " +
+                "-Xswiftc -no-whole-module-optimization -Xswiftc -file-prefix-map " +
                 "-Xswiftc '/private/tmp/scratch with space=/hostwright-build' " +
                 "-Xcc '-ffile-prefix-map=/private/tmp/scratch with space=/hostwright-build' " +
                 "-Xcc '-fmacro-prefix-map=/private/tmp/scratch with space=/hostwright-build' " +
                 "-Xcxx '-ffile-prefix-map=/private/tmp/scratch with space=/hostwright-build' " +
                 "-Xcxx '-fmacro-prefix-map=/private/tmp/scratch with space=/hostwright-build' " +
                 "--product hostwright"
+        )
+    }
+
+    func testDistributionRunnerRestrictsDeterministicSwiftEnvironment() throws {
+        let runner = DistributionProcessRunner()
+        let result = try runner.run(
+            executablePath: "/usr/bin/swift",
+            arguments: [
+                "-e",
+                "import Foundation; print(ProcessInfo.processInfo.environment[\"SWIFT_DETERMINISTIC_HASHING\"] ?? \"missing\")"
+            ],
+            label: "inspect deterministic Swift environment",
+            timeoutSeconds: 30,
+            trustedEnvironmentOverrides: DistributionDeterministicSwiftEnvironment.values
+        )
+        XCTAssertEqual(result.standardOutput, "1\n")
+
+        XCTAssertThrowsError(
+            try runner.run(
+                executablePath: "/usr/bin/true",
+                arguments: [],
+                label: "reject deterministic Swift environment on another executable",
+                trustedEnvironmentOverrides: DistributionDeterministicSwiftEnvironment.values
+            )
         )
     }
 

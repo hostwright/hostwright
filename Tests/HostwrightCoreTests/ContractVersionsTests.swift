@@ -65,6 +65,19 @@ final class ContractVersionsTests: XCTestCase {
             Set(releaseEvidence.requiredEvidence),
             Set([.unitContract, .localIntegration, .liveRuntime, .migrationUpgrade, .securityAssessment, .resilienceChaos])
         )
+
+        let runtimeProviders = report.capabilities.filter { capability in
+            capability.identifier == "runtime.apple-container-cli" ||
+                capability.identifier == "runtime.containerization"
+        }
+        XCTAssertEqual(runtimeProviders.count, 2)
+        XCTAssertTrue(runtimeProviders.allSatisfy { $0.state == .stable && $0.issue == 129 })
+        XCTAssertTrue(runtimeProviders.allSatisfy {
+            Set($0.requiredEvidence) == Set([
+                .unitContract, .localIntegration, .liveRuntime, .migrationUpgrade,
+                .securityAssessment, .resilienceChaos, .interopConformance
+            ])
+        })
     }
 
     func testVerificationConstitutionIncludesEveryV002EvidenceClass() {

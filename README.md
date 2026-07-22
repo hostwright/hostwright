@@ -19,7 +19,9 @@ Phase 01 established the breaking contracts and evidence system:
 - machine-readable capability truth through `hostwright capabilities --json`;
 - deterministic read-only v1/versionless manifest migration preview.
 
-Phase 02 qualification is complete. The existing implementation remains narrower than the `v0.0.2` outcome. It includes a restricted manifest parser, deterministic planning, hardened schema-v7 SQLite ledgers and maintenance, Apple `container` observation, a few confirmation-gated lifecycle mutations, bounded logs/events/diagnostics, a foreground daemon loop, local policy/team profiles, a one-shot control process, advisory scheduling models, signed/notarized qualification ZIP and `.pkg` artifacts, SBOMs, provenance and attestations, and a published vendor tap. Clean macOS 26 qualification passed package and tap install, upgrade, repair, rollback, reboot, uninstall, state recovery, signed doctor, abrupt-power recovery, and exact cleanup. It does not yet provide complete workload lifecycle, Containerization, networking, persistent storage, HA, Kubernetes/Docker compatibility, GUI, or GA qualification. Phase 03 has not started.
+Phase 02 qualification is complete. Its signed/notarized ZIP and `.pkg`, vendor tap, clean macOS 26 lifecycle, state, doctor, abrupt-power, and exact-cleanup gates passed.
+
+Phase 03 qualification is complete for the declared runtime-provider subset. Hostwright now has versioned structured codecs for Apple `container` 1.0.0 and 1.1.0, immutable capability negotiation, deterministic runtime inventory, normalized provider outcomes, stable provider IDs, an authenticated out-of-process Containerization 0.35.0 helper, cross-provider conformance, generation-bound provider migration, and upgrade/restart recovery. This evidence covers local-image-only create, start, managed restart, delete, bounded logs, resource usage, observation, timeout, and cancellation behavior; it does not claim the complete Phase 04 lifecycle, Phase 05 image/registry operations, networking, persistent storage, HA, Kubernetes/Docker compatibility, GUI, or GA qualification.
 
 The authoritative scope and every limitation-to-implementation mapping are in the [v0.0.2 implementation plan](docs/roadmap/v0.0.2/IMPLEMENTATION_PLAN.md). The [machine-readable issue manifest](docs/roadmap/v0.0.2/issues.json) tracks one master, 15 epics, and 167 workstreams. No research-only, blocked, fixture-only, mock-only, or dirty result closes an implementation gate.
 
@@ -57,6 +59,8 @@ See [installation](docs/reference/install.md) and [compatibility](docs/reference
 ```bash
 swift run hostwright --version
 swift run hostwright capabilities --json
+swift run hostwright runtime providers --json
+swift run hostwright runtime migrate hostwright.yaml --to containerization --dry-run --json
 swift run hostwright paths --json
 swift run hostwright state integrity --json
 swift run hostwright state backup --json
@@ -65,7 +69,7 @@ swift run hostwright init
 swift run hostwright migrate preview hostwright.yaml
 swift run hostwright validate
 swift run hostwright plan
-swift run hostwright status
+swift run hostwright status --runtime-provider auto
 swift run hostwright logs api
 swift run hostwright events
 swift run hostwright cleanup --dry-run

@@ -2,7 +2,9 @@
 
 Current product truth is the `0.0.2-dev` capability report plus the [v0.0.2 all-in limitation register and implementation plan](../roadmap/v0.0.2/IMPLEMENTATION_PLAN.md). Run `hostwright capabilities --json` for the exact build. Every useful missing or partial capability below now has a phase/workstream owner; it is not dismissed as a non-goal.
 
-Phase 02 qualification is complete. The immutable unsupported `v0.0.2-dev.11` and `v0.0.2-dev.12` releases passed signed/notarized ZIP and `.pkg`, SBOM, provenance, attestation, vendor-tap, clean macOS 26 lifecycle, state, doctor, abrupt-power, and exact-cleanup gates. `brew install hostwright/tap/hostwright` is available; unqualified `brew install hostwright` is not. This does not make Hostwright GA or production ready, and Phase 03 has not started.
+Phase 02 qualification is complete. The immutable unsupported `v0.0.2-dev.11` and `v0.0.2-dev.12` releases passed signed/notarized ZIP and `.pkg`, SBOM, provenance, attestation, vendor-tap, clean macOS 26 lifecycle, state, doctor, abrupt-power, and exact-cleanup gates. `brew install hostwright/tap/hostwright` is available; unqualified `brew install hostwright` is not.
+
+Phase 03 qualification is complete for Apple `container` 1.0.0 and 1.1.0 plus the exact Containerization 0.35.0 helper. The two providers now share capability negotiation, deterministic observation, normalized outcomes, the declared local-image lifecycle subset, provider fencing/migration, and restart/upgrade recovery. Containerization is not linked into the main process and does not add image pull/build/load, general stop/remove/run, exec/attach, streaming, storage, networking, or the complete Phase 04 lifecycle. This evidence does not make Hostwright GA or production ready.
 
 Permanent exclusions are limited to private Apple APIs, unsupported Intel/old-macOS emulation, unsafe writes without cluster quorum, silent telemetry, unauthenticated public exposure, and destructive garbage collection of unmanaged resources. Homebrew-core and direct guest accelerator constraints have implemented fallback tracks.
 

@@ -30,4 +30,4 @@ State schema v7 adds resource UUID, manifest version, mutation-provider, provide
 
 ## Verification
 
-Unit and migration evidence cover idempotent backfill, UUID stability, collision handling, provider-binding refusal, allowed same-provider generation updates, stale fencing, future schema refusal, and redaction. Live provider migration and cluster fencing evidence arrive in Phases 03 and 11.
+Unit and Phase 03 live migration evidence cover idempotent backfill, UUID stability, collision handling, provider-binding refusal, same-provider generation updates, stale fencing, CLI-to-helper and helper-to-CLI migration, checkpoint recovery, compensation, future schema refusal, and redaction. Phase 11 owns multi-Mac cluster fencing evidence.

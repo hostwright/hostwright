@@ -244,17 +244,92 @@ final class RuntimeQualificationRecoveryReportTests: XCTestCase {
         }
     }
 
+    func testDowngradeRefusalAllowsMetadataOnlyCapabilityInvalidation() throws {
+        let hash = String(repeating: "a", count: 64)
+        let image = RuntimeLocalImageEvidence(
+            reference: "example.local/runtime:1",
+            descriptorDigest: "sha256:\(hash)",
+            variantDigest: "sha256:\(String(repeating: "b", count: 64))",
+            architecture: "arm64",
+            operatingSystem: "linux"
+        )
+        let evidence = recoveryEvidence(
+            hash: hash,
+            image: image,
+            scenario: .downgradeRefusal,
+            providerID: .appleContainerCLI
+        )
+        XCTAssertNoThrow(try RuntimeQualificationRecoveryReport.passed(execution:
+            RuntimeQualificationRecoveryExecution(
+                fixtureImage: image,
+                evidence: evidence,
+                commands: commands(for: evidence),
+                cleanupIdentifiers: evidence.cleanupIdentifiers
+            )
+        ))
+
+        let invalid = RuntimeQualificationRecoveryEvidence(
+            schemaVersion: evidence.schemaVersion,
+            scenario: evidence.scenario,
+            providerID: evidence.providerID,
+            providerVersion: evidence.providerVersion,
+            fixtureImageReference: evidence.fixtureImageReference,
+            fixtureImageDescriptorDigest: evidence.fixtureImageDescriptorDigest,
+            fixtureImageVariantDigest: evidence.fixtureImageVariantDigest,
+            fixtureImageArchitecture: evidence.fixtureImageArchitecture,
+            fixtureImageOperatingSystem: evidence.fixtureImageOperatingSystem,
+            capabilityBeforeSHA256: evidence.capabilityBeforeSHA256,
+            capabilityAfterSHA256: String(repeating: "c", count: 64),
+            inventoryBeforeSHA256: evidence.inventoryBeforeSHA256,
+            inventoryAfterSHA256: evidence.inventoryAfterSHA256,
+            unmanagedInventoryBeforeSHA256: evidence.unmanagedInventoryBeforeSHA256,
+            unmanagedInventoryAfterSHA256: evidence.unmanagedInventoryAfterSHA256,
+            unmanagedInventoryUnchanged: evidence.unmanagedInventoryUnchanged,
+            recoveryDisposition: evidence.recoveryDisposition,
+            recoveryChangeKinds: evidence.recoveryChangeKinds,
+            recoveryFindingReasons: evidence.recoveryFindingReasons,
+            capabilitySnapshotInvalidated: evidence.capabilitySnapshotInvalidated,
+            providerGeneration: evidence.providerGeneration,
+            providerMetadataRevisionBefore: evidence.providerMetadataRevisionBefore,
+            providerMetadataRevisionAfter: evidence.providerMetadataRevisionAfter,
+            priorHelperSHA256: evidence.priorHelperSHA256,
+            currentHelperSHA256: evidence.currentHelperSHA256,
+            signedHelperTransitionVerified: evidence.signedHelperTransitionVerified,
+            rollbackDisposition: evidence.rollbackDisposition,
+            rollbackFindingReasons: evidence.rollbackFindingReasons,
+            contractInput: evidence.contractInput,
+            durableCheckpointBefore: evidence.durableCheckpointBefore,
+            durableCheckpointAfter: evidence.durableCheckpointAfter,
+            terminatedExecutable: evidence.terminatedExecutable,
+            processTreeTerminated: evidence.processTreeTerminated,
+            stateSchemaVersion: evidence.stateSchemaVersion,
+            passedAssertions: evidence.passedAssertions,
+            failedAssertions: evidence.failedAssertions,
+            cleanupComplete: evidence.cleanupComplete,
+            cleanupIdentifiers: evidence.cleanupIdentifiers
+        )
+        XCTAssertThrowsError(try RuntimeQualificationRecoveryReport.passed(execution:
+            RuntimeQualificationRecoveryExecution(
+                fixtureImage: image,
+                evidence: invalid,
+                commands: commands(for: invalid),
+                cleanupIdentifiers: invalid.cleanupIdentifiers
+            )
+        ))
+    }
+
     private func recoveryEvidence(
         hash: String,
         image: RuntimeLocalImageEvidence,
         scenario: RuntimeQualificationRecoveryScenario = .checkpointCrash,
         providerID: RuntimeProviderID = .appleContainerCLI
     ) -> RuntimeQualificationRecoveryEvidence {
-        let drifted = [
+        let capabilityDigestChanged = [
             RuntimeQualificationRecoveryScenario.mixedComponentVersions,
             .staleHelper,
             .futureProtocolRefusal,
         ].contains(scenario)
+        let invalidated = capabilityDigestChanged || scenario == .downgradeRefusal
         let disposition: RuntimeProviderRecoveryDisposition = switch scenario {
         case .mixedComponentVersions, .futureProtocolRefusal, .downgradeRefusal:
             .refuseAndPreserveCheckpoint
@@ -323,17 +398,17 @@ final class RuntimeQualificationRecoveryReportTests: XCTestCase {
             fixtureImageArchitecture: image.architecture,
             fixtureImageOperatingSystem: image.operatingSystem,
             capabilityBeforeSHA256: hash,
-            capabilityAfterSHA256: drifted ? String(repeating: "c", count: 64) : hash,
+            capabilityAfterSHA256: capabilityDigestChanged ? String(repeating: "c", count: 64) : hash,
             inventoryBeforeSHA256: hash,
             inventoryAfterSHA256: hash,
             unmanagedInventoryBeforeSHA256: String(repeating: "d", count: 64),
             unmanagedInventoryAfterSHA256: String(repeating: "d", count: 64),
             unmanagedInventoryUnchanged: true,
             recoveryDisposition: disposition.rawValue,
-            recoveryChangeKinds: drifted
+            recoveryChangeKinds: capabilityDigestChanged
                 ? [RuntimeProviderRecoveryChangeKind.capabilityDigest.rawValue] : [],
             recoveryFindingReasons: reasons,
-            capabilitySnapshotInvalidated: drifted,
+            capabilitySnapshotInvalidated: invalidated,
             providerGeneration: 1,
             providerMetadataRevisionBefore: metadataRevisionBefore,
             providerMetadataRevisionAfter: metadataRevisionAfter,

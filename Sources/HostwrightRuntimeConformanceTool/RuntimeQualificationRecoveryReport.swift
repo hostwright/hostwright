@@ -55,8 +55,7 @@ struct RuntimeQualificationRecoveryReport: Codable, Equatable, Sendable {
               Self.sha256(evidence.inventoryAfterSHA256),
               Self.sha256(evidence.unmanagedBeforeSHA256),
               Self.sha256(evidence.unmanagedAfterSHA256),
-              evidence.capabilitySnapshotInvalidated ==
-                (evidence.capabilityBeforeSHA256 != evidence.capabilityAfterSHA256),
+              Self.validCapabilityInvalidation(evidence, scenario: scenario),
               Set(evidence.recoveryChangeKinds).count == evidence.recoveryChangeKinds.count,
               evidence.recoveryChangeKinds.allSatisfy({ value in
                 RuntimeProviderRecoveryChangeKind.allCases.contains { $0.rawValue == value }
@@ -194,6 +193,17 @@ struct RuntimeQualificationRecoveryReport: Codable, Equatable, Sendable {
                 evidence.contractInput == "future-metadata-revision-against-live-snapshot" &&
                 noProcessCycle
         }
+    }
+
+    private static func validCapabilityInvalidation(
+        _ evidence: RuntimeQualificationRecoveryEvidence,
+        scenario: RuntimeQualificationRecoveryScenario
+    ) -> Bool {
+        let digestChanged = evidence.capabilityBeforeSHA256 != evidence.capabilityAfterSHA256
+        if scenario == .downgradeRefusal {
+            return evidence.capabilitySnapshotInvalidated && !digestChanged
+        }
+        return evidence.capabilitySnapshotInvalidated == digestChanged
     }
 
     private static func validHelperTransitionFields(

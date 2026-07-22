@@ -8,6 +8,37 @@ import XCTest
 @testable import HostwrightContainerizationHelper
 
 final class ContainerizationFrameworkBackendTests: XCTestCase {
+    func testCapabilitySnapshotAdvertisesExactImplementedFeatureSet() throws {
+        let snapshot = try ContainerizationHelperCapabilitySnapshot.make()
+
+        XCTAssertEqual(
+            Set(snapshot.features.filter { $0.state == .available }.map(\.feature)),
+            Set([
+                .observation,
+                .lifecycle,
+                .processControl,
+                .streaming,
+                .images,
+                .cancellation,
+                .timeouts,
+                .errors,
+                .cleanup
+            ])
+        )
+        XCTAssertEqual(
+            Set(snapshot.features.filter { $0.state == .unavailable }.map(\.feature)),
+            Set([.networks, .storage])
+        )
+        XCTAssertTrue(
+            snapshot.features.filter { $0.state == .available }
+                .allSatisfy { $0.reason == .implemented }
+        )
+        XCTAssertTrue(
+            snapshot.features.filter { $0.state == .unavailable }
+                .allSatisfy { $0.reason == .notImplemented }
+        )
+    }
+
     func testLifecyclePersistsOwnershipAndVerifiesEveryEffect() async throws {
         let parent = try makePrivateParent()
         defer { try? FileManager.default.removeItem(at: parent) }

@@ -605,14 +605,19 @@ final class DistributionIntegrationTests: XCTestCase {
             let builder = DistributionCleanBuilder(
                 containerizationAssets: try makeDistributionTestContainerizationAssets(at: root)
             )
+            let firstOutput = root.appendingPathComponent("first-output", isDirectory: true)
+            let secondOutput = root.appendingPathComponent("second-output", isDirectory: true)
+            XCTAssertNotEqual(firstOutput, secondOutput)
             let first = try builder.buildWithDependencyInventory(
                 sourceRoot: source,
-                outputDirectory: root.appendingPathComponent("first-output", isDirectory: true),
+                outputDirectory: firstOutput,
                 expectedCommit: commit
             )
+            let firstScratch = try XCTUnwrap(first.report.evidence.cleanup.exactResourceIdentifiers.first)
+            XCTAssertFalse(DistributionFileSystem.entryExists(URL(fileURLWithPath: firstScratch)))
             let second = try builder.buildWithDependencyInventory(
                 sourceRoot: source,
-                outputDirectory: root.appendingPathComponent("second-output", isDirectory: true),
+                outputDirectory: secondOutput,
                 expectedCommit: commit
             )
 
@@ -626,9 +631,126 @@ final class DistributionIntegrationTests: XCTestCase {
                     $0 == "containerization|https://github.com/apple/containerization.git|\(DistributionContainerizationAssets.frameworkVersion)|\(DistributionContainerizationAssets.frameworkRevision)"
                 }
             )
+            let secondScratch = try XCTUnwrap(second.report.evidence.cleanup.exactResourceIdentifiers.first)
+            XCTAssertEqual(first.report.evidence.cleanup.exactResourceIdentifiers.count, 1)
+            XCTAssertEqual(second.report.evidence.cleanup.exactResourceIdentifiers.count, 1)
+            XCTAssertEqual(firstScratch, secondScratch)
+            XCTAssertTrue(URL(fileURLWithPath: firstScratch).lastPathComponent.hasPrefix(
+                "hostwright-dist-clean-scratch-"
+            ))
+            XCTAssertFalse(DistributionFileSystem.entryExists(URL(fileURLWithPath: secondScratch)))
             XCTAssertEqual(first.report.manifest.files, second.report.manifest.files)
             let payloadPaths = Set(first.report.manifest.files.map(\.path))
             XCTAssertTrue(Set(DistributionLayout.shippedBinaryPaths).isSubset(of: payloadPaths))
+        }
+    }
+
+    func testCleanBuilderLeaseRejectsConcurrentStructCopyWithoutDeletingActiveScratch() throws {
+        try withTemporaryRoot { root in
+            let source = root.appendingPathComponent("source", isDirectory: true)
+            let scratch = root.appendingPathComponent(
+                "hostwright-dist-clean-scratch-\(UUID().uuidString)",
+                isDirectory: true
+            )
+            let firstOutput = root.appendingPathComponent("first-output", isDirectory: true)
+            let secondOutput = root.appendingPathComponent("second-output", isDirectory: true)
+            try FileManager.default.createDirectory(at: source, withIntermediateDirectories: false)
+            let slowManifest = """
+            // swift-tools-version: 6.2
+            import Foundation
+            import PackageDescription
+
+            Thread.sleep(forTimeInterval: 30)
+            let package = Package(name: "ConcurrentCleanBuildFixture")
+            """ + "\n"
+            try Data(slowManifest.utf8).write(
+                to: source.appendingPathComponent("Package.swift"),
+                options: .withoutOverwriting
+            )
+            let runner = DistributionProcessRunner()
+            _ = try runner.run(
+                executablePath: "/usr/bin/git",
+                arguments: ["init", "--quiet", source.path],
+                label: "initialize concurrent clean-build source"
+            )
+            _ = try runner.run(
+                executablePath: "/usr/bin/git",
+                arguments: ["-C", source.path, "add", "Package.swift"],
+                label: "stage concurrent clean-build source"
+            )
+            _ = try runner.run(
+                executablePath: "/usr/bin/git",
+                arguments: [
+                    "-C", source.path,
+                    "-c", "user.name=Hostwright Tests",
+                    "-c", "user.email=tests@invalid",
+                    "commit", "--quiet", "-m", "concurrent clean-build fixture"
+                ],
+                label: "commit concurrent clean-build source"
+            )
+            let commit = try runner.run(
+                executablePath: "/usr/bin/git",
+                arguments: ["-C", source.path, "rev-parse", "HEAD"],
+                label: "read concurrent clean-build commit"
+            ).standardOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            let builder = DistributionCleanBuilder(compilerScratchPath: scratch)
+            let copiedBuilder = builder
+            let cancellation = SecureSubprocessCancellation()
+            let firstFinished = DispatchGroup()
+            let firstError = LockedData()
+            firstFinished.enter()
+            DispatchQueue.global(qos: .userInitiated).async {
+                defer { firstFinished.leave() }
+                do {
+                    _ = try builder.buildWithDependencyInventory(
+                        sourceRoot: source,
+                        outputDirectory: firstOutput,
+                        expectedCommit: commit,
+                        cancellation: cancellation
+                    )
+                } catch {
+                    firstError.set(Data(String(describing: error).utf8))
+                }
+            }
+            defer {
+                cancellation.cancel()
+                _ = firstFinished.wait(timeout: .now() + 10)
+            }
+
+            let scratchDeadline = Date().addingTimeInterval(10)
+            while !DistributionFileSystem.entryExists(scratch), Date() < scratchDeadline {
+                usleep(10_000)
+            }
+            XCTAssertTrue(try DistributionFileSystem.isDirectoryNonSymlink(scratch))
+            var identityBefore = stat()
+            XCTAssertEqual(lstat(scratch.path, &identityBefore), 0)
+
+            XCTAssertThrowsError(
+                try copiedBuilder.buildWithDependencyInventory(
+                    sourceRoot: source,
+                    outputDirectory: secondOutput,
+                    expectedCommit: commit
+                )
+            ) { error in
+                XCTAssertEqual(
+                    error as? DistributionError,
+                    .invalidArguments("A clean distribution build is already active for this builder.")
+                )
+            }
+
+            var identityAfter = stat()
+            XCTAssertEqual(lstat(scratch.path, &identityAfter), 0)
+            XCTAssertEqual(identityAfter.st_dev, identityBefore.st_dev)
+            XCTAssertEqual(identityAfter.st_ino, identityBefore.st_ino)
+            XCTAssertFalse(DistributionFileSystem.entryExists(secondOutput))
+
+            cancellation.cancel()
+            XCTAssertEqual(firstFinished.wait(timeout: .now() + 10), .success)
+            XCTAssertTrue(String(data: firstError.value(), encoding: .utf8)?.contains("cancelled") == true)
+            XCTAssertFalse(DistributionFileSystem.entryExists(scratch))
+            XCTAssertFalse(DistributionFileSystem.entryExists(firstOutput))
+            XCTAssertFalse(DistributionFileSystem.entryExists(secondOutput))
         }
     }
 

@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import HostwrightCore
 import HostwrightRuntime
@@ -98,6 +99,18 @@ final class RuntimeQualificationCommandTests: XCTestCase {
             ])
             XCTAssertEqual(helperRecovery.providerID, .appleContainerization)
             XCTAssertEqual(helperRecovery.scenario, "helper-restart")
+
+            let priorHelper = try makePriorHelper(in: directory)
+            let staleHelperRecovery = try RuntimeQualificationCommand.parse([
+                "recovery",
+                "--provider", "apple-containerization",
+                "--expected-version", ContainerizationRuntimeAssetContract.frameworkVersion,
+                "--scenario", "stale-helper",
+                "--prior-helper", priorHelper.path,
+                "--local-image", localImage,
+                "--output", directory.appendingPathComponent("stale-helper.json").path,
+            ])
+            XCTAssertEqual(staleHelperRecovery.priorHelperURL, priorHelper)
         }
     }
 
@@ -141,6 +154,18 @@ final class RuntimeQualificationCommandTests: XCTestCase {
                     "--output", output,
                 ],
                 [
+                    "recovery", "--provider", "apple-containerization",
+                    "--expected-version", ContainerizationRuntimeAssetContract.frameworkVersion,
+                    "--scenario", "stale-helper", "--local-image", localImage,
+                    "--output", output,
+                ],
+                [
+                    "recovery", "--provider", "apple-containerization",
+                    "--expected-version", ContainerizationRuntimeAssetContract.frameworkVersion,
+                    "--scenario", "helper-restart", "--prior-helper", "/usr/bin/true",
+                    "--local-image", localImage, "--output", output,
+                ],
+                [
                     "conformance", "--provider", "apple-container-cli",
                     "--provider", "apple-container-cli", "--expected-version", "1.1.0",
                     "--local-image", localImage, "--output", output,
@@ -181,6 +206,25 @@ final class RuntimeQualificationCommandTests: XCTestCase {
             XCTAssertEqual(result.standardOutput, "")
             XCTAssertTrue(result.standardError.hasPrefix("USAGE: "))
             XCTAssertEqual(try Data(contentsOf: output), sentinel)
+        }
+    }
+
+    func testParserRefusesGroupWritablePriorHelper() throws {
+        try withTemporaryDirectory { directory in
+            let helper = try makePriorHelper(in: directory)
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o720],
+                ofItemAtPath: helper.path
+            )
+            assertUsageError([
+                "recovery",
+                "--provider", "apple-containerization",
+                "--expected-version", ContainerizationRuntimeAssetContract.frameworkVersion,
+                "--scenario", "stale-helper",
+                "--prior-helper", helper.path,
+                "--local-image", localImage,
+                "--output", directory.appendingPathComponent("unsafe-helper.json").path,
+            ])
         }
     }
 
@@ -255,6 +299,27 @@ final class RuntimeQualificationCommandTests: XCTestCase {
                 return XCTFail("Expected a usage error, got \(error)", file: file, line: line)
             }
         }
+    }
+
+    private func makePriorHelper(in directory: URL) throws -> URL {
+        let canonicalDirectory = directory.resolvingSymlinksInPath()
+        let helper = canonicalDirectory.appendingPathComponent(
+            "hostwright-containerization-helper"
+        )
+        try FileManager.default.copyItem(
+            at: URL(fileURLWithPath: "/usr/bin/true"),
+            to: helper
+        )
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: helper.path
+        )
+        let resolved = helper.path.withCString { pointer -> String? in
+            guard let canonical = realpath(pointer, nil) else { return nil }
+            defer { free(canonical) }
+            return String(cString: canonical)
+        }
+        return URL(fileURLWithPath: try XCTUnwrap(resolved))
     }
 
     private func withTemporaryDirectory(

@@ -152,6 +152,33 @@ final class RuntimeProviderMigrationTests: XCTestCase {
         }
     }
 
+    func testDryRunRejectsUnsupportedTargetCreateSubsetBeforeJournalOrRuntimeMutation() async throws {
+        let identity = RuntimeServiceIdentity(projectName: "sample", serviceName: "api")
+        let unsupportedTargetService = DesiredRuntimeService(
+            identity: identity,
+            image: "registry.example/api:1.0.0",
+            ports: [RuntimePortMapping(hostPort: 8_080, containerPort: 80)]
+        )
+        let fixture = try MigrationFixture(desiredService: unsupportedTargetService)
+
+        await assertMigrationError(
+            .unsupportedOwnedResource(identity.managedResourceIdentifier)
+        ) {
+            _ = try await fixture.engine.dryRun(
+                request: fixture.request,
+                source: fixture.source,
+                target: fixture.target
+            )
+        }
+
+        let sourceMutationKinds = await fixture.source.mutationKinds
+        let targetMutationKinds = await fixture.target.mutationKinds
+        let journalIntent = await fixture.journal.intent
+        XCTAssertEqual(sourceMutationKinds, [])
+        XCTAssertEqual(targetMutationKinds, [])
+        XCTAssertNil(journalIntent)
+    }
+
     func testDecodedPlanTamperingInvalidatesConfirmationBeforeJournalOrRuntimeMutation() async throws {
         let fixture = try MigrationFixture()
         let plan = try await fixture.plan()
@@ -496,13 +523,14 @@ private struct MigrationFixture {
     init(
         journal: MigrationTestJournal = MigrationTestJournal(),
         probe: MigrationMutationProbe = MigrationMutationProbe(),
+        desiredService: DesiredRuntimeService? = nil,
         targetFailure: PlannedRuntimeActionKind? = nil,
         targetTamperAfterCreate: Bool = false,
         sourceCancelsAfterStop: Bool = false,
         mutationDelayNanoseconds: UInt64 = 0
     ) throws {
         let identity = RuntimeServiceIdentity(projectName: "sample", serviceName: "api")
-        self.service = DesiredRuntimeService(
+        self.service = desiredService ?? DesiredRuntimeService(
             identity: identity,
             image: imageReference,
             restartPolicy: .unlessStopped

@@ -383,6 +383,7 @@ public actor RuntimeProviderMigrationEngine {
             inventory: targetInventory,
             sourceResources: sourceResources
         )
+        try Self.validateTargetCreateSubset(request)
 
         var imageRequirements: [RuntimeProviderMigrationImageRequirement] = []
         for reference in Set(sourceResources.map(\.container.imageReference)).sorted() {
@@ -1302,6 +1303,25 @@ private extension RuntimeProviderMigrationEngine {
             $0.ownership?.projectUUID == request.projectUUID
         }) {
             throw RuntimeProviderMigrationError.targetCollision(image.runtimeID)
+        }
+    }
+
+    static func validateTargetCreateSubset(
+        _ request: RuntimeProviderMigrationRequest
+    ) throws {
+        for resource in request.resources.sorted(by: {
+            $0.desiredService.identity.displayName < $1.desiredService.identity.displayName
+        }) {
+            do {
+                try RuntimeCreateSubsetPolicy.validate(
+                    resource.desiredService,
+                    providerID: request.targetProviderID
+                )
+            } catch {
+                throw RuntimeProviderMigrationError.unsupportedOwnedResource(
+                    resource.desiredService.identity.managedResourceIdentifier
+                )
+            }
         }
     }
 

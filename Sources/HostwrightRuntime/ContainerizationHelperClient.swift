@@ -1423,15 +1423,12 @@ public struct AppleContainerizationRuntimeAdapter: RuntimeAdapter {
         case .create:
             guard let service = action.desiredService,
                   service.identity == action.identity,
-                  action.resourceIdentifier == service.identity.managedResourceIdentifier,
-                  service.mounts.isEmpty,
-                  service.ports.isEmpty,
-                  service.healthCheck == nil,
-                  service.environment.allSatisfy({ $0.secretReference == nil }) else {
+                  action.resourceIdentifier == service.identity.managedResourceIdentifier else {
                 throw RuntimeAdapterError.mutationUnavailableByPolicy(
                     "Containerization create requires the supported local-image lifecycle subset."
                 )
             }
+            try RuntimeCreateSubsetPolicy.validate(service, providerID: .appleContainerization)
             let image = try await localImageEvidence(for: service.image)
             let labels = try RuntimeManagedResourceIdentity.labels(for: action.identity, context: context)
                 .map { RuntimeInventoryLabel(key: $0.key, value: $0.value) }

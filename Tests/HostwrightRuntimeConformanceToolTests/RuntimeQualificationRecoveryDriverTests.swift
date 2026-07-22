@@ -7,6 +7,62 @@ import XCTest
 @testable import HostwrightRuntimeConformanceTool
 
 final class RuntimeQualificationRecoveryDriverTests: XCTestCase {
+    func testHelperSignatureVerifierRequiresExactProductionIdentity() {
+        XCTAssertTrue(RuntimeQualificationHelperSignatureVerifier.matchesExpectedIdentity(
+            teamIdentifier: ContainerizationHelperPeerIdentityPolicy.expectedTeamIdentifier,
+            identifier: "hostwright-containerization-helper"
+        ))
+        XCTAssertFalse(RuntimeQualificationHelperSignatureVerifier.matchesExpectedIdentity(
+            teamIdentifier: ContainerizationHelperPeerIdentityPolicy.expectedTeamIdentifier,
+            identifier: "dev.hostwright.containerization-helper"
+        ))
+        XCTAssertFalse(RuntimeQualificationHelperSignatureVerifier.matchesExpectedIdentity(
+            teamIdentifier: "AAAAAAAAAA",
+            identifier: "hostwright-containerization-helper"
+        ))
+        XCTAssertFalse(RuntimeQualificationHelperSignatureVerifier.matchesExpectedIdentity(
+            teamIdentifier: nil,
+            identifier: nil
+        ))
+    }
+
+    func testHelperSignatureVerifierRejectsUnsignedAndWrongSignerExecutables() throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let helper = directory.appendingPathComponent("hostwright-containerization-helper")
+
+        try Data("#!/bin/sh\nexit 0\n".utf8).write(
+            to: helper,
+            options: .withoutOverwriting
+        )
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: helper.path
+        )
+        XCTAssertThrowsError(try RuntimeQualificationHelperSignatureVerifier.sha256(of: helper)) {
+            XCTAssertEqual(
+                $0 as? RuntimeQualificationRecoveryDriverError,
+                .providerPreflightFailed
+            )
+        }
+
+        try FileManager.default.removeItem(at: helper)
+        try FileManager.default.copyItem(
+            at: URL(fileURLWithPath: "/usr/bin/true"),
+            to: helper
+        )
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: helper.path
+        )
+        XCTAssertThrowsError(try RuntimeQualificationHelperSignatureVerifier.sha256(of: helper)) {
+            XCTAssertEqual(
+                $0 as? RuntimeQualificationRecoveryDriverError,
+                .providerPreflightFailed
+            )
+        }
+    }
+
     func testSpecificationAcceptsOnlyLockedProviderScenarioPairs() throws {
         for scenario in RuntimeQualificationRecoveryScenario.allCases {
             let provider: RuntimeProviderID = switch scenario {
@@ -18,7 +74,10 @@ final class RuntimeQualificationRecoveryDriverTests: XCTestCase {
                 providerID: provider,
                 expectedVersion: version,
                 scenario: scenario,
-                localImage: "example.local/runtime@sha256:\(digest("image"))"
+                localImage: "example.local/runtime@sha256:\(digest("image"))",
+                priorHelperURL: scenario == .staleHelper
+                    ? URL(fileURLWithPath: "/signed-h1/hostwright-containerization-helper")
+                    : nil
             ).validated())
         }
         XCTAssertThrowsError(try RuntimeQualificationRecoverySpecification(
@@ -26,6 +85,21 @@ final class RuntimeQualificationRecoveryDriverTests: XCTestCase {
             expectedVersion: "0.35.0",
             scenario: .cliServiceRestart,
             localImage: "example.local/runtime:latest"
+        ).validated())
+        XCTAssertThrowsError(try RuntimeQualificationRecoverySpecification(
+            providerID: .appleContainerization,
+            expectedVersion: "0.35.0",
+            scenario: .staleHelper,
+            localImage: "example.local/runtime:latest"
+        ).validated())
+        XCTAssertThrowsError(try RuntimeQualificationRecoverySpecification(
+            providerID: .appleContainerization,
+            expectedVersion: "0.35.0",
+            scenario: .helperRestart,
+            localImage: "example.local/runtime:latest",
+            priorHelperURL: URL(
+                fileURLWithPath: "/signed-h1/hostwright-containerization-helper"
+            )
         ).validated())
         XCTAssertThrowsError(try RuntimeQualificationRecoverySpecification(
             providerID: .appleContainerCLI,

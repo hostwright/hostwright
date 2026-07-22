@@ -69,6 +69,11 @@ final class RuntimeQualificationRecoveryReportTests: XCTestCase {
             providerGeneration: evidence.providerGeneration,
             providerMetadataRevisionBefore: evidence.providerMetadataRevisionBefore,
             providerMetadataRevisionAfter: evidence.providerMetadataRevisionAfter,
+            priorHelperSHA256: evidence.priorHelperSHA256,
+            currentHelperSHA256: evidence.currentHelperSHA256,
+            signedHelperTransitionVerified: evidence.signedHelperTransitionVerified,
+            rollbackDisposition: evidence.rollbackDisposition,
+            rollbackFindingReasons: evidence.rollbackFindingReasons,
             contractInput: evidence.contractInput,
             durableCheckpointBefore: evidence.durableCheckpointBefore,
             durableCheckpointAfter: evidence.durableCheckpointAfter,
@@ -190,6 +195,55 @@ final class RuntimeQualificationRecoveryReportTests: XCTestCase {
         ))
     }
 
+    func testStaleHelperRequiresRealDistinctSignedTransitionAndRollbackRefusal() throws {
+        let hash = String(repeating: "a", count: 64)
+        let image = RuntimeLocalImageEvidence(
+            reference: "example.local/runtime:1",
+            descriptorDigest: "sha256:\(hash)",
+            variantDigest: "sha256:\(String(repeating: "b", count: 64))",
+            architecture: "arm64",
+            operatingSystem: "linux"
+        )
+        let evidence = recoveryEvidence(
+            hash: hash,
+            image: image,
+            scenario: .staleHelper,
+            providerID: .appleContainerization
+        )
+        let data = try JSONEncoder().encode(evidence)
+        XCTAssertThrowsError(try RuntimeQualificationRecoveryReport.passed(execution:
+            RuntimeQualificationRecoveryExecution(
+                fixtureImage: image,
+                evidence: evidence,
+                commands: Array(commands(for: evidence).dropFirst()),
+                cleanupIdentifiers: evidence.cleanupIdentifiers
+            )
+        ))
+
+        for mutation in [
+            ("contractInput", "stale-helper-contract-injection-from-live-snapshot"),
+            ("currentHelperSHA256", evidence.priorHelperSHA256!),
+            ("rollbackDisposition", RuntimeProviderRecoveryDisposition.resumeFromCheckpoint.rawValue),
+        ] {
+            var object = try XCTUnwrap(
+                JSONSerialization.jsonObject(with: data) as? [String: Any]
+            )
+            object[mutation.0] = mutation.1
+            let invalid = try JSONDecoder().decode(
+                RuntimeQualificationRecoveryEvidence.self,
+                from: JSONSerialization.data(withJSONObject: object)
+            )
+            XCTAssertThrowsError(try RuntimeQualificationRecoveryReport.passed(execution:
+                RuntimeQualificationRecoveryExecution(
+                    fixtureImage: image,
+                    evidence: invalid,
+                    commands: commands(for: invalid),
+                    cleanupIdentifiers: invalid.cleanupIdentifiers
+                )
+            ))
+        }
+    }
+
     private func recoveryEvidence(
         hash: String,
         image: RuntimeLocalImageEvidence,
@@ -223,7 +277,7 @@ final class RuntimeQualificationRecoveryReportTests: XCTestCase {
         case .mixedComponentVersions:
             "mixed-component-contract-injection-from-live-snapshot"
         case .staleHelper:
-            "stale-helper-contract-injection-from-live-snapshot"
+            "signed-h1-to-h2-helper-transition"
         case .futureProtocolRefusal:
             "future-protocol-contract-injection-from-live-snapshot"
         case .downgradeRefusal:
@@ -242,9 +296,22 @@ final class RuntimeQualificationRecoveryReportTests: XCTestCase {
         case .checkpointCrash: "recovered-after-checkpoint-crash"
         default: nil
         }
-        let metadataRevision = scenario == .downgradeRefusal
-            ? RuntimeProviderMetadataEvidence.currentRevision + 1
-            : RuntimeProviderMetadataEvidence.currentRevision
+        let metadataRevisionBefore: Int
+        let metadataRevisionAfter: Int
+        if scenario == .staleHelper {
+            metadataRevisionBefore = RuntimeProviderMetadataEvidence.legacyRevision
+            metadataRevisionAfter = RuntimeProviderMetadataEvidence.currentRevision
+        } else if scenario == .downgradeRefusal {
+            metadataRevisionBefore = RuntimeProviderMetadataEvidence.currentRevision + 1
+            metadataRevisionAfter = RuntimeProviderMetadataEvidence.currentRevision + 1
+        } else {
+            metadataRevisionBefore = RuntimeProviderMetadataEvidence.currentRevision
+            metadataRevisionAfter = RuntimeProviderMetadataEvidence.currentRevision
+        }
+        let priorHelperSHA256 = scenario == .staleHelper
+            ? String(repeating: "e", count: 64) : nil
+        let currentHelperSHA256 = scenario == .staleHelper
+            ? String(repeating: "f", count: 64) : nil
         return RuntimeQualificationRecoveryEvidence(
             schemaVersion: 1,
             scenario: scenario.rawValue,
@@ -268,8 +335,17 @@ final class RuntimeQualificationRecoveryReportTests: XCTestCase {
             recoveryFindingReasons: reasons,
             capabilitySnapshotInvalidated: drifted,
             providerGeneration: 1,
-            providerMetadataRevisionBefore: metadataRevision,
-            providerMetadataRevisionAfter: metadataRevision,
+            providerMetadataRevisionBefore: metadataRevisionBefore,
+            providerMetadataRevisionAfter: metadataRevisionAfter,
+            priorHelperSHA256: priorHelperSHA256,
+            currentHelperSHA256: currentHelperSHA256,
+            signedHelperTransitionVerified: scenario == .staleHelper,
+            rollbackDisposition: scenario == .staleHelper
+                ? RuntimeProviderRecoveryDisposition.refuseAndPreserveCheckpoint.rawValue
+                : nil,
+            rollbackFindingReasons: scenario == .staleHelper
+                ? [RuntimeProviderRecoveryFindingReason.metadataRevisionTooNew.rawValue]
+                : [],
             contractInput: contractInput,
             durableCheckpointBefore: checkpointBefore,
             durableCheckpointAfter: checkpointAfter,
@@ -309,6 +385,34 @@ final class RuntimeQualificationRecoveryReportTests: XCTestCase {
                 arguments: ["hostwright-runtime-conformance", "recovery-worker-resume"],
                 exitStatus: 0
             ))
+        }
+        if evidence.scenario == RuntimeQualificationRecoveryScenario.staleHelper.rawValue {
+            result += [
+                RuntimeQualificationCommandEvidence(
+                    arguments: [
+                        "hostwright-containerization-helper", "negotiate", "h1"
+                    ],
+                    exitStatus: 0
+                ),
+                RuntimeQualificationCommandEvidence(
+                    arguments: [
+                        "hostwright-containerization-helper", "shutdown", "h1"
+                    ],
+                    exitStatus: 0
+                ),
+                RuntimeQualificationCommandEvidence(
+                    arguments: [
+                        "hostwright-containerization-helper", "negotiate", "h2"
+                    ],
+                    exitStatus: 0
+                ),
+                RuntimeQualificationCommandEvidence(
+                    arguments: [
+                        "hostwright-containerization-helper", "shutdown", "h2"
+                    ],
+                    exitStatus: 0
+                ),
+            ]
         }
         result.append(command(for: evidence))
         return result

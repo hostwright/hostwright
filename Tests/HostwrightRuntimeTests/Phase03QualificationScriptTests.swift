@@ -36,6 +36,12 @@ final class Phase03QualificationScriptTests: XCTestCase {
         XCTAssertTrue(source.contains("operation-specific details contain a sensitive key"))
         XCTAssertTrue(source.contains("the harness will not pull it"))
         XCTAssertTrue(source.contains("prepare-containerization-assets.sh"))
+        XCTAssertTrue(source.contains("--prior-helper-bin"))
+        XCTAssertTrue(source.contains("stale-helper requires --prior-helper-bin"))
+        XCTAssertTrue(source.contains("accepted only for stale-helper"))
+        XCTAssertTrue(source.contains("signed-h1-to-h2-helper-transition"))
+        XCTAssertTrue(source.contains("metadata-revision-too-new"))
+        XCTAssertTrue(source.contains("helper process-cycle evidence is incomplete"))
         XCTAssertTrue(source.contains("/usr/bin/find -P \"$WORK_ROOT\" -depth -delete"))
         XCTAssertFalse(source.contains("rm -rf"))
         XCTAssertFalse(source.contains("eval "))
@@ -105,6 +111,129 @@ final class Phase03QualificationScriptTests: XCTestCase {
         XCTAssertTrue(commands.contains("--version"))
         XCTAssertTrue(commands.contains("image list --format json"))
         XCTAssertFalse(commands.contains("pull"))
+        try assertNoHarnessTemporaryArtifacts(in: root)
+    }
+
+    func testStaleHelperRequiresOnePrivateNonsymlinkPriorHelper() throws {
+        let root = try temporaryDirectory(named: "prior-helper")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let marker = root.appendingPathComponent("runner-called")
+        let runner = try makeRunner(in: root, marker: marker)
+        let output = root.appendingPathComponent("evidence.json")
+
+        let missing = try runHarness(
+            [
+                "recovery",
+                "--lane", "containerization-0.35.0",
+                "--scenario", "stale-helper",
+                "--conformance-bin", runner.path,
+                "--local-image", "example.invalid/fixture:local",
+                "--output", output.path,
+            ],
+            environment: [:]
+        )
+        XCTAssertEqual(missing.status, 64, missing.error)
+        XCTAssertTrue(missing.error.contains("stale-helper requires --prior-helper-bin"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: marker.path))
+
+        let priorHelper = root.appendingPathComponent(
+            "hostwright-containerization-helper"
+        )
+        try FileManager.default.createSymbolicLink(
+            atPath: priorHelper.path,
+            withDestinationPath: "/usr/bin/true"
+        )
+        let unsafe = try runHarness(
+            [
+                "recovery",
+                "--lane", "containerization-0.35.0",
+                "--scenario", "stale-helper",
+                "--conformance-bin", runner.path,
+                "--prior-helper-bin", priorHelper.path,
+                "--local-image", "example.invalid/fixture:local",
+                "--output", output.path,
+            ],
+            environment: [:]
+        )
+        XCTAssertEqual(unsafe.status, 69, unsafe.error)
+        XCTAssertTrue(unsafe.error.contains("nonsymlink executable"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: marker.path))
+    }
+
+    func testPriorHelperIsRefusedForEveryOtherRecoveryScenario() throws {
+        let root = try temporaryDirectory(named: "prior-helper-scope")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let marker = root.appendingPathComponent("runner-called")
+        let runner = try makeRunner(in: root, marker: marker)
+        let result = try runHarness(
+            [
+                "recovery",
+                "--lane", "containerization-0.35.0",
+                "--scenario", "helper-restart",
+                "--conformance-bin", runner.path,
+                "--prior-helper-bin", "/usr/bin/true",
+                "--local-image", "example.invalid/fixture:local",
+                "--output", root.appendingPathComponent("evidence.json").path,
+            ],
+            environment: [:]
+        )
+        XCTAssertEqual(result.status, 64, result.error)
+        XCTAssertTrue(result.error.contains("accepted only for stale-helper"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: marker.path))
+    }
+
+    func testStaleHelperHarnessRejectsSyntheticTransitionBeforePublishing() throws {
+        let root = try temporaryDirectory(named: "stale-helper-evidence")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let harness = try makeIsolatedHarness(in: root)
+        let marker = root.appendingPathComponent("runner-called")
+        let runner = try makeStaleRecoveryRunner(in: root, marker: marker)
+        let priorHelper = root.appendingPathComponent(
+            "hostwright-containerization-helper"
+        )
+        try FileManager.default.copyItem(
+            at: URL(fileURLWithPath: "/usr/bin/true"),
+            to: priorHelper
+        )
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: priorHelper.path
+        )
+        let invalidOutput = root.appendingPathComponent("invalid-evidence.json")
+        let arguments = [
+            "recovery",
+            "--lane", "containerization-0.35.0",
+            "--scenario", "stale-helper",
+            "--conformance-bin", runner.path,
+            "--prior-helper-bin", priorHelper.path,
+            "--local-image", "example.invalid/fixture:local",
+            "--output", invalidOutput.path,
+        ]
+        let environment = [
+            "FAKE_STALE_CONTRACT": "stale-helper-contract-injection-from-live-snapshot",
+            "HOSTWRIGHT_CONTAINERIZATION_ASSET_ROOT": root.appendingPathComponent("assets").path,
+            "TMPDIR": root.path,
+        ]
+
+        let invalid = try runHarness(arguments, environment: environment, script: harness)
+        XCTAssertEqual(invalid.status, 70, invalid.error)
+        XCTAssertTrue(invalid.error.contains("evidence validation failed"))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: marker.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: invalidOutput.path))
+        try assertNoHarnessTemporaryArtifacts(in: root)
+
+        let validOutput = root.appendingPathComponent("valid-evidence.json")
+        var validArguments = arguments
+        validArguments[validArguments.count - 1] = validOutput.path
+        var validEnvironment = environment
+        validEnvironment.removeValue(forKey: "FAKE_STALE_CONTRACT")
+        let valid = try runHarness(
+            validArguments,
+            environment: validEnvironment,
+            script: harness
+        )
+        XCTAssertEqual(valid.status, 0, valid.error)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: validOutput.path))
         try assertNoHarnessTemporaryArtifacts(in: root)
     }
 
@@ -309,6 +438,142 @@ final class Phase03QualificationScriptTests: XCTestCase {
         return executable
     }
 
+    private func makeIsolatedHarness(in root: URL) throws -> URL {
+        let scripts = root.appendingPathComponent("isolated/scripts", isDirectory: true)
+        let release = scripts.appendingPathComponent("release", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: release,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
+        )
+        let harness = scripts.appendingPathComponent("phase03-qualification.sh")
+        try FileManager.default.copyItem(at: qualificationScript(), to: harness)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: harness.path
+        )
+        let verifier = release.appendingPathComponent(
+            "prepare-containerization-assets.sh"
+        )
+        try writeExecutable(
+            "#!/bin/bash\nset -euo pipefail\nprintf '%s\\n' 'Containerization framework: 0.35.0'\n",
+            to: verifier
+        )
+        return harness
+    }
+
+    private func makeStaleRecoveryRunner(in root: URL, marker: URL) throws -> URL {
+        let executable = root.appendingPathComponent("hostwright-runtime-conformance")
+        let source = """
+        #!/bin/bash
+        set -euo pipefail
+        if [[ "${1-}" == "--version" ]]; then
+          printf '%s\\n' 'hostwright-runtime-conformance 0.0.2-test'
+          exit 0
+        fi
+        printf '%s\\n' called > '\(marker.path)'
+        operation="${1-}"
+        shift
+        provider=''
+        expected=''
+        scenario=''
+        image=''
+        output=''
+        while [[ $# -gt 0 ]]; do
+          case "$1" in
+            --provider) provider="$2"; shift 2 ;;
+            --expected-version) expected="$2"; shift 2 ;;
+            --scenario) scenario="$2"; shift 2 ;;
+            --prior-helper) shift 2 ;;
+            --local-image) image="$2"; shift 2 ;;
+            --output) output="$2"; shift 2 ;;
+            *) exit 64 ;;
+          esac
+        done
+        /usr/bin/python3 - "$output" "$provider" "$expected" "$scenario" "$image" <<'PY'
+        import json
+        import os
+        import sys
+
+        output, provider, version, scenario, image = sys.argv[1:]
+        a, b, c, d, e, f = (character * 64 for character in "abcdef")
+        recovery = {
+            "schemaVersion": 1,
+            "scenario": scenario,
+            "providerID": provider,
+            "providerVersion": version,
+            "fixtureImageReference": image,
+            "fixtureImageDescriptorDigest": "sha256:" + c,
+            "fixtureImageVariantDigest": "sha256:" + e,
+            "fixtureImageArchitecture": "arm64",
+            "fixtureImageOperatingSystem": "linux",
+            "capabilityBeforeSHA256": a,
+            "capabilityAfterSHA256": b,
+            "inventoryBeforeSHA256": a,
+            "inventoryAfterSHA256": a,
+            "unmanagedInventoryBeforeSHA256": d,
+            "unmanagedInventoryAfterSHA256": d,
+            "unmanagedInventoryUnchanged": True,
+            "recoveryDisposition": "reobserve-then-resume-from-checkpoint",
+            "recoveryChangeKinds": ["capability-digest", "component-fingerprint"],
+            "recoveryFindingReasons": [],
+            "capabilitySnapshotInvalidated": True,
+            "providerGeneration": 1,
+            "providerMetadataRevisionBefore": 1,
+            "providerMetadataRevisionAfter": 2,
+            "priorHelperSHA256": e,
+            "currentHelperSHA256": f,
+            "signedHelperTransitionVerified": True,
+            "rollbackDisposition": "refuse-and-preserve-checkpoint",
+            "rollbackFindingReasons": ["metadata-revision-too-new"],
+            "contractInput": os.environ.get(
+                "FAKE_STALE_CONTRACT", "signed-h1-to-h2-helper-transition"
+            ),
+            "durableCheckpointBefore": None,
+            "durableCheckpointAfter": None,
+            "terminatedExecutable": None,
+            "processTreeTerminated": False,
+            "stateSchemaVersion": None,
+            "passedAssertions": 14,
+            "failedAssertions": 0,
+            "cleanupComplete": True,
+            "cleanupIdentifiers": [],
+        }
+        commands = [
+            {"arguments": ["hostwright-containerization-helper", "negotiate", "h1"], "exitStatus": 0},
+            {"arguments": ["hostwright-containerization-helper", "shutdown", "h1"], "exitStatus": 0},
+            {"arguments": ["hostwright-containerization-helper", "negotiate", "h2"], "exitStatus": 0},
+            {"arguments": ["hostwright-containerization-helper", "shutdown", "h2"], "exitStatus": 0},
+            {"arguments": ["hostwright-runtime-conformance", "recovery", provider, scenario], "exitStatus": 0},
+        ]
+        report = {
+            "schemaVersion": 1,
+            "kind": "runtimeProviderRecoveryEvidence",
+            "status": "passed",
+            "scenario": scenario,
+            "subjects": [{"providerID": provider, "providerVersion": version}],
+            "fixtureImage": {"reference": image, "digest": "sha256:" + c},
+            "inventory": {
+                "beforeSHA256": a,
+                "afterSHA256": a,
+                "unmanagedBeforeSHA256": d,
+                "unmanagedAfterSHA256": d,
+            },
+            "unmanagedInventoryUnchanged": True,
+            "summary": {"passed": 14, "failed": 0},
+            "commands": commands,
+            "cleanup": {"complete": True, "identifiers": []},
+            "details": {"recovery": recovery},
+        }
+        with open(output, "w", encoding="utf-8") as handle:
+            json.dump(report, handle, sort_keys=True, separators=(",", ":"))
+            handle.write("\\n")
+        PY
+        """
+        try writeExecutable(source, to: executable)
+        return executable
+    }
+
     private func writeExecutable(_ source: String, to url: URL) throws {
         try source.write(to: url, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: url.path)
@@ -316,11 +581,12 @@ final class Phase03QualificationScriptTests: XCTestCase {
 
     private func runHarness(
         _ arguments: [String],
-        environment overrides: [String: String]
+        environment overrides: [String: String],
+        script: URL? = nil
     ) throws -> (status: Int32, output: String, error: String) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/bash")
-        process.arguments = [qualificationScript().path] + arguments
+        process.arguments = [(script ?? qualificationScript()).path] + arguments
         var environment = ProcessInfo.processInfo.environment
         for (key, value) in overrides {
             environment[key] = value

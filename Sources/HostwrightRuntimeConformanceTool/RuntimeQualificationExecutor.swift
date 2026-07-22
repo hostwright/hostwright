@@ -118,7 +118,8 @@ enum RuntimeQualificationExecutor {
                     providerID: providerID,
                     expectedVersion: expectedVersion,
                     scenario: recoveryScenario,
-                    localImage: options.localImage
+                    localImage: options.localImage,
+                    priorHelperURL: options.priorHelperURL
                 )
             ).runReport()
         } catch let error as RuntimeQualificationRecoveryDriverError {

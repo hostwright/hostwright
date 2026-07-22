@@ -28,6 +28,7 @@ Usage:
     --lane apple-cli-1.0.0|apple-cli-1.1.0|containerization-0.35.0 \
     --scenario cli-service-restart|helper-restart|hostwright-termination|mixed-component-versions|checkpoint-crash|stale-helper|future-protocol-refusal|downgrade-refusal \
     --conformance-bin <hostwright-runtime-conformance> \
+    [--prior-helper-bin <signed-H1-hostwright-containerization-helper>] \
     --local-image <existing-local-reference> --output <new-evidence.json>
 
 This maintainer-only harness never downloads or pulls an image. Every lane requires
@@ -123,6 +124,7 @@ SOURCE_LANE=""
 TARGET_LANE=""
 SCENARIO=""
 CONFORMANCE_BIN=""
+PRIOR_HELPER_BIN=""
 LOCAL_IMAGE=""
 OUTPUT=""
 
@@ -158,6 +160,12 @@ while [[ $# -gt 0 ]]; do
       CONFORMANCE_BIN="$2"
       shift 2
       ;;
+    --prior-helper-bin)
+      require_option_value "$1" "${2-}"
+      [[ -z "$PRIOR_HELPER_BIN" ]] || usage_error "--prior-helper-bin may be supplied only once."
+      PRIOR_HELPER_BIN="$2"
+      shift 2
+      ;;
     --local-image)
       require_option_value "$1" "${2-}"
       [[ -z "$LOCAL_IMAGE" ]] || usage_error "--local-image may be supplied only once."
@@ -180,12 +188,14 @@ done
 
 case "$OPERATION" in
   conformance)
-    [[ -n "$LANE" && -z "$SOURCE_LANE" && -z "$TARGET_LANE" && -z "$SCENARIO" ]] \
+    [[ -n "$LANE" && -z "$SOURCE_LANE" && -z "$TARGET_LANE" && -z "$SCENARIO" \
+      && -z "$PRIOR_HELPER_BIN" ]] \
       || usage_error "conformance requires only one --lane."
     lane_provider "$LANE" >/dev/null
     ;;
   migration)
-    [[ -z "$LANE" && -n "$SOURCE_LANE" && -n "$TARGET_LANE" && -z "$SCENARIO" ]] \
+    [[ -z "$LANE" && -n "$SOURCE_LANE" && -n "$TARGET_LANE" && -z "$SCENARIO" \
+      && -z "$PRIOR_HELPER_BIN" ]] \
       || usage_error "migration requires --source-lane and --target-lane."
     SOURCE_PROVIDER="$(lane_provider "$SOURCE_LANE")"
     TARGET_PROVIDER="$(lane_provider "$TARGET_LANE")"
@@ -197,6 +207,13 @@ case "$OPERATION" in
       || usage_error "recovery requires --lane and --scenario."
     lane_provider "$LANE" >/dev/null
     validate_recovery_scenario "$LANE" "$SCENARIO"
+    if [[ "$SCENARIO" == stale-helper ]]; then
+      [[ -n "$PRIOR_HELPER_BIN" ]] \
+        || usage_error "stale-helper requires --prior-helper-bin."
+    else
+      [[ -z "$PRIOR_HELPER_BIN" ]] \
+        || usage_error "--prior-helper-bin is accepted only for stale-helper."
+    fi
     ;;
 esac
 
@@ -212,6 +229,39 @@ validate_scalar "--local-image" "$LOCAL_IMAGE" 512
 
 PYTHON_BIN="$(command -v python3 || true)"
 [[ -n "$PYTHON_BIN" && -x "$PYTHON_BIN" ]] || blocked "python3 is unavailable."
+
+if [[ -n "$PRIOR_HELPER_BIN" ]]; then
+  PRIOR_HELPER_BIN="$($PYTHON_BIN - "$PRIOR_HELPER_BIN" <<'PY'
+import os
+import stat
+import sys
+
+path = sys.argv[1]
+if len(path.encode("utf-8")) > 1024 or any(ord(character) < 32 or ord(character) == 127 for character in path):
+    raise SystemExit(1)
+if not os.path.isabs(path) or os.path.normpath(path) != path:
+    raise SystemExit(1)
+if os.path.basename(path) != "hostwright-containerization-helper":
+    raise SystemExit(1)
+if os.path.realpath(path) != path:
+    raise SystemExit(1)
+try:
+    metadata = os.lstat(path)
+except OSError:
+    raise SystemExit(1)
+unsafe = stat.S_IWGRP | stat.S_IWOTH | stat.S_ISUID | stat.S_ISGID | stat.S_ISVTX
+if not stat.S_ISREG(metadata.st_mode):
+    raise SystemExit(1)
+if metadata.st_nlink != 1 or metadata.st_uid not in {0, os.geteuid()}:
+    raise SystemExit(1)
+if metadata.st_mode & unsafe or not metadata.st_mode & stat.S_IXUSR:
+    raise SystemExit(1)
+if not os.access(path, os.X_OK):
+    raise SystemExit(1)
+print(path)
+PY
+)" || blocked "the prior helper path is not a private normalized nonsymlink executable."
+fi
 
 OUTPUT="$($PYTHON_BIN - "$OUTPUT" <<'PY'
 import os
@@ -411,6 +461,9 @@ case "$OPERATION" in
       --local-image "$LOCAL_IMAGE"
       --output "$RUNNER_OUTPUT"
     )
+    if [[ "$SCENARIO" == stale-helper ]]; then
+      RUNNER_ARGUMENTS+=(--prior-helper "$PRIOR_HELPER_BIN")
+    fi
     ;;
 esac
 
@@ -606,6 +659,98 @@ for identifier in cleanup["identifiers"]:
 
 if operation == "recovery":
     require(report["scenario"] == scenario, "runner recovery scenario differs")
+    if scenario == "stale-helper":
+        require(set(details) == {"recovery"}, "stale-helper details envelope differs")
+        recovery = details["recovery"]
+        require(type(recovery) is dict, "stale-helper recovery evidence must be an object")
+        require(recovery.get("schemaVersion") == 1, "stale-helper recovery schema differs")
+        require(recovery.get("scenario") == scenario, "stale-helper recovery scenario differs")
+        expected_provider, expected_version = provider_for_lane[lane]
+        require(recovery.get("providerID") == expected_provider, "stale-helper provider differs")
+        require(recovery.get("providerVersion") == expected_version, "stale-helper provider version differs")
+        require(recovery.get("fixtureImageReference") == local_image, "stale-helper image differs")
+        require(
+            recovery.get("fixtureImageDescriptorDigest") == fixture["digest"],
+            "stale-helper image digest differs",
+        )
+        prior_helper = recovery.get("priorHelperSHA256")
+        current_helper = recovery.get("currentHelperSHA256")
+        require(type(prior_helper) is str and hex64.fullmatch(prior_helper), "stale-helper H1 digest is invalid")
+        require(type(current_helper) is str and hex64.fullmatch(current_helper), "stale-helper H2 digest is invalid")
+        require(prior_helper != current_helper, "stale-helper helper digests must differ")
+        require(recovery.get("signedHelperTransitionVerified") is True, "stale-helper signed transition was not verified")
+        require(
+            recovery.get("contractInput") == "signed-h1-to-h2-helper-transition",
+            "stale-helper transition contract differs",
+        )
+        require(recovery.get("providerGeneration") == 1, "stale-helper provider generation differs")
+        require(recovery.get("providerMetadataRevisionBefore") == 1, "stale-helper H1 metadata revision differs")
+        require(recovery.get("providerMetadataRevisionAfter") == 2, "stale-helper H2 metadata revision differs")
+        require(
+            recovery.get("recoveryDisposition") == "reobserve-then-resume-from-checkpoint",
+            "stale-helper H2 recovery disposition differs",
+        )
+        require(recovery.get("recoveryFindingReasons") == [], "stale-helper H2 recovery findings differ")
+        change_kinds = recovery.get("recoveryChangeKinds")
+        require(type(change_kinds) is list, "stale-helper recovery changes differ")
+        require(
+            {"capability-digest", "component-fingerprint"}.issubset(set(change_kinds)),
+            "stale-helper helper fingerprint change is missing",
+        )
+        require(recovery.get("capabilitySnapshotInvalidated") is True, "stale-helper capability was not invalidated")
+        capability_before = recovery.get("capabilityBeforeSHA256")
+        capability_after = recovery.get("capabilityAfterSHA256")
+        require(
+            type(capability_before) is str and hex64.fullmatch(capability_before),
+            "stale-helper H1 capability digest is invalid",
+        )
+        require(
+            type(capability_after) is str and hex64.fullmatch(capability_after),
+            "stale-helper H2 capability digest is invalid",
+        )
+        require(
+            capability_before != capability_after,
+            "stale-helper capability snapshots did not change",
+        )
+        require(
+            recovery.get("inventoryBeforeSHA256") == inventory["beforeSHA256"]
+            and recovery.get("inventoryAfterSHA256") == inventory["afterSHA256"]
+            and recovery.get("unmanagedInventoryBeforeSHA256") == inventory["unmanagedBeforeSHA256"]
+            and recovery.get("unmanagedInventoryAfterSHA256") == inventory["unmanagedAfterSHA256"],
+            "stale-helper nested inventory evidence differs",
+        )
+        require(recovery.get("unmanagedInventoryUnchanged") is True, "stale-helper unmanaged inventory changed")
+        require(
+            recovery.get("rollbackDisposition") == "refuse-and-preserve-checkpoint",
+            "stale-helper rollback was not refused",
+        )
+        require(
+            recovery.get("rollbackFindingReasons") == ["metadata-revision-too-new"],
+            "stale-helper rollback refusal reason differs",
+        )
+        require(recovery.get("failedAssertions") == 0, "stale-helper evidence records failures")
+        require(recovery.get("passedAssertions") == summary["passed"], "stale-helper pass count differs")
+        require(recovery.get("cleanupComplete") is True, "stale-helper cleanup is incomplete")
+        require(recovery.get("cleanupIdentifiers") == cleanup["identifiers"], "stale-helper cleanup identifiers differ")
+        require(
+            recovery.get("durableCheckpointBefore") is None
+            and recovery.get("durableCheckpointAfter") is None
+            and recovery.get("terminatedExecutable") is None
+            and recovery.get("processTreeTerminated") is False
+            and recovery.get("stateSchemaVersion") is None,
+            "stale-helper unexpectedly used a synthetic process checkpoint",
+        )
+        required_transition_commands = [
+            ["hostwright-containerization-helper", "negotiate", "h1"],
+            ["hostwright-containerization-helper", "shutdown", "h1"],
+            ["hostwright-containerization-helper", "negotiate", "h2"],
+            ["hostwright-containerization-helper", "shutdown", "h2"],
+        ]
+        command_arguments = [command["arguments"] for command in commands if command["exitStatus"] == 0]
+        require(
+            all(arguments in command_arguments for arguments in required_transition_commands),
+            "stale-helper helper process-cycle evidence is incomplete",
+        )
 
 runner_command = ["hostwright-runtime-conformance", *runner_arguments]
 for index, argument in enumerate(runner_command):

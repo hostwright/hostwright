@@ -649,21 +649,57 @@ struct DistributionCleanBuildResult: Sendable {
     let externalSwiftPMDependencies: [String]
 }
 
+private final class DistributionCleanBuildLease: @unchecked Sendable {
+    private let lock = NSLock()
+    private var active = false
+
+    func acquire() -> Bool {
+        lock.withLock {
+            guard !active else { return false }
+            active = true
+            return true
+        }
+    }
+
+    func release() {
+        lock.withLock {
+            precondition(active)
+            active = false
+        }
+    }
+}
+
 public struct DistributionCleanBuilder: Sendable {
     private let runner: DistributionProcessRunner
     private let assembler: DistributionAssembler
     private let configuredContainerizationAssets: DistributionContainerizationAssetBundle?
-    private let compilerVisibleScratchPath: URL
+    private let compilerScratchPath: URL
+    private let buildLease: DistributionCleanBuildLease
 
     public init(
         runner: DistributionProcessRunner = DistributionProcessRunner(),
         containerizationAssets: DistributionContainerizationAssetBundle? = nil
     ) {
+        self.init(
+            runner: runner,
+            containerizationAssets: containerizationAssets,
+            compilerScratchPath: FileManager.default.temporaryDirectory.appendingPathComponent(
+                "hostwright-dist-clean-scratch-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        )
+    }
+
+    init(
+        runner: DistributionProcessRunner = DistributionProcessRunner(),
+        containerizationAssets: DistributionContainerizationAssetBundle? = nil,
+        compilerScratchPath: URL
+    ) {
         self.runner = runner
         self.assembler = DistributionAssembler(runner: runner)
         self.configuredContainerizationAssets = containerizationAssets
-        self.compilerVisibleScratchPath = FileManager.default.temporaryDirectory
-            .appendingPathComponent("hostwright-dist-clean-visible-\(UUID().uuidString)", isDirectory: true)
+        self.compilerScratchPath = compilerScratchPath
+        self.buildLease = DistributionCleanBuildLease()
     }
 
     static func deterministicReleaseBuildArguments(
@@ -718,6 +754,12 @@ public struct DistributionCleanBuilder: Sendable {
         guard !cancellation.isCancelled else {
             throw DistributionError.commandCancelled("clean distribution build preflight")
         }
+        guard buildLease.acquire() else {
+            throw DistributionError.invalidArguments(
+                "A clean distribution build is already active for this builder."
+            )
+        }
+        defer { buildLease.release() }
         guard expectedCommit.range(of: "^[a-f0-9]{40}$", options: .regularExpression) != nil,
               try DistributionFileSystem.isDirectoryNonSymlink(sourceRoot),
               try DistributionFileSystem.isRegularNonSymlink(sourceRoot.appendingPathComponent("Package.swift")) else {
@@ -757,20 +799,10 @@ public struct DistributionCleanBuilder: Sendable {
         commands.append(record("git status --porcelain=v1 --ignored --untracked-files=normal", ignoredStatusResult))
         try requireOnlyUnusedBuildDirectory(ignoredStatusResult.standardOutput)
 
-        let scratch = FileManager.default.temporaryDirectory
-            .appendingPathComponent("hostwright-dist-clean-scratch-\(UUID().uuidString)", isDirectory: true)
-        let visibleScratch = compilerVisibleScratchPath
-        try DistributionTemporaryPathPolicy.validate(scratch, role: "clean release-build scratch backing")
-        try DistributionTemporaryPathPolicy.validate(visibleScratch, role: "clean release-build scratch")
+        let scratch = compilerScratchPath
+        try DistributionTemporaryPathPolicy.validate(scratch, role: "clean release-build scratch")
         try DistributionFileSystem.createExclusiveDirectory(scratch)
-        try FileManager.default.createSymbolicLink(
-            atPath: visibleScratch.path,
-            withDestinationPath: scratch.path
-        )
         defer {
-            if DistributionFileSystem.entryExists(visibleScratch) {
-                try? DistributionFileSystem.removeOwnedTemporaryItem(visibleScratch)
-            }
             if DistributionFileSystem.entryExists(scratch) {
                 try? DistributionFileSystem.removeOwnedTemporaryItem(scratch)
             }
@@ -779,7 +811,7 @@ public struct DistributionCleanBuilder: Sendable {
         let dependencyResult = try runner.run(
             executablePath: "/usr/bin/swift",
             arguments: [
-                "package", "--package-path", sourceRoot.path, "--scratch-path", visibleScratch.path,
+                "package", "--package-path", sourceRoot.path, "--scratch-path", scratch.path,
                 "show-dependencies", "--format", "json"
             ],
             label: "inspect SwiftPM dependencies",
@@ -794,7 +826,7 @@ public struct DistributionCleanBuilder: Sendable {
         for product in DistributionLayout.shippedExecutableNames {
             let arguments = Self.deterministicReleaseBuildArguments(
                 sourceRoot: sourceRoot,
-                scratch: visibleScratch,
+                scratch: scratch,
                 additionalArguments: ["--product", product]
             )
             let result = try runner.run(
@@ -810,7 +842,7 @@ public struct DistributionCleanBuilder: Sendable {
         }
         let binPathArguments = Self.deterministicReleaseBuildArguments(
             sourceRoot: sourceRoot,
-            scratch: visibleScratch,
+            scratch: scratch,
             additionalArguments: ["--show-bin-path"]
         )
         let binPathResult = try runner.run(
@@ -824,26 +856,18 @@ public struct DistributionCleanBuilder: Sendable {
             binPathResult
         ))
         let binPath = binPathResult.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines)
-        let visiblePrefix = visibleScratch.path + "/"
-        guard binPath.hasPrefix(visiblePrefix) else {
+        let scratchPrefix = scratch.path + "/"
+        guard binPath.hasPrefix(scratchPrefix) else {
             throw DistributionError.invalidArtifact(
-                "SwiftPM returned a release binary path outside the compiler-visible scratch directory"
+                "SwiftPM returned a release binary path outside the clean build scratch directory"
             )
         }
-        let relativeBinPath = String(binPath.dropFirst(visiblePrefix.count))
+        let relativeBinPath = String(binPath.dropFirst(scratchPrefix.count))
         guard !relativeBinPath.isEmpty,
               !relativeBinPath.split(separator: "/").contains("..") else {
             throw DistributionError.invalidArtifact("SwiftPM returned an unsafe release binary path")
         }
         let backingBinPath = scratch.appendingPathComponent(relativeBinPath, isDirectory: true)
-        try DistributionFileSystem.removeOwnedTemporaryItem(visibleScratch)
-        commands.append(
-            HostwrightEvidenceCommand(
-                command: "remove exact compiler-visible release-build scratch alias",
-                exitCode: 0,
-                durationMilliseconds: 0
-            )
-        )
 
         let hostwright = backingBinPath.appendingPathComponent("hostwright")
         let control = backingBinPath.appendingPathComponent("hostwright-control")

@@ -4,6 +4,7 @@ import Foundation
 import HostwrightCore
 import HostwrightRuntime
 import HostwrightState
+import Security
 
 enum RuntimeQualificationRecoveryDriverError: Error, Equatable {
     case invalidSpecification
@@ -15,6 +16,76 @@ enum RuntimeQualificationRecoveryDriverError: Error, Equatable {
     case runtimeInventoryChanged
     case cleanupFailed
     case invalidEvidence
+}
+
+enum RuntimeQualificationHelperSignatureVerifier {
+    static func sha256(of url: URL) throws -> String {
+        let identity: SecureExecutableIdentity
+        do {
+            identity = try SecureExecutableResolver.verify(
+                path: url.path,
+                ownershipPolicy: .rootOrCurrentUser
+            )
+        } catch {
+            throw RuntimeQualificationRecoveryDriverError.providerPreflightFailed
+        }
+        guard identity.path == url.path,
+              url.lastPathComponent == "hostwright-containerization-helper" else {
+            throw RuntimeQualificationRecoveryDriverError.providerPreflightFailed
+        }
+
+        var staticCode: SecStaticCode?
+        guard SecStaticCodeCreateWithPath(url as CFURL, [], &staticCode) == errSecSuccess,
+              let staticCode else {
+            throw RuntimeQualificationRecoveryDriverError.providerPreflightFailed
+        }
+        var signingInformation: CFDictionary?
+        guard SecCodeCopySigningInformation(
+            staticCode,
+            SecCSFlags(rawValue: kSecCSSigningInformation),
+            &signingInformation
+        ) == errSecSuccess,
+        let values = signingInformation as? [String: Any],
+        matchesExpectedIdentity(
+            teamIdentifier: values[kSecCodeInfoTeamIdentifier as String] as? String,
+            identifier: values[kSecCodeInfoIdentifier as String] as? String
+        ) else {
+            throw RuntimeQualificationRecoveryDriverError.providerPreflightFailed
+        }
+
+        var requirement: SecRequirement?
+        guard SecRequirementCreateWithString(
+            ContainerizationHelperPeerIdentityPolicy.expectedDesignatedRequirement as CFString,
+            [],
+            &requirement
+        ) == errSecSuccess,
+        let requirement,
+        SecStaticCodeCheckValidity(
+            staticCode,
+            SecCSFlags(rawValue: kSecCSStrictValidate | kSecCSCheckAllArchitectures),
+            requirement
+        ) == errSecSuccess else {
+            throw RuntimeQualificationRecoveryDriverError.providerPreflightFailed
+        }
+
+        let data = try Data(contentsOf: url, options: .mappedIfSafe)
+        do {
+            try SecureExecutableResolver.verifyUnchanged(identity)
+        } catch {
+            throw RuntimeQualificationRecoveryDriverError.providerPreflightFailed
+        }
+        return SHA256.hash(data: data)
+            .map { String(format: "%02x", $0) }
+            .joined()
+    }
+
+    static func matchesExpectedIdentity(
+        teamIdentifier: String?,
+        identifier: String?
+    ) -> Bool {
+        teamIdentifier == ContainerizationHelperPeerIdentityPolicy.expectedTeamIdentifier &&
+            identifier == "hostwright-containerization-helper"
+    }
 }
 
 enum RuntimeQualificationRecoveryScenario: String, CaseIterable, Codable, Sendable {
@@ -33,6 +104,21 @@ struct RuntimeQualificationRecoverySpecification: Equatable, Sendable {
     let expectedVersion: String
     let scenario: RuntimeQualificationRecoveryScenario
     let localImage: String
+    let priorHelperURL: URL?
+
+    init(
+        providerID: RuntimeProviderID,
+        expectedVersion: String,
+        scenario: RuntimeQualificationRecoveryScenario,
+        localImage: String,
+        priorHelperURL: URL? = nil
+    ) {
+        self.providerID = providerID
+        self.expectedVersion = expectedVersion
+        self.scenario = scenario
+        self.localImage = localImage
+        self.priorHelperURL = priorHelperURL
+    }
 
     func validated() throws -> Self {
         let versionMatches = switch providerID {
@@ -48,6 +134,7 @@ struct RuntimeQualificationRecoverySpecification: Equatable, Sendable {
         }
         guard versionMatches,
               scenarioMatches,
+              (scenario == .staleHelper) == (priorHelperURL != nil),
               !localImage.isEmpty,
               localImage.utf8.count <= 512,
               localImage.rangeOfCharacter(from: .controlCharacters) == nil else {
@@ -81,6 +168,11 @@ struct RuntimeQualificationRecoveryEvidence: Codable, Equatable, Sendable {
     let providerGeneration: Int
     let providerMetadataRevisionBefore: Int
     let providerMetadataRevisionAfter: Int
+    let priorHelperSHA256: String?
+    let currentHelperSHA256: String?
+    let signedHelperTransitionVerified: Bool
+    let rollbackDisposition: String?
+    let rollbackFindingReasons: [String]
     let contractInput: String
     let durableCheckpointBefore: String?
     let durableCheckpointAfter: String?
@@ -142,12 +234,14 @@ private struct RuntimeQualificationRecoveryProviderBoundary: Sendable {
     let cliExecutablePath: String?
     let helperClient: ContainerizationHelperClient?
     let helperFaultController: RuntimeQualificationHelperFaultController?
+    let helperExecutableURL: URL?
     let recorder: RuntimeQualificationCommandRecorder
 
     static func make(
         providerID: RuntimeProviderID,
         expectedVersion: String,
-        recorder: RuntimeQualificationCommandRecorder
+        recorder: RuntimeQualificationCommandRecorder,
+        helperExecutableURL: URL? = nil
     ) async throws -> Self {
         let boundary: Self
         switch providerID {
@@ -168,6 +262,7 @@ private struct RuntimeQualificationRecoveryProviderBoundary: Sendable {
                 cliExecutablePath: executable.path,
                 helperClient: nil,
                 helperFaultController: nil,
+                helperExecutableURL: nil,
                 recorder: recorder
             )
         case .appleContainerization:
@@ -184,7 +279,7 @@ private struct RuntimeQualificationRecoveryProviderBoundary: Sendable {
             )
             let client = ContainerizationHelperClient(
                 configuration: try ContainerizationHelperClientConfiguration(
-                    executableURL: configuration.executableURL,
+                    executableURL: helperExecutableURL ?? configuration.executableURL,
                     configurationURL: configuration.configurationURL,
                     runtimeDirectoryURL: configuration.runtimeDirectoryURL,
                     launchTimeoutMilliseconds: 5_000,
@@ -201,20 +296,27 @@ private struct RuntimeQualificationRecoveryProviderBoundary: Sendable {
                 cliExecutablePath: nil,
                 helperClient: client,
                 helperFaultController: controller,
+                helperExecutableURL: helperExecutableURL ?? configuration.executableURL,
                 recorder: recorder
             )
         default:
             throw RuntimeQualificationRecoveryDriverError.providerPreflightFailed
         }
-        let snapshot = try await boundary.adapter.capabilitySnapshot()
-        let version = try await boundary.adapter.runtimeVersion()
-        guard snapshot.descriptor.providerID == providerID,
-              version == expectedVersion,
-              RuntimeProviderCapabilityNegotiator.validationFindings(for: snapshot).isEmpty else {
-            _ = await boundary.shutdown()
-            throw RuntimeQualificationRecoveryDriverError.providerPreflightFailed
+        do {
+            let snapshot = try await boundary.adapter.capabilitySnapshot()
+            let version = try await boundary.adapter.runtimeVersion()
+            guard snapshot.descriptor.providerID == providerID,
+                  version == expectedVersion,
+                  RuntimeProviderCapabilityNegotiator.validationFindings(for: snapshot).isEmpty else {
+                throw RuntimeQualificationRecoveryDriverError.providerPreflightFailed
+            }
+            return boundary
+        } catch {
+            guard await boundary.shutdown() else {
+                throw RuntimeQualificationRecoveryDriverError.cleanupFailed
+            }
+            throw error
         }
-        return boundary
     }
 
     func restart() async throws {
@@ -726,6 +828,7 @@ struct RuntimeQualificationRecoveryDriver {
         expectedVersion: String,
         scenario: String,
         localImage: String,
+        priorHelperURL: URL? = nil,
         recorder: RuntimeQualificationCommandRecorder = RuntimeQualificationCommandRecorder()
     ) throws {
         guard let scenario = RuntimeQualificationRecoveryScenario(rawValue: scenario) else {
@@ -736,7 +839,8 @@ struct RuntimeQualificationRecoveryDriver {
                 providerID: providerID,
                 expectedVersion: expectedVersion,
                 scenario: scenario,
-                localImage: localImage
+                localImage: localImage,
+                priorHelperURL: priorHelperURL
             ),
             recorder: recorder
         )
@@ -765,12 +869,25 @@ struct RuntimeQualificationRecoveryDriver {
     }
 
     private func runEvidence() async throws -> RuntimeQualificationRecoveryEvidence {
-        let boundary: RuntimeQualificationRecoveryProviderBoundary
+        let priorHelperSHA256BeforeLaunch: String?
+        if let priorHelperURL = specification.priorHelperURL {
+            do {
+                priorHelperSHA256BeforeLaunch = try RuntimeQualificationHelperSignatureVerifier.sha256(
+                    of: priorHelperURL
+                )
+            } catch {
+                throw RuntimeQualificationRecoveryDriverError.providerPreflightFailed
+            }
+        } else {
+            priorHelperSHA256BeforeLaunch = nil
+        }
+        var boundary: RuntimeQualificationRecoveryProviderBoundary
         do {
             boundary = try await .make(
                 providerID: specification.providerID,
                 expectedVersion: specification.expectedVersion,
-                recorder: recorder
+                recorder: recorder,
+                helperExecutableURL: specification.priorHelperURL
             )
         } catch let error as RuntimeQualificationRecoveryDriverError {
             throw error
@@ -789,9 +906,14 @@ struct RuntimeQualificationRecoveryDriver {
             let unmanagedInventoryBeforeSHA256 = try RuntimeQualificationUnmanagedInventoryDigest.sha256(
                 inventoryBefore
             )
-            let recordRevision = specification.scenario == .downgradeRefusal
-                ? RuntimeProviderMetadataEvidence.currentRevision + 1
-                : RuntimeProviderMetadataEvidence.currentRevision
+            let recordRevision: Int
+            if specification.scenario == .staleHelper {
+                recordRevision = RuntimeProviderMetadataEvidence.legacyRevision
+            } else if specification.scenario == .downgradeRefusal {
+                recordRevision = RuntimeProviderMetadataEvidence.currentRevision + 1
+            } else {
+                recordRevision = RuntimeProviderMetadataEvidence.currentRevision
+            }
             let record = RuntimeProviderRecoveryRecord(
                 persistedProviderBinding: specification.providerID.rawValue,
                 providerGeneration: 1,
@@ -806,6 +928,12 @@ struct RuntimeQualificationRecoveryDriver {
             var checkpointBefore: String?
             var checkpointAfter: String?
             var stateSchemaVersion: Int?
+            var freshPersistedEvidence: RuntimeProviderMetadataEvidence?
+            var priorHelperSHA256: String?
+            var currentHelperSHA256: String?
+            var signedHelperTransitionVerified = false
+            var rollbackDisposition: String?
+            var rollbackFindingReasons: [String] = []
             switch specification.scenario {
             case .cliServiceRestart, .helperRestart:
                 try await boundary.restart()
@@ -834,8 +962,86 @@ struct RuntimeQualificationRecoveryDriver {
                 evaluationSnapshot = Self.mixedSnapshot(from: baselineSnapshot)
                 contractInput = "mixed-component-contract-injection-from-live-snapshot"
             case .staleHelper:
-                evaluationSnapshot = Self.staleHelperSnapshot(from: baselineSnapshot)
-                contractInput = "stale-helper-contract-injection-from-live-snapshot"
+                guard let priorHelperURL = specification.priorHelperURL,
+                      let priorBefore = priorHelperSHA256BeforeLaunch,
+                      boundary.helperExecutableURL == priorHelperURL else {
+                    throw RuntimeQualificationRecoveryDriverError.providerPreflightFailed
+                }
+                let priorAfter = try RuntimeQualificationHelperSignatureVerifier.sha256(
+                    of: priorHelperURL
+                )
+                guard priorBefore == priorAfter,
+                      Self.helperFingerprint(in: baselineSnapshot) == priorAfter else {
+                    throw RuntimeQualificationRecoveryDriverError.providerPreflightFailed
+                }
+                priorHelperSHA256 = priorAfter
+                await recorder.record(
+                    arguments: [
+                        "hostwright-containerization-helper", "negotiate", "h1"
+                    ],
+                    exitStatus: 0
+                )
+                guard await boundary.shutdown() else {
+                    throw RuntimeQualificationRecoveryDriverError.cleanupFailed
+                }
+                await recorder.record(
+                    arguments: [
+                        "hostwright-containerization-helper", "shutdown", "h1"
+                    ],
+                    exitStatus: 0
+                )
+
+                let currentHelperURL = try Self.currentInstalledHelperURL()
+                let currentBefore = try RuntimeQualificationHelperSignatureVerifier.sha256(
+                    of: currentHelperURL
+                )
+                let currentBoundary = try await RuntimeQualificationRecoveryProviderBoundary.make(
+                    providerID: specification.providerID,
+                    expectedVersion: specification.expectedVersion,
+                    recorder: recorder,
+                    helperExecutableURL: currentHelperURL
+                )
+                boundary = currentBoundary
+                let currentAfter = try RuntimeQualificationHelperSignatureVerifier.sha256(
+                    of: currentHelperURL
+                )
+                guard currentBefore == currentAfter,
+                      priorAfter != currentAfter else {
+                    throw RuntimeQualificationRecoveryDriverError.providerPreflightFailed
+                }
+                currentHelperSHA256 = currentAfter
+                await recorder.record(
+                    arguments: [
+                        "hostwright-containerization-helper", "negotiate", "h2"
+                    ],
+                    exitStatus: 0
+                )
+                let currentImage = try await boundary.adapter.localImageEvidence(
+                    for: specification.localImage
+                )
+                guard currentImage == image else {
+                    throw RuntimeQualificationRecoveryDriverError.runtimeInventoryChanged
+                }
+                evaluationSnapshot = try await boundary.adapter.capabilitySnapshot()
+                guard Self.helperFingerprint(in: evaluationSnapshot) == currentAfter else {
+                    throw RuntimeQualificationRecoveryDriverError.providerPreflightFailed
+                }
+                let beforePersistence = RuntimeProviderRecoveryEvaluator.evaluate(
+                    record: record,
+                    currentSnapshot: evaluationSnapshot,
+                    metadataSupport: RuntimeProviderMetadataSupport(
+                        minimumReadableRevision: RuntimeProviderMetadataEvidence.legacyRevision,
+                        currentWritableRevision: RuntimeProviderMetadataEvidence.currentRevision
+                    )
+                )
+                try Self.verifyStaleHelperBeforePersistence(beforePersistence)
+                freshPersistedEvidence = try RuntimeProviderMetadataEvidence.parse(
+                    entries: RuntimeProviderMetadataEvidence.appendingCurrentEvidence(
+                        to: [],
+                        capabilitySHA256: evaluationSnapshot.canonicalSHA256
+                    )
+                )
+                contractInput = "signed-h1-to-h2-helper-transition"
             case .futureProtocolRefusal:
                 evaluationSnapshot = Self.futureProtocolSnapshot(from: baselineSnapshot)
                 contractInput = "future-protocol-contract-injection-from-live-snapshot"
@@ -849,9 +1055,32 @@ struct RuntimeQualificationRecoveryDriver {
                 metadataSupport: RuntimeProviderMetadataSupport(
                     minimumReadableRevision: RuntimeProviderMetadataEvidence.legacyRevision,
                     currentWritableRevision: RuntimeProviderMetadataEvidence.currentRevision
-                )
+                ),
+                freshPersistedEvidence: freshPersistedEvidence
             )
             try Self.verify(evaluation, for: specification.scenario)
+            if specification.scenario == .staleHelper {
+                let rollbackRecord = RuntimeProviderRecoveryRecord(
+                    persistedProviderBinding: specification.providerID.rawValue,
+                    providerGeneration: evaluation.providerGeneration,
+                    providerMetadataRevision: evaluation.nextProviderMetadataRevision,
+                    fingerprint: RuntimeProviderRecoveryFingerprint(
+                        snapshot: evaluationSnapshot
+                    )
+                )
+                let rollback = RuntimeProviderRecoveryEvaluator.evaluate(
+                    record: rollbackRecord,
+                    currentSnapshot: baselineSnapshot,
+                    metadataSupport: RuntimeProviderMetadataSupport(
+                        minimumReadableRevision: RuntimeProviderMetadataEvidence.legacyRevision,
+                        currentWritableRevision: RuntimeProviderMetadataEvidence.legacyRevision
+                    )
+                )
+                try Self.verifyStaleHelperRollback(rollback)
+                rollbackDisposition = rollback.disposition.rawValue
+                rollbackFindingReasons = rollback.findings.map(\.reason.rawValue)
+                signedHelperTransitionVerified = true
+            }
             let inventoryAfter = try await boundary.adapter.inventory()
             let unmanagedInventoryAfterSHA256 = try RuntimeQualificationUnmanagedInventoryDigest.sha256(
                 inventoryAfter
@@ -865,6 +1094,14 @@ struct RuntimeQualificationRecoveryDriver {
             state = nil
             guard await boundary.shutdown() else {
                 throw RuntimeQualificationRecoveryDriverError.cleanupFailed
+            }
+            if specification.scenario == .staleHelper {
+                await recorder.record(
+                    arguments: [
+                        "hostwright-containerization-helper", "shutdown", "h2"
+                    ],
+                    exitStatus: 0
+                )
             }
             await recorder.record(
                 arguments: [
@@ -897,13 +1134,18 @@ struct RuntimeQualificationRecoveryDriver {
                 providerGeneration: evaluation.providerGeneration,
                 providerMetadataRevisionBefore: record.providerMetadataRevision,
                 providerMetadataRevisionAfter: evaluation.nextProviderMetadataRevision,
+                priorHelperSHA256: priorHelperSHA256,
+                currentHelperSHA256: currentHelperSHA256,
+                signedHelperTransitionVerified: signedHelperTransitionVerified,
+                rollbackDisposition: rollbackDisposition,
+                rollbackFindingReasons: rollbackFindingReasons,
                 contractInput: contractInput,
                 durableCheckpointBefore: checkpointBefore,
                 durableCheckpointAfter: checkpointAfter,
                 terminatedExecutable: terminatedExecutable,
                 processTreeTerminated: processTreeTerminated,
                 stateSchemaVersion: stateSchemaVersion,
-                passedAssertions: 8,
+                passedAssertions: specification.scenario == .staleHelper ? 14 : 8,
                 failedAssertions: 0,
                 cleanupComplete: true,
                 cleanupIdentifiers: cleanupIdentifiers
@@ -943,7 +1185,9 @@ private extension RuntimeQualificationRecoveryDriver {
         case .staleHelper:
             evaluation.findings.isEmpty &&
                 evaluation.disposition == .reobserveThenResumeFromCheckpoint &&
-                evaluation.invalidatesCapabilitySnapshot
+                evaluation.invalidatesCapabilitySnapshot &&
+                evaluation.nextProviderMetadataRevision ==
+                    RuntimeProviderMetadataEvidence.currentRevision
         case .futureProtocolRefusal:
             evaluation.disposition == .refuseAndPreserveCheckpoint &&
                 reasons.contains(.unsupportedFutureProtocol)
@@ -956,6 +1200,50 @@ private extension RuntimeQualificationRecoveryDriver {
         guard valid, evaluation.providerGeneration == 1 else {
             throw RuntimeQualificationRecoveryDriverError.expectedRecoveryDecisionMissing
         }
+    }
+
+    static func verifyStaleHelperBeforePersistence(
+        _ evaluation: RuntimeProviderRecoveryEvaluation
+    ) throws {
+        guard evaluation.findings.isEmpty,
+              evaluation.disposition == .reobserveThenResumeFromCheckpoint,
+              evaluation.invalidatesCapabilitySnapshot,
+              evaluation.providerGeneration == 1,
+              evaluation.nextProviderMetadataRevision ==
+                RuntimeProviderMetadataEvidence.legacyRevision else {
+            throw RuntimeQualificationRecoveryDriverError.expectedRecoveryDecisionMissing
+        }
+    }
+
+    static func verifyStaleHelperRollback(
+        _ evaluation: RuntimeProviderRecoveryEvaluation
+    ) throws {
+        let reasons = Set(evaluation.findings.map(\.reason))
+        guard evaluation.disposition == .refuseAndPreserveCheckpoint,
+              reasons == [.metadataRevisionTooNew],
+              evaluation.invalidatesCapabilitySnapshot,
+              evaluation.providerGeneration == 1,
+              evaluation.nextProviderMetadataRevision ==
+                RuntimeProviderMetadataEvidence.currentRevision else {
+            throw RuntimeQualificationRecoveryDriverError.expectedRecoveryDecisionMissing
+        }
+    }
+
+    static func currentInstalledHelperURL() throws -> URL {
+        guard let hostExecutableURL = Bundle.main.executableURL else {
+            throw RuntimeQualificationRecoveryDriverError.hostwrightExecutableUnavailable
+        }
+        return try ContainerizationHelperClientConfiguration.installed(
+            hostExecutableURL: hostExecutableURL
+        ).executableURL
+    }
+
+    static func helperFingerprint(in snapshot: RuntimeCapabilitySnapshot) -> String? {
+        let helpers = snapshot.descriptor.components.filter {
+            $0.identifier == .appleContainerizationHelper
+        }
+        guard helpers.count == 1 else { return nil }
+        return helpers[0].fingerprint
     }
 
     static func mixedSnapshot(from snapshot: RuntimeCapabilitySnapshot) -> RuntimeCapabilitySnapshot {
@@ -980,19 +1268,6 @@ private extension RuntimeQualificationRecoveryDriver {
             ))
         }
         return replacingComponents(in: snapshot, with: components)
-    }
-
-    static func staleHelperSnapshot(
-        from snapshot: RuntimeCapabilitySnapshot
-    ) -> RuntimeCapabilitySnapshot {
-        replacingComponent(in: snapshot, identifier: .appleContainerizationHelper) { component in
-            RuntimeProviderComponent(
-                identifier: component.identifier,
-                version: component.version,
-                build: component.build,
-                fingerprint: sha256("stale-helper")
-            )
-        }
     }
 
     static func futureProtocolSnapshot(

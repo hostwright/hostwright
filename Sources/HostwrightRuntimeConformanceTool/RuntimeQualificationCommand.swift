@@ -54,6 +54,7 @@ struct RuntimeQualificationOptions: Sendable {
     let expectedSourceVersion: String?
     let expectedTargetVersion: String?
     let scenario: String?
+    let priorHelperURL: URL?
     let localImage: String
     let outputURL: URL
 }
@@ -109,7 +110,12 @@ enum RuntimeQualificationCommand {
                 "--expected-target-version", "--local-image", "--output"
             ]
         case .recovery:
-            allowed = ["--provider", "--expected-version", "--scenario", "--local-image", "--output"]
+            let base: Set<String> = [
+                "--provider", "--expected-version", "--scenario", "--local-image", "--output"
+            ]
+            allowed = values["--scenario"] == "stale-helper"
+                ? base.union(["--prior-helper"])
+                : base
         }
         guard Set(values.keys) == allowed else {
             throw RuntimeQualificationCommandError.usage(
@@ -135,6 +141,7 @@ enum RuntimeQualificationCommand {
                 expectedSourceVersion: nil,
                 expectedTargetVersion: nil,
                 scenario: nil,
+                priorHelperURL: nil,
                 localImage: localImage,
                 outputURL: outputURL
             )
@@ -157,6 +164,7 @@ enum RuntimeQualificationCommand {
                     try required("--expected-target-version", in: values), providerID: target
                 ),
                 scenario: nil,
+                priorHelperURL: nil,
                 localImage: localImage,
                 outputURL: outputURL
             )
@@ -176,6 +184,9 @@ enum RuntimeQualificationCommand {
                   !["helper-restart", "stale-helper"].contains(scenario) || providerID == .appleContainerization else {
                 throw RuntimeQualificationCommandError.usage("recovery scenario does not match the provider.")
             }
+            let priorHelperURL = scenario == "stale-helper"
+                ? try validatedPriorHelperURL(try required("--prior-helper", in: values))
+                : nil
             return RuntimeQualificationOptions(
                 operation: operation,
                 providerID: providerID,
@@ -185,6 +196,7 @@ enum RuntimeQualificationCommand {
                 expectedSourceVersion: nil,
                 expectedTargetVersion: nil,
                 scenario: scenario,
+                priorHelperURL: priorHelperURL,
                 localImage: localImage,
                 outputURL: outputURL
             )
@@ -258,5 +270,50 @@ enum RuntimeQualificationCommand {
             )
         }
         return url
+    }
+
+    private static func validatedPriorHelperURL(_ path: String) throws -> URL {
+        let components = path.split(separator: "/", omittingEmptySubsequences: false)
+        guard path.hasPrefix("/"), path.utf8.count <= 1_024,
+              !path.contains("\0"),
+              components.count > 1,
+              components.first?.isEmpty == true,
+              components.dropFirst().allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }),
+              URL(fileURLWithPath: path).lastPathComponent ==
+                "hostwright-containerization-helper" else {
+            throw RuntimeQualificationCommandError.usage(
+                "--prior-helper must be a normalized absolute helper executable path."
+            )
+        }
+        var metadata = stat()
+        guard lstat(path, &metadata) == 0,
+              metadata.st_mode & S_IFMT == S_IFREG,
+              metadata.st_nlink == 1,
+              metadata.st_uid == 0 || metadata.st_uid == geteuid(),
+              metadata.st_mode & (S_IWGRP | S_IWOTH | S_ISUID | S_ISGID | S_ISTXT) == 0,
+              metadata.st_mode & S_IXUSR != 0,
+              access(path, X_OK) == 0 else {
+            throw RuntimeQualificationCommandError.usage(
+                "--prior-helper must be a private regular executable."
+            )
+        }
+        do {
+            let identity = try SecureExecutableResolver.verify(
+                path: path,
+                ownershipPolicy: .rootOrCurrentUser
+            )
+            guard identity.path == path else {
+                throw RuntimeQualificationCommandError.usage(
+                    "--prior-helper may not traverse a symbolic link."
+                )
+            }
+        } catch let error as RuntimeQualificationCommandError {
+            throw error
+        } catch {
+            throw RuntimeQualificationCommandError.usage(
+                "--prior-helper failed secure executable validation."
+            )
+        }
+        return URL(fileURLWithPath: path)
     }
 }

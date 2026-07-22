@@ -26,7 +26,10 @@ struct RuntimeQualificationRecoveryReport: Codable, Equatable, Sendable {
                 providerID: RuntimeProviderID(rawValue: evidence.providerID),
                 expectedVersion: evidence.providerVersion,
                 scenario: scenario,
-                localImage: evidence.fixtureImageReference
+                localImage: evidence.fixtureImageReference,
+                priorHelperURL: scenario == .staleHelper
+                    ? URL(fileURLWithPath: "/evidence/hostwright-containerization-helper")
+                    : nil
               ).validated()) != nil,
               evidence.schemaVersion == 1,
               evidence.passedAssertions > 0,
@@ -63,6 +66,7 @@ struct RuntimeQualificationRecoveryReport: Codable, Equatable, Sendable {
                 RuntimeProviderRecoveryFindingReason(rawValue: value) != nil
               }),
               evidence.providerGeneration == 1,
+              Self.validHelperTransitionFields(evidence, scenario: scenario),
               Self.validScenario(evidence, scenario: scenario),
               Self.validProcessCycleCommands(
                 execution.commands,
@@ -165,8 +169,12 @@ struct RuntimeQualificationRecoveryReport: Codable, Equatable, Sendable {
             return disposition == .reobserveThenResumeFromCheckpoint &&
                 evidence.recoveryFindingReasons.isEmpty &&
                 evidence.capabilitySnapshotInvalidated &&
-                evidence.contractInput == "stale-helper-contract-injection-from-live-snapshot" &&
-                metadataStable && noProcessCycle
+                evidence.contractInput == "signed-h1-to-h2-helper-transition" &&
+                evidence.providerMetadataRevisionBefore ==
+                    RuntimeProviderMetadataEvidence.legacyRevision &&
+                evidence.providerMetadataRevisionAfter ==
+                    RuntimeProviderMetadataEvidence.currentRevision &&
+                noProcessCycle
         case .futureProtocolRefusal:
             return disposition == .refuseAndPreserveCheckpoint &&
                 reasons.contains(
@@ -188,6 +196,31 @@ struct RuntimeQualificationRecoveryReport: Codable, Equatable, Sendable {
         }
     }
 
+    private static func validHelperTransitionFields(
+        _ evidence: RuntimeQualificationRecoveryEvidence,
+        scenario: RuntimeQualificationRecoveryScenario
+    ) -> Bool {
+        if scenario != .staleHelper {
+            return evidence.priorHelperSHA256 == nil &&
+                evidence.currentHelperSHA256 == nil &&
+                !evidence.signedHelperTransitionVerified &&
+                evidence.rollbackDisposition == nil &&
+                evidence.rollbackFindingReasons.isEmpty
+        }
+        guard let prior = evidence.priorHelperSHA256,
+              let current = evidence.currentHelperSHA256,
+              sha256(prior), sha256(current), prior != current,
+              evidence.signedHelperTransitionVerified,
+              evidence.rollbackDisposition ==
+                RuntimeProviderRecoveryDisposition.refuseAndPreserveCheckpoint.rawValue,
+              evidence.rollbackFindingReasons == [
+                RuntimeProviderRecoveryFindingReason.metadataRevisionTooNew.rawValue
+              ] else {
+            return false
+        }
+        return true
+    }
+
     private static func validProcessCycle(
         _ evidence: RuntimeQualificationRecoveryEvidence,
         before: String,
@@ -206,6 +239,20 @@ struct RuntimeQualificationRecoveryReport: Codable, Equatable, Sendable {
         scenario: RuntimeQualificationRecoveryScenario,
         executable: String?
     ) -> Bool {
+        if scenario == .staleHelper {
+            let required: [(arguments: [String], status: Int)] = [
+                (["hostwright-containerization-helper", "negotiate", "h1"], 0),
+                (["hostwright-containerization-helper", "shutdown", "h1"], 0),
+                (["hostwright-containerization-helper", "negotiate", "h2"], 0),
+                (["hostwright-containerization-helper", "shutdown", "h2"], 0),
+            ]
+            return required.allSatisfy { requiredCommand in
+                commands.contains {
+                    $0.arguments == requiredCommand.arguments &&
+                        $0.exitStatus == requiredCommand.status
+                }
+            }
+        }
         guard scenario == .hostwrightTermination || scenario == .checkpointCrash else {
             return true
         }

@@ -225,7 +225,7 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
                 "Create-missing-service requires an action identity and exact versioned identifier bound to the desired service."
             )
         }
-        try validateCreateSubset(desiredService)
+        try RuntimeCreateSubsetPolicy.validate(desiredService, providerID: .appleContainerCLI)
 
         let imageListSpec = AppleContainerCommand.spec(
             kind: .listImages,
@@ -488,27 +488,6 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
         }
     }
 
-    private func validateCreateSubset(_ service: DesiredRuntimeService) throws {
-        guard service.mounts.isEmpty else {
-            throw RuntimeAdapterError.commandRejected(classification: .mutating, message: "Create-only apply rejects mounts.")
-        }
-        guard service.ports.allSatisfy({ ($0.hostPort ?? 0) >= 1_024 }) else {
-            throw RuntimeAdapterError.commandRejected(classification: .mutating, message: "Create-only apply rejects privileged host ports.")
-        }
-        guard service.ports.allSatisfy({ $0.bindAddress != "0.0.0.0" && $0.bindAddress != "::" }) else {
-            throw RuntimeAdapterError.commandRejected(classification: .mutating, message: "Create-only apply rejects broad bind addresses.")
-        }
-        guard !service.image.hasPrefix("-") else {
-            throw RuntimeAdapterError.commandRejected(classification: .mutating, message: "Create-only apply rejects image values beginning with '-'.")
-        }
-        guard service.command.allSatisfy({ !$0.hasPrefix("-") }) else {
-            throw RuntimeAdapterError.commandRejected(classification: .mutating, message: "Create-only apply rejects command tokens beginning with '-'.")
-        }
-        guard service.environment.allSatisfy({ $0.secretReference == nil }) else {
-            throw RuntimeAdapterError.commandRejected(classification: .mutating, message: "Create-only apply rejects unresolved secret references.")
-        }
-    }
-
     private func validateActionPreflight(_ action: PlannedRuntimeAction) throws {
         switch action.kind {
         case .create:
@@ -519,7 +498,7 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
                     "Create-missing-service requires exact desired identity and resource bindings."
                 )
             }
-            try validateCreateSubset(desiredService)
+            try RuntimeCreateSubsetPolicy.validate(desiredService, providerID: .appleContainerCLI)
         case .start:
             guard RuntimeManagedResourceIdentity.isSupportedIdentifier(action.resourceIdentifier) else {
                 throw RuntimeAdapterError.mutationUnavailableByPolicy(

@@ -873,6 +873,8 @@ enum ContainerizationHelperCapabilitySnapshot {
                 let implemented: Set<RuntimeProviderFeature> = [
                     .observation,
                     .lifecycle,
+                    .processControl,
+                    .streaming,
                     .images,
                     .cancellation,
                     .timeouts,

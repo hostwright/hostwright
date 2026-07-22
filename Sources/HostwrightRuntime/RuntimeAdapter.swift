@@ -152,6 +152,57 @@ public extension RuntimeAdapter {
     }
 }
 
+enum RuntimeCreateSubsetPolicy {
+    static func validate(
+        _ service: DesiredRuntimeService,
+        providerID: RuntimeProviderID
+    ) throws {
+        if providerID == .appleContainerCLI {
+            try validateAppleContainerCLI(service)
+            return
+        }
+        if providerID == .appleContainerization {
+            try validateAppleContainerization(service)
+            return
+        }
+        throw RuntimeAdapterError.mutationUnavailableByPolicy(
+            "Create-subset validation is unavailable for the selected runtime provider."
+        )
+    }
+
+    private static func validateAppleContainerCLI(_ service: DesiredRuntimeService) throws {
+        guard service.mounts.isEmpty else {
+            throw RuntimeAdapterError.commandRejected(classification: .mutating, message: "Create-only apply rejects mounts.")
+        }
+        guard service.ports.allSatisfy({ ($0.hostPort ?? 0) >= 1_024 }) else {
+            throw RuntimeAdapterError.commandRejected(classification: .mutating, message: "Create-only apply rejects privileged host ports.")
+        }
+        guard service.ports.allSatisfy({ $0.bindAddress != "0.0.0.0" && $0.bindAddress != "::" }) else {
+            throw RuntimeAdapterError.commandRejected(classification: .mutating, message: "Create-only apply rejects broad bind addresses.")
+        }
+        guard !service.image.hasPrefix("-") else {
+            throw RuntimeAdapterError.commandRejected(classification: .mutating, message: "Create-only apply rejects image values beginning with '-'.")
+        }
+        guard service.command.allSatisfy({ !$0.hasPrefix("-") }) else {
+            throw RuntimeAdapterError.commandRejected(classification: .mutating, message: "Create-only apply rejects command tokens beginning with '-'.")
+        }
+        guard service.environment.allSatisfy({ $0.secretReference == nil }) else {
+            throw RuntimeAdapterError.commandRejected(classification: .mutating, message: "Create-only apply rejects unresolved secret references.")
+        }
+    }
+
+    private static func validateAppleContainerization(_ service: DesiredRuntimeService) throws {
+        guard service.mounts.isEmpty,
+              service.ports.isEmpty,
+              service.healthCheck == nil,
+              service.environment.allSatisfy({ $0.secretReference == nil }) else {
+            throw RuntimeAdapterError.mutationUnavailableByPolicy(
+                "Containerization create requires the supported local-image lifecycle subset."
+            )
+        }
+    }
+}
+
 public struct AppleContainerCLIAdapter: RuntimeAdapter {
     private let applyAdapter: AppleContainerApplyAdapter
 

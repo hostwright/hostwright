@@ -10,6 +10,25 @@ final class ContainerizationHelperClientTests: XCTestCase {
     private let projectUUID = "22222222-2222-4222-8222-222222222222"
     private let fencingToken = "33333333-3333-4333-8333-333333333333"
 
+    func testLiveCodeValidationUsesSecurityFrameworkSupportedFlags() throws {
+        XCTAssertEqual(
+            ContainerizationHelperLiveCodeValidation.flags.rawValue,
+            kSecCSStrictValidate
+        )
+
+        var code: SecCode?
+        XCTAssertEqual(SecCodeCopySelf([], &code), errSecSuccess)
+        let liveCode = try XCTUnwrap(code)
+        XCTAssertEqual(
+            SecCodeCheckValidity(
+                liveCode,
+                ContainerizationHelperLiveCodeValidation.flags,
+                nil
+            ),
+            errSecSuccess
+        )
+    }
+
     func testHelperCodeRequirementSourceIsCanonicalAndParseable() {
         let source = ContainerizationHelperPeerIdentityPolicy.codeRequirementSource(
             identifier: "hostwright-containerization-helper"

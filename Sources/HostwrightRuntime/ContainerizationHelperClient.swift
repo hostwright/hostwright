@@ -3,6 +3,10 @@ import Foundation
 import HostwrightCore
 import Security
 
+package enum ContainerizationHelperLiveCodeValidation {
+    package static let flags = SecCSFlags(rawValue: kSecCSStrictValidate)
+}
+
 public enum ContainerizationHelperClientError: Error, Equatable, Sendable {
     case pathNotAbsolute
     case pathNotNormalized
@@ -711,7 +715,7 @@ private enum ContainerizationHelperUnixClient {
               let requirement,
               SecCodeCheckValidity(
                 code,
-                SecCSFlags(rawValue: kSecCSStrictValidate | kSecCSCheckAllArchitectures),
+                ContainerizationHelperLiveCodeValidation.flags,
                 requirement
               ) == errSecSuccess else {
             throw ContainerizationHelperClientError.peerAuthenticationFailed

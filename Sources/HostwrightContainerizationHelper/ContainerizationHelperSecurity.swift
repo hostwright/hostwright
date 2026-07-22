@@ -107,8 +107,11 @@ enum ContainerizationHelperSecurity {
             throw ContainerizationHelperAuthenticationError.peerCodeRequirementRejected
         }
 
-        let validationFlags = SecCSFlags(rawValue: kSecCSStrictValidate | kSecCSCheckAllArchitectures)
-        guard SecCodeCheckValidity(peerCode, validationFlags, requirement) == errSecSuccess else {
+        guard SecCodeCheckValidity(
+            peerCode,
+            ContainerizationHelperLiveCodeValidation.flags,
+            requirement
+        ) == errSecSuccess else {
             throw ContainerizationHelperAuthenticationError.peerCodeRequirementRejected
         }
     }

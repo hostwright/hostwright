@@ -3097,6 +3097,9 @@ final class HostwrightCLITests: XCTestCase {
                     )
                 )
             }
+            let originalWorkerOwnership = try XCTUnwrap(
+                try store.ownership.loadAll().first { $0.serviceName == "worker" }
+            )
             let observed = ObservedRuntimeState(
                 projectName: "demo",
                 services: [
@@ -3143,7 +3146,169 @@ final class HostwrightCLITests: XCTestCase {
             XCTAssertTrue(events.contains { $0.type == "cleanup.failed" })
             let ownership = try store.ownership.loadAll()
             XCTAssertFalse(try XCTUnwrap(ownership.first { $0.serviceName == "api" }).cleanupEligible)
-            XCTAssertTrue(try XCTUnwrap(ownership.first { $0.serviceName == "worker" }).cleanupEligible)
+            let survivingWorkerOwnership = try XCTUnwrap(ownership.first { $0.serviceName == "worker" })
+            XCTAssertTrue(survivingWorkerOwnership.cleanupEligible)
+            XCTAssertEqual(survivingWorkerOwnership.fencingToken, originalWorkerOwnership.fencingToken)
+            XCTAssertEqual(adapter.observedDesiredStates.count, 3)
+            let recoveryHint = try XCTUnwrap(
+                adapter.observedDesiredStates.last?.ownedResourceHints.first {
+                    $0.resourceIdentifier == originalWorkerOwnership.resourceIdentifier
+                }
+            )
+            XCTAssertEqual(recoveryHint.ownership?.resourceUUID, originalWorkerOwnership.resourceUUID)
+            XCTAssertEqual(recoveryHint.ownership?.fencingToken, originalWorkerOwnership.fencingToken)
+        }
+    }
+
+    func testCleanupProviderErrorWithVerifiedAbsenceFinalizesDeletion() throws {
+        try withTemporaryDatabase { databasePath in
+            let files = FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest])
+            let store = SQLiteStateStore(path: databasePath)
+            try store.migrate()
+            try saveDesiredManifest(store: store, manifestText: singleServiceManifest)
+            try store.ownership.upsert(
+                OwnershipRecord(
+                    id: "owner-api",
+                    resourceIdentifier: "hostwright-demo-api",
+                    resourceType: "container",
+                    projectID: "project-demo",
+                    serviceName: "api",
+                    runtimeAdapter: RuntimeProviderID.appleContainerCLI.rawValue,
+                    createdAt: "2026-07-01T00:00:00Z",
+                    observedAt: "2026-07-01T00:00:00Z",
+                    cleanupEligible: true,
+                    metadataJSONRedacted: "{}"
+                )
+            )
+            let present = ObservedRuntimeState(
+                projectName: "demo",
+                services: [ObservedRuntimeService(
+                    identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"),
+                    resourceIdentifier: "hostwright-demo-api",
+                    lifecycleState: .stopped
+                )],
+                adapterMetadata: fakeAdapterMetadata
+            )
+            let absent = ObservedRuntimeState(
+                projectName: "demo",
+                services: [],
+                adapterMetadata: fakeAdapterMetadata
+            )
+            let adapter = ScriptedApplyRuntimeAdapter(
+                observedState: present,
+                postExecuteObservedState: absent,
+                executeError: .commandFailed(
+                    exitStatus: 2,
+                    message: "provider reported failure",
+                    standardError: "token=\(fakeSecret)"
+                )
+            )
+
+            let dryRun = HostwrightCLI.run(
+                arguments: ["cleanup", "--state-db", databasePath, "--dry-run"],
+                environment: environment(files: files, runtimeAdapter: adapter)
+            )
+            let token = dryRun.standardOutput
+                .split(separator: "\n")
+                .first { $0.hasPrefix("Confirmation token: ") }!
+                .replacingOccurrences(of: "Confirmation token: ", with: "")
+            let confirmed = HostwrightCLI.run(
+                arguments: ["cleanup", "--state-db", databasePath, "--confirm-cleanup", token],
+                environment: environment(files: files, runtimeAdapter: adapter)
+            )
+
+            XCTAssertEqual(confirmed.exitCode, 0)
+            XCTAssertTrue(confirmed.standardOutput.contains("- deleted hostwright-demo-api"))
+            XCTAssertEqual(confirmed.standardError, "")
+            let operations = try store.operations.loadAll()
+            XCTAssertEqual(operations.map(\.status), [.recorded, .succeeded])
+            let succeeded = try XCTUnwrap(operations.last)
+            XCTAssertTrue(succeeded.payloadJSONRedacted.contains(#""result":"deleted-after-provider-error""#))
+            XCTAssertTrue(succeeded.payloadJSONRedacted.contains(#""recovery":"resource-absence-verified""#))
+            XCTAssertFalse(succeeded.payloadJSONRedacted.contains(fakeSecret))
+            let events = try store.events.loadAll()
+            XCTAssertTrue(events.contains { $0.type == "cleanup.deleted" })
+            XCTAssertFalse(events.contains { $0.type == "cleanup.failed" })
+            XCTAssertFalse(try XCTUnwrap(store.ownership.loadAll().first).cleanupEligible)
+        }
+    }
+
+    func testCleanupAmbiguousReobservationRetainsOperationFenceAndFailure() throws {
+        try withTemporaryDatabase { databasePath in
+            let files = FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest])
+            let store = SQLiteStateStore(path: databasePath)
+            try store.migrate()
+            try saveDesiredManifest(store: store, manifestText: singleServiceManifest)
+            try store.ownership.upsert(
+                OwnershipRecord(
+                    id: "owner-api",
+                    resourceIdentifier: "hostwright-demo-api",
+                    resourceType: "container",
+                    projectID: "project-demo",
+                    serviceName: "api",
+                    runtimeAdapter: RuntimeProviderID.appleContainerCLI.rawValue,
+                    createdAt: "2026-07-01T00:00:00Z",
+                    observedAt: "2026-07-01T00:00:00Z",
+                    cleanupEligible: true,
+                    metadataJSONRedacted: "{}"
+                )
+            )
+            let originalOwnership = try XCTUnwrap(store.ownership.loadAll().first)
+            let service = ObservedRuntimeService(
+                identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"),
+                resourceIdentifier: "hostwright-demo-api",
+                lifecycleState: .stopped
+            )
+            let present = ObservedRuntimeState(
+                projectName: "demo",
+                services: [service],
+                adapterMetadata: fakeAdapterMetadata
+            )
+            let mismatchedCapability = ObservedRuntimeState(
+                projectName: "demo",
+                services: [service],
+                adapterMetadata: fakeAdapterMetadata,
+                capabilitySHA256: String(repeating: "b", count: 64)
+            )
+            let adapter = ScriptedApplyRuntimeAdapter(
+                observedState: present,
+                postExecuteObservedState: mismatchedCapability,
+                executeError: .commandFailed(
+                    exitStatus: 2,
+                    message: "provider reported failure",
+                    standardError: "token=\(fakeSecret)"
+                )
+            )
+
+            let dryRun = HostwrightCLI.run(
+                arguments: ["cleanup", "--state-db", databasePath, "--dry-run"],
+                environment: environment(files: files, runtimeAdapter: adapter)
+            )
+            let token = dryRun.standardOutput
+                .split(separator: "\n")
+                .first { $0.hasPrefix("Confirmation token: ") }!
+                .replacingOccurrences(of: "Confirmation token: ", with: "")
+            let confirmed = HostwrightCLI.run(
+                arguments: ["cleanup", "--state-db", databasePath, "--confirm-cleanup", token],
+                environment: environment(files: files, runtimeAdapter: adapter)
+            )
+
+            XCTAssertEqual(confirmed.exitCode, CLIExitCode.partialFailure.rawValue)
+            XCTAssertTrue(confirmed.standardOutput.contains("- failed hostwright-demo-api"))
+            let operations = try store.operations.loadAll()
+            XCTAssertEqual(operations.map(\.status), [.recorded, .failed])
+            let failed = try XCTUnwrap(operations.last)
+            XCTAssertTrue(failed.payloadJSONRedacted.contains(
+                #""recovery":"reobservation-ambiguous-operation-fence-retained""#
+            ))
+            XCTAssertFalse(failed.payloadJSONRedacted.contains(fakeSecret))
+            let retainedOwnership = try XCTUnwrap(store.ownership.loadAll().first)
+            XCTAssertTrue(retainedOwnership.cleanupEligible)
+            XCTAssertNotEqual(retainedOwnership.fencingToken, originalOwnership.fencingToken)
+            XCTAssertTrue(failed.payloadJSONRedacted.contains(
+                #""fencingToken":"\#(retainedOwnership.fencingToken)""#
+            ))
+            XCTAssertTrue(try store.events.loadAll().contains { $0.type == "cleanup.failed" })
         }
     }
 
@@ -3544,6 +3709,7 @@ final class HostwrightCLITests: XCTestCase {
         )
 
         let observedState: ObservedRuntimeState
+        let postExecuteObservedState: ObservedRuntimeState?
         let observeError: RuntimeAdapterError?
         let executeError: RuntimeAdapterError?
         let readinessReport: RuntimeReadinessReport
@@ -3552,6 +3718,7 @@ final class HostwrightCLITests: XCTestCase {
         let onExecute: ExecuteHook?
         let capabilitySnapshots: [RuntimeCapabilitySnapshot]
         var capabilitySnapshotIndex = 0
+        var didAttemptExecution = false
         var executedActions: [PlannedRuntimeAction] = []
         var confirmations: [RuntimeMutationConfirmation] = []
         var logRequests: [RuntimeServiceIdentity] = []
@@ -3560,6 +3727,7 @@ final class HostwrightCLITests: XCTestCase {
 
         init(
             observedState: ObservedRuntimeState? = nil,
+            postExecuteObservedState: ObservedRuntimeState? = nil,
             observeError: RuntimeAdapterError? = nil,
             executeError: RuntimeAdapterError? = nil,
             readinessReport: RuntimeReadinessReport = RuntimeReadinessReport(
@@ -3596,6 +3764,16 @@ final class HostwrightCLITests: XCTestCase {
                     ? source.capabilitySHA256
                     : source.capabilitySHA256 ?? Self.testCapabilitySnapshot.canonicalSHA256
             )
+            self.postExecuteObservedState = postExecuteObservedState.map { source in
+                ObservedRuntimeState(
+                    projectName: source.projectName,
+                    services: source.services,
+                    adapterMetadata: source.adapterMetadata,
+                    capabilitySHA256: source.adapterMetadata == nil
+                        ? source.capabilitySHA256
+                        : source.capabilitySHA256 ?? Self.testCapabilitySnapshot.canonicalSHA256
+                )
+            }
             self.observeError = observeError
             self.executeError = executeError
             self.readinessReport = readinessReport
@@ -3631,6 +3809,9 @@ final class HostwrightCLITests: XCTestCase {
             if let observeError {
                 throw observeError
             }
+            if didAttemptExecution, let postExecuteObservedState {
+                return postExecuteObservedState
+            }
             return observedState
         }
 
@@ -3639,6 +3820,7 @@ final class HostwrightCLITests: XCTestCase {
         }
 
         func execute(_ action: PlannedRuntimeAction, confirmation: RuntimeMutationConfirmation?) async throws -> RuntimeEvent {
+            didAttemptExecution = true
             executedActions.append(action)
             if let confirmation {
                 confirmations.append(confirmation)

@@ -31,7 +31,7 @@ final class ContainerizationHelperClientTests: XCTestCase {
 
     func testHelperCodeRequirementSourceIsCanonicalAndParseable() {
         let source = ContainerizationHelperPeerIdentityPolicy.codeRequirementSource(
-            identifier: "hostwright-containerization-helper"
+            identifier: ContainerizationHelperPeerIdentityPolicy.expectedCodeIdentifier
         )
         XCTAssertEqual(
             source,
@@ -49,6 +49,27 @@ final class ContainerizationHelperClientTests: XCTestCase {
             errSecSuccess
         )
         XCTAssertNotNil(requirement)
+    }
+
+    func testHelperSignedCodeIdentityMatchesOnlyQualifiedIdentifierAndTeam() {
+        XCTAssertTrue(
+            ContainerizationHelperPeerIdentityPolicy.matchesSignedCode(
+                identifier: "hostwright-containerization-helper",
+                teamIdentifier: "993YC3JY4Q"
+            )
+        )
+        XCTAssertFalse(
+            ContainerizationHelperPeerIdentityPolicy.matchesSignedCode(
+                identifier: "dev.hostwright.containerization-helper",
+                teamIdentifier: "993YC3JY4Q"
+            )
+        )
+        XCTAssertFalse(
+            ContainerizationHelperPeerIdentityPolicy.matchesSignedCode(
+                identifier: "hostwright-containerization-helper",
+                teamIdentifier: "AAAAAAAAAA"
+            )
+        )
     }
 
     func testClientLaunchesHelperWithoutShellAndNegotiatesCanonicalProtocol() async throws {

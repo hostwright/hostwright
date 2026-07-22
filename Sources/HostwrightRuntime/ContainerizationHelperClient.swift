@@ -700,11 +700,11 @@ enum ContainerizationHelperUnixClient {
         let flags = SecCSFlags(rawValue: kSecCSSigningInformation)
         guard SecCodeCopySigningInformation(staticCode, flags, &information) == errSecSuccess,
               let values = information as? [String: Any],
-              values[kSecCodeInfoTeamIdentifier as String] as? String
-                == ContainerizationHelperPeerIdentityPolicy.expectedTeamIdentifier,
               let identifier = values[kSecCodeInfoIdentifier as String] as? String,
-              ["dev.hostwright.containerization-helper", "hostwright-containerization-helper"]
-                .contains(identifier) else {
+              ContainerizationHelperPeerIdentityPolicy.matchesSignedCode(
+                identifier: identifier,
+                teamIdentifier: values[kSecCodeInfoTeamIdentifier as String] as? String
+              ) else {
             throw ContainerizationHelperClientError.peerAuthenticationFailed
         }
         let requirementText = ContainerizationHelperPeerIdentityPolicy.codeRequirementSource(

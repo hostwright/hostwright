@@ -536,9 +536,17 @@ public enum ContainerizationHelperPeerIdentityError: Error, Equatable, Sendable 
 }
 
 public struct ContainerizationHelperPeerIdentityPolicy: Equatable, Sendable {
+    package static let expectedCodeIdentifier = "hostwright-containerization-helper"
     public static let expectedTeamIdentifier = "993YC3JY4Q"
     public static let expectedDesignatedRequirement =
         #"identifier "hostwright-containerization-helper" and anchor apple generic and certificate leaf[subject.OU] = "993YC3JY4Q""#
+
+    package static func matchesSignedCode(
+        identifier: String?,
+        teamIdentifier: String?
+    ) -> Bool {
+        identifier == expectedCodeIdentifier && teamIdentifier == expectedTeamIdentifier
+    }
 
     package static func codeRequirementSource(
         identifier: String,

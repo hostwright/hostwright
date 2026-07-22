@@ -128,6 +128,7 @@ struct CleanupCommandRunner {
                     token: token,
                     adapter: adapter,
                     observed: observed,
+                    observationDesiredState: observationDesiredState,
                     store: store,
                     projectName: mapping.desiredState.projectName,
                     teamBinding: teamBinding
@@ -283,6 +284,7 @@ struct CleanupCommandRunner {
         token: String,
         adapter: any RuntimeAdapter,
         observed: ObservedRuntimeState,
+        observationDesiredState: DesiredRuntimeState,
         store: SQLiteStateStore,
         projectName: String,
         teamBinding: TeamWorkflowBinding?
@@ -338,6 +340,10 @@ struct CleanupCommandRunner {
 
             let operationID = hostwrightUniqueID(prefix: "operation-cleanup")
             let operationFencingToken = HostwrightResourceUUID.generate()
+            var failureRecovery = "not-attempted"
+            var failureRecoveryError: String?
+            var successPayload: [String: Any] = ["result": "deleted"]
+            var successEventPayload: [String: Any] = ["resourceIdentifier": candidate.resourceIdentifier]
             try store.operations.record(
                 OperationRecord(
                     id: "\(operationID)-recorded",
@@ -390,25 +396,81 @@ struct CleanupCommandRunner {
                 if let issue = context.validationIssue {
                     throw StateStoreError.invalidRecord(issue)
                 }
-                let event = try hostwrightWaitForAsync {
-                    try await adapter.execute(
-                        PlannedRuntimeAction(
-                            kind: .remove,
-                            identity: candidate.identity,
-                            resourceIdentifier: candidate.resourceIdentifier,
-                            isDestructive: true,
-                            summary: "Delete cleanup-eligible Hostwright-owned container \(candidate.resourceIdentifier)."
-                        ),
-                        confirmation: RuntimeMutationConfirmation(
-                            confirmed: true,
-                            reason: "Confirmed Hostwright cleanup \(token)",
-                            planHash: token,
-                            manifestHash: teamBinding?.manifestHash,
-                            profileHash: teamBinding?.profileHash,
-                            approvalHash: teamBinding?.approvalHash,
-                            context: context
+                let event: RuntimeEvent
+                do {
+                    event = try hostwrightWaitForAsync {
+                        try await adapter.execute(
+                            PlannedRuntimeAction(
+                                kind: .remove,
+                                identity: candidate.identity,
+                                resourceIdentifier: candidate.resourceIdentifier,
+                                isDestructive: true,
+                                summary: "Delete cleanup-eligible Hostwright-owned container \(candidate.resourceIdentifier)."
+                            ),
+                            confirmation: RuntimeMutationConfirmation(
+                                confirmed: true,
+                                reason: "Confirmed Hostwright cleanup \(token)",
+                                planHash: token,
+                                manifestHash: teamBinding?.manifestHash,
+                                profileHash: teamBinding?.profileHash,
+                                approvalHash: teamBinding?.approvalHash,
+                                context: context
+                            )
                         )
-                    )
+                    }
+                } catch {
+                    let providerError = error
+                    switch reobserveFailedDelete(
+                        adapter: adapter,
+                        desiredState: observationDesiredState,
+                        candidate: candidate,
+                        providerID: providerID,
+                        capabilitySHA256: capabilitySHA256
+                    ) {
+                    case .resourceAbsent:
+                        let redactedProviderError = RuntimeRedactionPolicy.default.redact(
+                            String(describing: providerError)
+                        )
+                        successPayload = [
+                            "providerError": redactedProviderError,
+                            "recovery": "resource-absence-verified",
+                            "result": "deleted-after-provider-error"
+                        ]
+                        successEventPayload = [
+                            "providerError": redactedProviderError,
+                            "recovery": "resource-absence-verified",
+                            "resourceIdentifier": candidate.resourceIdentifier
+                        ]
+                        event = RuntimeEvent(
+                            identity: candidate.identity,
+                            severity: .warning,
+                            message: "The runtime provider reported a cleanup failure, but exact structured re-observation verified the managed container is absent.",
+                            resourceIdentifier: candidate.resourceIdentifier
+                        )
+                    case .resourcePresent:
+                        do {
+                            let restored = try store.ownership.advanceFencingToken(
+                                resourceIdentifier: candidate.resourceIdentifier,
+                                runtimeAdapter: candidate.runtimeAdapter,
+                                expectedResourceUUID: candidate.ownership.resourceUUID,
+                                expectedFencingToken: operationFencingToken,
+                                newFencingToken: candidate.ownership.fencingToken,
+                                observedAt: hostwrightTimestamp()
+                            )
+                            failureRecovery = restored == nil
+                                ? "resource-present-fence-retained"
+                                : "resource-present-fence-restored"
+                        } catch {
+                            failureRecovery = "resource-present-fence-retained"
+                            failureRecoveryError = RuntimeRedactionPolicy.default.redact(
+                                String(describing: error)
+                            )
+                        }
+                        throw providerError
+                    case .ambiguous:
+                        failureRecovery = "reobservation-ambiguous-operation-fence-retained"
+                        throw providerError
+                    }
                 }
 
                 let successTimestamp = hostwrightTimestamp()
@@ -425,7 +487,7 @@ struct CleanupCommandRunner {
                             idempotencyKey: idempotencyKey,
                             planHash: token,
                             payloadJSONRedacted: jsonPayload(
-                                ["result": "deleted"].merging(hostwrightTeamBindingPayload(teamBinding)) { current, _ in current }
+                                successPayload.merging(hostwrightTeamBindingPayload(teamBinding)) { current, _ in current }
                             )
                         )
                     )
@@ -441,7 +503,7 @@ struct CleanupCommandRunner {
                             runtimeAdapter: runtimeAdapter,
                             message: event.message,
                             payloadJSONRedacted: jsonPayload(
-                                ["resourceIdentifier": candidate.resourceIdentifier]
+                                successEventPayload
                                     .merging(hostwrightTeamBindingPayload(teamBinding)) { current, _ in current }
                             )
                         )
@@ -471,6 +533,15 @@ struct CleanupCommandRunner {
                 hadFailure = true
                 let redactedError = RuntimeRedactionPolicy.default.redact(String(describing: error))
                 do {
+                    var failurePayload: [String: Any] = [
+                        "error": redactedError,
+                        "fencingToken": operationFencingToken,
+                        "priorFencingToken": candidate.ownership.fencingToken,
+                        "recovery": failureRecovery
+                    ]
+                    if let failureRecoveryError {
+                        failurePayload["recoveryError"] = failureRecoveryError
+                    }
                     try store.operations.record(
                         OperationRecord(
                             id: "\(operationID)-failed",
@@ -483,7 +554,7 @@ struct CleanupCommandRunner {
                             idempotencyKey: idempotencyKey,
                             planHash: token,
                             payloadJSONRedacted: jsonPayload(
-                                ["error": redactedError].merging(hostwrightTeamBindingPayload(teamBinding)) { current, _ in current }
+                                failurePayload.merging(hostwrightTeamBindingPayload(teamBinding)) { current, _ in current }
                             )
                         )
                     )
@@ -499,7 +570,10 @@ struct CleanupCommandRunner {
                             runtimeAdapter: runtimeAdapter,
                             message: "Cleanup failed for \(candidate.resourceIdentifier): \(redactedError)",
                             payloadJSONRedacted: jsonPayload(
-                                ["resourceIdentifier": candidate.resourceIdentifier]
+                                [
+                                    "recovery": failureRecovery,
+                                    "resourceIdentifier": candidate.resourceIdentifier
+                                ]
                                     .merging(hostwrightTeamBindingPayload(teamBinding)) { current, _ in current }
                             )
                         )
@@ -526,6 +600,66 @@ struct CleanupCommandRunner {
             )
         }
         return CLIRunResult(standardOutput: lines.joined(separator: "\n"))
+    }
+
+    private enum FailedDeleteObservation {
+        case resourcePresent
+        case resourceAbsent
+        case ambiguous
+    }
+
+    private func reobserveFailedDelete(
+        adapter: any RuntimeAdapter,
+        desiredState: DesiredRuntimeState,
+        candidate: CleanupCandidate,
+        providerID: RuntimeProviderID,
+        capabilitySHA256: String
+    ) -> FailedDeleteObservation {
+        guard let projectResourceUUID = candidate.ownership.projectResourceUUID else {
+            return .ambiguous
+        }
+        let expectedOwnership = RuntimeInventoryOwnershipEvidence(
+            resourceUUID: candidate.ownership.resourceUUID,
+            projectUUID: projectResourceUUID,
+            resourceGeneration: candidate.ownership.resourceGeneration,
+            projectGeneration: candidate.ownership.projectGeneration,
+            providerID: providerID,
+            providerGeneration: candidate.ownership.providerGeneration,
+            fencingToken: candidate.ownership.fencingToken
+        )
+        let exactHints = desiredState.ownedResourceHints.filter {
+            $0.resourceIdentifier == candidate.resourceIdentifier &&
+                $0.identity == candidate.identity &&
+                $0.identityVersion == candidate.ownership.identityVersion &&
+                $0.ownership == expectedOwnership
+        }
+        guard exactHints.count == 1 else {
+            return .ambiguous
+        }
+
+        let reobserved: ObservedRuntimeState
+        do {
+            reobserved = try hostwrightWaitForAsync {
+                try await adapter.observe(desiredState: desiredState)
+            }
+        } catch {
+            return .ambiguous
+        }
+        guard reobserved.adapterMetadata?.providerID == providerID,
+              reobserved.capabilitySHA256 == capabilitySHA256 else {
+            return .ambiguous
+        }
+        let matching = reobserved.services.filter {
+            $0.identity == candidate.identity &&
+                $0.resourceIdentifier == candidate.resourceIdentifier
+        }
+        guard matching.count <= 1 else {
+            return .ambiguous
+        }
+        guard let service = matching.first else {
+            return .resourceAbsent
+        }
+        return service.lifecycleState == .missing ? .resourceAbsent : .resourcePresent
     }
 
     private func recordCleanupPlanned(

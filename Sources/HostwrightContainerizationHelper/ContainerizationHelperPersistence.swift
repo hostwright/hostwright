@@ -37,6 +37,7 @@ struct ContainerizationHelperPersistedRecord: Codable, Sendable {
     var workingDirectory: String?
     var user: String?
     let mutationContext: RuntimeMutationContext
+    var runtimeInstanceID: String?
     var phase: ContainerizationHelperPersistedPhase
     var failureCategory: String?
 
@@ -54,6 +55,7 @@ struct ContainerizationHelperPersistedRecord: Codable, Sendable {
         workingDirectory = nil
         user = nil
         mutationContext = context
+        runtimeInstanceID = UUID().uuidString.lowercased()
         phase = .preparedCreate
         failureCategory = nil
     }

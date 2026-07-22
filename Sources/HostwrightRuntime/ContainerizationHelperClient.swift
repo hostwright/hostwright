@@ -937,6 +937,7 @@ public actor ContainerizationHelperClient {
             process?.terminate()
             return
         }
+        let ownedProcess = process
         let _: ContainerizationHelperAcknowledgement? = try? await request(
             operation: .shutdown,
             capabilityDigest: snapshot.canonicalSHA256,
@@ -944,7 +945,10 @@ public actor ContainerizationHelperClient {
             idempotencyKey: "shutdown/\(UUID().uuidString.lowercased())",
             payload: ContainerizationHelperEmptyPayload()
         )
-        process?.terminate()
+        ownedProcess?.terminate()
+        if let ownedProcess {
+            try? removeStaleOwnedSocket(processID: ownedProcess.processID)
+        }
         process = nil
         ownedSocketIdentity = nil
         self.snapshot = nil
@@ -1072,6 +1076,8 @@ public actor ContainerizationHelperClient {
             } catch ContainerizationHelperClientError.socketUnavailable {
                 try await Task.sleep(for: .milliseconds(25))
             } catch ContainerizationHelperClientError.connectionFailed {
+                try await Task.sleep(for: .milliseconds(25))
+            } catch ContainerizationHelperClientError.peerAuthenticationFailed {
                 try await Task.sleep(for: .milliseconds(25))
             }
         }

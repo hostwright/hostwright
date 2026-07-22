@@ -1,4 +1,5 @@
 import Containerization
+import ContainerizationError
 import ContainerizationOCI
 import CryptoKit
 import Darwin
@@ -144,7 +145,11 @@ actor ContainerizationFrameworkBackend: ContainerizationHelperBackend {
         _ request: ContainerizationHelperImageRequest
     ) async throws -> ContainerizationHelperImageEvidence {
         try Task.checkCancellation()
-        return try await driver.localImageEvidence(reference: request.reference)
+        do {
+            return try await driver.localImageEvidence(reference: request.reference)
+        } catch let error as ContainerizationError where error.isCode(.notFound) {
+            throw ContainerizationHelperBackendError.rejected("image is not available locally")
+        }
     }
 
     func resourceUsage(
@@ -198,11 +203,11 @@ actor ContainerizationFrameworkBackend: ContainerizationHelperBackend {
             try Task.checkCancellation()
             try await driver.create(record)
             try Task.checkCancellation()
-            record.phase = .created
+            record.phase = .stopped
             record.failureCategory = nil
             try store.save(record)
             records[record.resourceIdentifier] = record
-            return result(for: record.resourceIdentifier, lifecycle: .created)
+            return result(for: record.resourceIdentifier, lifecycle: .stopped)
         } catch {
             try? await driver.stop(record)
             record.phase = error is CancellationError ? .stopped : .failed
@@ -284,6 +289,7 @@ actor ContainerizationFrameworkBackend: ContainerizationHelperBackend {
             try Task.checkCancellation()
             try await driver.restart(record)
             try Task.checkCancellation()
+            record.runtimeInstanceID = UUID().uuidString.lowercased()
             record.phase = .running
             try store.save(record)
             records[record.resourceIdentifier] = record
@@ -454,7 +460,7 @@ actor ContainerizationFrameworkBackend: ContainerizationHelperBackend {
             lifecycle = .failed
         }
         return RuntimeInventoryContainer(
-            runtimeID: record.resourceIdentifier,
+            runtimeID: record.runtimeInstanceID ?? record.resourceIdentifier,
             name: record.resourceIdentifier,
             imageID: record.image.variantDigest,
             imageReference: record.image.reference,

@@ -390,6 +390,53 @@ final class TrustedReleaseTests: XCTestCase {
         )
     }
 
+    func testContainerizationHelperSigningUsesOnlyVirtualizationEntitlement() throws {
+        let binary = URL(fileURLWithPath: "/private/tmp/release/bin/hostwright-containerization-helper")
+        let entitlements = URL(fileURLWithPath: "/private/tmp/helper.entitlements")
+        let fingerprint = String(repeating: "A", count: 40)
+
+        XCTAssertEqual(
+            TrustedReleaseCodeSigningPolicy.signingArguments(
+                relativePath: "bin/hostwright-containerization-helper",
+                binary: binary,
+                fingerprint: fingerprint,
+                entitlements: entitlements
+            ),
+            [
+                "--force", "--options", "runtime", "--timestamp",
+                "--entitlements", entitlements.path,
+                "--sign", fingerprint, binary.path
+            ]
+        )
+        XCTAssertEqual(
+            TrustedReleaseCodeSigningPolicy.signingArguments(
+                relativePath: "bin/hostwright",
+                binary: URL(fileURLWithPath: "/private/tmp/release/bin/hostwright"),
+                fingerprint: fingerprint,
+                entitlements: entitlements
+            ),
+            [
+                "--force", "--options", "runtime", "--timestamp",
+                "--sign", fingerprint, "/private/tmp/release/bin/hostwright"
+            ]
+        )
+
+        let plist = try XCTUnwrap(
+            String(
+                data: TrustedReleaseCodeSigningPolicy.containerizationHelperEntitlements,
+                encoding: .utf8
+            )
+        )
+        XCTAssertNoThrow(
+            try TrustedReleaseCodeSigningPolicy.requireContainerizationHelperEntitlement(plist)
+        )
+        XCTAssertThrowsError(
+            try TrustedReleaseCodeSigningPolicy.requireContainerizationHelperEntitlement(
+                plist.replacingOccurrences(of: "<true/>", with: "<false/>")
+            )
+        )
+    }
+
     func testDistributionRunnerRestrictsDeterministicSwiftEnvironment() throws {
         let runner = DistributionProcessRunner()
         let result = try runner.run(

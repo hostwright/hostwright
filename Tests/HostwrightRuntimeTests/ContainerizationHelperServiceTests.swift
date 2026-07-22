@@ -58,7 +58,7 @@ final class ContainerizationHelperServiceTests: XCTestCase {
             context: mutationContext(),
             through: dispatcher
         )
-        XCTAssertEqual(create.lifecycle, .created)
+        XCTAssertEqual(create.lifecycle, .stopped)
 
         for (operation, state) in [
             (ContainerizationHelperOperation.start, RuntimeInventoryLifecycleState.running),
@@ -547,7 +547,7 @@ private actor TestBackend: ContainerizationHelperBackend {
         }
         return ContainerizationHelperMutationResult(
             resourceIdentifier: request.resourceIdentifier,
-            lifecycle: .created,
+            lifecycle: .stopped,
             verified: true
         )
     }

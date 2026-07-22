@@ -1,3 +1,4 @@
+import ContainerizationError
 import CryptoKit
 import Darwin
 import Foundation
@@ -55,8 +56,8 @@ final class ContainerizationFrameworkBackendTests: XCTestCase {
         let request = try createRequest(context: context)
 
         let created = try await backend.create(request, context: context)
-        XCTAssertEqual(created.lifecycle, .created)
-        XCTAssertEqual(try store.loadRecords().map(\.phase), [.created])
+        XCTAssertEqual(created.lifecycle, .stopped)
+        XCTAssertEqual(try store.loadRecords().map(\.phase), [.stopped])
 
         let mutation = ContainerizationHelperMutationPayload(
             resourceIdentifier: request.resourceIdentifier,
@@ -86,6 +87,69 @@ final class ContainerizationFrameworkBackendTests: XCTestCase {
             operations,
             ["resolve", "create", "start", "stop", "start", "restart", "usage", "images", "delete"]
         )
+    }
+
+    func testMissingLocalImageIsRejectedWithoutMutation() async throws {
+        let parent = try makePrivateParent()
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let store = try ContainerizationHelperStateStore(
+            rootURL: parent.appendingPathComponent("state", isDirectory: true)
+        )
+        let driver = RecordingContainerizationDriver(
+            localImageError: ContainerizationError(.notFound, message: "image not found")
+        )
+        let backend = try ContainerizationFrameworkBackend(
+            snapshot: snapshot(),
+            store: store,
+            driver: driver
+        )
+
+        do {
+            _ = try await backend.localImageEvidence(
+                ContainerizationHelperImageRequest(reference: "example.invalid/missing:latest")
+            )
+            XCTFail("Expected missing local image rejection")
+        } catch {
+            XCTAssertEqual(
+                error as? ContainerizationHelperBackendError,
+                .rejected("image is not available locally")
+            )
+        }
+        XCTAssertTrue(try store.loadRecords().isEmpty)
+        let operations = await driver.operations()
+        XCTAssertEqual(operations, [])
+    }
+
+    func testManagedRestartReplacesOnlyTheRuntimeInstanceIdentity() async throws {
+        let parent = try makePrivateParent()
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let store = try ContainerizationHelperStateStore(
+            rootURL: parent.appendingPathComponent("state", isDirectory: true)
+        )
+        let backend = try ContainerizationFrameworkBackend(
+            snapshot: snapshot(),
+            store: store,
+            driver: RecordingContainerizationDriver()
+        )
+        let context = mutationContext()
+        let request = try createRequest(context: context)
+        let mutation = ContainerizationHelperMutationPayload(
+            resourceIdentifier: request.resourceIdentifier,
+            resourceUUID: request.resourceUUID
+        )
+
+        _ = try await backend.create(request, context: context)
+        let created = try await backend.observe(.init()).validatedInventory().containers[0]
+        _ = try await backend.start(mutation, context: context)
+        let started = try await backend.observe(.init()).validatedInventory().containers[0]
+        _ = try await backend.restart(mutation, context: context)
+        let restarted = try await backend.observe(.init()).validatedInventory().containers[0]
+
+        XCTAssertEqual(created.runtimeID, started.runtimeID)
+        XCTAssertNotEqual(started.runtimeID, restarted.runtimeID)
+        XCTAssertEqual(restarted.ownership?.resourceUUID, context.resourceUUID)
+        XCTAssertEqual(restarted.ownership?.projectUUID, context.projectResourceUUID)
+        XCTAssertEqual(try store.loadRecords()[0].runtimeInstanceID, restarted.runtimeID)
     }
 
     func testRestartRecoveryReportsStoppedUntilExplicitStart() async throws {
@@ -429,6 +493,11 @@ private actor RecordingContainerizationDriver: ContainerizationHelperRuntimeDriv
     )
 
     private var events: [String] = []
+    private let localImageError: ContainerizationError?
+
+    init(localImageError: ContainerizationError? = nil) {
+        self.localImageError = localImageError
+    }
 
     func resolveProcess(
         for request: ContainerizationHelperCreatePayload
@@ -443,7 +512,8 @@ private actor RecordingContainerizationDriver: ContainerizationHelperRuntimeDriv
     }
 
     func localImageEvidence(reference: String) async throws -> ContainerizationHelperImageEvidence {
-        Self.image
+        if let localImageError { throw localImageError }
+        return Self.image
     }
 
     func listImages() async throws -> [ContainerizationHelperImageRecord] {

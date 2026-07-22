@@ -125,7 +125,7 @@ final class ContainerizationHelperClientTests: XCTestCase {
                 ),
                 context: context
             )
-        XCTAssertEqual(create.lifecycle, .created)
+        XCTAssertEqual(create.lifecycle, .stopped)
         let payload = ContainerizationHelperMutationPayload(
             resourceIdentifier: "demo",
             resourceUUID: resourceUUID
@@ -338,6 +338,81 @@ final class ContainerizationHelperClientTests: XCTestCase {
         XCTAssertEqual(processState.launchedProcessIDs, [101, 102])
         XCTAssertEqual(operations, [.negotiate, .negotiate])
         XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.configuration.socketURL.path))
+    }
+
+    func testClientRetriesPeerAuthenticationFailureDuringFreshLaunch() async throws {
+        let fixture = try ClientFixture()
+        let helper = ScriptedHelper(snapshot: snapshot())
+        let processState = LockedProcessState()
+        let launcher = ContainerizationHelperProcessLauncher { _ in
+            processState.recordLaunch(processID: 401)
+            return processState.lease(processID: 401)
+        }
+        let transport = ContainerizationHelperClientTransport { frame, _, _, expectedPID in
+            guard expectedPID == 401 else {
+                throw ContainerizationHelperClientError.socketUnavailable
+            }
+            if processState.consumeInitialPeerAuthenticationFailure() {
+                throw ContainerizationHelperClientError.peerAuthenticationFailed
+            }
+            return try await helper.exchange(frame: frame, peerProcessID: 401)
+        }
+        let client = ContainerizationHelperClient(
+            configuration: fixture.configuration,
+            launcher: launcher,
+            transport: transport
+        )
+
+        let negotiated = try await client.negotiate()
+        let operations = await helper.operations()
+
+        XCTAssertEqual(negotiated, snapshot())
+        XCTAssertEqual(processState.launchCount, 1)
+        XCTAssertEqual(operations, [.negotiate])
+    }
+
+    func testShutdownRemovesOnlyTheOwnedSocketBeforeRelaunch() async throws {
+        let fixture = try ClientFixture()
+        let runtimeDirectory = try ContainerizationHelperRuntimeDirectory.prepare(
+            at: fixture.runtimeDirectoryURL
+        )
+        let socketLease = try runtimeDirectory.makeListeningSocket()
+        defer { try? socketLease.closeAndRemove() }
+        var socketMetadata = stat()
+        XCTAssertEqual(lstat(runtimeDirectory.socketURL.path, &socketMetadata), 0)
+        let socketDevice = UInt64(socketMetadata.st_dev)
+        let socketInode = UInt64(socketMetadata.st_ino)
+
+        let helper = ScriptedHelper(snapshot: snapshot())
+        let processState = LockedProcessState()
+        let launcher = ContainerizationHelperProcessLauncher { _ in
+            processState.lease(processID: processState.nextProcessID())
+        }
+        let transport = ContainerizationHelperClientTransport { frame, _, _, expectedPID in
+            guard let expectedPID else {
+                throw ContainerizationHelperClientError.socketUnavailable
+            }
+            let response = try await helper.exchange(frame: frame, peerProcessID: expectedPID)
+            return ContainerizationHelperTransportResponse(
+                frame: response.frame,
+                peerProcessID: expectedPID,
+                socketDevice: socketDevice,
+                socketInode: socketInode
+            )
+        }
+        let client = ContainerizationHelperClient(
+            configuration: fixture.configuration,
+            launcher: launcher,
+            transport: transport
+        )
+
+        _ = try await client.negotiate()
+        await client.shutdown()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: runtimeDirectory.socketURL.path))
+        _ = try await client.negotiate()
+
+        XCTAssertEqual(processState.launchedProcessIDs, [101, 102])
+        await client.shutdown()
     }
 
     func testCancellationSendsTypedCancelAndLeavesNoRunningClientTask() async throws {
@@ -673,6 +748,7 @@ private final class LockedProcessState: @unchecked Sendable {
     private let lock = NSLock()
     private var running: [pid_t: Bool] = [:]
     private var launches: [pid_t] = []
+    private var initialPeerAuthenticationFailureAvailable = true
 
     var launchCount: Int { lock.withLock { launches.count } }
     var launchedProcessIDs: [pid_t] { lock.withLock { launches } }
@@ -695,6 +771,14 @@ private final class LockedProcessState: @unchecked Sendable {
 
     func stop(processID: pid_t) {
         lock.withLock { running[processID] = false }
+    }
+
+    func consumeInitialPeerAuthenticationFailure() -> Bool {
+        lock.withLock {
+            guard initialPeerAuthenticationFailureAvailable else { return false }
+            initialPeerAuthenticationFailureAvailable = false
+            return true
+        }
     }
 
     func lease(processID: pid_t) -> ContainerizationHelperProcessLease {
@@ -971,7 +1055,7 @@ private actor ScriptedHelper {
             createPayloads.append(request.payload)
             return try await respond(
                 request,
-                result: mutationResult(request.payload.resourceIdentifier, lifecycle: .created),
+                result: mutationResult(request.payload.resourceIdentifier, lifecycle: .stopped),
                 peerPID: peerProcessID,
                 responseID: responseRequestID
             )

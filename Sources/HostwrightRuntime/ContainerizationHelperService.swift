@@ -416,7 +416,7 @@ public actor ContainerizationHelperDispatcher {
                     return try Self.requireVerifiedResult(
                         result,
                         resourceIdentifier: request.payload.resourceIdentifier,
-                        lifecycle: .created
+                        lifecycle: .stopped
                     )
                 }
             )

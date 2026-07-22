@@ -72,6 +72,53 @@ public struct TrustedReleaseBuildRequest: Sendable {
     }
 }
 
+enum TrustedReleaseCodeSigningPolicy {
+    static let containerizationHelperPath = "bin/hostwright-containerization-helper"
+    static let virtualizationEntitlement = "com.apple.security.virtualization"
+    static let containerizationHelperEntitlements = Data("""
+    <?xml version="1.0" encoding="UTF-8"?>
+    <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+    <plist version="1.0">
+    <dict>
+        <key>com.apple.security.virtualization</key>
+        <true/>
+    </dict>
+    </plist>
+
+    """.utf8)
+
+    static func signingArguments(
+        relativePath: String,
+        binary: URL,
+        fingerprint: String,
+        entitlements: URL
+    ) -> [String] {
+        var arguments = ["--force", "--options", "runtime", "--timestamp"]
+        if relativePath == containerizationHelperPath {
+            arguments.append(contentsOf: ["--entitlements", entitlements.path])
+        }
+        arguments.append(contentsOf: ["--sign", fingerprint, binary.path])
+        return arguments
+    }
+
+    static func requireContainerizationHelperEntitlement(_ output: String) throws {
+        guard let start = output.range(of: "<?xml"),
+              let end = output.range(of: "</plist>", range: start.lowerBound..<output.endIndex),
+              let data = String(output[start.lowerBound..<end.upperBound]).data(using: .utf8),
+              let values = try? PropertyListSerialization.propertyList(
+                  from: data,
+                  options: [],
+                  format: nil
+              ) as? [String: Any],
+              values.count == 1,
+              values[virtualizationEntitlement] as? Bool == true else {
+            throw DistributionError.invalidArtifact(
+                "containerization helper signature lacks the required virtualization entitlement"
+            )
+        }
+    }
+}
+
 public struct TrustedReleaseBuilder: Sendable {
     private let runner: DistributionProcessRunner
     private let identityResolver: DeveloperIDIdentityResolver
@@ -230,15 +277,25 @@ public struct TrustedReleaseBuilder: Sendable {
         }
 
         var signedBinaryCDHashes: [String: String] = [:]
+        let helperEntitlements = scratch.appendingPathComponent(
+            "hostwright-containerization-helper.entitlements",
+            isDirectory: false
+        )
+        try DistributionFileSystem.writeNewFile(
+            TrustedReleaseCodeSigningPolicy.containerizationHelperEntitlements,
+            to: helperEntitlements,
+            mode: 0o600
+        )
         for binaryPath in shippedBinaryPaths {
             let binary = signedRoot.appendingPathComponent(binaryPath)
             let sign = try runner.run(
                 executablePath: "/usr/bin/codesign",
-                arguments: [
-                    "--force", "--options", "runtime", "--timestamp",
-                    "--sign", applicationResolution.identity.sha1Fingerprint,
-                    binary.path
-                ],
+                arguments: TrustedReleaseCodeSigningPolicy.signingArguments(
+                    relativePath: binaryPath,
+                    binary: binary,
+                    fingerprint: applicationResolution.identity.sha1Fingerprint,
+                    entitlements: helperEntitlements
+                ),
                 label: "Developer ID sign \(binary.lastPathComponent)",
                 timeoutSeconds: 300,
                 cancellation: cancellation
@@ -261,6 +318,19 @@ public struct TrustedReleaseBuilder: Sendable {
             )
             signedBinaryCDHashes[binaryPath] = try requireSignedExecutableCDHash(details)
             commands.append(record("inspect Developer ID signature for \(binary.lastPathComponent)", details))
+            if binaryPath == TrustedReleaseCodeSigningPolicy.containerizationHelperPath {
+                let entitlements = try runner.run(
+                    executablePath: "/usr/bin/codesign",
+                    arguments: ["--display", "--entitlements", ":-", binary.path],
+                    label: "inspect containerization helper entitlements",
+                    timeoutSeconds: 30,
+                    cancellation: cancellation
+                )
+                try TrustedReleaseCodeSigningPolicy.requireContainerizationHelperEntitlement(
+                    entitlements.standardOutput + entitlements.standardError
+                )
+                commands.append(record("inspect containerization helper entitlements", entitlements))
+            }
         }
 
         let createdAt = DistributionTimestamp.string(Date())

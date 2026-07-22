@@ -177,7 +177,21 @@ public struct RuntimeNormalizedFailure: Codable, Equatable, Sendable {
     }
 
     private static func bounded(_ value: String, maximumBytes: Int) -> String {
-        let bytes = Array(value.utf8.prefix(maximumBytes))
-        return String(decoding: bytes, as: UTF8.self)
+        guard value.utf8.count > maximumBytes else {
+            return value
+        }
+
+        var byteCount = 0
+        var endIndex = value.startIndex
+        while endIndex < value.endIndex {
+            let nextIndex = value.index(after: endIndex)
+            let characterBytes = value[endIndex..<nextIndex].utf8.count
+            guard byteCount + characterBytes <= maximumBytes else {
+                break
+            }
+            byteCount += characterBytes
+            endIndex = nextIndex
+        }
+        return String(value[..<endIndex])
     }
 }

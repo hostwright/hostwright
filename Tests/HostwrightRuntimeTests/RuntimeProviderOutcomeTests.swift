@@ -69,4 +69,36 @@ final class RuntimeProviderOutcomeTests: XCTestCase {
         XCTAssertLessThanOrEqual(failure.guidance.utf8.count, RuntimeNormalizedFailure.maximumGuidanceBytes)
         XCTAssertTrue(failure.requiresObservationBeforeRetry)
     }
+
+    func testBoundsRemainExactAtMultibyteUTF8Boundary() {
+        let failure = RuntimeNormalizedFailure(
+            category: .invalidResponse,
+            retryDisposition: .safeAfterObservation,
+            recoveryDisposition: .reobserve,
+            providerID: String(repeating: "p", count: 255) + "🚀",
+            providerVersion: "1.1.0",
+            operationID: "operation-1",
+            diagnostic: String(
+                repeating: "d",
+                count: RuntimeNormalizedFailure.maximumDiagnosticBytes - 1
+            ) + "🚀",
+            guidance: String(
+                repeating: "g",
+                count: RuntimeNormalizedFailure.maximumGuidanceBytes - 1
+            ) + "🚀"
+        )
+
+        XCTAssertEqual(failure.providerID.utf8.count, 255)
+        XCTAssertEqual(
+            failure.diagnostic.utf8.count,
+            RuntimeNormalizedFailure.maximumDiagnosticBytes - 1
+        )
+        XCTAssertEqual(
+            failure.guidance.utf8.count,
+            RuntimeNormalizedFailure.maximumGuidanceBytes - 1
+        )
+        XCTAssertFalse(failure.providerID.contains("�"))
+        XCTAssertFalse(failure.diagnostic.contains("�"))
+        XCTAssertFalse(failure.guidance.contains("�"))
+    }
 }

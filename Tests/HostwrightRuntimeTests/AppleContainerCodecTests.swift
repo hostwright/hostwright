@@ -205,6 +205,116 @@ final class AppleContainerCodecTests: XCTestCase {
         }
     }
 
+    func testBothVersionCodecsAcceptUnknownNonSemanticFieldsAcrossStructuredReads() throws {
+        for codec in AppleContainerCLICodec.allCases {
+            let version = codec.rawValue
+            let versionOutput = try fixture("apple-container-\(version)-version.txt")
+
+            XCTAssertEqual(
+                try codec.decodeSystemStatus(
+                    fixtureAddingUnknownNonSemanticFields(
+                        "apple-container-\(version)-system-status.json"
+                    ),
+                    versionOutput: versionOutput
+                ).serviceState,
+                .running
+            )
+            XCTAssertEqual(
+                try codec.decodeObservation(
+                    fixtureAddingUnknownNonSemanticFields(
+                        "apple-container-\(version)-list.json"
+                    ),
+                    desiredState: desiredState,
+                    metadata: metadata
+                ).services.first?.lifecycleState,
+                .running
+            )
+
+            let image = "ghcr.io/example/api:\(version)"
+            let imageOutput = try fixtureAddingUnknownNonSemanticFields(
+                "apple-container-\(version)-image-list.json"
+            )
+            XCTAssertTrue(try codec.containsLocalImage(image, in: imageOutput))
+            XCTAssertEqual(
+                try codec.decodeLocalImageEvidence(
+                    imageOutput,
+                    expectedReference: image,
+                    preferredArchitecture: "arm64"
+                ).reference,
+                image
+            )
+            XCTAssertEqual(
+                try codec.decodeResourceUsage(
+                    fixtureAddingUnknownNonSemanticFields(
+                        "apple-container-\(version)-stats.json"
+                    ),
+                    expectedResourceIdentifier: resourceIdentifier
+                ).resourceIdentifier,
+                resourceIdentifier
+            )
+            XCTAssertEqual(
+                try codec.decodeNetworks(
+                    fixtureAddingUnknownNonSemanticFields(
+                        "apple-container-\(version)-network-list.json"
+                    )
+                ).first?.mode,
+                .nat
+            )
+            XCTAssertEqual(
+                try codec.decodeVolumes(
+                    fixtureAddingUnknownNonSemanticFields(
+                        "apple-container-\(version)-volume-list.json"
+                    )
+                ).first?.id,
+                "hostwright-cache"
+            )
+            XCTAssertEqual(
+                try codec.decodeMachines(
+                    fixtureAddingUnknownNonSemanticFields(
+                        "apple-container-\(version)-machine-list.json"
+                    )
+                ).first?.status,
+                .running
+            )
+        }
+    }
+
+    func testBothVersionCodecsRejectUnknownRequiredEnumsBeforeMutationConstruction() throws {
+        for codec in AppleContainerCLICodec.allCases {
+            let version = codec.rawValue
+
+            assertOutputParseFailsBeforeMutation(codec: codec, context: "container lifecycle \(version)") {
+                _ = try codec.decodeObservation(
+                    fixture(
+                        "apple-container-\(version)-list.json",
+                        replacing: "\"state\": \"running\"",
+                        with: "\"state\": \"future-lifecycle\""
+                    ),
+                    desiredState: desiredState,
+                    metadata: metadata
+                )
+            }
+            assertOutputParseFailsBeforeMutation(codec: codec, context: "network mode \(version)") {
+                _ = try codec.decodeNetworks(
+                    fixture(
+                        "apple-container-\(version)-network-list.json",
+                        replacing: "\"mode\": \"nat\"",
+                        with: "\"mode\": \"future-mode\""
+                    )
+                )
+            }
+            assertOutputParseFailsBeforeMutation(codec: codec, context: "machine status \(version)") {
+                _ = try codec.decodeMachines(
+                    fixture(
+                        "apple-container-\(version)-machine-list.json",
+                        replacing: "\"status\": \"running\"",
+                        with: "\"status\": \"future-machine-status\""
+                    )
+                )
+            }
+        }
+    }
+
     func testInfrastructureCodecsAcceptEmptyListsAndRejectAmbiguousOrPartialEvidence() throws {
         let codec = AppleContainerCLICodec.v1_1_0
 
@@ -568,6 +678,79 @@ final class AppleContainerCodecTests: XCTestCase {
     private func fixture(_ name: String) throws -> String {
         let url = try XCTUnwrap(Bundle.module.url(forResource: name, withExtension: nil))
         return try String(contentsOf: url, encoding: .utf8)
+    }
+
+    private func fixture(
+        _ name: String,
+        replacing original: String,
+        with replacement: String
+    ) throws -> String {
+        var output = try fixture(name)
+        let range = try XCTUnwrap(output.range(of: original), "Missing expected field in \(name).")
+        output.replaceSubrange(range, with: replacement)
+        XCTAssertNil(output.range(of: original), "Expected exactly one matching field in \(name).")
+        return output
+    }
+
+    private func fixtureAddingUnknownNonSemanticFields(_ name: String) throws -> String {
+        let source = try fixture(name)
+        let data = try XCTUnwrap(source.data(using: .utf8))
+        let json = try JSONSerialization.jsonObject(with: data)
+        var fieldIndex = 0
+
+        func addingUnknownFields(to value: Any, parentKey: String? = nil) -> Any {
+            if let array = value as? [Any] {
+                return array.map { addingUnknownFields(to: $0, parentKey: parentKey) }
+            }
+            guard var object = value as? [String: Any] else {
+                return value
+            }
+            for key in Array(object.keys) {
+                if let child = object[key] {
+                    object[key] = addingUnknownFields(to: child, parentKey: key)
+                }
+            }
+            if parentKey != "labels", parentKey != "options" {
+                object["futureNonSemanticField\(fieldIndex)"] = "ignored"
+                fieldIndex += 1
+            }
+            return object
+        }
+
+        let augmented = addingUnknownFields(to: json)
+        XCTAssertGreaterThan(fieldIndex, 0, "Expected at least one JSON object in \(name).")
+        let encoded = try JSONSerialization.data(withJSONObject: augmented, options: [.sortedKeys])
+        return try XCTUnwrap(String(data: encoded, encoding: .utf8))
+    }
+
+    private func assertOutputParseFailsBeforeMutation(
+        codec: AppleContainerCLICodec,
+        context: String,
+        file: StaticString = #filePath,
+        line: UInt = #line,
+        decode: () throws -> Void
+    ) {
+        var constructedMutation = false
+
+        XCTAssertThrowsError(
+            try {
+                try decode()
+                _ = AppleContainerCommand.spec(
+                    kind: .startContainer(containerID: resourceIdentifier),
+                    codec: codec,
+                    executable: ResolvedRuntimeExecutable(name: "container", path: "/usr/bin/container")
+                )
+                constructedMutation = true
+            }(),
+            context,
+            file: file,
+            line: line
+        ) { error in
+            guard case RuntimeAdapterError.outputParseFailed = error else {
+                return XCTFail("Expected outputParseFailed for \(context), got \(error).", file: file, line: line)
+            }
+        }
+        XCTAssertFalse(constructedMutation, context, file: file, line: line)
     }
 
     private func networkEntry(

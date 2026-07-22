@@ -110,6 +110,36 @@ final class AppleContainerAdapterInventoryTests: XCTestCase {
         let calls = await runner.recordedSpecs()
         XCTAssertTrue(calls.allSatisfy { $0.classification == .readOnly })
     }
+
+    func testProductionObservationPropagatesCancellationWithoutPartialObservationOrFurtherCommands() async throws {
+        let runner = try InventoryRuntimeProcessRunner(version: "1.1.0", cancelAtCall: 8)
+        let adapter = AppleContainerReadOnlyAdapter(
+            executableResolver: DictionaryRuntimeExecutableResolver(
+                executables: [
+                    AppleContainerCommand.executableName: "/usr/local/bin/container",
+                    "sw_vers": "/usr/bin/sw_vers",
+                    "uname": "/usr/bin/uname"
+                ]
+            ),
+            processRunner: runner
+        )
+        var observation: ObservedRuntimeState?
+
+        do {
+            observation = try await adapter.observe(
+                desiredState: DesiredRuntimeState(projectName: "demo", services: [])
+            )
+            XCTFail("Expected cancellation to propagate.")
+        } catch {
+            XCTAssertTrue(error is CancellationError)
+        }
+
+        XCTAssertNil(observation)
+        let calls = await runner.recordedSpecs()
+        XCTAssertEqual(calls.count, 9)
+        XCTAssertEqual(calls.last?.arguments, ["image", "list", "--format", "json"])
+        XCTAssertTrue(calls.allSatisfy { $0.classification == .readOnly })
+    }
 }
 
 private actor InventoryRuntimeProcessRunner: RuntimeProcessRunning {
@@ -121,9 +151,10 @@ private actor InventoryRuntimeProcessRunner: RuntimeProcessRunning {
     private let volumesOutput: String
     private let machinesOutput: String
     private let statsOutput: String
+    private let cancelAtCall: Int?
     private var specs: [RuntimeCommandSpec] = []
 
-    init(version: String) throws {
+    init(version: String, cancelAtCall: Int? = nil) throws {
         versionOutput = try Self.fixture("apple-container-\(version)-version.txt")
         statusOutput = try Self.fixture("apple-container-\(version)-system-status.json")
         containersOutput = try Self.fixture("apple-container-\(version)-inventory-containers.json")
@@ -132,10 +163,15 @@ private actor InventoryRuntimeProcessRunner: RuntimeProcessRunning {
         volumesOutput = try Self.fixture("apple-container-\(version)-volume-list.json")
         machinesOutput = try Self.fixture("apple-container-\(version)-machine-list.json")
         statsOutput = try Self.fixture("apple-container-\(version)-stats.json")
+        self.cancelAtCall = cancelAtCall
     }
 
     func run(_ spec: RuntimeCommandSpec) async throws -> RuntimeCommandResult {
+        let call = specs.count
         specs.append(spec)
+        if call == cancelAtCall {
+            throw CancellationError()
+        }
         let output: String
         if spec.executablePath == "/usr/local/bin/container" && spec.arguments == ["--version"] {
             output = versionOutput

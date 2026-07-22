@@ -565,7 +565,7 @@ public struct ContainerizationHelperClientTransport: Sendable {
     }
 }
 
-private enum ContainerizationHelperUnixClient {
+enum ContainerizationHelperUnixClient {
     static func exchange(
         frame: Data,
         socketURL: URL,
@@ -735,8 +735,7 @@ private enum ContainerizationHelperUnixClient {
             if result < 0, errno == EINTR { continue }
             guard result >= 0 else { throw ContainerizationHelperClientError.connectionFailed }
             if result == 0 { continue }
-            guard pollDescriptor.revents & Int16(POLLERR | POLLHUP | POLLNVAL) == 0,
-                  pollDescriptor.revents & Int16(event) != 0 else {
+            guard pollDescriptor.revents & Int16(event) != 0 else {
                 throw ContainerizationHelperClientError.connectionFailed
             }
             return
@@ -760,7 +759,7 @@ private enum ContainerizationHelperUnixClient {
         }
     }
 
-    private static func readExact(_ descriptor: Int32, count: Int, deadline: Int64) throws -> Data {
+    static func readExact(_ descriptor: Int32, count: Int, deadline: Int64) throws -> Data {
         var result = Data()
         result.reserveCapacity(count)
         var bytes = [UInt8](repeating: 0, count: min(max(1, count), 64 * 1_024))

@@ -203,6 +203,34 @@ final class ContainerizationHelperClientTests: XCTestCase {
         }
     }
 
+    func testUnixTransportReadsBufferedFrameWhenPeerClosesAfterWrite() throws {
+        var descriptors = [Int32](repeating: -1, count: 2)
+        XCTAssertEqual(socketpair(AF_UNIX, SOCK_STREAM, 0, &descriptors), 0)
+        let reader = descriptors[0]
+        let writer = descriptors[1]
+        defer { Darwin.close(reader) }
+
+        let payload = Data(#"{"status":"ok"}"#.utf8)
+        let frame = try ContainerizationHelperFraming.frame(payload)
+        let written = frame.withUnsafeBytes { bytes in
+            Darwin.write(writer, bytes.baseAddress, bytes.count)
+        }
+        XCTAssertEqual(written, frame.count)
+        XCTAssertEqual(Darwin.close(writer), 0)
+
+        var readiness = pollfd(fd: reader, events: Int16(POLLIN), revents: 0)
+        XCTAssertEqual(Darwin.poll(&readiness, 1, 1_000), 1)
+        XCTAssertNotEqual(readiness.revents & Int16(POLLIN), 0)
+        XCTAssertNotEqual(readiness.revents & Int16(POLLHUP), 0)
+
+        let received = try ContainerizationHelperUnixClient.readExact(
+            reader,
+            count: frame.count,
+            deadline: Int64(Date().timeIntervalSince1970 * 1_000) + 1_000
+        )
+        XCTAssertEqual(received, frame)
+    }
+
     func testRemoteErrorsAreTypedRedactedAndInvalidateStaleSnapshot() async throws {
         let fixture = try ClientFixture()
         let helper = ScriptedHelper(snapshot: snapshot())

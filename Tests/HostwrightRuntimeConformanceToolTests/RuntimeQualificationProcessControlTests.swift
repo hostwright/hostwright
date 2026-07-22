@@ -132,7 +132,7 @@ final class RuntimeQualificationProcessControlTests: XCTestCase {
 
         let crashed = try await RuntimeQualificationSubprocessProbe.crashed(
             executable: fixture.path,
-            resourceIdentifier: childPIDFile.path
+            arguments: ["logs", "--follow", childPIDFile.path]
         )
         XCTAssertTrue(crashed)
         let childPID = pid_t(

@@ -239,10 +239,15 @@ final class RuntimeQualificationHelperFaultController: @unchecked Sendable {
 }
 
 enum RuntimeQualificationSubprocessProbe {
-    static func timedOut(executable: String, resourceIdentifier: String) async throws -> Bool {
+    private static let appleSystemLogArguments = ["system", "logs", "--follow"]
+
+    static func timedOut(
+        executable: String,
+        arguments: [String] = appleSystemLogArguments
+    ) async throws -> Bool {
         let request = request(
             executable: executable,
-            resourceIdentifier: resourceIdentifier,
+            arguments: arguments,
             timeoutMilliseconds: 500
         )
         do {
@@ -253,12 +258,15 @@ enum RuntimeQualificationSubprocessProbe {
         }
     }
 
-    static func cancelled(executable: String, resourceIdentifier: String) async throws -> Bool {
+    static func cancelled(
+        executable: String,
+        arguments: [String] = appleSystemLogArguments
+    ) async throws -> Bool {
         let task = Task {
             try await SecureSubprocessRunner().runAsync(
                 request(
                     executable: executable,
-                    resourceIdentifier: resourceIdentifier,
+                    arguments: arguments,
                     timeoutMilliseconds: 30_000
                 )
             )
@@ -273,13 +281,16 @@ enum RuntimeQualificationSubprocessProbe {
         }
     }
 
-    static func crashed(executable: String, resourceIdentifier: String) async throws -> Bool {
+    static func crashed(
+        executable: String,
+        arguments: [String] = appleSystemLogArguments
+    ) async throws -> Bool {
         let observation = RuntimeQualificationLaunchObservation()
         let task = Task {
             try await SecureSubprocessRunner().runAsync(
                 request(
                     executable: executable,
-                    resourceIdentifier: resourceIdentifier,
+                    arguments: arguments,
                     timeoutMilliseconds: 30_000
                 ),
                 onLaunch: observation.record
@@ -298,9 +309,17 @@ enum RuntimeQualificationSubprocessProbe {
             _ = try? await task.value
             return false
         }
-        let result = try await task.value
-        return result.terminationSignal == SIGKILL &&
-            waitUntilProcessGroupAbsent(processID, timeoutMilliseconds: 2_000)
+        do {
+            let result = try await task.value
+            return result.terminationSignal == SIGKILL &&
+                waitUntilProcessGroupAbsent(processID, timeoutMilliseconds: 2_000)
+        } catch SecureSubprocessError.descendantProcessDetected(let result) {
+            return result.terminationSignal == SIGKILL &&
+                waitUntilProcessGroupAbsent(processID, timeoutMilliseconds: 2_000)
+        } catch SecureSubprocessError.outputReadFailed(let result) {
+            return result.terminationSignal == SIGKILL &&
+                waitUntilProcessGroupAbsent(processID, timeoutMilliseconds: 2_000)
+        }
     }
 
     private static func waitUntilProcessGroupAbsent(
@@ -322,12 +341,12 @@ enum RuntimeQualificationSubprocessProbe {
 
     private static func request(
         executable: String,
-        resourceIdentifier: String,
+        arguments: [String],
         timeoutMilliseconds: Int
     ) -> SecureSubprocessRequest {
         SecureSubprocessRequest(
             executablePath: executable,
-            arguments: ["logs", "--follow", resourceIdentifier],
+            arguments: arguments,
             environment: SecureSubprocessEnvironment.currentUser,
             workingDirectory: "/",
             timeoutMilliseconds: timeoutMilliseconds,

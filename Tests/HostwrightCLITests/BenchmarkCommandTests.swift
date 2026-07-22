@@ -495,7 +495,7 @@ private actor BenchmarkContractAdapter: RuntimeAdapter {
         if let versionError {
             throw versionError
         }
-        return "container CLI version 1.0.0 (build: release, commit: ee848e3)\n"
+        return "1.0.0"
     }
 
     func resourceUsage(for resourceIdentifier: String) async throws -> RuntimeResourceUsageSnapshot {

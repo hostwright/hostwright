@@ -193,18 +193,18 @@ final class BenchmarkSession: @unchecked Sendable {
             let (version, _) = try timed("RuntimeAdapter.runtimeVersion") {
                 try await self.adapter.runtimeVersion()
             }
-            guard let observedVersion = AppleContainerVersionParser.parse(version) else {
-                failures.append("Apple container version output did not contain a parseable semantic version.")
+            guard AppleContainerVersionParser.isValidExpectedVersion(version) else {
+                failures.append("Runtime provider version was not an exact semantic version.")
                 return nil
             }
-            if observedVersion != options.expectedContainerVersion {
+            if version != options.expectedContainerVersion {
                 failures.append(
-                    "Apple container version drift: expected \(options.expectedContainerVersion), observed \(observedVersion)."
+                    "Apple container version drift: expected \(options.expectedContainerVersion), observed \(version)."
                 )
-                return observedVersion
+                return version
             }
             versionMatchesExpected = true
-            return observedVersion
+            return version
         } catch {
             register(error)
             return nil

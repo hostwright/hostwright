@@ -216,6 +216,20 @@ final class LiveRuntimeProviderConformanceTests: XCTestCase {
                                          .localImageRefusal, .create, .exactCleanup])
     }
 
+    func testRunnerRejectsManagedRestartWithoutSemanticInventoryChange() async {
+        let evidence = await RuntimeProviderLiveQualificationRunner.run(
+            driver: RecordingLiveQualificationDriver(fault: .noOpManagedRestart)
+        )
+
+        XCTAssertFalse(evidence.passed)
+        XCTAssertEqual(
+            evidence.record(for: .managedRestart)?.status,
+            .invalidResourceTransition
+        )
+        XCTAssertEqual(evidence.record(for: .delete)?.status, .unsafePriorFailure)
+        XCTAssertEqual(evidence.record(for: .exactCleanup)?.status, .passed)
+    }
+
     func testCleanupDoesNotDependOnPreCleanupSnapshot() async {
         let driver = RecordingLiveQualificationDriver(fault: .invalidPreCleanupSnapshot)
         let evidence = await RuntimeProviderLiveQualificationRunner.run(driver: driver)
@@ -262,6 +276,7 @@ private actor RecordingLiveQualificationDriver: RuntimeProviderLiveQualification
     static let baselineDigest = String(repeating: "a", count: 64)
     static let createdDigest = String(repeating: "c", count: 64)
     static let runningDigest = String(repeating: "d", count: 64)
+    static let restartedDigest = String(repeating: "9", count: 64)
     static let changedDigest = String(repeating: "e", count: 64)
     static let sentinelDigest = String(repeating: "b", count: 64)
     static let changedSentinelDigest = String(repeating: "f", count: 64)
@@ -455,13 +470,16 @@ private actor RecordingLiveQualificationDriver: RuntimeProviderLiveQualification
         switch identifier {
         case .create:
             inventoryDigest = Self.createdDigest
-            lifecycle = .created
+            lifecycle = .stopped
             runtimeInstanceSHA256 = Self.createdDigest
         case .start:
             inventoryDigest = Self.runningDigest
             lifecycle = .running
         case .managedRestart:
-            break
+            if fault != .noOpManagedRestart {
+                inventoryDigest = Self.restartedDigest
+                runtimeInstanceSHA256 = Self.restartedDigest
+            }
         case .delete:
             inventoryDigest = Self.baselineDigest
             lifecycle = .missing
@@ -566,6 +584,7 @@ private actor RecordingLiveQualificationDriver: RuntimeProviderLiveQualification
         case invalidFirstSnapshot
         case invalidPreCleanupSnapshot
         case noOpLifecycle
+        case noOpManagedRestart
     }
 
     enum DriverError: Error {

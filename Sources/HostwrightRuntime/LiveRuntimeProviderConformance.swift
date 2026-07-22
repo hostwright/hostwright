@@ -562,7 +562,7 @@ private actor RuntimeProviderLiveQualificationSubject: RuntimeProviderConformanc
         _ identifier: RuntimeProviderConformanceCaseID
     ) -> Bool {
         switch identifier {
-        case .create, .start, .delete, .exactCleanup:
+        case .create, .start, .managedRestart, .delete, .exactCleanup:
             false
         default:
             true
@@ -588,13 +588,13 @@ private actor RuntimeProviderLiveQualificationSubject: RuntimeProviderConformanc
             return false
         }
         switch (transition.beforeLifecycle, transition.afterLifecycle) {
-        case (.missing, .created):
+        case (.missing, .stopped):
             guard transition.beforeRuntimeInstanceSHA256 == nil,
                   transition.afterRuntimeInstanceSHA256 != nil,
                   before.inventorySHA256 != after.inventorySHA256 else {
                 return false
             }
-        case (.created, .running):
+        case (.stopped, .running):
             guard transition.beforeRuntimeInstanceSHA256 != nil,
                   transition.beforeRuntimeInstanceSHA256 == transition.afterRuntimeInstanceSHA256,
                   before.inventorySHA256 != after.inventorySHA256 else {
@@ -602,7 +602,8 @@ private actor RuntimeProviderLiveQualificationSubject: RuntimeProviderConformanc
             }
         case (.running, .running):
             guard transition.beforeRuntimeInstanceSHA256 != nil,
-                  transition.afterRuntimeInstanceSHA256 != nil else {
+                  transition.afterRuntimeInstanceSHA256 != nil,
+                  before.inventorySHA256 != after.inventorySHA256 else {
                 return false
             }
         case (.running, .missing):
@@ -629,9 +630,9 @@ private actor RuntimeProviderLiveQualificationSubject: RuntimeProviderConformanc
     ) -> (RuntimeInventoryLifecycleState, RuntimeInventoryLifecycleState)? {
         switch identifier {
         case .create:
-            (.missing, .created)
+            (.missing, .stopped)
         case .start:
-            (.created, .running)
+            (.stopped, .running)
         case .managedRestart:
             (.running, .running)
         case .delete:

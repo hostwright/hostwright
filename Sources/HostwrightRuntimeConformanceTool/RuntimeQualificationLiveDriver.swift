@@ -285,7 +285,7 @@ actor RuntimeQualificationLiveDriver: RuntimeProviderLiveQualificationDriver {
         try await create()
         let afterInventory = try await canonicalInventory()
         guard let container = managedContainer(in: afterInventory),
-              container.lifecycle == .created,
+              container.lifecycle == .stopped,
               exactOwnership(container.ownership) else {
             throw RuntimeQualificationLiveDriverError.lifecycleMismatch
         }
@@ -295,7 +295,7 @@ actor RuntimeQualificationLiveDriver: RuntimeProviderLiveQualificationDriver {
             before: before,
             after: after,
             beforeLifecycle: .missing,
-            afterLifecycle: .created,
+            afterLifecycle: .stopped,
             beforeRuntimeID: nil,
             afterRuntimeID: container.runtimeID,
             beforeGeneration: beforeGeneration
@@ -306,7 +306,7 @@ actor RuntimeQualificationLiveDriver: RuntimeProviderLiveQualificationDriver {
         await recordLogical("start")
         let beforeInventory = try await canonicalInventory()
         guard let beforeContainer = managedContainer(in: beforeInventory),
-              beforeContainer.lifecycle == .created else {
+              beforeContainer.lifecycle == .stopped else {
             throw RuntimeQualificationLiveDriverError.lifecycleMismatch
         }
         let before = try await captureCanonicalInventory()
@@ -323,7 +323,7 @@ actor RuntimeQualificationLiveDriver: RuntimeProviderLiveQualificationDriver {
         return .passed(resourceTransition: transition(
             before: before,
             after: after,
-            beforeLifecycle: .created,
+            beforeLifecycle: .stopped,
             afterLifecycle: .running,
             beforeRuntimeID: beforeContainer.runtimeID,
             afterRuntimeID: afterContainer.runtimeID,
@@ -480,7 +480,7 @@ actor RuntimeQualificationLiveDriver: RuntimeProviderLiveQualificationDriver {
             }
             let observed = try await canonicalInventory()
             guard let container = managedContainer(in: observed),
-                  container.lifecycle == .created,
+                  container.lifecycle == .stopped,
                   exactOwnership(container.ownership),
                   partialEffectFaultController.didActivate else {
                 throw RuntimeQualificationLiveDriverError.ownershipMismatch
@@ -561,18 +561,15 @@ actor RuntimeQualificationLiveDriver: RuntimeProviderLiveQualificationDriver {
                 switch kind {
                 case .timedOut:
                     return try await RuntimeQualificationSubprocessProbe.timedOut(
-                        executable: executable,
-                        resourceIdentifier: resourceIdentifier
+                        executable: executable
                     )
                 case .cancelled:
                     return try await RuntimeQualificationSubprocessProbe.cancelled(
-                        executable: executable,
-                        resourceIdentifier: resourceIdentifier
+                        executable: executable
                     )
                 case .crashed:
                     return try await RuntimeQualificationSubprocessProbe.crashed(
-                        executable: executable,
-                        resourceIdentifier: resourceIdentifier
+                        executable: executable
                     )
                 }
             }

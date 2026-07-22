@@ -103,8 +103,12 @@ public struct AppleContainerReadOnlyAdapter: RuntimeAdapter {
         let spec = AppleContainerCommand.spec(kind: .version, executable: executable)
         try RuntimeCommandPolicy.validateReadOnlyExecution(spec)
         let result = try await processRunner.run(spec)
-        let version = redactionPolicy.redact(result.standardOutput).trimmingCharacters(in: .whitespacesAndNewlines)
         _ = try AppleContainerCLICodec.select(fromVersionOutput: result.standardOutput, redactionPolicy: redactionPolicy)
+        guard let version = AppleContainerVersionParser.parse(result.standardOutput) else {
+            throw RuntimeAdapterError.outputParseFailed(
+                "Apple container CLI version output did not match the selected codec."
+            )
+        }
         return version
     }
 

@@ -539,6 +539,12 @@ public enum RuntimeProviderCompatibility {
         guard RuntimeProviderID.knownValues.contains(metadata.providerID) else {
             return "Runtime provider \(metadata.adapterName) advertises unsupported provider identity \(metadata.providerID.rawValue)."
         }
+        guard metadata.supportsMutation else {
+            return "Runtime provider \(metadata.adapterName) does not authorize lifecycle mutation."
+        }
+        guard metadata.capabilities.contains(.lifecycleMutation) else {
+            return "Runtime provider \(metadata.adapterName) does not advertise the lifecycleMutation capability required for Hostwright mutation."
+        }
         return nil
     }
 }

@@ -400,6 +400,7 @@ extension ApplyCommandRunner {
             createdAt: timestamp,
             updatedAt: timestamp,
             metadataJSONRedacted: jsonPayload([
+                "capabilitySHA256": mutationContext.capabilitySHA256,
                 "executionAvailability": action.executionAvailability.rawValue,
                 "identity": action.identity.displayName,
                 "resourceIdentifier": action.resourceIdentifier,
@@ -408,6 +409,7 @@ extension ApplyCommandRunner {
             fencingToken: operationFencingToken,
             intentJSONRedacted: jsonPayload([
                 "action": action.kind.rawValue,
+                "capabilitySHA256": mutationContext.capabilitySHA256,
                 "planHash": planHash,
                 "projectID": projectID,
                 "projectGeneration": mutationContext.projectGeneration,

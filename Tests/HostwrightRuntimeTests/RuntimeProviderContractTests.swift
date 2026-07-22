@@ -15,7 +15,10 @@ final class RuntimeProviderContractTests: XCTestCase {
         )
 
         XCTAssertEqual(metadata.providerAPIVersion, HostwrightContractVersions.runtimeProviderAPI)
-        XCTAssertNil(RuntimeProviderCompatibility.mutationIncompatibility(metadata))
+        XCTAssertEqual(
+            RuntimeProviderCompatibility.mutationIncompatibility(metadata),
+            "Runtime provider test-provider does not authorize lifecycle mutation."
+        )
     }
 
     func testMutationCompatibilityRejectsOtherProviderAPIVersions() {
@@ -32,6 +35,34 @@ final class RuntimeProviderContractTests: XCTestCase {
         XCTAssertEqual(
             RuntimeProviderCompatibility.mutationIncompatibility(metadata),
             "Runtime provider legacy-provider advertises API v1; Hostwright requires Runtime Provider API v2."
+        )
+    }
+
+    func testMutationCompatibilityRejectsMissingMutationAuthorizationAndCapability() {
+        let unauthorized = RuntimeAdapterMetadata(
+            providerID: .appleContainerCLI,
+            adapterName: "read-only-provider",
+            adapterVersion: "1.0.0",
+            runtimeName: "read-only-runtime",
+            supportsMutation: false,
+            capabilities: [.readOnlyObservation]
+        )
+        XCTAssertEqual(
+            RuntimeProviderCompatibility.mutationIncompatibility(unauthorized),
+            "Runtime provider read-only-provider does not authorize lifecycle mutation."
+        )
+
+        let missingCapability = RuntimeAdapterMetadata(
+            providerID: .appleContainerCLI,
+            adapterName: "incomplete-provider",
+            adapterVersion: "1.0.0",
+            runtimeName: "incomplete-runtime",
+            supportsMutation: true,
+            capabilities: [.readOnlyObservation]
+        )
+        XCTAssertEqual(
+            RuntimeProviderCompatibility.mutationIncompatibility(missingCapability),
+            "Runtime provider incomplete-provider does not advertise the lifecycleMutation capability required for Hostwright mutation."
         )
     }
 

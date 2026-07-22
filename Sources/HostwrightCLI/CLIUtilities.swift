@@ -751,6 +751,7 @@ enum CLIJSON {
             ].compactNilValues(),
             "telemetryPolicy": "local-only; no upload",
             "planHash": plan.planHash,
+            "capabilitySHA256": plan.capabilitySHA256 as Any,
             "services": manifest.services.sorted { $0.name < $1.name }.map { service in
                 let observedService = observedByName[service.name]
                 return [

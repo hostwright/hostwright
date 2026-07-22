@@ -906,6 +906,38 @@ final class HostwrightCLITests: XCTestCase {
         }
     }
 
+    func testApplyRejectsCapabilityChangeAfterPlanningBeforeStateOrRuntimeMutation() throws {
+        try withTemporaryDatabase { databasePath in
+            let files = FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest])
+            let adapter = ScriptedApplyRuntimeAdapter(
+                capabilitySnapshots: [
+                    ScriptedApplyRuntimeAdapter.testCapabilitySnapshot,
+                    ScriptedApplyRuntimeAdapter.changedCapabilitySnapshot
+                ]
+            )
+            let expectedHash = try planHash(for: singleServiceManifest, observed: adapter.observedState)
+
+            let result = HostwrightCLI.run(
+                arguments: ["apply", "--state-db", databasePath, "--confirm-plan", expectedHash],
+                environment: environment(files: files, runtimeAdapter: adapter)
+            )
+
+            XCTAssertEqual(result.exitCode, CLIExitCode.runtimeUnavailable.rawValue)
+            XCTAssertTrue(result.standardError.contains("capability revalidation failed"))
+            XCTAssertTrue(adapter.executedActions.isEmpty)
+            let store = SQLiteStateStore(path: databasePath)
+            XCTAssertTrue(try store.operations.loadAll().isEmpty)
+            XCTAssertTrue(try store.operationGroups.loadAll().isEmpty)
+            XCTAssertTrue(try store.events.loadAll().isEmpty)
+            XCTAssertTrue(try store.ownership.loadAll().isEmpty)
+            XCTAssertNil(try store.observedStates.loadLatestSnapshot(
+                projectID: "project-demo",
+                providerID: .appleContainerCLI
+            ))
+            XCTAssertThrowsError(try store.desiredStates.loadProject(id: "project-demo"))
+        }
+    }
+
     func testApplyPersistsIntentBeforeCreateAndRecordsSuccess() throws {
         try withTemporaryDatabase { databasePath in
             let files = FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest])
@@ -929,11 +961,21 @@ final class HostwrightCLITests: XCTestCase {
             let operations = try store.operations.loadAll()
             XCTAssertEqual(operations.map(\.status), [.recorded, .succeeded])
             XCTAssertEqual(operations.map(\.planHash), [expectedHash, expectedHash])
+            for operation in operations {
+                XCTAssertEqual(
+                    try jsonObject(operation.payloadJSONRedacted)["capabilitySHA256"] as? String,
+                    context.capabilitySHA256
+                )
+            }
             let groups = try store.operationGroups.loadAll()
             XCTAssertEqual(groups.map(\.status), [.succeeded])
             XCTAssertEqual(groups[0].checkpoint, "completed")
             XCTAssertFalse(groups[0].rollbackAvailable)
             XCTAssertTrue(groups[0].intentJSONRedacted.contains(context.resourceUUID))
+            XCTAssertEqual(
+                try jsonObject(groups[0].intentJSONRedacted)["capabilitySHA256"] as? String,
+                context.capabilitySHA256
+            )
             XCTAssertEqual(groups[0].fencingToken, context.fencingToken)
             let steps = try store.operationGroupSteps.load(groupID: groups[0].id)
             XCTAssertEqual(steps.map(\.stepKey), ["rollback", "runtime-execute", "runtime-execute"])
@@ -942,6 +984,12 @@ final class HostwrightCLITests: XCTestCase {
             let events = try store.events.loadAll()
             XCTAssertTrue(events.contains { $0.type == "apply.create-intent-recorded" })
             XCTAssertTrue(events.contains { $0.type == "apply.created-service" })
+            for event in events where event.type == "apply.create-intent-recorded" || event.type == "apply.created-service" {
+                XCTAssertEqual(
+                    try jsonObject(event.payloadJSONRedacted)["capabilitySHA256"] as? String,
+                    context.capabilitySHA256
+                )
+            }
 
             let ownership = try store.ownership.loadAll()
             XCTAssertEqual(ownership.count, 1)
@@ -949,6 +997,10 @@ final class HostwrightCLITests: XCTestCase {
             XCTAssertEqual(ownership[0].resourceUUID, context.resourceUUID)
             XCTAssertEqual(ownership[0].projectResourceUUID, context.projectResourceUUID)
             XCTAssertEqual(ownership[0].fencingToken, context.fencingToken)
+            XCTAssertEqual(
+                try jsonObject(ownership[0].metadataJSONRedacted)["capabilitySHA256"] as? String,
+                context.capabilitySHA256
+            )
         }
     }
 
@@ -1792,7 +1844,42 @@ final class HostwrightCLITests: XCTestCase {
             XCTAssertTrue(result.standardOutput.contains("lifecycle=running"))
             XCTAssertTrue(result.standardOutput.contains("id=\(RuntimeServiceIdentity(projectName: "demo", serviceName: "api").managedResourceIdentifier)"))
             let events = try SQLiteStateStore(path: databasePath).events.loadAll()
-            XCTAssertTrue(events.contains { $0.type == "status.observed" })
+            let statusEvent = try XCTUnwrap(events.first { $0.type == "status.observed" })
+            XCTAssertEqual(
+                try jsonObject(statusEvent.payloadJSONRedacted)["capabilitySHA256"] as? String,
+                ScriptedApplyRuntimeAdapter.testCapabilitySnapshot.canonicalSHA256
+            )
+        }
+    }
+
+    func testStatusRejectsChangedObservedCapabilityBeforeRecordingState() throws {
+        try withTemporaryDatabase { databasePath in
+            let files = FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest])
+            let observed = ObservedRuntimeState(
+                projectName: "demo",
+                services: [],
+                adapterMetadata: fakeAdapterMetadata,
+                capabilitySHA256: ScriptedApplyRuntimeAdapter.changedCapabilitySnapshot.canonicalSHA256
+            )
+            let adapter = ScriptedApplyRuntimeAdapter(observedState: observed)
+
+            let result = HostwrightCLI.run(
+                arguments: ["status", "--state-db", databasePath],
+                environment: environment(files: files, runtimeAdapter: adapter)
+            )
+
+            XCTAssertEqual(result.exitCode, CLIExitCode.runtimeUnavailable.rawValue)
+            XCTAssertTrue(result.standardError.contains("staleCapability"))
+            let store = SQLiteStateStore(path: databasePath)
+            XCTAssertTrue(try store.operations.loadAll().isEmpty)
+            XCTAssertTrue(try store.operationGroups.loadAll().isEmpty)
+            XCTAssertTrue(try store.events.loadAll().isEmpty)
+            XCTAssertTrue(try store.ownership.loadAll().isEmpty)
+            XCTAssertNil(try store.observedStates.loadLatestSnapshot(
+                projectID: "project-demo",
+                providerID: .appleContainerCLI
+            ))
+            XCTAssertThrowsError(try store.desiredStates.loadProject(id: "project-demo"))
         }
     }
 
@@ -1860,6 +1947,10 @@ final class HostwrightCLITests: XCTestCase {
             let json = try jsonObject(result.standardOutput)
             XCTAssertEqual(json["kind"] as? String, "status")
             XCTAssertNotNil(json["planHash"])
+            XCTAssertEqual(
+                json["capabilitySHA256"] as? String,
+                ScriptedApplyRuntimeAdapter.testCapabilitySnapshot.canonicalSHA256
+            )
             let observedRuntime = try XCTUnwrap(json["runtime"] as? [String: Any])
             XCTAssertEqual(observedRuntime["observed"] as? Bool, true)
             XCTAssertEqual(observedRuntime["parser"] as? String, "status-observation-v1")
@@ -2725,6 +2816,10 @@ final class HostwrightCLITests: XCTestCase {
             let store = SQLiteStateStore(path: databasePath)
             let operations = try store.operations.loadAll()
             XCTAssertEqual(operations.map(\.status), [.recorded, .failed])
+            let capabilityMarker = "\"capabilitySHA256\":\"\(ScriptedApplyRuntimeAdapter.testCapabilitySnapshot.canonicalSHA256)\""
+            for operation in operations {
+                XCTAssertTrue(operation.payloadJSONRedacted.contains(capabilityMarker))
+            }
             let groups = try store.operationGroups.loadAll()
             XCTAssertEqual(groups.map(\.status), [.failed])
             XCTAssertEqual(groups[0].checkpoint, "runtime-failed")
@@ -2733,7 +2828,8 @@ final class HostwrightCLITests: XCTestCase {
             XCTAssertFalse(steps.map { $0.lastErrorRedacted ?? "" }.joined().contains(fakeSecret))
 
             let events = try store.events.loadAll()
-            XCTAssertTrue(events.contains { $0.type == "apply.failed" })
+            let failedEvent = try XCTUnwrap(events.first { $0.type == "apply.failed" })
+            XCTAssertTrue(failedEvent.payloadJSONRedacted.contains(capabilityMarker))
             XCTAssertFalse(events.map(\.message).joined(separator: "\n").contains(fakeSecret))
         }
     }
@@ -3437,6 +3533,15 @@ final class HostwrightCLITests: XCTestCase {
                 )
             }
         )
+        static let changedCapabilitySnapshot = RuntimeCapabilitySnapshot(
+            descriptor: testCapabilitySnapshot.descriptor,
+            host: RuntimeProviderHostPlatform(
+                macOSVersion: testCapabilitySnapshot.host.macOSVersion,
+                macOSBuild: "25F91",
+                architecture: testCapabilitySnapshot.host.architecture
+            ),
+            features: testCapabilitySnapshot.features
+        )
 
         let observedState: ObservedRuntimeState
         let observeError: RuntimeAdapterError?
@@ -3445,6 +3550,8 @@ final class HostwrightCLITests: XCTestCase {
         let readinessError: RuntimeAdapterError?
         let logsText: String
         let onExecute: ExecuteHook?
+        let capabilitySnapshots: [RuntimeCapabilitySnapshot]
+        var capabilitySnapshotIndex = 0
         var executedActions: [PlannedRuntimeAction] = []
         var confirmations: [RuntimeMutationConfirmation] = []
         var logRequests: [RuntimeServiceIdentity] = []
@@ -3464,8 +3571,10 @@ final class HostwrightCLITests: XCTestCase {
             ),
             readinessError: RuntimeAdapterError? = nil,
             logsText: String = "",
-            onExecute: ExecuteHook? = nil
+            onExecute: ExecuteHook? = nil,
+            capabilitySnapshots: [RuntimeCapabilitySnapshot] = [ScriptedApplyRuntimeAdapter.testCapabilitySnapshot]
         ) {
+            precondition(!capabilitySnapshots.isEmpty)
             let source = observedState ?? ObservedRuntimeState(
                 projectName: "demo",
                 services: [],
@@ -3493,6 +3602,7 @@ final class HostwrightCLITests: XCTestCase {
             self.readinessError = readinessError
             self.logsText = logsText
             self.onExecute = onExecute
+            self.capabilitySnapshots = capabilitySnapshots
         }
 
         func metadata() async -> RuntimeAdapterMetadata {
@@ -3504,7 +3614,9 @@ final class HostwrightCLITests: XCTestCase {
         }
 
         func capabilitySnapshot() async throws -> RuntimeCapabilitySnapshot {
-            Self.testCapabilitySnapshot
+            let index = min(capabilitySnapshotIndex, capabilitySnapshots.count - 1)
+            capabilitySnapshotIndex += 1
+            return capabilitySnapshots[index]
         }
 
         func runtimeReadiness() async throws -> RuntimeReadinessReport {

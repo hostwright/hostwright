@@ -98,7 +98,10 @@ struct StatusCommandRunner {
                     serviceName: nil,
                     runtimeAdapter: selectedProvider.selection.providerID.rawValue,
                     message: "Status observed \(observed.services.count) runtime service(s).",
-                    payloadJSONRedacted: #"{"planHash":"\#(plan.planHash)"}"#
+                    payloadJSONRedacted: CLIJSON.codable([
+                        "capabilitySHA256": plan.capabilitySHA256 ?? "unbound",
+                        "planHash": plan.planHash
+                    ])
                 )
             ])
 

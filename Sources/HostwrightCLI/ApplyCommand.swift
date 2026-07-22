@@ -366,7 +366,8 @@ struct ApplyCommandRunner {
                     projectID: projectID,
                     timestamp: timestamp,
                     runtimeAdapter: observedRuntimeAdapter,
-                    teamBinding: teamBinding
+                    teamBinding: teamBinding,
+                    mutationContext: mutationContext
                 )
                 if let existingOwnership {
                     guard try store.ownership.advanceFencingToken(
@@ -522,6 +523,7 @@ struct ApplyCommandRunner {
                         projectID: projectID,
                         timestamp: timestamp,
                         teamBinding: teamBinding,
+                        capabilitySHA256: capabilitySHA256,
                         normalizedFailure: normalizedFailure
                     )
                     try recordManagedStartAttempt(

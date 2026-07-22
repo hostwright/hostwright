@@ -777,6 +777,43 @@ struct RuntimeQualificationMigrationDriver {
     }
 }
 
+extension RuntimeQualificationMigrationDriver {
+    static func stableInventoryDigest(
+        _ inventory: RuntimeInventory,
+        excludingResourceUUID: String? = nil
+    ) throws -> String {
+        let containers = inventory.containers.filter { container in
+            guard let excludingResourceUUID else { return true }
+            return container.ownership?.resourceUUID != excludingResourceUUID
+        }.map {
+            RuntimeInventoryContainer(
+                runtimeID: $0.runtimeID,
+                name: $0.name,
+                imageID: $0.imageID,
+                imageReference: $0.imageReference,
+                lifecycle: $0.lifecycle,
+                health: $0.health,
+                labels: $0.labels,
+                ownership: $0.ownership,
+                initConfiguration: $0.initConfiguration,
+                ports: $0.ports,
+                mounts: $0.mounts,
+                networks: $0.networks,
+                allocation: $0.allocation,
+                usage: nil,
+                services: $0.services
+            )
+        }
+        return try RuntimeInventoryBuilder.build(
+            machine: inventory.machine,
+            containers: containers,
+            images: inventory.images,
+            networks: inventory.networks,
+            volumes: inventory.volumes
+        ).semanticSHA256
+    }
+}
+
 private extension RuntimeQualificationMigrationDriver {
     static func validOCIDigest(_ value: String) -> Bool {
         value.range(
@@ -818,8 +855,8 @@ private extension RuntimeQualificationMigrationDriver {
         source: any RuntimeAdapter,
         target: any RuntimeAdapter
     ) async throws {
-        let sourceBefore = try await source.inventory().semanticSHA256
-        let targetBefore = try await target.inventory().semanticSHA256
+        let sourceBefore = try Self.stableInventoryDigest(try await source.inventory())
+        let targetBefore = try Self.stableInventoryDigest(try await target.inventory())
         do {
             _ = try await RuntimeProviderMigrationEngine(
                 journal: RuntimeProviderMigrationJournalFactory.sqlite(
@@ -839,8 +876,8 @@ private extension RuntimeQualificationMigrationDriver {
         } catch let error as RuntimeProviderMigrationError {
             guard error == .confirmationMismatch else { throw error }
         }
-        guard try await source.inventory().semanticSHA256 == sourceBefore,
-              try await target.inventory().semanticSHA256 == targetBefore else {
+        guard try Self.stableInventoryDigest(try await source.inventory()) == sourceBefore,
+              try Self.stableInventoryDigest(try await target.inventory()) == targetBefore else {
             throw RuntimeQualificationMigrationDriverError.expectedRefusalMissing
         }
     }
@@ -1118,34 +1155,10 @@ private extension RuntimeQualificationMigrationDriver {
         excluding resourceUUID: String
     ) async throws -> String {
         let inventory = try await adapter.inventory()
-        let containers = inventory.containers.filter {
-            $0.ownership?.resourceUUID != resourceUUID
-        }.map {
-            RuntimeInventoryContainer(
-                runtimeID: $0.runtimeID,
-                name: $0.name,
-                imageID: $0.imageID,
-                imageReference: $0.imageReference,
-                lifecycle: $0.lifecycle,
-                health: $0.health,
-                labels: $0.labels,
-                ownership: $0.ownership,
-                initConfiguration: $0.initConfiguration,
-                ports: $0.ports,
-                mounts: $0.mounts,
-                networks: $0.networks,
-                allocation: $0.allocation,
-                usage: nil,
-                services: $0.services
-            )
-        }
-        return try RuntimeInventoryBuilder.build(
-            machine: inventory.machine,
-            containers: containers,
-            images: inventory.images,
-            networks: inventory.networks,
-            volumes: inventory.volumes
-        ).semanticSHA256
+        return try stableInventoryDigest(
+            inventory,
+            excludingResourceUUID: resourceUUID
+        )
     }
 
     static func verifyState(

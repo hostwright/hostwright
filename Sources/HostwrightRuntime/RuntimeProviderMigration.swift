@@ -371,7 +371,7 @@ public actor RuntimeProviderMigrationEngine {
             request: request,
             inventory: sourceInventory
         )
-        let targetRequiredFeatures = Self.requiredTargetFeatures(sourceResources)
+        let targetRequiredFeatures = Self.requiredTargetFeatures(request.resources)
         try Self.requireSnapshot(
             targetSnapshot,
             providerID: request.targetProviderID,
@@ -433,12 +433,14 @@ public actor RuntimeProviderMigrationEngine {
             sourceProviderID: request.sourceProviderID,
             targetProviderID: request.targetProviderID
         )
+        let sourceObservationSHA256 = try Self.migrationObservationSHA256(sourceInventory)
+        let targetObservationSHA256 = try Self.migrationObservationSHA256(targetInventory)
         let token = Self.confirmationToken(
             request: request,
             sourceSnapshot: sourceSnapshot,
             targetSnapshot: targetSnapshot,
-            sourceInventory: sourceInventory,
-            targetInventory: targetInventory,
+            sourceObservationSHA256: sourceObservationSHA256,
+            targetObservationSHA256: targetObservationSHA256,
             resources: resourcePlans,
             images: imageRequirements,
             effects: effects,
@@ -453,8 +455,8 @@ public actor RuntimeProviderMigrationEngine {
             targetProviderID: request.targetProviderID,
             sourceCapabilitySHA256: sourceSnapshot.canonicalSHA256,
             targetCapabilitySHA256: targetSnapshot.canonicalSHA256,
-            sourceObservationSHA256: sourceInventory.semanticSHA256,
-            targetObservationSHA256: targetInventory.semanticSHA256,
+            sourceObservationSHA256: sourceObservationSHA256,
+            targetObservationSHA256: targetObservationSHA256,
             targetDescriptor: targetSnapshot.descriptor,
             resources: resourcePlans,
             requiredLocalImages: imageRequirements,
@@ -531,18 +533,20 @@ public actor RuntimeProviderMigrationEngine {
                     providerID: plan.targetProviderID,
                     checkpoint: checkpoint
                 )
-                guard initialSource.semanticSHA256 == plan.sourceObservationSHA256 else {
+                let sourceObservationSHA256 = try Self.migrationObservationSHA256(initialSource)
+                let targetObservationSHA256 = try Self.migrationObservationSHA256(initialTarget)
+                guard sourceObservationSHA256 == plan.sourceObservationSHA256 else {
                     throw RuntimeProviderMigrationError.observationChanged(
                         providerID: plan.sourceProviderID,
                         expected: plan.sourceObservationSHA256,
-                        current: initialSource.semanticSHA256
+                        current: sourceObservationSHA256
                     )
                 }
-                guard initialTarget.semanticSHA256 == plan.targetObservationSHA256 else {
+                guard targetObservationSHA256 == plan.targetObservationSHA256 else {
                     throw RuntimeProviderMigrationError.observationChanged(
                         providerID: plan.targetProviderID,
                         expected: plan.targetObservationSHA256,
-                        current: initialTarget.semanticSHA256
+                        current: targetObservationSHA256
                     )
                 }
                 mutationStarted = true
@@ -732,10 +736,27 @@ public actor RuntimeProviderMigrationEngine {
                 resumed: resumed
             )
         } catch {
-            guard mutationStarted, !bindingCommitted else { throw error }
             let status: RuntimeProviderMigrationTerminalStatus = error is CancellationError
                 ? .cancelled
                 : .failed
+            if !mutationStarted {
+                if let migrationError = error as? RuntimeProviderMigrationError,
+                   migrationError == .fenceLost {
+                    throw error
+                }
+                do {
+                    try await journal.finish(
+                        operationID: operationID,
+                        fencingToken: fencingToken,
+                        status: status,
+                        checkpoint: .intentPersisted
+                    )
+                } catch {
+                    throw RuntimeProviderMigrationError.compensationFailed
+                }
+                throw error
+            }
+            guard !bindingCommitted else { throw error }
             do {
                 try await Task.detached {
                     try await Self.compensate(
@@ -1326,7 +1347,7 @@ private extension RuntimeProviderMigrationEngine {
     }
 
     static func requiredTargetFeatures(
-        _ resources: [SourceResource]
+        _ resources: [RuntimeProviderMigrationResource]
     ) -> [RuntimeProviderFeature] {
         var required: Set<RuntimeProviderFeature> = [
             .observation,
@@ -1334,10 +1355,38 @@ private extension RuntimeProviderMigrationEngine {
             .cleanup
         ]
         for resource in resources {
-            if !resource.container.mounts.isEmpty { required.insert(.storage) }
-            if !resource.container.networks.isEmpty { required.insert(.networks) }
+            if !resource.desiredService.mounts.isEmpty { required.insert(.storage) }
         }
         return required.sorted { $0.rawValue < $1.rawValue }
+    }
+
+    static func migrationObservationSHA256(_ inventory: RuntimeInventory) throws -> String {
+        let containers = inventory.containers.map {
+            RuntimeInventoryContainer(
+                runtimeID: $0.runtimeID,
+                name: $0.name,
+                imageID: $0.imageID,
+                imageReference: $0.imageReference,
+                lifecycle: $0.lifecycle,
+                health: $0.health,
+                labels: $0.labels,
+                ownership: $0.ownership,
+                initConfiguration: $0.initConfiguration,
+                ports: $0.ports,
+                mounts: $0.mounts,
+                networks: $0.networks,
+                allocation: $0.allocation,
+                usage: nil,
+                services: $0.services
+            )
+        }
+        return try RuntimeInventoryBuilder.build(
+            machine: inventory.machine,
+            containers: containers,
+            images: inventory.images,
+            networks: inventory.networks,
+            volumes: inventory.volumes
+        ).semanticSHA256
     }
 
     static func effects(
@@ -1406,8 +1455,8 @@ private extension RuntimeProviderMigrationEngine {
         request: RuntimeProviderMigrationRequest,
         sourceSnapshot: RuntimeCapabilitySnapshot,
         targetSnapshot: RuntimeCapabilitySnapshot,
-        sourceInventory: RuntimeInventory,
-        targetInventory: RuntimeInventory,
+        sourceObservationSHA256: String,
+        targetObservationSHA256: String,
         resources: [RuntimeProviderMigrationResourcePlan],
         images: [RuntimeProviderMigrationImageRequirement],
         effects: [RuntimeProviderMigrationEffect],
@@ -1422,8 +1471,8 @@ private extension RuntimeProviderMigrationEngine {
             targetProviderID: request.targetProviderID,
             sourceCapabilitySHA256: sourceSnapshot.canonicalSHA256,
             targetCapabilitySHA256: targetSnapshot.canonicalSHA256,
-            sourceObservationSHA256: sourceInventory.semanticSHA256,
-            targetObservationSHA256: targetInventory.semanticSHA256,
+            sourceObservationSHA256: sourceObservationSHA256,
+            targetObservationSHA256: targetObservationSHA256,
             resources: resources,
             images: images,
             effects: effects,

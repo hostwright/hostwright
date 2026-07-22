@@ -179,6 +179,28 @@ final class RuntimeProviderMigrationTests: XCTestCase {
         XCTAssertNil(journalIntent)
     }
 
+    func testDryRunDoesNotRequireTargetNetworksForAppleRuntimeDefaultAttachment() async throws {
+        let fixture = try MigrationFixture(
+            sourceNetworks: [
+                RuntimeInventoryNetworkAttachment(
+                    networkID: "default",
+                    interfaceName: "eth0",
+                    addresses: ["192.0.2.2"]
+                )
+            ],
+            targetUnavailableFeature: .networks
+        )
+
+        let plan = try await fixture.engine.dryRun(
+            request: fixture.request,
+            source: fixture.source,
+            target: fixture.target
+        )
+
+        XCTAssertEqual(plan.resources.map(\.resourceUUID), [fixture.resourceUUID])
+        XCTAssertEqual(plan.targetProviderID, .appleContainerization)
+    }
+
     func testDecodedPlanTamperingInvalidatesConfirmationBeforeJournalOrRuntimeMutation() async throws {
         let fixture = try MigrationFixture()
         let plan = try await fixture.plan()
@@ -257,6 +279,73 @@ final class RuntimeProviderMigrationTests: XCTestCase {
         XCTAssertTrue(targetContexts.allSatisfy {
             $0.providerID == .appleContainerization && $0.providerGeneration == 2
         })
+    }
+
+    func testExecuteAcceptsUsageOnlyObservationChangeAndStillRejectsLifecycleDrift() async throws {
+        let usageFixture = try MigrationFixture(sourceUsageCounter: 1)
+        let usagePlan = try await usageFixture.plan()
+        let usageResult = try await usageFixture.engine.execute(
+            plan: usagePlan,
+            request: usageFixture.request,
+            confirmationToken: usagePlan.confirmationToken,
+            operationID: "usage-only-migration",
+            fencingToken: "33333333-3333-4333-8333-333333333333",
+            source: usageFixture.source,
+            target: usageFixture.target
+        )
+        XCTAssertEqual(usageResult.checkpoint, .sourceRetired)
+
+        let driftFixture = try MigrationFixture()
+        let driftPlan = try await driftFixture.plan()
+        await driftFixture.source.setLifecycle(.stopped, resourceUUID: driftFixture.resourceUUID)
+        do {
+            _ = try await driftFixture.engine.execute(
+                plan: driftPlan,
+                request: driftFixture.request,
+                confirmationToken: driftPlan.confirmationToken,
+                operationID: "lifecycle-drift-migration",
+                fencingToken: "44444444-4444-4444-8444-444444444444",
+                source: driftFixture.source,
+                target: driftFixture.target
+            )
+            XCTFail("Expected lifecycle drift to invalidate the observation.")
+        } catch let error as RuntimeProviderMigrationError {
+            guard case .observationChanged(let providerID, _, _) = error else {
+                return XCTFail("Unexpected error: \(error)")
+            }
+            XCTAssertEqual(providerID, .appleContainerCLI)
+        }
+        let sourceMutationKinds = await driftFixture.source.mutationKinds
+        let targetMutationKinds = await driftFixture.target.mutationKinds
+        let terminalStatus = await driftFixture.journal.terminalStatus
+        XCTAssertEqual(sourceMutationKinds, [])
+        XCTAssertEqual(targetMutationKinds, [])
+        XCTAssertEqual(terminalStatus, .failed)
+    }
+
+    func testFenceLossBeforeFirstMutationIsNotMisreportedAsCompensationFailure() async throws {
+        let fixture = try MigrationFixture()
+        let plan = try await fixture.plan()
+        await fixture.journal.rejectFenceVerification()
+
+        await assertMigrationError(.fenceLost) {
+            _ = try await fixture.engine.execute(
+                plan: plan,
+                request: fixture.request,
+                confirmationToken: plan.confirmationToken,
+                operationID: "lost-initial-fence",
+                fencingToken: "33333333-3333-4333-8333-333333333333",
+                source: fixture.source,
+                target: fixture.target
+            )
+        }
+
+        let sourceMutationKinds = await fixture.source.mutationKinds
+        let targetMutationKinds = await fixture.target.mutationKinds
+        let terminalStatus = await fixture.journal.terminalStatus
+        XCTAssertEqual(sourceMutationKinds, [])
+        XCTAssertEqual(targetMutationKinds, [])
+        XCTAssertNil(terminalStatus)
     }
 
     func testTargetFailureRemovesOnlyVerifiedTargetAndRestoresSource() async throws {
@@ -527,6 +616,9 @@ private struct MigrationFixture {
         targetFailure: PlannedRuntimeActionKind? = nil,
         targetTamperAfterCreate: Bool = false,
         sourceCancelsAfterStop: Bool = false,
+        sourceNetworks: [RuntimeInventoryNetworkAttachment] = [],
+        targetUnavailableFeature: RuntimeProviderFeature? = nil,
+        sourceUsageCounter: UInt64? = nil,
         mutationDelayNanoseconds: UInt64 = 0
     ) throws {
         let identity = RuntimeServiceIdentity(projectName: "sample", serviceName: "api")
@@ -545,7 +637,10 @@ private struct MigrationFixture {
             fencingToken: sourceFence
         )
         self.sourceSnapshot = migrationSnapshot(providerID: .appleContainerCLI)
-        self.targetSnapshot = migrationSnapshot(providerID: .appleContainerization)
+        self.targetSnapshot = migrationSnapshot(
+            providerID: .appleContainerization,
+            unavailableFeature: targetUnavailableFeature
+        )
         self.imageEvidence = RuntimeLocalImageEvidence(
             reference: imageReference,
             descriptorDigest: digest("a"),
@@ -563,12 +658,14 @@ private struct MigrationFixture {
                     desiredService: service,
                     ownership: sourceOwnership,
                     lifecycle: .running,
-                    runtimeID: "source-container"
+                    runtimeID: "source-container",
+                    networks: sourceNetworks
                 )
             ],
             localImages: [:],
             probe: probe,
             cancelAfterStop: sourceCancelsAfterStop,
+            usageCounter: sourceUsageCounter,
             mutationDelayNanoseconds: mutationDelayNanoseconds
         )
         self.target = MigrationTestAdapter(
@@ -648,6 +745,7 @@ private struct MigrationTestResource: Sendable {
     var ownership: RuntimeInventoryOwnershipEvidence?
     var lifecycle: RuntimeInventoryLifecycleState
     let runtimeID: String
+    var networks: [RuntimeInventoryNetworkAttachment] = []
 }
 
 private actor MigrationTestAdapter: RuntimeAdapter {
@@ -660,6 +758,7 @@ private actor MigrationTestAdapter: RuntimeAdapter {
     let tamperAfterCreate: Bool
     let cancelAfterStop: Bool
     let mutationDelayNanoseconds: UInt64
+    private var usageCounter: UInt64?
     private(set) var mutationKinds: [PlannedRuntimeActionKind] = []
     private(set) var mutationContexts: [RuntimeMutationContext] = []
 
@@ -672,6 +771,7 @@ private actor MigrationTestAdapter: RuntimeAdapter {
         failOnAction: PlannedRuntimeActionKind? = nil,
         tamperAfterCreate: Bool = false,
         cancelAfterStop: Bool = false,
+        usageCounter: UInt64? = nil,
         mutationDelayNanoseconds: UInt64 = 0
     ) {
         self.providerID = providerID
@@ -682,6 +782,7 @@ private actor MigrationTestAdapter: RuntimeAdapter {
         self.failOnAction = failOnAction
         self.tamperAfterCreate = tamperAfterCreate
         self.cancelAfterStop = cancelAfterStop
+        self.usageCounter = usageCounter
         self.mutationDelayNanoseconds = mutationDelayNanoseconds
     }
 
@@ -704,7 +805,23 @@ private actor MigrationTestAdapter: RuntimeAdapter {
     func capabilitySnapshot() async throws -> RuntimeCapabilitySnapshot { snapshot }
 
     func inventory() async throws -> RuntimeInventory {
-        try RuntimeInventoryBuilder.build(
+        let usage: RuntimeInventoryUsage?
+        if let current = usageCounter {
+            usage = RuntimeInventoryUsage(
+                cpuUsageMicroseconds: current,
+                memoryUsageBytes: current,
+                memoryLimitBytes: 1_024,
+                networkReceiveBytes: current,
+                networkTransmitBytes: current,
+                blockReadBytes: current,
+                blockWriteBytes: current,
+                processCount: Int(current)
+            )
+            usageCounter = current + 1
+        } else {
+            usage = nil
+        }
+        return try RuntimeInventoryBuilder.build(
             machine: RuntimeInventoryMachine(
                 state: .running,
                 operatingSystem: "macOS 26.0",
@@ -714,7 +831,7 @@ private actor MigrationTestAdapter: RuntimeAdapter {
                     RuntimeInventoryService(identifier: "api-server", state: .running, required: true)
                 ]
             ),
-            containers: resources.map(container),
+            containers: resources.map { container($0, usage: usage) },
             images: localImages.values.map {
                 RuntimeInventoryImage(
                     runtimeID: $0.descriptorDigest,
@@ -922,7 +1039,10 @@ private actor MigrationTestAdapter: RuntimeAdapter {
         resources[index].lifecycle = lifecycle
     }
 
-    private func container(_ resource: MigrationTestResource) -> RuntimeInventoryContainer {
+    private func container(
+        _ resource: MigrationTestResource,
+        usage: RuntimeInventoryUsage?
+    ) -> RuntimeInventoryContainer {
         let labels: [RuntimeInventoryLabel]
         if let ownership = resource.ownership {
             let context = RuntimeMutationContext(
@@ -958,7 +1078,8 @@ private actor MigrationTestAdapter: RuntimeAdapter {
             ),
             ports: [],
             mounts: [],
-            networks: [],
+            networks: resource.networks,
+            usage: usage,
             services: []
         )
     }
@@ -985,6 +1106,7 @@ private actor MigrationTestJournal: RuntimeProviderMigrationJournaling {
     private(set) var checkpoint: RuntimeProviderMigrationCheckpoint = .intentPersisted
     private(set) var terminalStatus: RuntimeProviderMigrationTerminalStatus?
     private(set) var commit: RuntimeProviderMigrationBindingCommit?
+    private var rejectFence = false
 
     func beginOrResume(
         _ proposed: RuntimeProviderMigrationIntent
@@ -1018,9 +1140,14 @@ private actor MigrationTestJournal: RuntimeProviderMigrationJournaling {
     }
 
     func verifyFence(operationID: String, fencingToken: String) async throws -> Bool {
-        intent?.operationID == operationID &&
+        !rejectFence &&
+            intent?.operationID == operationID &&
             intent?.fencingToken == fencingToken &&
             terminalStatus == nil
+    }
+
+    func rejectFenceVerification() {
+        rejectFence = true
     }
 
     func recordCheckpoint(

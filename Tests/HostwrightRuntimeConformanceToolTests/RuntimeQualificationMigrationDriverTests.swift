@@ -144,6 +144,90 @@ final class RuntimeQualificationMigrationDriverTests: XCTestCase {
         ), evidence)
     }
 
+    func testStableInventoryDigestIgnoresUsageButTracksLifecycleAndOwnership() throws {
+        func inventory(
+            usageValue: UInt64,
+            lifecycle: RuntimeInventoryLifecycleState = .running,
+            fencingToken: String = "33333333-3333-4333-8333-333333333333"
+        ) throws -> RuntimeInventory {
+            try RuntimeInventoryBuilder.build(
+                machine: RuntimeInventoryMachine(
+                    state: .running,
+                    operatingSystem: "macOS 26.0",
+                    architecture: "arm64",
+                    runtimeVersion: "1.1.0",
+                    services: []
+                ),
+                containers: [
+                    RuntimeInventoryContainer(
+                        runtimeID: "runtime-api",
+                        name: "sample--api",
+                        imageReference: "docker.io/library/python:alpine",
+                        lifecycle: lifecycle,
+                        health: RuntimeInventoryHealth(availability: .unavailable),
+                        labels: [
+                            RuntimeInventoryLabel(
+                                key: RuntimeManagedResourceIdentity.managedLabel,
+                                value: "true"
+                            )
+                        ],
+                        ownership: RuntimeInventoryOwnershipEvidence(
+                            resourceUUID: "22222222-2222-4222-8222-222222222222",
+                            projectUUID: "11111111-1111-4111-8111-111111111111",
+                            resourceGeneration: 1,
+                            projectGeneration: 1,
+                            providerID: .appleContainerCLI,
+                            providerGeneration: 1,
+                            fencingToken: fencingToken
+                        ),
+                        initConfiguration: RuntimeInventoryInitConfiguration(
+                            executable: "/bin/service",
+                            arguments: [],
+                            environment: []
+                        ),
+                        ports: [],
+                        mounts: [],
+                        networks: [],
+                        usage: RuntimeInventoryUsage(
+                            cpuUsageMicroseconds: usageValue,
+                            memoryUsageBytes: usageValue,
+                            memoryLimitBytes: 1_024,
+                            networkReceiveBytes: usageValue,
+                            networkTransmitBytes: usageValue,
+                            blockReadBytes: usageValue,
+                            blockWriteBytes: usageValue,
+                            processCount: Int(usageValue)
+                        ),
+                        services: []
+                    )
+                ],
+                images: [],
+                networks: [],
+                volumes: []
+            )
+        }
+
+        let baseline = try RuntimeQualificationMigrationDriver.stableInventoryDigest(
+            inventory(usageValue: 1)
+        )
+        let usageChanged = try RuntimeQualificationMigrationDriver.stableInventoryDigest(
+            inventory(usageValue: 2)
+        )
+        let lifecycleChanged = try RuntimeQualificationMigrationDriver.stableInventoryDigest(
+            inventory(usageValue: 2, lifecycle: .stopped)
+        )
+        let ownershipChanged = try RuntimeQualificationMigrationDriver.stableInventoryDigest(
+            inventory(
+                usageValue: 2,
+                fencingToken: "44444444-4444-4444-8444-444444444444"
+            )
+        )
+
+        XCTAssertEqual(baseline, usageChanged)
+        XCTAssertNotEqual(baseline, lifecycleChanged)
+        XCTAssertNotEqual(baseline, ownershipChanged)
+    }
+
     func testStateFoundationRefusesCleanupAfterOwnershipMarkerTampering() throws {
         let parent = FileManager.default.temporaryDirectory.appendingPathComponent(
             "hostwright-phase03-migration-parent-\(UUID().uuidString.lowercased())",

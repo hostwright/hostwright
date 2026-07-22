@@ -63,6 +63,114 @@ final class RuntimeQualificationRecoveryDriverTests: XCTestCase {
         }
     }
 
+    func testInstalledHelperTransitionUsesOneFixedSlotAndExactCleans() throws {
+        let root = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let prior = try executable(named: "prior", contents: "h1", under: root)
+        let installed = try executable(named: "installed", contents: "h2", under: root)
+        let transition = try RuntimeQualificationInstalledHelperTransition.prepare(
+            priorURL: prior,
+            installedURL: installed,
+            priorSHA256: digest("h1"),
+            currentSHA256: digest("h2")
+        )
+        XCTAssertEqual(
+            transition.stagedURL.deletingLastPathComponent().lastPathComponent,
+            ".hostwright-phase03-helper-upgrade"
+        )
+
+        try transition.activatePrior()
+        XCTAssertEqual(try String(contentsOf: installed, encoding: .utf8), "h1")
+        XCTAssertEqual(try String(contentsOf: transition.stagedURL, encoding: .utf8), "h2")
+
+        try transition.restoreCurrent()
+        XCTAssertEqual(try String(contentsOf: installed, encoding: .utf8), "h2")
+        XCTAssertEqual(try String(contentsOf: transition.stagedURL, encoding: .utf8), "h1")
+        try transition.removeStaging()
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: transition.stagedURL.deletingLastPathComponent().path
+        ))
+    }
+
+    func testInstalledHelperTransitionRestoresAfterInterruptedPriorSlot() throws {
+        let root = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let prior = try executable(named: "prior", contents: "h1", under: root)
+        let installed = try executable(named: "installed", contents: "h2", under: root)
+        var interrupted: RuntimeQualificationInstalledHelperTransition? = try
+            RuntimeQualificationInstalledHelperTransition.prepare(
+            priorURL: prior,
+            installedURL: installed,
+            priorSHA256: digest("h1"),
+            currentSHA256: digest("h2")
+        )
+        try interrupted?.activatePrior()
+        let interruptedStagedURL = try XCTUnwrap(interrupted?.stagedURL)
+        interrupted = nil
+
+        let resumed = try RuntimeQualificationInstalledHelperTransition.prepare(
+            priorURL: prior,
+            installedURL: installed,
+            priorSHA256: digest("h1"),
+            currentSHA256: digest("h2")
+        )
+
+        XCTAssertEqual(try String(contentsOf: installed, encoding: .utf8), "h2")
+        XCTAssertEqual(try String(contentsOf: resumed.stagedURL, encoding: .utf8), "h1")
+        XCTAssertEqual(resumed.stagedURL, interruptedStagedURL)
+        try resumed.removeStaging()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: resumed.stagedURL.path))
+    }
+
+    func testInstalledHelperTransitionRefusesConcurrentFixedSlotUse() throws {
+        let root = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let prior = try executable(named: "prior", contents: "h1", under: root)
+        let installed = try executable(named: "installed", contents: "h2", under: root)
+        let active = try RuntimeQualificationInstalledHelperTransition.prepare(
+            priorURL: prior,
+            installedURL: installed,
+            priorSHA256: digest("h1"),
+            currentSHA256: digest("h2")
+        )
+
+        XCTAssertThrowsError(try RuntimeQualificationInstalledHelperTransition.prepare(
+            priorURL: prior,
+            installedURL: installed,
+            priorSHA256: digest("h1"),
+            currentSHA256: digest("h2")
+        )) {
+            XCTAssertEqual(
+                $0 as? RuntimeQualificationRecoveryDriverError,
+                .providerPreflightFailed
+            )
+        }
+        XCTAssertEqual(try String(contentsOf: installed, encoding: .utf8), "h2")
+        XCTAssertEqual(try String(contentsOf: active.stagedURL, encoding: .utf8), "h1")
+        try active.removeStaging()
+    }
+
+    func testInstalledHelperTransitionRejectsTamperedStagingBeforeSwap() throws {
+        let root = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let prior = try executable(named: "prior", contents: "h1", under: root)
+        let installed = try executable(named: "installed", contents: "h2", under: root)
+        let transition = try RuntimeQualificationInstalledHelperTransition.prepare(
+            priorURL: prior,
+            installedURL: installed,
+            priorSHA256: digest("h1"),
+            currentSHA256: digest("h2")
+        )
+        try Data("tampered".utf8).write(to: transition.stagedURL)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: transition.stagedURL.path
+        )
+
+        XCTAssertThrowsError(try transition.activatePrior())
+        XCTAssertEqual(try String(contentsOf: installed, encoding: .utf8), "h2")
+    }
+
     func testSpecificationAcceptsOnlyLockedProviderScenarioPairs() throws {
         for scenario in RuntimeQualificationRecoveryScenario.allCases {
             let provider: RuntimeProviderID = switch scenario {
@@ -258,6 +366,26 @@ final class RuntimeQualificationRecoveryDriverTests: XCTestCase {
             at: url,
             withIntermediateDirectories: false,
             attributes: [.posixPermissions: 0o700]
+        )
+        return url
+    }
+
+    private func executable(
+        named directoryName: String,
+        contents: String,
+        under root: URL
+    ) throws -> URL {
+        let directory = root.appendingPathComponent(directoryName, isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: false,
+            attributes: [.posixPermissions: 0o700]
+        )
+        let url = directory.appendingPathComponent("hostwright-containerization-helper")
+        try Data(contents.utf8).write(to: url, options: .withoutOverwriting)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: url.path
         )
         return url
     }

@@ -88,6 +88,248 @@ enum RuntimeQualificationHelperSignatureVerifier {
     }
 }
 
+private final class RuntimeQualificationHelperDirectoryLock {
+    private var descriptor: Int32
+
+    init(directoryURL: URL) throws {
+        descriptor = Darwin.open(
+            directoryURL.path,
+            O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC | O_EXLOCK | O_NONBLOCK
+        )
+        guard descriptor >= 0 else {
+            throw RuntimeQualificationRecoveryDriverError.providerPreflightFailed
+        }
+    }
+
+    deinit {
+        guard descriptor >= 0 else { return }
+        Darwin.close(descriptor)
+    }
+}
+
+struct RuntimeQualificationInstalledHelperTransition {
+    private static let stagingDirectoryName = ".hostwright-phase03-helper-upgrade"
+
+    let installedURL: URL
+    let stagedURL: URL
+    let priorSHA256: String
+    let currentSHA256: String
+
+    private let stagingDirectoryURL: URL
+    private let directoryLock: RuntimeQualificationHelperDirectoryLock
+
+    static func prepare(
+        priorURL: URL,
+        installedURL: URL,
+        priorSHA256: String,
+        currentSHA256: String
+    ) throws -> Self {
+        guard priorURL.path != installedURL.path,
+              priorURL.lastPathComponent == "hostwright-containerization-helper",
+              installedURL.lastPathComponent == "hostwright-containerization-helper",
+              isDigest(priorSHA256), isDigest(currentSHA256),
+              priorSHA256 != currentSHA256,
+              try fileSHA256(priorURL) == priorSHA256 else {
+            throw RuntimeQualificationRecoveryDriverError.providerPreflightFailed
+        }
+        let stagingDirectoryURL = installedURL.deletingLastPathComponent()
+            .appendingPathComponent(
+                stagingDirectoryName,
+                isDirectory: true
+            )
+        let stagedURL = stagingDirectoryURL.appendingPathComponent(
+            "hostwright-containerization-helper",
+            isDirectory: false
+        )
+        let directoryLock = try RuntimeQualificationHelperDirectoryLock(
+            directoryURL: installedURL.deletingLastPathComponent()
+        )
+        try recoverInterruptedTransitionIfPresent(
+            installedURL: installedURL,
+            stagedURL: stagedURL,
+            stagingDirectoryURL: stagingDirectoryURL,
+            priorSHA256: priorSHA256,
+            currentSHA256: currentSHA256,
+            directoryLock: directoryLock
+        )
+        guard try fileSHA256(installedURL) == currentSHA256 else {
+            throw RuntimeQualificationRecoveryDriverError.providerPreflightFailed
+        }
+        var createdStagingDirectory = false
+        do {
+            try FileManager.default.createDirectory(
+                at: stagingDirectoryURL,
+                withIntermediateDirectories: false,
+                attributes: [.posixPermissions: 0o700]
+            )
+            createdStagingDirectory = true
+            try FileManager.default.copyItem(at: priorURL, to: stagedURL)
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o700],
+                ofItemAtPath: stagedURL.path
+            )
+            guard try fileSHA256(stagedURL) == priorSHA256 else {
+                throw RuntimeQualificationRecoveryDriverError.providerPreflightFailed
+            }
+            try synchronizeFile(stagedURL)
+            try synchronizeDirectory(stagingDirectoryURL)
+            try synchronizeDirectory(installedURL.deletingLastPathComponent())
+            return Self(
+                installedURL: installedURL,
+                stagedURL: stagedURL,
+                priorSHA256: priorSHA256,
+                currentSHA256: currentSHA256,
+                stagingDirectoryURL: stagingDirectoryURL,
+                directoryLock: directoryLock
+            )
+        } catch {
+            if createdStagingDirectory {
+                try? FileManager.default.removeItem(at: stagingDirectoryURL)
+            }
+            throw error
+        }
+    }
+
+    func activatePrior() throws {
+        guard try Self.fileSHA256(installedURL) == currentSHA256,
+              try Self.fileSHA256(stagedURL) == priorSHA256 else {
+            throw RuntimeQualificationRecoveryDriverError.providerPreflightFailed
+        }
+        try swap()
+        guard try Self.fileSHA256(installedURL) == priorSHA256,
+              try Self.fileSHA256(stagedURL) == currentSHA256 else {
+            throw RuntimeQualificationRecoveryDriverError.cleanupFailed
+        }
+    }
+
+    func restoreCurrent() throws {
+        let installed = try Self.fileSHA256(installedURL)
+        let staged = try Self.fileSHA256(stagedURL)
+        if installed == priorSHA256, staged == currentSHA256 {
+            try swap()
+        } else if installed != currentSHA256 || staged != priorSHA256 {
+            throw RuntimeQualificationRecoveryDriverError.cleanupFailed
+        }
+        guard try Self.fileSHA256(installedURL) == currentSHA256,
+              try Self.fileSHA256(stagedURL) == priorSHA256 else {
+            throw RuntimeQualificationRecoveryDriverError.cleanupFailed
+        }
+    }
+
+    func removeStaging() throws {
+        var directoryMetadata = stat()
+        guard stagingDirectoryURL.deletingLastPathComponent()
+                == installedURL.deletingLastPathComponent(),
+              stagingDirectoryURL.lastPathComponent == Self.stagingDirectoryName,
+              lstat(stagingDirectoryURL.path, &directoryMetadata) == 0,
+              directoryMetadata.st_mode & S_IFMT == S_IFDIR,
+              directoryMetadata.st_uid == geteuid(),
+              directoryMetadata.st_mode & 0o7777 == 0o700,
+              try FileManager.default.contentsOfDirectory(
+                atPath: stagingDirectoryURL.path
+              ) == [stagedURL.lastPathComponent],
+              try Self.fileSHA256(stagedURL) == priorSHA256 else {
+            throw RuntimeQualificationRecoveryDriverError.cleanupFailed
+        }
+        try FileManager.default.removeItem(at: stagedURL)
+        try FileManager.default.removeItem(at: stagingDirectoryURL)
+        try Self.synchronizeDirectory(installedURL.deletingLastPathComponent())
+        guard !FileManager.default.fileExists(atPath: stagingDirectoryURL.path) else {
+            throw RuntimeQualificationRecoveryDriverError.cleanupFailed
+        }
+    }
+
+    private func swap() throws {
+        guard renamex_np(
+            installedURL.path,
+            stagedURL.path,
+            UInt32(RENAME_SWAP)
+        ) == 0 else {
+            throw RuntimeQualificationRecoveryDriverError.cleanupFailed
+        }
+        try Self.synchronizeDirectory(installedURL.deletingLastPathComponent())
+        try Self.synchronizeDirectory(stagingDirectoryURL)
+    }
+
+    private static func recoverInterruptedTransitionIfPresent(
+        installedURL: URL,
+        stagedURL: URL,
+        stagingDirectoryURL: URL,
+        priorSHA256: String,
+        currentSHA256: String,
+        directoryLock: RuntimeQualificationHelperDirectoryLock
+    ) throws {
+        var directoryMetadata = stat()
+        errno = 0
+        guard lstat(stagingDirectoryURL.path, &directoryMetadata) == 0 else {
+            if errno == ENOENT { return }
+            throw RuntimeQualificationRecoveryDriverError.cleanupFailed
+        }
+        guard stagingDirectoryURL.deletingLastPathComponent()
+                == installedURL.deletingLastPathComponent(),
+              stagingDirectoryURL.lastPathComponent == stagingDirectoryName,
+              directoryMetadata.st_mode & S_IFMT == S_IFDIR,
+              directoryMetadata.st_uid == geteuid(),
+              directoryMetadata.st_mode & 0o7777 == 0o700,
+              try FileManager.default.contentsOfDirectory(
+                atPath: stagingDirectoryURL.path
+              ) == [stagedURL.lastPathComponent] else {
+            throw RuntimeQualificationRecoveryDriverError.cleanupFailed
+        }
+        let interrupted = Self(
+            installedURL: installedURL,
+            stagedURL: stagedURL,
+            priorSHA256: priorSHA256,
+            currentSHA256: currentSHA256,
+            stagingDirectoryURL: stagingDirectoryURL,
+            directoryLock: directoryLock
+        )
+        try interrupted.restoreCurrent()
+        try interrupted.removeStaging()
+    }
+
+    private static func fileSHA256(_ url: URL) throws -> String {
+        let identity = try SecureExecutableResolver.verify(
+            path: url.path,
+            ownershipPolicy: .rootOrCurrentUser
+        )
+        let data = try Data(contentsOf: url, options: .mappedIfSafe)
+        try SecureExecutableResolver.verifyUnchanged(identity)
+        return SHA256.hash(data: data)
+            .map { String(format: "%02x", $0) }
+            .joined()
+    }
+
+    private static func synchronizeFile(_ url: URL) throws {
+        let descriptor = Darwin.open(url.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+        guard descriptor >= 0 else {
+            throw RuntimeQualificationRecoveryDriverError.cleanupFailed
+        }
+        defer { Darwin.close(descriptor) }
+        guard fsync(descriptor) == 0 else {
+            throw RuntimeQualificationRecoveryDriverError.cleanupFailed
+        }
+    }
+
+    private static func synchronizeDirectory(_ url: URL) throws {
+        let descriptor = Darwin.open(
+            url.path,
+            O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC
+        )
+        guard descriptor >= 0 else {
+            throw RuntimeQualificationRecoveryDriverError.cleanupFailed
+        }
+        defer { Darwin.close(descriptor) }
+        guard fsync(descriptor) == 0 else {
+            throw RuntimeQualificationRecoveryDriverError.cleanupFailed
+        }
+    }
+
+    private static func isDigest(_ value: String) -> Bool {
+        value.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil
+    }
+}
+
 enum RuntimeQualificationRecoveryScenario: String, CaseIterable, Codable, Sendable {
     case cliServiceRestart = "cli-service-restart"
     case helperRestart = "helper-restart"
@@ -870,16 +1112,59 @@ struct RuntimeQualificationRecoveryDriver {
 
     private func runEvidence() async throws -> RuntimeQualificationRecoveryEvidence {
         let priorHelperSHA256BeforeLaunch: String?
+        let currentHelperSHA256BeforeTransition: String?
+        var helperTransition: RuntimeQualificationInstalledHelperTransition?
+        let helperExecutableURL: URL?
         if let priorHelperURL = specification.priorHelperURL {
             do {
                 priorHelperSHA256BeforeLaunch = try RuntimeQualificationHelperSignatureVerifier.sha256(
                     of: priorHelperURL
                 )
+                let currentHelperURL = try Self.currentInstalledHelperURL()
+                currentHelperSHA256BeforeTransition = try RuntimeQualificationHelperSignatureVerifier.sha256(
+                    of: currentHelperURL
+                )
+                var socketMetadata = stat()
+                let socketURL = try ContainerizationHelperClientConfiguration.installed(
+                    hostExecutableURL: Bundle.main.executableURL
+                ).socketURL
+                errno = 0
+                guard lstat(socketURL.path, &socketMetadata) == -1,
+                      errno == ENOENT else {
+                    throw RuntimeQualificationRecoveryDriverError.providerPreflightFailed
+                }
+                let transition = try RuntimeQualificationInstalledHelperTransition.prepare(
+                    priorURL: priorHelperURL,
+                    installedURL: currentHelperURL,
+                    priorSHA256: priorHelperSHA256BeforeLaunch!,
+                    currentSHA256: currentHelperSHA256BeforeTransition!
+                )
+                helperTransition = transition
+                try transition.activatePrior()
+                guard try RuntimeQualificationHelperSignatureVerifier.sha256(
+                    of: transition.installedURL
+                ) == priorHelperSHA256BeforeLaunch,
+                try RuntimeQualificationHelperSignatureVerifier.sha256(
+                    of: transition.stagedURL
+                ) == currentHelperSHA256BeforeTransition else {
+                    throw RuntimeQualificationRecoveryDriverError.providerPreflightFailed
+                }
+                helperExecutableURL = transition.installedURL
             } catch {
+                if let helperTransition {
+                    do {
+                        try Self.restoreAndCleanInstalledHelper(helperTransition)
+                    } catch {
+                        throw RuntimeQualificationRecoveryDriverError.cleanupFailed
+                    }
+                }
                 throw RuntimeQualificationRecoveryDriverError.providerPreflightFailed
             }
         } else {
             priorHelperSHA256BeforeLaunch = nil
+            currentHelperSHA256BeforeTransition = nil
+            helperTransition = nil
+            helperExecutableURL = nil
         }
         var boundary: RuntimeQualificationRecoveryProviderBoundary
         do {
@@ -887,11 +1172,25 @@ struct RuntimeQualificationRecoveryDriver {
                 providerID: specification.providerID,
                 expectedVersion: specification.expectedVersion,
                 recorder: recorder,
-                helperExecutableURL: specification.priorHelperURL
+                helperExecutableURL: helperExecutableURL
             )
         } catch let error as RuntimeQualificationRecoveryDriverError {
+            if let helperTransition {
+                do {
+                    try Self.restoreAndCleanInstalledHelper(helperTransition)
+                } catch {
+                    throw RuntimeQualificationRecoveryDriverError.cleanupFailed
+                }
+            }
             throw error
         } catch {
+            if let helperTransition {
+                do {
+                    try Self.restoreAndCleanInstalledHelper(helperTransition)
+                } catch {
+                    throw RuntimeQualificationRecoveryDriverError.cleanupFailed
+                }
+            }
             throw RuntimeQualificationRecoveryDriverError.providerPreflightFailed
         }
         var state: RuntimeQualificationRecoveryStateFoundation?
@@ -964,13 +1263,18 @@ struct RuntimeQualificationRecoveryDriver {
             case .staleHelper:
                 guard let priorHelperURL = specification.priorHelperURL,
                       let priorBefore = priorHelperSHA256BeforeLaunch,
-                      boundary.helperExecutableURL == priorHelperURL else {
+                      let currentBeforeTransition = currentHelperSHA256BeforeTransition,
+                      let transition = helperTransition,
+                      boundary.helperExecutableURL == transition.installedURL else {
                     throw RuntimeQualificationRecoveryDriverError.providerPreflightFailed
                 }
                 let priorAfter = try RuntimeQualificationHelperSignatureVerifier.sha256(
                     of: priorHelperURL
                 )
                 guard priorBefore == priorAfter,
+                      try RuntimeQualificationHelperSignatureVerifier.sha256(
+                        of: transition.installedURL
+                      ) == priorAfter,
                       Self.helperFingerprint(in: baselineSnapshot) == priorAfter else {
                     throw RuntimeQualificationRecoveryDriverError.providerPreflightFailed
                 }
@@ -991,10 +1295,15 @@ struct RuntimeQualificationRecoveryDriver {
                     exitStatus: 0
                 )
 
-                let currentHelperURL = try Self.currentInstalledHelperURL()
+                try Self.restoreAndCleanInstalledHelper(transition)
+                helperTransition = nil
+                let currentHelperURL = transition.installedURL
                 let currentBefore = try RuntimeQualificationHelperSignatureVerifier.sha256(
                     of: currentHelperURL
                 )
+                guard currentBefore == currentBeforeTransition else {
+                    throw RuntimeQualificationRecoveryDriverError.cleanupFailed
+                }
                 let currentBoundary = try await RuntimeQualificationRecoveryProviderBoundary.make(
                     providerID: specification.providerID,
                     expectedVersion: specification.expectedVersion,
@@ -1157,6 +1466,13 @@ struct RuntimeQualificationRecoveryDriver {
                 do { try state.remove() } catch { cleaned = false }
             }
             let stopped = await boundary.shutdown()
+            if let helperTransition {
+                do {
+                    try Self.restoreAndCleanInstalledHelper(helperTransition)
+                } catch {
+                    cleaned = false
+                }
+            }
             guard cleaned, stopped else {
                 throw RuntimeQualificationRecoveryDriverError.cleanupFailed
             }
@@ -1167,6 +1483,21 @@ struct RuntimeQualificationRecoveryDriver {
 }
 
 private extension RuntimeQualificationRecoveryDriver {
+    static func restoreAndCleanInstalledHelper(
+        _ transition: RuntimeQualificationInstalledHelperTransition
+    ) throws {
+        try transition.restoreCurrent()
+        guard try RuntimeQualificationHelperSignatureVerifier.sha256(
+            of: transition.installedURL
+        ) == transition.currentSHA256,
+        try RuntimeQualificationHelperSignatureVerifier.sha256(
+            of: transition.stagedURL
+        ) == transition.priorSHA256 else {
+            throw RuntimeQualificationRecoveryDriverError.cleanupFailed
+        }
+        try transition.removeStaging()
+    }
+
     static func verify(
         _ evaluation: RuntimeProviderRecoveryEvaluation,
         for scenario: RuntimeQualificationRecoveryScenario

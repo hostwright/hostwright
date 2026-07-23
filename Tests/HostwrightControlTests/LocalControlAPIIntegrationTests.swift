@@ -3,6 +3,7 @@ import HostwrightCLI
 import HostwrightCore
 import HostwrightHealth
 import HostwrightManifest
+import HostwrightRuntime
 import HostwrightState
 import HostwrightTestSupport
 import XCTest
@@ -92,6 +93,7 @@ final class LocalControlAPIIntegrationTests: XCTestCase {
             XCTAssertEqual(string("kind", in: status.result), "status")
             let runtime = try XCTUnwrap(object("runtime", in: status.result))
             XCTAssertEqual(bool("observed", in: .object(runtime)), true)
+            XCTAssertEqual(string("adapter", in: .object(runtime)), "ScriptedRuntimeAdapter")
             let defaultResolution = try HostwrightLocalPathResolver.resolve(
                 homeDirectory: workspace.root.path,
                 environment: [:]
@@ -270,7 +272,20 @@ final class LocalControlAPIIntegrationTests: XCTestCase {
                 environment: [:]
             )
         }
-        environment.runtimeAdapter = { ScriptedRuntimeAdapter(scenario: .availableEmpty) }
+        let runtimeAdapter = ScriptedRuntimeAdapter(scenario: .availableEmpty)
+        environment.runtimeAdapter = { runtimeAdapter }
+        environment.runtimeAdapterForProvider = { providerID in
+            guard providerID == .appleContainerCLI else {
+                throw RuntimeProviderSelectionError.providerUnavailable(providerID)
+            }
+            return runtimeAdapter
+        }
+        environment.runtimeProviderProbes = {
+            [
+                .available(ScriptedRuntimeAdapter.testCapabilitySnapshot),
+                .unavailable(.appleContainerization, reason: .componentUnavailable)
+            ]
+        }
         let executablePath = environment.executablePath
         environment.executablePath = { name in
             name == "container" ? "/usr/local/bin/container" : executablePath(name)

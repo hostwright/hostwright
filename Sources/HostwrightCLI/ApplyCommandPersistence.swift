@@ -17,7 +17,8 @@ extension ApplyCommandRunner {
         projectID: String,
         timestamp: String,
         runtimeAdapter: String,
-        teamBinding: TeamWorkflowBinding?
+        teamBinding: TeamWorkflowBinding?,
+        mutationContext: RuntimeMutationContext
     ) throws {
         try store.desiredStates.saveManifestSnapshot(
             projectID: projectID,
@@ -51,6 +52,7 @@ extension ApplyCommandRunner {
                 planHash: plan.planHash,
                 payloadJSONRedacted: jsonPayload([
                     "action": action.kind.rawValue,
+                    "capabilitySHA256": mutationContext.capabilitySHA256,
                     "identity": action.identity.displayName,
                     "resourceIdentifier": action.resourceIdentifier
                 ].merging(hostwrightTeamBindingPayload(teamBinding)) { current, _ in current })
@@ -68,7 +70,10 @@ extension ApplyCommandRunner {
                 runtimeAdapter: runtimeAdapter,
                 message: "Apply intent recorded for \(action.identity.displayName).",
                 payloadJSONRedacted: jsonPayload(
-                    ["planHash": plan.planHash].merging(hostwrightTeamBindingPayload(teamBinding)) { current, _ in current }
+                    [
+                        "capabilitySHA256": mutationContext.capabilitySHA256,
+                        "planHash": plan.planHash
+                    ].merging(hostwrightTeamBindingPayload(teamBinding)) { current, _ in current }
                 )
             )
         ]
@@ -125,7 +130,10 @@ extension ApplyCommandRunner {
                 idempotencyKey: idempotencyKey,
                 planHash: planHash,
                 payloadJSONRedacted: jsonPayload(
-                    ["result": "succeeded"].merging(hostwrightTeamBindingPayload(teamBinding)) { current, _ in current }
+                    [
+                        "capabilitySHA256": mutationContext.capabilitySHA256,
+                        "result": "succeeded"
+                    ].merging(hostwrightTeamBindingPayload(teamBinding)) { current, _ in current }
                 )
             )
         )
@@ -141,7 +149,10 @@ extension ApplyCommandRunner {
                 runtimeAdapter: nil,
                 message: event.message,
                 payloadJSONRedacted: jsonPayload(
-                    ["planHash": planHash].merging(hostwrightTeamBindingPayload(teamBinding)) { current, _ in current }
+                    [
+                        "capabilitySHA256": mutationContext.capabilitySHA256,
+                        "planHash": planHash
+                    ].merging(hostwrightTeamBindingPayload(teamBinding)) { current, _ in current }
                 )
             )
         ])
@@ -164,7 +175,10 @@ extension ApplyCommandRunner {
                     observedAt: timestamp,
                     cleanupEligible: action.executionAvailability == .availableForCreateMissingService,
                     metadataJSONRedacted: jsonPayload(
-                        ["planHash": planHash].merging(hostwrightTeamBindingPayload(teamBinding)) { current, _ in current }
+                        [
+                            "capabilitySHA256": mutationContext.capabilitySHA256,
+                            "planHash": planHash
+                        ].merging(hostwrightTeamBindingPayload(teamBinding)) { current, _ in current }
                     ),
                     identityVersion: RuntimeManagedResourceIdentity.currentVersion,
                     resourceUUID: mutationContext.resourceUUID,
@@ -196,9 +210,27 @@ extension ApplyCommandRunner {
         planHash: String,
         projectID: String,
         timestamp: String,
-        teamBinding: TeamWorkflowBinding?
+        teamBinding: TeamWorkflowBinding?,
+        capabilitySHA256: String,
+        normalizedFailure: RuntimeNormalizedFailure? = nil
     ) throws {
         let redactedError = RuntimeRedactionPolicy.default.redact(String(describing: error))
+        var failurePayload: [String: Any] = [
+            "capabilitySHA256": capabilitySHA256,
+            "error": redactedError
+        ]
+        if let normalizedFailure {
+            failurePayload.merge([
+                "category": normalizedFailure.category.rawValue,
+                "diagnostic": normalizedFailure.diagnostic,
+                "guidance": normalizedFailure.guidance,
+                "operationID": normalizedFailure.operationID,
+                "providerID": normalizedFailure.providerID,
+                "providerVersion": normalizedFailure.providerVersion,
+                "recoveryDisposition": normalizedFailure.recoveryDisposition.rawValue,
+                "retryDisposition": normalizedFailure.retryDisposition.rawValue
+            ]) { current, _ in current }
+        }
         try store.operations.record(
             OperationRecord(
                 id: "\(operationID)-failed",
@@ -211,7 +243,7 @@ extension ApplyCommandRunner {
                 idempotencyKey: idempotencyKey,
                 planHash: planHash,
                 payloadJSONRedacted: jsonPayload(
-                    ["error": redactedError].merging(hostwrightTeamBindingPayload(teamBinding)) { current, _ in current }
+                    failurePayload.merging(hostwrightTeamBindingPayload(teamBinding)) { current, _ in current }
                 )
             )
         )
@@ -227,7 +259,12 @@ extension ApplyCommandRunner {
                 runtimeAdapter: nil,
                 message: "Apply failed for \(action.identity.displayName): \(redactedError)",
                 payloadJSONRedacted: jsonPayload(
-                    ["planHash": planHash].merging(hostwrightTeamBindingPayload(teamBinding)) { current, _ in current }
+                    [
+                        "category": normalizedFailure?.category.rawValue ?? "untyped",
+                        "capabilitySHA256": capabilitySHA256,
+                        "planHash": planHash,
+                        "retryDisposition": normalizedFailure?.retryDisposition.rawValue ?? RuntimeRetryDisposition.never.rawValue
+                    ].merging(hostwrightTeamBindingPayload(teamBinding)) { current, _ in current }
                 )
             )
         ])

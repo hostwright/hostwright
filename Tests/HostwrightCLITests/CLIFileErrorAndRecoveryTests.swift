@@ -381,6 +381,39 @@ private final class FileBox {
 }
 
 private final class RecordingRuntimeAdapter: RuntimeAdapter, @unchecked Sendable {
+    private static let capabilitySnapshot = RuntimeCapabilitySnapshot(
+        descriptor: RuntimeProviderDescriptor(
+            providerID: .appleContainerCLI,
+            components: [
+                RuntimeProviderComponent(
+                    identifier: .appleContainerCLI,
+                    version: "1.1.0",
+                    build: "109",
+                    fingerprint: "099d8db0"
+                ),
+                RuntimeProviderComponent(
+                    identifier: .appleContainerAPIService,
+                    version: "1.1.0",
+                    build: "109",
+                    fingerprint: "099d8db0"
+                )
+            ],
+            minimumMacOSVersion: RuntimeProviderCapabilityContract.minimumMacOSVersion,
+            supportedArchitectures: [.arm64]
+        ),
+        host: RuntimeProviderHostPlatform(
+            macOSVersion: RuntimeProviderMacOSVersion(major: 26, minor: 5, patch: 0),
+            macOSBuild: "25F90",
+            architecture: .arm64
+        ),
+        features: RuntimeProviderFeature.knownValues.map {
+            RuntimeProviderFeatureStatus(
+                feature: $0,
+                state: .available,
+                reason: .implemented
+            )
+        }
+    )
     let observedState: ObservedRuntimeState
     private let lock = NSLock()
     private var executedActions = 0
@@ -390,13 +423,15 @@ private final class RecordingRuntimeAdapter: RuntimeAdapter, @unchecked Sendable
             projectName: projectName,
             services: [],
             adapterMetadata: RuntimeAdapterMetadata(
+                providerID: .appleContainerCLI,
                 adapterName: "RecordingRuntimeAdapter",
                 adapterVersion: "test",
                 runtimeName: "test-runtime",
                 runtimeVersion: nil,
                 supportsMutation: true,
                 capabilities: [.readOnlyObservation, .lifecycleMutation]
-            )
+            ),
+            capabilitySHA256: Self.capabilitySnapshot.canonicalSHA256
         )
     }
 
@@ -412,12 +447,34 @@ private final class RecordingRuntimeAdapter: RuntimeAdapter, @unchecked Sendable
         [.readOnlyObservation, .lifecycleMutation]
     }
 
+    func capabilitySnapshot() async throws -> RuntimeCapabilitySnapshot {
+        Self.capabilitySnapshot
+    }
+
     func observe(desiredState: DesiredRuntimeState) async throws -> ObservedRuntimeState {
-        observedState
+        ObservedRuntimeState(
+            projectName: desiredState.projectName,
+            services: observedState.services,
+            adapterMetadata: observedState.adapterMetadata,
+            capabilitySHA256: observedState.capabilitySHA256
+        )
     }
 
     func plan(desiredState: DesiredRuntimeState, observedState: ObservedRuntimeState) async throws -> RuntimePlan {
-        RuntimePlan(actions: [])
+        let observedIdentities = Set(observedState.services.map(\.identity))
+        let actions = desiredState.services
+            .filter { !observedIdentities.contains($0.identity) }
+            .map { service in
+                PlannedRuntimeAction(
+                    kind: .create,
+                    identity: service.identity,
+                    resourceIdentifier: service.identity.managedResourceIdentifier,
+                    isDestructive: false,
+                    summary: "Create test runtime resource.",
+                    desiredService: service
+                )
+            }
+        return RuntimePlan(actions: actions, capabilitySHA256: observedState.capabilitySHA256)
     }
 
     func execute(_ action: PlannedRuntimeAction, confirmation: RuntimeMutationConfirmation?) async throws -> RuntimeEvent {

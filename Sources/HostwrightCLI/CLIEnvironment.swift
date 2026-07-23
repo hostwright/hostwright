@@ -12,7 +12,9 @@ public struct CLIEnvironment: @unchecked Sendable {
     public var writeNewTextFile: (String, String) throws -> Void
     public var executablePath: (String) -> String?
     public var localPathResolution: (String?) throws -> HostwrightLocalPathResolution
-    public var runtimeAdapter: () -> any RuntimeAdapter
+    public var runtimeAdapter: @Sendable () -> any RuntimeAdapter
+    public var runtimeAdapterForProvider: @Sendable (RuntimeProviderID) throws -> any RuntimeAdapter
+    public var runtimeProviderProbes: @Sendable () async -> [RuntimeProviderProbeResult]
     public var secretStore: () -> any SecretStore
     public var swiftVersion: () -> String?
     public var platformSnapshot: () -> PlatformSnapshot
@@ -37,7 +39,9 @@ public struct CLIEnvironment: @unchecked Sendable {
         localPathResolution: @escaping (String?) throws -> HostwrightLocalPathResolution = { explicitPath in
             try HostwrightLocalPathResolver.resolve(explicitStateDatabasePath: explicitPath)
         },
-        runtimeAdapter: @escaping () -> any RuntimeAdapter = { RuntimeAdapterFactory.defaultLocal() },
+        runtimeAdapter: @escaping @Sendable () -> any RuntimeAdapter = { RuntimeAdapterFactory.defaultLocal() },
+        runtimeAdapterForProvider: (@Sendable (RuntimeProviderID) throws -> any RuntimeAdapter)? = nil,
+        runtimeProviderProbes: (@Sendable () async -> [RuntimeProviderProbeResult])? = nil,
         secretStore: @escaping () -> any SecretStore = { UnavailableKeychainSecretStore() },
         swiftVersion: @escaping () -> String?,
         platformSnapshot: @escaping () -> PlatformSnapshot,
@@ -58,6 +62,25 @@ public struct CLIEnvironment: @unchecked Sendable {
         self.executablePath = executablePath
         self.localPathResolution = localPathResolution
         self.runtimeAdapter = runtimeAdapter
+        self.runtimeAdapterForProvider = runtimeAdapterForProvider ?? { providerID in
+            guard providerID == .appleContainerCLI else {
+                throw RuntimeProviderSelectionError.providerUnavailable(providerID)
+            }
+            return runtimeAdapter()
+        }
+        self.runtimeProviderProbes = runtimeProviderProbes ?? {
+            do {
+                return [
+                    .available(try await runtimeAdapter().capabilitySnapshot()),
+                    .unavailable(.appleContainerization, reason: .helperHandshakeUnavailable)
+                ]
+            } catch {
+                return [
+                    .unavailable(.appleContainerCLI, reason: .probeFailed),
+                    .unavailable(.appleContainerization, reason: .helperHandshakeUnavailable)
+                ]
+            }
+        }
         self.secretStore = secretStore
         self.swiftVersion = swiftVersion
         self.platformSnapshot = platformSnapshot
@@ -84,6 +107,21 @@ public struct CLIEnvironment: @unchecked Sendable {
             try HostwrightLocalPathResolver.resolve(explicitStateDatabasePath: explicitPath)
         },
         runtimeAdapter: { RuntimeAdapterFactory.defaultLocal() },
+        runtimeAdapterForProvider: { providerID in
+            if providerID == .appleContainerCLI {
+                return AppleContainerCLIAdapter()
+            }
+            if providerID == .appleContainerization {
+                let configuration = try ContainerizationHelperClientConfiguration.installed()
+                return AppleContainerizationRuntimeAdapter(
+                    client: ContainerizationHelperClient(configuration: configuration)
+                )
+            }
+            throw RuntimeProviderSelectionError.providerUnavailable(providerID)
+        },
+        runtimeProviderProbes: {
+            await RuntimeProviderDiscovery.liveProbe()
+        },
         secretStore: { UnavailableKeychainSecretStore() },
         swiftVersion: { ProcessLookup.swiftVersionSummary() },
         platformSnapshot: { PlatformSnapshot.current },

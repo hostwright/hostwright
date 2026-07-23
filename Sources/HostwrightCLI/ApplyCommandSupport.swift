@@ -32,12 +32,47 @@ func stableHash(_ value: String) -> String {
 }
 
 func jsonPayload(_ object: [String: Any]) -> String {
-    let redacted = object.mapValues { value -> Any in
-        if let string = value as? String {
-            return RuntimeRedactionPolicy.default.redact(string)
-        }
-        return value
-    }
+    let redacted = redactJSONValue(object)
     let data = try! JSONSerialization.data(withJSONObject: redacted, options: [.sortedKeys])
     return String(data: data, encoding: .utf8)!
+}
+
+private let hostwrightNonSecretJSONIdentityKeys: Set<String> = [
+    "capabilitySHA256",
+    "checkpoint",
+    "confirmationToken",
+    "fencingToken",
+    "operationID",
+    "planHash",
+    "projectResourceUUID",
+    "projectUUID",
+    "resourceFencingToken",
+    "resourceUUID",
+    "verification"
+]
+
+func redactJSONValue(_ value: Any, key: String? = nil) -> Any {
+    switch value {
+    case let dictionary as [String: Any]:
+        var result: [String: Any] = [:]
+        result.reserveCapacity(dictionary.count)
+        for (nestedKey, nestedValue) in dictionary {
+            if hostwrightNonSecretJSONIdentityKeys.contains(nestedKey),
+               let string = nestedValue as? String {
+                result[nestedKey] = string
+            } else {
+                result[nestedKey] = redactJSONValue(nestedValue, key: nestedKey)
+            }
+        }
+        return result
+    case let array as [Any]:
+        return array.map { redactJSONValue($0, key: key) }
+    case let string as String:
+        if let key, hostwrightNonSecretJSONIdentityKeys.contains(key) {
+            return string
+        }
+        return RuntimeRedactionPolicy.default.redact(string)
+    default:
+        return value
+    }
 }

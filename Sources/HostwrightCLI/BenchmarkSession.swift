@@ -23,6 +23,7 @@ final class BenchmarkSession: @unchecked Sendable {
     private var blockers: [String] = []
     private var actualContainerVersion: String?
     private var adapterMetadata: RuntimeAdapterMetadata?
+    private var runtimeCapabilitySHA256: String?
     private var imageEvidence: RuntimeLocalImageEvidence?
     private var versionMatchesExpected = false
     private var sleepWakeSample: BenchmarkSleepWakeSample?
@@ -192,18 +193,18 @@ final class BenchmarkSession: @unchecked Sendable {
             let (version, _) = try timed("RuntimeAdapter.runtimeVersion") {
                 try await self.adapter.runtimeVersion()
             }
-            guard let observedVersion = AppleContainerVersionParser.parse(version) else {
-                failures.append("Apple container version output did not contain a parseable semantic version.")
+            guard AppleContainerVersionParser.isValidExpectedVersion(version) else {
+                failures.append("Runtime provider version was not an exact semantic version.")
                 return nil
             }
-            if observedVersion != options.expectedContainerVersion {
+            if version != options.expectedContainerVersion {
                 failures.append(
-                    "Apple container version drift: expected \(options.expectedContainerVersion), observed \(observedVersion)."
+                    "Apple container version drift: expected \(options.expectedContainerVersion), observed \(version)."
                 )
-                return observedVersion
+                return version
             }
             versionMatchesExpected = true
-            return observedVersion
+            return version
         } catch {
             register(error)
             return nil
@@ -250,6 +251,21 @@ final class BenchmarkSession: @unchecked Sendable {
         let (initialObservation, _) = try timed("RuntimeAdapter.observe preflight \(identifier)") {
             try await self.adapter.observe(desiredState: desired)
         }
+        guard let observedCapabilitySHA256 = initialObservation.capabilitySHA256,
+              observedCapabilitySHA256.range(
+                  of: "^[a-f0-9]{64}$",
+                  options: .regularExpression
+              ) != nil else {
+            throw BenchmarkSessionError.capabilityUnavailable(identifier)
+        }
+        guard let providerID = adapterMetadata?.providerID else {
+            throw BenchmarkSessionError.capabilityUnavailable(identifier)
+        }
+        if let runtimeCapabilitySHA256,
+           runtimeCapabilitySHA256 != observedCapabilitySHA256 {
+            throw BenchmarkSessionError.capabilityChanged(identifier)
+        }
+        runtimeCapabilitySHA256 = observedCapabilitySHA256
         guard initialObservation.services.isEmpty else {
             throw BenchmarkSessionError.resourceCollision(identifier)
         }
@@ -271,6 +287,8 @@ final class BenchmarkSession: @unchecked Sendable {
             reason: "Confirmed disposable Phase 36 hardware benchmark resource.",
             planHash: hostwrightStableHash("phase36|\(options.sourceCommit)|\(identifier)"),
             context: RuntimeMutationContext(
+                providerID: providerID,
+                capabilitySHA256: observedCapabilitySHA256,
                 operationID: "benchmark-iteration-\(sequence)-\(instance)",
                 resourceUUID: HostwrightResourceUUID.legacy(kind: "benchmark-resource", identifier: identifier),
                 resourceGeneration: 1,
@@ -400,11 +418,24 @@ final class BenchmarkSession: @unchecked Sendable {
 
     private func cleanupRemainingCandidates() {
         for service in cleanupCandidates where !cleanedIdentifiers.contains(service.identity.managedResourceIdentifier) {
+            guard let providerID = adapterMetadata?.providerID,
+                  let capabilitySHA256 = runtimeCapabilitySHA256,
+                  capabilitySHA256.range(
+                      of: "^[a-f0-9]{64}$",
+                      options: .regularExpression
+                  ) != nil else {
+                cleanupFailures.append(
+                    "Exact cleanup could not bind the provider capability context for \(service.identity.managedResourceIdentifier)."
+                )
+                continue
+            }
             let confirmation = RuntimeMutationConfirmation(
                 confirmed: true,
                 reason: "Exact cleanup for disposable Phase 36 hardware benchmark resource.",
                 planHash: hostwrightStableHash("phase36-cleanup|\(options.sourceCommit)|\(service.identity.managedResourceIdentifier)"),
                 context: RuntimeMutationContext(
+                    providerID: providerID,
+                    capabilitySHA256: capabilitySHA256,
                     operationID: "benchmark-cleanup-\(service.identity.instanceName ?? "resource")",
                     resourceUUID: HostwrightResourceUUID.legacy(
                         kind: "benchmark-resource",
@@ -714,6 +745,9 @@ final class BenchmarkSession: @unchecked Sendable {
             switch runtimeError {
             case .runtimeUnavailable, .executableNotFound, .unsupportedRuntime, .capabilityUnavailable:
                 blockers.append(message)
+            case .normalizedFailure(let failure)
+                where failure.category == .unavailable || failure.category == .incompatible:
+                blockers.append(message)
             default:
                 failures.append(message)
             }
@@ -760,6 +794,8 @@ final class BenchmarkSession: @unchecked Sendable {
             return "Runtime capability unavailable: \(capability.rawValue)."
         case .mutationUnavailableByPolicy(let message):
             return "Runtime mutation unavailable by policy: \(message)"
+        case .normalizedFailure(let failure):
+            return "Runtime provider failure (\(failure.category.rawValue)): \(failure.diagnostic)"
         }
     }
 
@@ -785,6 +821,8 @@ final class BenchmarkSession: @unchecked Sendable {
 }
 
 private enum BenchmarkSessionError: Error, CustomStringConvertible {
+    case capabilityUnavailable(String)
+    case capabilityChanged(String)
     case invalidIdentity(String)
     case resourceCollision(String)
     case invalidPlan(String)
@@ -797,6 +835,10 @@ private enum BenchmarkSessionError: Error, CustomStringConvertible {
 
     var description: String {
         switch self {
+        case .capabilityUnavailable(let identifier):
+            return "Runtime observation did not bind an immutable capability digest for \(identifier)."
+        case .capabilityChanged(let identifier):
+            return "Runtime capabilities changed while benchmarking \(identifier); mutation stopped before reuse."
         case .invalidIdentity(let identifier):
             return "Benchmark generated an unsupported resource identifier: \(identifier)."
         case .resourceCollision(let identifier):

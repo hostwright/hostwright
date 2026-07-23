@@ -1,0 +1,23 @@
+[
+  {
+    "configuration": {
+      "creationDate": "2026-07-18T23:50:00Z",
+      "driver": "local",
+      "format": "ext4",
+      "futureConfigurationField": false,
+      "labels": {
+        "com.example.purpose": "cache"
+      },
+      "name": "hostwright-cache",
+      "options": {
+        "compression": "enabled"
+      },
+      "sizeInBytes": 536870912,
+      "source": "/var/lib/container/volumes/hostwright-cache"
+    },
+    "futureResourceField": {
+      "ignored": true
+    },
+    "id": "hostwright-cache"
+  }
+]

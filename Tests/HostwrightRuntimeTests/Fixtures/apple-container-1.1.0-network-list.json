@@ -1,0 +1,25 @@
+[
+  {
+    "configuration": {
+      "creationDate": "2026-07-18T23:49:12Z",
+      "futureConfigurationField": {
+        "ignored": true
+      },
+      "labels": {
+        "com.apple.container.resource.role": "builtin"
+      },
+      "mode": "nat",
+      "name": "default",
+      "options": {},
+      "plugin": "container-network-vmnet"
+    },
+    "futureResourceField": ["ignored"],
+    "id": "default",
+    "status": {
+      "futureStatusField": 1,
+      "ipv4Gateway": "192.168.64.1",
+      "ipv4Subnet": "192.168.64.0/24",
+      "ipv6Subnet": "fdae:498:8db7:d30c::/64"
+    }
+  }
+]

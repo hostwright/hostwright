@@ -72,13 +72,65 @@ public struct TrustedReleaseBuildRequest: Sendable {
     }
 }
 
+enum TrustedReleaseCodeSigningPolicy {
+    static let containerizationHelperPath = "bin/hostwright-containerization-helper"
+    static let virtualizationEntitlement = "com.apple.security.virtualization"
+    static let containerizationHelperEntitlements = Data("""
+    <?xml version="1.0" encoding="UTF-8"?>
+    <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+    <plist version="1.0">
+    <dict>
+        <key>com.apple.security.virtualization</key>
+        <true/>
+    </dict>
+    </plist>
+
+    """.utf8)
+
+    static func signingArguments(
+        relativePath: String,
+        binary: URL,
+        fingerprint: String,
+        entitlements: URL
+    ) -> [String] {
+        var arguments = ["--force", "--options", "runtime", "--timestamp"]
+        if relativePath == containerizationHelperPath {
+            arguments.append(contentsOf: ["--entitlements", entitlements.path])
+        }
+        arguments.append(contentsOf: ["--sign", fingerprint, binary.path])
+        return arguments
+    }
+
+    static func requireContainerizationHelperEntitlement(_ output: String) throws {
+        guard let start = output.range(of: "<?xml"),
+              let end = output.range(of: "</plist>", range: start.lowerBound..<output.endIndex),
+              let data = String(output[start.lowerBound..<end.upperBound]).data(using: .utf8),
+              let values = try? PropertyListSerialization.propertyList(
+                  from: data,
+                  options: [],
+                  format: nil
+              ) as? [String: Any],
+              values.count == 1,
+              values[virtualizationEntitlement] as? Bool == true else {
+            throw DistributionError.invalidArtifact(
+                "containerization helper signature lacks the required virtualization entitlement"
+            )
+        }
+    }
+}
+
 public struct TrustedReleaseBuilder: Sendable {
     private let runner: DistributionProcessRunner
     private let identityResolver: DeveloperIDIdentityResolver
+    private let containerizationAssets: DistributionContainerizationAssetBundle?
 
-    public init(runner: DistributionProcessRunner = DistributionProcessRunner()) {
+    public init(
+        runner: DistributionProcessRunner = DistributionProcessRunner(),
+        containerizationAssets: DistributionContainerizationAssetBundle? = nil
+    ) {
         self.runner = runner
         self.identityResolver = DeveloperIDIdentityResolver(runner: runner)
+        self.containerizationAssets = containerizationAssets
     }
 
     public func build(
@@ -131,7 +183,10 @@ public struct TrustedReleaseBuilder: Sendable {
 
         let firstOutput = scratch.appendingPathComponent("unsigned-first", isDirectory: true)
         let secondOutput = scratch.appendingPathComponent("unsigned-second", isDirectory: true)
-        let cleanBuilder = DistributionCleanBuilder(runner: runner)
+        let cleanBuilder = DistributionCleanBuilder(
+            runner: runner,
+            containerizationAssets: containerizationAssets
+        )
         let firstBuild = try cleanBuilder.buildWithDependencyInventory(
             sourceRoot: request.sourceRoot,
             outputDirectory: firstOutput,
@@ -222,15 +277,25 @@ public struct TrustedReleaseBuilder: Sendable {
         }
 
         var signedBinaryCDHashes: [String: String] = [:]
+        let helperEntitlements = scratch.appendingPathComponent(
+            "hostwright-containerization-helper.entitlements",
+            isDirectory: false
+        )
+        try DistributionFileSystem.writeNewFile(
+            TrustedReleaseCodeSigningPolicy.containerizationHelperEntitlements,
+            to: helperEntitlements,
+            mode: 0o600
+        )
         for binaryPath in shippedBinaryPaths {
             let binary = signedRoot.appendingPathComponent(binaryPath)
             let sign = try runner.run(
                 executablePath: "/usr/bin/codesign",
-                arguments: [
-                    "--force", "--options", "runtime", "--timestamp",
-                    "--sign", applicationResolution.identity.sha1Fingerprint,
-                    binary.path
-                ],
+                arguments: TrustedReleaseCodeSigningPolicy.signingArguments(
+                    relativePath: binaryPath,
+                    binary: binary,
+                    fingerprint: applicationResolution.identity.sha1Fingerprint,
+                    entitlements: helperEntitlements
+                ),
                 label: "Developer ID sign \(binary.lastPathComponent)",
                 timeoutSeconds: 300,
                 cancellation: cancellation
@@ -253,6 +318,19 @@ public struct TrustedReleaseBuilder: Sendable {
             )
             signedBinaryCDHashes[binaryPath] = try requireSignedExecutableCDHash(details)
             commands.append(record("inspect Developer ID signature for \(binary.lastPathComponent)", details))
+            if binaryPath == TrustedReleaseCodeSigningPolicy.containerizationHelperPath {
+                let entitlements = try runner.run(
+                    executablePath: "/usr/bin/codesign",
+                    arguments: ["--display", "--entitlements", ":-", binary.path],
+                    label: "inspect containerization helper entitlements",
+                    timeoutSeconds: 30,
+                    cancellation: cancellation
+                )
+                try TrustedReleaseCodeSigningPolicy.requireContainerizationHelperEntitlement(
+                    entitlements.standardOutput + entitlements.standardError
+                )
+                commands.append(record("inspect containerization helper entitlements", entitlements))
+            }
         }
 
         let createdAt = DistributionTimestamp.string(Date())
@@ -826,12 +904,22 @@ public struct TrustedReleaseBuilder: Sendable {
                         byteIdenticalUnsignedPayloads: buildMetadata.byteIdenticalUnsignedPayloads,
                         toolVersions: buildMetadata.toolVersions
                     ),
-                    resolvedDependencies: [
+                    resolvedDependencies: ([
                         ProvenanceResolvedDependency(
                             uri: "git+https://github.com/hostwright/hostwright.git",
                             digest: ["gitCommit": sourceCommit]
                         )
-                    ]
+                    ] + buildMetadata.externalSwiftPMDependencies.map { dependency in
+                        let fields = dependency.split(
+                            separator: "|",
+                            maxSplits: 3,
+                            omittingEmptySubsequences: false
+                        ).map(String.init)
+                        return ProvenanceResolvedDependency(
+                            uri: "git+\(fields[1])@\(fields[2])",
+                            digest: ["gitCommit": fields[3]]
+                        )
+                    }).sorted { $0.uri < $1.uri }
                 ),
                 runDetails: ProvenanceRunDetails(
                     builder: ProvenanceBuilder(id: "urn:hostwright:builder:release-macos:v1"),

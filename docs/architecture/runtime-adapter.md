@@ -8,21 +8,28 @@ Hostwright needs to observe, plan, and eventually mutate container runtime state
 
 ## Current State
 
-Hostwright has Apple container observation infrastructure behind `RuntimeAdapter` and one mutation-capable adapter path, limited to create-missing-service, restart-policy-gated managed start, restart-policy-gated managed restart, bounded logs, and ownership-gated cleanup delete.
+Phase 03 implements two Runtime Provider API v2 providers behind `RuntimeAdapter`: `apple-container-cli` and `apple-containerization`. Each exposes only capabilities it passed in the shared conformance suite. Mutation remains limited to create-missing-service, restart-policy-gated managed start and restart, and ownership-gated cleanup delete; Phase 04 owns the complete lifecycle.
 
 Implemented:
 
 - typed versioned runtime service identity, exact observed resource identifiers, desired service, observed service, lifecycle state, health state, ports, networks, mounts, environment values, events, capabilities, and adapter metadata;
+- immutable canonical capability snapshots and digests covering provider, component, host, protocol, and per-feature compatibility;
+- explicit Apple `container` 1.0.0 and 1.1.0 structured codecs for status, containers, images, networks, volumes, machines, and stats;
+- deterministic bounded inventories for containers, images, networks, volumes, mounts, ports, resources, init processes, lifecycle, available health, labels, services, and machine state;
+- normalized provider outcomes with stable categories, retry disposition, redacted guidance, and observation-before-retry for ambiguous effects;
 - expanded `RuntimeAdapter` protocol for metadata, capability discovery, read-only observation, planning, bounded logs, and mutation hooks;
 - test-only `ScriptedRuntimeAdapter` for deterministic contracts without live process execution;
 - runtime command specs, command results, command classification, timeout model, and process runner protocol;
 - test-only scripted process runner for deterministic result and failure injection;
 - `SecureRuntimeProcessRunner` for policy-approved read-only runtime commands and the supported mutation specs;
 - root-owned executable resolution through `RuntimeExecutableResolver`;
-- `AppleContainerReadOnlyAdapter` for read-only observation attempts;
-- `AppleContainerApplyAdapter` for narrow create, start, managed restart, and delete mutation;
-- fixture-defined observation parser for empty and running service snapshots;
+- `AppleContainerReadOnlyAdapter` and `AppleContainerApplyAdapter` for the versioned Apple CLI path;
+- an on-demand authenticated `hostwright-containerization-helper` process that alone links exact Containerization 0.35.0;
+- helper protocol v1 over a private Unix socket using bounded length-prefixed canonical JSON frames, request IDs, deadlines, capability digests, mutation context, and idempotency keys;
+- project-generation provider binding, dry-run/confirmation migration, fencing, compensation, and checkpoint recovery in existing schema-v7 state;
 - redaction policy for command args, env values, stdout, stderr, parser errors, and runtime errors.
+
+The helper uses a private mode-`0700` runtime directory and mode-`0600` socket, authenticates same-UID peers plus the signed Hostwright code requirement, limits frames to 8 MiB, and rejects replay, duplicate IDs, truncation, overflow, protocol mismatch, unsafe paths, and replaced binaries. It implements only negotiate, observe, local-image evidence, resource usage, bounded logs, create, start, managed restart, delete, cancellation, and idle shutdown. Images must already exist locally.
 
 Not implemented:
 
@@ -84,7 +91,7 @@ The shared launch and recovery contract is documented in [Secure Process Executi
 
 The current policy permits read-only command specs and four behavior-named mutating command kinds: `createMissingService`, `startManagedService`, `restartManagedService`, and `deleteManagedContainer`. Forbidden, unknown, unresolved, and unsupported mutating specs are rejected before execution.
 
-Apple container command strings live only in `AppleContainerCommand` and runtime adapters. The current list-style command shape and create command shape are based on local Apple container 1.0.0 help output and guarded by fail-closed parsing and policy checks; they are not broad Apple CLI compatibility claims.
+Apple container command strings live only in `AppleContainerCommand` and runtime adapters. The supported command shapes are selected by exact Apple CLI/API versions 1.0.0 or 1.1.0 and guarded by fail-closed structured parsing and policy checks; they are not a compatibility claim for other versions.
 
 ## Timeout And Cancellation Model
 
@@ -130,9 +137,15 @@ The default policy redacts key/value patterns and sensitive key fragments such a
 
 ## Parser Boundary
 
-`AppleContainerObservationParser` accepts the fixture-defined JSON schema `hostwright.apple-container.observation.v1`, the verified real empty Apple container list output, Apple builder output as ignored runtime state, state-backed legacy identifiers, and labeled Apple container 1.0.0 rows. Current-project v2 labels are bound to the exact identifier, labeled orphans remain visible, unrelated labeled projects are ignored, and malformed current-project ownership fails closed. Real network parsing records hostname, IPv4/IPv6 address, gateway, MAC address, network name, and MTU.
+The Apple provider selects explicit 1.0.0 or 1.1.0 codecs after version negotiation. It accepts unknown non-semantic fields but rejects duplicate critical keys, partial documents, unknown required enum values, conflicting identity, and oversized output. Current-project UUID labels are bound to exact identifiers, labeled orphans remain visible, unrelated projects are ignored, names never grant ownership, and every collection is sorted before its semantic digest is calculated.
 
-If broader real Apple container output does not match one of those reviewed shapes, Hostwright reports a parse failure instead of guessing. This protects the runtime boundary from turning unverified Apple CLI output into fake product truth.
+If real Apple container output does not match the selected reviewed codec, Hostwright reports an incompatible or invalid-response outcome instead of guessing. This protects the runtime boundary from turning unverified Apple CLI output into product truth.
+
+## Provider Selection, Migration, And Recovery
+
+An existing schema-v7 project-generation binding is authoritative. An unbound `auto` selection prefers a compatible Apple CLI provider and chooses Containerization only when the CLI is unavailable and the helper is fully capable. A requested provider that differs from an existing binding is refused and directed to `hostwright runtime migrate`.
+
+Migration binds its dry-run token to source observation, source and target capability digests, state, planned effects, and rollback actions. Confirmed migration acquires an operation group and new fence before either provider mutates, verifies UUID-backed ownership and target continuity, and advances the provider generation only after durable verification. Recovery re-probes and re-observes after CLI/API/helper/framework/protocol/macOS changes, helper or service restart, Hostwright termination, timeout, cancellation, or ambiguous effect. Incompatible downgrade or future protocol versions stop safely rather than replaying an operation.
 
 ## Mutation Boundary
 

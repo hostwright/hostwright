@@ -30,6 +30,66 @@ final class CLIAsyncResultBox<T: Sendable>: @unchecked Sendable {
     var result: Result<T, Error>?
 }
 
+struct HostwrightSelectedRuntimeProvider {
+    let adapter: any RuntimeAdapter
+    let selection: RuntimeProviderSelectionResult
+}
+
+func hostwrightSelectRuntimeProvider(
+    requested: RuntimeProviderSelection,
+    store: SQLiteStateStore,
+    projectID: String,
+    requiredFeatures: Set<RuntimeProviderFeature>,
+    environment: CLIEnvironment
+) throws -> HostwrightSelectedRuntimeProvider {
+    let existingBinding: String?
+    do {
+        existingBinding = try store.desiredStates.loadProject(id: projectID).mutationProvider
+    } catch StateStoreError.notFound(_) {
+        existingBinding = nil
+    }
+
+    let persistedEvidence: RuntimeProviderMetadataEvidence?
+    if let existingBinding,
+       let providerID = RuntimeProviderBinding.stableID(for: existingBinding),
+       let latestSnapshot = try store.observedStates.loadLatestSnapshot(
+           projectID: projectID,
+           providerID: providerID
+       ) {
+        do {
+            persistedEvidence = try RuntimeProviderMetadataEvidence.parse(
+                capabilitiesJSON: latestSnapshot.capabilitiesJSON
+            )
+        } catch is RuntimeProviderMetadataEvidenceError {
+            throw RuntimeProviderSelectionError.invalidPersistedProviderMetadataEvidence
+        }
+    } else {
+        persistedEvidence = nil
+    }
+
+    let probeResults = try hostwrightWaitForAsync {
+        await environment.runtimeProviderProbes()
+    }
+    let snapshots = probeResults.compactMap { result -> RuntimeCapabilitySnapshot? in
+        guard result.failure == nil,
+              result.snapshot?.descriptor.providerID == result.providerID else {
+            return nil
+        }
+        return result.snapshot
+    }
+    let selection = try RuntimeProviderSelector.select(
+        requested: requested,
+        existingBinding: existingBinding,
+        snapshots: snapshots,
+        persistedEvidence: persistedEvidence,
+        requiredFeatures: requiredFeatures
+    )
+    return HostwrightSelectedRuntimeProvider(
+        adapter: try environment.runtimeAdapterForProvider(selection.providerID),
+        selection: selection
+    )
+}
+
 func hostwrightStableHash(_ value: String) -> String {
     var hash: UInt64 = 0xcbf29ce484222325
     for byte in value.utf8 {
@@ -174,14 +234,16 @@ func hostwrightRestartPolicyStateMap(
 func hostwrightDesiredStateWithOwnershipHints(
     _ desiredState: DesiredRuntimeState,
     store: SQLiteStateStore,
-    projectID: String
+    projectID: String,
+    providerID: RuntimeProviderID = .appleContainerCLI
 ) throws -> DesiredRuntimeState {
     DesiredRuntimeState(
         projectName: desiredState.projectName,
         services: desiredState.services,
         ownedResourceHints: try store.ownership.runtimeHints(
             projectID: projectID,
-            projectName: desiredState.projectName
+            projectName: desiredState.projectName,
+            providerID: providerID
         )
     )
 }
@@ -221,7 +283,8 @@ func hostwrightPlanningObservedState(
     return ObservedRuntimeState(
         projectName: observed.projectName,
         services: services,
-        adapterMetadata: observed.adapterMetadata
+        adapterMetadata: observed.adapterMetadata,
+        capabilitySHA256: observed.capabilitySHA256
     )
 }
 
@@ -442,6 +505,7 @@ enum CLIJSON {
             "kind": "plan",
             "project": plan.projectName,
             "planHash": plan.planHash,
+            "capabilitySHA256": plan.capabilitySHA256 as Any,
             "observationConnected": plan.observationConnected,
             "mutatesRuntime": plan.mutatesRuntime,
             "execution": "unavailable unless one createMissingService, startManagedService, or restartManagedService action is explicitly confirmed",
@@ -687,6 +751,7 @@ enum CLIJSON {
             ].compactNilValues(),
             "telemetryPolicy": "local-only; no upload",
             "planHash": plan.planHash,
+            "capabilitySHA256": plan.capabilitySHA256 as Any,
             "services": manifest.services.sorted { $0.name < $1.name }.map { service in
                 let observedService = observedByName[service.name]
                 return [

@@ -1,6 +1,8 @@
 import Foundation
 
 public enum AppleContainerStatsParser {
+    public static let maximumBytes = 256 * 1_024
+
     public static func parse(
         _ text: String,
         expectedResourceIdentifier: String,
@@ -11,10 +13,15 @@ public enum AppleContainerStatsParser {
         }
 
         do {
-            let payloads = try JSONDecoder().decode([StatsPayload].self, from: Data(text.utf8))
+            let data = try AppleContainerStructuredOutput.validatedJSONData(
+                text,
+                operation: "Apple container stats",
+                maximumBytes: maximumBytes
+            )
+            let payloads = try JSONDecoder().decode([StatsPayload].self, from: data)
             guard payloads.count == 1, let payload = payloads.first,
                   payload.id == expectedResourceIdentifier,
-                  payload.numProcesses >= 0 else {
+                  payload.numProcesses <= UInt64(Int.max) else {
                 throw RuntimeAdapterError.outputParseFailed(
                     "Apple container stats did not return exactly the requested Hostwright resource."
                 )
@@ -28,7 +35,7 @@ public enum AppleContainerStatsParser {
                 networkTransmitBytes: payload.networkTxBytes,
                 blockReadBytes: payload.blockReadBytes,
                 blockWriteBytes: payload.blockWriteBytes,
-                processCount: payload.numProcesses
+                processCount: Int(payload.numProcesses)
             )
         } catch let error as RuntimeAdapterError {
             throw error
@@ -48,6 +55,6 @@ public enum AppleContainerStatsParser {
         let networkTxBytes: UInt64
         let blockReadBytes: UInt64
         let blockWriteBytes: UInt64
-        let numProcesses: Int
+        let numProcesses: UInt64
     }
 }

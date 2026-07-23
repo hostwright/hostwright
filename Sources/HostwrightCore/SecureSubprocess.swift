@@ -139,6 +139,22 @@ public struct SecureSubprocessRunner: Sendable {
         _ request: SecureSubprocessRequest,
         cancellation: SecureSubprocessCancellation = SecureSubprocessCancellation()
     ) throws -> SecureSubprocessResult {
+        try run(request, cancellation: cancellation, onLaunch: nil)
+    }
+
+    package func run(
+        _ request: SecureSubprocessRequest,
+        cancellation: SecureSubprocessCancellation = SecureSubprocessCancellation(),
+        onLaunch: @escaping @Sendable (pid_t) -> Void
+    ) throws -> SecureSubprocessResult {
+        try run(request, cancellation: cancellation, onLaunch: Optional(onLaunch))
+    }
+
+    private func run(
+        _ request: SecureSubprocessRequest,
+        cancellation: SecureSubprocessCancellation,
+        onLaunch: (@Sendable (pid_t) -> Void)?
+    ) throws -> SecureSubprocessResult {
         try validate(request)
         if cancellation.isCancelled {
             throw SecureSubprocessError.cancelled(preLaunchCancellationResult())
@@ -249,6 +265,7 @@ public struct SecureSubprocessRunner: Sendable {
             terminateSuspendedProcess(processID)
             throw SecureSubprocessError.launchFailed(code)
         }
+        onLaunch?(processID)
 
         do {
             try setNonBlocking(outputPipe.readDescriptor)
@@ -275,12 +292,30 @@ public struct SecureSubprocessRunner: Sendable {
     }
 
     public func runAsync(_ request: SecureSubprocessRequest) async throws -> SecureSubprocessResult {
+        try await runAsync(request, onLaunch: nil)
+    }
+
+    package func runAsync(
+        _ request: SecureSubprocessRequest,
+        onLaunch: @escaping @Sendable (pid_t) -> Void
+    ) async throws -> SecureSubprocessResult {
+        try await runAsync(request, onLaunch: Optional(onLaunch))
+    }
+
+    private func runAsync(
+        _ request: SecureSubprocessRequest,
+        onLaunch: (@Sendable (pid_t) -> Void)?
+    ) async throws -> SecureSubprocessResult {
         let cancellation = SecureSubprocessCancellation()
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 DispatchQueue.global(qos: .utility).async {
                     do {
-                        continuation.resume(returning: try run(request, cancellation: cancellation))
+                        continuation.resume(returning: try run(
+                            request,
+                            cancellation: cancellation,
+                            onLaunch: onLaunch
+                        ))
                     } catch {
                         continuation.resume(throwing: error)
                     }

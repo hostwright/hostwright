@@ -210,16 +210,31 @@ public struct DistributionVerifier: Sendable {
         )
         let lines = result.standardOutput.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
         let expected = expectedArchivePaths(manifest: manifest)
+        var expectedFileModes = Dictionary(
+            uniqueKeysWithValues: manifest.files.map {
+                ("\(manifest.artifactID)/\($0.path)", $0.mode)
+            }
+        )
+        expectedFileModes["\(manifest.artifactID)/\(DistributionLayout.manifestFileName)"] = 0o644
         var observed: [String] = []
         for line in lines {
-            guard let type = line.first, type == "d" || type == "-",
-                  let rawPath = line.split(whereSeparator: { $0.isWhitespace }).last.map(String.init) else {
+            let fields = line.split(whereSeparator: { $0.isWhitespace })
+            guard let modeField = fields.first,
+                  let type = modeField.first,
+                  type == "d" || type == "-",
+                  let mode = archiveMode(modeField, type: type),
+                  let rawPath = fields.last.map(String.init) else {
                 throw DistributionError.invalidArtifact("archive contains a link, device, or unsupported entry type")
             }
             let path = rawPath.hasSuffix("/") ? String(rawPath.dropLast()) : rawPath
             guard DistributionPathPolicy.isSafeRelativePath(path),
                   path == manifest.artifactID || path.hasPrefix(manifest.artifactID + "/") else {
                 throw DistributionError.invalidArtifact("archive entry escapes its exact artifact root")
+            }
+            if type == "-", expectedFileModes[path] != mode {
+                throw DistributionError.invalidArtifact(
+                    "archive regular-file mode does not match the manifest: \(path)"
+                )
             }
             observed.append(path)
         }
@@ -264,8 +279,7 @@ public struct DistributionVerifier: Sendable {
             }
         }
         let insideManifest = extractedRoot.appendingPathComponent(DistributionLayout.manifestFileName)
-        guard try Data(contentsOf: insideManifest) == Data(contentsOf: manifestURL),
-              try DistributionFileSystem.mode(of: insideManifest) == 0o644 else {
+        guard try Data(contentsOf: insideManifest) == Data(contentsOf: manifestURL) else {
             throw DistributionError.invalidArtifact("archive manifest differs from its verified sidecar")
         }
         for file in manifest.files {
@@ -274,8 +288,7 @@ public struct DistributionVerifier: Sendable {
             }
             let url = extractedRoot.appendingPathComponent(file.path)
             guard try DistributionHash.sha256(fileURL: url, cancellation: cancellation) == file.sha256,
-                  try DistributionFileSystem.size(of: url) == file.sizeBytes,
-                  try DistributionFileSystem.mode(of: url) == file.mode else {
+                  try DistributionFileSystem.size(of: url) == file.sizeBytes else {
                 throw DistributionError.invalidArtifact("payload metadata drifted for \(file.path)")
             }
         }
@@ -288,6 +301,25 @@ public struct DistributionVerifier: Sendable {
             paths.insert("\(manifest.artifactID)/\(file.path)")
         }
         return paths
+    }
+
+    private func archiveMode(_ field: Substring, type: Character) -> Int? {
+        let characters = Array(field)
+        guard characters.count == 10, characters[0] == type else { return nil }
+        let permissions: [(Int, Character, Int)] = [
+            (1, "r", 0o400), (2, "w", 0o200), (3, "x", 0o100),
+            (4, "r", 0o040), (5, "w", 0o020), (6, "x", 0o010),
+            (7, "r", 0o004), (8, "w", 0o002), (9, "x", 0o001)
+        ]
+        var mode = 0
+        for (index, expected, bit) in permissions {
+            if characters[index] == expected {
+                mode |= bit
+            } else if characters[index] != "-" {
+                return nil
+            }
+        }
+        return mode
     }
 
     private func expectedDirectoryPaths(manifest: DistributionArtifactManifest) -> Set<String> {

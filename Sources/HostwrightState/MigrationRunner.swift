@@ -1,4 +1,5 @@
 import HostwrightCore
+import HostwrightRuntime
 
 public struct SchemaMigration: Equatable, Sendable {
     public let version: Int
@@ -138,6 +139,13 @@ public struct MigrationRunner: Sendable {
                             message: "Recorded checksum \(checksum) does not match expected checksum \(migration.checksum)."
                         )
                     }
+                    if migration.version == 7, checksum != migration.checksum {
+                        try backfillV7ProviderBindings(on: connection)
+                        try connection.run(
+                            "UPDATE schema_migrations SET checksum = ? WHERE version = 7",
+                            bindings: [.text(migration.checksum)]
+                        )
+                    }
                     continue
                 }
 
@@ -220,6 +228,8 @@ public struct MigrationRunner: Sendable {
                 ]
             )
         }
+
+        try backfillV7ProviderBindings(on: connection)
 
         let desiredServices = try connection.query(
             "SELECT id, project_id, service_name FROM desired_services WHERE resource_uuid IS NULL OR resource_uuid = ''"
@@ -331,6 +341,52 @@ public struct MigrationRunner: Sendable {
                     .text(HostwrightResourceUUID.legacy(kind: "operation-fence", identifier: identifier)),
                     .text(identifier)
                 ]
+            )
+        }
+    }
+
+    private func backfillV7ProviderBindings(on connection: SQLiteConnection) throws {
+        let rows = try connection.query(
+            """
+            SELECT project_id, runtime_adapter
+            FROM ownership_records
+            WHERE project_id IS NOT NULL
+            ORDER BY project_id, runtime_adapter, id
+            """
+        )
+        var providersByProject: [String: Set<RuntimeProviderID>] = [:]
+        for row in rows {
+            guard row.count == 2,
+                  let projectID = row[0],
+                  !projectID.isEmpty,
+                  let runtimeAdapter = row[1],
+                  let providerID = RuntimeProviderBinding.stableID(for: runtimeAdapter) else {
+                let projectID = row.first.flatMap { $0 } ?? "unknown"
+                let runtimeAdapter = row.count > 1 ? row[1] ?? "unknown" : "unknown"
+                throw StateStoreError.migrationFailed(
+                    version: 7,
+                    message: "Could not derive a stable runtime provider for project \(projectID) from ownership adapter \(runtimeAdapter)."
+                )
+            }
+            providersByProject[projectID, default: []].insert(providerID)
+        }
+
+        for projectID in providersByProject.keys.sorted() {
+            let providers = providersByProject[projectID, default: []]
+            guard providers.count == 1, let providerID = providers.first else {
+                let values = providers.map(\.rawValue).sorted().joined(separator: ", ")
+                throw StateStoreError.migrationFailed(
+                    version: 7,
+                    message: "Project \(projectID) has conflicting runtime providers: \(values)."
+                )
+            }
+            try connection.run(
+                """
+                UPDATE projects
+                SET mutation_provider = ?, provider_generation = MAX(1, provider_generation)
+                WHERE id = ?
+                """,
+                bindings: [.text(providerID.rawValue), .text(projectID)]
             )
         }
     }
@@ -761,7 +817,8 @@ public struct MigrationRunner: Sendable {
         SchemaMigration(
             version: 7,
             description: "Resource identity, provider binding, and durable saga contracts",
-            implementationRevision: "identity-fencing-backfill-v2",
+            legacyChecksums: ["fnv1a64:5bf70e7832651a2"],
+            implementationRevision: "identity-fencing-provider-binding-backfill-v3",
             statements: [
                 "ALTER TABLE projects ADD COLUMN resource_uuid TEXT",
                 "ALTER TABLE projects ADD COLUMN manifest_version INTEGER NOT NULL DEFAULT 1",

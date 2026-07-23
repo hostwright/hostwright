@@ -33,6 +33,31 @@ public struct DistributionProcessRunner: Sendable {
         timeoutSeconds: Int = 900,
         cancellation: SecureSubprocessCancellation = SecureSubprocessCancellation()
     ) throws -> DistributionCommandResult {
+        try run(
+            executablePath: executablePath,
+            arguments: arguments,
+            workingDirectory: workingDirectory,
+            label: label,
+            timeoutSeconds: timeoutSeconds,
+            cancellation: cancellation,
+            trustedEnvironmentOverrides: [:]
+        )
+    }
+
+    func run(
+        executablePath: String,
+        arguments: [String],
+        workingDirectory: URL? = nil,
+        label: String,
+        timeoutSeconds: Int = 900,
+        cancellation: SecureSubprocessCancellation = SecureSubprocessCancellation(),
+        trustedEnvironmentOverrides: [String: String]
+    ) throws -> DistributionCommandResult {
+        guard trustedEnvironmentOverrides.isEmpty ||
+                (executablePath == "/usr/bin/swift" &&
+                    trustedEnvironmentOverrides == DistributionDeterministicSwiftEnvironment.values) else {
+            throw DistributionError.invalidArguments("Distribution command environment override is not permitted.")
+        }
         guard executablePath.hasPrefix("/"), (1...86_400).contains(timeoutSeconds) else {
             throw DistributionError.invalidArguments("Distribution command executable or timeout is invalid.")
         }
@@ -43,6 +68,7 @@ public struct DistributionProcessRunner: Sendable {
         environment["GIT_TERMINAL_PROMPT"] = "0"
         environment["PAGER"] = "cat"
         environment["TERM"] = "dumb"
+        environment.merge(trustedEnvironmentOverrides) { _, trusted in trusted }
         let request = SecureSubprocessRequest(
             executablePath: executablePath,
             arguments: arguments,
@@ -86,6 +112,10 @@ public struct DistributionProcessRunner: Sendable {
         }
         return result
     }
+}
+
+enum DistributionDeterministicSwiftEnvironment {
+    static let values = ["SWIFT_DETERMINISTIC_HASHING": "1"]
 }
 
 public enum DistributionHash {
@@ -138,6 +168,122 @@ public enum DistributionJSON {
             )
         }
         return value
+    }
+}
+
+struct DistributionValidatedSourceIdentity: Equatable, Sendable {
+    let device: UInt64
+    let inode: UInt64
+    let userID: UInt32
+    let groupID: UInt32
+    let permissions: UInt16
+    let linkCount: UInt64
+    let size: Int64
+    let modifiedSeconds: Int64
+    let modifiedNanoseconds: Int64
+    let changedSeconds: Int64
+    let changedNanoseconds: Int64
+
+    init(metadata: stat) {
+        device = UInt64(metadata.st_dev)
+        inode = UInt64(metadata.st_ino)
+        userID = UInt32(metadata.st_uid)
+        groupID = UInt32(metadata.st_gid)
+        permissions = UInt16(metadata.st_mode & 0o7777)
+        linkCount = UInt64(metadata.st_nlink)
+        size = Int64(metadata.st_size)
+        modifiedSeconds = Int64(metadata.st_mtimespec.tv_sec)
+        modifiedNanoseconds = Int64(metadata.st_mtimespec.tv_nsec)
+        changedSeconds = Int64(metadata.st_ctimespec.tv_sec)
+        changedNanoseconds = Int64(metadata.st_ctimespec.tv_nsec)
+    }
+
+    init?(serialized: Substring) {
+        let fields = serialized.split(
+            separator: ",",
+            omittingEmptySubsequences: false
+        )
+        guard fields.count == 11,
+              let device = UInt64(fields[0]),
+              let inode = UInt64(fields[1]),
+              let userID = UInt32(fields[2]),
+              let groupID = UInt32(fields[3]),
+              let permissions = UInt16(fields[4]),
+              let linkCount = UInt64(fields[5]),
+              let size = Int64(fields[6]),
+              let modifiedSeconds = Int64(fields[7]),
+              let modifiedNanoseconds = Int64(fields[8]),
+              let changedSeconds = Int64(fields[9]),
+              let changedNanoseconds = Int64(fields[10]) else {
+            return nil
+        }
+        self.device = device
+        self.inode = inode
+        self.userID = userID
+        self.groupID = groupID
+        self.permissions = permissions
+        self.linkCount = linkCount
+        self.size = size
+        self.modifiedSeconds = modifiedSeconds
+        self.modifiedNanoseconds = modifiedNanoseconds
+        self.changedSeconds = changedSeconds
+        self.changedNanoseconds = changedNanoseconds
+    }
+
+    var serialized: String {
+        [
+            String(device), String(inode), String(userID), String(groupID),
+            String(permissions), String(linkCount), String(size),
+            String(modifiedSeconds), String(modifiedNanoseconds),
+            String(changedSeconds), String(changedNanoseconds)
+        ].joined(separator: ",")
+    }
+}
+
+struct DistributionValidatedSourceBinding: Equatable, Sendable {
+    private static let fragmentPrefix = "hostwright-validated-source-v2:"
+
+    let fileIdentity: DistributionValidatedSourceIdentity
+    let directoryIdentities: [DistributionValidatedSourceIdentity]
+
+    init(
+        fileIdentity: DistributionValidatedSourceIdentity,
+        directoryIdentities: [DistributionValidatedSourceIdentity]
+    ) {
+        self.fileIdentity = fileIdentity
+        self.directoryIdentities = directoryIdentities
+    }
+
+    init?(fragment: String) {
+        guard fragment.hasPrefix(Self.fragmentPrefix) else { return nil }
+        let fields = fragment.dropFirst(Self.fragmentPrefix.count).split(
+            separator: ":",
+            maxSplits: 1,
+            omittingEmptySubsequences: false
+        )
+        guard fields.count == 2,
+              let fileIdentity = DistributionValidatedSourceIdentity(serialized: fields[0]) else {
+            return nil
+        }
+        let directoryIdentities: [DistributionValidatedSourceIdentity]
+        if fields[1].isEmpty {
+            directoryIdentities = []
+        } else {
+            let parsed = fields[1].split(separator: ";", omittingEmptySubsequences: false)
+                .compactMap(DistributionValidatedSourceIdentity.init(serialized:))
+            guard parsed.count == fields[1].split(
+                separator: ";",
+                omittingEmptySubsequences: false
+            ).count else { return nil }
+            directoryIdentities = parsed
+        }
+        self.fileIdentity = fileIdentity
+        self.directoryIdentities = directoryIdentities
+    }
+
+    var fragment: String {
+        Self.fragmentPrefix + fileIdentity.serialized + ":"
+            + directoryIdentities.map(\.serialized).joined(separator: ";")
     }
 }
 
@@ -199,30 +345,198 @@ public enum DistributionFileSystem {
     }
 
     public static func copyRegularFile(from source: URL, to destination: URL, mode: Int) throws {
-        guard try isRegularNonSymlink(source) else {
+        guard source.isFileURL else {
             throw DistributionError.invalidArtifact("source file is not regular: \(source.lastPathComponent)")
         }
+        let binding: DistributionValidatedSourceBinding?
+        if let fragment = source.fragment {
+            guard let validatedBinding = DistributionValidatedSourceBinding(fragment: fragment) else {
+                throw DistributionError.invalidArtifact("source file identity binding is invalid")
+            }
+            binding = validatedBinding
+        } else {
+            binding = nil
+        }
+
+        let sourceDescriptor = try openSource(source, binding: binding)
+        guard sourceDescriptor >= 0 else {
+            throw DistributionError.invalidArtifact(
+                "source file is not regular: \(source.lastPathComponent)"
+            )
+        }
+        defer { close(sourceDescriptor) }
+        var sourceMetadata = stat()
+        guard fstat(sourceDescriptor, &sourceMetadata) == 0,
+              sourceMetadata.st_mode & S_IFMT == S_IFREG else {
+            throw DistributionError.invalidArtifact(
+                "source file is not regular: \(source.lastPathComponent)"
+            )
+        }
+        let openedIdentity = DistributionValidatedSourceIdentity(metadata: sourceMetadata)
+        guard binding == nil || binding?.fileIdentity == openedIdentity else {
+            throw DistributionError.invalidArtifact(
+                "source file changed after validation: \(source.lastPathComponent)"
+            )
+        }
+
         try FileManager.default.createDirectory(
             at: destination.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
-        guard !FileManager.default.fileExists(atPath: destination.path) else {
-            throw DistributionError.existingOutput(destination.path)
-        }
-        try FileManager.default.copyItem(at: source, to: destination)
-        try FileManager.default.setAttributes([.posixPermissions: mode], ofItemAtPath: destination.path)
-        let descriptor = open(destination.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
-        guard descriptor >= 0 else {
+        let destinationDescriptor = open(
+            destination.path,
+            O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC,
+            mode_t(mode)
+        )
+        guard destinationDescriptor >= 0 else {
+            if errno == EEXIST { throw DistributionError.existingOutput(destination.path) }
             throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
         }
-        defer { close(descriptor) }
-        var metadata = stat()
-        guard fstat(descriptor, &metadata) == 0,
-              metadata.st_mode & S_IFMT == S_IFREG,
-              fsync(descriptor) == 0 else {
+        var complete = false
+        defer {
+            close(destinationDescriptor)
+            if !complete { unlink(destination.path) }
+        }
+        var buffer = [UInt8](repeating: 0, count: 1024 * 1024)
+        while true {
+            let count = Darwin.read(sourceDescriptor, &buffer, buffer.count)
+            if count < 0, errno == EINTR { continue }
+            guard count >= 0 else {
+                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+            }
+            if count == 0 { break }
+            try buffer.withUnsafeBytes { rawBuffer in
+                var offset = 0
+                while offset < count {
+                    let result = Darwin.write(
+                        destinationDescriptor,
+                        rawBuffer.baseAddress!.advanced(by: offset),
+                        count - offset
+                    )
+                    if result < 0, errno == EINTR { continue }
+                    guard result > 0 else {
+                        throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+                    }
+                    offset += result
+                }
+            }
+        }
+        var finalSourceMetadata = stat()
+        guard fstat(sourceDescriptor, &finalSourceMetadata) == 0,
+              DistributionValidatedSourceIdentity(metadata: finalSourceMetadata) == openedIdentity else {
+            throw DistributionError.invalidArtifact(
+                "source file changed while copying: \(source.lastPathComponent)"
+            )
+        }
+        guard fchmod(destinationDescriptor, mode_t(mode)) == 0,
+              fsync(destinationDescriptor) == 0 else {
             throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+        var destinationMetadata = stat()
+        guard fstat(destinationDescriptor, &destinationMetadata) == 0,
+              destinationMetadata.st_mode & S_IFMT == S_IFREG,
+              destinationMetadata.st_uid == geteuid(),
+              destinationMetadata.st_nlink == 1,
+              Int(destinationMetadata.st_mode & 0o7777) == mode else {
+            throw DistributionError.invalidArtifact("copied distribution file metadata is unsafe")
+        }
+        do {
+            try HostwrightLocalFilesystemPolicy.validateNoAccessGrantingACL(
+                fileDescriptor: destinationDescriptor,
+                path: destination.path,
+                role: "copied distribution file"
+            )
+        } catch {
+            throw DistributionError.invalidArtifact("copied distribution file grants access through an ACL")
         }
         try synchronizeDirectory(destination.deletingLastPathComponent())
+        complete = true
+    }
+
+    static func bindValidatedSource(
+        _ url: URL,
+        metadata: stat,
+        directoryIdentities: [DistributionValidatedSourceIdentity] = []
+    ) throws -> URL {
+        guard url.isFileURL, url.fragment == nil,
+              var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            throw DistributionError.invalidArtifact("validated source URL is invalid")
+        }
+        components.fragment = DistributionValidatedSourceBinding(
+            fileIdentity: DistributionValidatedSourceIdentity(metadata: metadata),
+            directoryIdentities: directoryIdentities
+        ).fragment
+        guard let boundURL = components.url, boundURL.path == url.path else {
+            throw DistributionError.invalidArtifact("validated source URL could not be bound")
+        }
+        return boundURL
+    }
+
+    private static func openSource(
+        _ source: URL,
+        binding: DistributionValidatedSourceBinding?
+    ) throws -> Int32 {
+        guard let binding, !binding.directoryIdentities.isEmpty else {
+            return open(source.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+        }
+        let components = source.path.split(separator: "/").map(String.init)
+        let parentComponents = components.dropLast()
+        guard parentComponents.count >= binding.directoryIdentities.count else {
+            throw DistributionError.invalidArtifact("source file identity binding is invalid")
+        }
+        let firstValidatedIndex = parentComponents.count - binding.directoryIdentities.count
+        var currentDescriptor = open("/", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        guard currentDescriptor >= 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+        var currentPath = ""
+        for (index, component) in parentComponents.enumerated() {
+            let childDescriptor = openat(
+                currentDescriptor,
+                component,
+                O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC
+            )
+            close(currentDescriptor)
+            guard childDescriptor >= 0 else {
+                throw DistributionError.invalidArtifact(
+                    "source directory changed after validation: \(component)"
+                )
+            }
+            currentDescriptor = childDescriptor
+            currentPath += "/\(component)"
+            guard index >= firstValidatedIndex else { continue }
+            var metadata = stat()
+            let expected = binding.directoryIdentities[index - firstValidatedIndex]
+            guard fstat(currentDescriptor, &metadata) == 0,
+                  metadata.st_mode & S_IFMT == S_IFDIR,
+                  metadata.st_uid == geteuid(),
+                  metadata.st_mode & 0o7777 == 0o700,
+                  DistributionValidatedSourceIdentity(metadata: metadata) == expected else {
+                close(currentDescriptor)
+                throw DistributionError.invalidArtifact(
+                    "source directory changed after validation: \(component)"
+                )
+            }
+            do {
+                try HostwrightLocalFilesystemPolicy.validateNoAccessGrantingACL(
+                    fileDescriptor: currentDescriptor,
+                    path: currentPath,
+                    role: "validated source directory"
+                )
+            } catch {
+                close(currentDescriptor)
+                throw DistributionError.invalidArtifact(
+                    "source directory changed after validation: \(component)"
+                )
+            }
+        }
+        let descriptor = openat(
+            currentDescriptor,
+            components.last!,
+            O_RDONLY | O_NOFOLLOW | O_CLOEXEC
+        )
+        close(currentDescriptor)
+        return descriptor
     }
 
     public static func isRegularNonSymlink(_ url: URL) throws -> Bool {

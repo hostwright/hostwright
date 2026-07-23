@@ -2,6 +2,7 @@ import Foundation
 
 public enum AppleContainerObservationParser {
     public static let supportedSchema = "hostwright.apple-container.observation.v1"
+    public static let maximumBytes = 4 * 1_024 * 1_024
 
     public static func parse(
         _ output: String,
@@ -9,13 +10,12 @@ public enum AppleContainerObservationParser {
         metadata: RuntimeAdapterMetadata,
         redactionPolicy: RuntimeRedactionPolicy = .default
     ) throws -> ObservedRuntimeState {
-        let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            throw RuntimeAdapterError.outputParseFailed("Apple container observation output was empty.")
-        }
-
         do {
-            let data = Data(trimmed.utf8)
+            let data = try AppleContainerStructuredOutput.validatedJSONData(
+                output,
+                operation: "Apple container observation",
+                maximumBytes: maximumBytes
+            )
             let json = try JSONSerialization.jsonObject(with: data)
 
             if let realList = json as? [Any] {
@@ -23,8 +23,7 @@ public enum AppleContainerObservationParser {
                     realList,
                     desiredState: desiredState,
                     metadata: metadata,
-                    redactionPolicy: redactionPolicy,
-                    rawOutput: trimmed
+                    redactionPolicy: redactionPolicy
                 )
             }
 
@@ -32,7 +31,7 @@ public enum AppleContainerObservationParser {
             let fixture = try JSONDecoder().decode(ObservationFixture.self, from: data)
 
             guard fixture.schema == supportedSchema else {
-                throw RuntimeAdapterError.outputParseFailed("Unsupported Apple container observation schema in output: \(redactionPolicy.redact(trimmed))")
+                throw RuntimeAdapterError.outputParseFailed("Unsupported Apple container observation schema in output.")
             }
 
             guard fixture.project == desiredState.projectName else {
@@ -49,10 +48,16 @@ public enum AppleContainerObservationParser {
                 adapterMetadata: metadata
             )
         } catch let error as RuntimeAdapterError {
+            if case .outputParseFailed(let message) = error,
+               message.contains("malformed or duplicate JSON fields") {
+                throw RuntimeAdapterError.outputParseFailed(
+                    "\(message) Bounded diagnostic: [REDACTED]"
+                )
+            }
             throw error.redacted(using: redactionPolicy)
         } catch {
             throw RuntimeAdapterError.outputParseFailed(
-                "Unsupported Apple container observation output: \(redactionPolicy.redact(trimmed))"
+                "Unsupported Apple container observation output."
             )
         }
     }
@@ -104,8 +109,7 @@ public enum AppleContainerObservationParser {
         _ list: [Any],
         desiredState: DesiredRuntimeState,
         metadata: RuntimeAdapterMetadata,
-        redactionPolicy: RuntimeRedactionPolicy,
-        rawOutput: String
+        redactionPolicy: RuntimeRedactionPolicy
     ) throws -> ObservedRuntimeState {
         let desiredByContainerID = Dictionary(
             uniqueKeysWithValues: desiredState.services.map {
@@ -119,9 +123,11 @@ public enum AppleContainerObservationParser {
             guard let object = item as? [String: Any],
                   let id = object["id"] as? String,
                   let configuration = object["configuration"] as? [String: Any],
+                  let configurationID = configuration["id"] as? String,
+                  configurationID == id,
                   let status = object["status"] as? [String: Any] else {
                 throw RuntimeAdapterError.outputParseFailed(
-                    "Unsupported real Apple container list item shape: \(redactionPolicy.redact(rawOutput))"
+                    "Unsupported real Apple container list item shape."
                 )
             }
 
@@ -147,10 +153,29 @@ public enum AppleContainerObservationParser {
                 )
             }
 
-            let image = (configuration["image"] as? [String: Any])?["reference"] as? String
+            guard let imageObject = configuration["image"] as? [String: Any],
+                  let image = imageObject["reference"] as? String,
+                  !image.isEmpty else {
+                throw RuntimeAdapterError.outputParseFailed(
+                    "Apple container list item '\(redactionPolicy.redact(id))' omitted its image reference."
+                )
+            }
             let observedAt = status["startedDate"] as? String ?? configuration["creationDate"] as? String
-            let ports = try parsePublishedPorts(configuration["publishedPorts"] as? [[String: Any]] ?? [])
-            let networks = try parseRealNetworks(status["networks"] as? [Any] ?? [])
+            let ports = try requiredArrayIfPresent(
+                configuration["publishedPorts"],
+                context: "published ports"
+            ).map { value -> [String: Any] in
+                guard let port = value as? [String: Any] else {
+                    throw RuntimeAdapterError.outputParseFailed(
+                        "Apple container published ports contained a partial entry."
+                    )
+                }
+                return port
+            }
+            let networks = try requiredArrayIfPresent(
+                status["networks"],
+                context: "networks"
+            )
 
             services.append(
                 ObservedRuntimeService(
@@ -159,8 +184,8 @@ public enum AppleContainerObservationParser {
                     image: image,
                     lifecycleState: lifecycleState,
                     healthState: .unknown,
-                    ports: ports,
-                    networks: networks,
+                    ports: try parsePublishedPorts(ports),
+                    networks: try parseRealNetworks(networks),
                     mounts: [],
                     observedAt: observedAt
                 )
@@ -204,7 +229,7 @@ public enum AppleContainerObservationParser {
         ownedHintsByContainerID: [String: RuntimeOwnedResourceHint],
         redactionPolicy: RuntimeRedactionPolicy
     ) throws -> RuntimeServiceIdentity? {
-        let labels = stringLabels(configuration["labels"])
+        let labels = try stringLabels(configuration["labels"])
         if RuntimeManagedResourceIdentity.isManaged(labels) {
             if let labeledProject = labels[RuntimeManagedResourceIdentity.projectLabel],
                labeledProject != desiredState.projectName {
@@ -250,15 +275,25 @@ public enum AppleContainerObservationParser {
         return nil
     }
 
-    private static func stringLabels(_ rawValue: Any?) -> [String: String] {
+    private static func stringLabels(_ rawValue: Any?) throws -> [String: String] {
+        guard let rawValue else {
+            return [:]
+        }
         guard let rawLabels = rawValue as? [String: Any] else {
-            return rawValue as? [String: String] ?? [:]
+            throw RuntimeAdapterError.outputParseFailed(
+                "Apple container ownership labels were not a JSON object."
+            )
         }
-        return rawLabels.reduce(into: [:]) { result, element in
-            if let value = element.value as? String {
-                result[element.key] = value
+        var labels: [String: String] = [:]
+        for (key, rawLabel) in rawLabels {
+            guard let value = rawLabel as? String else {
+                throw RuntimeAdapterError.outputParseFailed(
+                    "Apple container ownership labels contained a non-string value."
+                )
             }
+            labels[key] = value
         }
+        return labels
     }
 
     private static func parsePublishedPorts(_ ports: [[String: Any]]) throws -> [RuntimePortMapping] {
@@ -285,11 +320,9 @@ public enum AppleContainerObservationParser {
             guard let network = rawNetwork as? [String: Any] else {
                 throw RuntimeAdapterError.outputParseFailed("Unsupported Apple container network entry shape.")
             }
-            let allowed = Set(["hostname", "ipv4Address", "ipv4Gateway", "ipv6Address", "macAddress", "mtu", "network"])
-            let unknown = Set(network.keys).subtracting(allowed)
-            guard unknown.isEmpty, let name = network["network"] as? String, !name.isEmpty else {
+            guard let name = network["network"] as? String, !name.isEmpty else {
                 throw RuntimeAdapterError.outputParseFailed(
-                    "Unsupported Apple container network keys: \(unknown.sorted().joined(separator: ", "))."
+                    "Unsupported Apple container network keys: network identity is missing."
                 )
             }
 
@@ -307,6 +340,19 @@ public enum AppleContainerObservationParser {
                 mtu: network["mtu"] as? Int
             )
         }
+    }
+
+    private static func requiredArrayIfPresent(
+        _ value: Any?,
+        context: String
+    ) throws -> [Any] {
+        guard let value else { return [] }
+        guard let array = value as? [Any] else {
+            throw RuntimeAdapterError.outputParseFailed(
+                "Apple container \(context) field was not a JSON array."
+            )
+        }
+        return array
     }
 }
 

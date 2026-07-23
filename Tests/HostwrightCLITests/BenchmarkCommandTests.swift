@@ -398,6 +398,33 @@ private actor BenchmarkContractAdapter: RuntimeAdapter {
     private let createBlocked: Bool
     private let deleteFails: Bool
     private let versionError: RuntimeAdapterError?
+    private static let capabilitySnapshot = RuntimeCapabilitySnapshot(
+        descriptor: RuntimeProviderDescriptor(
+            providerID: .appleContainerCLI,
+            components: [
+                RuntimeProviderComponent(
+                    identifier: .appleContainerCLI,
+                    version: "1.1.0",
+                    build: "109",
+                    fingerprint: "099d8db0"
+                ),
+                RuntimeProviderComponent(
+                    identifier: .appleContainerAPIService,
+                    version: "1.1.0",
+                    build: "109",
+                    fingerprint: "099d8db0"
+                )
+            ],
+            minimumMacOSVersion: RuntimeProviderCapabilityContract.minimumMacOSVersion,
+            supportedArchitectures: [.arm64]
+        ),
+        host: RuntimeProviderHostPlatform(
+            macOSVersion: RuntimeProviderMacOSVersion(major: 26, minor: 5, patch: 0),
+            macOSBuild: "25F90",
+            architecture: .arm64
+        ),
+        features: RuntimeProviderCapabilityProbe.appleContainerCLIFeatures
+    )
 
     init(
         createBlocked: Bool = false,
@@ -411,6 +438,7 @@ private actor BenchmarkContractAdapter: RuntimeAdapter {
 
     func metadata() async -> RuntimeAdapterMetadata {
         RuntimeAdapterMetadata(
+            providerID: .appleContainerCLI,
             adapterName: "BenchmarkContractAdapter",
             adapterVersion: "unit-contract",
             runtimeName: "scripted-contract-runtime",
@@ -424,6 +452,10 @@ private actor BenchmarkContractAdapter: RuntimeAdapter {
         [.readOnlyObservation, .lifecycleMutation, .cleanup]
     }
 
+    func capabilitySnapshot() async throws -> RuntimeCapabilitySnapshot {
+        Self.capabilitySnapshot
+    }
+
     func observe(desiredState: DesiredRuntimeState) async throws -> ObservedRuntimeState {
         let services = desiredState.services.compactMap { desired -> ObservedRuntimeService? in
             guard let entry = entries[desired.identity.managedResourceIdentifier] else { return nil }
@@ -434,7 +466,12 @@ private actor BenchmarkContractAdapter: RuntimeAdapter {
                 lifecycleState: entry.state
             )
         }
-        return ObservedRuntimeState(projectName: desiredState.projectName, services: services, adapterMetadata: await metadata())
+        return ObservedRuntimeState(
+            projectName: desiredState.projectName,
+            services: services,
+            adapterMetadata: await metadata(),
+            capabilitySHA256: Self.capabilitySnapshot.canonicalSHA256
+        )
     }
 
     func plan(desiredState: DesiredRuntimeState, observedState: ObservedRuntimeState) async throws -> RuntimePlan {
@@ -458,7 +495,7 @@ private actor BenchmarkContractAdapter: RuntimeAdapter {
         if let versionError {
             throw versionError
         }
-        return "container CLI version 1.0.0 (contract input)"
+        return "1.0.0"
     }
 
     func resourceUsage(for resourceIdentifier: String) async throws -> RuntimeResourceUsageSnapshot {

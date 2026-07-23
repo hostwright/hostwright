@@ -418,12 +418,23 @@ public struct OwnershipRepository: Sendable {
         }
     }
 
-    public func runtimeHints(projectID: String, projectName: String) throws -> [RuntimeOwnedResourceHint] {
+    public func runtimeHints(
+        projectID: String,
+        projectName: String,
+        providerID: RuntimeProviderID = .appleContainerCLI
+    ) throws -> [RuntimeOwnedResourceHint] {
         try loadAll().compactMap { record in
             guard record.resourceType == "container",
                   record.projectID == projectID,
-                  record.runtimeAdapter == "AppleContainerApplyAdapter",
+                  RuntimeProviderBinding.stableID(for: record.runtimeAdapter) == providerID,
                   let serviceName = record.serviceName,
+                  let projectResourceUUID = record.projectResourceUUID,
+                  HostwrightResourceUUID.isValid(record.resourceUUID),
+                  HostwrightResourceUUID.isValid(projectResourceUUID),
+                  HostwrightResourceUUID.isValid(record.fencingToken),
+                  record.resourceGeneration > 0,
+                  record.projectGeneration > 0,
+                  record.providerGeneration > 0,
                   (record.identityVersion == 1 || record.identityVersion == RuntimeManagedResourceIdentity.currentVersion),
                   RuntimeManagedResourceIdentity.isSupportedIdentifier(record.resourceIdentifier) else {
                 return nil
@@ -431,7 +442,16 @@ public struct OwnershipRepository: Sendable {
             return RuntimeOwnedResourceHint(
                 resourceIdentifier: record.resourceIdentifier,
                 identity: RuntimeServiceIdentity(projectName: projectName, serviceName: serviceName),
-                identityVersion: record.identityVersion
+                identityVersion: record.identityVersion,
+                ownership: RuntimeInventoryOwnershipEvidence(
+                    resourceUUID: record.resourceUUID,
+                    projectUUID: projectResourceUUID,
+                    resourceGeneration: record.resourceGeneration,
+                    projectGeneration: record.projectGeneration,
+                    providerID: providerID,
+                    providerGeneration: record.providerGeneration,
+                    fencingToken: record.fencingToken
+                )
             )
         }.sorted { $0.resourceIdentifier < $1.resourceIdentifier }
     }

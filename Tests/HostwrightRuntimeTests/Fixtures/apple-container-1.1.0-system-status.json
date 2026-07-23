@@ -1,0 +1,8 @@
+{
+  "status": "running",
+  "apiServerVersion": "container-apiserver version 1.1.0 (build: release, commit: 5973b9c)",
+  "apiServerBuild": "release",
+  "apiServerCommit": "5973b9c",
+  "apiServerAppName": "container-apiserver",
+  "futureStatusDetail": "accepted-as-non-semantic"
+}

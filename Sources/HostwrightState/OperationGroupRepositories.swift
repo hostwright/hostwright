@@ -43,6 +43,14 @@ public struct OperationGroupRepository: Sendable {
                         return OperationGroupAcquireResult(acquired: nil, existingActive: existing)
                     }
                 }
+                if let projectID = redacted.projectID,
+                   let existing = try active(projectID: projectID, on: connection) {
+                    if isExpired(existing, currentTimestamp: currentTimestamp) {
+                        try expire(existing, currentTimestamp: currentTimestamp, on: connection)
+                    } else {
+                        return OperationGroupAcquireResult(acquired: nil, existingActive: existing)
+                    }
+                }
                 try insert(redacted, on: connection)
                 return OperationGroupAcquireResult(acquired: redacted, existingActive: nil)
             }
@@ -94,6 +102,52 @@ public struct OperationGroupRepository: Sendable {
                         .text(updatedAt),
                         .text(redactedMetadata),
                         .text(groupID)
+                    ]
+                )
+            }
+        }
+    }
+
+    public func recordCheckpoint(
+        groupID: String,
+        expectedFencingToken: String,
+        checkpoint: String,
+        verificationJSONRedacted: String,
+        updatedAt: String
+    ) throws {
+        guard HostwrightResourceUUID.isValid(expectedFencingToken),
+              !checkpoint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              StateJSON.isObject(verificationJSONRedacted) else {
+            throw StateStoreError.invalidRecord(
+                "Operation group checkpoint requires a valid fence, name, and verification object."
+            )
+        }
+        let verification = try StateJSON.redactedJSON(verificationJSONRedacted)
+        try store.withValidatedConnection { connection in
+            try connection.transaction {
+                let rows = try connection.query(
+                    "SELECT status, fencing_token FROM operation_groups WHERE id = ? LIMIT 1",
+                    bindings: [.text(groupID)]
+                )
+                guard rows.count == 1,
+                      rows[0][0] == OperationGroupStatus.active.rawValue,
+                      rows[0][1] == expectedFencingToken.lowercased() else {
+                    throw StateStoreError.invalidRecord(
+                        "Operation group checkpoint fence was lost or the group is no longer active."
+                    )
+                }
+                try connection.run(
+                    """
+                    UPDATE operation_groups
+                    SET checkpoint = ?, verification_json_redacted = ?, updated_at = ?
+                    WHERE id = ? AND status = 'active' AND fencing_token = ?
+                    """,
+                    bindings: [
+                        .text(checkpoint),
+                        .text(verification),
+                        .text(updatedAt),
+                        .text(groupID),
+                        .text(expectedFencingToken.lowercased())
                     ]
                 )
             }
@@ -189,6 +243,24 @@ public struct OperationGroupRepository: Sendable {
             LIMIT 1
             """,
             bindings: [.text(groupIdempotencyKey)]
+        )
+        return try rows.first.map(operationGroupRecord(from:))
+    }
+
+    private func active(projectID: String, on connection: SQLiteConnection) throws -> OperationGroupRecord? {
+        let rows = try connection.query(
+            """
+            SELECT id, operation_id, group_kind, project_id, service_name, planned_action_type,
+                   status, group_idempotency_key, plan_hash, checkpoint, lock_owner, lock_expires_at,
+                   rollback_available, manual_recovery_hint_redacted, created_at, updated_at,
+                   metadata_json_redacted, fencing_token, intent_json_redacted,
+                   compensation_json_redacted, verification_json_redacted
+            FROM operation_groups
+            WHERE project_id = ? AND status = 'active'
+            ORDER BY updated_at DESC, created_at DESC, rowid DESC
+            LIMIT 1
+            """,
+            bindings: [.text(projectID)]
         )
         return try rows.first.map(operationGroupRecord(from:))
     }

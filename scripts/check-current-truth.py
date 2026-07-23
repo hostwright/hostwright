@@ -49,6 +49,12 @@ def main() -> int:
     compatibility = read("docs/reference/compatibility.md")
     manifest_doc = read("docs/reference/manifest.md")
     cli = read("docs/reference/cli.md")
+    limitations = read("docs/reference/limitations.md")
+    build_status = read("docs/BUILD_STATUS.md")
+    runtime_architecture = read("docs/architecture/runtime-adapter.md")
+    runtime_binding_adr = read("docs/design/adr-0007-resource-identity-provider-binding.md")
+    contract_readme = read("contracts/v0.0.2/README.md")
+    capability_catalog = read("Sources/HostwrightCore/CapabilityCatalog.swift")
     state = read("docs/architecture/state-store.md")
     requirements = read("docs/requirements/REQUIREMENTS.md")
     acceptance = read("docs/requirements/ACCEPTANCE_MATRIX.md")
@@ -76,6 +82,7 @@ def main() -> int:
     require("0.0.2-dev" in readme and "v0.0.2" in readme, "README lacks current version/release truth", errors)
     require("`brew install hostwright` does not exist today" in readme, "README must state the unqualified brew command does not exist", errors)
     require("Phase 02 qualification is complete" in readme, "README does not record completed Phase 02 qualification", errors)
+    require("Phase 03 qualification is complete" in readme, "README does not record completed Phase 03 qualification", errors)
     require("brew install hostwright/tap/hostwright" in readme, "README lacks the available vendor-tap command", errors)
     require("`brew install hostwright` does not exist today" in install, "install docs must state the unqualified brew command does not exist", errors)
     require(
@@ -86,8 +93,21 @@ def main() -> int:
     require("brew install hostwright/tap/hostwright" in install, "install docs lack the available vendor-tap command", errors)
     require("v0.0.2-dev.11" in install and "v0.0.2-dev.12" in install, "install docs lack the immutable Phase 02 qualification pair", errors)
     require("exact development evidence" in compatibility, "compatibility docs must distinguish evidence from GA claims", errors)
+    require("Apple `container` 1.0.0 and 1.1.0" in compatibility, "compatibility docs lack the exact Phase 03 Apple CLI matrix", errors)
+    require("Containerization 0.35.0" in compatibility, "compatibility docs lack the exact Phase 03 Containerization pin", errors)
     require("version: 2" in manifest_doc and "migrate preview" in manifest_doc, "manifest docs lack v2/migration truth", errors)
     require("0.0.2-dev" in cli and "apiVersion\":2" in cli, "CLI docs lack product/API v2 truth", errors)
+    for fragment in ["hostwright runtime providers", "hostwright runtime migrate", "--runtime-provider auto|apple-cli|containerization"]:
+        require(fragment in cli, f"CLI docs lack Phase 03 runtime surface: {fragment}", errors)
+    require("Phase 03 qualification is complete" in limitations, "limitations do not record completed Phase 03 qualification", errors)
+    require("Phase 03 runtime-provider qualification is complete" in build_status, "build status does not record Phase 03 qualification", errors)
+    for fragment in ["apple-container-cli", "apple-containerization", "helper protocol v1", "Provider Selection, Migration, And Recovery"]:
+        require(fragment in runtime_architecture, f"runtime architecture lacks Phase 03 truth: {fragment}", errors)
+    require("Phase 03 live migration evidence" in runtime_binding_adr, "provider-binding ADR retains pre-Phase 03 verification truth", errors)
+    require("runtime-provider-capabilities.json" in contract_readme and "helper protocol v1" in contract_readme, "contract README lacks Phase 03 runtime contracts", errors)
+    for identifier in ["runtime.apple-container-cli", "runtime.containerization"]:
+        pattern = rf'capability\("{re.escape(identifier)}"[^\n]+\.stable, 3, 129'
+        require(re.search(pattern, capability_catalog) is not None, f"capability catalog does not report qualified Phase 03 provider: {identifier}", errors)
     require("Schema version 7 is the latest" in state, "state docs do not name schema v7", errors)
     require("secure selected state paths" in requirements, "requirements lack the secure selected-state contract", errors)
     require("Implemented for API version 2" in requirements, "requirements retain the obsolete Control API version", errors)

@@ -743,6 +743,7 @@ private final class CountingRuntimeAdapter: RuntimeAdapter, @unchecked Sendable 
 
     func metadata() async -> RuntimeAdapterMetadata {
         RuntimeAdapterMetadata(
+            providerID: .appleContainerCLI,
             adapterName: "CountingRuntimeAdapter",
             adapterVersion: "test",
             runtimeName: "test",

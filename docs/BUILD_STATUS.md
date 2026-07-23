@@ -1,12 +1,22 @@
 # Build Status
 
-> **Current program:** Hostwright is `0.0.2-dev`; Phase 01 of the [v0.0.2 roadmap](roadmap/v0.0.2/IMPLEMENTATION_PLAN.md) is merged and closed, and Phase 02 qualification is complete. Phase 03 has not started. The immutable unsupported `v0.0.2-dev.11` (`7d97d6c9ff878ec567c88e6993d4543ab8f0ad95`) and `v0.0.2-dev.12` (`71414005104933d8ee3591e8c91bc831bce2e2a2`) releases passed signed/notarized ZIP and `.pkg`, SBOM, provenance, attestation, public-byte, vendor-tap, clean macOS 26 lifecycle, state, SQLite hardening, sanitizer, signed doctor, abrupt-power recovery, and exact-cleanup gates. `brew install hostwright/tap/hostwright` is available; unqualified `brew install hostwright` is not. Hostwright is not GA or production ready. The phase-by-phase entries below are a retained pre-v0.0.2 engineering ledger, not the active release scope or schedule.
+> **Current program:** Hostwright is `0.0.2-dev`; Phases 01 and 02 of the [v0.0.2 roadmap](roadmap/v0.0.2/IMPLEMENTATION_PLAN.md) are closed, and Phase 03 runtime-provider qualification is complete. Apple `container` 1.0.0/1.1.0 and the pinned Containerization 0.35.0 helper passed their declared-capability, migration, upgrade, restart, failure, and exact-cleanup gates. The immutable unsupported Phase 02 releases and vendor tap remain available qualification channels. Hostwright is not GA or production ready. The phase-by-phase entries below are a retained pre-v0.0.2 engineering ledger, not the active release scope or schedule.
 
 ## Local Environment
 
 - macOS 26.5
 - Apple silicon (`arm64`)
 - Swift 6.3.3 through full Xcode developer tools
+
+## Verified On 2026-07-22 — v0.0.2 Phase 03
+
+- Stable provider identities are `apple-container-cli` and `apple-containerization`. Capability snapshots are immutable and digest-bound to planning, intent, ownership, migration, and audit records.
+- Explicit structured codecs cover Apple `container` 1.0.0 and 1.1.0. Physical Apple-silicon qualification ran both versions in a controlled maintenance window, restored signed 1.1.0, and preserved the unmanaged runtime inventory.
+- The exact Containerization 0.35.0 dependency runs only in the signed out-of-process helper. Protocol v1 authentication, bounded framing, local-image-only lifecycle, crash/hang/cancellation, replaced-binary, unsafe-socket, and exact-cleanup cases passed.
+- Both providers passed the same declared-capability contract for observation, UUID identity, create, start, managed restart, delete, logs, stats, timeout, cancellation, restart, and failure normalization. Unsupported image management, process control, streaming, storage, networking, and full lifecycle behavior remains explicit.
+- CLI-to-helper and helper-to-CLI migration passed with generation fencing, UUID continuity, target verification, rollback/compensation, checkpoint crashes, stale confirmation refusal, and no concurrent mutation of one project generation.
+- Helper H1-to-H2 upgrade, incompatible downgrade refusal, CLI/API/helper restart, mixed-version invalidation, Hostwright termination, future-protocol refusal, and checkpoint recovery passed with zero duplicate effects, unmanaged mutation, identity loss, or false success.
+- Final exact-head repository, sanitizer, property/fuzz, documentation, governance, and hosted-CI results are recorded in PR #304 and the issue-specific evidence comments for #121–#129.
 
 ## Locally verified on 2026-07-14 — v0.0.2 Phase 02 issue #117
 

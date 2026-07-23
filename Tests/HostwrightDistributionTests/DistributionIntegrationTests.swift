@@ -64,8 +64,11 @@ final class DistributionIntegrationTests: XCTestCase {
             let common = [
                 "--hostwright-binary", binaries.appendingPathComponent("hostwright").path,
                 "--hostwright-control-binary", binaries.appendingPathComponent("hostwright-control").path,
+                "--hostwright-containerization-helper-binary",
+                binaries.appendingPathComponent("hostwright-containerization-helper").path,
                 "--hostwright-dist-binary", binaries.appendingPathComponent("hostwright-dist").path,
                 "--hostwrightd-binary", binaries.appendingPathComponent("hostwrightd").path,
+                "--containerization-asset-root", root.appendingPathComponent("unused-assets").path,
                 "--example-manifest", repository.appendingPathComponent("examples/single-service/hostwright.yaml").path,
                 "--license", repository.appendingPathComponent("LICENSE").path,
                 "--readme", repository.appendingPathComponent("README.md").path,
@@ -85,17 +88,10 @@ final class DistributionIntegrationTests: XCTestCase {
             XCTAssertTrue(rejected.error.contains("use build for clean-source evidence"))
             XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("false-clean").path))
 
-            let baseline = try runExecutable(tool, arguments: [
-                "assemble", "--output-dir", baselineDirectory.path,
-                "--source-commit", baselineCommit
-            ] + common)
-            XCTAssertEqual(baseline.status, 69)
-            XCTAssertTrue(baseline.error.contains("HW-DIST-002"))
-            let candidate = try runExecutable(tool, arguments: [
-                "assemble", "--output-dir", candidateDirectory.path,
-                "--source-commit", candidateCommit
-            ] + common)
-            XCTAssertEqual(candidate.status, 69)
+            let baseline = try makeArtifact(root: root, name: "baseline", commit: baselineCommit)
+            let candidate = try makeArtifact(root: root, name: "candidate", commit: candidateCommit)
+            XCTAssertEqual(baseline.evidence.status, .blocked)
+            XCTAssertEqual(candidate.evidence.status, .blocked)
 
             let managedPrefix = root.appendingPathComponent("managed-prefix", isDirectory: true)
             try FileManager.default.createDirectory(at: managedPrefix, withIntermediateDirectories: false)
@@ -344,6 +340,64 @@ final class DistributionIntegrationTests: XCTestCase {
         }
     }
 
+    func testVerifierAcceptsExactArchiveUnderRestrictiveUmask() throws {
+        try withTemporaryRoot { root in
+            let report = try makeArtifact(root: root, name: "restrictive-umask", commit: baselineCommit)
+            let previousMask = umask(0o077)
+            defer { _ = umask(previousMask) }
+
+            let verified = try DistributionVerifier().verifyAndCleanup(
+                distributionDirectory: root.appendingPathComponent("restrictive-umask")
+            )
+
+            XCTAssertEqual(verified.manifest, report.manifest)
+        }
+    }
+
+    func testArchiveTableRejectsRegularFileModeThatDiffersFromManifest() throws {
+        try withTemporaryRoot { root in
+            let report = try makeArtifact(root: root, name: "mode-source", commit: baselineCommit)
+            let distribution = root.appendingPathComponent("mode-source")
+            let extracted = root.appendingPathComponent("mode-tree", isDirectory: true)
+            try DistributionFileSystem.createExclusiveDirectory(extracted)
+            let runner = DistributionProcessRunner()
+            _ = try runner.run(
+                executablePath: "/usr/bin/tar",
+                arguments: [
+                    "-xzf", distribution.appendingPathComponent(report.archive.fileName).path,
+                    "-C", extracted.path
+                ],
+                label: "extract archive for mode rejection"
+            )
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o777],
+                ofItemAtPath: extracted.appendingPathComponent(
+                    "\(report.manifest.artifactID)/bin/hostwright"
+                ).path
+            )
+            let archive = root.appendingPathComponent("wrong-mode.tar.gz")
+            _ = try runner.run(
+                executablePath: "/usr/bin/tar",
+                arguments: [
+                    "-czf", archive.path, "-C", extracted.path, report.manifest.artifactID
+                ],
+                label: "create wrong-mode archive"
+            )
+
+            XCTAssertThrowsError(
+                try DistributionVerifier().validateArchiveTable(
+                    archiveURL: archive,
+                    manifest: report.manifest
+                )
+            ) { error in
+                guard case let DistributionError.invalidArtifact(message) = error else {
+                    return XCTFail("Expected invalidArtifact, received \(error)")
+                }
+                XCTAssertTrue(message.contains("regular-file mode"))
+            }
+        }
+    }
+
     func testAtomicUpgradeFailureRestoresVerifiedBaseline() throws {
         try withTemporaryRoot { root in
             _ = try makeArtifact(root: root, name: "baseline", commit: baselineCommit)
@@ -548,23 +602,155 @@ final class DistributionIntegrationTests: XCTestCase {
                 label: "read clean source snapshot commit"
             ).standardOutput.trimmingCharacters(in: .whitespacesAndNewlines)
 
-            let builder = DistributionCleanBuilder()
+            let builder = DistributionCleanBuilder(
+                containerizationAssets: try makeDistributionTestContainerizationAssets(at: root)
+            )
+            let firstOutput = root.appendingPathComponent("first-output", isDirectory: true)
+            let secondOutput = root.appendingPathComponent("second-output", isDirectory: true)
+            XCTAssertNotEqual(firstOutput, secondOutput)
             let first = try builder.buildWithDependencyInventory(
                 sourceRoot: source,
-                outputDirectory: root.appendingPathComponent("first-output", isDirectory: true),
+                outputDirectory: firstOutput,
                 expectedCommit: commit
             )
+            let firstScratch = try XCTUnwrap(first.report.evidence.cleanup.exactResourceIdentifiers.first)
+            XCTAssertFalse(DistributionFileSystem.entryExists(URL(fileURLWithPath: firstScratch)))
             let second = try builder.buildWithDependencyInventory(
                 sourceRoot: source,
-                outputDirectory: root.appendingPathComponent("second-output", isDirectory: true),
+                outputDirectory: secondOutput,
                 expectedCommit: commit
             )
 
-            XCTAssertEqual(first.externalSwiftPMDependencies, [])
-            XCTAssertEqual(second.externalSwiftPMDependencies, [])
+            XCTAssertEqual(first.externalSwiftPMDependencies, second.externalSwiftPMDependencies)
+            XCTAssertEqual(
+                first.externalSwiftPMDependencies,
+                first.externalSwiftPMDependencies.sorted()
+            )
+            XCTAssertTrue(
+                first.externalSwiftPMDependencies.contains {
+                    $0 == "containerization|https://github.com/apple/containerization.git|\(DistributionContainerizationAssets.frameworkVersion)|\(DistributionContainerizationAssets.frameworkRevision)"
+                }
+            )
+            let secondScratch = try XCTUnwrap(second.report.evidence.cleanup.exactResourceIdentifiers.first)
+            XCTAssertEqual(first.report.evidence.cleanup.exactResourceIdentifiers.count, 1)
+            XCTAssertEqual(second.report.evidence.cleanup.exactResourceIdentifiers.count, 1)
+            XCTAssertEqual(firstScratch, secondScratch)
+            XCTAssertTrue(URL(fileURLWithPath: firstScratch).lastPathComponent.hasPrefix(
+                "hostwright-dist-clean-scratch-"
+            ))
+            XCTAssertFalse(DistributionFileSystem.entryExists(URL(fileURLWithPath: secondScratch)))
             XCTAssertEqual(first.report.manifest.files, second.report.manifest.files)
             let payloadPaths = Set(first.report.manifest.files.map(\.path))
             XCTAssertTrue(Set(DistributionLayout.shippedBinaryPaths).isSubset(of: payloadPaths))
+        }
+    }
+
+    func testCleanBuilderLeaseRejectsConcurrentStructCopyWithoutDeletingActiveScratch() throws {
+        try withTemporaryRoot { root in
+            let source = root.appendingPathComponent("source", isDirectory: true)
+            let scratch = root.appendingPathComponent(
+                "hostwright-dist-clean-scratch-\(UUID().uuidString)",
+                isDirectory: true
+            )
+            let firstOutput = root.appendingPathComponent("first-output", isDirectory: true)
+            let secondOutput = root.appendingPathComponent("second-output", isDirectory: true)
+            try FileManager.default.createDirectory(at: source, withIntermediateDirectories: false)
+            let slowManifest = """
+            // swift-tools-version: 6.2
+            import Foundation
+            import PackageDescription
+
+            Thread.sleep(forTimeInterval: 30)
+            let package = Package(name: "ConcurrentCleanBuildFixture")
+            """ + "\n"
+            try Data(slowManifest.utf8).write(
+                to: source.appendingPathComponent("Package.swift"),
+                options: .withoutOverwriting
+            )
+            let runner = DistributionProcessRunner()
+            _ = try runner.run(
+                executablePath: "/usr/bin/git",
+                arguments: ["init", "--quiet", source.path],
+                label: "initialize concurrent clean-build source"
+            )
+            _ = try runner.run(
+                executablePath: "/usr/bin/git",
+                arguments: ["-C", source.path, "add", "Package.swift"],
+                label: "stage concurrent clean-build source"
+            )
+            _ = try runner.run(
+                executablePath: "/usr/bin/git",
+                arguments: [
+                    "-C", source.path,
+                    "-c", "user.name=Hostwright Tests",
+                    "-c", "user.email=tests@invalid",
+                    "commit", "--quiet", "-m", "concurrent clean-build fixture"
+                ],
+                label: "commit concurrent clean-build source"
+            )
+            let commit = try runner.run(
+                executablePath: "/usr/bin/git",
+                arguments: ["-C", source.path, "rev-parse", "HEAD"],
+                label: "read concurrent clean-build commit"
+            ).standardOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            let builder = DistributionCleanBuilder(compilerScratchPath: scratch)
+            let copiedBuilder = builder
+            let cancellation = SecureSubprocessCancellation()
+            let firstFinished = DispatchGroup()
+            let firstError = LockedData()
+            firstFinished.enter()
+            DispatchQueue.global(qos: .userInitiated).async {
+                defer { firstFinished.leave() }
+                do {
+                    _ = try builder.buildWithDependencyInventory(
+                        sourceRoot: source,
+                        outputDirectory: firstOutput,
+                        expectedCommit: commit,
+                        cancellation: cancellation
+                    )
+                } catch {
+                    firstError.set(Data(String(describing: error).utf8))
+                }
+            }
+            defer {
+                cancellation.cancel()
+                _ = firstFinished.wait(timeout: .now() + 10)
+            }
+
+            let scratchDeadline = Date().addingTimeInterval(10)
+            while !DistributionFileSystem.entryExists(scratch), Date() < scratchDeadline {
+                usleep(10_000)
+            }
+            XCTAssertTrue(try DistributionFileSystem.isDirectoryNonSymlink(scratch))
+            var identityBefore = stat()
+            XCTAssertEqual(lstat(scratch.path, &identityBefore), 0)
+
+            XCTAssertThrowsError(
+                try copiedBuilder.buildWithDependencyInventory(
+                    sourceRoot: source,
+                    outputDirectory: secondOutput,
+                    expectedCommit: commit
+                )
+            ) { error in
+                XCTAssertEqual(
+                    error as? DistributionError,
+                    .invalidArguments("A clean distribution build is already active for this builder.")
+                )
+            }
+
+            var identityAfter = stat()
+            XCTAssertEqual(lstat(scratch.path, &identityAfter), 0)
+            XCTAssertEqual(identityAfter.st_dev, identityBefore.st_dev)
+            XCTAssertEqual(identityAfter.st_ino, identityBefore.st_ino)
+            XCTAssertFalse(DistributionFileSystem.entryExists(secondOutput))
+
+            cancellation.cancel()
+            XCTAssertEqual(firstFinished.wait(timeout: .now() + 10), .success)
+            XCTAssertTrue(String(data: firstError.value(), encoding: .utf8)?.contains("cancelled") == true)
+            XCTAssertFalse(DistributionFileSystem.entryExists(scratch))
+            XCTAssertFalse(DistributionFileSystem.entryExists(firstOutput))
+            XCTAssertFalse(DistributionFileSystem.entryExists(secondOutput))
         }
     }
 
@@ -667,8 +853,11 @@ final class DistributionIntegrationTests: XCTestCase {
             DistributionAssemblyRequest(
                 hostwrightBinary: binaries.appendingPathComponent("hostwright"),
                 hostwrightControlBinary: binaries.appendingPathComponent("hostwright-control"),
+                hostwrightContainerizationHelperBinary: binaries
+                    .appendingPathComponent("hostwright-containerization-helper"),
                 hostwrightDistributionBinary: binaries.appendingPathComponent("hostwright-dist"),
                 hostwrightDaemonBinary: binaries.appendingPathComponent("hostwrightd"),
+                containerizationAssets: try makeDistributionTestContainerizationAssets(at: root),
                 exampleManifestFile: repository.appendingPathComponent("examples/single-service/hostwright.yaml"),
                 licenseFile: repository.appendingPathComponent("LICENSE"),
                 readmeFile: repository.appendingPathComponent("README.md"),

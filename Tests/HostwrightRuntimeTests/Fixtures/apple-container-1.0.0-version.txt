@@ -1,0 +1,1 @@
+container CLI version 1.0.0 (build: release, commit: ee848e3)

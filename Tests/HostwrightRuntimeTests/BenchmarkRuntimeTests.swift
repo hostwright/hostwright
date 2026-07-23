@@ -108,7 +108,7 @@ final class BenchmarkRuntimeTests: XCTestCase {
             )
         )
         let version = try await versionAdapter.runtimeVersion()
-        XCTAssertEqual(version, "container CLI version 1.0.0 (build: release, commit: ee848e3)")
+        XCTAssertEqual(version, "1.0.0")
 
         let statsSpec = AppleContainerCommand.spec(kind: .stats(containerID: identifier), executable: executable)
         let statsAdapter = AppleContainerReadOnlyAdapter(

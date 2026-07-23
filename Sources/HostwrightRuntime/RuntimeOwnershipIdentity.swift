@@ -1,6 +1,12 @@
 import CryptoKit
 import Foundation
 
+public enum RuntimeManagedResourceIdentityError: Error, Equatable, Sendable {
+    case invalidMutationContext
+    case incompleteOwnershipLabels
+    case invalidOwnershipLabels
+}
+
 public enum RuntimeManagedResourceIdentity {
     public static let currentVersion = 2
     public static let maximumIdentifierLength = 63
@@ -11,6 +17,13 @@ public enum RuntimeManagedResourceIdentity {
     public static let serviceLabel = "dev.hostwright.service"
     public static let instanceLabel = "dev.hostwright.instance"
     public static let resourceIdentifierLabel = "dev.hostwright.resource-id"
+    public static let resourceUUIDLabel = "dev.hostwright.resource-uuid"
+    public static let projectUUIDLabel = "dev.hostwright.project-uuid"
+    public static let resourceGenerationLabel = "dev.hostwright.resource-generation"
+    public static let projectGenerationLabel = "dev.hostwright.project-generation"
+    public static let providerIDLabel = "dev.hostwright.provider-id"
+    public static let providerGenerationLabel = "dev.hostwright.provider-generation"
+    public static let fencingTokenLabel = "dev.hostwright.fencing-token"
 
     public static func resourceIdentifier(for identity: RuntimeServiceIdentity) -> String {
         let digest = identityDigest(identity)
@@ -33,6 +46,68 @@ public enum RuntimeManagedResourceIdentity {
             labels[instanceLabel] = instanceName
         }
         return labels
+    }
+
+    public static func labels(
+        for identity: RuntimeServiceIdentity,
+        context: RuntimeMutationContext
+    ) throws -> [String: String] {
+        guard context.validationIssue == nil else {
+            throw RuntimeManagedResourceIdentityError.invalidMutationContext
+        }
+        var result = labels(for: identity)
+        result[resourceUUIDLabel] = context.resourceUUID.lowercased()
+        result[projectUUIDLabel] = context.projectResourceUUID.lowercased()
+        result[resourceGenerationLabel] = String(context.resourceGeneration)
+        result[projectGenerationLabel] = String(context.projectGeneration)
+        result[providerIDLabel] = context.providerID.rawValue
+        result[providerGenerationLabel] = String(context.providerGeneration)
+        result[fencingTokenLabel] = context.fencingToken.lowercased()
+        return result
+    }
+
+    public static func ownershipEvidence(
+        from labels: [String: String],
+        expectedProviderID: RuntimeProviderID
+    ) throws -> RuntimeInventoryOwnershipEvidence? {
+        let ownershipKeys = [
+            resourceUUIDLabel,
+            projectUUIDLabel,
+            resourceGenerationLabel,
+            projectGenerationLabel,
+            providerIDLabel,
+            providerGenerationLabel,
+            fencingTokenLabel
+        ]
+        let presentCount = ownershipKeys.reduce(into: 0) { count, key in
+            if labels[key] != nil { count += 1 }
+        }
+        if labels[managedLabel] != "true" {
+            guard presentCount == 0 else {
+                throw RuntimeManagedResourceIdentityError.incompleteOwnershipLabels
+            }
+            return nil
+        }
+        guard presentCount == ownershipKeys.count,
+              let resourceUUID = canonicalUUID(labels[resourceUUIDLabel]),
+              let projectUUID = canonicalUUID(labels[projectUUIDLabel]),
+              resourceUUID != projectUUID,
+              let resourceGeneration = positiveInteger(labels[resourceGenerationLabel]),
+              let projectGeneration = positiveInteger(labels[projectGenerationLabel]),
+              labels[providerIDLabel] == expectedProviderID.rawValue,
+              let providerGeneration = positiveInteger(labels[providerGenerationLabel]),
+              let fencingToken = canonicalUUID(labels[fencingTokenLabel]) else {
+            throw RuntimeManagedResourceIdentityError.invalidOwnershipLabels
+        }
+        return RuntimeInventoryOwnershipEvidence(
+            resourceUUID: resourceUUID,
+            projectUUID: projectUUID,
+            resourceGeneration: resourceGeneration,
+            projectGeneration: projectGeneration,
+            providerID: expectedProviderID,
+            providerGeneration: providerGeneration,
+            fencingToken: fencingToken
+        )
     }
 
     public static func identity(from labels: [String: String]) -> RuntimeServiceIdentity? {
@@ -131,5 +206,24 @@ public enum RuntimeManagedResourceIdentity {
     private static func isDNSLikeName(_ value: String) -> Bool {
         let pattern = #"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"#
         return value.range(of: pattern, options: .regularExpression) != nil
+    }
+
+    private static func canonicalUUID(_ value: String?) -> String? {
+        guard let value,
+              let uuid = UUID(uuidString: value),
+              uuid.uuidString.lowercased() == value else {
+            return nil
+        }
+        return value
+    }
+
+    private static func positiveInteger(_ value: String?) -> Int? {
+        guard let value,
+              value.range(of: "^[1-9][0-9]*$", options: .regularExpression) != nil,
+              let number = Int(value),
+              number > 0 else {
+            return nil
+        }
+        return number
     }
 }

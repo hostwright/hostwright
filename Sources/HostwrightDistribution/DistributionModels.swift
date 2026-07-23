@@ -21,6 +21,7 @@ public enum DistributionLayout {
     public static let shippedExecutableNames = [
         "hostwright",
         "hostwright-control",
+        "hostwright-containerization-helper",
         "hostwright-dist",
         "hostwrightd"
     ]
@@ -37,12 +38,15 @@ public enum DistributionLayout {
     public static let payloadModes: [String: Int] = [
         "bin/hostwright": 0o755,
         "bin/hostwright-control": 0o755,
+        "bin/hostwright-containerization-helper": 0o755,
         "bin/hostwright-dist": 0o755,
         "bin/hostwrightd": 0o755,
         "share/hostwright/examples/hostwright.yaml": 0o644,
         "share/doc/hostwright/LICENSE": 0o644,
         "share/doc/hostwright/README.md": 0o644
-    ]
+    ].merging(DistributionContainerizationAssets.payloadModes) { _, _ in
+        preconditionFailure("duplicate distribution payload path")
+    }
 }
 
 public enum DistributionInstallationSource: String, Codable, Equatable, Sendable {

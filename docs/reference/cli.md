@@ -7,6 +7,9 @@ The current CLI provides a dependency-free `hostwright` command surface with nar
 ```bash
 hostwright --version
 hostwright capabilities [--json | --output text|json]
+hostwright runtime providers [--json]
+hostwright runtime migrate [path] --to apple-cli|containerization --dry-run [--state-db <path>] [--json | --output text|json]
+hostwright runtime migrate [path] --to apple-cli|containerization --confirm-migration <token> [--state-db <path>] [--json | --output text|json]
 hostwright paths [--state-db <path>] [--json | --output text|json]
 hostwright state integrity [--state-db <path>] [--json | --output text|json]
 hostwright state backup [--state-db <path>] [--json | --output text|json]
@@ -21,8 +24,8 @@ hostwright init
 hostwright import-stack <path> [--output text|json] [--team-profile <path>]
 hostwright validate [path] [--team-profile <path>]
 hostwright plan [path] [--output text|json] [--team-profile <path>]
-hostwright status [path] [--state-db <path>] [--output text|json]
-hostwright apply [path] [--state-db <path>] --confirm-plan <hash> [--team-profile <path> --approval-record <path>]
+hostwright status [path] [--state-db <path>] [--output text|json] [--runtime-provider auto|apple-cli|containerization]
+hostwright apply [path] [--state-db <path>] --confirm-plan <hash> [--runtime-provider auto|apple-cli|containerization] [--team-profile <path> --approval-record <path>]
 hostwright logs <service> [path] [--tail <n>] [--state-db <path>]
 hostwright events [--state-db <path>] [--project <name>] [--type <event>] [--service <name>] [--severity info|warning|error] [--limit <n>] [--sort asc|desc] [--output text|json]
 hostwright recovery [--state-db <path>] [--project <name>] [--output text|json]
@@ -53,7 +56,7 @@ hostwright-dist help
 
 Text output is the default for `hostwright` commands. Installed-lifecycle `hostwright-dist` commands require `--output json`; release and developer-evidence commands retain their documented text/report output.
 
-`capabilities`, `paths`, every `state` subcommand, `migrate preview`, `import-stack`, `plan`, `status`, `events`, `recovery`, `extension check`, and `doctor` also accept JSON output. `capabilities`, `paths`, every `state` subcommand, `migrate preview`, and `doctor` accept the convenience spelling `--json`. JSON output is intended for local scripts, conformance checks, and tests. It does not weaken mutation gates.
+`capabilities`, `runtime providers`, `runtime migrate`, `paths`, every `state` subcommand, `migrate preview`, `import-stack`, `plan`, `status`, `events`, `recovery`, `extension check`, and `doctor` also accept JSON output. `capabilities`, `runtime providers`, `runtime migrate`, `paths`, every `state` subcommand, `migrate preview`, and `doctor` accept the convenience spelling `--json`. JSON output is intended for local scripts, conformance checks, and tests. It does not weaken mutation gates.
 
 When JSON mode is requested and the CLI can classify the failure, stderr uses this envelope:
 
@@ -137,6 +140,20 @@ The complete artifact-source grammar, prefix policy, JSON contracts, durable che
 Prints the current product version, release target, locked contract versions, and a deterministic catalog of stable, experimental, unavailable, and externally blocked capabilities. Each capability names its owning phase, GitHub epic, reason, and required evidence classes.
 
 JSON is the machine-readable current-support source. The command performs no runtime observation, network access, state access, or mutation. It reports what this exact build declares; it does not convert a planned capability into support.
+
+## `hostwright runtime providers [--json]`
+
+Negotiates immutable capability snapshots for the Apple CLI and installed Containerization helper without changing state or runtime resources. Output names stable provider IDs, detected CLI/API/helper/framework/protocol versions, macOS and architecture compatibility, per-feature states and reasons, and the canonical capability digest.
+
+An unavailable component remains an explicit unavailable or blocked result. Unknown or mixed versions, an invalid helper handshake, stale component identity, and unsupported architecture never become automatic fallback success.
+
+## `hostwright runtime migrate ...`
+
+`--dry-run` observes the bound source and requested target, checks local-image and capability requirements, and emits planned effects, rollback actions, observation/capability digests, and an exact confirmation token without acquiring an operation or mutating either provider.
+
+`--confirm-migration <token>` recomputes the plan, refuses stale capabilities, observations, ownership, or state, then uses the existing schema-v7 operation group and fencing records to quiesce the source, create and verify the target, preserve UUID identity and prior running state, and advance the provider generation. A failed target verification removes only verified target resources and restores the source when safe. Active operations, ambiguous ownership, collisions, unavailable images, or an incompatible target fail closed.
+
+`status` and `apply` accept `--runtime-provider auto|apple-cli|containerization`. An existing project binding always wins; selecting another provider requires the migration command. For an unbound project, `auto` prefers a compatible Apple CLI provider and selects Containerization only when the CLI is unavailable and the helper is fully capable.
 
 ## `hostwright paths [--state-db <path>] [--json | --output text|json]`
 

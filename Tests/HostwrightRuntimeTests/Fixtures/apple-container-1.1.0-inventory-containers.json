@@ -1,0 +1,172 @@
+[
+  {
+    "configuration": {
+      "creationDate": "2026-07-18T23:40:00Z",
+      "futureConfigurationField": {
+        "ignored": true
+      },
+      "id": "hostwright-v2-demo-api-8022a4342ff931db15cdc03b748de2b6",
+      "image": {
+        "descriptor": {
+          "digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "futureDescriptorField": "ignored",
+          "mediaType": "application/vnd.oci.image.index.v1+json",
+          "size": 512
+        },
+        "futureImageField": false,
+        "reference": "ghcr.io/example/api:1.1.0"
+      },
+      "initProcess": {
+        "arguments": ["serve", "--token=fixture-secret"],
+        "environment": ["PLAIN=value", "API_TOKEN=fixture-secret", "EMPTY="],
+        "executable": "/usr/local/bin/api",
+        "futureProcessField": "ignored",
+        "rlimits": [],
+        "supplementalGroups": [],
+        "terminal": false,
+        "user": {
+          "id": {
+            "gid": 1000,
+            "uid": 1000
+          }
+        },
+        "workingDirectory": "/srv/app"
+      },
+      "labels": {
+        "dev.hostwright.fencing-token": "33333333-3333-4333-8333-333333333333",
+        "dev.hostwright.identity-version": "2",
+        "dev.hostwright.managed": "true",
+        "dev.hostwright.project": "demo",
+        "dev.hostwright.project-generation": "3",
+        "dev.hostwright.project-uuid": "11111111-1111-4111-8111-111111111111",
+        "dev.hostwright.provider-generation": "4",
+        "dev.hostwright.provider-id": "apple-container-cli",
+        "dev.hostwright.resource-generation": "2",
+        "dev.hostwright.resource-id": "hostwright-v2-demo-api-8022a4342ff931db15cdc03b748de2b6",
+        "dev.hostwright.resource-uuid": "22222222-2222-4222-8222-222222222222",
+        "dev.hostwright.service": "api"
+      },
+      "mounts": [
+        {
+          "destination": "/srv/data",
+          "futureMountField": 1,
+          "options": ["ro"],
+          "source": "/Users/example/data",
+          "type": {
+            "virtiofs": {}
+          }
+        },
+        {
+          "destination": "/cache",
+          "options": [],
+          "source": "/var/lib/container/volumes/cache",
+          "type": {
+            "volume": {
+              "cache": "on",
+              "format": "ext4",
+              "futureVolumeField": true,
+              "name": "cache",
+              "sync": "fsync"
+            }
+          }
+        }
+      ],
+      "networks": [
+        {
+          "network": "default",
+          "options": {
+            "futureNetworkOption": false,
+            "hostname": "api",
+            "macAddress": "02:00:00:00:00:02",
+            "mtu": 1500
+          }
+        }
+      ],
+      "platform": {
+        "architecture": "arm64",
+        "futurePlatformField": "ignored",
+        "os": "linux",
+        "variant": "v8"
+      },
+      "publishedPorts": [
+        {
+          "containerPort": 80,
+          "count": 2,
+          "futurePortField": "ignored",
+          "hostAddress": "127.0.0.1",
+          "hostPort": 8080,
+          "proto": "tcp"
+        }
+      ],
+      "resources": {
+        "cpuOverhead": 1,
+        "cpus": 4,
+        "futureResourceField": null,
+        "memoryInBytes": 8589934592,
+        "storage": 68719476736
+      }
+    },
+    "futureTopLevelField": ["ignored"],
+    "id": "hostwright-v2-demo-api-8022a4342ff931db15cdc03b748de2b6",
+    "status": {
+      "futureStatusField": "ignored",
+      "networks": [
+        {
+          "futureNetworkField": {},
+          "hostname": "api",
+          "ipv4Address": "192.168.64.3/24",
+          "ipv4Gateway": "192.168.64.1",
+          "ipv6Address": "fdae:498:8db7:d30c::3/64",
+          "macAddress": "02:00:00:00:00:02",
+          "mtu": 1500,
+          "network": "default"
+        }
+      ],
+      "state": "running"
+    }
+  },
+  {
+    "configuration": {
+      "creationDate": "2026-07-18T23:41:00Z",
+      "id": "hostwright-v2-demo-web-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "image": {
+        "descriptor": {
+          "digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        },
+        "reference": "ghcr.io/example/api:1.1.0"
+      },
+      "initProcess": {
+        "arguments": [],
+        "environment": [],
+        "executable": "/bin/true",
+        "rlimits": [],
+        "supplementalGroups": [],
+        "terminal": false,
+        "user": {
+          "raw": {
+            "userString": "nobody"
+          }
+        },
+        "workingDirectory": "/"
+      },
+      "labels": {},
+      "mounts": [],
+      "networks": [],
+      "platform": {
+        "architecture": "arm64",
+        "os": "linux"
+      },
+      "publishedPorts": [],
+      "resources": {
+        "cpuOverhead": 1,
+        "cpus": 1,
+        "memoryInBytes": 536870912
+      }
+    },
+    "id": "hostwright-v2-demo-web-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "status": {
+      "networks": [],
+      "state": "stopped"
+    }
+  }
+]

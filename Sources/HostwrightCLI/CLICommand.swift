@@ -3,9 +3,33 @@ import HostwrightCore
 import HostwrightRuntime
 import HostwrightState
 
+public struct RuntimeProviderMigrationCLIOptions: Equatable, Sendable {
+    public let manifestPath: String
+    public let stateDatabasePath: String?
+    public let targetProviderID: RuntimeProviderID
+    public let confirmationToken: String?
+    public let output: CLIOutputFormat
+
+    public init(
+        manifestPath: String,
+        stateDatabasePath: String?,
+        targetProviderID: RuntimeProviderID,
+        confirmationToken: String?,
+        output: CLIOutputFormat
+    ) {
+        self.manifestPath = manifestPath
+        self.stateDatabasePath = stateDatabasePath
+        self.targetProviderID = targetProviderID
+        self.confirmationToken = confirmationToken
+        self.output = output
+    }
+}
+
 public enum CLICommand: Equatable, Sendable {
     case version
     case capabilities(output: CLIOutputFormat)
+    case runtimeProviders(output: CLIOutputFormat)
+    case runtimeMigrate(options: RuntimeProviderMigrationCLIOptions)
     case paths(stateDatabasePath: String?, output: CLIOutputFormat)
     case state(action: StateCLIAction, stateDatabasePath: String?, output: CLIOutputFormat)
     case migrateManifestPreview(path: String, output: CLIOutputFormat)
@@ -13,8 +37,20 @@ public enum CLICommand: Equatable, Sendable {
     case importStack(path: String, output: CLIOutputFormat, teamProfilePath: String?)
     case validate(path: String, teamProfilePath: String?)
     case plan(path: String, output: CLIOutputFormat, teamProfilePath: String?)
-    case status(path: String, stateDatabasePath: String?, output: CLIOutputFormat)
-    case apply(path: String, stateDatabasePath: String?, confirmedPlanHash: String, teamProfilePath: String?, approvalRecordPath: String?)
+    case status(
+        path: String,
+        stateDatabasePath: String?,
+        output: CLIOutputFormat,
+        runtimeProvider: RuntimeProviderSelection
+    )
+    case apply(
+        path: String,
+        stateDatabasePath: String?,
+        confirmedPlanHash: String,
+        teamProfilePath: String?,
+        approvalRecordPath: String?,
+        runtimeProvider: RuntimeProviderSelection
+    )
     case logs(serviceName: String, path: String, tail: Int, stateDatabasePath: String?)
     case events(stateDatabasePath: String?, projectName: String?, filters: EventFilters, output: CLIOutputFormat)
     case recovery(stateDatabasePath: String?, projectName: String?, output: CLIOutputFormat)
@@ -39,6 +75,8 @@ public enum CLICommand: Equatable, Sendable {
             return .help
         case "capabilities":
             return try capabilitiesCommand(arguments: arguments)
+        case "runtime":
+            return try runtimeCommand(arguments: arguments)
         case "paths":
             return try pathsCommand(arguments: arguments)
         case "state":
@@ -107,6 +145,112 @@ public enum CLICommand: Equatable, Sendable {
             return .capabilities(output: output)
         }
         throw CLIUsageError("capabilities supports only --json or --output text|json.")
+    }
+
+    private static func runtimeCommand(arguments: [String]) throws -> CLICommand {
+        guard arguments.count >= 2 else {
+            throw CLIUsageError("runtime requires providers or migrate.")
+        }
+        if arguments[1] == "migrate" {
+            return try runtimeMigrationCommand(arguments: arguments)
+        }
+        guard arguments[1] == "providers" else {
+            throw CLIUsageError("runtime supports providers and migrate.")
+        }
+        let options = Array(arguments.dropFirst(2))
+        if options.isEmpty {
+            return .runtimeProviders(output: .text)
+        }
+        if options == ["--json"] {
+            return .runtimeProviders(output: .json)
+        }
+        throw CLIUsageError("runtime providers supports only --json.")
+    }
+
+    private static func runtimeMigrationCommand(arguments: [String]) throws -> CLICommand {
+        var path: String?
+        var stateDatabasePath: String?
+        var targetProvider: RuntimeProviderID?
+        var confirmationToken: String?
+        var dryRun = false
+        var output: CLIOutputFormat = .text
+        var outputSelected = false
+        var index = 2
+        while index < arguments.count {
+            switch arguments[index] {
+            case "--state-db":
+                guard stateDatabasePath == nil, index + 1 < arguments.count else {
+                    throw CLIUsageError("runtime migrate accepts one value after --state-db.")
+                }
+                stateDatabasePath = arguments[index + 1]
+                index += 2
+            case "--to":
+                guard targetProvider == nil, index + 1 < arguments.count,
+                      let selection = RuntimeProviderSelection(rawValue: arguments[index + 1]),
+                      let providerID = selection.explicitProviderID else {
+                    throw CLIUsageError("runtime migrate --to requires apple-cli or containerization.")
+                }
+                targetProvider = providerID
+                index += 2
+            case "--dry-run":
+                guard !dryRun, confirmationToken == nil else {
+                    throw CLIUsageError("runtime migrate accepts exactly one of --dry-run or --confirm-migration.")
+                }
+                dryRun = true
+                index += 1
+            case "--confirm-migration":
+                guard confirmationToken == nil, !dryRun, index + 1 < arguments.count else {
+                    throw CLIUsageError("runtime migrate accepts exactly one of --dry-run or --confirm-migration.")
+                }
+                let token = arguments[index + 1]
+                guard token.hasPrefix(RuntimeProviderMigrationPlan.confirmationPrefix),
+                      token.count == RuntimeProviderMigrationPlan.confirmationPrefix.count + 64 else {
+                    throw CLIUsageError("runtime migrate requires the exact token emitted by --dry-run.")
+                }
+                confirmationToken = token
+                index += 2
+            case "--json":
+                guard !outputSelected else {
+                    throw CLIUsageError("runtime migrate accepts one output selector.")
+                }
+                output = .json
+                outputSelected = true
+                index += 1
+            case "--output":
+                guard !outputSelected else {
+                    throw CLIUsageError("runtime migrate accepts one output selector.")
+                }
+                output = try parseOutputValue(
+                    arguments: arguments,
+                    index: index,
+                    commandName: "runtime migrate"
+                )
+                outputSelected = true
+                index += 2
+            default:
+                let argument = arguments[index]
+                guard !argument.hasPrefix("-"), path == nil else {
+                    throw CLIUsageError("runtime migrate does not support argument '\(argument)'.")
+                }
+                path = argument
+                index += 1
+            }
+        }
+        guard let targetProvider else {
+            throw CLIUsageError("runtime migrate requires --to apple-cli|containerization.")
+        }
+        guard dryRun != (confirmationToken != nil) else {
+            throw CLIUsageError("runtime migrate requires exactly one of --dry-run or --confirm-migration <token>.")
+        }
+        return .runtimeMigrate(
+            options: RuntimeProviderMigrationCLIOptions(
+                manifestPath: path ?? HostwrightIdentity.manifestFileName,
+                stateDatabasePath: stateDatabasePath,
+                targetProviderID: targetProvider,
+                confirmationToken: confirmationToken,
+                output: output
+            )
+        )
     }
 
     private static func pathsCommand(arguments: [String]) throws -> CLICommand {
@@ -382,6 +526,8 @@ public enum CLICommand: Equatable, Sendable {
         var confirmedPlanHash: String?
         var teamProfilePath: String?
         var approvalRecordPath: String?
+        var runtimeProvider: RuntimeProviderSelection = .automatic
+        var runtimeProviderSelected = false
         var index = 1
 
         while index < arguments.count {
@@ -417,6 +563,14 @@ public enum CLICommand: Equatable, Sendable {
                     existing: approvalRecordPath
                 )
                 index += 2
+            case "--runtime-provider":
+                guard !runtimeProviderSelected, index + 1 < arguments.count,
+                      let parsed = RuntimeProviderSelection(rawValue: arguments[index + 1]) else {
+                    throw CLIUsageError("apply accepts one --runtime-provider value: auto, apple-cli, or containerization.")
+                }
+                runtimeProvider = parsed
+                runtimeProviderSelected = true
+                index += 2
             default:
                 guard !argument.hasPrefix("-") else {
                     throw CLIUsageError("apply does not support flag '\(argument)' in the confirmed single-action gate.")
@@ -444,7 +598,8 @@ public enum CLICommand: Equatable, Sendable {
             stateDatabasePath: stateDatabasePath,
             confirmedPlanHash: confirmedPlanHash,
             teamProfilePath: teamProfilePath,
-            approvalRecordPath: approvalRecordPath
+            approvalRecordPath: approvalRecordPath,
+            runtimeProvider: runtimeProvider
         )
     }
 
@@ -452,6 +607,8 @@ public enum CLICommand: Equatable, Sendable {
         var path: String?
         var stateDatabasePath: String?
         var output: CLIOutputFormat = .text
+        var runtimeProvider: RuntimeProviderSelection = .automatic
+        var runtimeProviderSelected = false
         var index = 1
 
         while index < arguments.count {
@@ -466,6 +623,14 @@ public enum CLICommand: Equatable, Sendable {
             case "--output":
                 output = try parseOutputValue(arguments: arguments, index: index, commandName: "status")
                 index += 2
+            case "--runtime-provider":
+                guard !runtimeProviderSelected, index + 1 < arguments.count,
+                      let parsed = RuntimeProviderSelection(rawValue: arguments[index + 1]) else {
+                    throw CLIUsageError("status accepts one --runtime-provider value: auto, apple-cli, or containerization.")
+                }
+                runtimeProvider = parsed
+                runtimeProviderSelected = true
+                index += 2
             default:
                 guard !argument.hasPrefix("-") else {
                     throw CLIUsageError("status does not support flag '\(argument)'.")
@@ -478,7 +643,12 @@ public enum CLICommand: Equatable, Sendable {
             }
         }
 
-        return .status(path: path ?? HostwrightIdentity.manifestFileName, stateDatabasePath: stateDatabasePath, output: output)
+        return .status(
+            path: path ?? HostwrightIdentity.manifestFileName,
+            stateDatabasePath: stateDatabasePath,
+            output: output,
+            runtimeProvider: runtimeProvider
+        )
     }
 
     private static func logsCommand(arguments: [String]) throws -> CLICommand {

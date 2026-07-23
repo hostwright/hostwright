@@ -417,6 +417,35 @@ final class HostwrightReconcilerTests: XCTestCase {
         XCTAssertEqual(first.actions.map(\.orderingKey), second.actions.map(\.orderingKey))
     }
 
+    func testCapabilityDigestIsBoundIntoTheObservedPlanHash() {
+        let firstDigest = String(repeating: "a", count: 64)
+        let secondDigest = String(repeating: "b", count: 64)
+        let first = ReconciliationPlanner().reconcile(
+            PlanningInput(
+                desiredState: desiredState(),
+                observedState: ObservedRuntimeState(
+                    projectName: "demo",
+                    services: [],
+                    capabilitySHA256: firstDigest
+                )
+            )
+        )
+        let second = ReconciliationPlanner().reconcile(
+            PlanningInput(
+                desiredState: desiredState(),
+                observedState: ObservedRuntimeState(
+                    projectName: "demo",
+                    services: [],
+                    capabilitySHA256: secondDigest
+                )
+            )
+        )
+
+        XCTAssertEqual(first.capabilitySHA256, firstDigest)
+        XCTAssertEqual(second.capabilitySHA256, secondDigest)
+        XCTAssertNotEqual(first.planHash, second.planHash)
+    }
+
     func testRuntimePlanCompatibilityStillCreatesMissingAction() {
         let plan = ReconciliationPlanner().plan(desired: desiredState(), observed: ObservedRuntimeState(projectName: "demo", services: []))
 

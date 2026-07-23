@@ -7,6 +7,7 @@ These files are executable compatibility fixtures for the contracts locked in Ph
 - `control-plan-request.json`: smallest accepted Control API v2 plan request.
 - `control-plan-response.json`: stable Control API v2 response envelope.
 - `runtime-provider-metadata.json`: Runtime Provider API v2 capability metadata.
+- `runtime-provider-capabilities.json`: canonical Runtime Provider API v2 capability-snapshot grammar.
 - `plugin-declaration.json`: plugin ABI v1 reviewed-local declaration supported by the current narrow extension boundary.
 
-Runtime Provider API v2 is currently a typed in-process contract; its version and metadata codec are locked by production-decoded goldens. Phase 03 adds the versioned out-of-process Containerization protocol goldens only when that protocol is implemented—no placeholder wire schema is claimed here.
+Runtime Provider API v2 uses the stable provider IDs `apple-container-cli` and `apple-containerization`. Its metadata and capability-snapshot codecs are locked by production-decoded goldens. The Containerization boundary uses helper protocol v1 with bounded length-prefixed canonical JSON frames; protocol, replay, truncation, overflow, and version-refusal behavior is locked by executable contract tests rather than a placeholder wire fixture.

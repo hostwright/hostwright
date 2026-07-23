@@ -176,7 +176,10 @@ final class TrustedReleaseTests: XCTestCase {
         let provenance = makeProvenance(manifest: manifest)
         XCTAssertNoThrow(try provenance.validate(manifest: manifest))
         let internalParameters = provenance.predicate.buildDefinition.internalParameters
-        XCTAssertEqual(internalParameters.externalSwiftPMDependencies, [])
+        XCTAssertEqual(
+            internalParameters.externalSwiftPMDependencies,
+            trustedSwiftPMDependencies()
+        )
         XCTAssertEqual(internalParameters.packageLicenseSPDX, "Apache-2.0")
         XCTAssertEqual(internalParameters.reproducibilityBuildCount, 2)
         XCTAssertEqual(internalParameters.byteIdenticalUnsignedPayloads, true)
@@ -200,7 +203,7 @@ final class TrustedReleaseTests: XCTestCase {
             try provenance.validate(
                 manifest: manifest,
                 expectedBuildMetadata: TrustedReleaseBuildMetadata(
-                    externalSwiftPMDependencies: [],
+                    externalSwiftPMDependencies: trustedSwiftPMDependencies(),
                     packageLicenseSPDX: "Apache-2.0",
                     reproducibilityBuildCount: 3,
                     byteIdenticalUnsignedPayloads: true,
@@ -218,7 +221,10 @@ final class TrustedReleaseTests: XCTestCase {
         let encodedInternalParameters = try XCTUnwrap(
             buildDefinition["internalParameters"] as? [String: Any]
         )
-        XCTAssertEqual(encodedInternalParameters["externalSwiftPMDependencies"] as? [String], [])
+        XCTAssertEqual(
+            encodedInternalParameters["externalSwiftPMDependencies"] as? [String],
+            trustedSwiftPMDependencies()
+        )
         XCTAssertNil(envelope["buildMetadata"])
 
         let wrongPackage = DistributionArtifactDescriptor(
@@ -279,7 +285,7 @@ final class TrustedReleaseTests: XCTestCase {
             try provenance.validate(
                 manifest: manifest,
                 expectedBuildMetadata: TrustedReleaseBuildMetadata(
-                    externalSwiftPMDependencies: [],
+                    externalSwiftPMDependencies: trustedSwiftPMDependencies(),
                     packageLicenseSPDX: "Apache-2.0",
                     reproducibilityBuildCount: 2,
                     byteIdenticalUnsignedPayloads: true,
@@ -310,6 +316,7 @@ final class TrustedReleaseTests: XCTestCase {
     func testCleanBuildArgumentsUseOneDeterministicReleaseContract() {
         let source = URL(fileURLWithPath: "/private/tmp/source with space", isDirectory: true)
         let scratch = URL(fileURLWithPath: "/private/tmp/scratch with space", isDirectory: true)
+        let prefixMap = "\(scratch.path)=/hostwright-build"
 
         let productArguments = DistributionCleanBuilder.deterministicReleaseBuildArguments(
             sourceRoot: source,
@@ -323,7 +330,18 @@ final class TrustedReleaseTests: XCTestCase {
                 "--package-path", source.path,
                 "--scratch-path", scratch.path,
                 "-c", "release",
+                "--jobs", "1",
                 "-debug-info-format", "none",
+                "-Xlinker", "-reproducible",
+                "-Xswiftc", "-num-threads",
+                "-Xswiftc", "1",
+                "-Xswiftc", "-no-whole-module-optimization",
+                "-Xswiftc", "-file-prefix-map",
+                "-Xswiftc", prefixMap,
+                "-Xcc", "-ffile-prefix-map=\(prefixMap)",
+                "-Xcc", "-fmacro-prefix-map=\(prefixMap)",
+                "-Xcxx", "-ffile-prefix-map=\(prefixMap)",
+                "-Xcxx", "-fmacro-prefix-map=\(prefixMap)",
                 "--product", "hostwright"
             ]
         )
@@ -333,8 +351,14 @@ final class TrustedReleaseTests: XCTestCase {
             scratch: scratch,
             additionalArguments: ["--show-bin-path"]
         )
-        XCTAssertEqual(Array(binPathArguments.prefix(8)), Array(productArguments.prefix(8)))
-        XCTAssertEqual(Array(binPathArguments.suffix(1)), ["--show-bin-path"])
+        XCTAssertEqual(
+            binPathArguments,
+            Array(productArguments.dropLast(2)) + ["--show-bin-path"]
+        )
+        XCTAssertEqual(
+            DistributionDeterministicSwiftEnvironment.values,
+            ["SWIFT_DETERMINISTIC_HASHING": "1"]
+        )
     }
 
     func testCleanBuildCommandEvidenceRecordsExactDeterministicInvocation() {
@@ -346,14 +370,95 @@ final class TrustedReleaseTests: XCTestCase {
 
         let command = DistributionCleanBuilder.evidenceCommand(
             executablePath: "/usr/bin/swift",
-            arguments: arguments
+            arguments: arguments,
+            environment: DistributionDeterministicSwiftEnvironment.values
         )
-        XCTAssertTrue(command.hasPrefix("/usr/bin/swift build --package-path "))
-        XCTAssertFalse(command.contains("'-debug-info-format'"))
-        XCTAssertTrue(command.contains("-debug-info-format none"))
-        XCTAssertTrue(command.contains("'/private/tmp/source with space'"))
-        XCTAssertTrue(command.contains("'/private/tmp/scratch with space'"))
-        XCTAssertTrue(command.hasSuffix("--product hostwright"))
+        XCTAssertEqual(
+            command,
+            "SWIFT_DETERMINISTIC_HASHING=1 /usr/bin/swift build " +
+                "--package-path '/private/tmp/source with space' " +
+                "--scratch-path '/private/tmp/scratch with space' -c release " +
+                "--jobs 1 -debug-info-format none -Xlinker -reproducible " +
+                "-Xswiftc -num-threads -Xswiftc 1 " +
+                "-Xswiftc -no-whole-module-optimization -Xswiftc -file-prefix-map " +
+                "-Xswiftc '/private/tmp/scratch with space=/hostwright-build' " +
+                "-Xcc '-ffile-prefix-map=/private/tmp/scratch with space=/hostwright-build' " +
+                "-Xcc '-fmacro-prefix-map=/private/tmp/scratch with space=/hostwright-build' " +
+                "-Xcxx '-ffile-prefix-map=/private/tmp/scratch with space=/hostwright-build' " +
+                "-Xcxx '-fmacro-prefix-map=/private/tmp/scratch with space=/hostwright-build' " +
+                "--product hostwright"
+        )
+    }
+
+    func testContainerizationHelperSigningUsesOnlyVirtualizationEntitlement() throws {
+        let binary = URL(fileURLWithPath: "/private/tmp/release/bin/hostwright-containerization-helper")
+        let entitlements = URL(fileURLWithPath: "/private/tmp/helper.entitlements")
+        let fingerprint = String(repeating: "A", count: 40)
+
+        XCTAssertEqual(
+            TrustedReleaseCodeSigningPolicy.signingArguments(
+                relativePath: "bin/hostwright-containerization-helper",
+                binary: binary,
+                fingerprint: fingerprint,
+                entitlements: entitlements
+            ),
+            [
+                "--force", "--options", "runtime", "--timestamp",
+                "--entitlements", entitlements.path,
+                "--sign", fingerprint, binary.path
+            ]
+        )
+        XCTAssertEqual(
+            TrustedReleaseCodeSigningPolicy.signingArguments(
+                relativePath: "bin/hostwright",
+                binary: URL(fileURLWithPath: "/private/tmp/release/bin/hostwright"),
+                fingerprint: fingerprint,
+                entitlements: entitlements
+            ),
+            [
+                "--force", "--options", "runtime", "--timestamp",
+                "--sign", fingerprint, "/private/tmp/release/bin/hostwright"
+            ]
+        )
+
+        let plist = try XCTUnwrap(
+            String(
+                data: TrustedReleaseCodeSigningPolicy.containerizationHelperEntitlements,
+                encoding: .utf8
+            )
+        )
+        XCTAssertNoThrow(
+            try TrustedReleaseCodeSigningPolicy.requireContainerizationHelperEntitlement(plist)
+        )
+        XCTAssertThrowsError(
+            try TrustedReleaseCodeSigningPolicy.requireContainerizationHelperEntitlement(
+                plist.replacingOccurrences(of: "<true/>", with: "<false/>")
+            )
+        )
+    }
+
+    func testDistributionRunnerRestrictsDeterministicSwiftEnvironment() throws {
+        let runner = DistributionProcessRunner()
+        let result = try runner.run(
+            executablePath: "/usr/bin/swift",
+            arguments: [
+                "-e",
+                "import Foundation; print(ProcessInfo.processInfo.environment[\"SWIFT_DETERMINISTIC_HASHING\"] ?? \"missing\")"
+            ],
+            label: "inspect deterministic Swift environment",
+            timeoutSeconds: 30,
+            trustedEnvironmentOverrides: DistributionDeterministicSwiftEnvironment.values
+        )
+        XCTAssertEqual(result.standardOutput, "1\n")
+
+        XCTAssertThrowsError(
+            try runner.run(
+                executablePath: "/usr/bin/true",
+                arguments: [],
+                label: "reject deterministic Swift environment on another executable",
+                trustedEnvironmentOverrides: DistributionDeterministicSwiftEnvironment.values
+            )
+        )
     }
 
     func testReproducibilityMismatchNamesSortedDifferingPayloadPaths() throws {
@@ -386,13 +491,61 @@ final class TrustedReleaseTests: XCTestCase {
 
     func testCleanBuildDependencyInventoryUsesParsedSwiftPMGraph() throws {
         let builder = DistributionCleanBuilder()
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-dependency-inventory-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let resolved = root.appendingPathComponent("Package.resolved")
+        let resolvedText = """
+        {
+          "pins": [
+            {
+              "identity": "containerization",
+              "kind": "remoteSourceControl",
+              "location": "https://github.com/apple/containerization.git",
+              "state": {
+                "revision": "\(DistributionContainerizationAssets.frameworkRevision)",
+                "version": "\(DistributionContainerizationAssets.frameworkVersion)"
+              }
+            },
+            {
+              "identity": "swift-nio",
+              "kind": "remoteSourceControl",
+              "location": "https://github.com/apple/swift-nio.git",
+              "state": {
+                "revision": "\(String(repeating: "a", count: 40))",
+                "version": "2.101.3"
+              }
+            },
+            {
+              "identity": "swift-nio-extras",
+              "kind": "remoteSourceControl",
+              "location": "https://github.com/apple/swift-nio-extras.git",
+              "state": {
+                "revision": "\(String(repeating: "b", count: 40))",
+                "version": "1.34.3"
+              }
+            }
+          ],
+          "version": 3
+        }
+        """
+        try Data(resolvedText.utf8).write(to: resolved, options: .withoutOverwriting)
+        let graph = #"{"dependencies":[{"identity":"containerization","url":"https://github.com/apple/containerization.git","version":"0.35.0","dependencies":[{"identity":"swift-nio","url":"https://github.com/apple/swift-nio.git","version":"2.101.3","dependencies":[]},{"identity":"swift-nio-extras","url":"https://github.com/apple/swift-nio-extras.git","version":"1.34.3","dependencies":[]}]}]}"#
         XCTAssertEqual(
-            try builder.requireNoExternalDependencies(#"{"dependencies":[]}"#),
-            []
+            try builder.requirePinnedExternalDependencies(graph, resolvedFile: resolved),
+            [
+                "containerization|https://github.com/apple/containerization.git|0.35.0|\(DistributionContainerizationAssets.frameworkRevision)",
+                "swift-nio-extras|https://github.com/apple/swift-nio-extras.git|1.34.3|\(String(repeating: "b", count: 40))",
+                "swift-nio|https://github.com/apple/swift-nio.git|2.101.3|\(String(repeating: "a", count: 40))"
+            ]
         )
         XCTAssertThrowsError(
-            try builder.requireNoExternalDependencies(
-                #"{"dependencies":[{"identity":"unapproved-package"}]}"#
+            try builder.requirePinnedExternalDependencies(
+                #"{"dependencies":[{"identity":"containerization","url":"https://github.com/apple/containerization.git","version":"0.35.1","dependencies":[]}]}"#,
+                resolvedFile: resolved
             )
         )
     }
@@ -433,7 +586,10 @@ final class TrustedReleaseTests: XCTestCase {
         )
         XCTAssertTrue(formula.contains("class Hostwright < Formula"))
         XCTAssertTrue(formula.contains("sha256 \"\(manifest.archive.sha256)\""))
-        XCTAssertTrue(formula.contains("%w[hostwright hostwright-control hostwright-dist hostwrightd]"))
+        XCTAssertTrue(formula.contains(
+            "%w[hostwright hostwright-control hostwright-containerization-helper hostwright-dist hostwrightd]"
+        ))
+        XCTAssertTrue(formula.contains("pkgshare.install \"share/hostwright/containerization\""))
         XCTAssertTrue(formula.contains("service do"))
         XCTAssertTrue(formula.contains("depends_on arch: :arm64"))
         XCTAssertTrue(formula.contains("depends_on macos: :tahoe"))
@@ -786,7 +942,7 @@ final class TrustedReleaseTests: XCTestCase {
                     internalParameters: ProvenanceInternalParameters(
                         sourceDirty: false,
                         unsigned: false,
-                        externalSwiftPMDependencies: [],
+                        externalSwiftPMDependencies: trustedSwiftPMDependencies(),
                         packageLicenseSPDX: "Apache-2.0",
                         reproducibilityBuildCount: 2,
                         byteIdenticalUnsignedPayloads: true,
@@ -796,8 +952,12 @@ final class TrustedReleaseTests: XCTestCase {
                         ProvenanceResolvedDependency(
                             uri: "git+https://github.com/hostwright/hostwright.git",
                             digest: ["gitCommit": manifest.sourceCommit]
+                        ),
+                        ProvenanceResolvedDependency(
+                            uri: "git+https://github.com/apple/containerization.git@\(DistributionContainerizationAssets.frameworkVersion)",
+                            digest: ["gitCommit": DistributionContainerizationAssets.frameworkRevision]
                         )
-                    ]
+                    ].sorted { $0.uri < $1.uri }
                 ),
                 runDetails: ProvenanceRunDetails(
                     builder: ProvenanceBuilder(id: "urn:hostwright:builder:release-macos:v1"),
@@ -867,6 +1027,12 @@ final class TrustedReleaseTests: XCTestCase {
             "notarytool": "notarytool version 1.1.2",
             "swift": "Swift version 6.2",
             "tar": "bsdtar 3.7.7"
+        ]
+    }
+
+    private func trustedSwiftPMDependencies() -> [String] {
+        [
+            "containerization|https://github.com/apple/containerization.git|\(DistributionContainerizationAssets.frameworkVersion)|\(DistributionContainerizationAssets.frameworkRevision)"
         ]
     }
 

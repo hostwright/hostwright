@@ -33,11 +33,18 @@ public struct RuntimeOwnedResourceHint: Equatable, Sendable {
     public let resourceIdentifier: String
     public let identity: RuntimeServiceIdentity
     public let identityVersion: Int
+    public let ownership: RuntimeInventoryOwnershipEvidence?
 
-    public init(resourceIdentifier: String, identity: RuntimeServiceIdentity, identityVersion: Int) {
+    public init(
+        resourceIdentifier: String,
+        identity: RuntimeServiceIdentity,
+        identityVersion: Int,
+        ownership: RuntimeInventoryOwnershipEvidence? = nil
+    ) {
         self.resourceIdentifier = resourceIdentifier
         self.identity = identity
         self.identityVersion = identityVersion
+        self.ownership = ownership
     }
 }
 
@@ -384,11 +391,18 @@ public struct ObservedRuntimeState: Equatable, Sendable {
     public let projectName: String
     public let services: [ObservedRuntimeService]
     public let adapterMetadata: RuntimeAdapterMetadata?
+    public let capabilitySHA256: String?
 
-    public init(projectName: String, services: [ObservedRuntimeService], adapterMetadata: RuntimeAdapterMetadata? = nil) {
+    public init(
+        projectName: String,
+        services: [ObservedRuntimeService],
+        adapterMetadata: RuntimeAdapterMetadata? = nil,
+        capabilitySHA256: String? = nil
+    ) {
         self.projectName = projectName
         self.services = services
         self.adapterMetadata = adapterMetadata
+        self.capabilitySHA256 = capabilitySHA256
     }
 }
 
@@ -430,10 +444,16 @@ public struct PlannedRuntimeAction: Equatable, Sendable {
 public struct RuntimePlan: Equatable, Sendable {
     public let actions: [PlannedRuntimeAction]
     public let warnings: [String]
+    public let capabilitySHA256: String?
 
-    public init(actions: [PlannedRuntimeAction], warnings: [String] = []) {
+    public init(
+        actions: [PlannedRuntimeAction],
+        warnings: [String] = [],
+        capabilitySHA256: String? = nil
+    ) {
         self.actions = actions
         self.warnings = warnings
+        self.capabilitySHA256 = capabilitySHA256
     }
 
     public var mutatesRuntime: Bool {
@@ -482,6 +502,7 @@ public enum RuntimeCapability: String, Codable, Equatable, Hashable, Sendable {
 
 public struct RuntimeAdapterMetadata: Codable, Equatable, Sendable {
     public let providerAPIVersion: Int
+    public let providerID: RuntimeProviderID
     public let adapterName: String
     public let adapterVersion: String
     public let runtimeName: String
@@ -491,6 +512,7 @@ public struct RuntimeAdapterMetadata: Codable, Equatable, Sendable {
 
     public init(
         providerAPIVersion: Int = HostwrightContractVersions.runtimeProviderAPI,
+        providerID: RuntimeProviderID,
         adapterName: String,
         adapterVersion: String,
         runtimeName: String,
@@ -499,6 +521,7 @@ public struct RuntimeAdapterMetadata: Codable, Equatable, Sendable {
         capabilities: [RuntimeCapability]
     ) {
         self.providerAPIVersion = providerAPIVersion
+        self.providerID = providerID
         self.adapterName = adapterName
         self.adapterVersion = adapterVersion
         self.runtimeName = runtimeName
@@ -513,12 +536,23 @@ public enum RuntimeProviderCompatibility {
         guard metadata.providerAPIVersion == HostwrightContractVersions.runtimeProviderAPI else {
             return "Runtime provider \(metadata.adapterName) advertises API v\(metadata.providerAPIVersion); Hostwright requires Runtime Provider API v\(HostwrightContractVersions.runtimeProviderAPI)."
         }
+        guard RuntimeProviderID.knownValues.contains(metadata.providerID) else {
+            return "Runtime provider \(metadata.adapterName) advertises unsupported provider identity \(metadata.providerID.rawValue)."
+        }
+        guard metadata.supportsMutation else {
+            return "Runtime provider \(metadata.adapterName) does not authorize lifecycle mutation."
+        }
+        guard metadata.capabilities.contains(.lifecycleMutation) else {
+            return "Runtime provider \(metadata.adapterName) does not advertise the lifecycleMutation capability required for Hostwright mutation."
+        }
         return nil
     }
 }
 
 public struct RuntimeMutationContext: Equatable, Sendable {
     public let providerAPIVersion: Int
+    public let providerID: RuntimeProviderID
+    public let capabilitySHA256: String
     public let operationID: String
     public let resourceUUID: String
     public let resourceGeneration: Int
@@ -529,6 +563,8 @@ public struct RuntimeMutationContext: Equatable, Sendable {
 
     public init(
         providerAPIVersion: Int = HostwrightContractVersions.runtimeProviderAPI,
+        providerID: RuntimeProviderID,
+        capabilitySHA256: String,
         operationID: String,
         resourceUUID: String,
         resourceGeneration: Int,
@@ -538,6 +574,8 @@ public struct RuntimeMutationContext: Equatable, Sendable {
         fencingToken: String
     ) {
         self.providerAPIVersion = providerAPIVersion
+        self.providerID = providerID
+        self.capabilitySHA256 = capabilitySHA256
         self.operationID = operationID
         self.resourceUUID = resourceUUID
         self.resourceGeneration = resourceGeneration
@@ -550,6 +588,15 @@ public struct RuntimeMutationContext: Equatable, Sendable {
     public var validationIssue: String? {
         guard providerAPIVersion == HostwrightContractVersions.runtimeProviderAPI else {
             return "Mutation context provider API version is unsupported."
+        }
+        guard RuntimeProviderID.knownValues.contains(providerID) else {
+            return "Mutation context provider identity is unsupported."
+        }
+        guard capabilitySHA256.range(
+            of: "^[a-f0-9]{64}$",
+            options: .regularExpression
+        ) != nil else {
+            return "Mutation context capability digest must be a lowercase SHA-256 value."
         }
         guard !operationID.isEmpty,
               operationID.count <= 256,

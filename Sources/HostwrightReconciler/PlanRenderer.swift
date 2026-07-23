@@ -18,6 +18,7 @@ public enum PlanRenderer {
             "Hostwright plan (non-mutating)",
             "Project: \(plan.projectName)",
             "Plan hash: \(plan.planHash)",
+            "Capability digest: \(plan.capabilitySHA256 ?? "unbound")",
             "Runtime observation: \(plan.observationConnected ? "connected from supplied observed state" : "not connected for CLI plan; no Apple container state was inspected")",
             "Execution: unavailable unless one createMissingService, startManagedService, or restartManagedService action is explicitly confirmed",
             ""
@@ -49,6 +50,6 @@ public enum PlanRenderer {
     }
 
     private static func renderCompact(_ plan: ReconciliationPlan) -> String {
-        "plan=\(plan.planHash) issues=\(plan.issues.count) drift=\(plan.drift.count) actions=\(plan.actions.count)"
+        "plan=\(plan.planHash) capability=\(plan.capabilitySHA256 ?? "unbound") issues=\(plan.issues.count) drift=\(plan.drift.count) actions=\(plan.actions.count)"
     }
 }

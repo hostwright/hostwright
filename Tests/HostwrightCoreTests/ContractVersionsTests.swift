@@ -78,6 +78,23 @@ final class ContractVersionsTests: XCTestCase {
                 .securityAssessment, .resilienceChaos, .interopConformance
             ])
         })
+
+        let phase04Identifiers = [
+            "lifecycle.single-host",
+            "manifest.restricted-parser",
+            "manifest.v2"
+        ]
+        let phase04Capabilities = report.capabilities.filter {
+            phase04Identifiers.contains($0.identifier)
+        }
+        XCTAssertEqual(phase04Capabilities.count, phase04Identifiers.count)
+        XCTAssertTrue(phase04Capabilities.allSatisfy {
+            $0.state == .stable && $0.phase == 4
+        })
+        XCTAssertEqual(
+            Set(phase04Capabilities.map(\.issue)),
+            Set([130, 131, 140])
+        )
     }
 
     func testVerificationConstitutionIncludesEveryV002EvidenceClass() {

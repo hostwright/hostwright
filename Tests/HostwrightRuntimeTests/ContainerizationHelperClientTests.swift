@@ -176,6 +176,29 @@ final class ContainerizationHelperClientTests: XCTestCase {
         XCTAssertEqual(operationIDs, Array(repeating: "operation-1", count: 5))
     }
 
+    func testClientValidatesCursorBasedBoundedLogResponse() async throws {
+        let fixture = try ClientFixture()
+        let helper = ScriptedHelper(snapshot: snapshot())
+        let client = directClient(fixture: fixture, helper: helper)
+
+        _ = try await client.negotiate()
+        let chunk = try await client.logChunk(
+            "demo",
+            lineLimit: 20,
+            cursor: 7,
+            startAtEnd: false,
+            maximumBytes: RuntimeStreamEnvelope.maximumChunkBytes
+        )
+
+        XCTAssertEqual(chunk.resourceIdentifier, "demo")
+        XCTAssertEqual(chunk.text, "bounded output")
+        XCTAssertEqual(chunk.cursorStart, 7)
+        XCTAssertEqual(chunk.cursorEnd, 21)
+        XCTAssertTrue(chunk.atCurrentEnd)
+        let operations = await helper.operations()
+        XCTAssertEqual(operations, [.negotiate, .logs])
+    }
+
     func testClientRejectsMismatchedTruncatedAndOversizedResponses() async throws {
         let fixture = try ClientFixture()
         let validHelper = ScriptedHelper(snapshot: snapshot())
@@ -607,6 +630,31 @@ final class ContainerizationHelperClientTests: XCTestCase {
         XCTAssertEqual(stopEvent.resourceIdentifier, identity.managedResourceIdentifier)
         let operations = await helper.operations()
         XCTAssertEqual(Array(operations.suffix(3)), [.localImageEvidence, .create, .stop])
+
+        let operationsBeforeCompletionStart = await helper.operations()
+        await XCTAssertThrowsErrorAsync(
+            try await adapter.execute(
+                PlannedRuntimeAction(
+                    kind: .start,
+                    identity: identity,
+                    resourceIdentifier: identity.managedResourceIdentifier,
+                    isDestructive: false,
+                    requiresProcessCompletion: true,
+                    summary: "completion-aware start"
+                ),
+                confirmation: confirmation
+            )
+        ) { error in
+            guard case RuntimeAdapterError.mutationUnavailableByPolicy(let message) = error else {
+                return XCTFail("Expected mutationUnavailableByPolicy, got \(error).")
+            }
+            XCTAssertTrue(message.contains("cannot prove"))
+        }
+        let operationsAfterCompletionStart = await helper.operations()
+        XCTAssertEqual(
+            operationsAfterCompletionStart,
+            operationsBeforeCompletionStart
+        )
     }
 
     private var inertLauncher: ContainerizationHelperProcessLauncher {
@@ -1061,12 +1109,19 @@ private actor ScriptedHelper {
             )
         case .logs:
             let request = try request(ContainerizationHelperLogsRequest.self, payload)
+            let cursorStart = request.payload.maximumBytes == nil
+                ? nil
+                : request.payload.cursor ?? 0
+            let text = request.payload.startAtEnd ? "" : "bounded output"
             return try await respond(
                 request,
                 result: ContainerizationHelperLogs(
                     resourceIdentifier: request.payload.resourceIdentifier,
-                    text: "bounded output",
-                    lineLimit: request.payload.lineLimit
+                    text: text,
+                    lineLimit: request.payload.lineLimit,
+                    cursorStart: cursorStart,
+                    cursorEnd: cursorStart.map { $0 + UInt64(text.utf8.count) },
+                    atCurrentEnd: cursorStart.map { _ in true }
                 ),
                 peerPID: peerProcessID,
                 responseID: responseRequestID

@@ -45,6 +45,7 @@ public struct LocalControlAPI: Sendable {
         for request: LocalControlRequest,
         configuration: LocalControlConfiguration
     ) throws -> [String] {
+        try LocalControlRequestParser.validate(request)
         switch request.operation {
         case .plan:
             var arguments = ["plan", configuration.manifestPath, "--output", "json"]
@@ -84,6 +85,30 @@ public struct LocalControlAPI: Sendable {
             var arguments = ["doctor"]
             if let stateDatabasePath = configuration.stateDatabasePath {
                 arguments += ["--state-db", stateDatabasePath]
+            }
+            arguments += ["--output", "json"]
+            return arguments
+        case .up, .down, .run, .start, .stop, .restart, .rm, .update:
+            var arguments = [request.operation.rawValue, configuration.manifestPath]
+            for service in request.services?.sorted() ?? [] {
+                arguments += ["--service", service]
+            }
+            if let stateDatabasePath = configuration.stateDatabasePath {
+                arguments += ["--state-db", stateDatabasePath]
+            }
+            if request.dryRun == true {
+                arguments.append("--dry-run")
+            } else if let confirmPlan = request.confirmPlan {
+                arguments += ["--confirm-plan", confirmPlan]
+            }
+            if let runtimeProvider = request.runtimeProvider {
+                arguments += ["--runtime-provider", runtimeProvider]
+            }
+            if let timeout = request.timeout {
+                arguments += ["--timeout", String(timeout)]
+            }
+            if let parallelism = request.parallelism {
+                arguments += ["--parallelism", String(parallelism)]
             }
             arguments += ["--output", "json"]
             return arguments

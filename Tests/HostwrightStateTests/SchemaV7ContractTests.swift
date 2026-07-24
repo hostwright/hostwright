@@ -412,6 +412,53 @@ final class SchemaV7ContractTests: XCTestCase {
         }
     }
 
+    func testOwnershipRemovalRequiresTheExactResourceUUIDAndFence() throws {
+        try withTemporaryStore { store, _ in
+            try store.migrate()
+            let resourceUUID = HostwrightResourceUUID.generate()
+            let fence = HostwrightResourceUUID.generate()
+            try store.ownership.upsert(
+                OwnershipRecord(
+                    id: "ownership-remove-exact",
+                    resourceIdentifier: "hostwright-demo-api",
+                    resourceType: "container",
+                    projectID: nil,
+                    serviceName: "api",
+                    runtimeAdapter: RuntimeProviderID.appleContainerCLI.rawValue,
+                    createdAt: "2026-07-23T00:00:00Z",
+                    observedAt: "2026-07-23T00:00:00Z",
+                    cleanupEligible: true,
+                    metadataJSONRedacted: "{}",
+                    resourceUUID: resourceUUID,
+                    resourceGeneration: 1,
+                    projectResourceUUID: HostwrightResourceUUID.generate(),
+                    projectGeneration: 1,
+                    providerGeneration: 1,
+                    fencingToken: fence
+                )
+            )
+
+            XCTAssertFalse(
+                try store.ownership.removeExact(
+                    resourceIdentifier: "hostwright-demo-api",
+                    runtimeAdapter: RuntimeProviderID.appleContainerCLI.rawValue,
+                    expectedResourceUUID: resourceUUID,
+                    expectedFencingToken: HostwrightResourceUUID.generate()
+                )
+            )
+            XCTAssertEqual(try store.ownership.loadAll().count, 1)
+            XCTAssertTrue(
+                try store.ownership.removeExact(
+                    resourceIdentifier: "hostwright-demo-api",
+                    runtimeAdapter: RuntimeProviderID.appleContainerCLI.rawValue,
+                    expectedResourceUUID: resourceUUID,
+                    expectedFencingToken: fence
+                )
+            )
+            XCTAssertTrue(try store.ownership.loadAll().isEmpty)
+        }
+    }
+
     private func columns(in table: String, connection: SQLiteConnection) throws -> [String] {
         try connection.query("PRAGMA table_info(\(table))").compactMap { $0[1] }
     }

@@ -7,6 +7,14 @@ public enum LocalControlOperation: String, Codable, CaseIterable, Equatable, Sen
     case events
     case recovery
     case doctor
+    case up
+    case down
+    case run
+    case start
+    case stop
+    case restart
+    case rm
+    case update
 }
 
 public struct LocalControlRequest: Codable, Equatable, Sendable {
@@ -19,6 +27,12 @@ public struct LocalControlRequest: Codable, Equatable, Sendable {
     public let severity: String?
     public let limit: Int?
     public let sort: String?
+    public let services: [String]?
+    public let dryRun: Bool?
+    public let confirmPlan: String?
+    public let runtimeProvider: String?
+    public let timeout: Int?
+    public let parallelism: Int?
 
     public init(
         apiVersion: Int = HostwrightContractVersions.controlAPI,
@@ -29,7 +43,13 @@ public struct LocalControlRequest: Codable, Equatable, Sendable {
         service: String? = nil,
         severity: String? = nil,
         limit: Int? = nil,
-        sort: String? = nil
+        sort: String? = nil,
+        services: [String]? = nil,
+        dryRun: Bool? = nil,
+        confirmPlan: String? = nil,
+        runtimeProvider: String? = nil,
+        timeout: Int? = nil,
+        parallelism: Int? = nil
     ) {
         self.apiVersion = apiVersion
         self.requestID = requestID
@@ -40,6 +60,12 @@ public struct LocalControlRequest: Codable, Equatable, Sendable {
         self.severity = severity
         self.limit = limit
         self.sort = sort
+        self.services = services
+        self.dryRun = dryRun
+        self.confirmPlan = confirmPlan
+        self.runtimeProvider = runtimeProvider
+        self.timeout = timeout
+        self.parallelism = parallelism
     }
 }
 

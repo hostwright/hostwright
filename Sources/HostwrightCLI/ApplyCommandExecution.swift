@@ -45,13 +45,33 @@ extension ApplyCommandRunner {
 
         return DesiredRuntimeService(
             identity: service.identity,
+            logicalServiceName: service.logicalServiceName,
+            replicaIndex: service.replicaIndex,
             image: service.image,
+            platformOperatingSystem: service.platformOperatingSystem,
+            platformArchitecture: service.platformArchitecture,
+            cpuCount: service.cpuCount,
+            memoryBytes: service.memoryBytes,
+            userID: service.userID,
+            groupID: service.groupID,
+            workingDirectory: service.workingDirectory,
+            entrypoint: service.entrypoint,
             command: service.command,
+            initProcess: service.initProcess,
+            dependencies: service.dependencies,
             environment: resolvedEnvironment,
+            labels: service.labels,
             ports: service.ports,
             mounts: service.mounts,
             healthCheck: service.healthCheck,
-            restartPolicy: service.restartPolicy
+            probes: service.probes,
+            restartPolicy: service.restartPolicy,
+            updatePolicy: service.updatePolicy,
+            hooks: service.hooks,
+            rosetta: service.rosetta,
+            virtualization: service.virtualization,
+            readOnlyRootFilesystem: service.readOnlyRootFilesystem,
+            sharedMemoryBytes: service.sharedMemoryBytes
         )
     }
 

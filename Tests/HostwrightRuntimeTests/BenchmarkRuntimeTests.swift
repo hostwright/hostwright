@@ -49,6 +49,131 @@ final class BenchmarkRuntimeTests: XCTestCase {
         XCTAssertEqual(evidence.operatingSystem, "linux")
     }
 
+    func testLocalImageEvidenceParserAcceptsDigestPinnedReferenceForMatchingLocalTag() throws {
+        let descriptor = String(repeating: "a", count: 64)
+        let armVariant = String(repeating: "b", count: 64)
+        let amdVariant = String(repeating: "c", count: 64)
+        let expected =
+            "docker.io/library/python@sha256:\(descriptor)"
+        let output = """
+        [
+          {
+            "configuration": {
+              "descriptor": {"digest": "sha256:\(descriptor)"},
+              "name": "docker.io/library/python:alpine"
+            },
+            "variants": [
+              {
+                "digest": "sha256:\(amdVariant)",
+                "platform": {"architecture": "amd64", "os": "linux"}
+              },
+              {
+                "digest": "sha256:\(armVariant)",
+                "platform": {"architecture": "arm64", "os": "linux"}
+              }
+            ]
+          },
+          {
+            "configuration": {
+              "descriptor": {"digest": "sha256:\(descriptor)"},
+              "name": "\(expected)"
+            },
+            "variants": [
+              {
+                "digest": "sha256:\(armVariant)",
+                "platform": {"architecture": "arm64", "os": "linux"}
+              },
+              {
+                "digest": "sha256:\(amdVariant)",
+                "platform": {"architecture": "amd64", "os": "linux"}
+              }
+            ]
+          }
+        ]
+        """
+
+        let evidence = try AppleContainerImageEvidenceParser.parse(
+            output,
+            expectedReference: expected,
+            preferredArchitecture: "arm64"
+        )
+
+        XCTAssertEqual(evidence.reference, expected)
+        XCTAssertEqual(evidence.descriptorDigest, "sha256:\(descriptor)")
+        XCTAssertEqual(evidence.variantDigest, "sha256:\(armVariant)")
+    }
+
+    func testLocalImageEvidenceParserRejectsConflictingDigestPinnedAliases() {
+        let descriptor = String(repeating: "a", count: 64)
+        let variant = String(repeating: "b", count: 64)
+        let expected =
+            "docker.io/library/python@sha256:\(descriptor)"
+        let output = """
+        [
+          {
+            "configuration": {
+              "descriptor": {"digest": "sha256:\(descriptor)"},
+              "name": "docker.io/library/python:alpine"
+            },
+            "variants": [{
+              "digest": "sha256:\(variant)",
+              "platform": {"architecture": "arm64", "os": "linux"}
+            }]
+          },
+          {
+            "configuration": {
+              "descriptor": {"digest": "sha256:\(descriptor)"},
+              "name": "\(expected)"
+            },
+            "variants": [{
+              "digest": "sha256:\(variant)",
+              "platform": {"architecture": "arm64", "os": "darwin"}
+            }]
+          }
+        ]
+        """
+
+        XCTAssertThrowsError(
+            try AppleContainerImageEvidenceParser.parse(
+                output,
+                expectedReference: expected,
+                preferredArchitecture: "arm64"
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? RuntimeAdapterError,
+                .outputParseFailed(
+                    "Local image aliases contained conflicting descriptor or variant evidence."
+                )
+            )
+        }
+    }
+
+    func testLocalImageEvidenceParserRejectsDigestPinnedReferenceForOtherRepository() {
+        let descriptor = String(repeating: "a", count: 64)
+        let output = """
+        [{
+          "configuration": {
+            "descriptor": {"digest": "sha256:\(descriptor)"},
+            "name": "docker.io/library/python:alpine"
+          },
+          "variants": [{
+            "digest": "sha256:\(String(repeating: "b", count: 64))",
+            "platform": {"architecture": "arm64", "os": "linux"}
+          }]
+        }]
+        """
+
+        XCTAssertThrowsError(
+            try AppleContainerImageEvidenceParser.parse(
+                output,
+                expectedReference:
+                    "docker.io/library/other@sha256:\(descriptor)",
+                preferredArchitecture: "arm64"
+            )
+        )
+    }
+
     func testLocalImageEvidenceParserBlocksMissingImageAndRejectsBadDigest() {
         let validDigest = "sha256:" + String(repeating: "a", count: 64)
         let missing = "[{\"configuration\":{\"descriptor\":{\"digest\":\"\(validDigest)\"},\"name\":\"other:image\"},\"variants\":[]}]"

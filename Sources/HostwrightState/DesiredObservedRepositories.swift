@@ -1,4 +1,5 @@
 import Foundation
+import HostwrightCore
 import HostwrightManifest
 import HostwrightRuntime
 
@@ -94,6 +95,219 @@ public struct DesiredStateRepository: Sendable {
                 bindings: [.text(projectID)]
             )
             return try rows.map(desiredServiceRecord(from:))
+        }
+    }
+
+    public func loadRecoverySnapshot(
+        projectID: String
+    ) throws -> DesiredStateRecoverySnapshot? {
+        try store.withValidatedConnection(readOnly: true) { connection in
+            let projectRows = try connection.query(
+                """
+                SELECT id, name, manifest_path, manifest_hash, created_at, updated_at,
+                       resource_uuid, manifest_version, mutation_provider, provider_generation
+                FROM projects
+                WHERE id = ?
+                """,
+                bindings: [.text(projectID)]
+            )
+            guard let projectRow = projectRows.first else {
+                return nil
+            }
+            let project = try projectRecord(from: projectRow)
+            let serviceRows = try connection.query(
+                """
+                SELECT id, project_id, service_name, image, command_json, ports_json, mounts_json,
+                       env_json_redacted, manifest_hash, desired_generation, created_at, updated_at,
+                       resource_uuid, resource_generation, mutation_provider
+                FROM desired_services
+                WHERE project_id = ? AND desired_generation = ?
+                ORDER BY desired_generation ASC, service_name ASC
+                """,
+                bindings: [
+                    .text(projectID),
+                    .int(project.providerGeneration)
+                ]
+            )
+            return DesiredStateRecoverySnapshot(
+                project: project,
+                desiredServices: try serviceRows.map(desiredServiceRecord(from:))
+            )
+        }
+    }
+
+    public func restoreRecoverySnapshot(
+        _ snapshot: DesiredStateRecoverySnapshot,
+        expectedCurrentManifestHash: String,
+        expectedProjectResourceUUID: String,
+        expectedMutationProvider: String,
+        expectedProviderGeneration: Int
+    ) throws {
+        try validateRecoverySnapshot(
+            snapshot,
+            expectedProjectResourceUUID: expectedProjectResourceUUID,
+            expectedMutationProvider: expectedMutationProvider,
+            expectedProviderGeneration: expectedProviderGeneration
+        )
+
+        try store.withValidatedConnection { connection in
+            try connection.transaction {
+                let projectRows = try connection.query(
+                    """
+                    SELECT id, name, manifest_path, manifest_hash, created_at, updated_at,
+                           resource_uuid, manifest_version, mutation_provider, provider_generation
+                    FROM projects
+                    WHERE id = ?
+                    """,
+                    bindings: [.text(snapshot.project.id)]
+                )
+                guard let projectRow = projectRows.first else {
+                    throw StateStoreError.notFound(
+                        "Project \(snapshot.project.id)"
+                    )
+                }
+                let current = try projectRecord(from: projectRow)
+                guard current.resourceUUID == expectedProjectResourceUUID,
+                      current.mutationProvider == expectedMutationProvider,
+                      current.providerGeneration == expectedProviderGeneration else {
+                    throw StateStoreError.invalidRecord(
+                        "Desired-state recovery refused a stale project identity, provider, or generation."
+                    )
+                }
+
+                if current.manifestHash == snapshot.project.manifestHash {
+                    let currentServices = try loadDesiredServices(
+                        projectID: snapshot.project.id,
+                        desiredGeneration: expectedProviderGeneration,
+                        on: connection
+                    )
+                    guard current == snapshot.project,
+                          currentServices == snapshot.desiredServices else {
+                        throw StateStoreError.invalidRecord(
+                            "Desired-state recovery found a partially restored healthy snapshot."
+                        )
+                    }
+                    return
+                }
+                guard current.manifestHash == expectedCurrentManifestHash else {
+                    throw StateStoreError.invalidRecord(
+                        "Desired-state recovery refused to overwrite a newer manifest revision."
+                    )
+                }
+
+                try connection.run(
+                    """
+                    DELETE FROM desired_services
+                    WHERE project_id = ? AND desired_generation = ?
+                    """,
+                    bindings: [
+                        .text(snapshot.project.id),
+                        .int(expectedProviderGeneration)
+                    ]
+                )
+                try connection.run(
+                    """
+                    UPDATE projects
+                    SET name = ?, manifest_path = ?, manifest_hash = ?, created_at = ?,
+                        updated_at = ?, resource_uuid = ?, manifest_version = ?,
+                        mutation_provider = ?, provider_generation = ?
+                    WHERE id = ?
+                    """,
+                    bindings: [
+                        .text(snapshot.project.name),
+                        optionalText(snapshot.project.manifestPath),
+                        .text(snapshot.project.manifestHash),
+                        .text(snapshot.project.createdAt),
+                        .text(snapshot.project.updatedAt),
+                        .text(snapshot.project.resourceUUID),
+                        .int(snapshot.project.manifestVersion),
+                        optionalText(snapshot.project.mutationProvider),
+                        .int(snapshot.project.providerGeneration),
+                        .text(snapshot.project.id)
+                    ]
+                )
+                for service in snapshot.desiredServices {
+                    try upsert(service, on: connection)
+                }
+
+                guard let restoredProjectRow = try connection.query(
+                    """
+                    SELECT id, name, manifest_path, manifest_hash, created_at, updated_at,
+                           resource_uuid, manifest_version, mutation_provider, provider_generation
+                    FROM projects
+                    WHERE id = ?
+                    """,
+                    bindings: [.text(snapshot.project.id)]
+                ).first,
+                      try projectRecord(from: restoredProjectRow) == snapshot.project,
+                      try loadDesiredServices(
+                          projectID: snapshot.project.id,
+                          desiredGeneration: expectedProviderGeneration,
+                          on: connection
+                      ) == snapshot.desiredServices else {
+                    throw StateStoreError.invalidRecord(
+                        "Desired-state recovery could not verify the restored healthy snapshot."
+                    )
+                }
+            }
+        }
+    }
+
+    private func loadDesiredServices(
+        projectID: String,
+        desiredGeneration: Int,
+        on connection: SQLiteConnection
+    ) throws -> [DesiredServiceRecord] {
+        let rows = try connection.query(
+            """
+            SELECT id, project_id, service_name, image, command_json, ports_json, mounts_json,
+                   env_json_redacted, manifest_hash, desired_generation, created_at, updated_at,
+                   resource_uuid, resource_generation, mutation_provider
+            FROM desired_services
+            WHERE project_id = ? AND desired_generation = ?
+            ORDER BY desired_generation ASC, service_name ASC
+            """,
+            bindings: [
+                .text(projectID),
+                .int(desiredGeneration)
+            ]
+        )
+        return try rows.map(desiredServiceRecord(from:))
+    }
+
+    private func validateRecoverySnapshot(
+        _ snapshot: DesiredStateRecoverySnapshot,
+        expectedProjectResourceUUID: String,
+        expectedMutationProvider: String,
+        expectedProviderGeneration: Int
+    ) throws {
+        let project = snapshot.project
+        let serviceKeys = Set(
+            snapshot.desiredServices.map {
+                "\($0.serviceName):\($0.desiredGeneration)"
+            }
+        )
+        guard snapshot.schemaVersion ==
+                DesiredStateRecoverySnapshot.currentSchemaVersion,
+              project.resourceUUID == expectedProjectResourceUUID,
+              project.mutationProvider == expectedMutationProvider,
+              project.providerGeneration == expectedProviderGeneration,
+              expectedProviderGeneration > 0,
+              !snapshot.desiredServices.isEmpty,
+              serviceKeys.count == snapshot.desiredServices.count,
+              snapshot.desiredServices.allSatisfy({
+                  $0.projectID == project.id &&
+                      $0.manifestHash == project.manifestHash &&
+                      $0.desiredGeneration == expectedProviderGeneration &&
+                      $0.mutationProvider == expectedMutationProvider &&
+                      StateJSON.isArray($0.commandJSON) &&
+                      StateJSON.isArray($0.portsJSON) &&
+                      StateJSON.isArray($0.mountsJSON) &&
+                      StateJSON.isObject($0.environmentJSONRedacted)
+              }) else {
+            throw StateStoreError.invalidRecord(
+                "Desired-state recovery snapshot is not bound to one exact redacted project generation."
+            )
         }
     }
 
@@ -253,10 +467,21 @@ public struct ObservedStateRepository: Sendable {
             capabilitiesJSON: try StateJSON.encodeStringArray(capabilities)
         )
 
+        let identityCounts = Dictionary(
+            grouping: observedState.services,
+            by: \.identity
+        ).mapValues(\.count)
         let services = try observedState.services
-            .sorted { $0.identity.displayName < $1.identity.displayName }
+            .sorted {
+                ($0.identity.displayName, $0.resourceIdentifier) <
+                    ($1.identity.displayName, $1.resourceIdentifier)
+            }
             .map { service in
-                try observedServiceRecord(snapshotID: snapshotID, service: service)
+                try observedServiceRecord(
+                    snapshotID: snapshotID,
+                    service: service,
+                    disambiguateResource: identityCounts[service.identity, default: 0] > 1
+                )
             }
 
         try store.withValidatedConnection { connection in
@@ -338,9 +563,20 @@ public struct ObservedStateRepository: Sendable {
         }
     }
 
-    private func observedServiceRecord(snapshotID: String, service: ObservedRuntimeService) throws -> ObservedServiceRecord {
-        ObservedServiceRecord(
-            id: "\(snapshotID):\(service.identity.displayName)",
+    private func observedServiceRecord(
+        snapshotID: String,
+        service: ObservedRuntimeService,
+        disambiguateResource: Bool
+    ) throws -> ObservedServiceRecord {
+        let identityID = "\(snapshotID):\(service.identity.displayName)"
+        let resourceDisambiguator = HostwrightResourceUUID.legacy(
+            kind: "observed-service",
+            identifier: service.resourceIdentifier
+        )
+        return ObservedServiceRecord(
+            id: disambiguateResource
+                ? "\(identityID):\(resourceDisambiguator)"
+                : identityID,
             snapshotID: snapshotID,
             projectName: service.identity.projectName,
             serviceName: service.identity.serviceName,

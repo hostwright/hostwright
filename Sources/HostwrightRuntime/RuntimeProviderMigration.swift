@@ -1570,9 +1570,29 @@ private extension RuntimeProviderMigrationEngine {
         canonical.append(service.identity.projectName)
         canonical.append(service.identity.serviceName)
         canonical.append(service.identity.instanceName ?? "")
+        canonical.append(service.logicalServiceName)
+        canonical.append(service.replicaIndex)
         canonical.append(service.image)
+        canonical.append(service.platformOperatingSystem)
+        canonical.append(service.platformArchitecture)
+        canonical.append(service.cpuCount ?? -1)
+        canonical.append(service.memoryBytes.map(String.init) ?? "")
+        canonical.append(service.userID.map(String.init) ?? "")
+        canonical.append(service.groupID.map(String.init) ?? "")
+        canonical.append(service.workingDirectory ?? "")
+        canonical.append(service.entrypoint.count)
+        for argument in service.entrypoint { canonical.append(argument) }
         canonical.append(service.command.count)
         for argument in service.command { canonical.append(argument) }
+        canonical.append(service.initProcess ? 1 : 0)
+        let dependencies = service.dependencies.sorted {
+            ($0.serviceName, $0.condition.rawValue) < ($1.serviceName, $1.condition.rawValue)
+        }
+        canonical.append(dependencies.count)
+        for dependency in dependencies {
+            canonical.append(dependency.serviceName)
+            canonical.append(dependency.condition.rawValue)
+        }
         let environment = service.environment.sorted { $0.name < $1.name }
         canonical.append(environment.count)
         for entry in environment {
@@ -1580,6 +1600,12 @@ private extension RuntimeProviderMigrationEngine {
             canonical.append(entry.value)
             canonical.append(entry.isSensitive ? 1 : 0)
             canonical.append(entry.secretReference?.rawValue ?? "")
+        }
+        let labels = service.labels.sorted { $0.key < $1.key }
+        canonical.append(labels.count)
+        for label in labels {
+            canonical.append(label.key)
+            canonical.append(label.value)
         }
         let ports = service.ports.sorted {
             ($0.hostPort ?? -1, $0.containerPort, $0.protocolName.rawValue, $0.bindAddress ?? "") <
@@ -1608,7 +1634,46 @@ private extension RuntimeProviderMigrationEngine {
         } else {
             canonical.append(0)
         }
+        for kind in RuntimeProbeKind.allCases {
+            guard let probe = service.probes[kind] else {
+                canonical.append(kind.rawValue)
+                canonical.append(0)
+                continue
+            }
+            canonical.append(kind.rawValue)
+            canonical.append(1)
+            switch probe.action {
+            case .exec(let action):
+                canonical.append(RuntimeProbeActionKind.exec.rawValue)
+                canonical.append(action.command.count)
+                for value in action.command { canonical.append(value) }
+            case .http(let action):
+                canonical.append(RuntimeProbeActionKind.http.rawValue)
+                canonical.append(action.port)
+                canonical.append(action.path)
+            case .tcp(let action):
+                canonical.append(RuntimeProbeActionKind.tcp.rawValue)
+                canonical.append(action.port)
+            }
+            canonical.append(probe.startPeriodSeconds)
+            canonical.append(probe.intervalSeconds)
+            canonical.append(probe.timeoutSeconds)
+            canonical.append(probe.successThreshold)
+            canonical.append(probe.failureThreshold)
+        }
         canonical.append(service.restartPolicy.rawValue)
+        canonical.append(service.updatePolicy.strategy.rawValue)
+        canonical.append(service.updatePolicy.maxSurge)
+        canonical.append(service.updatePolicy.maxUnavailable)
+        canonical.append(service.updatePolicy.progressDeadlineSeconds)
+        canonical.append(service.hooks.postStart?.count ?? 0)
+        for value in service.hooks.postStart ?? [] { canonical.append(value) }
+        canonical.append(service.hooks.preStop?.count ?? 0)
+        for value in service.hooks.preStop ?? [] { canonical.append(value) }
+        canonical.append(service.rosetta ? 1 : 0)
+        canonical.append(service.virtualization ? 1 : 0)
+        canonical.append(service.readOnlyRootFilesystem ? 1 : 0)
+        canonical.append(service.sharedMemoryBytes.map(String.init) ?? "")
         return SHA256.hash(data: canonical.data)
             .map { String(format: "%02x", $0) }
             .joined()

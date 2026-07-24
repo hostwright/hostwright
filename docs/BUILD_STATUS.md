@@ -1,12 +1,19 @@
 # Build Status
 
-> **Current program:** Hostwright is `0.0.2-dev`; Phases 01 and 02 of the [v0.0.2 roadmap](roadmap/v0.0.2/IMPLEMENTATION_PLAN.md) are closed, and Phase 03 runtime-provider qualification is complete. Apple `container` 1.0.0/1.1.0 and the pinned Containerization 0.35.0 helper passed their declared-capability, migration, upgrade, restart, failure, and exact-cleanup gates. The immutable unsupported Phase 02 releases and vendor tap remain available qualification channels. Hostwright is not GA or production ready. The phase-by-phase entries below are a retained pre-v0.0.2 engineering ledger, not the active release scope or schedule.
+> **Current program:** Hostwright is `0.0.2-dev`; Phases 01 and 02 of the [v0.0.2 roadmap](roadmap/v0.0.2/IMPLEMENTATION_PLAN.md) are closed, Phase 03 runtime-provider qualification is complete, and Phase 04 single-host lifecycle qualification is complete. Strict Manifest v2, confirmed lifecycle commands, typed probes, bounded interactive operations, rolling/recreate updates, verified rollback, and resumable recovery use one schema-v7 saga. Apple `container` 1.0.0/1.1.0 and the pinned Containerization 0.35.0 helper expose only their qualified capabilities. The immutable unsupported Phase 02 releases and vendor tap remain available qualification channels. Hostwright is not GA or production ready. The phase-by-phase entries below are a retained pre-v0.0.2 engineering ledger, not the active release scope or schedule.
 
 ## Local Environment
 
 - macOS 26.5
 - Apple silicon (`arm64`)
 - Swift 6.3.3 through full Xcode developer tools
+
+## Verified On 2026-07-23 — v0.0.2 Phase 04
+
+- Strict source-aware Yams 6.2.2 decoding enforces the Manifest v2 byte, depth, node, duplicate-key, alias/tag/merge, scalar, and unknown-field contract; canonical round trips preserve the checked-in corpus.
+- The schema-v7 lifecycle saga persists canonical intent, compensation, verification, attempts, and checkpoints before provider effects. Dependency/replica reconciliation, lifecycle commands, typed probes, rolling/recreate updates, rollback, and recovery share that engine.
+- Bounded exec, attach, copy, export, inspect, stats, and log-follow behavior is capability-gated and preserves UUID-backed ownership, path confinement, backpressure, cancellation, redaction, and process-tree cleanup.
+- Phase 05–07 surfaces remain explicit: Hostwright does not pull/build/load images, manage named volumes or snapshots, or create custom networks, DNS, or ingress.
 
 ## Verified On 2026-07-22 — v0.0.2 Phase 03
 

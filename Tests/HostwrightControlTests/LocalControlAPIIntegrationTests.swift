@@ -10,6 +10,46 @@ import XCTest
 @testable import HostwrightControl
 
 final class LocalControlAPIIntegrationTests: XCTestCase {
+    func testLifecycleDryRunReturnsSharedPlanSuccessEnvelope() throws {
+        try withWorkspace { workspace in
+            let store = SQLiteStateStore(
+                configuration: StateStoreConfiguration(
+                    explicitDatabasePath: workspace.database.path
+                )
+            )
+            try store.migrate()
+            let response = try run(
+                isolatedAPI(
+                    configuration: LocalControlConfiguration(
+                        manifestPath: workspace.manifest.path,
+                        stateDatabasePath: workspace.database.path
+                    ),
+                    workspace: workspace
+                ),
+                LocalControlRequest(
+                    requestID: "down-dry-run-1",
+                    operation: .down,
+                    dryRun: true
+                )
+            )
+
+            XCTAssertTrue(response.success)
+            XCTAssertEqual(response.requestID, "down-dry-run-1")
+            XCTAssertEqual(response.operation, .down)
+            XCTAssertEqual(response.exitCode, 0)
+            XCTAssertEqual(string("command", in: response.result), "down")
+            XCTAssertEqual(
+                string("providerID", in: response.result),
+                RuntimeProviderID.appleContainerCLI.rawValue
+            )
+            XCTAssertEqual(
+                string("planSHA256", in: response.result)?.count,
+                64
+            )
+            XCTAssertEqual(array("nodes", in: response.result), [])
+        }
+    }
+
     func testRealFilesAndSQLiteServeAllFiveApprovedOperations() throws {
         try withWorkspace { workspace in
             let store = SQLiteStateStore(
@@ -272,7 +312,7 @@ final class LocalControlAPIIntegrationTests: XCTestCase {
                 environment: [:]
             )
         }
-        let runtimeAdapter = ScriptedRuntimeAdapter(scenario: .availableEmpty)
+        let runtimeAdapter = ControlLifecycleRuntimeAdapter()
         environment.runtimeAdapter = { runtimeAdapter }
         environment.runtimeAdapterForProvider = { providerID in
             guard providerID == .appleContainerCLI else {
@@ -387,6 +427,104 @@ final class LocalControlAPIIntegrationTests: XCTestCase {
           "requirements": ["requireManifestReview"]
         }
         """
+    }
+}
+
+private struct ControlLifecycleRuntimeAdapter: RuntimeAdapter {
+    private let base = ScriptedRuntimeAdapter(
+        scenario: .availableEmpty,
+        adapterMetadata: RuntimeAdapterMetadata(
+            providerID: .appleContainerCLI,
+            adapterName: "ScriptedRuntimeAdapter",
+            adapterVersion: HostwrightIdentity.version,
+            runtimeName: "scripted-test-runtime",
+            runtimeVersion: "1.1.0",
+            supportsMutation: true,
+            capabilities: [
+                .readOnlyObservation,
+                .lifecycleMutation,
+                .healthObservation,
+                .cleanup
+            ]
+        )
+    )
+
+    func metadata() async -> RuntimeAdapterMetadata {
+        await base.metadata()
+    }
+
+    func capabilities() async throws -> [RuntimeCapability] {
+        try await base.capabilities()
+    }
+
+    func capabilitySnapshot() async throws -> RuntimeCapabilitySnapshot {
+        try await base.capabilitySnapshot()
+    }
+
+    func inventory() async throws -> RuntimeInventory {
+        try RuntimeInventoryBuilder.build(
+            machine: RuntimeInventoryMachine(
+                state: .running,
+                operatingSystem: "linux",
+                architecture: "arm64",
+                runtimeVersion: "1.1.0",
+                services: []
+            ),
+            containers: [],
+            images: [],
+            networks: [],
+            volumes: []
+        )
+    }
+
+    func observe(
+        desiredState: DesiredRuntimeState
+    ) async throws -> ObservedRuntimeState {
+        try await base.observe(desiredState: desiredState)
+    }
+
+    func plan(
+        desiredState: DesiredRuntimeState,
+        observedState: ObservedRuntimeState
+    ) async throws -> RuntimePlan {
+        try await base.plan(
+            desiredState: desiredState,
+            observedState: observedState
+        )
+    }
+
+    func logs(
+        for service: ObservedRuntimeService,
+        tail: Int
+    ) async throws -> RuntimeLogResult {
+        try await base.logs(for: service, tail: tail)
+    }
+
+    func runtimeVersion() async throws -> String {
+        "1.1.0"
+    }
+
+    func runtimeReadiness() async throws -> RuntimeReadinessReport {
+        try await base.runtimeReadiness()
+    }
+
+    func localImageEvidence(
+        for imageReference: String
+    ) async throws -> RuntimeLocalImageEvidence {
+        try await base.localImageEvidence(for: imageReference)
+    }
+
+    func resourceUsage(
+        for resourceIdentifier: String
+    ) async throws -> RuntimeResourceUsageSnapshot {
+        try await base.resourceUsage(for: resourceIdentifier)
+    }
+
+    func execute(
+        _ action: PlannedRuntimeAction,
+        confirmation: RuntimeMutationConfirmation?
+    ) async throws -> RuntimeEvent {
+        try await base.execute(action, confirmation: confirmation)
     }
 }
 

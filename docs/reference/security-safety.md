@@ -14,21 +14,15 @@ Production subprocess execution uses one shared bounded implementation. It passe
 
 ## Mutation Boundaries
 
-Supported mutation is intentionally narrow:
+Supported application mutation requires an exact lifecycle plan hash and one durable schema-v7 operation group. `up`, `down`, `run`, `start`, `stop`, `restart`, `rm`, and `update` revalidate provider identity, capability digest, project/resource generation, ownership UUID, and fence before every mutation wave. Intent and compensation are persisted before effects; ambiguous results are re-observed; automatic rollback runs only when ownership and every inverse effect are provable. Otherwise Hostwright records a safe hold.
 
-- one create-missing-service action after explicit plan hash confirmation;
-- one restart-policy-allowed managed start action;
-- one restart-policy-allowed managed restart action for an exact Hostwright-owned running/unhealthy service;
-- exact cleanup-eligible managed container delete after dry-run token confirmation.
-- explicitly confirmed benchmark create/start/exact-delete for unique versioned Hostwright-owned resources using a pre-existing local image and bounded process.
+Phase 04 does not implement registry-backed image replacement or pull/build/load, named-volume lifecycle or snapshots, custom networking/DNS/ingress, broad bind exposure, unattended daemon mutation, or broad/unmanaged cleanup. Existing bind mounts and localhost port publishing remain path- and policy-gated.
 
-Hostwright does not implement broad lifecycle management, user-facing stop commands, user-facing restart commands, image replacement, mount mutation, port mutation, automatic rollback, or unattended daemon mutation.
-
-Restart policy state can block the narrow managed-start and managed-restart paths through backoff, preexisting operator hold state, manual-disable from `restart.policy: no`, and crash-loop protection. Managed restart also requires exact Hostwright ownership, live observed running state, a fresh persisted unhealthy health result from the selected state database, operation ledger entries, restart recovery records, and operation recovery group records. The foreground daemon records restart state but does not start or restart services by itself.
+Restart policy state can block managed restart through backoff, operator hold, manual disable, and crash-loop protection. The foreground daemon records restart state but does not start or restart services by itself.
 
 New runtime resources use collision-resistant v2 identifiers and exact labels for managed state, identity version, project, service, optional instance, and resource identifier. Mutation plans retain the exact observed identifier. State-backed legacy identifiers remain readable for upgrade continuity, but labels or ownership records may not be inferred from a Hostwright-looking name.
 
-Operation recovery records are audit and recovery guidance only. They record checkpoints, failed/completed steps, and rollback-unavailable status; they do not authorize automatic inverse runtime operations.
+Operation recovery records bind exact checkpoints, failed/completed steps, verified effects, and precomputed inverse actions. Confirmed resume or rollback re-observes the runtime and proceeds only when identity, ownership, fence, and effect remain exact.
 
 ## Local State Boundary
 

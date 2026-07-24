@@ -50,6 +50,59 @@ final class ControlRequestTests: XCTestCase {
         }
     }
 
+    func testParserAcceptsEveryLifecycleOperationWithStrictMutationIntent() throws {
+        let digest = String(repeating: "a", count: 64)
+        let operations: [LocalControlOperation] = [
+            .up, .down, .run, .start, .stop, .restart, .rm, .update
+        ]
+
+        for operation in operations {
+            let services = operation == .run ? #"["job"]"# : #"["worker","api"]"#
+            let request = try LocalControlRequestParser.parse(
+                Data(
+                    """
+                    {"apiVersion":2,"requestID":"\(operation.rawValue)-1","operation":"\(operation.rawValue)","services":\(services),"confirmPlan":"\(digest)","runtimeProvider":"apple-cli","timeout":30,"parallelism":2}
+                    """.utf8
+                )
+            )
+            XCTAssertEqual(request.operation, operation)
+            XCTAssertEqual(request.services, operation == .run ? ["job"] : ["worker", "api"])
+            XCTAssertEqual(request.confirmPlan, digest)
+        }
+    }
+
+    func testParserRejectsInvalidLifecycleFieldCombinationsAndCrossOperationLeakage() {
+        let digest = String(repeating: "a", count: 64)
+        let invalid = [
+            #"{"apiVersion":2,"requestID":"r1","operation":"up"}"#,
+            #"{"apiVersion":2,"requestID":"r1","operation":"up","dryRun":false}"#,
+            #"{"apiVersion":2,"requestID":"r1","operation":"up","dryRun":true,"confirmPlan":"\#(digest)"}"#,
+            #"{"apiVersion":2,"requestID":"r1","operation":"up","confirmPlan":"ABC"}"#,
+            #"{"apiVersion":2,"requestID":"r1","operation":"up","dryRun":true,"runtimeProvider":"docker"}"#,
+            #"{"apiVersion":2,"requestID":"r1","operation":"up","dryRun":true,"timeout":0}"#,
+            #"{"apiVersion":2,"requestID":"r1","operation":"up","dryRun":true,"timeout":86401}"#,
+            #"{"apiVersion":2,"requestID":"r1","operation":"up","dryRun":true,"parallelism":0}"#,
+            #"{"apiVersion":2,"requestID":"r1","operation":"up","dryRun":true,"parallelism":33}"#,
+            #"{"apiVersion":2,"requestID":"r1","operation":"up","dryRun":true,"services":[]}"#,
+            #"{"apiVersion":2,"requestID":"r1","operation":"up","dryRun":true,"services":["api","api"]}"#,
+            #"{"apiVersion":2,"requestID":"r1","operation":"up","dryRun":true,"services":["../api"]}"#,
+            #"{"apiVersion":2,"requestID":"r1","operation":"up","dryRun":true,"service":"api"}"#,
+            #"{"apiVersion":2,"requestID":"r1","operation":"up","dryRun":true,"stateDB":"/tmp/state.sqlite"}"#,
+            #"{"apiVersion":2,"requestID":"r1","operation":"up","dryRun":true,"output":"text"}"#,
+            #"{"apiVersion":2,"requestID":"r1","operation":"run","dryRun":true}"#,
+            #"{"apiVersion":2,"requestID":"r1","operation":"run","dryRun":true,"services":["a","b"]}"#,
+            #"{"apiVersion":2,"requestID":"r1","operation":"events","dryRun":true}"#,
+            #"{"apiVersion":2,"requestID":"r1","operation":"plan","services":["api"]}"#
+        ]
+
+        for text in invalid {
+            assertDiagnostic(
+                tryRun: { try LocalControlRequestParser.parse(Data(text.utf8)) },
+                code: .controlAPIInvalid
+            )
+        }
+    }
+
     func testCommandArgumentsKeepPathsInLaunchConfiguration() throws {
         let configuration = LocalControlConfiguration(
             manifestPath: "/tmp/hostwright.yaml",
@@ -95,6 +148,107 @@ final class ControlRequestTests: XCTestCase {
             ),
             ["recovery", "--output", "json"]
         )
+    }
+
+    func testLifecycleCommandArgumentsMatchCLIGrammar() throws {
+        let configuration = LocalControlConfiguration(
+            manifestPath: "/tmp/hostwright.yaml",
+            stateDatabasePath: "/tmp/state.sqlite"
+        )
+        let digest = String(repeating: "b", count: 64)
+        let operations: [LocalControlOperation] = [
+            .up, .down, .run, .start, .stop, .restart, .rm, .update
+        ]
+
+        for operation in operations {
+            let services = operation == .run ? ["job"] : ["worker", "api"]
+            let arguments = try LocalControlAPI.commandArguments(
+                for: LocalControlRequest(
+                    requestID: "\(operation.rawValue)-1",
+                    operation: operation,
+                    services: services,
+                    dryRun: true
+                ),
+                configuration: configuration
+            )
+
+            XCTAssertEqual(arguments.first, operation.rawValue)
+            XCTAssertEqual(arguments.dropFirst().first, "/tmp/hostwright.yaml")
+            XCTAssertEqual(arguments.filter { $0 == "--service" }.count, services.count)
+            XCTAssertTrue(arguments.contains("/tmp/state.sqlite"))
+            XCTAssertTrue(arguments.contains("--dry-run"))
+            XCTAssertEqual(Array(arguments.suffix(2)), ["--output", "json"])
+        }
+
+        let confirmed = try LocalControlAPI.commandArguments(
+            for: LocalControlRequest(
+                requestID: "up-confirmed",
+                operation: .up,
+                services: ["worker", "api"],
+                confirmPlan: digest,
+                runtimeProvider: "containerization",
+                timeout: 45,
+                parallelism: 3
+            ),
+            configuration: configuration
+        )
+        XCTAssertEqual(
+            confirmed,
+            [
+                "up", "/tmp/hostwright.yaml",
+                "--service", "api",
+                "--service", "worker",
+                "--state-db", "/tmp/state.sqlite",
+                "--confirm-plan", digest,
+                "--runtime-provider", "containerization",
+                "--timeout", "45",
+                "--parallelism", "3",
+                "--output", "json"
+            ]
+        )
+    }
+
+    func testProgrammaticLifecycleRequestCannotBypassStrictValidation() {
+        assertDiagnostic(
+            tryRun: {
+                try LocalControlAPI.commandArguments(
+                    for: LocalControlRequest(requestID: "up-1", operation: .up, dryRun: true, timeout: 0),
+                    configuration: LocalControlConfiguration(manifestPath: "/tmp/hostwright.yaml")
+                )
+            },
+            code: .controlAPIInvalid
+        )
+    }
+
+    func testInvalidLifecycleRequestsReturnTheSharedBoundedErrorEnvelope() throws {
+        let api = LocalControlAPI(
+            configuration: LocalControlConfiguration(manifestPath: "/not-read-for-invalid-request")
+        )
+        let operations: [LocalControlOperation] = [
+            .up, .down, .run, .start, .stop, .restart, .rm, .update
+        ]
+
+        for operation in operations {
+            let result = api.run(
+                requestData: Data(
+                    """
+                    {"apiVersion":2,"requestID":"\(operation.rawValue)-invalid","operation":"\(operation.rawValue)"}
+                    """.utf8
+                )
+            )
+            let response = try JSONDecoder().decode(LocalControlResponse.self, from: result.standardOutput)
+
+            XCTAssertEqual(result.exitCode, LocalControlExitCode.invalidRequest.rawValue)
+            XCTAssertEqual(result.standardError, "")
+            XCTAssertLessThanOrEqual(result.standardOutput.count, LocalControlAPI.maximumResponseBytes)
+            XCTAssertFalse(response.success)
+            XCTAssertEqual(response.exitCode, LocalControlExitCode.invalidRequest.rawValue)
+            XCTAssertNil(response.result)
+            guard case .object(let error) = response.error else {
+                return XCTFail("Expected the shared structured error envelope for \(operation.rawValue).")
+            }
+            XCTAssertEqual(error["code"], .string(HostwrightErrorCode.controlAPIInvalid.rawValue))
+        }
     }
 
     func testToolParserRequiresExplicitAbsoluteLaunchPaths() throws {

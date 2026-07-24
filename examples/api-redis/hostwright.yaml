@@ -1,23 +1,16 @@
 version: 2
-project: api-redis
+project: phase04-automation
+imagePolicy: require-digest
 
 services:
   api:
-    image: ghcr.io/example/api:latest
-    ports:
-      - "8081:8080"
-    env:
-      APP_ENV: development
-      REDIS_HOST: redis
-    health:
-      command: ["curl", "-f", "http://localhost:8081/health"]
-      interval: 10s
-    restart:
-      policy: on-failure
-
-  redis:
-    image: redis:7
-    ports:
-      - "6379:6379"
-    restart:
-      policy: unless-stopped
+    image: docker.io/library/python@sha256:26730869004e2b9c4b9ad09cab8625e81d256d1ce97e72df5520e806b1709f92
+    command: ["python3", "-c", "import time; time.sleep(3600)"]
+    probes:
+      readiness:
+        exec: ["python3", "-c", "raise SystemExit(0)"]
+    update:
+      strategy: rolling
+      maxSurge: 1
+      maxUnavailable: 0
+      progressDeadline: 60s

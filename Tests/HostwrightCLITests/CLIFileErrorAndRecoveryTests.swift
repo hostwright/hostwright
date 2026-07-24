@@ -272,6 +272,8 @@ final class CLIFileErrorAndRecoveryTests: XCTestCase {
             )
             XCTAssertEqual(textResult.exitCode, 0)
             XCTAssertTrue(textResult.standardOutput.contains("lock: owner=hostwright-cli:token=[REDACTED] expiresAt=\(lockExpiresAt)"))
+            XCTAssertTrue(textResult.standardOutput.contains("group: "))
+            XCTAssertTrue(textResult.standardOutput.contains("plan: plan"))
             XCTAssertFalse(textResult.standardOutput.contains("plain-secret-token"))
 
             let jsonResult = HostwrightCLI.run(
@@ -285,6 +287,71 @@ final class CLIFileErrorAndRecoveryTests: XCTestCase {
             let group = try XCTUnwrap(groups.first)
             XCTAssertEqual(group["lockOwner"] as? String, "hostwright-cli:token=[REDACTED]")
             XCTAssertEqual(group["lockExpiresAt"] as? String, lockExpiresAt)
+        }
+    }
+
+    func testConfirmedRecoveryRejectsWrongPlanHashBeforeRuntimeMutation() throws {
+        try withTemporaryDatabase { databasePath in
+            let store = SQLiteStateStore(path: databasePath)
+            try store.migrate()
+            let groupID = "11111111-1111-4111-8111-111111111111"
+            let operationID = "22222222-2222-4222-8222-222222222222"
+            let fencingToken = "33333333-3333-4333-8333-333333333333"
+            let expectedPlan = String(repeating: "a", count: 64)
+            _ = try store.operationGroups.acquire(
+                OperationGroupRecord(
+                    id: groupID,
+                    operationID: operationID,
+                    groupKind: "lifecycle-v1",
+                    projectID: "project-demo",
+                    serviceName: nil,
+                    plannedActionType: "update",
+                    status: .active,
+                    groupIdempotencyKey: expectedPlan,
+                    planHash: expectedPlan,
+                    checkpoint: "effect-pending",
+                    lockOwner: "hostwright-cli",
+                    lockExpiresAt: nil,
+                    rollbackAvailable: true,
+                    manualRecoveryHintRedacted: "",
+                    createdAt: "2026-07-23T00:00:00Z",
+                    updatedAt: "2026-07-23T00:00:00Z",
+                    metadataJSONRedacted: "{}",
+                    fencingToken: fencingToken,
+                    intentJSONRedacted: "{}",
+                    compensationJSONRedacted: "[]",
+                    verificationJSONRedacted: "{}"
+                )
+            )
+            try store.operationGroups.finish(
+                groupID: groupID,
+                status: .interrupted,
+                checkpoint: "effect-pending",
+                manualRecoveryHintRedacted: "Resume the exact confirmed plan.",
+                updatedAt: "2026-07-23T00:00:01Z",
+                metadataJSONRedacted: "{}"
+            )
+
+            let result = HostwrightCLI.run(
+                arguments: [
+                    "recovery", "resume",
+                    "--group", groupID,
+                    "--confirm-plan", String(repeating: "b", count: 64),
+                    "--state-db", databasePath
+                ],
+                environment: environment(files: FileBox())
+            )
+
+            XCTAssertEqual(result.exitCode, CLIExitCode.confirmationMismatch.rawValue)
+            XCTAssertTrue(
+                result.standardError.contains(
+                    HostwrightErrorCode.confirmationMismatch.rawValue
+                )
+            )
+            XCTAssertEqual(
+                try store.operationGroups.load(id: groupID)?.status,
+                .interrupted
+            )
         }
     }
 

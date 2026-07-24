@@ -1,13 +1,27 @@
 version: 2
-project: single-service
+project: phase04-single
+imagePolicy: require-digest
 
 services:
   web:
-    image: docker.io/library/nginx:1.27
+    image: docker.io/library/python@sha256:26730869004e2b9c4b9ad09cab8625e81d256d1ce97e72df5520e806b1709f92
+    command: ["python3", "-m", "http.server", "8080", "--bind", "0.0.0.0"]
     ports:
-      - "8080:80"
-    health:
-      command: ["curl", "-f", "http://localhost:8080/"]
-      interval: 30s
+      - "18080:8080"
+    probes:
+      startup:
+        exec: ["python3", "-c", "raise SystemExit(0)"]
+      readiness:
+        tcp:
+          port: 8080
+      liveness:
+        http:
+          port: 8080
+          path: /
     restart:
-      policy: on-failure
+      policy: unless-stopped
+    update:
+      strategy: recreate
+      maxSurge: 0
+      maxUnavailable: 1
+      progressDeadline: 60s

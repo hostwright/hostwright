@@ -83,6 +83,7 @@ def main() -> int:
     require("`brew install hostwright` does not exist today" in readme, "README must state the unqualified brew command does not exist", errors)
     require("Phase 02 qualification is complete" in readme, "README does not record completed Phase 02 qualification", errors)
     require("Phase 03 qualification is complete" in readme, "README does not record completed Phase 03 qualification", errors)
+    require("Phase 04 qualification is complete" in readme, "README does not record completed Phase 04 qualification", errors)
     require("brew install hostwright/tap/hostwright" in readme, "README lacks the available vendor-tap command", errors)
     require("`brew install hostwright` does not exist today" in install, "install docs must state the unqualified brew command does not exist", errors)
     require(
@@ -96,11 +97,16 @@ def main() -> int:
     require("Apple `container` 1.0.0 and 1.1.0" in compatibility, "compatibility docs lack the exact Phase 03 Apple CLI matrix", errors)
     require("Containerization 0.35.0" in compatibility, "compatibility docs lack the exact Phase 03 Containerization pin", errors)
     require("version: 2" in manifest_doc and "migrate preview" in manifest_doc, "manifest docs lack v2/migration truth", errors)
+    require("Yams 6.2.2" in manifest_doc and "1 MiB" in manifest_doc, "manifest docs lack the maintained bounded parser truth", errors)
     require("0.0.2-dev" in cli and "apiVersion\":2" in cli, "CLI docs lack product/API v2 truth", errors)
     for fragment in ["hostwright runtime providers", "hostwright runtime migrate", "--runtime-provider auto|apple-cli|containerization"]:
         require(fragment in cli, f"CLI docs lack Phase 03 runtime surface: {fragment}", errors)
+    for fragment in ["hostwright up", "hostwright update", "hostwright exec", "recovery rollback"]:
+        require(fragment in cli, f"CLI docs lack Phase 04 lifecycle surface: {fragment}", errors)
     require("Phase 03 qualification is complete" in limitations, "limitations do not record completed Phase 03 qualification", errors)
+    require("Phase 04 qualification is complete" in limitations, "limitations do not record completed Phase 04 qualification", errors)
     require("Phase 03 runtime-provider qualification is complete" in build_status, "build status does not record Phase 03 qualification", errors)
+    require("Phase 04 single-host lifecycle qualification is complete" in build_status, "build status does not record Phase 04 qualification", errors)
     for fragment in ["apple-container-cli", "apple-containerization", "helper protocol v1", "Provider Selection, Migration, And Recovery"]:
         require(fragment in runtime_architecture, f"runtime architecture lacks Phase 03 truth: {fragment}", errors)
     require("Phase 03 live migration evidence" in runtime_binding_adr, "provider-binding ADR retains pre-Phase 03 verification truth", errors)
@@ -108,6 +114,13 @@ def main() -> int:
     for identifier in ["runtime.apple-container-cli", "runtime.containerization"]:
         pattern = rf'capability\("{re.escape(identifier)}"[^\n]+\.stable, 3, 129'
         require(re.search(pattern, capability_catalog) is not None, f"capability catalog does not report qualified Phase 03 provider: {identifier}", errors)
+    for identifier, issue in [
+        ("lifecycle.single-host", 140),
+        ("manifest.restricted-parser", 130),
+        ("manifest.v2", 131),
+    ]:
+        pattern = rf'capability\("{re.escape(identifier)}"[^\n]+\.stable, 4, {issue}'
+        require(re.search(pattern, capability_catalog) is not None, f"capability catalog does not report qualified Phase 04 capability: {identifier}", errors)
     require("Schema version 7 is the latest" in state, "state docs do not name schema v7", errors)
     require("secure selected state paths" in requirements, "requirements lack the secure selected-state contract", errors)
     require("Implemented for API version 2" in requirements, "requirements retain the obsolete Control API version", errors)

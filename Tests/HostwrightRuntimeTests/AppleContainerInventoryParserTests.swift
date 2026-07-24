@@ -288,6 +288,36 @@ final class AppleContainerInventoryParserTests: XCTestCase {
         XCTAssertEqual(degraded.machine.state, .degraded)
     }
 
+    func testDistinguishesNeverStartedStoppedFromStructuredStartedExit() throws {
+        let containers = try fixture(
+            "apple-container-1.1.0-inventory-containers.json"
+        ).replacingOccurrences(
+            of: "\"state\": \"stopped\"",
+            with:
+                "\"startedDate\": \"2026-07-23T16:00:00Z\", \"state\": \"stopped\""
+        )
+        let inventory = try AppleContainerInventoryParser.parse(
+            outputs: try outputs(version: "1.1.0", containers: containers)
+        )
+
+        XCTAssertEqual(
+            inventory.containers.first {
+                $0.runtimeID == managedLookingUnownedContainerID
+            }?.lifecycle,
+            .exited
+        )
+
+        let malformed = containers.replacingOccurrences(
+            of: "\"startedDate\": \"2026-07-23T16:00:00Z\"",
+            with: "\"startedDate\": \"\""
+        )
+        XCTAssertThrowsError(
+            try AppleContainerInventoryParser.parse(
+                outputs: try outputs(version: "1.1.0", containers: malformed)
+            )
+        )
+    }
+
     private let managedContainerID = "hostwright-v2-demo-api-8022a4342ff931db15cdc03b748de2b6"
     private let managedLookingUnownedContainerID =
         "hostwright-v2-demo-web-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"

@@ -754,7 +754,7 @@ final class HostwrightCoreTests: XCTestCase {
             phase42Devlog
         ].joined(separator: "\n")
 
-        XCTAssertTrue(boundary.contains("Status: Historical design record for the bounded one-shot API, now versioned as Control API v2."))
+        XCTAssertTrue(boundary.contains("Status: Historical design record plus current contract for the bounded one-shot Control API v2."))
         XCTAssertTrue(boundary.contains("Phase 09 implements the persistent authenticated Control API v2"))
         XCTAssertTrue(boundary.contains("A control surface must not call Apple container, SQLite, `RuntimeAdapter`, state migrations, cleanup deletion, or health execution directly."))
         XCTAssertTrue(boundary.contains("| Cleanup preview | `hostwright cleanup [--state-db <path>] --dry-run` |"))

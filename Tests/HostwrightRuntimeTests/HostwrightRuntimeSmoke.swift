@@ -323,7 +323,7 @@ final class HostwrightRuntimeTests: XCTestCase {
         XCTAssertThrowsError(try RuntimeCommandPolicy.validateCreateMissingServiceMutation(nonHostwrightCreate))
     }
 
-    func testCreateMissingServiceMutationPolicyRejectsFlagLikeImageAndCommandTokens() throws {
+    func testCreateMissingServiceMutationPolicyRejectsPreImageFlagsAndAllowsLiteralWorkloadArguments() throws {
         let valid = try AppleContainerCommand.spec(
             kind: .createContainer,
             executable: ResolvedRuntimeExecutable(name: "container", path: "/usr/bin/container-fixture"),
@@ -357,17 +357,80 @@ final class HostwrightRuntimeTests: XCTestCase {
         )
         XCTAssertThrowsError(try RuntimeCommandPolicy.validateCreateMissingServiceMutation(badImage))
 
-        let unsafeCommandToken = RuntimeCommandSpec(
+        let literalWorkloadArguments = RuntimeCommandSpec(
             executablePath: "/usr/bin/container-fixture",
-            arguments: valid.arguments + ["--flag"],
+            arguments: valid.arguments + ["--network", "literal-network", "--name", "literal-name"],
             classification: .mutating,
             executableResolution: .resolvedByRuntimeExecutableResolver,
             mutationKind: .createMissingService,
             purpose: "fixture"
         )
-        XCTAssertThrowsError(try RuntimeCommandPolicy.validateCreateMissingServiceMutation(unsafeCommandToken)) { error in
-            XCTAssertTrue(String(describing: error).contains("command tokens beginning"))
+        XCTAssertNoThrow(
+            try RuntimeCommandPolicy.validateCreateMissingServiceMutation(
+                literalWorkloadArguments
+            )
+        )
+
+        var preImageArguments = valid.arguments
+        preImageArguments.insert("--network", at: imageIndex)
+        let unsupportedCreateOption = RuntimeCommandSpec(
+            executablePath: "/usr/bin/container-fixture",
+            arguments: preImageArguments,
+            classification: .mutating,
+            executableResolution: .resolvedByRuntimeExecutableResolver,
+            mutationKind: .createMissingService,
+            purpose: "fixture"
+        )
+        XCTAssertThrowsError(
+            try RuntimeCommandPolicy.validateCreateMissingServiceMutation(
+                unsupportedCreateOption
+            )
+        ) { error in
+            XCTAssertTrue(String(describing: error).contains("unsupported create option"))
         }
+    }
+
+    func testCreateMissingServiceMutationPolicyPermitsOnlyBoundedNonreservedUserLabels() throws {
+        func spec(labels: [String: String]) throws -> RuntimeCommandSpec {
+            try AppleContainerCommand.spec(
+                kind: .createContainer,
+                executable: ResolvedRuntimeExecutable(
+                    name: "container",
+                    path: "/usr/bin/container-fixture"
+                ),
+                desiredService: DesiredRuntimeService(
+                    identity: identity,
+                    image: desiredService.image,
+                    command: desiredService.command,
+                    labels: labels
+                ),
+                mutationContext: mutationContext
+            )
+        }
+
+        XCTAssertNoThrow(
+            try RuntimeCommandPolicy.validateCreateMissingServiceMutation(
+                spec(labels: ["com.example.role": "api"])
+            )
+        )
+        XCTAssertThrowsError(
+            try RuntimeCommandPolicy.validateCreateMissingServiceMutation(
+                spec(labels: ["dev.hostwright.unexpected": "true"])
+            )
+        )
+        XCTAssertThrowsError(
+            try RuntimeCommandPolicy.validateCreateMissingServiceMutation(
+                spec(
+                    labels: [
+                        "com.example.oversized":
+                            String(
+                                repeating: "x",
+                                count: RuntimeInventoryLimits.maximumStringBytes + 1
+                            )
+                    ]
+                )
+            )
+        )
     }
 
     func testCreateMissingServiceMutationPolicyRejectsTamperedOwnershipBinding() throws {
@@ -413,6 +476,33 @@ final class HostwrightRuntimeTests: XCTestCase {
         XCTAssertThrowsError(try RuntimeCommandPolicy.validateCreateMissingServiceMutation(duplicateName)) { error in
             XCTAssertTrue(String(describing: error).contains("exactly one"))
         }
+
+        var duplicateLabelArguments = valid.arguments
+        let firstLabelOptionIndex = try XCTUnwrap(
+            duplicateLabelArguments.firstIndex(of: "--label")
+        )
+        duplicateLabelArguments.insert(
+            contentsOf: [
+                "--label",
+                duplicateLabelArguments[firstLabelOptionIndex + 1]
+            ],
+            at: firstLabelOptionIndex + 2
+        )
+        let duplicateLabel = RuntimeCommandSpec(
+            executablePath: valid.executablePath,
+            arguments: duplicateLabelArguments,
+            classification: .mutating,
+            executableResolution: .resolvedByRuntimeExecutableResolver,
+            mutationKind: .createMissingService,
+            purpose: "duplicate label fixture"
+        )
+        XCTAssertThrowsError(
+            try RuntimeCommandPolicy.validateCreateMissingServiceMutation(
+                duplicateLabel
+            )
+        ) { error in
+            XCTAssertTrue(String(describing: error).contains("duplicate ownership label"))
+        }
     }
 
     func testManagedStartAndDeletePoliciesAcceptOnlyExactHostwrightContainers() {
@@ -435,7 +525,21 @@ final class HostwrightRuntimeTests: XCTestCase {
             mutationKind: .startManagedService,
             purpose: "fixture"
         )
-        XCTAssertThrowsError(try RuntimeCommandPolicy.validateStartManagedServiceMutation(attachedStart))
+        XCTAssertNoThrow(try RuntimeCommandPolicy.validateStartManagedServiceMutation(attachedStart))
+
+        let unsafeAttachedStart = RuntimeCommandSpec(
+            executablePath: "/usr/bin/container-fixture",
+            arguments: ["start", "--attach", "--debug", "hostwright-demo-api"],
+            classification: .mutating,
+            executableResolution: .resolvedByRuntimeExecutableResolver,
+            mutationKind: .startManagedService,
+            purpose: "fixture"
+        )
+        XCTAssertThrowsError(
+            try RuntimeCommandPolicy.validateStartManagedServiceMutation(
+                unsafeAttachedStart
+            )
+        )
 
         let forcedDelete = RuntimeCommandSpec(
             executablePath: "/usr/bin/container-fixture",
@@ -1033,6 +1137,103 @@ final class HostwrightRuntimeTests: XCTestCase {
         XCTAssertFalse(event.message.contains("fake-token"))
     }
 
+    func testAppleContainerApplyAdapterCompletionStartAttachesAndRequiresExitedObservation() async throws {
+        let resourceIdentifier = identity.managedResourceIdentifier
+        let exitedFixture = try containerListOutput(
+            identity: identity,
+            state: "stopped",
+            context: mutationContext,
+            startedDate: "2026-07-23T16:00:00Z"
+        )
+        let runner = RoutingRuntimeProcessRunner { spec in
+            if spec.arguments == ["start", "--attach", resourceIdentifier] {
+                return RuntimeCommandResult(
+                    spec: spec,
+                    exitStatus: 0,
+                    standardOutput: "completed",
+                    standardError: ""
+                )
+            }
+            if spec.arguments == ["list", "--all", "--format", "json"] {
+                return RuntimeCommandResult(
+                    spec: spec,
+                    exitStatus: 0,
+                    standardOutput: exitedFixture,
+                    standardError: ""
+                )
+            }
+            throw RuntimeAdapterError.commandRejected(
+                classification: spec.classification,
+                message: "unexpected command"
+            )
+        }
+        let adapter = AppleContainerApplyAdapter(
+            executableResolver: resolvedContainer,
+            processRunner: runner
+        )
+
+        _ = try await adapter.execute(
+            PlannedRuntimeAction(
+                kind: .start,
+                identity: identity,
+                resourceIdentifier: resourceIdentifier,
+                isDestructive: false,
+                requiresProcessCompletion: true,
+                summary: "start-and-complete"
+            ),
+            confirmation: mutationConfirmation(context: mutationContext)
+        )
+
+        XCTAssertEqual(
+            runner.calls.map(\.arguments),
+            [
+                ["start", "--attach", resourceIdentifier],
+                ["list", "--all", "--format", "json"]
+            ]
+        )
+    }
+
+    func testAppleContainerApplyAdapterCompletionStartRejectsFailedExit() async throws {
+        let resourceIdentifier = identity.managedResourceIdentifier
+        let runner = RoutingRuntimeProcessRunner { spec in
+            if spec.arguments == ["start", "--attach", resourceIdentifier] {
+                throw RuntimeAdapterError.commandFailed(
+                    exitStatus: 7,
+                    message: "init process failed",
+                    standardError: "exit 7"
+                )
+            }
+            throw RuntimeAdapterError.commandRejected(
+                classification: spec.classification,
+                message: "observation must not convert a failed exit into success"
+            )
+        }
+        let adapter = AppleContainerApplyAdapter(
+            executableResolver: resolvedContainer,
+            processRunner: runner
+        )
+
+        do {
+            _ = try await adapter.execute(
+                PlannedRuntimeAction(
+                    kind: .start,
+                    identity: identity,
+                    resourceIdentifier: resourceIdentifier,
+                    isDestructive: false,
+                    requiresProcessCompletion: true,
+                    summary: "start-and-complete"
+                ),
+                confirmation: mutationConfirmation(context: mutationContext)
+            )
+            XCTFail("Expected nonzero completion exit to fail.")
+        } catch let error as RuntimeAdapterError {
+            guard case .commandFailed(let status, _, _) = error else {
+                return XCTFail("Expected commandFailed, got \(error).")
+            }
+            XCTAssertEqual(status, 7)
+        }
+    }
+
     func testAppleContainerApplyAdapterDeletesOnlyExplicitDestructiveManagedContainer() async throws {
         let resourceIdentifier = identity.managedResourceIdentifier
         let runner = RoutingRuntimeProcessRunner { spec in
@@ -1071,6 +1272,7 @@ final class HostwrightRuntimeTests: XCTestCase {
     func testAppleContainerApplyAdapterRestartsManagedServiceWithStopThenStartOnly() async throws {
         let resourceIdentifier = identity.managedResourceIdentifier
         let observations = ObservationFixtureSequence(outputs: [
+            try containerListOutput(identity: identity, state: "running", context: mutationContext),
             try containerListOutput(identity: identity, state: "stopped", context: mutationContext),
             try containerListOutput(identity: identity, state: "running", context: mutationContext)
         ])
@@ -1096,6 +1298,7 @@ final class HostwrightRuntimeTests: XCTestCase {
         XCTAssertEqual(
             runner.calls.map(\.arguments),
             [
+                ["list", "--all", "--format", "json"],
                 ["stop", resourceIdentifier],
                 ["list", "--all", "--format", "json"],
                 ["start", resourceIdentifier],
@@ -1109,11 +1312,10 @@ final class HostwrightRuntimeTests: XCTestCase {
 
     func testAppleContainerApplyAdapterReportsPartialManagedRestartWhenStartFailsAfterStop() async throws {
         let resourceIdentifier = identity.managedResourceIdentifier
-        let stoppedFixture = try containerListOutput(
-            identity: identity,
-            state: "stopped",
-            context: mutationContext
-        )
+        let observations = ObservationFixtureSequence(outputs: [
+            try containerListOutput(identity: identity, state: "running", context: mutationContext),
+            try containerListOutput(identity: identity, state: "stopped", context: mutationContext)
+        ])
         let runner = RoutingRuntimeProcessRunner { spec in
             if spec.arguments == ["stop", resourceIdentifier] {
                 return RuntimeCommandResult(spec: spec, exitStatus: 0, standardOutput: "stopped", standardError: "")
@@ -1122,7 +1324,7 @@ final class HostwrightRuntimeTests: XCTestCase {
                 throw RuntimeAdapterError.commandFailed(exitStatus: 2, message: "start failed", standardError: "token=fake-token")
             }
             if spec.arguments == ["list", "--all", "--format", "json"] {
-                return RuntimeCommandResult(spec: spec, exitStatus: 0, standardOutput: stoppedFixture, standardError: "")
+                return RuntimeCommandResult(spec: spec, exitStatus: 0, standardOutput: observations.next(), standardError: "")
             }
             throw RuntimeAdapterError.commandRejected(classification: spec.classification, message: "unexpected command")
         }
@@ -1144,6 +1346,7 @@ final class HostwrightRuntimeTests: XCTestCase {
             XCTAssertEqual(
                 runner.calls.map(\.arguments),
                 [
+                    ["list", "--all", "--format", "json"],
                     ["stop", resourceIdentifier],
                     ["list", "--all", "--format", "json"],
                     ["start", resourceIdentifier]
@@ -1151,6 +1354,78 @@ final class HostwrightRuntimeTests: XCTestCase {
             )
         } catch {
             XCTFail("Unexpected error: \(error).")
+        }
+    }
+
+    func testAppleContainerApplyAdapterRestartsStoppedAndExitedServicesWithStartOnly() async throws {
+        let resourceIdentifier = identity.managedResourceIdentifier
+        let cases: [(name: String, startedDate: String?)] = [
+            ("stopped", nil),
+            ("exited", "2026-07-23T16:00:00Z")
+        ]
+
+        for fixture in cases {
+            let observations = ObservationFixtureSequence(outputs: [
+                try containerListOutput(
+                    identity: identity,
+                    state: "stopped",
+                    context: mutationContext,
+                    startedDate: fixture.startedDate
+                ),
+                try containerListOutput(
+                    identity: identity,
+                    state: "running",
+                    context: mutationContext
+                )
+            ])
+            let runner = RoutingRuntimeProcessRunner { spec in
+                if spec.arguments == ["start", resourceIdentifier] {
+                    return RuntimeCommandResult(
+                        spec: spec,
+                        exitStatus: 0,
+                        standardOutput: "started",
+                        standardError: ""
+                    )
+                }
+                if spec.arguments == ["list", "--all", "--format", "json"] {
+                    return RuntimeCommandResult(
+                        spec: spec,
+                        exitStatus: 0,
+                        standardOutput: observations.next(),
+                        standardError: ""
+                    )
+                }
+                throw RuntimeAdapterError.commandRejected(
+                    classification: spec.classification,
+                    message: "unexpected command"
+                )
+            }
+            let adapter = AppleContainerApplyAdapter(
+                executableResolver: resolvedContainer,
+                processRunner: runner
+            )
+
+            let event = try await adapter.execute(
+                PlannedRuntimeAction(
+                    kind: .restart,
+                    identity: identity,
+                    resourceIdentifier: resourceIdentifier,
+                    isDestructive: true,
+                    summary: "restart"
+                ),
+                confirmation: mutationConfirmation(context: mutationContext)
+            )
+
+            XCTAssertEqual(
+                runner.calls.map(\.arguments),
+                [
+                    ["list", "--all", "--format", "json"],
+                    ["start", resourceIdentifier],
+                    ["list", "--all", "--format", "json"]
+                ],
+                fixture.name
+            )
+            XCTAssertEqual(event.resourceIdentifier, resourceIdentifier, fixture.name)
         }
     }
 
@@ -1233,10 +1508,10 @@ final class HostwrightRuntimeTests: XCTestCase {
             )
             XCTFail("Expected unsupported subset failure.")
         } catch let error as RuntimeAdapterError {
-            guard case .commandRejected(classification: .mutating, message: let message) = error else {
-                return XCTFail("Expected commandRejected, got \(error).")
+            guard case .mutationUnavailableByPolicy(let message) = error else {
+                return XCTFail("Expected mutationUnavailableByPolicy, got \(error).")
             }
-            XCTAssertTrue(message.contains("mounts"))
+            XCTAssertTrue(message.contains("bind mounts"))
         } catch {
             XCTFail("Unexpected error: \(error).")
         }
@@ -1839,7 +2114,8 @@ final class HostwrightRuntimeTests: XCTestCase {
     private func containerListOutput(
         identity: RuntimeServiceIdentity,
         state: String,
-        context: RuntimeMutationContext
+        context: RuntimeMutationContext,
+        startedDate: String? = nil
     ) throws -> String {
         let resourceIdentifier = identity.managedResourceIdentifier
         var container = try structuredInventoryTemplate()[0]
@@ -1860,6 +2136,7 @@ final class HostwrightRuntimeTests: XCTestCase {
         configuration["image"] = image
         status["networks"] = []
         status["state"] = state
+        status["startedDate"] = startedDate
         container["configuration"] = configuration
         container["status"] = status
 

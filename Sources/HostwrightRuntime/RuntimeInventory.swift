@@ -523,7 +523,7 @@ public enum RuntimeInventoryBuilder {
         try cancellationCheck()
         let payload = RuntimeInventorySemanticPayload(
             machine: semantic.machine,
-            containers: semantic.containers,
+            containers: semantic.containers.map(excludingVolatileUsage),
             images: semantic.images,
             networks: semantic.networks,
             volumes: semantic.volumes
@@ -546,6 +546,28 @@ public enum RuntimeInventoryBuilder {
             networks: normalized.networks,
             volumes: normalized.volumes,
             semanticSHA256: digest
+        )
+    }
+
+    private static func excludingVolatileUsage(
+        _ container: RuntimeInventoryContainer
+    ) -> RuntimeInventoryContainer {
+        RuntimeInventoryContainer(
+            runtimeID: container.runtimeID,
+            name: container.name,
+            imageID: container.imageID,
+            imageReference: container.imageReference,
+            lifecycle: container.lifecycle,
+            health: container.health,
+            labels: container.labels,
+            ownership: container.ownership,
+            initConfiguration: container.initConfiguration,
+            ports: container.ports,
+            mounts: container.mounts,
+            networks: container.networks,
+            allocation: container.allocation,
+            usage: nil,
+            services: container.services
         )
     }
 

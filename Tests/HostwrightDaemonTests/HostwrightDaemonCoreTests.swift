@@ -456,7 +456,7 @@ final class HostwrightDaemonCoreTests: XCTestCase {
                 runtimeAdapter: adapter,
                 clock: ManualDaemonClock(),
                 instanceLock: ScriptedDaemonLock(),
-                readConfig: { _ in "project: demo\nservices:\n" },
+                readConfig: { _ in "version: 2\nproject: demo\nservices: {}\n" },
                 idGenerator: ids.next
             )
 

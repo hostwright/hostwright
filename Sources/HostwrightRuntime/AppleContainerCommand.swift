@@ -15,7 +15,7 @@ public enum AppleContainerCommand {
 
     public enum MutatingKind: Equatable, Sendable {
         case createContainer
-        case startContainer(containerID: String)
+        case startContainer(containerID: String, attach: Bool = false)
         case stopForManagedRestart(containerID: String)
         case startForManagedRestart(containerID: String)
         case deleteContainer(containerID: String)
@@ -59,6 +59,7 @@ public enum AppleContainerCommand {
         executable: ResolvedRuntimeExecutable,
         desiredService: DesiredRuntimeService,
         mutationContext: RuntimeMutationContext,
+        resourceIdentifier: String? = nil,
         timeout: RuntimeCommandTimeout = RuntimeCommandTimeout()
     ) throws -> RuntimeCommandSpec {
         RuntimeCommandSpec(
@@ -66,7 +67,8 @@ public enum AppleContainerCommand {
             arguments: try arguments(
                 for: kind,
                 desiredService: desiredService,
-                mutationContext: mutationContext
+                mutationContext: mutationContext,
+                resourceIdentifier: resourceIdentifier
             ),
             environment: inheritedSensitiveEnvironment(for: desiredService),
             sensitiveValues: desiredService.environment.filter(\.isSensitive).map(\.value),
@@ -84,6 +86,7 @@ public enum AppleContainerCommand {
         executable: ResolvedRuntimeExecutable,
         desiredService: DesiredRuntimeService,
         mutationContext: RuntimeMutationContext,
+        resourceIdentifier: String? = nil,
         timeout: RuntimeCommandTimeout = RuntimeCommandTimeout()
     ) throws -> RuntimeCommandSpec {
         RuntimeCommandSpec(
@@ -92,6 +95,7 @@ public enum AppleContainerCommand {
                 for: kind,
                 desiredService: desiredService,
                 mutationContext: mutationContext,
+                resourceIdentifier: resourceIdentifier,
                 codec: codec
             ),
             environment: inheritedSensitiveEnvironment(for: desiredService),
@@ -173,20 +177,55 @@ public enum AppleContainerCommand {
     public static func arguments(
         for kind: MutatingKind,
         desiredService: DesiredRuntimeService,
-        mutationContext: RuntimeMutationContext
+        mutationContext: RuntimeMutationContext,
+        resourceIdentifier: String? = nil
     ) throws -> [String] {
         switch kind {
         case .createContainer:
+            let resourceIdentifier =
+                resourceIdentifier ?? desiredService.identity.managedResourceIdentifier
+            guard RuntimeManagedResourceIdentity.isScopedCurrentIdentifier(
+                resourceIdentifier,
+                for: desiredService.identity
+            ) else {
+                throw RuntimeManagedResourceIdentityError.invalidMutationContext
+            }
             var arguments = [
                 "create",
                 "--name",
-                containerName(for: desiredService.identity)
+                resourceIdentifier
             ]
-            for (key, value) in try RuntimeManagedResourceIdentity.labels(
+            let ownershipLabels = try RuntimeManagedResourceIdentity.labels(
                 for: desiredService.identity,
+                resourceIdentifier: resourceIdentifier,
                 context: mutationContext
-            ).sorted(by: { $0.key < $1.key }) {
+            )
+            let labels = ownershipLabels.merging(desiredService.labels) { owned, _ in owned }
+            for (key, value) in labels.sorted(by: { $0.key < $1.key }) {
                 arguments += ["--label", "\(key)=\(value)"]
+            }
+            arguments += ["--os", desiredService.platformOperatingSystem]
+            arguments += ["--arch", desiredService.platformArchitecture]
+            if let cpuCount = desiredService.cpuCount {
+                arguments += ["--cpus", String(cpuCount)]
+            }
+            if let memoryBytes = desiredService.memoryBytes {
+                arguments += ["--memory", "\(memoryBytes)B"]
+            }
+            if let userID = desiredService.userID {
+                arguments += ["--uid", String(userID)]
+            }
+            if let groupID = desiredService.groupID {
+                arguments += ["--gid", String(groupID)]
+            }
+            if let workingDirectory = desiredService.workingDirectory {
+                arguments += ["--workdir", workingDirectory]
+            }
+            if let executable = desiredService.entrypoint.first {
+                arguments += ["--entrypoint", executable]
+            }
+            if desiredService.initProcess {
+                arguments.append("--init")
             }
             for value in desiredService.environment.sorted(by: { $0.name < $1.name }) {
                 let argument = value.isSensitive ? value.name : "\(value.name)=\(value.value)"
@@ -197,7 +236,23 @@ public enum AppleContainerCommand {
                     arguments += ["--publish", publishSpec(for: port, hostPort: hostPort)]
                 }
             }
+            for mount in desiredService.mounts.sorted(by: stableMountOrdering) {
+                arguments += ["--volume", volumeSpec(for: mount)]
+            }
+            if desiredService.readOnlyRootFilesystem {
+                arguments.append("--read-only")
+            }
+            if desiredService.rosetta {
+                arguments.append("--rosetta")
+            }
+            if desiredService.virtualization {
+                arguments.append("--virtualization")
+            }
+            if let sharedMemoryBytes = desiredService.sharedMemoryBytes {
+                arguments += ["--shm-size", "\(sharedMemoryBytes)B"]
+            }
             arguments.append(desiredService.image)
+            arguments += desiredService.entrypoint.dropFirst()
             arguments += desiredService.command
             return arguments
         case .startContainer, .stopForManagedRestart, .startForManagedRestart, .deleteContainer:
@@ -209,6 +264,7 @@ public enum AppleContainerCommand {
         for kind: MutatingKind,
         desiredService: DesiredRuntimeService,
         mutationContext: RuntimeMutationContext,
+        resourceIdentifier: String? = nil,
         codec: AppleContainerCLICodec
     ) throws -> [String] {
         switch codec {
@@ -216,7 +272,8 @@ public enum AppleContainerCommand {
             return try arguments(
                 for: kind,
                 desiredService: desiredService,
-                mutationContext: mutationContext
+                mutationContext: mutationContext,
+                resourceIdentifier: resourceIdentifier
             )
         }
     }
@@ -225,8 +282,10 @@ public enum AppleContainerCommand {
         switch kind {
         case .createContainer:
             return []
-        case .startContainer(let containerID):
-            return ["start", containerID]
+        case .startContainer(let containerID, let attach):
+            return attach
+                ? ["start", "--attach", containerID]
+                : ["start", containerID]
         case .stopForManagedRestart(let containerID):
             return ["stop", containerID]
         case .startForManagedRestart(let containerID):
@@ -282,8 +341,10 @@ public enum AppleContainerCommand {
         switch kind {
         case .createContainer:
             return "Create missing Hostwright-managed service."
-        case .startContainer(let containerID):
-            return "Start Hostwright-managed container \(containerID)."
+        case .startContainer(let containerID, let attach):
+            return attach
+                ? "Start Hostwright-managed container \(containerID) and require its init process to complete successfully."
+                : "Start Hostwright-managed container \(containerID)."
         case .stopForManagedRestart(let containerID):
             return "Stop Hostwright-managed container \(containerID) as the first managed restart step."
         case .startForManagedRestart(let containerID):
@@ -323,6 +384,19 @@ public enum AppleContainerCommand {
             rhs.bindAddress ?? "",
             rhs.protocolName.rawValue
         ].joined(separator: ":")
+    }
+
+    private static func stableMountOrdering(
+        _ lhs: RuntimeMountReference,
+        _ rhs: RuntimeMountReference
+    ) -> Bool {
+        [lhs.source, lhs.target, lhs.access.rawValue].joined(separator: ":") <
+            [rhs.source, rhs.target, rhs.access.rawValue].joined(separator: ":")
+    }
+
+    private static func volumeSpec(for mount: RuntimeMountReference) -> String {
+        let base = "\(mount.source):\(mount.target)"
+        return mount.access == .readOnly ? "\(base):ro" : base
     }
 
     private static func publishSpec(for port: RuntimePortMapping, hostPort: Int) -> String {

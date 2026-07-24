@@ -897,6 +897,53 @@ public actor ContainerizationHelperClient {
         return result.text
     }
 
+    public func logChunk(
+        _ resourceIdentifier: String,
+        lineLimit: Int,
+        cursor: UInt64?,
+        startAtEnd: Bool,
+        maximumBytes: Int = RuntimeStreamEnvelope.maximumChunkBytes
+    ) async throws -> ContainerizationHelperLogChunk {
+        guard (1...RuntimeStreamEnvelope.maximumChunkBytes).contains(maximumBytes),
+              cursor == nil || !startAtEnd else {
+            throw ContainerizationHelperClientError.invalidResponse
+        }
+        let snapshot = try await requireSnapshot()
+        let boundedLimit = min(max(1, lineLimit), RuntimeProviderConformanceLimits.maximumLogLines)
+        let result: ContainerizationHelperLogs = try await request(
+            operation: .logs,
+            capabilityDigest: snapshot.canonicalSHA256,
+            mutationContext: nil,
+            idempotencyKey: "logs-cursor/\(UUID().uuidString.lowercased())",
+            payload: ContainerizationHelperLogsRequest(
+                resourceIdentifier: resourceIdentifier,
+                lineLimit: boundedLimit,
+                cursor: cursor,
+                startAtEnd: startAtEnd,
+                maximumBytes: maximumBytes
+            )
+        )
+        guard result.resourceIdentifier == resourceIdentifier,
+              result.lineLimit == boundedLimit,
+              let cursorStart = result.cursorStart,
+              let cursorEnd = result.cursorEnd,
+              let atCurrentEnd = result.atCurrentEnd,
+              cursorEnd >= cursorStart,
+              cursorEnd - cursorStart <= UInt64(maximumBytes),
+              cursor.map({ cursorStart == $0 }) ?? true,
+              !startAtEnd || cursorStart == cursorEnd,
+              Data(result.text.utf8).count <= RuntimeProviderConformanceLimits.maximumLogBytes else {
+            throw ContainerizationHelperClientError.responseMismatch
+        }
+        return ContainerizationHelperLogChunk(
+            resourceIdentifier: result.resourceIdentifier,
+            text: result.text,
+            cursorStart: cursorStart,
+            cursorEnd: cursorEnd,
+            atCurrentEnd: atCurrentEnd
+        )
+    }
+
     public func create(
         _ payload: ContainerizationHelperCreatePayload,
         context: RuntimeMutationContext
@@ -1432,14 +1479,21 @@ public struct AppleContainerizationRuntimeAdapter: RuntimeAdapter {
         case .create:
             guard let service = action.desiredService,
                   service.identity == action.identity,
-                  action.resourceIdentifier == service.identity.managedResourceIdentifier else {
+                  RuntimeManagedResourceIdentity.isScopedCurrentIdentifier(
+                      action.resourceIdentifier,
+                      for: service.identity
+                  ) else {
                 throw RuntimeAdapterError.mutationUnavailableByPolicy(
                     "Containerization create requires the supported local-image lifecycle subset."
                 )
             }
             try RuntimeCreateSubsetPolicy.validate(service, providerID: .appleContainerization)
             let image = try await localImageEvidence(for: service.image)
-            let labels = try RuntimeManagedResourceIdentity.labels(for: action.identity, context: context)
+            let labels = try RuntimeManagedResourceIdentity.labels(
+                for: action.identity,
+                resourceIdentifier: action.resourceIdentifier,
+                context: context
+            )
                 .map { RuntimeInventoryLabel(key: $0.key, value: $0.value) }
                 .sorted { $0.key < $1.key }
             let result = try await translate {
@@ -1460,6 +1514,11 @@ public struct AppleContainerizationRuntimeAdapter: RuntimeAdapter {
             }
             return event(action, result: result, verb: "Created")
         case .start:
+            guard !action.requiresProcessCompletion else {
+                throw RuntimeAdapterError.mutationUnavailableByPolicy(
+                    "Containerization completion-aware start is unavailable because the helper cannot prove the init-process exit status."
+                )
+            }
             let result = try await translate {
                 try await client.start(mutationPayload(action, context: context), context: context)
             }

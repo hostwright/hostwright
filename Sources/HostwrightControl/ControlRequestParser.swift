@@ -13,7 +13,13 @@ public enum LocalControlRequestParser {
         "service",
         "severity",
         "limit",
-        "sort"
+        "sort",
+        "services",
+        "dryRun",
+        "confirmPlan",
+        "runtimeProvider",
+        "timeout",
+        "parallelism"
     ]
     private static let requiredKeys: Set<String> = ["apiVersion", "requestID", "operation"]
 
@@ -38,7 +44,7 @@ public enum LocalControlRequestParser {
         return request
     }
 
-    private static func validate(_ request: LocalControlRequest) throws {
+    static func validate(_ request: LocalControlRequest) throws {
         guard request.apiVersion == HostwrightContractVersions.controlAPI else {
             throw invalid("Local control API version \(request.apiVersion) is not supported.")
         }
@@ -63,19 +69,58 @@ public enum LocalControlRequestParser {
         if let limit = request.limit, !(1...1_000).contains(limit) {
             throw invalid("Local control event limit must be between 1 and 1000.")
         }
+        if let services = request.services {
+            guard !services.isEmpty,
+                  services.count <= 256,
+                  Set(services).count == services.count,
+                  services.allSatisfy(validServiceName) else {
+                throw invalid("Local control lifecycle services must contain 1-256 unique bounded identifiers.")
+            }
+        }
+        if let dryRun = request.dryRun, !dryRun {
+            throw invalid("Local control lifecycle dryRun, when present, must be true.")
+        }
+        if let confirmPlan = request.confirmPlan, !validSHA256(confirmPlan) {
+            throw invalid("Local control lifecycle confirmPlan must be an exact lowercase SHA-256.")
+        }
+        if let runtimeProvider = request.runtimeProvider,
+           !["auto", "apple-cli", "containerization"].contains(runtimeProvider) {
+            throw invalid("Local control lifecycle runtimeProvider supports only auto, apple-cli, or containerization.")
+        }
+        if let timeout = request.timeout, !(1...86_400).contains(timeout) {
+            throw invalid("Local control lifecycle timeout must be between 1 and 86400 seconds.")
+        }
+        if let parallelism = request.parallelism, !(1...32).contains(parallelism) {
+            throw invalid("Local control lifecycle parallelism must be between 1 and 32.")
+        }
 
         let hasEventOnlyFilters = request.eventType != nil || request.service != nil ||
             request.severity != nil || request.limit != nil || request.sort != nil
+        let hasLifecycleFields = request.services != nil || request.dryRun != nil ||
+            request.confirmPlan != nil || request.runtimeProvider != nil ||
+            request.timeout != nil || request.parallelism != nil
         switch request.operation {
         case .events:
-            break
+            guard !hasLifecycleFields else {
+                throw invalid("Local control events does not accept lifecycle fields.")
+            }
         case .recovery:
-            guard !hasEventOnlyFilters else {
+            guard !hasEventOnlyFilters, !hasLifecycleFields else {
                 throw invalid("Local control recovery accepts only the optional project filter.")
             }
         case .plan, .status, .doctor:
-            guard request.project == nil, !hasEventOnlyFilters else {
+            guard request.project == nil, !hasEventOnlyFilters, !hasLifecycleFields else {
                 throw invalid("This local control operation does not accept filters.")
+            }
+        case .up, .down, .run, .start, .stop, .restart, .rm, .update:
+            guard request.project == nil, !hasEventOnlyFilters else {
+                throw invalid("Local control lifecycle operations accept only lifecycle fields.")
+            }
+            guard (request.dryRun == true) != (request.confirmPlan != nil) else {
+                throw invalid("Local control lifecycle operations require exactly one of dryRun or confirmPlan.")
+            }
+            if request.operation == .run, request.services?.count != 1 {
+                throw invalid("Local control run requires exactly one service.")
             }
         }
     }
@@ -85,6 +130,17 @@ public enum LocalControlRequestParser {
         return !trimmed.isEmpty &&
             trimmed.count <= 128 &&
             !trimmed.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) })
+    }
+
+    private static func validServiceName(_ value: String) -> Bool {
+        value.range(
+            of: "^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,62}[A-Za-z0-9])?$",
+            options: .regularExpression
+        ) != nil
+    }
+
+    private static func validSHA256(_ value: String) -> Bool {
+        value.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil
     }
 
     private static func invalid(_ message: String) -> HostwrightDiagnostic {

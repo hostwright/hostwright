@@ -199,7 +199,13 @@ public enum RuntimeCommandPolicy {
             )
         }
 
-        let nameIndices = spec.arguments.indices.filter { spec.arguments[$0] == "--name" }
+        let imageIndex = try createImageIndex(in: spec)
+        let createArguments = spec.arguments.indices.filter {
+            $0 < imageIndex
+        }
+        let nameIndices = createArguments.filter {
+            spec.arguments[$0] == "--name"
+        }
         guard nameIndices.count == 1,
               let nameIndex = nameIndices.first,
               spec.arguments.indices.contains(spec.arguments.index(after: nameIndex)) else {
@@ -216,7 +222,7 @@ public enum RuntimeCommandPolicy {
             )
         }
 
-        let labels = try createLabels(in: spec)
+        let labels = try createLabels(in: spec, before: imageIndex)
         guard let identity = RuntimeManagedResourceIdentity.identity(from: labels),
               RuntimeManagedResourceIdentity.labelsMatch(
                   labels,
@@ -255,31 +261,26 @@ public enum RuntimeCommandPolicy {
         ]
         let expectedKeys = Set(RuntimeManagedResourceIdentity.labels(for: identity).keys)
             .union(ownershipKeys)
-        guard ownership != nil, Set(labels.keys) == expectedKeys else {
+        let hostwrightKeys = Set(
+            labels.keys.filter { $0.hasPrefix("dev.hostwright.") }
+        )
+        let userLabels = labels.filter {
+            !$0.key.hasPrefix("dev.hostwright.")
+        }
+        guard ownership != nil,
+              hostwrightKeys == expectedKeys,
+              labels.count <= RuntimeInventoryLimits.maximumLabelsPerResource,
+              userLabels.allSatisfy({
+                  !$0.key.isEmpty &&
+                      $0.key.utf8.count <= 128 &&
+                      $0.value.utf8.count <= RuntimeInventoryLimits.maximumStringBytes
+              }) else {
             throw RuntimeAdapterError.commandRejected(
                 classification: spec.classification,
                 message: "Create-missing-service command specs require complete ownership labels bound to the exact container identifier."
             )
         }
 
-        let rejectedCreateFlags = [
-            "--rm",
-            "--mount",
-            "--volume",
-            "--network",
-            "--dns",
-            "--privileged",
-            "--cap-add",
-            "--cap-drop"
-        ]
-        if spec.arguments.contains(where: { rejectedCreateFlags.contains($0) }) {
-            throw RuntimeAdapterError.commandRejected(
-                classification: spec.classification,
-                message: "Create-missing-service command spec contains an unsupported create option."
-            )
-        }
-
-        try validateCreateImageAndCommandTokens(spec)
     }
 
     public static func validateSupportedMutation(_ spec: RuntimeCommandSpec) throws {
@@ -301,16 +302,29 @@ public enum RuntimeCommandPolicy {
     }
 
     public static func validateStartManagedServiceMutation(_ spec: RuntimeCommandSpec) throws {
-        try validateResolvedMutatingSpec(spec, expectedKind: .startManagedService, commandName: "start-managed-service")
+        try validateResolvedMutatingSpecWithoutLifecycleVerbBlock(
+            spec,
+            expectedKind: .startManagedService,
+            commandName: "start-managed-service",
+            allowsAttach: true
+        )
 
-        guard spec.arguments.count == 2, spec.arguments.first == "start" else {
+        let identifier: String
+        if spec.arguments.count == 2,
+           spec.arguments[0] == "start" {
+            identifier = spec.arguments[1]
+        } else if spec.arguments.count == 3,
+                  spec.arguments[0] == "start",
+                  spec.arguments[1] == "--attach" {
+            identifier = spec.arguments[2]
+        } else {
             throw RuntimeAdapterError.commandRejected(
                 classification: spec.classification,
-                message: "Start-managed-service mutation accepts only 'start <hostwright-container-id>'."
+                message: "Start-managed-service mutation accepts only 'start <hostwright-container-id>' or completion-aware 'start --attach <hostwright-container-id>'."
             )
         }
 
-        guard RuntimeManagedResourceIdentity.isSupportedIdentifier(spec.arguments[1]) else {
+        guard RuntimeManagedResourceIdentity.isSupportedIdentifier(identifier) else {
             throw RuntimeAdapterError.commandRejected(
                 classification: spec.classification,
                 message: "Start-managed-service mutation requires an exact Hostwright-owned container identifier."
@@ -415,7 +429,8 @@ public enum RuntimeCommandPolicy {
     private static func validateResolvedMutatingSpecWithoutLifecycleVerbBlock(
         _ spec: RuntimeCommandSpec,
         expectedKind: RuntimeMutationCommandKind,
-        commandName: String
+        commandName: String,
+        allowsAttach: Bool = false
     ) throws {
         guard spec.executableResolution == .resolvedByRuntimeExecutableResolver else {
             throw RuntimeAdapterError.commandRejected(
@@ -459,7 +474,10 @@ public enum RuntimeCommandPolicy {
             "exec",
             "run"
         ]
-        if spec.arguments.contains(where: { forbiddenArguments.contains($0) }) {
+        if spec.arguments.contains(where: {
+            forbiddenArguments.contains($0) &&
+                (!allowsAttach || $0 != "--attach")
+        }) {
             throw RuntimeAdapterError.commandRejected(
                 classification: spec.classification,
                 message: "\(commandName) mutation command spec contains a forbidden argument."
@@ -467,12 +485,13 @@ public enum RuntimeCommandPolicy {
         }
     }
 
-    private static func validateCreateImageAndCommandTokens(_ spec: RuntimeCommandSpec) throws {
+    private static func createImageIndex(
+        in spec: RuntimeCommandSpec
+    ) throws -> Int {
         var index = 1
         while index < spec.arguments.count {
             let argument = spec.arguments[index]
-            switch argument {
-            case "--name", "--label", "--env", "--publish":
+            if createValueFlags.contains(argument) {
                 let valueIndex = index + 1
                 guard valueIndex < spec.arguments.count else {
                     throw RuntimeAdapterError.commandRejected(
@@ -481,22 +500,25 @@ public enum RuntimeCommandPolicy {
                     )
                 }
                 index += 2
-            default:
-                guard !argument.hasPrefix("-") else {
-                    throw RuntimeAdapterError.commandRejected(
-                        classification: spec.classification,
-                        message: "Create-missing-service image must not begin with '-'."
-                    )
-                }
-
-                for token in spec.arguments.dropFirst(index + 1) where token.hasPrefix("-") {
-                    throw RuntimeAdapterError.commandRejected(
-                        classification: spec.classification,
-                        message: "Create-missing-service command tokens beginning with '-' are not supported in this apply scope."
-                    )
-                }
-                return
+                continue
             }
+            if createSwitchFlags.contains(argument) {
+                index += 1
+                continue
+            }
+            if rejectedCreateFlags.contains(argument) {
+                throw RuntimeAdapterError.commandRejected(
+                    classification: spec.classification,
+                    message: "Create-missing-service command spec contains an unsupported create option."
+                )
+            }
+            guard !argument.hasPrefix("-") else {
+                throw RuntimeAdapterError.commandRejected(
+                    classification: spec.classification,
+                    message: "Create-missing-service contains an unsupported option before its image."
+                )
+            }
+            return index
         }
 
         throw RuntimeAdapterError.commandRejected(
@@ -505,35 +527,86 @@ public enum RuntimeCommandPolicy {
         )
     }
 
-    private static func createLabels(in spec: RuntimeCommandSpec) throws -> [String: String] {
+    private static func createLabels(
+        in spec: RuntimeCommandSpec,
+        before imageIndex: Int
+    ) throws -> [String: String] {
         var labels: [String: String] = [:]
         var index = 1
-        while index < spec.arguments.count {
+        while index < imageIndex {
             let argument = spec.arguments[index]
-            guard ["--name", "--label", "--env", "--publish"].contains(argument) else {
-                break
-            }
-            let valueIndex = index + 1
-            guard valueIndex < spec.arguments.count else {
-                throw RuntimeAdapterError.commandRejected(
-                    classification: spec.classification,
-                    message: "Create-missing-service command spec is missing a value for \(argument)."
-                )
-            }
-            if argument == "--label" {
-                let pair = spec.arguments[valueIndex].split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
-                guard pair.count == 2, !pair[0].isEmpty, labels[String(pair[0])] == nil else {
+            if createValueFlags.contains(argument) {
+                let valueIndex = index + 1
+                guard valueIndex < imageIndex else {
                     throw RuntimeAdapterError.commandRejected(
                         classification: spec.classification,
-                        message: "Create-missing-service command spec contains an invalid or duplicate ownership label."
+                        message: "Create-missing-service command spec is missing a value for \(argument)."
                     )
                 }
-                labels[String(pair[0])] = String(pair[1])
+                if argument == "--label" {
+                    let pair = spec.arguments[valueIndex].split(
+                        separator: "=",
+                        maxSplits: 1,
+                        omittingEmptySubsequences: false
+                    )
+                    guard pair.count == 2,
+                          !pair[0].isEmpty,
+                          labels[String(pair[0])] == nil else {
+                        throw RuntimeAdapterError.commandRejected(
+                            classification: spec.classification,
+                            message: "Create-missing-service command spec contains an invalid or duplicate ownership label."
+                        )
+                    }
+                    labels[String(pair[0])] = String(pair[1])
+                }
+                index += 2
+                continue
             }
-            index += 2
+            if createSwitchFlags.contains(argument) {
+                index += 1
+                continue
+            }
+            throw RuntimeAdapterError.commandRejected(
+                classification: spec.classification,
+                message: "Create-missing-service contains an unsupported option before its image."
+            )
         }
         return labels
     }
+
+    private static let createValueFlags: Set<String> = [
+        "--name",
+        "--label",
+        "--env",
+        "--publish",
+        "--os",
+        "--arch",
+        "--cpus",
+        "--memory",
+        "--uid",
+        "--gid",
+        "--workdir",
+        "--entrypoint",
+        "--volume",
+        "--shm-size"
+    ]
+
+    private static let createSwitchFlags: Set<String> = [
+        "--init",
+        "--read-only",
+        "--rosetta",
+        "--virtualization"
+    ]
+
+    private static let rejectedCreateFlags: Set<String> = [
+        "--rm",
+        "--mount",
+        "--network",
+        "--dns",
+        "--privileged",
+        "--cap-add",
+        "--cap-drop"
+    ]
 }
 
 public protocol RuntimeProcessRunning: Sendable {

@@ -21,7 +21,9 @@ Phase 01 established the breaking contracts and evidence system:
 
 Phase 02 qualification is complete. Its signed/notarized ZIP and `.pkg`, vendor tap, clean macOS 26 lifecycle, state, doctor, abrupt-power, and exact-cleanup gates passed.
 
-Phase 03 qualification is complete for the declared runtime-provider subset. Hostwright now has versioned structured codecs for Apple `container` 1.0.0 and 1.1.0, immutable capability negotiation, deterministic runtime inventory, normalized provider outcomes, stable provider IDs, an authenticated out-of-process Containerization 0.35.0 helper, cross-provider conformance, generation-bound provider migration, and upgrade/restart recovery. This evidence covers local-image-only create, start, managed restart, delete, bounded logs, resource usage, observation, timeout, and cancellation behavior; it does not claim the complete Phase 04 lifecycle, Phase 05 image/registry operations, networking, persistent storage, HA, Kubernetes/Docker compatibility, GUI, or GA qualification.
+Phase 03 qualification is complete for the declared runtime-provider subset. Hostwright now has versioned structured codecs for Apple `container` 1.0.0 and 1.1.0, immutable capability negotiation, deterministic runtime inventory, normalized provider outcomes, stable provider IDs, an authenticated out-of-process Containerization 0.35.0 helper, cross-provider conformance, generation-bound provider migration, and upgrade/restart recovery. That provider evidence remains the boundary beneath Phase 04; it does not claim Phase 05 image/registry operations, networking, persistent storage, HA, Kubernetes/Docker compatibility, GUI, or GA qualification.
+
+Phase 04 qualification is complete for the single-host application lifecycle. Manifest v2 now uses a strict source-aware Yams 6.2.2 boundary, maps every accepted workload field into executable desired state, and drives dependency-aware replicas through one durable schema-v7 operation DAG and saga. Confirmed `up`, `down`, `run`, `start`, `stop`, `restart`, `rm`, and `update` operations share that engine; `apply` is compatibility-routed through `up`. Bounded exec/attach/copy/export/inspect/stats/log-follow operations, typed probes, rolling/recreate updates, verified rollback, and resumable recovery are capability-gated through the selected runtime provider. Images must already exist locally. Named volumes, custom networks, registry behavior, and production secret-provider lifecycle remain owned by later phases.
 
 The authoritative scope and every limitation-to-implementation mapping are in the [v0.0.2 implementation plan](docs/roadmap/v0.0.2/IMPLEMENTATION_PLAN.md). The [machine-readable issue manifest](docs/roadmap/v0.0.2/issues.json) tracks one master, 15 epics, and 167 workstreams. No research-only, blocked, fixture-only, mock-only, or dirty result closes an implementation gate.
 
@@ -70,8 +72,12 @@ swift run hostwright migrate preview hostwright.yaml
 swift run hostwright validate
 swift run hostwright plan
 swift run hostwright status --runtime-provider auto
-swift run hostwright logs api
+swift run hostwright up hostwright.yaml --dry-run --output json
+swift run hostwright update hostwright.yaml --dry-run --output json
+swift run hostwright inspect api --manifest hostwright.yaml --output json
+swift run hostwright logs api hostwright.yaml --follow
 swift run hostwright events
+swift run hostwright recovery --output json
 swift run hostwright cleanup --dry-run
 swift run hostwright doctor
 swift run hostwrightd --foreground --config hostwright.yaml --max-iterations 1
@@ -79,7 +85,7 @@ swift run hostwrightd --foreground --config hostwright.yaml --max-iterations 1
 
 State-backed commands default to `~/Library/Application Support/Hostwright/state/state.sqlite`; `--state-db` remains an explicit override. Hostwright creates private `0700` directories, requires `0600` sensitive files, and safely migrates a compatible `~/.hostwright/state.sqlite` through a resumable journal. `hostwright state` provides full integrity reports, SQLite online backup, verified catalogs, confirmation-bound atomic restore, reconstruction-only repair, and interrupted-maintenance recovery. See [state-store architecture](docs/architecture/state-store.md), [CLI reference](docs/reference/cli.md), and [local paths](docs/reference/local-paths.md).
 
-The current mutation surface still requires plan/cleanup confirmation tokens. `hostwrightd` is not yet installed as a LaunchAgent and does not yet perform the Phase 08 unattended reconciliation contract.
+Lifecycle mutation still requires an exact plan confirmation; cleanup retains its separate exact token. `hostwrightd` is not yet installed as a LaunchAgent and does not yet perform the Phase 08 unattended reconciliation contract.
 
 ## Manifest v2
 
@@ -91,19 +97,30 @@ project: api-local
 
 services:
   api:
-    image: ghcr.io/example/api:latest
+    image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    replicas: 2
     ports:
       - "8080:8080"
+    probes:
+      readiness:
+        http:
+          port: 8080
+          path: /health
+        interval: 10s
+    update:
+      strategy: rolling
+      maxSurge: 1
+      maxUnavailable: 0
 ```
 
-The current parser remains a restricted YAML subset. Versionless and explicit v1 files are legacy input and fail execution with migration guidance. Preview a deterministic, non-writing conversion:
+The maintained parser accepts one UTF-8 YAML document up to 1 MiB, depth 64, and 100,000 nodes. It rejects duplicate keys, anchors, aliases, merge keys, custom tags, unknown fields, ambiguous scalar coercion, and multiple documents with stable source locations and manifest paths. Versionless and explicit v1 files are legacy input and fail execution with migration guidance. Preview a deterministic, non-writing conversion:
 
 ```bash
 hostwright migrate preview hostwright.yaml
 hostwright migrate preview hostwright.yaml --json
 ```
 
-The preview only upgrades the version contract today; Phase 04 owns the maintained YAML parser, complete executable workload schema, lifecycle semantics, and full semantic migration.
+Legacy `health` deterministically migrates to a typed liveness probe. Preview never writes the source, state, or runtime.
 
 ## Runtime and State Safety
 

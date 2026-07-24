@@ -212,12 +212,13 @@ public enum AppleContainerInventoryParser {
               validSemanticText(payload.configuration.platform.architecture),
               validSemanticText(payload.configuration.platform.os),
               payload.configuration.platform.variant.map(validSemanticText) ?? true,
+              payload.status.startedDate.map(validSemanticText) ?? true,
               payload.configuration.resources.cpuOverhead >= 0 else {
             throw RuntimeAdapterError.outputParseFailed(
                 "Apple container inventory contained conflicting or malformed container evidence."
             )
         }
-        let lifecycle = lifecycle(payload.status.state)
+        let lifecycle = lifecycle(payload.status)
         return RuntimeInventoryContainer(
             runtimeID: payload.id,
             name: payload.configuration.id,
@@ -614,13 +615,13 @@ public enum AppleContainerInventoryParser {
     }
 
     private static func lifecycle(
-        _ status: AppleContainerMachineStatus
+        _ status: ContainerStatusPayload
     ) -> RuntimeInventoryLifecycleState {
-        switch status {
+        switch status.state {
         case .running:
             return .running
         case .stopped:
-            return .stopped
+            return status.startedDate == nil ? .stopped : .exited
         case .unknown, .stopping:
             return .unknown
         }
@@ -837,6 +838,7 @@ private struct PlatformPayload: Decodable {
 private struct ContainerStatusPayload: Decodable {
     let state: AppleContainerMachineStatus
     let networks: [ObservedNetworkPayload]
+    let startedDate: String?
 }
 
 private struct ObservedNetworkPayload: Decodable {

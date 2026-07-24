@@ -275,7 +275,7 @@ final class HostwrightManifestTests: XCTestCase {
         )
     }
 
-    func testFlagLikeImageAndServiceCommandTokensFailValidation() {
+    func testFlagLikeImagesFailWhileCommandArgumentsRemainExecutable() throws {
         assertManifestFailure(
             """
             version: 2
@@ -298,7 +298,7 @@ final class HostwrightManifestTests: XCTestCase {
             contains: "image must not begin"
         )
 
-        assertManifestFailure(
+        let manifest = try ManifestValidator.validated(
             """
             version: 2
             project: api-local
@@ -306,9 +306,9 @@ final class HostwrightManifestTests: XCTestCase {
               api:
                 image: ghcr.io/example/api:latest
                 command: ["--flag"]
-            """,
-            contains: "command token"
+            """
         )
+        XCTAssertEqual(manifest.services[0].command, ["--flag"])
     }
 
     func testEnvironmentKeysAndUnsafeVolumesFailValidation() {
@@ -579,7 +579,7 @@ final class HostwrightManifestTests: XCTestCase {
         let version = try XCTUnwrap(properties["version"] as? [String: Any])
         XCTAssertEqual(version["const"] as? Int, HostwrightManifest.currentVersion)
         let project = try XCTUnwrap(properties["project"] as? [String: Any])
-        XCTAssertEqual(project["pattern"] as? String, #"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"#)
+        XCTAssertEqual(project["$ref"] as? String, "#/$defs/name")
         let imagePolicy = try XCTUnwrap(properties["imagePolicy"] as? [String: Any])
         XCTAssertEqual(imagePolicy["enum"] as? [String], ["allow-tags", "require-digest"])
         let services = try XCTUnwrap(properties["services"] as? [String: Any])
@@ -590,7 +590,15 @@ final class HostwrightManifestTests: XCTestCase {
         XCTAssertEqual(service["required"] as? [String], ["image"])
         XCTAssertEqual(service["additionalProperties"] as? Bool, false)
         let serviceProperties = try XCTUnwrap(service["properties"] as? [String: Any])
-        XCTAssertEqual(Set(serviceProperties.keys), ["image", "command", "env", "secretEnv", "ports", "volumes", "health", "restart"])
+        XCTAssertEqual(
+            Set(serviceProperties.keys),
+            [
+                "image", "replicas", "platform", "resources", "user", "group", "workdir",
+                "entrypoint", "command", "init", "dependsOn", "env", "secretEnv", "labels",
+                "ports", "volumes", "health", "probes", "restart", "update", "hooks",
+                "rosetta", "virtualization", "readOnlyRootFilesystem", "shmSize"
+            ]
+        )
         let image = try XCTUnwrap(serviceProperties["image"] as? [String: Any])
         XCTAssertEqual(image["minLength"] as? Int, 1)
         let imagePattern = try XCTUnwrap(image["pattern"] as? String)
@@ -601,11 +609,9 @@ final class HostwrightManifestTests: XCTestCase {
         XCTAssertFalse(matches("https://ghcr.io/example/api:latest", pattern: imagePattern))
         XCTAssertFalse(matches("-bad", pattern: imagePattern))
         let command = try XCTUnwrap(serviceProperties["command"] as? [String: Any])
-        let commandItems = try XCTUnwrap(command["items"] as? [String: Any])
-        XCTAssertEqual(commandItems["pattern"] as? String, #"^[^-].*$"#)
+        XCTAssertEqual(command["$ref"] as? String, "#/$defs/stringArray")
         let env = try XCTUnwrap(serviceProperties["env"] as? [String: Any])
-        let envPropertyNames = try XCTUnwrap(env["propertyNames"] as? [String: Any])
-        XCTAssertEqual(envPropertyNames["pattern"] as? String, #"^[A-Za-z_][A-Za-z0-9_]*$"#)
+        XCTAssertEqual(env["$ref"] as? String, "#/$defs/environment")
         let secretEnv = try XCTUnwrap(serviceProperties["secretEnv"] as? [String: Any])
         let secretEnvPropertyNames = try XCTUnwrap(secretEnv["propertyNames"] as? [String: Any])
         XCTAssertEqual(secretEnvPropertyNames["pattern"] as? String, #"^[A-Za-z_][A-Za-z0-9_]*$"#)
@@ -621,13 +627,19 @@ final class HostwrightManifestTests: XCTestCase {
         XCTAssertEqual(healthRef["$ref"] as? String, "#/$defs/health")
         let restartRef = try XCTUnwrap(serviceProperties["restart"] as? [String: Any])
         XCTAssertEqual(restartRef["$ref"] as? String, "#/$defs/restart")
+        let probesRef = try XCTUnwrap(serviceProperties["probes"] as? [String: Any])
+        XCTAssertEqual(probesRef["$ref"] as? String, "#/$defs/probes")
+        let updateRef = try XCTUnwrap(serviceProperties["update"] as? [String: Any])
+        XCTAssertEqual(updateRef["$ref"] as? String, "#/$defs/update")
+        let hooksRef = try XCTUnwrap(serviceProperties["hooks"] as? [String: Any])
+        XCTAssertEqual(hooksRef["$ref"] as? String, "#/$defs/hooks")
 
         let health = try XCTUnwrap(definitions["health"] as? [String: Any])
         XCTAssertEqual(health["required"] as? [String], ["command"])
         XCTAssertEqual(health["additionalProperties"] as? Bool, false)
         let healthProperties = try XCTUnwrap(health["properties"] as? [String: Any])
         let healthCommand = try XCTUnwrap(healthProperties["command"] as? [String: Any])
-        XCTAssertEqual(healthCommand["minItems"] as? Int, 1)
+        XCTAssertEqual(healthCommand["$ref"] as? String, "#/$defs/stringArray")
         let healthInterval = try XCTUnwrap(healthProperties["interval"] as? [String: Any])
         XCTAssertEqual(healthInterval["pattern"] as? String, #"^[1-9][0-9]*s$"#)
 
@@ -637,6 +649,14 @@ final class HostwrightManifestTests: XCTestCase {
         let restartProperties = try XCTUnwrap(restart["properties"] as? [String: Any])
         let restartPolicy = try XCTUnwrap(restartProperties["policy"] as? [String: Any])
         XCTAssertEqual(restartPolicy["enum"] as? [String], ["no", "on-failure", "unless-stopped"])
+
+        let probe = try XCTUnwrap(definitions["probe"] as? [String: Any])
+        XCTAssertEqual(probe["additionalProperties"] as? Bool, false)
+        XCTAssertEqual((probe["oneOf"] as? [[String: Any]])?.count, 3)
+        let update = try XCTUnwrap(definitions["update"] as? [String: Any])
+        XCTAssertEqual(update["additionalProperties"] as? Bool, false)
+        let hooks = try XCTUnwrap(definitions["hooks"] as? [String: Any])
+        XCTAssertEqual(hooks["additionalProperties"] as? Bool, false)
     }
 
     private func assertManifestFailure(_ text: String, code expectedCode: String? = nil, contains expectedText: String) {

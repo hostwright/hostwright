@@ -4,6 +4,13 @@ import Darwin
 import Foundation
 import HostwrightRuntime
 
+struct ContainerizationHelperLogSlice: Equatable, Sendable {
+    let data: Data
+    let startOffset: UInt64
+    let endOffset: UInt64
+    let atCurrentEnd: Bool
+}
+
 enum ContainerizationHelperPersistenceError: Error, Equatable {
     case pathMustBeAbsolute
     case pathNotNormalized
@@ -205,9 +212,77 @@ final class ContainerizationHelperStateStore: @unchecked Sendable {
             throw ContainerizationHelperPersistenceError.inputTooLarge
         }
         let data = try Data(contentsOf: fileURL, options: [.mappedIfSafe])
-        let text = String(decoding: data, as: UTF8.self)
-        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
-        return lines.suffix(lineLimit).joined(separator: "\n")
+        let start = Self.tailStart(in: data, lineLimit: lineLimit)
+        return String(decoding: data[start...], as: UTF8.self)
+    }
+
+    func readLogSlice(
+        resourceIdentifier: String,
+        lineLimit: Int,
+        cursor: UInt64?,
+        startAtEnd: Bool,
+        maximumBytes: Int
+    ) throws -> ContainerizationHelperLogSlice {
+        guard Self.validResourceIdentifier(resourceIdentifier),
+              (1...10_000).contains(lineLimit),
+              (1...RuntimeStreamEnvelope.maximumChunkBytes).contains(maximumBytes),
+              cursor == nil || !startAtEnd,
+              cursor.map({ $0 <= UInt64(Int.max) }) ?? true else {
+            throw ContainerizationHelperPersistenceError.invalidRecord
+        }
+
+        let fileURL = logURL(for: resourceIdentifier)
+        var metadata = stat()
+        if lstat(fileURL.path, &metadata) != 0 {
+            guard errno == ENOENT,
+                  cursor == nil || cursor == 0 else {
+                throw ContainerizationHelperPersistenceError.invalidRecord
+            }
+            return ContainerizationHelperLogSlice(
+                data: Data(),
+                startOffset: 0,
+                endOffset: 0,
+                atCurrentEnd: true
+            )
+        }
+        metadata = try Self.requirePrivateRegularFile(fileURL)
+        guard metadata.st_size >= 0,
+              metadata.st_size <= Self.maximumLogBytes else {
+            throw ContainerizationHelperPersistenceError.inputTooLarge
+        }
+
+        let data = try Data(contentsOf: fileURL, options: [.mappedIfSafe])
+        let start: Int
+        if startAtEnd {
+            start = data.count
+        } else if let cursor {
+            let value = Int(cursor)
+            guard value <= data.count else {
+                throw ContainerizationHelperPersistenceError.invalidRecord
+            }
+            start = value
+        } else {
+            start = Self.tailStart(in: data, lineLimit: lineLimit)
+        }
+
+        let lowerBound: Int
+        let upperBound: Int
+        if startAtEnd {
+            lowerBound = data.count
+            upperBound = data.count
+        } else if cursor == nil {
+            upperBound = data.count
+            lowerBound = max(start, upperBound - maximumBytes)
+        } else {
+            lowerBound = start
+            upperBound = min(data.count, start + maximumBytes)
+        }
+        return ContainerizationHelperLogSlice(
+            data: Data(data[lowerBound..<upperBound]),
+            startOffset: UInt64(lowerBound),
+            endOffset: UInt64(upperBound),
+            atCurrentEnd: upperBound == data.count
+        )
     }
 
     func removeLog(resourceIdentifier: String) throws {
@@ -308,6 +383,25 @@ final class ContainerizationHelperStateStore: @unchecked Sendable {
         SHA256.hash(data: Data(text.utf8))
             .map { String(format: "%02x", $0) }
             .joined()
+    }
+
+    private static func tailStart(in data: Data, lineLimit: Int) -> Int {
+        guard !data.isEmpty else { return 0 }
+        let bytes = [UInt8](data)
+        var boundary = bytes.last == 0x0a ? bytes.count - 1 : bytes.count
+        var remaining = lineLimit
+        while remaining > 0 {
+            guard boundary > 0,
+                  let newline = bytes[..<boundary].lastIndex(of: 0x0a) else {
+                return 0
+            }
+            remaining -= 1
+            if remaining == 0 {
+                return newline + 1
+            }
+            boundary = newline
+        }
+        return 0
     }
 
     private static func writeAll(_ data: Data, to descriptor: Int32) throws {

@@ -481,4 +481,58 @@ public struct OwnershipRepository: Sendable {
             }
         }
     }
+
+    public func removeExact(
+        resourceIdentifier: String,
+        runtimeAdapter: String,
+        expectedResourceUUID: String,
+        expectedFencingToken: String
+    ) throws -> Bool {
+        guard HostwrightResourceUUID.isValid(expectedResourceUUID),
+              HostwrightResourceUUID.isValid(expectedFencingToken) else {
+            throw StateStoreError.invalidRecord(
+                "Ownership removal requires exact valid resource and fencing UUIDs."
+            )
+        }
+        return try store.withValidatedConnection { connection in
+            try connection.transaction {
+                let matches = try connection.query(
+                    """
+                    SELECT id
+                    FROM ownership_records
+                    WHERE resource_identifier = ?
+                      AND runtime_adapter = ?
+                      AND resource_uuid = ?
+                      AND fencing_token = ?
+                    LIMIT 1
+                    """,
+                    bindings: [
+                        .text(resourceIdentifier),
+                        .text(runtimeAdapter),
+                        .text(expectedResourceUUID.lowercased()),
+                        .text(expectedFencingToken.lowercased())
+                    ]
+                )
+                guard matches.count == 1 else {
+                    return false
+                }
+                try connection.run(
+                    """
+                    DELETE FROM ownership_records
+                    WHERE resource_identifier = ?
+                      AND runtime_adapter = ?
+                      AND resource_uuid = ?
+                      AND fencing_token = ?
+                    """,
+                    bindings: [
+                        .text(resourceIdentifier),
+                        .text(runtimeAdapter),
+                        .text(expectedResourceUUID.lowercased()),
+                        .text(expectedFencingToken.lowercased())
+                    ]
+                )
+                return true
+            }
+        }
+    }
 }

@@ -142,10 +142,50 @@ public struct ContainerizationHelperResourceUsage: Codable, Equatable, Sendable 
 public struct ContainerizationHelperLogsRequest: Codable, Equatable, Sendable {
     public let resourceIdentifier: String
     public let lineLimit: Int
+    public let cursor: UInt64?
+    public let startAtEnd: Bool
+    public let maximumBytes: Int?
 
-    public init(resourceIdentifier: String, lineLimit: Int) {
+    public init(
+        resourceIdentifier: String,
+        lineLimit: Int,
+        cursor: UInt64? = nil,
+        startAtEnd: Bool = false,
+        maximumBytes: Int? = nil
+    ) {
         self.resourceIdentifier = resourceIdentifier
         self.lineLimit = lineLimit
+        self.cursor = cursor
+        self.startAtEnd = startAtEnd
+        self.maximumBytes = maximumBytes
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case resourceIdentifier
+        case lineLimit
+        case cursor
+        case startAtEnd
+        case maximumBytes
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        resourceIdentifier = try values.decode(String.self, forKey: .resourceIdentifier)
+        lineLimit = try values.decode(Int.self, forKey: .lineLimit)
+        cursor = try values.decodeIfPresent(UInt64.self, forKey: .cursor)
+        startAtEnd = try values.decodeIfPresent(Bool.self, forKey: .startAtEnd) ?? false
+        maximumBytes = try values.decodeIfPresent(Int.self, forKey: .maximumBytes)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(resourceIdentifier, forKey: .resourceIdentifier)
+        try values.encode(lineLimit, forKey: .lineLimit)
+        try values.encodeIfPresent(cursor, forKey: .cursor)
+        if startAtEnd {
+            try values.encode(true, forKey: .startAtEnd)
+        }
+        try values.encodeIfPresent(maximumBytes, forKey: .maximumBytes)
     }
 }
 
@@ -153,11 +193,46 @@ public struct ContainerizationHelperLogs: Codable, Equatable, Sendable {
     public let resourceIdentifier: String
     public let text: String
     public let lineLimit: Int
+    public let cursorStart: UInt64?
+    public let cursorEnd: UInt64?
+    public let atCurrentEnd: Bool?
 
-    public init(resourceIdentifier: String, text: String, lineLimit: Int) {
+    public init(
+        resourceIdentifier: String,
+        text: String,
+        lineLimit: Int,
+        cursorStart: UInt64? = nil,
+        cursorEnd: UInt64? = nil,
+        atCurrentEnd: Bool? = nil
+    ) {
         self.resourceIdentifier = resourceIdentifier
         self.text = RuntimeRedactionPolicy.default.redact(text)
         self.lineLimit = lineLimit
+        self.cursorStart = cursorStart
+        self.cursorEnd = cursorEnd
+        self.atCurrentEnd = atCurrentEnd
+    }
+}
+
+public struct ContainerizationHelperLogChunk: Equatable, Sendable {
+    public let resourceIdentifier: String
+    public let text: String
+    public let cursorStart: UInt64
+    public let cursorEnd: UInt64
+    public let atCurrentEnd: Bool
+
+    public init(
+        resourceIdentifier: String,
+        text: String,
+        cursorStart: UInt64,
+        cursorEnd: UInt64,
+        atCurrentEnd: Bool
+    ) {
+        self.resourceIdentifier = resourceIdentifier
+        self.text = RuntimeRedactionPolicy.default.redact(text)
+        self.cursorStart = cursorStart
+        self.cursorEnd = cursorEnd
+        self.atCurrentEnd = atCurrentEnd
     }
 }
 
@@ -293,6 +368,8 @@ public enum ContainerizationHelperServiceError: Error, Equatable, Sendable {
     case mutationIdentityMismatch
     case imageNotLocal
     case invalidLineLimit
+    case invalidLogCursor
+    case invalidLogByteLimit
     case invalidText
     case shuttingDown
 }
@@ -387,6 +464,17 @@ public actor ContainerizationHelperDispatcher {
                     try Self.requireText(request.payload.resourceIdentifier)
                     guard (1...10_000).contains(request.payload.lineLimit) else {
                         throw ContainerizationHelperServiceError.invalidLineLimit
+                    }
+                    if let cursor = request.payload.cursor,
+                       cursor > UInt64(Int.max) {
+                        throw ContainerizationHelperServiceError.invalidLogCursor
+                    }
+                    guard request.payload.cursor == nil || !request.payload.startAtEnd else {
+                        throw ContainerizationHelperServiceError.invalidLogCursor
+                    }
+                    if let maximumBytes = request.payload.maximumBytes,
+                       !(1...RuntimeStreamEnvelope.maximumChunkBytes).contains(maximumBytes) {
+                        throw ContainerizationHelperServiceError.invalidLogByteLimit
                     }
                 },
                 action: { [backend] request in try await backend.logs(request.payload) }

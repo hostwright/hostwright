@@ -6,20 +6,24 @@ Reconciliation is the loop that compares desired state with observed state and p
 
 1. Load desired state.
 2. Observe runtime state through `RuntimeAdapter`.
-3. Compute drift.
-4. Produce a dry-run plan.
-5. Apply only through the confirmed single-action persistence gate.
-6. Record events.
+3. Bind the immutable provider capability digest and compute drift.
+4. Compile a canonical dependency DAG with preconditions, postconditions, timeouts, idempotency keys, and compensation.
+5. Persist complete schema-v7 intent before the first external effect.
+6. Execute ready nodes with deterministic bounded parallelism.
+7. Re-observe and persist verification after each mutation wave.
+8. Complete, compensate, resume, or enter a precise safe hold.
 
 ## Current State
 
-Hostwright has a deterministic planner. It maps the supported `hostwright.yaml` manifest subset to runtime-shaped desired state, accepts optional `RuntimeAdapter`-shaped observed state, runs planning policy checks, and emits typed drift records, typed issues, typed planned actions, and a deterministic plan hash.
+Hostwright maps strict Manifest v2 into executable desired state and compiles `up`, `down`, `run`, `start`, `stop`, `restart`, `rm`, and `update` into `LifecyclePlan v1`. Plans bind manifest, observation, capability, provider, project generation, resource UUID, and fence digests and have a stable topological order.
 
 `hostwright plan` still does not perform live runtime observation by default. It renders desired-state and policy diagnostics and states that runtime observation is not connected in the CLI path.
 
-`hostwright apply` is separate from `hostwright plan`. Apply recomputes the observed plan, requires a matching `--confirm-plan` hash, persists intent before mutation, and executes exactly one executable action: `createMissingService`, restart-policy-allowed `startManagedService`, or restart-policy-allowed `restartManagedService`.
+Lifecycle dry-runs observe without acquiring a mutation group and return the exact confirmation hash. Confirmed execution re-observes, rejects a stale hash before mutation, acquires one operation group per project, and persists canonical intent plus precomputed compensation before calling a provider. `hostwright apply` is a compatibility entry point for the same confirmed `up` engine, not a separate executor.
 
-Cleanup is separate from apply. It requires dry-run token confirmation and deletes only exact cleanup-eligible Hostwright-owned stopped/created/exited containers. There is no rollback, multi-action apply, broad cleanup, or unattended daemon mutation.
+Replicas and service dependencies expand into deterministic nodes. `started`, `ready`, and `completed` dependencies gate subsequent work; scale-down and removal use safe reverse order. Repeated desired state emits no mutation. Rolling and recreate updates keep the prior revision until the candidate satisfies startup and readiness gates. Failure restores the prior verified revision only when every inverse effect and ownership identity is provable; otherwise recovery records a safe hold.
+
+Node starts, attempts, provider results, observations, health results, and checkpoints are durable. After timeout, cancellation, crash, or ambiguous provider output, Hostwright observes before deciding whether to retry, compensate, or hold. Retry is capped at three attempts and allowed only by normalized retry safety.
 
 `hostwrightd --foreground` runs a non-mutating reconciliation loop. It reads the explicit config path, observes through `RuntimeAdapter`, computes a plan, and records daemon events and operation records to the selected state database (Application Support by default). It does not call `RuntimeAdapter.execute`.
 
@@ -38,7 +42,7 @@ The planner detects:
 - unsupported unknown observed lifecycle state;
 - unavailable observation.
 
-Only `createMissingService`, restart-policy-allowed `proposeStartStoppedService`, and restart-policy-allowed `restartManagedService` can be marked executable. Every other action remains unavailable.
+The lifecycle planner also detects replica, dependency, revision, probe, and ownership/fence drift. It rejects named volumes, custom networks, unavailable secrets, unavailable architecture/Apple options, and missing local images before external mutation.
 
 ## Correctness Requirements
 
@@ -47,7 +51,10 @@ Only `createMissingService`, restart-policy-allowed `proposeStartStoppedService`
 - Drift must be explainable.
 - Plan rendering must not expose raw secrets.
 - Mutation must require plan-hash confirmation.
-- Operation intent must be persisted before mutation.
+- Complete intent and compensation must be persisted before mutation.
 - Failures must be observable through events.
-- Managed restart must require Hostwright ownership, live observed running state, fresh persisted unhealthy health state, and recovery records.
-- Cleanup must require ownership records, live observation, non-running lifecycle, dry-run token confirmation, and exact resource identifiers.
+- Every external effect must use exact UUID-backed ownership, project generation, provider generation, and fence validation.
+- Ambiguous effects must be re-observed before retry, compensation, or return.
+- Readiness must gate dependency release and rollout promotion; liveness restarts remain bounded by policy.
+- Removal must verify exact runtime absence before deleting ownership state.
+- Unmanaged collisions and later-phase capability gaps must fail before mutation.

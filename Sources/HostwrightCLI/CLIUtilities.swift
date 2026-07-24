@@ -725,6 +725,27 @@ enum CLIJSON {
         ].compactNilValues())
     }
 
+    static func recoveryExecution(
+        action: LifecyclePersistedRecoveryAction,
+        stateDatabasePath: String,
+        result: LifecycleSagaExecutionResult
+    ) -> String {
+        render([
+            "kind": "recovery-execution",
+            "action": action == .resume ? "resume" : "rollback",
+            "stateDatabasePath": stateDatabasePath,
+            "operationID": result.operationID,
+            "groupID": result.groupID,
+            "planSHA256": result.planSHA256,
+            "status": result.status.rawValue,
+            "checkpoint": result.checkpoint,
+            "completedNodeKeys": result.completedNodeKeys,
+            "recoveryHint": RuntimeRedactionPolicy.default.redact(
+                result.recoveryHintRedacted
+            )
+        ])
+    }
+
     static func statusObserved(
         manifestPath: String,
         stateDatabasePath: String,

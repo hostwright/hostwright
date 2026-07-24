@@ -57,6 +57,27 @@ final class HostwrightCLITests: XCTestCase {
             .logs(serviceName: "api", path: "hostwright.yaml", tail: 25, stateDatabasePath: "/tmp/state.sqlite")
         )
         XCTAssertEqual(
+            try CLICommand.parse(arguments: [
+                "logs", "api", "/tmp/hostwright.yaml", "--follow", "--tail", "25",
+                "--state-db", "/tmp/state.sqlite", "--runtime-provider", "apple-cli",
+                "--timeout", "45", "--output", "json"
+            ]),
+            .interactive(
+                options: InteractiveCLIOptions(
+                    command: .logsFollow,
+                    manifestPath: "/tmp/hostwright.yaml",
+                    serviceName: "api",
+                    stateDatabasePath: "/tmp/state.sqlite",
+                    runtimeProvider: .appleCLI,
+                    timeoutSeconds: 45,
+                    output: .json,
+                    terminal: false,
+                    forwardsStandardInput: false,
+                    tail: 25
+                )
+            )
+        )
+        XCTAssertEqual(
             try CLICommand.parse(arguments: ["events", "--state-db", "/tmp/state.sqlite", "--project", "demo"]),
             .events(stateDatabasePath: "/tmp/state.sqlite", projectName: "demo", filters: EventFilters(), output: .text)
         )
@@ -75,7 +96,55 @@ final class HostwrightCLITests: XCTestCase {
         )
         XCTAssertEqual(
             try CLICommand.parse(arguments: ["recovery", "--state-db", "/tmp/state.sqlite", "--project", "demo", "--output", "json"]),
-            .recovery(stateDatabasePath: "/tmp/state.sqlite", projectName: "demo", output: .json)
+            .recovery(
+                action: .inspect,
+                stateDatabasePath: "/tmp/state.sqlite",
+                projectName: "demo",
+                output: .json
+            )
+        )
+        let recoveryGroupID = "11111111-1111-4111-8111-111111111111"
+        let recoveryPlanSHA256 = String(repeating: "a", count: 64)
+        XCTAssertEqual(
+            try CLICommand.parse(
+                arguments: [
+                    "recovery", "resume",
+                    "--group", recoveryGroupID,
+                    "--confirm-plan", recoveryPlanSHA256,
+                    "--timeout", "45",
+                    "--state-db", "/tmp/state.sqlite",
+                    "--output", "json"
+                ]
+            ),
+            .recovery(
+                action: .resume(
+                    groupID: recoveryGroupID,
+                    confirmationPlanSHA256: recoveryPlanSHA256,
+                    timeoutSeconds: 45
+                ),
+                stateDatabasePath: "/tmp/state.sqlite",
+                projectName: nil,
+                output: .json
+            )
+        )
+        XCTAssertEqual(
+            try CLICommand.parse(
+                arguments: [
+                    "recovery", "rollback",
+                    "--group", recoveryGroupID,
+                    "--confirm-plan", recoveryPlanSHA256
+                ]
+            ),
+            .recovery(
+                action: .rollback(
+                    groupID: recoveryGroupID,
+                    confirmationPlanSHA256: recoveryPlanSHA256,
+                    timeoutSeconds: 120
+                ),
+                stateDatabasePath: nil,
+                projectName: nil,
+                output: .text
+            )
         )
         XCTAssertEqual(
             try CLICommand.parse(arguments: ["cleanup", "--state-db", "/tmp/state.sqlite", "--dry-run"]),
@@ -116,6 +185,28 @@ final class HostwrightCLITests: XCTestCase {
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["import-stack"]))
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["import-stack", "compose.yaml", "--write"]))
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["events", "--state-db", "/tmp/state.sqlite", "--sort", "newest"]))
+        XCTAssertThrowsError(try CLICommand.parse(arguments: ["recovery", "resume"]))
+        XCTAssertThrowsError(
+            try CLICommand.parse(
+                arguments: [
+                    "recovery", "resume",
+                    "--group", "not-a-uuid",
+                    "--confirm-plan", String(repeating: "a", count: 64)
+                ]
+            )
+        )
+        XCTAssertThrowsError(
+            try CLICommand.parse(
+                arguments: [
+                    "recovery", "rollback",
+                    "--group", "11111111-1111-4111-8111-111111111111",
+                    "--confirm-plan", "not-a-digest"
+                ]
+            )
+        )
+        XCTAssertThrowsError(
+            try CLICommand.parse(arguments: ["recovery", "--timeout", "30"])
+        )
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["diagnostics", "--state-db", "/tmp/state.sqlite"]))
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["status", "--runtime-provider", "other"]))
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["status", "--runtime-provider", "auto", "--runtime-provider", "apple-cli"]))
@@ -396,13 +487,36 @@ final class HostwrightCLITests: XCTestCase {
 
     func testHelpDocumentsOutputModesAndExamples() {
         let result = HostwrightCLI.run(arguments: ["--help"], environment: environment(files: FileBox()))
+        let usageFailure = HostwrightCLI.run(arguments: ["unknown"], environment: environment(files: FileBox()))
 
         XCTAssertEqual(result.exitCode, 0)
         XCTAssertEqual(result.standardError, "")
+        XCTAssertEqual(usageFailure.exitCode, CLIExitCode.commandUsage.rawValue)
         XCTAssertTrue(result.standardOutput.contains("hostwright plan [path] [--output text|json]"))
         XCTAssertTrue(result.standardOutput.contains("hostwright import-stack <path> [--output text|json]"))
         XCTAssertTrue(result.standardOutput.contains("hostwright status [path] [--state-db <path>] [--output text|json]"))
+        for command in ["up", "down", "run", "start", "stop", "restart", "rm", "update"] {
+            XCTAssertTrue(
+                result.standardOutput.contains("hostwright \(command) [path]"),
+                "Missing lifecycle command \(command) from help."
+            )
+        }
+        for command in ["exec", "attach", "copy", "export", "inspect", "stats", "logs"] {
+            for usage in [result.standardOutput, usageFailure.standardError] {
+                XCTAssertTrue(
+                    usage.contains("hostwright \(command) "),
+                    "Missing interactive command \(command) from usage."
+                )
+            }
+        }
+        XCTAssertTrue(
+            result.standardOutput.contains(
+                "Every lifecycle command supports --json or --output json."
+            )
+        )
         XCTAssertTrue(result.standardOutput.contains("hostwright recovery [--state-db <path>] [--project <name>] [--output text|json]"))
+        XCTAssertTrue(result.standardOutput.contains("hostwright recovery resume --group <uuid> --confirm-plan <hash>"))
+        XCTAssertTrue(result.standardOutput.contains("hostwright recovery rollback --group <uuid> --confirm-plan <hash>"))
         XCTAssertTrue(result.standardOutput.contains("hostwright diagnostics [--state-db <path>] --bundle <path>"))
         XCTAssertTrue(result.standardOutput.contains("hostwright extension check --declaration <absolute-path> --executable <absolute-path> [--output text|json]"))
         XCTAssertTrue(result.standardOutput.contains("hostwright capabilities [--json|--output text|json]"))
@@ -880,7 +994,7 @@ final class HostwrightCLITests: XCTestCase {
 
         let invalidManifest = HostwrightCLI.run(
             arguments: ["plan", "--output", "json"],
-            environment: environment(files: FileBox(files: [HostwrightIdentity.manifestFileName: "project: demo\nservices:\n  api:\n"]))
+            environment: environment(files: FileBox(files: [HostwrightIdentity.manifestFileName: "version: 2\nproject: demo\nservices: {}\n"]))
         )
 
         XCTAssertEqual(invalidManifest.exitCode, CLIExitCode.validation.rawValue)

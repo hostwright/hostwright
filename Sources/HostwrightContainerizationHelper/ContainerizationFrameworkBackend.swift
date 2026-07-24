@@ -167,6 +167,23 @@ actor ContainerizationFrameworkBackend: ContainerizationHelperBackend {
         guard records[request.resourceIdentifier] != nil else {
             throw ContainerizationHelperBackendError.rejected("resource is not managed")
         }
+        if request.cursor != nil || request.startAtEnd || request.maximumBytes != nil {
+            let slice = try store.readLogSlice(
+                resourceIdentifier: request.resourceIdentifier,
+                lineLimit: request.lineLimit,
+                cursor: request.cursor,
+                startAtEnd: request.startAtEnd,
+                maximumBytes: request.maximumBytes ?? RuntimeStreamEnvelope.maximumChunkBytes
+            )
+            return ContainerizationHelperLogs(
+                resourceIdentifier: request.resourceIdentifier,
+                text: String(decoding: slice.data, as: UTF8.self),
+                lineLimit: request.lineLimit,
+                cursorStart: slice.startOffset,
+                cursorEnd: slice.endOffset,
+                atCurrentEnd: slice.atCurrentEnd
+            )
+        }
         return ContainerizationHelperLogs(
             resourceIdentifier: request.resourceIdentifier,
             text: try store.readLog(

@@ -220,9 +220,12 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
             throw RuntimeAdapterError.mutationUnavailableByPolicy("Create-missing-service requires desired runtime service details.")
         }
         guard action.identity == desiredService.identity,
-              action.resourceIdentifier == desiredService.identity.managedResourceIdentifier else {
+              RuntimeManagedResourceIdentity.isScopedCurrentIdentifier(
+                  action.resourceIdentifier,
+                  for: desiredService.identity
+              ) else {
             throw RuntimeAdapterError.mutationUnavailableByPolicy(
-                "Create-missing-service requires an action identity and exact versioned identifier bound to the desired service."
+                "Create-missing-service requires an action identity and scoped versioned identifier bound to the desired service."
             )
         }
         try RuntimeCreateSubsetPolicy.validate(desiredService, providerID: .appleContainerCLI)
@@ -246,7 +249,8 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
             codec: codec,
             executable: executable,
             desiredService: desiredService,
-            mutationContext: context
+            mutationContext: context,
+            resourceIdentifier: action.resourceIdentifier
         )
         try RuntimeCommandPolicy.validateCreateMissingServiceMutation(createSpec)
         let result = try await runRedacted(createSpec)
@@ -279,7 +283,10 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
             throw RuntimeAdapterError.mutationUnavailableByPolicy("Start-managed-service requires an exact supported Hostwright resource identifier.")
         }
         let spec = AppleContainerCommand.spec(
-            kind: .startContainer(containerID: containerID),
+            kind: .startContainer(
+                containerID: containerID,
+                attach: action.requiresProcessCompletion
+            ),
             codec: codec,
             executable: executable
         )
@@ -288,7 +295,7 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
         try codec.discardMutationOutput(result.standardOutput)
         try await verifyMutation(
             action,
-            expected: .running,
+            expected: action.requiresProcessCompletion ? .exited : .running,
             context: context,
             codec: codec,
             executable: executable
@@ -318,21 +325,40 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
         guard RuntimeManagedResourceIdentity.isSupportedIdentifier(containerID) else {
             throw RuntimeAdapterError.mutationUnavailableByPolicy("Restart-managed-service requires an exact supported Hostwright resource identifier.")
         }
-        let stopSpec = AppleContainerCommand.spec(
-            kind: .stopForManagedRestart(containerID: containerID),
-            codec: codec,
-            executable: executable
-        )
-        try RuntimeCommandPolicy.validateRestartManagedServiceMutation(stopSpec)
-        let stopResult = try await runRedacted(stopSpec)
-        try codec.discardMutationOutput(stopResult.standardOutput)
-        try await verifyMutation(
+        let initialLifecycle = try await exactOwnedLifecycle(
             action,
-            expected: .stopped,
-            context: context,
-            codec: codec,
-            executable: executable
+            context: context
         )
+        let stoppedByRestart: Bool
+        switch initialLifecycle {
+        case .running:
+            let stopSpec = AppleContainerCommand.spec(
+                kind: .stopForManagedRestart(containerID: containerID),
+                codec: codec,
+                executable: executable
+            )
+            try RuntimeCommandPolicy.validateRestartManagedServiceMutation(stopSpec)
+            let stopResult = try await runRedacted(stopSpec)
+            try codec.discardMutationOutput(stopResult.standardOutput)
+            try await verifyMutation(
+                action,
+                expected: .stopped,
+                context: context,
+                codec: codec,
+                executable: executable
+            )
+            stoppedByRestart = true
+        case .created, .stopped, .exited:
+            stoppedByRestart = false
+        case .missing, .none:
+            throw RuntimeAdapterError.outputParseFailed(
+                "Structured pre-restart observation did not find the exact owned resource."
+            )
+        case .failed, .unknown:
+            throw RuntimeAdapterError.outputParseFailed(
+                "Structured pre-restart observation returned an ambiguous lifecycle state."
+            )
+        }
 
         let startSpec = AppleContainerCommand.spec(
             kind: .startForManagedRestart(containerID: containerID),
@@ -352,7 +378,10 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
                 executable: executable
             )
         } catch {
-            throw managedRestartStartFailedAfterStop(error)
+            if stoppedByRestart {
+                throw managedRestartStartFailedAfterStop(error)
+            }
+            throw error
         }
 
         return RuntimeEvent(
@@ -424,6 +453,7 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
         case present
         case running
         case stopped
+        case exited
         case absent
     }
 
@@ -434,6 +464,34 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
         codec: AppleContainerCLICodec,
         executable: ResolvedRuntimeExecutable
     ) async throws {
+        let lifecycle = try await exactOwnedLifecycle(
+            action,
+            context: context
+        )
+        let satisfied: Bool
+        switch expected {
+        case .present:
+            satisfied = lifecycle != nil && lifecycle != .missing
+        case .running:
+            satisfied = lifecycle == .running
+        case .stopped:
+            satisfied = lifecycle == .stopped || lifecycle == .exited
+        case .exited:
+            satisfied = lifecycle == .exited
+        case .absent:
+            satisfied = lifecycle == nil
+        }
+        guard satisfied else {
+            throw RuntimeAdapterError.outputParseFailed(
+                "Structured post-mutation observation did not satisfy the exact owned-resource postcondition."
+            )
+        }
+    }
+
+    private func exactOwnedLifecycle(
+        _ action: PlannedRuntimeAction,
+        context: RuntimeMutationContext
+    ) async throws -> RuntimeLifecycleState? {
         let desiredServices = action.desiredService.map { [$0] } ?? []
         let identityVersion = RuntimeManagedResourceIdentity.isLegacyIdentifier(action.resourceIdentifier)
             ? 1
@@ -462,22 +520,12 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
         let matching = observed.services.filter {
             $0.identity == action.identity && $0.resourceIdentifier == action.resourceIdentifier
         }
-        let satisfied: Bool
-        switch expected {
-        case .present:
-            satisfied = matching.count == 1 && matching[0].lifecycleState != .missing
-        case .running:
-            satisfied = matching.count == 1 && matching[0].lifecycleState == .running
-        case .stopped:
-            satisfied = matching.count == 1 && [.stopped, .exited].contains(matching[0].lifecycleState)
-        case .absent:
-            satisfied = matching.isEmpty
-        }
-        guard satisfied else {
+        guard matching.count <= 1 else {
             throw RuntimeAdapterError.outputParseFailed(
-                "Structured post-mutation observation did not satisfy the exact owned-resource postcondition."
+                "Structured owned-resource observation returned conflicting exact matches."
             )
         }
+        return matching.first?.lifecycleState
     }
 
     private func runRedacted(_ spec: RuntimeCommandSpec) async throws -> RuntimeCommandResult {
@@ -493,9 +541,12 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
         case .create:
             guard let desiredService = action.desiredService,
                   action.identity == desiredService.identity,
-                  action.resourceIdentifier == desiredService.identity.managedResourceIdentifier else {
+                  RuntimeManagedResourceIdentity.isScopedCurrentIdentifier(
+                      action.resourceIdentifier,
+                      for: desiredService.identity
+                  ) else {
                 throw RuntimeAdapterError.mutationUnavailableByPolicy(
-                    "Create-missing-service requires exact desired identity and resource bindings."
+                    "Create-missing-service requires exact desired identity and scoped resource bindings."
                 )
             }
             try RuntimeCreateSubsetPolicy.validate(desiredService, providerID: .appleContainerCLI)

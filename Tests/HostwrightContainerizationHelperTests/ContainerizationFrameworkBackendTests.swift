@@ -89,6 +89,105 @@ final class ContainerizationFrameworkBackendTests: XCTestCase {
         )
     }
 
+    func testLogSnapshotsAndCursorsPreserveCompleteAndEmptyLines() async throws {
+        let parent = try makePrivateParent()
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let store = try ContainerizationHelperStateStore(
+            rootURL: parent.appendingPathComponent("state", isDirectory: true)
+        )
+        let backend = try ContainerizationFrameworkBackend(
+            snapshot: snapshot(),
+            store: store,
+            driver: RecordingContainerizationDriver()
+        )
+        let context = mutationContext()
+        let create = try createRequest(context: context)
+        _ = try await backend.create(create, context: context)
+        let writer = try store.logWriter(resourceIdentifier: create.resourceIdentifier)
+        try writer.write(Data())
+
+        let empty = try await backend.logs(
+            ContainerizationHelperLogsRequest(
+                resourceIdentifier: create.resourceIdentifier,
+                lineLimit: 1,
+                maximumBytes: RuntimeStreamEnvelope.maximumChunkBytes
+            )
+        )
+        XCTAssertEqual(empty.text, "")
+        XCTAssertEqual(empty.cursorStart, 0)
+        XCTAssertEqual(empty.cursorEnd, 0)
+        XCTAssertEqual(empty.atCurrentEnd, true)
+
+        try writer.write(Data("a\nb\n".utf8))
+
+        let snapshot = try await backend.logs(
+            ContainerizationHelperLogsRequest(
+                resourceIdentifier: create.resourceIdentifier,
+                lineLimit: 1
+            )
+        )
+        XCTAssertEqual(snapshot.text, "b\n")
+
+        let initial = try await backend.logs(
+            ContainerizationHelperLogsRequest(
+                resourceIdentifier: create.resourceIdentifier,
+                lineLimit: 1,
+                maximumBytes: RuntimeStreamEnvelope.maximumChunkBytes
+            )
+        )
+        XCTAssertEqual(initial.text, "b\n")
+        XCTAssertEqual(initial.cursorStart, 2)
+        XCTAssertEqual(initial.cursorEnd, 4)
+        XCTAssertEqual(initial.atCurrentEnd, true)
+
+        try writer.write(Data("\n".utf8))
+        let resumed = try await backend.logs(
+            ContainerizationHelperLogsRequest(
+                resourceIdentifier: create.resourceIdentifier,
+                lineLimit: 1,
+                cursor: try XCTUnwrap(initial.cursorEnd),
+                maximumBytes: RuntimeStreamEnvelope.maximumChunkBytes
+            )
+        )
+        XCTAssertEqual(resumed.text, "\n")
+        XCTAssertEqual(resumed.cursorStart, 4)
+        XCTAssertEqual(resumed.cursorEnd, 5)
+        XCTAssertEqual(resumed.atCurrentEnd, true)
+
+        let emptyLineSnapshot = try await backend.logs(
+            ContainerizationHelperLogsRequest(
+                resourceIdentifier: create.resourceIdentifier,
+                lineLimit: 1
+            )
+        )
+        XCTAssertEqual(emptyLineSnapshot.text, "\n")
+
+        let latestEmptyLine = try await backend.logs(
+            ContainerizationHelperLogsRequest(
+                resourceIdentifier: create.resourceIdentifier,
+                lineLimit: 1,
+                maximumBytes: RuntimeStreamEnvelope.maximumChunkBytes
+            )
+        )
+        XCTAssertEqual(latestEmptyLine.text, "\n")
+        XCTAssertEqual(latestEmptyLine.cursorStart, 4)
+        XCTAssertEqual(latestEmptyLine.cursorEnd, 5)
+
+        try writer.write(Data("c\n".utf8))
+        let restarted = try await backend.logs(
+            ContainerizationHelperLogsRequest(
+                resourceIdentifier: create.resourceIdentifier,
+                lineLimit: 1,
+                cursor: try XCTUnwrap(resumed.cursorEnd),
+                maximumBytes: RuntimeStreamEnvelope.maximumChunkBytes
+            )
+        )
+        XCTAssertEqual(restarted.text, "c\n")
+        XCTAssertEqual(restarted.cursorStart, 5)
+        XCTAssertEqual(restarted.cursorEnd, 7)
+        XCTAssertEqual(restarted.atCurrentEnd, true)
+    }
+
     func testMissingLocalImageIsRejectedWithoutMutation() async throws {
         let parent = try makePrivateParent()
         defer { try? FileManager.default.removeItem(at: parent) }

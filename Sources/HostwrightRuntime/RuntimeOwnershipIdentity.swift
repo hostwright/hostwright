@@ -52,10 +52,26 @@ public enum RuntimeManagedResourceIdentity {
         for identity: RuntimeServiceIdentity,
         context: RuntimeMutationContext
     ) throws -> [String: String] {
+        try labels(
+            for: identity,
+            resourceIdentifier: resourceIdentifier(for: identity),
+            context: context
+        )
+    }
+
+    public static func labels(
+        for identity: RuntimeServiceIdentity,
+        resourceIdentifier: String,
+        context: RuntimeMutationContext
+    ) throws -> [String: String] {
         guard context.validationIssue == nil else {
             throw RuntimeManagedResourceIdentityError.invalidMutationContext
         }
         var result = labels(for: identity)
+        guard isScopedCurrentIdentifier(resourceIdentifier, for: identity) else {
+            throw RuntimeManagedResourceIdentityError.invalidMutationContext
+        }
+        result[resourceIdentifierLabel] = resourceIdentifier
         result[resourceUUIDLabel] = context.resourceUUID.lowercased()
         result[projectUUIDLabel] = context.projectResourceUUID.lowercased()
         result[resourceGenerationLabel] = String(context.resourceGeneration)
@@ -138,7 +154,7 @@ public enum RuntimeManagedResourceIdentity {
         resourceIdentifier: String
     ) -> Bool {
         labels[resourceIdentifierLabel] == resourceIdentifier &&
-            resourceIdentifier == self.resourceIdentifier(for: identity) &&
+            isScopedCurrentIdentifier(resourceIdentifier, for: identity) &&
             self.identity(from: labels) == identity
     }
 
@@ -165,6 +181,16 @@ public enum RuntimeManagedResourceIdentity {
 
     public static func isSupportedIdentifier(_ value: String) -> Bool {
         isCurrentIdentifier(value) || isLegacyIdentifier(value)
+    }
+
+    public static func isScopedCurrentIdentifier(
+        _ value: String,
+        for identity: RuntimeServiceIdentity
+    ) -> Bool {
+        isCurrentIdentifier(value) &&
+            value.hasPrefix(
+                "hostwright-v2-\(slug(identity.projectName))-\(slug(identity.serviceName))-"
+            )
     }
 
     private static func identityDigest(_ identity: RuntimeServiceIdentity) -> String {

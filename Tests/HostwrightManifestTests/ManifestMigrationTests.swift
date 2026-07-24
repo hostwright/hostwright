@@ -100,7 +100,7 @@ final class ManifestMigrationTests: XCTestCase {
         )
     }
 
-    func testEveryExecutableExampleHasAnIdempotentV2MigrationPreview() throws {
+    func testEveryExecutableExampleHasDeterministicV2MigrationPreview() throws {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -117,8 +117,19 @@ final class ManifestMigrationTests: XCTestCase {
             let preview = try ManifestMigrator.previewV2(source)
             XCTAssertEqual(preview.sourceVersion, 2, path.path)
             XCTAssertEqual(preview.targetVersion, 2, path.path)
-            XCTAssertEqual(preview.migratedManifest, source, path.path)
-            XCTAssertEqual(preview.changes, [], path.path)
+            if source.contains("\n    health:") {
+                XCTAssertEqual(preview.changes, [.migrateLegacyHealth], path.path)
+                XCTAssertFalse(preview.migratedManifest.contains("\n    health:"), path.path)
+                XCTAssertTrue(preview.migratedManifest.contains("\n    probes:"), path.path)
+                XCTAssertEqual(
+                    try ManifestValidator.validated(preview.migratedManifest),
+                    try ManifestValidator.validated(source),
+                    path.path
+                )
+            } else {
+                XCTAssertEqual(preview.migratedManifest, source, path.path)
+                XCTAssertEqual(preview.changes, [], path.path)
+            }
         }
     }
 }

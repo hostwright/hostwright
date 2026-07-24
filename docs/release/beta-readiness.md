@@ -56,7 +56,7 @@ These are not beta blockers if docs keep them explicit as unsupported, deferred,
 - Kubernetes, CRI, Docker API, Testcontainers, and full Compose parity;
 - multi-host orchestration, remote placement, scheduler API, and state replication;
 - GPU/ANE/Metal/Core ML/MLX, PyTorch MPS, host-native accelerator helpers, and accelerator-aware scheduling;
-- automatic rollback, broad lifecycle management, image cleanup, volume cleanup, unmanaged cleanup, aggressive restart loops, and unattended daemon mutation;
+- image cleanup, volume cleanup, unmanaged cleanup, aggressive restart loops, and unattended daemon mutation;
 - performance benchmark numbers and production capacity guidance.
 
 ## Release Notes And Public Claim Audit
@@ -65,15 +65,15 @@ Before a beta tag, public docs must say:
 
 - Hostwright is beta only after the beta tag exists and release notes are published.
 - The beta remains scoped to one local Apple silicon Mac unless compatibility docs change with evidence.
-- Runtime mutation remains limited to the documented `apply` and `cleanup` gates.
-- Installation remains source-only unless distribution readiness evidence exists.
+- Runtime mutation remains limited to the documented confirmed lifecycle and cleanup gates.
+- Installation claims remain limited to the evidence-backed channels in the compatibility matrix.
 - Limitations are part of the release, not a footnote.
 
 Public docs must not use wording that presents any of these as current support:
 
 - production readiness;
 - Kubernetes, CRI, Docker API, full Compose parity, cloud, tunnels, DNS, GPU, ANE, Metal, Core ML, MLX, multi-host, or GUI behavior;
-- binary downloads, installers, Homebrew, signing, notarization, SBOM, provenance, support SLA, hosted diagnostics, external telemetry, performance numbers, or capacity guarantees.
+- Homebrew-core availability, GA artifacts, support SLA, hosted diagnostics, external telemetry, performance numbers, or capacity guarantees.
 
 ## Clean-Checkout Smoke
 

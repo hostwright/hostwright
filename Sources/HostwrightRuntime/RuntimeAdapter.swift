@@ -152,8 +152,8 @@ public extension RuntimeAdapter {
     }
 }
 
-enum RuntimeCreateSubsetPolicy {
-    static func validate(
+public enum RuntimeCreateSubsetPolicy {
+    public static func validate(
         _ service: DesiredRuntimeService,
         providerID: RuntimeProviderID
     ) throws {
@@ -171,23 +171,49 @@ enum RuntimeCreateSubsetPolicy {
     }
 
     private static func validateAppleContainerCLI(_ service: DesiredRuntimeService) throws {
-        guard service.mounts.isEmpty else {
-            throw RuntimeAdapterError.commandRejected(classification: .mutating, message: "Create-only apply rejects mounts.")
+        guard service.ports.allSatisfy({
+            guard let hostPort = $0.hostPort else { return false }
+            return (1_024...65_535).contains(hostPort) &&
+                (1...65_535).contains($0.containerPort)
+        }) else {
+            throw RuntimeAdapterError.commandRejected(
+                classification: .mutating,
+                message: "Create-only apply requires valid unprivileged host ports and valid container ports."
+            )
         }
-        guard service.ports.allSatisfy({ ($0.hostPort ?? 0) >= 1_024 }) else {
-            throw RuntimeAdapterError.commandRejected(classification: .mutating, message: "Create-only apply rejects privileged host ports.")
-        }
-        guard service.ports.allSatisfy({ $0.bindAddress != "0.0.0.0" && $0.bindAddress != "::" }) else {
-            throw RuntimeAdapterError.commandRejected(classification: .mutating, message: "Create-only apply rejects broad bind addresses.")
+        guard service.ports.allSatisfy({
+            $0.bindAddress == nil || $0.bindAddress == "127.0.0.1"
+        }) else {
+            throw RuntimeAdapterError.commandRejected(
+                classification: .mutating,
+                message: "Create-only apply accepts only localhost port publishing."
+            )
         }
         guard !service.image.hasPrefix("-") else {
             throw RuntimeAdapterError.commandRejected(classification: .mutating, message: "Create-only apply rejects image values beginning with '-'.")
         }
-        guard service.command.allSatisfy({ !$0.hasPrefix("-") }) else {
-            throw RuntimeAdapterError.commandRejected(classification: .mutating, message: "Create-only apply rejects command tokens beginning with '-'.")
-        }
         guard service.environment.allSatisfy({ $0.secretReference == nil }) else {
             throw RuntimeAdapterError.commandRejected(classification: .mutating, message: "Create-only apply rejects unresolved secret references.")
+        }
+        guard service.platformOperatingSystem == "linux",
+              (service.platformArchitecture == "arm64" && !service.rosetta) ||
+                (
+                    service.platformArchitecture == "amd64" &&
+                        service.rosetta &&
+                        service.virtualization
+                ) else {
+            throw RuntimeAdapterError.mutationUnavailableByPolicy(
+                "Apple container CLI create supports linux/arm64 without Rosetta or capability-gated linux/amd64 with Rosetta and virtualization."
+            )
+        }
+        guard service.mounts.allSatisfy({
+            $0.source.hasPrefix("/") &&
+                $0.target.hasPrefix("/") &&
+                $0.access != .unknown
+        }) else {
+            throw RuntimeAdapterError.mutationUnavailableByPolicy(
+                "Apple container CLI create accepts only validated absolute bind mounts with explicit read-only or read-write access."
+            )
         }
     }
 
@@ -195,9 +221,26 @@ enum RuntimeCreateSubsetPolicy {
         guard service.mounts.isEmpty,
               service.ports.isEmpty,
               service.healthCheck == nil,
+              service.probes.configuredKinds.isEmpty,
+              service.platformOperatingSystem == "linux",
+              service.platformArchitecture == "arm64",
+              service.cpuCount == nil,
+              service.memoryBytes == nil,
+              service.userID == nil,
+              service.groupID == nil,
+              service.workingDirectory == nil,
+              service.entrypoint.isEmpty,
+              !service.initProcess,
+              service.labels.isEmpty,
+              service.hooks.postStart == nil,
+              service.hooks.preStop == nil,
+              !service.rosetta,
+              !service.virtualization,
+              !service.readOnlyRootFilesystem,
+              service.sharedMemoryBytes == nil,
               service.environment.allSatisfy({ $0.secretReference == nil }) else {
             throw RuntimeAdapterError.mutationUnavailableByPolicy(
-                "Containerization create requires the supported local-image lifecycle subset."
+                "Containerization 0.35.0 create does not qualify the requested Phase 04 service options; select the Apple CLI provider or remove unsupported fields before mutation."
             )
         }
     }

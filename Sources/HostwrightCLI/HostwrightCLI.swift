@@ -153,16 +153,23 @@ public enum HostwrightCLI {
             let approvalRecordPath,
             let runtimeProvider
         ):
-            return ApplyCommandRunner(
+            return ApplyLifecycleCompatibilityRunner(
                 manifestPath: path,
-                stateStoreConfiguration: try hostwrightStateStoreConfiguration(
-                    explicitPath: stateDatabasePath,
-                    environment: environment
-                ),
+                stateDatabasePath: stateDatabasePath,
                 confirmedPlanHash: confirmedPlanHash,
                 teamProfilePath: teamProfilePath,
                 approvalRecordPath: approvalRecordPath,
                 runtimeProvider: runtimeProvider,
+                environment: environment
+            ).run()
+        case .lifecycle(let options):
+            return LifecycleCommandRunner(
+                options: options,
+                driver: LifecycleLiveDriver(environment: environment, options: options)
+            ).run()
+        case .interactive(let options):
+            return InteractiveCommandRunner(
+                options: options,
                 environment: environment
             ).run()
         case .logs(let serviceName, let path, let tail, let stateDatabasePath):
@@ -186,14 +193,16 @@ public enum HostwrightCLI {
                 filters: filters,
                 output: output
             ).run()
-        case .recovery(let stateDatabasePath, let projectName, let output):
+        case .recovery(let action, let stateDatabasePath, let projectName, let output):
             return RecoveryCommandRunner(
                 stateStoreConfiguration: try hostwrightStateStoreConfiguration(
                     explicitPath: stateDatabasePath,
                     environment: environment
                 ),
+                action: action,
                 projectName: projectName,
-                output: output
+                output: output,
+                environment: environment
             ).run()
         case .cleanup(let path, let stateDatabasePath, let confirmation, let teamProfilePath, let approvalRecordPath):
             return CleanupCommandRunner(
@@ -260,9 +269,25 @@ public enum HostwrightCLI {
       hostwright plan [path] [--output text|json] [--team-profile <path>]
       hostwright status [path] [--state-db <path>] [--output text|json] [--runtime-provider auto|apple-cli|containerization]
       hostwright apply [path] [--state-db <path>] --confirm-plan <hash> [--runtime-provider auto|apple-cli|containerization] [--team-profile <path> --approval-record <path>]
-      hostwright logs <service> [path] [--tail <n>] [--state-db <path>]
+      hostwright up [path] [--service <name>] [--state-db <path>] (--dry-run|--confirm-plan <hash>) [--runtime-provider auto|apple-cli|containerization] [--timeout <seconds>] [--parallelism <1-32>] [--json|--output text|json]
+      hostwright down [path] [--service <name>] [--state-db <path>] (--dry-run|--confirm-plan <hash>) [--runtime-provider auto|apple-cli|containerization] [--timeout <seconds>] [--parallelism <1-32>] [--json|--output text|json]
+      hostwright run [path] --service <name> [--state-db <path>] (--dry-run|--confirm-plan <hash>) [--runtime-provider auto|apple-cli|containerization] [--timeout <seconds>] [--parallelism <1-32>] [--json|--output text|json]
+      hostwright start [path] [--service <name>] [--state-db <path>] (--dry-run|--confirm-plan <hash>) [--runtime-provider auto|apple-cli|containerization] [--timeout <seconds>] [--parallelism <1-32>] [--json|--output text|json]
+      hostwright stop [path] [--service <name>] [--state-db <path>] (--dry-run|--confirm-plan <hash>) [--runtime-provider auto|apple-cli|containerization] [--timeout <seconds>] [--parallelism <1-32>] [--json|--output text|json]
+      hostwright restart [path] [--service <name>] [--state-db <path>] (--dry-run|--confirm-plan <hash>) [--runtime-provider auto|apple-cli|containerization] [--timeout <seconds>] [--parallelism <1-32>] [--json|--output text|json]
+      hostwright rm [path] [--service <name>] [--state-db <path>] (--dry-run|--confirm-plan <hash>) [--runtime-provider auto|apple-cli|containerization] [--timeout <seconds>] [--parallelism <1-32>] [--json|--output text|json]
+      hostwright update [path] [--service <name>] [--state-db <path>] (--dry-run|--confirm-plan <hash>) [--runtime-provider auto|apple-cli|containerization] [--timeout <seconds>] [--parallelism <1-32>] [--json|--output text|json]
+      hostwright exec <service> [--manifest <path>] [--state-db <path>] [--runtime-provider <auto|apple-cli|containerization>] [--timeout <seconds>] [--tty|--no-tty] [--no-stdin] [--json|--output text|json] -- <command> [args...]
+      hostwright attach <service> [--manifest <path>] [--state-db <path>] [--runtime-provider <auto|apple-cli|containerization>] [--timeout <seconds>] [--tty|--no-tty] [--no-stdin] [--output text]
+      hostwright copy (<absolute-host-path> <service:/absolute/container/path>|<service:/absolute/container/path> <absolute-host-path>) [--manifest <path>] [--state-db <path>] [--runtime-provider <auto|apple-cli|containerization>] [--timeout <seconds>] [--json|--output text|json]
+      hostwright export <service> <absolute-destination-path> [--manifest <path>] [--state-db <path>] [--runtime-provider <auto|apple-cli|containerization>] [--timeout <seconds>] [--json|--output text|json]
+      hostwright inspect <service> [--manifest <path>] [--state-db <path>] [--runtime-provider <auto|apple-cli|containerization>] [--timeout <seconds>] [--json|--output text|json]
+      hostwright stats <service> [--manifest <path>] [--state-db <path>] [--runtime-provider <auto|apple-cli|containerization>] [--timeout <seconds>] [--json|--output text|json]
+      hostwright logs <service> [path] [--tail <n>] [--follow] [--runtime-provider <auto|apple-cli|containerization>] [--timeout <seconds>] [--state-db <path>] [--output <text|json>]
       hostwright events [--state-db <path>] [--project <name>] [--type <event>] [--service <name>] [--severity info|warning|error] [--limit <n>] [--sort asc|desc] [--output text|json]
       hostwright recovery [--state-db <path>] [--project <name>] [--output text|json]
+      hostwright recovery resume --group <uuid> --confirm-plan <hash> [--timeout <seconds>] [--state-db <path>] [--project <name>] [--output text|json]
+      hostwright recovery rollback --group <uuid> --confirm-plan <hash> [--timeout <seconds>] [--state-db <path>] [--project <name>] [--output text|json]
       hostwright cleanup [path] [--state-db <path>] --dry-run [--team-profile <path>]
       hostwright cleanup [path] [--state-db <path>] --confirm-cleanup <token> [--team-profile <path> --approval-record <path>]
       hostwright diagnostics [--state-db <path>] --bundle <path> [--project <name>] [--manifest <path>]
@@ -278,14 +303,16 @@ public enum HostwrightCLI {
     state restore and repair require a dry-run token bound to the exact state fingerprint and planned effects.
     state repair clears only reconstructible runtime-observation and health projections; it never invents authoritative state.
     state recover completes or rolls back a journaled maintenance operation before ordinary state access resumes.
+    recovery inspects durable lifecycle groups; resume and rollback require the exact group UUID and persisted plan hash.
     migrate preview validates and prints an in-memory v1-to-v2 conversion; it never writes the source file.
     init writes hostwright.yaml only when absent.
     import-stack reads a narrow safe stack-file subset and prints converted hostwright.yaml; it does not write files, observe runtime, or imply Compose parity.
     CLI plan output is deterministic but does not perform live runtime observation.
-    Apply can execute exactly one confirmed createMissingService or restart-policy-allowed startManagedService action through RuntimeAdapter.
+    Apply is a compatibility entry point for an exact confirmed up lifecycle plan. Generate its hash with up --dry-run; execution uses the same durable DAG and saga as up.
+    Lifecycle dry-runs emit deterministic plans; confirmed up, down, run, start, stop, restart, rm, and update executions emit deterministic per-resource outcomes. Every lifecycle command supports --json or --output json.
     Cleanup deletes only exact cleanup-eligible Hostwright-owned stopped/created/exited containers after dry-run token confirmation.
     Diagnostics writes a local redacted JSON bundle only. It never uploads telemetry.
-    JSON output is supported for capabilities, paths, migrate preview, every state subcommand, import-stack, plan, status, events, recovery, extension check, doctor, and errors when --json or --output json is present.
+    JSON output is supported for capabilities, paths, migrate preview, every state subcommand, import-stack, plan, status, every lifecycle command, events, recovery, extension check, doctor, and errors when --json or --output json is present.
     Team profiles and approvals are loaded only from explicit local paths. Profile-aware mutations require an approval bound to the exact profile, manifest, and plan or cleanup token.
     Benchmark runs are explicit local hardware evidence. They refuse image pulls and broad cleanup, use bounded disposable Hostwright-owned resources, and write only the requested non-existing report path.
     Extension check executes one reviewed-local protocol handshake from explicit absolute paths. The protocol grants no Hostwright capability, but the reviewed executable still has the invoking macOS account's ambient privileges; it is not sandboxed.

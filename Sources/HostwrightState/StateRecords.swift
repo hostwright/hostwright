@@ -1,7 +1,7 @@
 import HostwrightCore
 import HostwrightRuntime
 
-public struct StateProjectRecord: Equatable, Sendable {
+public struct StateProjectRecord: Codable, Equatable, Sendable {
     public let id: String
     public let name: String
     public let manifestPath: String?
@@ -38,7 +38,7 @@ public struct StateProjectRecord: Equatable, Sendable {
     }
 }
 
-public struct DesiredServiceRecord: Equatable, Sendable {
+public struct DesiredServiceRecord: Codable, Equatable, Sendable {
     public let id: String
     public let projectID: String
     public let serviceName: String
@@ -90,6 +90,23 @@ public struct DesiredServiceRecord: Equatable, Sendable {
         )
         self.resourceGeneration = resourceGeneration
         self.mutationProvider = mutationProvider
+    }
+}
+
+public struct DesiredStateRecoverySnapshot: Codable, Equatable, Sendable {
+    public static let currentSchemaVersion = 1
+
+    public let schemaVersion: Int
+    public let project: StateProjectRecord
+    public let desiredServices: [DesiredServiceRecord]
+
+    public init(
+        project: StateProjectRecord,
+        desiredServices: [DesiredServiceRecord]
+    ) {
+        schemaVersion = Self.currentSchemaVersion
+        self.project = project
+        self.desiredServices = desiredServices
     }
 }
 

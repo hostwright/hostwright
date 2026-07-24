@@ -236,9 +236,65 @@ final class HostwrightStateTests: XCTestCase {
 
             let observedServices = try store.observedStates.loadObservedServices(snapshotID: snapshotID)
             XCTAssertEqual(observedServices.count, 1)
+            XCTAssertEqual(
+                observedServices[0].id,
+                "\(snapshotID):\(observedState.services[0].identity.displayName)"
+            )
             XCTAssertEqual(observedServices[0].lifecycleState, .running)
             XCTAssertEqual(observedServices[0].resourceIdentifier, observedState.services[0].resourceIdentifier)
             XCTAssertTrue(observedServices[0].networksJSON.contains("192.168.64.2"))
+        }
+    }
+
+    func testObservedSnapshotPersistsConcurrentRevisionsWithOneLogicalIdentity() throws {
+        try withTemporaryStore { store, _ in
+            try store.migrate()
+            let identity = RuntimeServiceIdentity(
+                projectName: "api-local",
+                serviceName: "api"
+            )
+            let services = [
+                "hostwright-api-old",
+                "provider://credential=do-not-copy-into-row-id"
+            ].map {
+                ObservedRuntimeService(
+                    identity: identity,
+                    resourceIdentifier: $0,
+                    image: "ghcr.io/example/api:latest",
+                    lifecycleState: .running,
+                    healthState: .healthy
+                )
+            }
+            try store.observedStates.saveSnapshot(
+                snapshotID: "snapshot-revisions",
+                projectID: nil,
+                observedState: ObservedRuntimeState(
+                    projectName: "api-local",
+                    services: services
+                ),
+                runtimeAdapter: RuntimeProviderID.appleContainerCLI.rawValue,
+                parserVersion: "phase04-lifecycle-v1",
+                rawOutputHash: nil,
+                redactedSummary: "two verified revisions",
+                observedAt: timestamp
+            )
+
+            let persisted = try store.observedStates.loadObservedServices(
+                snapshotID: "snapshot-revisions"
+            )
+            XCTAssertEqual(persisted.count, 2)
+            XCTAssertEqual(
+                persisted.map(\.resourceIdentifier).sorted(),
+                services.map(\.resourceIdentifier).sorted()
+            )
+            XCTAssertEqual(Set(persisted.map(\.id)).count, 2)
+            for value in persisted {
+                XCTAssertFalse(
+                    services.map(\.resourceIdentifier).contains {
+                        value.id.contains($0)
+                    }
+                )
+            }
         }
     }
 
@@ -751,6 +807,167 @@ final class HostwrightStateTests: XCTestCase {
             XCTAssertNil(groups[0].lockOwner)
             XCTAssertNil(groups[0].lockExpiresAt)
         }
+    }
+
+    func testExpiredActiveLeaseReclaimIsExactAndHasOneWinner() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-state-xctest-\(UUID().uuidString)"
+        )
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: false,
+            attributes: [.posixPermissions: 0o700]
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let databaseURL = directory.appendingPathComponent("state.sqlite")
+        let store = SQLiteStateStore(path: databaseURL.path)
+        try store.migrate()
+        let fence = HostwrightResourceUUID.generate()
+        let planHash = String(repeating: "a", count: 64)
+        let group = OperationGroupRecord(
+            id: "group-lifecycle-expired",
+            operationID: "operation-lifecycle-expired",
+            groupKind: "lifecycle-v1",
+            projectID: nil,
+            serviceName: nil,
+            plannedActionType: "up",
+            status: .active,
+            groupIdempotencyKey: planHash,
+            planHash: planHash,
+            checkpoint: "create-web:effect-pending",
+            lockOwner: "lifecycle-original",
+            lockExpiresAt: "2026-07-23T00:10:00Z",
+            rollbackAvailable: true,
+            manualRecoveryHintRedacted: "",
+            createdAt: "2026-07-23T00:00:00Z",
+            updatedAt: "2026-07-23T00:00:00Z",
+            metadataJSONRedacted: "{}",
+            fencingToken: fence
+        )
+        XCTAssertNotNil(
+            try store.operationGroups.acquire(
+                group,
+                currentTimestamp: "2026-07-23T00:00:00Z"
+            ).acquired
+        )
+
+        let live = try store.operationGroups.reclaimExpiredActive(
+            groupID: group.id,
+            expectedPlanHash: planHash,
+            expectedFencingToken: fence,
+            lockOwner: "lifecycle-contender",
+            lockExpiresAt: "2026-07-23T00:20:00Z",
+            currentTimestamp: "2026-07-23T00:05:00Z"
+        )
+        guard case .activeUnexpired(let stillOwned) = live else {
+            return XCTFail("A live lifecycle lease must not be reclaimed.")
+        }
+        XCTAssertEqual(stillOwned.lockOwner, "lifecycle-original")
+
+        XCTAssertThrowsError(
+            try store.operationGroups.reclaimExpiredActive(
+                groupID: group.id,
+                expectedPlanHash: String(repeating: "b", count: 64),
+                expectedFencingToken: fence,
+                lockOwner: "lifecycle-wrong-plan",
+                lockExpiresAt: "2026-07-23T00:30:00Z",
+                currentTimestamp: "2026-07-23T00:11:00Z"
+            )
+        )
+        XCTAssertThrowsError(
+            try store.operationGroups.reclaimExpiredActive(
+                groupID: group.id,
+                expectedPlanHash: planHash,
+                expectedFencingToken: HostwrightResourceUUID.generate(),
+                lockOwner: "lifecycle-wrong-fence",
+                lockExpiresAt: "2026-07-23T00:30:00Z",
+                currentTimestamp: "2026-07-23T00:11:00Z"
+            )
+        )
+
+        let results = try await withThrowingTaskGroup(
+            of: OperationGroupLeaseRecoveryResult.self,
+            returning: [OperationGroupLeaseRecoveryResult].self
+        ) { tasks in
+            for contender in 1...2 {
+                tasks.addTask {
+                    let contenderStore = SQLiteStateStore(path: databaseURL.path)
+                    return try contenderStore.operationGroups.reclaimExpiredActive(
+                        groupID: group.id,
+                        expectedPlanHash: planHash,
+                        expectedFencingToken: fence,
+                        lockOwner: "lifecycle-contender-\(contender)",
+                        lockExpiresAt: "2026-07-23T00:30:00Z",
+                        currentTimestamp: "2026-07-23T00:11:00Z"
+                    )
+                }
+            }
+            var values: [OperationGroupLeaseRecoveryResult] = []
+            for try await value in tasks {
+                values.append(value)
+            }
+            return values
+        }
+        XCTAssertEqual(
+            results.filter {
+                if case .reclaimed = $0 { return true }
+                return false
+            }.count,
+            1
+        )
+        XCTAssertEqual(
+            results.filter {
+                if case .activeUnexpired = $0 { return true }
+                return false
+            }.count,
+            1
+        )
+        let reclaimed = try XCTUnwrap(
+            store.operationGroups.load(id: group.id)
+        )
+        XCTAssertTrue(
+            ["lifecycle-contender-1", "lifecycle-contender-2"].contains(
+                reclaimed.lockOwner
+            )
+        )
+        XCTAssertEqual(reclaimed.lockExpiresAt, "2026-07-23T00:30:00Z")
+
+        let legacy = OperationGroupRecord(
+            id: "group-lifecycle-legacy",
+            operationID: "operation-lifecycle-legacy",
+            groupKind: "lifecycle-v1",
+            projectID: nil,
+            serviceName: nil,
+            plannedActionType: "up",
+            status: .active,
+            groupIdempotencyKey: String(repeating: "c", count: 64),
+            planHash: String(repeating: "c", count: 64),
+            checkpoint: "intent-persisted",
+            lockOwner: "legacy-owner",
+            lockExpiresAt: nil,
+            rollbackAvailable: true,
+            manualRecoveryHintRedacted: "",
+            createdAt: "2026-07-23T00:00:00Z",
+            updatedAt: "2026-07-23T00:00:00Z",
+            metadataJSONRedacted: "{}",
+            fencingToken: HostwrightResourceUUID.generate()
+        )
+        XCTAssertNotNil(
+            try store.operationGroups.acquire(
+                legacy,
+                currentTimestamp: "2026-07-23T00:00:00Z"
+            ).acquired
+        )
+        XCTAssertThrowsError(
+            try store.operationGroups.reclaimExpiredActive(
+                groupID: legacy.id,
+                expectedPlanHash: legacy.planHash,
+                expectedFencingToken: legacy.fencingToken,
+                lockOwner: "legacy-reclaimer",
+                lockExpiresAt: "2026-07-23T00:30:00Z",
+                currentTimestamp: "2026-07-23T00:11:00Z"
+            )
+        )
     }
 
     func testOperationGroupStepsAppendAndRedactFailureState() throws {

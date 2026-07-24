@@ -238,34 +238,261 @@ public struct RuntimeEnvironmentValue: Equatable, Sendable {
     }
 }
 
+public enum RuntimeDependencyCondition: String, Codable, Equatable, Sendable {
+    case started
+    case ready
+    case completed
+}
+
+public struct RuntimeServiceDependency: Codable, Equatable, Sendable {
+    public let serviceName: String
+    public let condition: RuntimeDependencyCondition
+
+    public init(serviceName: String, condition: RuntimeDependencyCondition) {
+        self.serviceName = serviceName
+        self.condition = condition
+    }
+}
+
+public enum RuntimeProbeKind: String, Codable, CaseIterable, Equatable, Hashable, Sendable {
+    case startup
+    case readiness
+    case liveness
+
+    public var order: Int {
+        switch self {
+        case .startup: 0
+        case .readiness: 1
+        case .liveness: 2
+        }
+    }
+}
+
+public enum RuntimeProbeActionKind: String, Codable, CaseIterable, Equatable, Hashable, Sendable {
+    case exec
+    case http
+    case tcp
+}
+
+public struct RuntimeProbeExecAction: Codable, Equatable, Sendable {
+    public let command: [String]
+
+    public init(command: [String]) {
+        self.command = command
+    }
+}
+
+public struct RuntimeProbeHTTPAction: Codable, Equatable, Sendable {
+    public let port: Int
+    public let path: String
+
+    public init(port: Int, path: String = "/") {
+        self.port = port
+        self.path = path
+    }
+
+    public var implicitLoopbackURL: URL? {
+        URL(string: "http://127.0.0.1:\(port)\(path)")
+    }
+}
+
+public struct RuntimeProbeTCPAction: Codable, Equatable, Sendable {
+    public let port: Int
+
+    public init(port: Int) {
+        self.port = port
+    }
+}
+
+public enum RuntimeProbeAction: Codable, Equatable, Sendable {
+    case exec(RuntimeProbeExecAction)
+    case http(RuntimeProbeHTTPAction)
+    case tcp(RuntimeProbeTCPAction)
+
+    public var kind: RuntimeProbeActionKind {
+        switch self {
+        case .exec: .exec
+        case .http: .http
+        case .tcp: .tcp
+        }
+    }
+}
+
+public struct RuntimeProbeConfiguration: Codable, Equatable, Sendable {
+    public let action: RuntimeProbeAction
+    public let startPeriodSeconds: Int
+    public let intervalSeconds: Int
+    public let timeoutSeconds: Int
+    public let successThreshold: Int
+    public let failureThreshold: Int
+
+    public init(
+        action: RuntimeProbeAction,
+        startPeriodSeconds: Int = 0,
+        intervalSeconds: Int = 30,
+        timeoutSeconds: Int = 5,
+        successThreshold: Int = 1,
+        failureThreshold: Int = 3
+    ) {
+        self.action = action
+        self.startPeriodSeconds = startPeriodSeconds
+        self.intervalSeconds = intervalSeconds
+        self.timeoutSeconds = timeoutSeconds
+        self.successThreshold = successThreshold
+        self.failureThreshold = failureThreshold
+    }
+}
+
+public struct RuntimeProbeSet: Codable, Equatable, Sendable {
+    public let startup: RuntimeProbeConfiguration?
+    public let readiness: RuntimeProbeConfiguration?
+    public let liveness: RuntimeProbeConfiguration?
+
+    public init(
+        startup: RuntimeProbeConfiguration? = nil,
+        readiness: RuntimeProbeConfiguration? = nil,
+        liveness: RuntimeProbeConfiguration? = nil
+    ) {
+        self.startup = startup
+        self.readiness = readiness
+        self.liveness = liveness
+    }
+
+    public subscript(kind: RuntimeProbeKind) -> RuntimeProbeConfiguration? {
+        switch kind {
+        case .startup: startup
+        case .readiness: readiness
+        case .liveness: liveness
+        }
+    }
+
+    public var configuredKinds: [RuntimeProbeKind] {
+        RuntimeProbeKind.allCases.filter { self[$0] != nil }
+    }
+}
+
+public enum RuntimeUpdateStrategy: String, Codable, Equatable, Sendable {
+    case rolling
+    case recreate
+}
+
+public struct RuntimeUpdatePolicy: Codable, Equatable, Sendable {
+    public let strategy: RuntimeUpdateStrategy
+    public let maxSurge: Int
+    public let maxUnavailable: Int
+    public let progressDeadlineSeconds: Int
+
+    public init(
+        strategy: RuntimeUpdateStrategy = .rolling,
+        maxSurge: Int = 1,
+        maxUnavailable: Int = 0,
+        progressDeadlineSeconds: Int = 300
+    ) {
+        self.strategy = strategy
+        self.maxSurge = maxSurge
+        self.maxUnavailable = maxUnavailable
+        self.progressDeadlineSeconds = progressDeadlineSeconds
+    }
+}
+
+public struct RuntimeLifecycleHooks: Codable, Equatable, Sendable {
+    public let postStart: [String]?
+    public let preStop: [String]?
+
+    public init(postStart: [String]? = nil, preStop: [String]? = nil) {
+        self.postStart = postStart
+        self.preStop = preStop
+    }
+}
+
 public struct DesiredRuntimeService: Equatable, Sendable {
     public let identity: RuntimeServiceIdentity
+    public let logicalServiceName: String
+    public let replicaIndex: Int
     public let image: String
+    public let platformOperatingSystem: String
+    public let platformArchitecture: String
+    public let cpuCount: Int?
+    public let memoryBytes: UInt64?
+    public let userID: UInt32?
+    public let groupID: UInt32?
+    public let workingDirectory: String?
+    public let entrypoint: [String]
     public let command: [String]
+    public let initProcess: Bool
+    public let dependencies: [RuntimeServiceDependency]
     public let environment: [RuntimeEnvironmentValue]
+    public let labels: [String: String]
     public let ports: [RuntimePortMapping]
     public let mounts: [RuntimeMountReference]
     public let healthCheck: RuntimeHealthCheckSpec?
+    public let probes: RuntimeProbeSet
     public let restartPolicy: RuntimeRestartPolicy
+    public let updatePolicy: RuntimeUpdatePolicy
+    public let hooks: RuntimeLifecycleHooks
+    public let rosetta: Bool
+    public let virtualization: Bool
+    public let readOnlyRootFilesystem: Bool
+    public let sharedMemoryBytes: UInt64?
 
     public init(
         identity: RuntimeServiceIdentity,
+        logicalServiceName: String? = nil,
+        replicaIndex: Int = 0,
         image: String,
+        platformOperatingSystem: String = "linux",
+        platformArchitecture: String = "arm64",
+        cpuCount: Int? = nil,
+        memoryBytes: UInt64? = nil,
+        userID: UInt32? = nil,
+        groupID: UInt32? = nil,
+        workingDirectory: String? = nil,
+        entrypoint: [String] = [],
         command: [String] = [],
+        initProcess: Bool = false,
+        dependencies: [RuntimeServiceDependency] = [],
         environment: [RuntimeEnvironmentValue] = [],
+        labels: [String: String] = [:],
         ports: [RuntimePortMapping] = [],
         mounts: [RuntimeMountReference] = [],
         healthCheck: RuntimeHealthCheckSpec? = nil,
-        restartPolicy: RuntimeRestartPolicy = .no
+        probes: RuntimeProbeSet = RuntimeProbeSet(),
+        restartPolicy: RuntimeRestartPolicy = .no,
+        updatePolicy: RuntimeUpdatePolicy = RuntimeUpdatePolicy(),
+        hooks: RuntimeLifecycleHooks = RuntimeLifecycleHooks(),
+        rosetta: Bool = false,
+        virtualization: Bool = false,
+        readOnlyRootFilesystem: Bool = false,
+        sharedMemoryBytes: UInt64? = nil
     ) {
         self.identity = identity
+        self.logicalServiceName = logicalServiceName ?? identity.serviceName
+        self.replicaIndex = replicaIndex
         self.image = image
+        self.platformOperatingSystem = platformOperatingSystem
+        self.platformArchitecture = platformArchitecture
+        self.cpuCount = cpuCount
+        self.memoryBytes = memoryBytes
+        self.userID = userID
+        self.groupID = groupID
+        self.workingDirectory = workingDirectory
+        self.entrypoint = entrypoint
         self.command = command
+        self.initProcess = initProcess
+        self.dependencies = dependencies
         self.environment = environment
+        self.labels = labels
         self.ports = ports
         self.mounts = mounts
         self.healthCheck = healthCheck
+        self.probes = probes
         self.restartPolicy = restartPolicy
+        self.updatePolicy = updatePolicy
+        self.hooks = hooks
+        self.rosetta = rosetta
+        self.virtualization = virtualization
+        self.readOnlyRootFilesystem = readOnlyRootFilesystem
+        self.sharedMemoryBytes = sharedMemoryBytes
     }
 }
 
@@ -421,6 +648,7 @@ public struct PlannedRuntimeAction: Equatable, Sendable {
     public let identity: RuntimeServiceIdentity
     public let resourceIdentifier: String
     public let isDestructive: Bool
+    public let requiresProcessCompletion: Bool
     public let summary: String
     public let desiredService: DesiredRuntimeService?
 
@@ -429,6 +657,7 @@ public struct PlannedRuntimeAction: Equatable, Sendable {
         identity: RuntimeServiceIdentity,
         resourceIdentifier: String,
         isDestructive: Bool,
+        requiresProcessCompletion: Bool = false,
         summary: String,
         desiredService: DesiredRuntimeService? = nil
     ) {
@@ -436,6 +665,7 @@ public struct PlannedRuntimeAction: Equatable, Sendable {
         self.identity = identity
         self.resourceIdentifier = resourceIdentifier
         self.isDestructive = isDestructive
+        self.requiresProcessCompletion = requiresProcessCompletion
         self.summary = summary
         self.desiredService = desiredService
     }

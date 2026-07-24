@@ -4,6 +4,7 @@ import HostwrightCore
 public enum ManifestMigrationChange: Equatable, Sendable {
     case insertVersion(Int)
     case replaceVersion(from: Int, to: Int)
+    case migrateLegacyHealth
 
     public var description: String {
         switch self {
@@ -11,6 +12,8 @@ public enum ManifestMigrationChange: Equatable, Sendable {
             return "Declare manifest version \(version)."
         case .replaceVersion(let source, let target):
             return "Replace manifest version \(source) with \(target)."
+        case .migrateLegacyHealth:
+            return "Replace legacy health checks with typed liveness probes."
         }
     }
 }
@@ -57,8 +60,8 @@ public enum ManifestMigrator {
             ])
         }
 
-        let migratedManifest: String
-        let changes: [ManifestMigrationChange]
+        var migratedManifest: String
+        var changes: [ManifestMigrationChange]
         switch parsed.version {
         case .none:
             let newline = source.contains("\r\n") ? "\r\n" : "\n"
@@ -72,6 +75,13 @@ public enum ManifestMigrator {
             changes = [.replaceVersion(from: version, to: targetVersion)]
         }
 
+        if containsLegacyHealth(source) {
+            var migrated = parsed
+            migrated.version = targetVersion
+            migratedManifest = try ManifestCanonicalEncoder.encode(migrated)
+            changes.append(.migrateLegacyHealth)
+        }
+
         _ = try ManifestValidator.validated(migratedManifest)
         return ManifestMigrationPreview(
             sourceVersion: sourceVersion,
@@ -79,6 +89,13 @@ public enum ManifestMigrator {
             migratedManifest: migratedManifest,
             changes: changes
         )
+    }
+
+    private static func containsLegacyHealth(_ source: String) -> Bool {
+        source.range(
+            of: #"(?m)^    health:[ \t]*(?:#.*)?\r?$"#,
+            options: .regularExpression
+        ) != nil
     }
 
     private static func replaceTopLevelVersion(in source: String, from: Int, to: Int) throws -> String {

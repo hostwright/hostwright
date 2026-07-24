@@ -1,6 +1,6 @@
 # CLI Reference
 
-The current CLI provides a dependency-free `hostwright` command surface with narrow RuntimeAdapter-backed operation gates.
+The current CLI provides strict RuntimeAdapter-backed lifecycle, observation, recovery, and local automation surfaces.
 
 ## Commands
 
@@ -26,9 +26,23 @@ hostwright validate [path] [--team-profile <path>]
 hostwright plan [path] [--output text|json] [--team-profile <path>]
 hostwright status [path] [--state-db <path>] [--output text|json] [--runtime-provider auto|apple-cli|containerization]
 hostwright apply [path] [--state-db <path>] --confirm-plan <hash> [--runtime-provider auto|apple-cli|containerization] [--team-profile <path> --approval-record <path>]
-hostwright logs <service> [path] [--tail <n>] [--state-db <path>]
+hostwright up [path] [--service <name>] [--state-db <path>] (--dry-run | --confirm-plan <hash>) [--runtime-provider auto|apple-cli|containerization] [--timeout <seconds>] [--parallelism <1-32>] [--output text|json]
+hostwright down [path] [--service <name>] [--state-db <path>] (--dry-run | --confirm-plan <hash>) [--runtime-provider auto|apple-cli|containerization] [--timeout <seconds>] [--parallelism <1-32>] [--output text|json]
+hostwright start [path] [--service <name>] [--state-db <path>] (--dry-run | --confirm-plan <hash>) [--runtime-provider auto|apple-cli|containerization] [--timeout <seconds>] [--parallelism <1-32>] [--output text|json]
+hostwright stop [path] [--service <name>] [--state-db <path>] (--dry-run | --confirm-plan <hash>) [--runtime-provider auto|apple-cli|containerization] [--timeout <seconds>] [--parallelism <1-32>] [--output text|json]
+hostwright restart [path] [--service <name>] [--state-db <path>] (--dry-run | --confirm-plan <hash>) [--runtime-provider auto|apple-cli|containerization] [--timeout <seconds>] [--parallelism <1-32>] [--output text|json]
+hostwright rm [path] [--service <name>] [--state-db <path>] (--dry-run | --confirm-plan <hash>) [--runtime-provider auto|apple-cli|containerization] [--timeout <seconds>] [--parallelism <1-32>] [--output text|json]
+hostwright update [path] [--service <name>] [--state-db <path>] (--dry-run | --confirm-plan <hash>) [--runtime-provider auto|apple-cli|containerization] [--timeout <seconds>] [--parallelism <1-32>] [--output text|json]
+hostwright run [path] --service <name> [--state-db <path>] (--dry-run | --confirm-plan <hash>) [--runtime-provider auto|apple-cli|containerization] [--timeout <seconds>] [--parallelism <1-32>] [--output text|json]
+hostwright exec <service> [--manifest <path>] [--state-db <path>] [--runtime-provider auto|apple-cli|containerization] [--timeout <seconds>] [--tty | --no-tty] [--no-stdin] [--output text|json] -- <command> [args...]
+hostwright attach <service> [--manifest <path>] [--state-db <path>] [--runtime-provider auto|apple-cli|containerization] [--timeout <seconds>] [--tty | --no-tty] [--no-stdin]
+hostwright copy (<absolute-host-path> <service:/absolute/container/path> | <service:/absolute/container/path> <absolute-host-path>) [--manifest <path>] [--state-db <path>] [--runtime-provider auto|apple-cli|containerization] [--timeout <seconds>] [--output text|json]
+hostwright export <service> <absolute-destination-path> [--manifest <path>] [--state-db <path>] [--runtime-provider auto|apple-cli|containerization] [--timeout <seconds>] [--output text|json]
+hostwright inspect|stats <service> [--manifest <path>] [--state-db <path>] [--runtime-provider auto|apple-cli|containerization] [--timeout <seconds>] [--output text|json]
+hostwright logs <service> [path] [--tail <n>] [--follow] [--runtime-provider auto|apple-cli|containerization] [--timeout <seconds>] [--state-db <path>] [--output text|json]
 hostwright events [--state-db <path>] [--project <name>] [--type <event>] [--service <name>] [--severity info|warning|error] [--limit <n>] [--sort asc|desc] [--output text|json]
 hostwright recovery [--state-db <path>] [--project <name>] [--output text|json]
+hostwright recovery resume|rollback --group <uuid> --confirm-plan <hash> [--timeout <seconds>] [--state-db <path>] [--project <name>] [--output text|json]
 hostwright diagnostics [--state-db <path>] --bundle <path> [--project <name>] [--manifest <path>]
 hostwright cleanup [path] [--state-db <path>] --dry-run [--team-profile <path>]
 hostwright cleanup [path] [--state-db <path>] --confirm-cleanup <token> [--team-profile <path> --approval-record <path>]
@@ -56,7 +70,7 @@ hostwright-dist help
 
 Text output is the default for `hostwright` commands. Installed-lifecycle `hostwright-dist` commands require `--output json`; release and developer-evidence commands retain their documented text/report output.
 
-`capabilities`, `runtime providers`, `runtime migrate`, `paths`, every `state` subcommand, `migrate preview`, `import-stack`, `plan`, `status`, `events`, `recovery`, `extension check`, and `doctor` also accept JSON output. `capabilities`, `runtime providers`, `runtime migrate`, `paths`, every `state` subcommand, `migrate preview`, and `doctor` accept the convenience spelling `--json`. JSON output is intended for local scripts, conformance checks, and tests. It does not weaken mutation gates.
+`capabilities`, `runtime providers`, `runtime migrate`, `paths`, every `state` subcommand, `migrate preview`, `import-stack`, `plan`, `status`, every lifecycle command, non-TTY interactive operations, `events`, `recovery`, `extension check`, and `doctor` accept JSON output where shown above. JSON streaming uses bounded NDJSON frames with base64 payloads. Interactive TTY mode and JSON mode are mutually exclusive. JSON output does not weaken mutation gates.
 
 When JSON mode is requested and the CLI can classify the failure, stderr uses this envelope:
 
@@ -72,7 +86,7 @@ Runs one versioned local JSON request through existing `hostwright` command cont
 
 Launch arguments require an explicit absolute manifest path. Optional `--state-db` and `--team-profile` paths are also fixed at launch; request JSON cannot provide or override any path. Configured files must already exist as regular non-symlink files with safe ownership and mode.
 
-Supported operations are `plan`, `status`, `events`, `recovery`, and `doctor`. Requests use this strict top-level shape:
+Supported operations are `plan`, `status`, `events`, `recovery`, `doctor`, `up`, `down`, `run`, `start`, `stop`, `restart`, `rm`, and `update`. Requests use a strict top-level shape:
 
 ```json
 {"apiVersion":2,"requestID":"request-1","operation":"events","project":"demo","eventType":"apply.failed","service":"api","severity":"error","limit":100,"sort":"desc"}
@@ -80,11 +94,13 @@ Supported operations are `plan`, `status`, `events`, `recovery`, and `doctor`. R
 
 Only `events` accepts all filters. `recovery` accepts only `project`; `plan`, `status`, and `doctor` accept no filters. Input is limited to 64 KiB with a five-second read deadline. Output is limited to one 1 MiB JSON object.
 
+Lifecycle requests accept only `services`, `dryRun`, `confirmPlan`, `runtimeProvider`, `timeout`, and `parallelism`. They require exactly one of `"dryRun": true` or an exact lowercase SHA-256 `confirmPlan`; `run` requires exactly one service. These operations delegate to the same lifecycle planner, saga, provider binding, and result envelopes as the CLI.
+
 Success wraps the delegated CLI JSON under `result`. A delegated CLI failure preserves that command's exit code and JSON body under `error`. Invalid requests, unavailable configured files, and control execution failures use `HW-API-001`, `HW-API-002`, and `HW-API-003` respectively.
 
-Without a configured `--state-db`, `status`, `events`, and `recovery` use the CLI's secure Application Support default. `status` performs runtime observation plus compatible schema migration, snapshot, and audit writes. `events` and `recovery` remain read-only and fail instead of creating or migrating a missing database. The API never mutates runtime.
+Without a configured `--state-db`, state-backed operations use the CLI's secure Application Support default. `status` performs runtime observation plus compatible schema migration, snapshot, and audit writes. `events` and recovery inspection remain read-only and fail instead of creating or migrating a missing database. A confirmed lifecycle request may mutate only through the same exact plan and durable operation gate as its CLI counterpart.
 
-The API deliberately excludes apply, cleanup, logs, diagnostics export, benchmark, extension execution, arbitrary commands, and every generic mutation endpoint.
+The API deliberately excludes interactive streams, apply compatibility, cleanup, logs, diagnostics export, benchmark, extension execution, arbitrary commands, persistent listeners, and generic mutation endpoints.
 
 ## Exit Codes
 
@@ -213,7 +229,7 @@ Do not confuse `hostwright state recover` with `hostwright recovery`: the former
 
 ## `hostwright migrate preview <path> [--json | --output text|json]`
 
-Reads a manifest and prints the deterministic Manifest v2 preview without writing the source, state, or runtime. Explicit v1 has its version replaced, versionless input receives `version: 2`, and v2 is idempotent. Future or unsupported versions fail closed. Phase 01 changes only the version contract; Phase 04 owns semantic migration for the complete workload schema.
+Reads a manifest and prints the deterministic Manifest v2 preview without writing the source, state, or runtime. Explicit v1 has its version replaced, versionless input receives `version: 2`, legacy `health` becomes an equivalent typed liveness probe, and v2 is idempotent. Future or unsupported versions fail closed.
 
 ## `hostwright init`
 
@@ -337,48 +353,45 @@ JSON shape:
 
 ## `hostwright apply [path] [--state-db <path>] --confirm-plan <hash> [--team-profile <path> --approval-record <path>]`
 
-Runs the narrow confirmed apply gate.
+`apply` is the compatibility entry point for a confirmed `up` lifecycle plan. Generate the exact hash with `hostwright up --dry-run`; confirmed execution then uses the same durable operation DAG, schema-v7 saga, provider binding, observation, verification, retry, compensation, and recovery behavior as `up`.
 
-This command:
-
-- validates the manifest;
-- observes Apple container through `RuntimeAdapter`;
-- recomputes the deterministic plan;
-- uses the secure Application Support state default unless `--state-db` or `HOSTWRIGHT_STATE_DB` overrides it;
-- requires the supplied plan hash to match the current observed plan;
-- persists desired state, observed state, operation intent, and an apply-start event before mutation;
-- executes exactly one `createMissingService`, restart-policy-allowed `startManagedService`, or restart-policy-allowed `restartManagedService` action through `RuntimeAdapter`;
-- records operation recovery groups, forward runtime steps, rollback-unavailable steps, checkpoints, and redacted manual recovery hints;
-- records success or failure events and operation status.
-
-When `--team-profile` is selected, `--approval-record` is mandatory. The approved record must match the exact profile SHA-256, manifest SHA-256, current plan hash, and `apply` scope. Hostwright computes the approval SHA-256 and carries all four hashes into runtime confirmation and redacted append-only audit records. Missing, rejected, stale, wrong-scope, or mismatched approvals fail before mutation.
-
-It refuses mutation when:
-
-- the selected state path is invalid, unsafe, conflicting, locked, corrupt, or incompatible;
-- `--confirm-plan` is missing or mismatched;
-- runtime observation fails;
-- the plan has blockers;
-- zero executable actions exist;
-- more than one executable action exists;
-- a create action uses mounts, privileged host ports, broad bind addresses, flag-like image values, or service command tokens beginning with `-`;
-- a create action cannot confirm the local Apple container image;
-- a start action is not for an observed Hostwright-managed stopped, created, or exited service allowed by restart policy;
-- a restart action is not for an exact Hostwright-owned running service with a fresh persisted unhealthy health result and a matching ownership record.
-- an operation group with the same idempotency key still has an active lease; the error reports its redacted owner, checkpoint, and expiry without attempting mutation.
-- a profile-aware approval is absent, rejected, wrong-scope, or bound to different profile, manifest, or plan data.
-
-An interrupted operation can reuse the same plan only when its persisted checkpoint proves runtime execution never began (`pre-runtime-state-incomplete`). Completed operations and interruptions with ambiguous or post-runtime state remain blocked.
-
-Manifest-declared ports are published to `127.0.0.1` by default during Hostwright-created container creation. Sensitive environment values are passed to the runtime for execution, but plan output, state rows, events, logs, and errors use redacted values.
-
-It does not implement user-facing stop/restart commands, image replacement, port mutation, mount mutation, automatic rollback, image pull, unattended daemon mutation, broad bind exposure, or multi-action apply.
+When `--team-profile` is selected, `--approval-record` remains mandatory and must bind the exact profile, manifest, current plan, and `apply` scope. `apply` does not add a separate mutation path or loosen lifecycle checks.
 
 Failure example:
 
 ```text
 HW-CLI-003: Confirmed plan hash does not match current observed plan.
 ```
+
+## Lifecycle commands
+
+`up`, `down`, `run`, `start`, `stop`, `restart`, `rm`, and `update` compile the manifest, immutable capability snapshot, provider binding, current observation, and ownership state into one deterministic `LifecyclePlan`.
+
+Every invocation requires exactly one of:
+
+- `--dry-run`, which prints the canonical plan and its SHA-256 without acquiring a mutation group; or
+- `--confirm-plan <sha256>`, which re-observes and refuses stale capabilities, provider identity, generations, fences, ownership, or plan data before mutation.
+
+The confirmed path persists canonical intent, compensation, verification, node attempts, and idempotency keys before external effects. It executes ready nodes with bounded deterministic parallelism, re-observes between waves, and either succeeds, compensates a proven effect, resumes a durable checkpoint, or enters a precise safe hold. It never deletes by name or adopts an unmanaged collision.
+
+Command semantics:
+
+- `up` converges declared replicas in dependency order and validates that every required image already exists locally;
+- `down` stops verified managed resources but preserves them;
+- `run` creates one uniquely identified ephemeral instance for exactly one service;
+- `start`, `stop`, and `restart` operate only on exact managed instances;
+- `rm` removes only verified Hostwright-owned resources in safe reverse dependency order;
+- `update` performs the declared rolling or recreate transition, health-gates promotion, retains the prior revision until success, and restores the last verified revision when exact compensation is provable.
+
+Manifest-declared ports publish only to localhost. Phase 04 supports existing bind mounts; named volumes, custom networks, registry operations, and other later-phase capabilities fail before mutation. Secret references are resolved only when the configured backend is available and never enter plan output, state, logs, or diagnostics.
+
+## Interactive and streaming commands
+
+`exec`, `attach`, `copy`, `export`, `inspect`, `stats`, and `logs --follow` require exact UUID-backed managed identity and a provider capability that passed qualification. Unsupported operations fail before execution instead of using a host-shell fallback.
+
+Streams use 64 KiB chunks, at most 1 MiB queued per stream, bounded diagnostics, backpressure, stdin closure, TTY resize, an allowed signal set, cancellation, and complete process-tree cleanup. JSON streams use NDJSON/base64 frames and cannot be combined with an interactive TTY.
+
+Host copy paths must be absolute and pass descriptor-based no-symlink confinement. Container paths and archive entries reject traversal. `inspect` and `stats` render normalized structured provider results; log follow resumes from bounded provider state after a supported restart without uncontrolled duplication.
 
 ## `hostwright status [path] [--state-db <path>] [--output text|json]`
 
@@ -399,7 +412,7 @@ JSON shape:
 }
 ```
 
-## `hostwright logs <service> [path] [--tail <n>] [--state-db <path>]`
+## `hostwright logs <service> [path] [--tail <n>] [--follow] [--runtime-provider <provider>] [--timeout <seconds>] [--state-db <path>] [--output text|json]`
 
 Reads the last log lines for a declared and observed Hostwright-managed service through `RuntimeAdapter`.
 
@@ -409,7 +422,7 @@ Rules:
 - maximum tail is clamped to 1000 lines;
 - the adapter receives the exact observed runtime identifier rather than recomputing a container name; the selected state path supplies migrated legacy ownership hints;
 - log output is redacted before display;
-- `--follow`, attach, interactive, and exec behavior are not implemented;
+- `--follow` uses the bounded streaming contract and is available only when the selected provider advertises it;
 - a `logs.read` event with the exact resource identifier is persisted to the selected state database.
 
 Failure example:
@@ -445,15 +458,9 @@ JSON shape:
 
 ## `hostwright recovery [--state-db <path>] [--project <name>] [--output text|json]`
 
-Reads operation recovery groups and steps from the selected, already-migrated state database. For older state databases that contain managed restart recovery records but no Phase 18 operation group for the same operation, the command renders those restart records as legacy recovery entries.
+Inspection reads durable operation groups and steps from the selected, already-migrated state database without creating or migrating it. Output distinguishes completed work, resumable work, compensable work, and safe holds, and includes the exact group identity, persisted plan hash, checkpoint, remaining effects, and redacted operator guidance.
 
-It does not inspect runtime state, create or migrate the database as a read side effect, retry operations, or roll back runtime changes. Recovery output distinguishes:
-
-- no automatic recovery required;
-- manual inspection required after a failed or interrupted operation;
-- rollback unsupported because no safe inverse operation is proven.
-
-Active groups include their redacted lock owner and lease expiry in text and JSON output. A group with no persisted mutation intent can be reacquired after expiry, which marks the old group interrupted. A recorded intent remains blocked unless the persisted checkpoint proves runtime execution never began; ambiguous or post-runtime interruptions require manual inspection.
+`recovery resume` and `recovery rollback` require the exact group UUID and persisted plan SHA-256. They re-observe provider identity, capabilities, generations, fences, ownership, and completed effects before continuing. Resume skips already verified nodes. Rollback applies only precomputed inverse actions whose exact ownership and effect remain provable; otherwise the group stays in safe hold without deleting or fabricating success.
 
 JSON shape:
 

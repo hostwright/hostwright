@@ -25,6 +25,12 @@ public struct RuntimeProviderMigrationCLIOptions: Equatable, Sendable {
     }
 }
 
+public enum RecoveryCLIAction: Equatable, Sendable {
+    case inspect
+    case resume(groupID: String, confirmationPlanSHA256: String, timeoutSeconds: Int)
+    case rollback(groupID: String, confirmationPlanSHA256: String, timeoutSeconds: Int)
+}
+
 public enum CLICommand: Equatable, Sendable {
     case version
     case capabilities(output: CLIOutputFormat)
@@ -51,9 +57,16 @@ public enum CLICommand: Equatable, Sendable {
         approvalRecordPath: String?,
         runtimeProvider: RuntimeProviderSelection
     )
+    case lifecycle(options: LifecycleCLIOptions)
+    case interactive(options: InteractiveCLIOptions)
     case logs(serviceName: String, path: String, tail: Int, stateDatabasePath: String?)
     case events(stateDatabasePath: String?, projectName: String?, filters: EventFilters, output: CLIOutputFormat)
-    case recovery(stateDatabasePath: String?, projectName: String?, output: CLIOutputFormat)
+    case recovery(
+        action: RecoveryCLIAction,
+        stateDatabasePath: String?,
+        projectName: String?,
+        output: CLIOutputFormat
+    )
     case cleanup(path: String, stateDatabasePath: String?, confirmation: CleanupConfirmation, teamProfilePath: String?, approvalRecordPath: String?)
     case diagnostics(stateDatabasePath: String?, bundlePath: String, projectName: String?, manifestPath: String?)
     case benchmark(options: BenchmarkCLIOptions)
@@ -96,6 +109,10 @@ public enum CLICommand: Equatable, Sendable {
             return try statusCommand(arguments: arguments)
         case "apply":
             return try applyCommand(arguments: arguments)
+        case "up", "down", "run", "start", "stop", "restart", "rm", "update":
+            return .lifecycle(options: try LifecycleCLIParser.parse(arguments: arguments))
+        case "exec", "attach", "copy", "export", "inspect", "stats":
+            return .interactive(options: try InteractiveCLIParser.parse(arguments: arguments))
         case "logs":
             return try logsCommand(arguments: arguments)
         case "events":
@@ -664,11 +681,24 @@ public enum CLICommand: Equatable, Sendable {
         var path: String?
         var tail = 100
         var stateDatabasePath: String?
+        var follows = false
+        var runtimeProvider = RuntimeProviderSelection.automatic
+        var runtimeProviderSelected = false
+        var timeoutSeconds = 300
+        var timeoutSelected = false
+        var output = CLIOutputFormat.text
+        var outputSelected = false
         var index = 2
 
         while index < arguments.count {
             let argument = arguments[index]
             switch argument {
+            case "--follow":
+                guard !follows else {
+                    throw CLIUsageError("logs accepts --follow once.")
+                }
+                follows = true
+                index += 1
             case "--tail":
                 guard index + 1 < arguments.count, let parsed = Int(arguments[index + 1]), parsed > 0 else {
                     throw CLIUsageError("logs requires a positive integer after --tail.")
@@ -680,6 +710,47 @@ public enum CLICommand: Equatable, Sendable {
                     throw CLIUsageError("logs requires a value after --state-db.")
                 }
                 stateDatabasePath = arguments[index + 1]
+                index += 2
+            case "--runtime-provider":
+                guard !runtimeProviderSelected,
+                      index + 1 < arguments.count,
+                      let selected = RuntimeProviderSelection(
+                          rawValue: arguments[index + 1]
+                      ) else {
+                    throw CLIUsageError(
+                        "logs --runtime-provider requires auto, apple-cli, or containerization."
+                    )
+                }
+                runtimeProvider = selected
+                runtimeProviderSelected = true
+                index += 2
+            case "--timeout":
+                guard !timeoutSelected,
+                      index + 1 < arguments.count,
+                      let selected = Int(arguments[index + 1]),
+                      (1...LifecycleCLIParser.maximumTimeoutSeconds).contains(selected) else {
+                    throw CLIUsageError(
+                        "logs --timeout must be between 1 and \(LifecycleCLIParser.maximumTimeoutSeconds) seconds."
+                    )
+                }
+                timeoutSeconds = selected
+                timeoutSelected = true
+                index += 2
+            case "--json":
+                guard !outputSelected else {
+                    throw CLIUsageError("logs accepts one output selector.")
+                }
+                output = .json
+                outputSelected = true
+                index += 1
+            case "--output":
+                guard !outputSelected,
+                      index + 1 < arguments.count,
+                      let selected = CLIOutputFormat(rawValue: arguments[index + 1]) else {
+                    throw CLIUsageError("logs --output supports only text or json.")
+                }
+                output = selected
+                outputSelected = true
                 index += 2
             default:
                 guard !argument.hasPrefix("-") else {
@@ -693,6 +764,27 @@ public enum CLICommand: Equatable, Sendable {
             }
         }
 
+        if follows {
+            return .interactive(
+                options: InteractiveCLIOptions(
+                    command: .logsFollow,
+                    manifestPath: path ?? HostwrightIdentity.manifestFileName,
+                    serviceName: serviceName,
+                    stateDatabasePath: stateDatabasePath,
+                    runtimeProvider: runtimeProvider,
+                    timeoutSeconds: timeoutSeconds,
+                    output: output,
+                    terminal: false,
+                    forwardsStandardInput: false,
+                    tail: tail
+                )
+            )
+        }
+        guard !runtimeProviderSelected, !timeoutSelected, !outputSelected else {
+            throw CLIUsageError(
+                "logs runtime-provider, timeout, and output selectors require --follow."
+            )
+        }
         return .logs(
             serviceName: serviceName,
             path: path ?? HostwrightIdentity.manifestFileName,
@@ -776,7 +868,19 @@ public enum CLICommand: Equatable, Sendable {
         var stateDatabasePath: String?
         var projectName: String?
         var output: CLIOutputFormat = .text
-        var index = 1
+        var groupID: String?
+        var confirmationPlanSHA256: String?
+        var timeoutSeconds = 120
+        let operation: String?
+        var index: Int
+
+        if arguments.count > 1, ["resume", "rollback"].contains(arguments[1]) {
+            operation = arguments[1]
+            index = 2
+        } else {
+            operation = nil
+            index = 1
+        }
 
         while index < arguments.count {
             switch arguments[index] {
@@ -795,12 +899,92 @@ public enum CLICommand: Equatable, Sendable {
             case "--output":
                 output = try parseOutputValue(arguments: arguments, index: index, commandName: "recovery")
                 index += 2
+            case "--group":
+                guard operation != nil, groupID == nil, index + 1 < arguments.count else {
+                    throw CLIUsageError(
+                        "recovery resume/rollback requires exactly one value after --group."
+                    )
+                }
+                let candidate = arguments[index + 1].lowercased()
+                guard HostwrightResourceUUID.isValid(candidate) else {
+                    throw CLIUsageError(
+                        "recovery --group requires the exact lifecycle operation-group UUID."
+                    )
+                }
+                groupID = candidate
+                index += 2
+            case "--confirm-plan":
+                guard operation != nil,
+                      confirmationPlanSHA256 == nil,
+                      index + 1 < arguments.count else {
+                    throw CLIUsageError(
+                        "recovery resume/rollback requires exactly one value after --confirm-plan."
+                    )
+                }
+                let digest = arguments[index + 1].lowercased()
+                guard digest.count == 64,
+                      digest.allSatisfy({ $0.isHexDigit }) else {
+                    throw CLIUsageError(
+                        "recovery --confirm-plan requires the exact 64-character SHA-256 shown by recovery status."
+                    )
+                }
+                confirmationPlanSHA256 = digest
+                index += 2
+            case "--timeout":
+                guard operation != nil,
+                      index + 1 < arguments.count,
+                      let parsed = Int(arguments[index + 1]),
+                      (1...RuntimeCommandTimeout.maximumSeconds).contains(parsed) else {
+                    throw CLIUsageError(
+                        "recovery resume/rollback --timeout must be between 1 and " +
+                            "\(RuntimeCommandTimeout.maximumSeconds) seconds."
+                    )
+                }
+                timeoutSeconds = parsed
+                index += 2
             default:
-                throw CLIUsageError("recovery supports only --state-db, --project, and --output.")
+                throw CLIUsageError(
+                    "recovery supports inspection or the confirmed resume/rollback operations."
+                )
             }
         }
 
-        return .recovery(stateDatabasePath: stateDatabasePath, projectName: projectName, output: output)
+        let action: RecoveryCLIAction
+        switch operation {
+        case nil:
+            action = .inspect
+        case "resume":
+            guard let groupID, let confirmationPlanSHA256 else {
+                throw CLIUsageError(
+                    "recovery resume requires --group <uuid> and --confirm-plan <sha256>."
+                )
+            }
+            action = .resume(
+                groupID: groupID,
+                confirmationPlanSHA256: confirmationPlanSHA256,
+                timeoutSeconds: timeoutSeconds
+            )
+        case "rollback":
+            guard let groupID, let confirmationPlanSHA256 else {
+                throw CLIUsageError(
+                    "recovery rollback requires --group <uuid> and --confirm-plan <sha256>."
+                )
+            }
+            action = .rollback(
+                groupID: groupID,
+                confirmationPlanSHA256: confirmationPlanSHA256,
+                timeoutSeconds: timeoutSeconds
+            )
+        default:
+            preconditionFailure("Recovery parser admitted an unknown operation.")
+        }
+
+        return .recovery(
+            action: action,
+            stateDatabasePath: stateDatabasePath,
+            projectName: projectName,
+            output: output
+        )
     }
 
     private static func doctorCommand(arguments: [String]) throws -> CLICommand {

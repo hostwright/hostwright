@@ -39,6 +39,10 @@ let package = Package(
         .package(
             url: "https://github.com/apple/containerization.git",
             exact: "0.35.0"
+        ),
+        .package(
+            url: "https://github.com/jpsim/Yams.git",
+            exact: "6.2.2"
         )
     ],
     targets: [
@@ -121,7 +125,8 @@ let package = Package(
             name: "HostwrightManifest",
             dependencies: [
                 "HostwrightCore",
-                "HostwrightSecrets"
+                "HostwrightSecrets",
+                .product(name: "Yams", package: "Yams")
             ]
         ),
         .target(

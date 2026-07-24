@@ -12,6 +12,11 @@ public struct OperationGroupAcquireResult: Equatable, Sendable {
     }
 }
 
+public enum OperationGroupLeaseRecoveryResult: Equatable, Sendable {
+    case reclaimed(OperationGroupRecord)
+    case activeUnexpired(OperationGroupRecord)
+}
+
 public struct OperationGroupRepository: Sendable {
     private let store: SQLiteStateStore
 
@@ -150,6 +155,270 @@ public struct OperationGroupRepository: Sendable {
                         .text(expectedFencingToken.lowercased())
                     ]
                 )
+            }
+        }
+    }
+
+    public func recordCheckpointRenewingLease(
+        groupID: String,
+        expectedFencingToken: String,
+        expectedLockOwner: String,
+        checkpoint: String,
+        verificationJSONRedacted: String,
+        lockExpiresAt: String,
+        updatedAt: String
+    ) throws {
+        guard HostwrightResourceUUID.isValid(expectedFencingToken),
+              !expectedLockOwner.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !checkpoint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              StateJSON.isObject(verificationJSONRedacted),
+              lockExpiresAt > updatedAt else {
+            throw StateStoreError.invalidRecord(
+                "Operation group checkpoint lease renewal requires an exact owner, fence, checkpoint, verification object, and future expiry."
+            )
+        }
+        let owner = RuntimeRedactionPolicy.default.redact(expectedLockOwner)
+        let verification = try StateJSON.redactedJSON(verificationJSONRedacted)
+        try store.withValidatedConnection { connection in
+            try connection.transaction {
+                let rows = try connection.query(
+                    """
+                    SELECT status, fencing_token, lock_owner, lock_expires_at
+                    FROM operation_groups
+                    WHERE id = ?
+                    LIMIT 1
+                    """,
+                    bindings: [.text(groupID)]
+                )
+                guard rows.count == 1,
+                      rows[0][0] == OperationGroupStatus.active.rawValue,
+                      rows[0][1] == expectedFencingToken.lowercased(),
+                      rows[0][2] == owner,
+                      let existingExpiry = rows[0][3],
+                      existingExpiry > updatedAt else {
+                    throw StateStoreError.invalidRecord(
+                        "Operation group checkpoint lease was expired, missing, or no longer owned by the exact fenced executor."
+                    )
+                }
+                try connection.run(
+                    """
+                    UPDATE operation_groups
+                    SET checkpoint = ?, verification_json_redacted = ?,
+                        lock_expires_at = ?, updated_at = ?
+                    WHERE id = ? AND status = 'active' AND fencing_token = ?
+                      AND lock_owner = ? AND lock_expires_at = ?
+                    """,
+                    bindings: [
+                        .text(checkpoint),
+                        .text(verification),
+                        .text(lockExpiresAt),
+                        .text(updatedAt),
+                        .text(groupID),
+                        .text(expectedFencingToken.lowercased()),
+                        .text(owner),
+                        .text(existingExpiry)
+                    ]
+                )
+                let updated = try connection.query(
+                    """
+                    SELECT checkpoint, lock_expires_at
+                    FROM operation_groups
+                    WHERE id = ? AND status = 'active' AND fencing_token = ?
+                      AND lock_owner = ?
+                    LIMIT 1
+                    """,
+                    bindings: [
+                        .text(groupID),
+                        .text(expectedFencingToken.lowercased()),
+                        .text(owner)
+                    ]
+                )
+                guard updated.count == 1,
+                      updated[0][0] == checkpoint,
+                      updated[0][1] == lockExpiresAt else {
+                    throw StateStoreError.invalidRecord(
+                        "Operation group checkpoint lease renewal lost its exact fenced owner."
+                    )
+                }
+            }
+        }
+    }
+
+    public func reclaimExpiredActive(
+        groupID: String,
+        expectedPlanHash: String,
+        expectedFencingToken: String,
+        lockOwner: String,
+        lockExpiresAt: String,
+        currentTimestamp: String
+    ) throws -> OperationGroupLeaseRecoveryResult {
+        guard !groupID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !expectedPlanHash.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              HostwrightResourceUUID.isValid(expectedFencingToken),
+              !lockOwner.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              lockExpiresAt > currentTimestamp else {
+            throw StateStoreError.invalidRecord(
+                "Expired operation recovery requires the exact group, plan, fence, owner, and a future replacement lease."
+            )
+        }
+        let owner = RuntimeRedactionPolicy.default.redact(lockOwner)
+        return try store.withValidatedConnection { connection in
+            try connection.transaction {
+                let rows = try connection.query(
+                    """
+                    SELECT id, operation_id, group_kind, project_id, service_name,
+                           planned_action_type, status, group_idempotency_key, plan_hash,
+                           checkpoint, lock_owner, lock_expires_at, rollback_available,
+                           manual_recovery_hint_redacted, created_at, updated_at,
+                           metadata_json_redacted, fencing_token, intent_json_redacted,
+                           compensation_json_redacted, verification_json_redacted
+                    FROM operation_groups
+                    WHERE id = ?
+                    LIMIT 1
+                    """,
+                    bindings: [.text(groupID)]
+                )
+                guard let existing = try rows.first.map(operationGroupRecord(from:)),
+                      existing.status == .active,
+                      existing.planHash == expectedPlanHash,
+                      existing.fencingToken == expectedFencingToken.lowercased() else {
+                    throw StateStoreError.invalidRecord(
+                        "Only the exact active operation group, plan, and fence can be reclaimed."
+                    )
+                }
+                guard let existingExpiry = existing.lockExpiresAt else {
+                    throw StateStoreError.invalidRecord(
+                        "Legacy active operation groups without a finite lease cannot be reclaimed automatically."
+                    )
+                }
+                guard existingExpiry <= currentTimestamp else {
+                    return .activeUnexpired(existing)
+                }
+                try connection.run(
+                    """
+                    UPDATE operation_groups
+                    SET lock_owner = ?, lock_expires_at = ?, updated_at = ?
+                    WHERE id = ? AND status = 'active' AND plan_hash = ?
+                      AND fencing_token = ? AND lock_expires_at = ?
+                    """,
+                    bindings: [
+                        .text(owner),
+                        .text(lockExpiresAt),
+                        .text(currentTimestamp),
+                        .text(groupID),
+                        .text(expectedPlanHash),
+                        .text(expectedFencingToken.lowercased()),
+                        .text(existingExpiry)
+                    ]
+                )
+                let loaded = try connection.query(
+                    """
+                    SELECT id, operation_id, group_kind, project_id, service_name,
+                           planned_action_type, status, group_idempotency_key, plan_hash,
+                           checkpoint, lock_owner, lock_expires_at, rollback_available,
+                           manual_recovery_hint_redacted, created_at, updated_at,
+                           metadata_json_redacted, fencing_token, intent_json_redacted,
+                           compensation_json_redacted, verification_json_redacted
+                    FROM operation_groups
+                    WHERE id = ?
+                    LIMIT 1
+                    """,
+                    bindings: [.text(groupID)]
+                )
+                guard let reclaimed = try loaded.first.map(operationGroupRecord(from:)),
+                      reclaimed.status == .active,
+                      reclaimed.planHash == expectedPlanHash,
+                      reclaimed.fencingToken == expectedFencingToken.lowercased(),
+                      reclaimed.lockOwner == owner,
+                      reclaimed.lockExpiresAt == lockExpiresAt else {
+                    throw StateStoreError.invalidRecord(
+                        "Expired operation recovery lost the exact fenced lease race."
+                    )
+                }
+                return .reclaimed(reclaimed)
+            }
+        }
+    }
+
+    public func resumeInterrupted(
+        groupID: String,
+        expectedFencingToken: String,
+        lockOwner: String,
+        lockExpiresAt: String?,
+        updatedAt: String
+    ) throws -> OperationGroupRecord {
+        guard HostwrightResourceUUID.isValid(expectedFencingToken),
+              !lockOwner.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw StateStoreError.invalidRecord(
+                "Operation group resume requires a valid fence and lock owner."
+            )
+        }
+        let redactedOwner = RuntimeRedactionPolicy.default.redact(lockOwner)
+        return try store.withValidatedConnection { connection in
+            try connection.transaction {
+                let rows = try connection.query(
+                    """
+                    SELECT status, fencing_token, project_id
+                    FROM operation_groups
+                    WHERE id = ?
+                    LIMIT 1
+                    """,
+                    bindings: [.text(groupID)]
+                )
+                guard rows.count == 1,
+                      rows[0][0] == OperationGroupStatus.interrupted.rawValue,
+                      rows[0][1] == expectedFencingToken.lowercased() else {
+                    throw StateStoreError.invalidRecord(
+                        "Only the exact fenced interrupted operation group can be resumed."
+                    )
+                }
+                if let projectID = rows[0][2] {
+                    let conflicts = try connection.query(
+                        """
+                        SELECT id
+                        FROM operation_groups
+                        WHERE project_id = ? AND status = 'active' AND id != ?
+                        LIMIT 1
+                        """,
+                        bindings: [.text(projectID), .text(groupID)]
+                    )
+                    guard conflicts.isEmpty else {
+                        throw StateStoreError.invalidRecord(
+                            "Another mutating operation is active for this project."
+                        )
+                    }
+                }
+                try connection.run(
+                    """
+                    UPDATE operation_groups
+                    SET status = 'active', lock_owner = ?, lock_expires_at = ?, updated_at = ?
+                    WHERE id = ? AND status = 'interrupted' AND fencing_token = ?
+                    """,
+                    bindings: [
+                        .text(redactedOwner),
+                        optionalText(lockExpiresAt),
+                        .text(updatedAt),
+                        .text(groupID),
+                        .text(expectedFencingToken.lowercased())
+                    ]
+                )
+                let loaded = try connection.query(
+                    """
+                    SELECT id, operation_id, group_kind, project_id, service_name, planned_action_type,
+                           status, group_idempotency_key, plan_hash, checkpoint, lock_owner, lock_expires_at,
+                           rollback_available, manual_recovery_hint_redacted, created_at, updated_at,
+                           metadata_json_redacted, fencing_token, intent_json_redacted,
+                           compensation_json_redacted, verification_json_redacted
+                    FROM operation_groups
+                    WHERE id = ?
+                    LIMIT 1
+                    """,
+                    bindings: [.text(groupID)]
+                )
+                guard let record = try loaded.first.map(operationGroupRecord(from:)) else {
+                    throw StateStoreError.notFound("Operation group '\(groupID)' does not exist.")
+                }
+                return record
             }
         }
     }
@@ -346,12 +615,49 @@ public struct OperationGroupStepRepository: Sendable {
     }
 
     public func append(_ step: OperationGroupStepRecord) throws {
+        try appendValidated(step, expectedFencingToken: nil)
+    }
+
+    public func append(
+        _ step: OperationGroupStepRecord,
+        expectedFencingToken: String
+    ) throws {
+        guard HostwrightResourceUUID.isValid(expectedFencingToken) else {
+            throw StateStoreError.invalidRecord(
+                "Operation group step append requires a valid fencing token."
+            )
+        }
+        try appendValidated(step, expectedFencingToken: expectedFencingToken.lowercased())
+    }
+
+    private func appendValidated(
+        _ step: OperationGroupStepRecord,
+        expectedFencingToken: String?
+    ) throws {
         guard StateJSON.isObject(step.metadataJSONRedacted) else {
             throw StateStoreError.invalidRecord("Operation group step metadata must be a JSON object.")
         }
         let redacted = step.redacted()
         try store.withValidatedConnection { connection in
             try connection.transaction {
+                if let expectedFencingToken {
+                    let groups = try connection.query(
+                        """
+                        SELECT status, fencing_token
+                        FROM operation_groups
+                        WHERE id = ?
+                        LIMIT 1
+                        """,
+                        bindings: [.text(redacted.groupID)]
+                    )
+                    guard groups.count == 1,
+                          groups[0][0] == OperationGroupStatus.active.rawValue,
+                          groups[0][1] == expectedFencingToken else {
+                        throw StateStoreError.invalidRecord(
+                            "Operation group step fence was lost or the group is no longer active."
+                        )
+                    }
+                }
                 try connection.run(
                     """
                     INSERT INTO operation_group_steps (

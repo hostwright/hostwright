@@ -1,0 +1,24 @@
+version: 2
+project: phase04-rollback
+imagePolicy: require-digest
+
+services:
+  web:
+    image: docker.io/library/python@sha256:26730869004e2b9c4b9ad09cab8625e81d256d1ce97e72df5520e806b1709f92
+    command: ["python3", "-m", "http.server", "8080", "--bind", "0.0.0.0"]
+    ports:
+      - "18083:8080"
+    probes:
+      startup:
+        exec: ["python3", "-c", "raise SystemExit(0)"]
+      readiness:
+        exec: ["python3", "-c", "raise SystemExit(1)"]
+      liveness:
+        http:
+          port: 8080
+          path: /
+    update:
+      strategy: recreate
+      maxSurge: 0
+      maxUnavailable: 1
+      progressDeadline: 10s

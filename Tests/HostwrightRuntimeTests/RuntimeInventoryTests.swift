@@ -107,6 +107,30 @@ final class RuntimeInventoryTests: XCTestCase {
         XCTAssertNotEqual(first.semanticSHA256, changed.semanticSHA256)
     }
 
+    func testSemanticDigestExcludesVolatileUsageWhileRetainingSamples() throws {
+        let first = try build(
+            containers: [
+                makeContainer(
+                    runtimeID: "container-a",
+                    name: "api",
+                    cpuUsageMicroseconds: 100
+                )
+            ]
+        )
+        let second = try build(
+            containers: [
+                makeContainer(
+                    runtimeID: "container-a",
+                    name: "api",
+                    cpuUsageMicroseconds: 101
+                )
+            ]
+        )
+
+        XCTAssertNotEqual(first.containers[0].usage, second.containers[0].usage)
+        XCTAssertEqual(first.semanticSHA256, second.semanticSHA256)
+    }
+
     func testMalformedHealthPortsAllocationsAndImagesFailClosed() {
         let container = makeContainer(
             runtimeID: "container",
@@ -428,7 +452,8 @@ final class RuntimeInventoryTests: XCTestCase {
             cpuCount: 2,
             memoryBytes: 1_048_576,
             storageBytes: 8_388_608
-        )
+        ),
+        cpuUsageMicroseconds: UInt64 = 100
     ) -> RuntimeInventoryContainer {
         let resolvedOwnership = explicitOwnership ?? resourceUUID.map(ownership)
         let resolvedLabels = labels ?? (resolvedOwnership == nil ? [] : [
@@ -450,7 +475,7 @@ final class RuntimeInventoryTests: XCTestCase {
             networks: networks,
             allocation: allocation,
             usage: RuntimeInventoryUsage(
-                cpuUsageMicroseconds: 100,
+                cpuUsageMicroseconds: cpuUsageMicroseconds,
                 memoryUsageBytes: 1_024,
                 memoryLimitBytes: 1_048_576,
                 networkReceiveBytes: 10,

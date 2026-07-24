@@ -8,7 +8,7 @@ Hostwright needs to observe, plan, and eventually mutate container runtime state
 
 ## Current State
 
-Phase 03 implements two Runtime Provider API v2 providers behind `RuntimeAdapter`: `apple-container-cli` and `apple-containerization`. Each exposes only capabilities it passed in the shared conformance suite. Mutation remains limited to create-missing-service, restart-policy-gated managed start and restart, and ownership-gated cleanup delete; Phase 04 owns the complete lifecycle.
+Phase 03 implements two Runtime Provider API v2 providers behind `RuntimeAdapter`: `apple-container-cli` and `apple-containerization`. Each exposes only capabilities it passed in the shared conformance suite. Phase 04 composes those qualified primitives into the confirmed single-host lifecycle, probes, bounded interactive operations, rolling/recreate updates, rollback, and recovery. Provider capability snapshots remain authoritative; an unavailable operation fails before execution.
 
 Implemented:
 
@@ -33,12 +33,12 @@ The helper uses a private mode-`0700` runtime directory and mode-`0600` socket, 
 
 Not implemented:
 
-- public stop/restart commands, broad remove, run, pull, build, exec, image delete, volume delete, or prune;
-- daemon restart loops;
-- daemon runtime loop;
-- broad cleanup or unmanaged cleanup.
+- image pull, build, load, push, tag, image delete, or prune;
+- named-volume lifecycle, snapshots, custom networks, DNS, ingress, or broad bind exposure;
+- unattended daemon runtime mutation;
+- broad or unmanaged cleanup.
 
-Runtime mutation is limited to create-missing-service, restart-policy-allowed managed start, restart-policy-allowed managed restart, and exact cleanup-eligible managed container delete.
+Runtime mutation remains plan-confirmed and ownership-scoped. Lifecycle commands can create, start, stop, restart, and remove exact managed instances; update composes those primitives with health-gated promotion and compensation. Interactive operations use their own bounded provider interface and are advertised only after qualification.
 
 ## RuntimeAdapter Protocol Shape
 
@@ -51,7 +51,7 @@ The adapter exposes:
 - `logs(for:tail:)` for bounded read-only log output;
 - `execute(_:confirmation:)` for future mutation hooks.
 
-`execute(_:confirmation:)` may perform exactly one supported mutation action when confirmation, plan hash, policy validation, and any state persistence gates have passed.
+`execute(_:confirmation:)` performs one supported provider mutation action only after confirmation, plan hash, policy validation, state persistence, identity, generation, capability, ownership, and fence gates have passed. The lifecycle saga is responsible for composing those individual actions.
 
 ## Process Runner Boundary
 
@@ -149,14 +149,14 @@ Migration binds its dry-run token to source observation, source and target capab
 
 ## Mutation Boundary
 
-Apply and cleanup support only:
+Phase 04 lifecycle support uses:
 
-- `container image list --format json` as a read-only local-image availability gate;
-- `container create --name <versioned-id> --label <exact-ownership-label> ... --env KEY=value --publish 127.0.0.1:host:container <image> [command...]`.
-- `container start <id>` for exact Hostwright-owned stopped/created/exited services when restart policy allows managed start.
-- internal `container stop <id>` then `container start <id>` for exact Hostwright-owned running/unhealthy services when restart policy allows managed restart.
-- `container delete <id>` for exact cleanup-eligible Hostwright-owned stopped/created/exited containers after dry-run token confirmation.
+- structured local-image evidence before creation;
+- exact UUID/fence-labeled create with localhost-only port publishing and supported bind mounts;
+- start, stop, managed restart, and delete for exact Hostwright-owned identifiers;
+- structured observation after every ambiguous or completed effect;
+- bounded exec, attach, copy, export, inspect, stats, and log-follow operations only when the selected provider advertises them.
 
-The adapter rejects mounts, DNS, custom networks, capabilities, Rosetta, virtualization, custom runtime/kernel, SSH forwarding, `--rm`, `run`, image pull, public stop/restart commands, remove, broad cleanup, prune, build, exec, attach, interactive, `--all`, `--force`, image delete, and volume delete.
+The lifecycle planner, not a raw provider command, implements replicas, dependencies, probes, rolling/recreate updates, rollback, and checkpoint recovery. The adapter still rejects image pull/build/load, named volumes, DNS, custom networks, broad bind exposure, custom runtime/kernel, SSH forwarding, `--all`, `--force`, image deletion, volume deletion, and unmanaged cleanup.
 
 The latest live identity proof used the existing local `docker.io/library/python:alpine` image without pulling. Two projects whose legacy identifiers were identical produced distinct v2 identifiers and labels, were observed concurrently with Apple container 1.0.0 network metadata, exited naturally, and were removed through exact token-confirmed Hostwright cleanup. Apple builder runtime state and the base image remained outside Hostwright ownership. Localhost HTTP forwarding is not claimed by that proof because macOS Local Network access for `container-runtime-linux` is disabled on the proof host.

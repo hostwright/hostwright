@@ -1,24 +1,52 @@
 version: 2
-project: app-suite
+project: phase04-three-service
+imagePolicy: require-digest
 
 services:
-  web:
-    image: ghcr.io/example/web:latest
-    command: ["serve"]
-    ports:
-      - "8080:8080"
-    env:
-      APP_ENV: development
-      API_BASE_URL: http://localhost:8081
-    health:
-      command: ["curl", "-f", "http://localhost:8080/health"]
-      interval: 15s
+  prepare:
+    image: docker.io/library/python@sha256:26730869004e2b9c4b9ad09cab8625e81d256d1ce97e72df5520e806b1709f92
+    command: ["python3", "-c", "print('prepared')"]
     restart:
-      policy: on-failure
+      policy: "no"
 
   worker:
-    image: ghcr.io/example/worker:latest
-    env:
-      QUEUE_NAME: default
-    restart:
-      policy: no
+    image: docker.io/library/python@sha256:26730869004e2b9c4b9ad09cab8625e81d256d1ce97e72df5520e806b1709f92
+    replicas: 2
+    command: ["python3", "-c", "import time; time.sleep(3600)"]
+    dependsOn:
+      prepare: completed
+    probes:
+      startup:
+        exec: ["python3", "-c", "raise SystemExit(0)"]
+      readiness:
+        exec: ["python3", "-c", "raise SystemExit(0)"]
+      liveness:
+        exec: ["python3", "-c", "raise SystemExit(0)"]
+    update:
+      strategy: rolling
+      maxSurge: 1
+      maxUnavailable: 1
+      progressDeadline: 60s
+
+  web:
+    image: docker.io/library/python@sha256:26730869004e2b9c4b9ad09cab8625e81d256d1ce97e72df5520e806b1709f92
+    command: ["python3", "-m", "http.server", "8080", "--bind", "0.0.0.0"]
+    dependsOn:
+      worker: ready
+    ports:
+      - "18081:8080"
+    probes:
+      startup:
+        exec: ["python3", "-c", "raise SystemExit(0)"]
+      readiness:
+        tcp:
+          port: 8080
+      liveness:
+        http:
+          port: 8080
+          path: /
+    update:
+      strategy: recreate
+      maxSurge: 0
+      maxUnavailable: 1
+      progressDeadline: 60s

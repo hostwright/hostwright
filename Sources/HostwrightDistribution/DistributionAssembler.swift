@@ -670,6 +670,8 @@ private final class DistributionCleanBuildLease: @unchecked Sendable {
 }
 
 public struct DistributionCleanBuilder: Sendable {
+    private static let releaseBuildTimeoutSeconds = 3_600
+
     private let runner: DistributionProcessRunner
     private let assembler: DistributionAssembler
     private let configuredContainerizationAssets: DistributionContainerizationAssetBundle?
@@ -842,6 +844,7 @@ public struct DistributionCleanBuilder: Sendable {
                 executablePath: "/usr/bin/swift",
                 arguments: arguments,
                 label: "build release product \(product)",
+                timeoutSeconds: Self.releaseBuildTimeoutSeconds,
                 cancellation: cancellation,
                 trustedEnvironmentOverrides: deterministicSwiftEnvironment
             )
@@ -863,6 +866,7 @@ public struct DistributionCleanBuilder: Sendable {
             executablePath: "/usr/bin/swift",
             arguments: binPathArguments,
             label: "read release binary path",
+            timeoutSeconds: Self.releaseBuildTimeoutSeconds,
             cancellation: cancellation,
             trustedEnvironmentOverrides: deterministicSwiftEnvironment
         )

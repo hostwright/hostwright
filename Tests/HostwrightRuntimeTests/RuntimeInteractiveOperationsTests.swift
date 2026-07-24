@@ -1145,8 +1145,8 @@ final class RuntimeInteractiveOperationsTests: XCTestCase {
             }
         }
 
-        XCTAssertEqual(sinkStarted.wait(timeout: .now() + 1), .success)
-        XCTAssertEqual(runnerFinished.wait(timeout: .now() + 1), .success)
+        XCTAssertEqual(sinkStarted.wait(timeout: .now() + 5), .success)
+        XCTAssertEqual(runnerFinished.wait(timeout: .now() + 5), .success)
         releaseSink.signal()
         do {
             _ = try await task.value

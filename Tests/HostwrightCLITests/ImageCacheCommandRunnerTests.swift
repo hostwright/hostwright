@@ -7,6 +7,16 @@ import XCTest
 @testable import HostwrightCLI
 
 final class ImageCacheCommandRunnerTests: XCTestCase {
+    func testLeaseExpiryUsesTheExactFractionalAcquisitionTimestamp() {
+        XCTAssertEqual(
+            hostwrightTimestampAdding(
+                seconds: 86_400,
+                to: "2026-07-25T12:00:00.999Z"
+            ),
+            "2026-07-26T12:00:00Z"
+        )
+    }
+
     func testDryRunThenExactConfirmationDeletesOnlyManagedContent()
         async throws
     {

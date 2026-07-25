@@ -104,9 +104,20 @@ func hostwrightTimestamp() -> String {
 }
 
 func hostwrightTimestampAdding(seconds: Int, to timestamp: String) -> String {
-    let formatter = ISO8601DateFormatter()
-    let date = formatter.date(from: timestamp) ?? Date()
-    return formatter.string(from: date.addingTimeInterval(TimeInterval(seconds)))
+    let fractional = ISO8601DateFormatter()
+    fractional.formatOptions = [
+        .withInternetDateTime,
+        .withFractionalSeconds
+    ]
+    let whole = ISO8601DateFormatter()
+    whole.formatOptions = [.withInternetDateTime]
+    let date =
+        fractional.date(from: timestamp) ??
+        whole.date(from: timestamp) ??
+        Date()
+    return whole.string(
+        from: date.addingTimeInterval(TimeInterval(seconds))
+    )
 }
 
 func hostwrightUniqueID(prefix: String) -> String {

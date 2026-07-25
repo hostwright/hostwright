@@ -13,7 +13,7 @@ final class ImageCacheCommandRunnerTests: XCTestCase {
                 seconds: 86_400,
                 to: "2026-07-25T12:00:00.999Z"
             ),
-            "2026-07-26T12:00:00Z"
+            "2026-07-26T12:00:00.999Z"
         )
     }
 

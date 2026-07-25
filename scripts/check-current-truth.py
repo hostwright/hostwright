@@ -81,10 +81,10 @@ def main() -> int:
 
     require("0.0.2-dev" in readme and "v0.0.2" in readme, "README lacks current version/release truth", errors)
     require("`brew install hostwright` does not exist today" in readme, "README must state the unqualified brew command does not exist", errors)
-    require("Phase 02 qualification is complete" in readme, "README does not record completed Phase 02 qualification", errors)
-    require("Phase 03 qualification is complete" in readme, "README does not record completed Phase 03 qualification", errors)
-    require("Phase 04 qualification is complete" in readme, "README does not record completed Phase 04 qualification", errors)
-    require("Phase 05 Gates 1–11 are locally complete" in readme, "README does not record completed Phase 05 Gate 11", errors)
+    require("macOS command-line control plane" in readme, "README lacks the product purpose", errors)
+    require("Manifest v2" in readme and "SQLite schema v14" in readme, "README lacks current manifest/state contracts", errors)
+    require("Apple `container` 1.0.0 and 1.1.0" in readme, "README lacks the tested Apple container matrix", errors)
+    require("`hostwright image`, `registry`, `secret`" in readme, "README lacks the current image, registry, and secret surfaces", errors)
     require("brew install hostwright/tap/hostwright" in readme, "README lacks the available vendor-tap command", errors)
     require("`brew install hostwright` does not exist today" in install, "install docs must state the unqualified brew command does not exist", errors)
     require(

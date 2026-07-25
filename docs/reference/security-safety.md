@@ -14,9 +14,9 @@ Production subprocess execution uses one shared bounded implementation. It passe
 
 ## Mutation Boundaries
 
-Supported application mutation requires an exact lifecycle plan hash and one durable schema-v7 operation group. `up`, `down`, `run`, `start`, `stop`, `restart`, `rm`, and `update` revalidate provider identity, capability digest, project/resource generation, ownership UUID, and fence before every mutation wave. Intent and compensation are persisted before effects; ambiguous results are re-observed; automatic rollback runs only when ownership and every inverse effect are provable. Otherwise Hostwright records a safe hold.
+Supported application mutation requires an exact lifecycle plan hash and one durable schema-v8 operation group. `up`, `down`, `run`, `start`, `stop`, `restart`, `rm`, and `update` revalidate provider identity, capability digest, project/resource generation, ownership UUID, and fence before every mutation wave. Intent and compensation are persisted before effects; ambiguous results are re-observed; automatic rollback runs only when ownership and every inverse effect are provable. Otherwise Hostwright records a safe hold.
 
-Phase 04 does not implement registry-backed image replacement or pull/build/load, named-volume lifecycle or snapshots, custom networking/DNS/ingress, broad bind exposure, unattended daemon mutation, or broad/unmanaged cleanup. Existing bind mounts and localhost port publishing remain path- and policy-gated.
+Phase 04 workload lifecycle remains separate from Phase 05 image preparation. Phase 05 image commands implement strict Apple CLI pull/build/push/tag/load/save/inspect plus exact Hostwright-owned delete/prune. They do not add named-volume lifecycle, snapshots, custom networking/DNS/ingress, broad bind exposure, unattended daemon mutation, or broad/unmanaged cleanup. Existing bind mounts and localhost port publishing remain path- and policy-gated.
 
 Restart policy state can block managed restart through backoff, operator hold, manual disable, and crash-loop protection. The foreground daemon records restart state but does not start or restart services by itself.
 
@@ -88,11 +88,11 @@ Current public Hostwright releases nevertheless remain source-only. Local unsign
 
 ## Control Surface Boundary
 
-Future GUI or local control surfaces must use Hostwright command contracts or the explicit `hostwright-control` subset while preserving the same validation, redaction, ownership, selected-state-path, and RuntimeAdapter boundaries. Mutation remains outside the current one-shot API, so plan-hash confirmation and cleanup-token authority are not exposed through it.
+Future GUI or local control surfaces must use Hostwright command contracts or the explicit `hostwright-control` subset while preserving the same validation, redaction, ownership, selected-state-path, and RuntimeAdapter boundaries. The one-shot API exposes strict image lifecycle parity only through the same durable coordinator; first use may create its launch-selected image state database through that shared secure path boundary. It does not expose generic mutation, apply compatibility, or cleanup-token authority.
 
-They must not call Apple container, SQLite, `RuntimeAdapter`, state migrations, cleanup deletion, health execution, or diagnostics upload directly. `hostwright-control` delegates only plan, status, events, recovery, and doctor to existing CLI contracts, requires launch-fixed absolute paths, rejects request-selected paths and mutation names, bounds one stdin request and one stdout response, and then exits. It adds no GUI code, daemon API, listener, web dashboard, hosted diagnostics, telemetry upload, or remote control.
+They must not call Apple container, SQLite, `RuntimeAdapter`, state migrations, cleanup deletion, health execution, or diagnostics upload directly. `hostwright-control` delegates its admitted operations, including `image`, to existing CLI contracts, requires launch-fixed paths, rejects request-selected paths and arbitrary mutation names, bounds one stdin request and one stdout response, and then exits. It adds no GUI code, daemon API, listener, web dashboard, hosted diagnostics, telemetry upload, or remote control.
 
-Configured files must be existing regular non-symlink files with safe ownership, no group/world write permission, and no set-ID bits. This check reduces accidental or cross-account substitution; it is not an operating-system sandbox or a guarantee against the invoking account replacing its own files. State-backed status can perform compatible path/schema migration, observation snapshot, and audit writes to the launch-configured database or the secure default when no state override is configured. No API operation mutates runtime.
+Configured files must be existing regular non-symlink files with safe ownership, no group/world write permission, and no set-ID bits. This check reduces accidental or cross-account substitution; it is not an operating-system sandbox or a guarantee against the invoking account replacing its own files. State-backed status can perform compatible path/schema migration, observation snapshot, and audit writes to the launch-configured database or the secure default when no state override is configured. An image mutation can affect only the exact versioned image request accepted by the shared coordinator. Source-consuming and destructive requests are bound to structured pre-observation digests before provider effects. Load verifies the complete inventory delta, and interrupted creation recovery requires durable reference-to-digest proof before adoption or exact rollback.
 
 ## Cleanup Safety
 
@@ -115,11 +115,15 @@ Cleanup does not delete images, volumes, networks, Apple builder resources, base
 
 Hostwright keeps execution environment values separate from display and persistence values. Runtime command construction receives the manifest value, while command output, logs, state payloads, events, plan output, and failure messages use redacted values.
 
-Plaintext credential-like environment keys in `env` are rejected. Use `secretEnv` with `keychain://<service>/<account>` references for local secret values. The reference is not a secret value, but Hostwright still redacts keychain reference labels from state, diagnostics, plans, and errors because labels can reveal local account context.
+Plaintext credential-like environment keys in `env` are rejected. Use `secretEnv` with a typed `keychain://`, `env-file://`, `local-file://`, `external://`, or `plugin://` reference. A reference is not the secret value, but Hostwright redacts every provider reference from state, diagnostics, plans, and errors because it can reveal local account or path context.
+
+Registry credentials use a distinct endpoint-derived Keychain service/account and the same durable schema-v9 mutation boundary. Login secrets come only from stdin or an attended no-echo terminal. Docker and OCI auth files are opened without following symlinks, must be exact current-user-owned private regular files, and are identity-checked after bounded reads. Credential helpers run through the secure subprocess boundary with the registry on stdin and never receive credentials in argv.
+
+Registry network traffic is HTTPS-only with system TLS validation, bounded headers and bodies, no cookies or cache, and at most three same-origin redirects. Basic and Bearer authorization are never forwarded across origins. Bearer challenges, token documents, requested scopes, expiry, refresh, and rotation are validated before reuse; refresh tokens are sent only to the original HTTPS token realm. Errors and capability output contain no credential, token, auth-file content, or helper stderr.
 
 After an explicitly confirmed create resolves a `secretEnv` reference, Hostwright transports the value to the Apple CLI only through its bounded child environment and passes `--env KEY` so the CLI inherits it. The resolved value is not placed in argv or an environment file. Runtime result specs, output, errors, state, events, and diagnostics apply exact-value redaction before leaving the execution boundary.
 
-Hostwright does not use the live macOS Keychain by default in this phase. The default CLI secret store fails closed before mutation, and unit-contract tests inject a test-only in-memory secret store. The opt-in read-only `MacOSKeychainSecretStore` uses an interaction-disabled authentication context, excludes synchronizable items, and is covered by live add/read/exact-delete/post-delete tests. Production Hostwright code does not create, update, or delete Keychain items.
+The default CLI resolves Keychain items and guarded local environment or value files only for the exact project, resource generation, service, and environment key granted by the confirmed workload plan. External and plugin providers fail closed unless an explicitly configured resolver registers the matching stable provider and grant; Hostwright never falls back to a shell command or network lookup. The production `MacOSKeychainSecretStore` uses an interaction-disabled authentication context, excludes synchronizable items, uses `WhenUnlockedThisDeviceOnly`, and creates, updates, lists metadata for, and exactly deletes only Hostwright-owned Keychain items.
 
 Redaction is heuristic. Users should not place plaintext credentials in manifests, logs, examples, fixtures, or issue reports.
 
@@ -137,9 +141,63 @@ Secret references do not make third-party manifests trusted. A manifest can stil
 
 ## Image Trust Boundary
 
-Manifest `imagePolicy: require-digest` can require service image references to use `@sha256:<64 lowercase hex characters>` before planning or mutation. This is local string validation only. It does not contact registries, resolve mutable tags, pull images, verify cosign/Sigstore signatures, inspect OCI referrers, generate or validate SBOMs, run vulnerability scanners, or prove build provenance.
+Manifest `imagePolicy: require-digest` requires service image references to use `@sha256:<64 lowercase hex characters>` before planning or mutation. For both policies, lifecycle dry-run resolves the local provider record to an immutable descriptor plus exact Linux platform variant and binds that evidence, platform, provider, and capability digest into the confirmation hash. A moved tag or changed descriptor, variant, platform, provider, or capability produces a new plan or fails closed before mutation.
+
+Resolution uses only bounded local provider evidence and does not contact registries or pull missing images. With no `imageTrust` declaration, digest locks remain content identity rather than publisher trust. With `imageTrust`, a separate offline preflight requires an exact passing signature record or exact active exception before provider mutation.
 
 Operators should still decide which registries, image publishers, digests, and local images they trust. A digest-pinned reference is a content identifier input to Hostwright, not a complete supply-chain trust guarantee.
+
+Image lifecycle operations never treat mutation stdout as state. Apple CLI results come from bounded structured inventory observed before and after the operation, with immutable descriptor-digest verification. Credentials remain within the registry/provider boundary and are never accepted as image CLI fields or copied into argv, state, progress, diagnostics, or provenance.
+
+Confirmed lifecycle intent stores the complete non-secret lock before provider effects. Schema-v13 state keeps separate desired and postcondition-observed lock evidence plus immutable signature, SBOM, vulnerability, and build-provenance records. Plan-bound authorization events make recovery revalidate the same digest, policy, Gate 6 graph, artifact bytes, and current trust material before further effects. `status` and one-shot Control status expose bounded evidence without credentials.
+
+Image delete and prune require exact Hostwright-owned reference/provider/digest records and refuse content referenced by a live container. Schema-v14 cache pressure planning applies deterministic size/retention policy only to provider-scoped accounted content. Deletion requires an exact confirmed plan, an exclusive fenced lease, post-delete observation, and durable recovery accounting; active shared leases, operator or policy pins, desired digest locks, live references, concurrent reference changes, and unmanaged content block it. Native prune, `--all`, `--force`, global or automatic garbage collection, and unmanaged deletion remain unavailable. The Containerization helper reports image mutations unavailable before effects.
+
+## OCI Referrer Transport Boundary
+
+OCI referrers are opaque typed artifact transport in Gate 6. Discovery accepts only exact repository and subject digests, validates any declared index subject, bounds pages, descriptors, graph depth, object bytes, and total bytes, and follows only same-origin HTTPS pagination. Fallback-tag reads and updates are allowed only when the truncated tag preserves exact digest identity; updates additionally require an ETag or create-only condition. Hostwright refuses non-injective or unfenced fallback behavior before effects.
+
+Fetch verifies descriptor size, digest, media type, graph edges, and root subject binding before caching. Publish persists non-secret durable intent first, uploads children before manifests, verifies exact remote bytes after mutation, and records ownership only for root manifests proven newly created by that operation. Interrupted publication resumes by exact operation group and plan. Credentials stay inside the authorized transport and are absent from argv, graph payload descriptions, state intent, progress, diagnostics, and errors.
+
+Narrow retention leases use exact UUID fencing tokens. Remote cleanup requires a confirmed plan hash, an inactive lease set, immutable Hostwright publication evidence, exact remote content and subject revalidation, and post-delete absence. Fallback cleanup conditionally removes only the matching descriptor and restores it if the exact manifest delete fails. It never deletes blobs, unrelated manifests, indexes belonging to another subject, or invokes a registry-wide prune. This remote artifact-retention boundary is separate from schema-v14 local content-cache accounting and does not authorize runtime-image or OCI-cache pressure deletion.
+
+Gate 6 transport does not interpret artifact contents. Gate 7 interprets only standardized Sigstore bundle v0.3 message signatures for exact digest-bound image trust. Gate 8 interprets only bounded SPDX 2.3 and CycloneDX 1.5/1.6 image-SBOM JSON. Gate 9 interprets only the bounded signed vulnerability-report contract. Gate 10 interprets only DSSE Ed25519 envelopes whose payload is an in-toto Statement v1 with the SLSA provenance v1 predicate and the exact image subject. Gate 11 adds bounded accounting, pins, leases, deterministic pressure planning, and exact confirmed deletion for Hostwright-owned unreferenced local content; it does not broaden any registry or unmanaged-content deletion authority.
+
+## Image Signature Verification Boundary
+
+Cosign is an explicit verifier dependency, not a credentialed registry client. Hostwright accepts only a current-user- or root-owned immutable executable, requires cosign v3.0.6 or newer within major version 3 on Darwin ARM64, checks executable identity before and during work, and records the executable version and SHA-256. Registry credentials, tokens, usernames, helper output, and environment secrets never enter cosign argv, stdin, output, durable intent, or diagnostics.
+
+The verifier receives the exact subject manifest on stdin and private temporary paths for verified bundle bytes and copied trust material. Keyed authorities use an exact public key. Keyless authorities additionally require exact certificate identity, exact HTTPS OIDC issuer, and an explicit Sigstore TrustedRoot JSON document. Thresholds count distinct active authorities only; expired, not-yet-valid, or revoked authorities do not count.
+
+Mutation stdout is never trust state. A successful record binds the exact descriptor digest, policy/material SHA-256, Gate 6 discovery UUID and graph SHA-256, trusted-root digest, matched authority IDs, threshold, verifier identity, and timestamp. Lifecycle preflight reloads and verifies the graph and cached subject bytes. Exceptions require a strict external approval record and are exact, time-bounded, revocable, audited, and plan-bound. Missing, changed, incomplete, expired, or ambiguous evidence fails before runtime mutation.
+
+## Image SBOM Boundary
+
+SBOM input is untrusted. Parsing rejects duplicate JSON fields, unsupported specification versions, excessive bytes, depth, components, strings, licenses, hashes, and duplicate component identities. Image binding is accepted only from the exact SHA-256 checksum/hash in the document. OCI artifact manifests, documents, subjects, annotations, and optional provenance identity pairs are digest-verified from a complete Gate 6 graph before immutable schema-v11 persistence and again before query, export, lifecycle execution, or recovery.
+
+Archive generation opens one owned regular non-symlink OCI tar, rejects traversal, links, unsafe entry types, duplicates, malformed headers, size/digest drift, and ambiguous subject matches, and scans only bounded Alpine and Debian package databases through the secure subprocess boundary. Cancellation is checked while indexing and reading and terminates the bounded extractor process group. Temporary layer copies and failed export outputs use exact-path cleanup only.
+
+Credentials are not accepted by SBOM CLI or Control fields and never enter generator argv, document metadata, durable intent, state evidence, progress, errors, diagnostics, or provenance. Gate 8 does not claim that a package inventory is vulnerability-free, that declared licenses are legally complete, or that a referenced provenance artifact is valid.
+
+## Image Vulnerability Policy Boundary
+
+Vulnerability reports are untrusted input. Hostwright accepts only one bounded versioned JSON contract with duplicate and unknown fields rejected, normalized finding identities, exact SHA-256 image/report/referrer binding, coherent database and generation timestamps, and one complete digest-verified Gate 6 graph. Report bytes must have exact Sigstore evidence that passes the manifest's image-signature policy; an image signature is not inferred to sign a report.
+
+Policy selectors are deterministic and ANDed. A matching known finding always blocks unless an exact unexpired manifest allowlist entry applies. Fail-open is restricted to configured stale-database or unavailable-report cases and never suppresses a known matching finding. Decisions record freshness, data age, candidate/allowlisted/blocking findings, reason codes, policy hashes, and immutable report identity. Lifecycle and recovery recompute current freshness and finding disposition before effects.
+
+Exception approvals are external bounded JSON records. They bind one prior blocked decision ID and digest, exact image/report/referrer, vulnerability and signature policy hashes, database identity/version, and blocked-findings digest. They are accepted only during their approval/expiry window, are revocable, and cannot authorize changed evidence. Referrer cleanup refuses immutable vulnerability-report references.
+
+Credentials are not accepted by vulnerability CLI or Control fields and never enter cosign argv, report data, durable intent, decisions, events, diagnostics, or build provenance. Gate 9 evaluates supplied signed reports; it does not run or update a vulnerability scanner/database.
+
+## Image Build Provenance Boundary
+
+Build records, OCI archives, DSSE envelopes, public keys, and cached referrer graphs are untrusted input. Record parsing is byte-, depth-, collection-, and string-bounded; duplicate and unknown fields fail closed. The exact SHA-256 OCI manifest/index named by the selected service must be present in the archive. Source, dependency, and material identities accept only bounded credential-free HTTPS or URN values and reject user information, query strings, fragments, filesystem paths, traversal, or conflicting digests.
+
+Generation emits an in-toto Statement v1 with the SLSA provenance v1 predicate and binds the exact image, builder identity/version, build type, invocation UUID, source and dependency materials, digest-only command model, allowlisted environment-variable names, network policy, timestamps, output, and reproducibility result. It never records native argv, environment values, secret values, auth material, host paths, mutation stdout, or undeclared metadata. The Ed25519 private key is resolved only at the signing boundary from an exact workload-authorized typed secret reference; state stores only the reference digest and never the reference or key bytes.
+
+Verification re-observes one complete Gate 6 graph and requires the exact provenance referrer, subject, DSSE payload type, statement and envelope digests, signature, active signer material, builder, build type, material set, age, and optional reproducibility proof. Immutable schema-v14 evidence is not treated as current by itself: status, lifecycle execution, and recovery reload and digest-verify the graph and current manifest policy material before effects. Cancellation leaves a fenced interrupted group, recovery requires the exact plan and signing-reference digest, rollback never deletes registry content, and exact referrer cleanup refuses any immutable provenance reference.
+
+Gate 10 does not inspect source repositories, run a build, establish a remote builder identity, infer reproducibility, sign through registry credentials, or claim SLSA conformance beyond the strict provenance v1 statement contract and policy checks implemented here.
 
 ## Network Exposure
 

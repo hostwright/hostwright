@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import HostwrightCore
 import HostwrightRuntime
 
 enum RuntimeQualificationMigrationReportError: Error, Equatable {
@@ -45,7 +46,7 @@ enum RuntimeQualificationMigrationReportComposer {
             evidence.checkpointRecovered,
             evidence.forwardCheckpoint == "sourceRetired",
             evidence.reverseCheckpoint == "sourceRetired",
-            evidence.stateSchemaVersion == 7,
+            evidence.stateSchemaVersion == HostwrightContractVersions.stateSchema,
             evidence.sourceInventoryBeforeSHA256 == evidence.sourceInventoryAfterSHA256,
             evidence.targetInventoryBeforeSHA256 == evidence.targetInventoryAfterSHA256,
             evidence.cleanupComplete,
@@ -111,7 +112,7 @@ enum RuntimeQualificationMigrationReportComposer {
             evidence.checkpointRecovered &&
             evidence.forwardCheckpoint == "sourceRetired" &&
             evidence.reverseCheckpoint == "sourceRetired" &&
-            evidence.stateSchemaVersion == 7 &&
+            evidence.stateSchemaVersion == HostwrightContractVersions.stateSchema &&
             sha256(evidence.sourceInventoryBeforeSHA256) &&
             sha256(evidence.sourceInventoryAfterSHA256) &&
             sha256(evidence.targetInventoryBeforeSHA256) &&

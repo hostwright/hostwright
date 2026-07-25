@@ -36,6 +36,58 @@
           }
         }
       }
+    },
+    {
+      "if": {
+        "required": ["imageTrust"]
+      },
+      "then": {
+        "properties": {
+          "imagePolicy": {
+            "const": "require-digest"
+          }
+        },
+        "required": ["imagePolicy"]
+      }
+    },
+    {
+      "if": {
+        "required": ["imageSBOM"]
+      },
+      "then": {
+        "properties": {
+          "imagePolicy": {
+            "const": "require-digest"
+          }
+        },
+        "required": ["imagePolicy"]
+      }
+    },
+    {
+      "if": {
+        "required": ["imageVulnerability"]
+      },
+      "then": {
+        "properties": {
+          "imagePolicy": {
+            "const": "require-digest"
+          }
+        },
+        "required": ["imagePolicy", "imageTrust"]
+      }
+    },
+    {
+      "if": {
+        "required": ["imageProvenance"]
+      },
+      "then": {
+        "properties": {
+          "imagePolicy": {
+            "const": "require-digest"
+          }
+        },
+        "required": ["imagePolicy"]
+      }
     }
   ],
   "properties": {
@@ -48,6 +100,18 @@
     },
     "imagePolicy": {
       "enum": ["allow-tags", "require-digest"]
+    },
+    "imageTrust": {
+      "$ref": "#/$defs/imageTrust"
+    },
+    "imageSBOM": {
+      "$ref": "#/$defs/imageSBOM"
+    },
+    "imageVulnerability": {
+      "$ref": "#/$defs/imageVulnerability"
+    },
+    "imageProvenance": {
+      "$ref": "#/$defs/imageProvenance"
     },
     "services": {
       "type": "object",
@@ -73,6 +137,38 @@
       "type": "string",
       "pattern": "^(0|[1-9][0-9]*)s$"
     },
+    "normalizedAbsoluteHostPath": {
+      "type": "string",
+      "pattern": "^/(?!.*//)(?!.*(?:^|/)\\.\\.?(/|$)).+$"
+    },
+    "safeAuthorityID": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,62}[A-Za-z0-9])?$"
+    },
+    "httpsURL": {
+      "type": "string",
+      "pattern": "^https://[^\\s?#]+(?:/[^\\s?#]*)?(?:\\?[^\\s#]*)?(?:#[^\\s]*)?$"
+    },
+    "rfc3339Timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]+)?(?:Z|[+-][0-9]{2}:[0-9]{2})$"
+    },
+    "provenanceURI": {
+      "type": "string",
+      "minLength": 5,
+      "maxLength": 512,
+      "pattern": "^(?!.*@)(?!.*\\.\\.)(?:https://|urn:)[^\\s\\u0000-\\u001F\\u007F]+$"
+    },
+    "provenanceSignerID": {
+      "type": "string",
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,126}[A-Za-z0-9])?$"
+    },
+    "boundedNormalizedAbsoluteHostPath": {
+      "type": "string",
+      "maxLength": 4096,
+      "pattern": "^/(?!.*//)(?!.*(?:^|/)\\.\\.?(/|$))[^\\u0000-\\u001F\\u007F]+$"
+    },
     "stringArray": {
       "type": "array",
       "maxItems": 1024,
@@ -80,6 +176,321 @@
         "type": "string",
         "minLength": 1,
         "maxLength": 16384
+      }
+    },
+    "secretReference": {
+      "type": "string",
+      "oneOf": [
+        {
+          "pattern": "^keychain://[A-Za-z0-9._:@-]{1,128}/[A-Za-z0-9._:@-]{1,128}$"
+        },
+        {
+          "pattern": "^env-file:///(?:#[A-Za-z_][A-Za-z0-9_]{0,127}|(?=[^#]{1,4095}#)(?!/)(?!\\.{1,2}(?:/|#))(?!.*//)(?!.*(?:/\\.\\.?)(?:/|#))[^#\\u0000-\\u001F]*[^/#\\u0000-\\u001F]#[A-Za-z_][A-Za-z0-9_]{0,127})$"
+        },
+        {
+          "pattern": "^local-file:///(?:|(?!/)(?!\\.{1,2}(?:/|$))(?!.*//)(?!.*(?:/\\.\\.?)(?:/|$))(?=[^#]{1,4095}$)[^#\\u0000-\\u001F]*[^/#\\u0000-\\u001F])$"
+        },
+        {
+          "pattern": "^external://[A-Za-z0-9][A-Za-z0-9._-]{0,127}/[A-Za-z0-9._:@-]{1,128}$"
+        },
+        {
+          "pattern": "^plugin://[A-Za-z0-9][A-Za-z0-9._-]{0,127}/[A-Za-z0-9._:@-]{1,128}$"
+        }
+      ]
+    },
+    "imageTrust": {
+      "type": "object",
+      "required": ["threshold", "authorities"],
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "type": "integer",
+          "const": 1
+        },
+        "threshold": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8
+        },
+        "trustedRoot": {
+          "$ref": "#/$defs/normalizedAbsoluteHostPath"
+        },
+        "authorities": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/imageTrustAuthority"
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "authorities": {
+                "contains": {
+                  "properties": {
+                    "type": {
+                      "const": "keyless"
+                    }
+                  },
+                  "required": ["type"]
+                }
+              }
+            },
+            "required": ["authorities"]
+          },
+          "then": {
+            "required": ["trustedRoot"]
+          }
+        }
+      ]
+    },
+    "imageTrustAuthority": {
+      "type": "object",
+      "required": ["id", "type"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/safeAuthorityID"
+        },
+        "type": {
+          "enum": ["keyed", "keyless"]
+        },
+        "publicKey": {
+          "$ref": "#/$defs/normalizedAbsoluteHostPath"
+        },
+        "issuer": {
+          "$ref": "#/$defs/httpsURL"
+        },
+        "identity": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "notBefore": {
+          "$ref": "#/$defs/rfc3339Timestamp"
+        },
+        "notAfter": {
+          "$ref": "#/$defs/rfc3339Timestamp"
+        },
+        "revokedAt": {
+          "$ref": "#/$defs/rfc3339Timestamp"
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "type": {
+              "const": "keyed"
+            }
+          },
+          "required": ["publicKey"],
+          "not": {
+            "anyOf": [
+              {
+                "required": ["issuer"]
+              },
+              {
+                "required": ["identity"]
+              }
+            ]
+          }
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "keyless"
+            }
+          },
+          "required": ["issuer", "identity"],
+          "not": {
+            "required": ["publicKey"]
+          }
+        }
+      ]
+    },
+    "imageSBOM": {
+      "type": "object",
+      "required": ["requirement", "formats"],
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "type": "integer",
+          "const": 1
+        },
+        "requirement": {
+          "enum": ["optional", "required"]
+        },
+        "formats": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": {
+            "enum": ["spdx-json", "cyclonedx-json"]
+          }
+        }
+      }
+    },
+    "imageVulnerability": {
+      "type": "object",
+      "required": [
+        "severityThreshold",
+        "minimumVulnerabilityAgeSeconds",
+        "exploitability",
+        "fixAvailability",
+        "maximumDatabaseAgeSeconds",
+        "staleAction",
+        "unavailableAction",
+        "exceptionApproval"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "type": "integer",
+          "const": 1
+        },
+        "severityThreshold": {
+          "enum": ["low", "medium", "high", "critical"]
+        },
+        "minimumVulnerabilityAgeSeconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 31536000
+        },
+        "exploitability": {
+          "enum": ["any", "known-exploited"]
+        },
+        "fixAvailability": {
+          "enum": ["any", "fix-available"]
+        },
+        "maximumDatabaseAgeSeconds": {
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 2592000
+        },
+        "staleAction": {
+          "enum": ["fail-open", "fail-closed"]
+        },
+        "unavailableAction": {
+          "enum": ["fail-open", "fail-closed"]
+        },
+        "exceptionApproval": {
+          "enum": ["required", "disabled"]
+        },
+        "allowlist": {
+          "type": "array",
+          "maxItems": 256,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/imageVulnerabilityAllowlistEntry"
+          }
+        }
+      }
+    },
+    "imageVulnerabilityAllowlistEntry": {
+      "type": "object",
+      "required": ["vulnerabilityID", "reason", "expiresAt"],
+      "additionalProperties": false,
+      "properties": {
+        "vulnerabilityID": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "packagePURL": {
+          "type": "string",
+          "maxLength": 1024,
+          "pattern": "^pkg:[^\\s\\u0000-\\u001F\\u007F/]+/[^\\s\\u0000-\\u001F\\u007F]+$"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512,
+          "pattern": "^[^\\s\\u0000-\\u001F\\u007F](?:[^\\u0000-\\u001F\\u007F]*[^\\s\\u0000-\\u001F\\u007F])?$"
+        },
+        "expiresAt": {
+          "$ref": "#/$defs/rfc3339Timestamp"
+        }
+      }
+    },
+    "imageProvenance": {
+      "type": "object",
+      "required": [
+        "requirement",
+        "builderIDs",
+        "buildTypes",
+        "signers",
+        "maximumAgeSeconds",
+        "requireReproducible"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "type": "integer",
+          "const": 1
+        },
+        "requirement": {
+          "enum": ["optional", "required"]
+        },
+        "builderIDs": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/provenanceURI"
+          }
+        },
+        "buildTypes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/provenanceURI"
+          }
+        },
+        "signers": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/imageProvenanceSigner"
+          }
+        },
+        "maximumAgeSeconds": {
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 31536000
+        },
+        "requireReproducible": {
+          "type": "boolean"
+        }
+      }
+    },
+    "imageProvenanceSigner": {
+      "type": "object",
+      "required": ["id", "publicKey"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/provenanceSignerID"
+        },
+        "publicKey": {
+          "$ref": "#/$defs/boundedNormalizedAbsoluteHostPath"
+        },
+        "notBefore": {
+          "$ref": "#/$defs/rfc3339Timestamp"
+        },
+        "notAfter": {
+          "$ref": "#/$defs/rfc3339Timestamp"
+        },
+        "revokedAt": {
+          "$ref": "#/$defs/rfc3339Timestamp"
+        }
       }
     },
     "service": {
@@ -146,8 +557,7 @@
             "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
           },
           "additionalProperties": {
-            "type": "string",
-            "pattern": "^keychain://[A-Za-z0-9._:@-]+/[A-Za-z0-9._:@-]+$"
+            "$ref": "#/$defs/secretReference"
           }
         },
         "labels": {

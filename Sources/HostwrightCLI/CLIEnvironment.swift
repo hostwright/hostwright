@@ -2,6 +2,7 @@ import Darwin
 import Foundation
 import HostwrightCore
 import HostwrightHealth
+import HostwrightRegistry
 import HostwrightRuntime
 import HostwrightSecrets
 
@@ -16,6 +17,20 @@ public struct CLIEnvironment: @unchecked Sendable {
     public var runtimeAdapterForProvider: @Sendable (RuntimeProviderID) throws -> any RuntimeAdapter
     public var runtimeProviderProbes: @Sendable () async -> [RuntimeProviderProbeResult]
     public var secretStore: () -> any SecretStore
+    public var secretResolver: () -> any HostwrightSecretResolving
+    public var secretManager: () -> any SecretManager
+    public var readSecretInput: () throws -> Data
+    public var registryTransport: () -> any RegistrySynchronousHTTPTransporting
+    public var registryCredentialDocuments: () throws -> [DockerCredentialConfigurationDocument]
+    public var registryCredentialHelperResolver: () -> any DockerCredentialHelperResolving
+    public var registryDate: @Sendable () -> Date
+    public var imageTrustVerification: @Sendable (
+        String,
+        Data,
+        String,
+        [SigstoreBundleEvidence],
+        ImageTrustVerificationPolicy
+    ) throws -> ImageTrustVerificationResult
     public var swiftVersion: () -> String?
     public var platformSnapshot: () -> PlatformSnapshot
     public var operatingSystemDescription: () -> String
@@ -43,6 +58,46 @@ public struct CLIEnvironment: @unchecked Sendable {
         runtimeAdapterForProvider: (@Sendable (RuntimeProviderID) throws -> any RuntimeAdapter)? = nil,
         runtimeProviderProbes: (@Sendable () async -> [RuntimeProviderProbeResult])? = nil,
         secretStore: @escaping () -> any SecretStore = { UnavailableKeychainSecretStore() },
+        secretResolver: (() -> any HostwrightSecretResolving)? = nil,
+        secretManager: @escaping () -> any SecretManager = {
+            UnavailableKeychainSecretManager()
+        },
+        readSecretInput: @escaping () throws -> Data = {
+            throw SecretStoreError.backendUnavailable(
+                "Secret input is unavailable in this execution environment."
+            )
+        },
+        registryTransport: @escaping () -> any RegistrySynchronousHTTPTransporting = {
+            SynchronousURLSessionRegistryTransport()
+        },
+        registryCredentialDocuments: @escaping () throws -> [DockerCredentialConfigurationDocument] = {
+            try RegistryCredentialDocumentLoader.loadDefault()
+        },
+        registryCredentialHelperResolver: @escaping () -> any DockerCredentialHelperResolving = {
+            SecureDockerCredentialHelperResolver()
+        },
+        registryDate: @escaping @Sendable () -> Date = { Date() },
+        imageTrustVerification: @escaping @Sendable (
+            String,
+            Data,
+            String,
+            [SigstoreBundleEvidence],
+            ImageTrustVerificationPolicy
+        ) throws -> ImageTrustVerificationResult = {
+            executablePath,
+            subjectManifest,
+            subjectDigest,
+            bundles,
+            policy in
+            try CosignImageTrustVerifier(
+                executablePath: executablePath
+            ).verify(
+                subjectManifest: subjectManifest,
+                subjectDigest: subjectDigest,
+                bundles: bundles,
+                policy: policy
+            )
+        },
         swiftVersion: @escaping () -> String?,
         platformSnapshot: @escaping () -> PlatformSnapshot,
         operatingSystemDescription: @escaping () -> String,
@@ -82,6 +137,16 @@ public struct CLIEnvironment: @unchecked Sendable {
             }
         }
         self.secretStore = secretStore
+        self.secretResolver = secretResolver ?? {
+            hostwrightDefaultSecretResolver(store: secretStore())
+        }
+        self.secretManager = secretManager
+        self.readSecretInput = readSecretInput
+        self.registryTransport = registryTransport
+        self.registryCredentialDocuments = registryCredentialDocuments
+        self.registryCredentialHelperResolver = registryCredentialHelperResolver
+        self.registryDate = registryDate
+        self.imageTrustVerification = imageTrustVerification
         self.swiftVersion = swiftVersion
         self.platformSnapshot = platformSnapshot
         self.operatingSystemDescription = operatingSystemDescription
@@ -123,6 +188,13 @@ public struct CLIEnvironment: @unchecked Sendable {
             await RuntimeProviderDiscovery.liveProbe()
         },
         secretStore: { UnavailableKeychainSecretStore() },
+        secretResolver: {
+            hostwrightDefaultSecretResolver(
+                store: MacOSKeychainSecretStore()
+            )
+        },
+        secretManager: { MacOSKeychainSecretStore() },
+        readSecretInput: { try HostwrightSecretInputReader.read() },
         swiftVersion: { ProcessLookup.swiftVersionSummary() },
         platformSnapshot: { PlatformSnapshot.current },
         operatingSystemDescription: { ProcessInfo.processInfo.operatingSystemVersionString },

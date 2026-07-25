@@ -41,6 +41,7 @@ private let hostwrightNonSecretJSONIdentityKeys: Set<String> = [
     "capabilitySHA256",
     "checkpoint",
     "confirmationToken",
+    "errorCode",
     "fencingToken",
     "operationID",
     "planHash",
@@ -48,6 +49,7 @@ private let hostwrightNonSecretJSONIdentityKeys: Set<String> = [
     "projectUUID",
     "resourceFencingToken",
     "resourceUUID",
+    "secretReferenceSHA256",
     "verification"
 ]
 

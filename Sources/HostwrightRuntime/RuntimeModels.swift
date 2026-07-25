@@ -410,6 +410,7 @@ public struct DesiredRuntimeService: Equatable, Sendable {
     public let logicalServiceName: String
     public let replicaIndex: Int
     public let image: String
+    public let imageLock: RuntimeImageDigestLock?
     public let platformOperatingSystem: String
     public let platformArchitecture: String
     public let cpuCount: Int?
@@ -440,6 +441,7 @@ public struct DesiredRuntimeService: Equatable, Sendable {
         logicalServiceName: String? = nil,
         replicaIndex: Int = 0,
         image: String,
+        imageLock: RuntimeImageDigestLock? = nil,
         platformOperatingSystem: String = "linux",
         platformArchitecture: String = "arm64",
         cpuCount: Int? = nil,
@@ -469,6 +471,7 @@ public struct DesiredRuntimeService: Equatable, Sendable {
         self.logicalServiceName = logicalServiceName ?? identity.serviceName
         self.replicaIndex = replicaIndex
         self.image = image
+        self.imageLock = imageLock
         self.platformOperatingSystem = platformOperatingSystem
         self.platformArchitecture = platformArchitecture
         self.cpuCount = cpuCount
@@ -561,6 +564,174 @@ public struct RuntimeLocalImageEvidence: Equatable, Sendable {
         self.variantDigest = variantDigest
         self.architecture = architecture
         self.operatingSystem = operatingSystem
+    }
+}
+
+public enum RuntimeImageDigestLockError: Error, Equatable, Sendable {
+    case unsupportedSchemaVersion(Int)
+    case invalidReference
+    case invalidDigest
+    case invalidPlatform
+    case invalidProvider
+    case invalidCapability
+    case evidenceMismatch
+}
+
+public struct RuntimeImageDigestLock: Codable, Equatable, Sendable {
+    public static let currentSchemaVersion = 1
+
+    public let schemaVersion: Int
+    public let requestedReference: String
+    public let resolvedReference: String
+    public let descriptorDigest: String
+    public let variantDigest: String
+    public let operatingSystem: String
+    public let architecture: String
+    public let providerID: RuntimeProviderID
+    public let capabilitySHA256: String
+
+    public init(
+        schemaVersion: Int = Self.currentSchemaVersion,
+        requestedReference: String,
+        resolvedReference: String,
+        descriptorDigest: String,
+        variantDigest: String,
+        operatingSystem: String,
+        architecture: String,
+        providerID: RuntimeProviderID,
+        capabilitySHA256: String
+    ) throws {
+        guard schemaVersion == Self.currentSchemaVersion else {
+            throw RuntimeImageDigestLockError.unsupportedSchemaVersion(
+                schemaVersion
+            )
+        }
+        let requested: String
+        let resolved: String
+        do {
+            requested = try RuntimeImageLifecycleContract.validatedReference(
+                requestedReference
+            )
+            resolved = try RuntimeImageLifecycleContract.validatedReference(
+                resolvedReference
+            )
+        } catch {
+            throw RuntimeImageDigestLockError.invalidReference
+        }
+        let descriptor: String
+        let variant: String
+        do {
+            descriptor = try RuntimeImageLifecycleContract.validatedDigest(
+                descriptorDigest
+            )
+            variant = try RuntimeImageLifecycleContract.validatedDigest(
+                variantDigest
+            )
+        } catch {
+            throw RuntimeImageDigestLockError.invalidDigest
+        }
+        guard Self.resolvedReference(
+            for: requested,
+            descriptorDigest: descriptor
+        ) == resolved else {
+            throw RuntimeImageDigestLockError.invalidReference
+        }
+        if let requestedDigest = Self.digest(in: requested),
+           requestedDigest != descriptor {
+            throw RuntimeImageDigestLockError.evidenceMismatch
+        }
+        guard operatingSystem == "linux",
+              architecture == "arm64" || architecture == "amd64" else {
+            throw RuntimeImageDigestLockError.invalidPlatform
+        }
+        guard RuntimeProviderID.knownValues.contains(providerID) else {
+            throw RuntimeImageDigestLockError.invalidProvider
+        }
+        guard capabilitySHA256.range(
+            of: "^[a-f0-9]{64}$",
+            options: .regularExpression
+        ) != nil else {
+            throw RuntimeImageDigestLockError.invalidCapability
+        }
+        self.schemaVersion = schemaVersion
+        self.requestedReference = requested
+        self.resolvedReference = resolved
+        self.descriptorDigest = descriptor
+        self.variantDigest = variant
+        self.operatingSystem = operatingSystem
+        self.architecture = architecture
+        self.providerID = providerID
+        self.capabilitySHA256 = capabilitySHA256
+    }
+
+    public static func resolve(
+        requestedReference: String,
+        evidence: RuntimeLocalImageEvidence,
+        providerID: RuntimeProviderID,
+        capabilitySHA256: String
+    ) throws -> RuntimeImageDigestLock {
+        guard evidence.reference == requestedReference else {
+            throw RuntimeImageDigestLockError.evidenceMismatch
+        }
+        return try RuntimeImageDigestLock(
+            requestedReference: requestedReference,
+            resolvedReference: resolvedReference(
+                for: requestedReference,
+                descriptorDigest: evidence.descriptorDigest
+            ),
+            descriptorDigest: evidence.descriptorDigest,
+            variantDigest: evidence.variantDigest,
+            operatingSystem: evidence.operatingSystem,
+            architecture: evidence.architecture,
+            providerID: providerID,
+            capabilitySHA256: capabilitySHA256
+        )
+    }
+
+    public func verify(
+        _ evidence: RuntimeLocalImageEvidence,
+        providerID: RuntimeProviderID,
+        capabilitySHA256: String
+    ) throws {
+        guard self.providerID == providerID,
+              self.capabilitySHA256 == capabilitySHA256,
+              evidence.reference == requestedReference ||
+                evidence.reference == resolvedReference,
+              evidence.descriptorDigest == descriptorDigest,
+              evidence.variantDigest == variantDigest,
+              evidence.operatingSystem == operatingSystem,
+              evidence.architecture == architecture else {
+            throw RuntimeImageDigestLockError.evidenceMismatch
+        }
+    }
+
+    private static func resolvedReference(
+        for requestedReference: String,
+        descriptorDigest: String
+    ) -> String {
+        let withoutDigest = requestedReference.split(
+            separator: "@",
+            maxSplits: 1,
+            omittingEmptySubsequences: false
+        ).first.map(String.init) ?? requestedReference
+        let slash = withoutDigest.lastIndex(of: "/")
+        let colon = withoutDigest.lastIndex(of: ":")
+        let repository: String
+        if let colon, slash == nil || colon > slash! {
+            repository = String(withoutDigest[..<colon])
+        } else {
+            repository = withoutDigest
+        }
+        return "\(repository)@\(descriptorDigest)"
+    }
+
+    private static func digest(in reference: String) -> String? {
+        let parts = reference.split(
+            separator: "@",
+            maxSplits: 1,
+            omittingEmptySubsequences: false
+        )
+        return parts.count == 2 ? String(parts[1]) : nil
     }
 }
 

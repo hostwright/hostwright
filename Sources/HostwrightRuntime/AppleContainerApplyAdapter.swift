@@ -236,12 +236,37 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
             executable: executable
         )
         let imageListResult = try await processRunner.run(imageListSpec)
-        guard try codec.containsLocalImage(
-            desiredService.image,
-            in: imageListResult.standardOutput,
-            redactionPolicy: redactionPolicy
-        ) else {
-            throw RuntimeAdapterError.capabilityUnavailable(.lifecycleMutation)
+        if let lock = desiredService.imageLock {
+            let evidence = try codec.decodeLocalImageEvidence(
+                imageListResult.standardOutput,
+                expectedReference: lock.resolvedReference,
+                preferredArchitecture: lock.architecture,
+                redactionPolicy: redactionPolicy
+            )
+            do {
+                try lock.verify(
+                    evidence,
+                    providerID: context.providerID,
+                    capabilitySHA256: context.capabilitySHA256
+                )
+            } catch {
+                throw RuntimeAdapterError.commandRejected(
+                    classification: .mutating,
+                    message:
+                        "Local image content no longer matches the confirmed " +
+                        "descriptor and platform-variant lock."
+                )
+            }
+        } else {
+            guard try codec.containsLocalImage(
+                desiredService.image,
+                in: imageListResult.standardOutput,
+                redactionPolicy: redactionPolicy
+            ) else {
+                throw RuntimeAdapterError.capabilityUnavailable(
+                    .lifecycleMutation
+                )
+            }
         }
 
         let createSpec = try AppleContainerCommand.spec(

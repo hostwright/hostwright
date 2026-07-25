@@ -118,7 +118,7 @@ struct RuntimeQualificationMigrationStateFoundation: Sendable {
             )
             let store = SQLiteStateStore(path: directory.appendingPathComponent("state.sqlite").path)
             try store.migrate()
-            guard try store.schemaVersion() == 7 else {
+            guard try store.schemaVersion() == HostwrightContractVersions.stateSchema else {
                 throw RuntimeQualificationMigrationDriverError.stateFoundationFailed
             }
             let timestamp = ISO8601DateFormatter().string(from: Date())

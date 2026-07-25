@@ -235,7 +235,7 @@ public enum LifecycleRevisionCodec {
         let labels = Dictionary(
             uniqueKeysWithValues: service.labels.sorted { $0.key < $1.key }
         )
-        let object: [String: Any] = [
+        var object: [String: Any] = [
             "command": service.command,
             "cpuCount": service.cpuCount.map { $0 as Any } ?? NSNull(),
             "dependencies": dependencies,
@@ -281,6 +281,19 @@ public enum LifecycleRevisionCodec {
             "workingDirectory":
                 service.workingDirectory.map { $0 as Any } ?? NSNull()
         ]
+        if let lock = service.imageLock {
+            object["imageLock"] = [
+                "architecture": lock.architecture,
+                "capabilitySHA256": lock.capabilitySHA256,
+                "descriptorDigest": lock.descriptorDigest,
+                "operatingSystem": lock.operatingSystem,
+                "providerID": lock.providerID.rawValue,
+                "requestedReference": lock.requestedReference,
+                "resolvedReference": lock.resolvedReference,
+                "schemaVersion": lock.schemaVersion,
+                "variantDigest": lock.variantDigest
+            ]
+        }
         guard JSONSerialization.isValidJSONObject(object),
               let data = try? JSONSerialization.data(
                   withJSONObject: object,
@@ -408,6 +421,7 @@ public enum LifecycleRevisionCodec {
         let hooks: HooksDocument
         let identity: IdentityDocument
         let image: String
+        let imageLock: ImageLockDocument?
         let initProcess: Bool
         let labels: [String: String]
         let logicalServiceName: String
@@ -439,6 +453,7 @@ public enum LifecycleRevisionCodec {
                     "rosetta", "sharedMemoryBytes", "updatePolicy", "userID",
                     "virtualization", "workingDirectory"
                 ],
+                optional: ["imageLock"],
                 path: ""
             )
             command = try container.decode([String].self, forKey: "command")
@@ -460,6 +475,10 @@ public enum LifecycleRevisionCodec {
             hooks = try container.decode(HooksDocument.self, forKey: "hooks")
             identity = try container.decode(IdentityDocument.self, forKey: "identity")
             image = try container.decode(String.self, forKey: "image")
+            imageLock = try container.decodeIfPresent(
+                ImageLockDocument.self,
+                forKey: "imageLock"
+            )
             initProcess = try container.decode(Bool.self, forKey: "init")
             labels = try container.decode([String: String].self, forKey: "labels")
             logicalServiceName = try container.decode(
@@ -522,6 +541,7 @@ public enum LifecycleRevisionCodec {
                 logicalServiceName: logicalServiceName,
                 replicaIndex: replicaIndex,
                 image: image,
+                imageLock: try imageLock?.value,
                 platformOperatingSystem: platform.operatingSystem,
                 platformArchitecture: platform.architecture,
                 cpuCount: cpuCount,
@@ -578,6 +598,86 @@ public enum LifecycleRevisionCodec {
                 throw LifecycleRevisionCodecError.invalidField(path)
             }
             return result
+        }
+    }
+
+    private struct ImageLockDocument: Decodable {
+        let architecture: String
+        let capabilitySHA256: String
+        let descriptorDigest: String
+        let operatingSystem: String
+        let providerID: String
+        let requestedReference: String
+        let resolvedReference: String
+        let schemaVersion: Int
+        let variantDigest: String
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(
+                keyedBy: RevisionCodingKey.self
+            )
+            try LifecycleRevisionCodec.validateKeys(
+                container,
+                required: [
+                    "architecture", "capabilitySHA256", "descriptorDigest",
+                    "operatingSystem", "providerID", "requestedReference",
+                    "resolvedReference", "schemaVersion", "variantDigest"
+                ],
+                path: "imageLock"
+            )
+            architecture = try container.decode(
+                String.self,
+                forKey: "architecture"
+            )
+            capabilitySHA256 = try container.decode(
+                String.self,
+                forKey: "capabilitySHA256"
+            )
+            descriptorDigest = try container.decode(
+                String.self,
+                forKey: "descriptorDigest"
+            )
+            operatingSystem = try container.decode(
+                String.self,
+                forKey: "operatingSystem"
+            )
+            providerID = try container.decode(String.self, forKey: "providerID")
+            requestedReference = try container.decode(
+                String.self,
+                forKey: "requestedReference"
+            )
+            resolvedReference = try container.decode(
+                String.self,
+                forKey: "resolvedReference"
+            )
+            schemaVersion = try container.decode(
+                Int.self,
+                forKey: "schemaVersion"
+            )
+            variantDigest = try container.decode(
+                String.self,
+                forKey: "variantDigest"
+            )
+        }
+
+        var value: RuntimeImageDigestLock {
+            get throws {
+                do {
+                    return try RuntimeImageDigestLock(
+                        schemaVersion: schemaVersion,
+                        requestedReference: requestedReference,
+                        resolvedReference: resolvedReference,
+                        descriptorDigest: descriptorDigest,
+                        variantDigest: variantDigest,
+                        operatingSystem: operatingSystem,
+                        architecture: architecture,
+                        providerID: RuntimeProviderID(rawValue: providerID),
+                        capabilitySHA256: capabilitySHA256
+                    )
+                } catch {
+                    throw LifecycleRevisionCodecError.invalidField("imageLock")
+                }
+            }
         }
     }
 

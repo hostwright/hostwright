@@ -751,7 +751,8 @@ enum CLIJSON {
         stateDatabasePath: String,
         manifest: HostwrightManifest,
         observed: ObservedRuntimeState,
-        plan: ReconciliationPlan
+        plan: ReconciliationPlan,
+        imageDigestLocks: [ImageDigestLockRecord]
     ) -> String {
         let observedByName = Dictionary(uniqueKeysWithValues: observed.services.map { ($0.identity.serviceName, $0) })
         return render([
@@ -773,6 +774,34 @@ enum CLIJSON {
             "telemetryPolicy": "local-only; no upload",
             "planHash": plan.planHash,
             "capabilitySHA256": plan.capabilitySHA256 as Any,
+            "imageDigestLocks": imageDigestLocks.map { record in
+                [
+                    "schemaVersion": record.lock.schemaVersion,
+                    "service": record.serviceName,
+                    "replica": record.replicaIndex,
+                    "state": record.stateKind.rawValue,
+                    "requestedReference":
+                        record.lock.requestedReference,
+                    "resolvedReference":
+                        record.lock.resolvedReference,
+                    "descriptorDigest":
+                        record.lock.descriptorDigest,
+                    "variantDigest": record.lock.variantDigest,
+                    "operatingSystem":
+                        record.lock.operatingSystem,
+                    "architecture": record.lock.architecture,
+                    "providerID": record.lock.providerID.rawValue,
+                    "providerGeneration":
+                        record.providerGeneration,
+                    "capabilitySHA256":
+                        record.lock.capabilitySHA256,
+                    "planSHA256": record.planSHA256,
+                    "operationGroupID":
+                        record.operationGroupID,
+                    "observationSHA256":
+                        record.observationSHA256 as Any
+                ].compactNilValues()
+            },
             "services": manifest.services.sorted { $0.name < $1.name }.map { service in
                 let observedService = observedByName[service.name]
                 return [

@@ -116,7 +116,7 @@ Validation currently checks:
 - dependencies name declared services, do not reference themselves, and use `started`, `ready`, or `completed`; lifecycle planning rejects cycles;
 - environment variable keys use shell-safe letters, numbers, and underscores and do not start with a number;
 - plaintext credential-like environment keys in `env` are rejected and must move to `secretEnv`;
-- `secretEnv` values must use `keychain://<service>/<account>`;
+- `secretEnv` values must use a typed `keychain://`, `env-file://`, `local-file://`, `external://`, or `plugin://` reference;
 - the same environment key must not appear in both `env` and `secretEnv`;
 - labels are bounded and cannot use the reserved `dev.hostwright.` ownership prefix;
 - ports use `"host:container"` with values from 1 to 65535; fixed localhost ports cannot collide or be shared by replicas;
@@ -131,7 +131,7 @@ Validation does not contact registries or Apple container.
 
 After validation, Hostwright maps accepted manifests into runtime desired state and evaluates local policy decisions for planner safety. Current planner policy decisions explain port conflicts, broad bind blockers, privileged-port warnings, unsafe mounts, and secret redaction. Separate local policy APIs can also explain image-policy failures, unsupported untrusted-manifest fields, secure-exposure blockers, and accelerator blockers without adding runtime side effects. Policy evaluation is local and non-mutating; it does not expand the manifest into Compose parity.
 
-`imagePolicy` is a local manifest validation policy only. The default is `allow-tags`, which currently accepts tag-based manifests such as `ghcr.io/example/api:latest`. `require-digest` rejects mutable tag-only image references and accepts digest-pinned references:
+`imagePolicy` controls which image reference forms are accepted. The default is `allow-tags`, which accepts tag-based manifests such as `ghcr.io/example/api:latest`. `require-digest` rejects mutable tag-only image references and accepts digest-pinned references:
 
 ```yaml
 version: 2
@@ -143,7 +143,118 @@ services:
     image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 ```
 
-Digest pinning gives Hostwright a stable content identifier string to require before planning. Confirmed lifecycle execution verifies that the exact image exists locally through the selected provider. Hostwright does not contact a registry, resolve tags, pull images, verify signatures or SBOMs, or scan vulnerabilities in Phase 04.
+Lifecycle dry-run resolves every selected local image through structured provider evidence and binds the requested reference, immutable descriptor digest, exact Linux platform-variant digest, platform, provider identity, and capability digest into the reviewed plan. Under `allow-tags`, a moved local tag therefore produces a different plan generation and stale confirmation is refused. Under `require-digest`, the supplied descriptor must match the observed descriptor. Execution and rollback reverify the same lock before native create effects.
+
+Lifecycle image resolution remains local and offline: it does not contact a registry or pull missing content. When `imageTrust` is present, execution separately requires previously verified, exact Gate 6 signature evidence or an exact active exception before provider mutation.
+
+`imageTrust` adds an optional offline image-signature trust policy on top of digest pinning:
+
+```yaml
+version: 2
+project: api-local
+imagePolicy: require-digest
+imageTrust:
+  version: 1
+  threshold: 2
+  trustedRoot: /Users/dev/.config/hostwright/sigstore-trusted-root.json
+  authorities:
+    - id: release-key
+      type: keyed
+      publicKey: /Users/dev/.config/hostwright/release.pub
+    - id: ci-oidc
+      type: keyless
+      issuer: https://token.actions.githubusercontent.com
+      identity: https://github.com/example/repo/.github/workflows/release.yml@refs/heads/main
+      notBefore: 2026-01-01T00:00:00Z
+services:
+  api:
+    image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+```
+
+`imageTrust` is supported only in Manifest v2 and requires `imagePolicy: require-digest`. The `imageTrust.version` field is locked to `1`. `threshold` must be between 1 and 8, `authorities` must contain between 1 and 8 entries, and threshold cannot exceed the number of declared authorities.
+
+Each authority must declare a unique bounded identifier, a `type`, and only the fields for that type. `keyed` authorities require an absolute normalized `publicKey` path. `keyless` authorities require an exact HTTPS `issuer`, a bounded non-empty `identity`, and a top-level absolute normalized path to a Sigstore TrustedRoot JSON document. Optional `notBefore`, `notAfter`, and `revokedAt` timestamps must be RFC3339 and chronologically ordered.
+
+Canonical encoding sorts `imageTrust.authorities` by `id` and preserves a fixed field order. Unknown `imageTrust` fields fail closed. The manifest text and exact trust-material bytes are bound into the lifecycle confirmation hash. Verification accepts only standardized Sigstore bundle v0.3 message signatures and does not expose user-disableable transparency or identity checks.
+
+`imageSBOM` declares which bounded image-SBOM formats Hostwright may generate and whether exact evidence is required before lifecycle effects:
+
+```yaml
+version: 2
+project: api-local
+imagePolicy: require-digest
+imageSBOM:
+  version: 1
+  requirement: required
+  formats:
+    - spdx-json
+    - cyclonedx-json
+services:
+  api:
+    image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+```
+
+`imageSBOM` is supported only in Manifest v2 with `imagePolicy: require-digest`. Version is locked to `1`; `requirement` is `optional` or `required`; `formats` contains one or both unique values `spdx-json` and `cyclonedx-json`. Canonical encoding sorts formats, and unknown or duplicate fields fail closed. The policy hash and exact image descriptor participate in lifecycle confirmation. A required policy revalidates an immutable schema-v11 binding and its complete Gate 6 graph before execution and again during persisted recovery. Gate 8 binds optional provenance descriptor/referrer identities but does not generate or verify provenance.
+
+`imageVulnerability` declares an explainable signed-report policy:
+
+```yaml
+version: 2
+project: api-local
+imagePolicy: require-digest
+imageTrust:
+  threshold: 1
+  authorities:
+    - id: release
+      type: keyed
+      publicKey: /Users/dev/.config/hostwright/release.pub
+imageVulnerability:
+  version: 1
+  severityThreshold: high
+  minimumVulnerabilityAgeSeconds: 86400
+  exploitability: known-exploited
+  fixAvailability: fix-available
+  maximumDatabaseAgeSeconds: 604800
+  staleAction: fail-closed
+  unavailableAction: fail-closed
+  exceptionApproval: required
+  allowlist:
+    - vulnerabilityID: CVE-2026-0001
+      packagePURL: pkg:swift/example@1.0.0
+      reason: Not reachable in this deployment
+      expiresAt: "2026-12-01T00:00:00Z"
+services:
+  api:
+    image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+```
+
+The policy is Manifest v2 only and requires `imagePolicy: require-digest` plus `imageTrust`. Version is locked to `1`. Severity is `low`, `medium`, `high`, or `critical`; exploitability is `any` or `known-exploited`; fix availability is `any` or `fix-available`; stale and unavailable actions are `fail-open` or `fail-closed`; exception approval is `required` or `disabled`. Allowlist entries bind an exact vulnerability ID and optional package PURL, require a reason and RFC3339 expiry, and are sorted canonically. All bounds, duplicate keys, duplicate allowlist identities, unknown fields, and invalid cross-field combinations fail closed. The policy hash is part of lifecycle confirmation and schema-v12 decisions.
+
+`imageProvenance` declares which signed build provenance may authorize an exact image:
+
+```yaml
+version: 2
+project: api-local
+imagePolicy: require-digest
+imageProvenance:
+  version: 1
+  requirement: required
+  builderIDs:
+    - urn:hostwright:builder:apple-container
+  buildTypes:
+    - https://hostwright.dev/build-types/apple-container/v1
+  signers:
+    - id: release-builder
+      publicKey: /Users/dev/.config/hostwright/provenance.pub
+      notBefore: "2026-01-01T00:00:00Z"
+  maximumAgeSeconds: 604800
+  requireReproducible: true
+services:
+  api:
+    image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+```
+
+The policy is Manifest v2 only and requires `imagePolicy: require-digest`. Version is locked to `1`; `requirement` is `optional` or `required`; builder and build-type entries are unique bounded credential-free HTTPS or URN values; signer identifiers are unique; public-key paths are normalized absolute host paths; optional authority timestamps are RFC3339 and chronologically ordered. `maximumAgeSeconds` is between 60 seconds and one year. Canonical encoding sorts builders, build types, and signers, and unknown or duplicate fields fail closed. The policy and current signer material are bound into lifecycle confirmation. A required policy revalidates immutable schema-v14 evidence, the exact Gate 6 graph and referrer, DSSE signature, in-toto/SLSA subject and materials, signer authority, age, and optional reproducibility proof before execution and again during persisted recovery.
 
 The executable Manifest v2 contract does not expose a bind-address field. Hostwright-created runtime port publishes default to `127.0.0.1`. Phase 04 executes only existing bind mounts; named volumes fail before mutation with a Phase 06 diagnostic. DNS, custom networks, service aliases, ingress, and network policy fail before mutation and remain owned by Phase 07.
 
@@ -153,4 +264,4 @@ Typed probes never use a host shell. Exec probes cross the provider’s bounded 
 
 Treat manifests from third parties as untrusted input. `hostwright validate`, `hostwright plan`, and lifecycle `--dry-run` are non-mutating gates, but an accepted manifest can still describe images, ports, environment values, paths, hooks, probes, and process arguments that an operator should review before exact plan confirmation.
 
-Do not place plaintext credentials in manifests. `secretEnv` stores a local reference such as `keychain://hostwright.api/api-token`, not the secret value. Confirmed lifecycle execution resolves references only through the configured backend and otherwise fails before operation-group acquisition or runtime mutation. State, events, diagnostics, plans, revisions, and recovery records redact both resolved values and keychain reference labels.
+Do not place plaintext credentials in manifests. `secretEnv` stores a typed provider reference such as `keychain://hostwright.api/api-token`, not the secret value. Confirmed lifecycle execution resolves references only through the exact workload grant and configured provider; absent or mismatched providers fail before operation-group acquisition or runtime mutation. State, events, diagnostics, plans, revisions, and recovery records redact both resolved values and provider references.

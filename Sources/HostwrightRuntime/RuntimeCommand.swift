@@ -1,3 +1,5 @@
+import Foundation
+
 public enum RuntimeCommandClassification: String, Equatable, Sendable {
     case readOnly
     case mutating
@@ -15,6 +17,7 @@ public enum RuntimeMutationCommandKind: String, Equatable, Sendable {
     case startManagedService
     case restartManagedService
     case deleteManagedContainer
+    case imageLifecycle
 }
 
 public enum RuntimeCommandExitStatusPolicy: Equatable, Sendable {
@@ -293,6 +296,8 @@ public enum RuntimeCommandPolicy {
             try validateRestartManagedServiceMutation(spec)
         case .deleteManagedContainer:
             try validateDeleteManagedContainerMutation(spec)
+        case .imageLifecycle:
+            try validateImageLifecycleMutation(spec)
         case nil:
             throw RuntimeAdapterError.commandRejected(
                 classification: spec.classification,
@@ -369,6 +374,42 @@ public enum RuntimeCommandPolicy {
         }
     }
 
+    public static func validateImageLifecycleMutation(_ spec: RuntimeCommandSpec) throws {
+        guard spec.executableResolution == .resolvedByRuntimeExecutableResolver,
+              spec.classification == .mutating,
+              spec.mutationKind == .imageLifecycle,
+              spec.exitStatusPolicy == .zeroOnly,
+              spec.sensitiveValues.isEmpty,
+              spec.environment.isEmpty,
+              !spec.arguments.isEmpty,
+              !spec.arguments.contains("--all"),
+              !spec.arguments.contains("-a"),
+              !spec.arguments.contains("--force"),
+              !spec.arguments.contains("-f"),
+              !spec.arguments.contains("prune"),
+              !spec.arguments.contains("--debug") else {
+            throw RuntimeAdapterError.commandRejected(
+                classification: spec.classification,
+                message: "Image lifecycle mutation requires one resolved, credential-free, exact command without broad native flags."
+            )
+        }
+
+        let arguments = spec.arguments
+        if validImagePullOrPush(arguments, verb: "pull") ||
+            validImagePullOrPush(arguments, verb: "push") ||
+            validImageTag(arguments) ||
+            validImageLoad(arguments) ||
+            validImageSave(arguments) ||
+            validImageBuild(arguments) ||
+            validImageDelete(arguments) {
+            return
+        }
+        throw RuntimeAdapterError.commandRejected(
+            classification: spec.classification,
+            message: "Image lifecycle mutation command shape is not part of the qualified Apple CLI contract."
+        )
+    }
+
     private static func rejectNonReadOnlyCommand(_ spec: RuntimeCommandSpec) throws {
         switch spec.classification {
         case .readOnly:
@@ -379,6 +420,128 @@ public enum RuntimeCommandPolicy {
                 message: "Read-only runtime execution rejects mutating, forbidden, and unknown command specs."
             )
         }
+    }
+
+    private static func validImagePullOrPush(
+        _ arguments: [String],
+        verb: String
+    ) -> Bool {
+        guard arguments.count == 7 || arguments.count == 9,
+              Array(arguments.prefix(6)) == [
+                "image", verb, "--scheme", "https", "--progress", "none"
+              ] else {
+            return false
+        }
+        if arguments.count == 7 {
+            return validImageArgument(arguments[6])
+        }
+        return arguments[6] == "--platform" &&
+            validImagePlatform(arguments[7]) &&
+            validImageArgument(arguments[8])
+    }
+
+    private static func validImageTag(_ arguments: [String]) -> Bool {
+        arguments.count == 4 &&
+            Array(arguments.prefix(2)) == ["image", "tag"] &&
+            validImageArgument(arguments[2]) &&
+            validImageArgument(arguments[3])
+    }
+
+    private static func validImageLoad(_ arguments: [String]) -> Bool {
+        arguments.count == 4 &&
+            Array(arguments.prefix(3)) == ["image", "load", "--input"] &&
+            validAbsoluteArgument(arguments[3])
+    }
+
+    private static func validImageSave(_ arguments: [String]) -> Bool {
+        guard arguments.count >= 5,
+              Array(arguments.prefix(3)) == ["image", "save", "--output"],
+              validAbsoluteArgument(arguments[3]) else {
+            return false
+        }
+        let referenceIndex: Int
+        if arguments.count >= 7, arguments[4] == "--platform" {
+            guard validImagePlatform(arguments[5]) else {
+                return false
+            }
+            referenceIndex = 6
+        } else {
+            referenceIndex = 4
+        }
+        return referenceIndex < arguments.count &&
+            arguments[referenceIndex...].allSatisfy(validImageArgument)
+    }
+
+    private static func validImageBuild(_ arguments: [String]) -> Bool {
+        guard arguments.count >= 5,
+              arguments[0] == "build",
+              arguments[1] == "--tag",
+              validImageArgument(arguments[2]),
+              arguments[3] == "--quiet",
+              validAbsoluteArgument(arguments.last!) else {
+            return false
+        }
+        var index = 4
+        while index < arguments.count - 1 {
+            switch arguments[index] {
+            case "--file":
+                guard index + 1 < arguments.count - 1,
+                      validAbsoluteArgument(arguments[index + 1]) else {
+                    return false
+                }
+                index += 2
+            case "--platform":
+                guard index + 1 < arguments.count - 1,
+                      validImagePlatform(arguments[index + 1]) else {
+                    return false
+                }
+                index += 2
+            case "--no-cache":
+                index += 1
+            default:
+                return false
+            }
+        }
+        return true
+    }
+
+    private static func validImageDelete(_ arguments: [String]) -> Bool {
+        arguments.count >= 3 &&
+            Array(arguments.prefix(2)) == ["image", "delete"] &&
+            arguments.dropFirst(2).allSatisfy(validImageArgument)
+    }
+
+    private static func validImageArgument(_ value: String) -> Bool {
+        guard !value.isEmpty,
+              value.utf8.count <= RuntimeImageLifecycleLimits.maximumReferenceBytes,
+              !value.hasPrefix("-"),
+              !value.contains("://"),
+              !value.unicodeScalars.contains(where: {
+                  CharacterSet.controlCharacters.contains($0)
+              }) else {
+            return false
+        }
+        if value.contains("@") {
+            return value.range(
+                of: #"@sha256:[a-f0-9]{64}$"#,
+                options: .regularExpression
+            ) != nil
+        }
+        return true
+    }
+
+    private static func validAbsoluteArgument(_ value: String) -> Bool {
+        !value.isEmpty &&
+            value.hasPrefix("/") &&
+            value.utf8.count <= RuntimeImageLifecycleLimits.maximumPathBytes &&
+            !value.unicodeScalars.contains {
+                CharacterSet.controlCharacters.contains($0)
+            } &&
+            !value.split(separator: "/", omittingEmptySubsequences: false).contains("..")
+    }
+
+    private static func validImagePlatform(_ value: String) -> Bool {
+        value == "linux/arm64" || value == "linux/amd64"
     }
 
     private static func validateReadOnlyExitStatusPolicy(_ spec: RuntimeCommandSpec) throws {
@@ -611,4 +774,23 @@ public enum RuntimeCommandPolicy {
 
 public protocol RuntimeProcessRunning: Sendable {
     func run(_ spec: RuntimeCommandSpec) async throws -> RuntimeCommandResult
+    func run(
+        _ spec: RuntimeCommandSpec,
+        standardInput: Data?
+    ) async throws -> RuntimeCommandResult
+}
+
+public extension RuntimeProcessRunning {
+    func run(
+        _ spec: RuntimeCommandSpec,
+        standardInput: Data?
+    ) async throws -> RuntimeCommandResult {
+        guard standardInput == nil else {
+            throw RuntimeAdapterError.commandRejected(
+                classification: spec.classification,
+                message: "This runtime process boundary does not accept standard input."
+            )
+        }
+        return try await run(spec)
+    }
 }

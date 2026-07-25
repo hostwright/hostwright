@@ -1,5 +1,6 @@
 import Foundation
 import HostwrightCore
+import HostwrightSecrets
 
 public struct SecureRuntimeProcessRunner: RuntimeProcessRunning {
     public let redactionPolicy: RuntimeRedactionPolicy
@@ -9,6 +10,17 @@ public struct SecureRuntimeProcessRunner: RuntimeProcessRunning {
     }
 
     public func run(_ spec: RuntimeCommandSpec) async throws -> RuntimeCommandResult {
+        try await run(spec, standardInput: nil)
+    }
+
+    public func run(
+        _ spec: RuntimeCommandSpec,
+        standardInput: Data?
+    ) async throws -> RuntimeCommandResult {
+        let executionSpec = try specWithStandardInputRedaction(
+            spec,
+            standardInput: standardInput
+        )
         switch spec.classification {
         case .readOnly:
             try RuntimeCommandPolicy.validateReadOnlyExecution(spec)
@@ -37,16 +49,18 @@ public struct SecureRuntimeProcessRunner: RuntimeProcessRunning {
             arguments: spec.arguments,
             environment: environment,
             workingDirectory: spec.workingDirectory ?? "/",
+            standardInput: standardInput,
             timeoutMilliseconds: spec.timeout.seconds * 1_000,
             maximumStandardOutputBytes: 16 * 1_024 * 1_024,
-            maximumStandardErrorBytes: 16 * 1_024 * 1_024
+            maximumStandardErrorBytes: 16 * 1_024 * 1_024,
+            maximumStandardInputBytes: HostwrightSecretValue.maximumByteCount
         )
 
         let secureResult: SecureSubprocessResult
         do {
             secureResult = try await SecureSubprocessRunner().runAsync(request)
         } catch let error as SecureSubprocessError {
-            throw normalize(error, spec: spec)
+            throw normalize(error, spec: executionSpec)
         } catch {
             throw RuntimeAdapterError.commandFailed(
                 exitStatus: -1,
@@ -62,7 +76,7 @@ public struct SecureRuntimeProcessRunner: RuntimeProcessRunning {
             )
         }
         let result = RuntimeCommandResult(
-            spec: spec,
+            spec: executionSpec,
             exitStatus: secureResult.exitStatus,
             standardOutput: standardOutput,
             standardError: standardError
@@ -76,6 +90,45 @@ public struct SecureRuntimeProcessRunner: RuntimeProcessRunning {
             )
         }
         return result
+    }
+
+    private func specWithStandardInputRedaction(
+        _ spec: RuntimeCommandSpec,
+        standardInput: Data?
+    ) throws -> RuntimeCommandSpec {
+        guard let standardInput else {
+            return spec
+        }
+        guard standardInput.count <= HostwrightSecretValue.maximumByteCount,
+              let input = String(data: standardInput, encoding: .utf8) else {
+            throw RuntimeAdapterError.commandRejected(
+                classification: spec.classification,
+                message: "Runtime standard input must be bounded UTF-8."
+            )
+        }
+        var sensitiveValues = spec.sensitiveValues
+        if !input.isEmpty {
+            sensitiveValues.append(input)
+            let withoutTrailingNewline = input.last == "\n"
+                ? String(input.dropLast())
+                : input
+            if !withoutTrailingNewline.isEmpty {
+                sensitiveValues.append(withoutTrailingNewline)
+            }
+        }
+        return RuntimeCommandSpec(
+            executablePath: spec.executablePath,
+            arguments: spec.arguments,
+            environment: spec.environment,
+            sensitiveValues: sensitiveValues,
+            workingDirectory: spec.workingDirectory,
+            timeout: spec.timeout,
+            classification: spec.classification,
+            executableResolution: spec.executableResolution,
+            mutationKind: spec.mutationKind,
+            exitStatusPolicy: spec.exitStatusPolicy,
+            purpose: spec.purpose
+        )
     }
 
     private func normalize(

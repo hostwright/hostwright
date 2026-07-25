@@ -128,18 +128,14 @@ struct LifecycleCommandRunnerTests {
     @Test
     func exactConfirmationRevalidatesThenExecutesOnce() throws {
         let preparation = try preparation(desired: [service()])
-        let dryOptions = options(command: .up, dryRun: true)
-        let compiled = try LifecycleCommandPlanCompiler().compile(
-            options: dryOptions,
-            preparation: preparation
-        )
+        let plan = try reviewedPlan(preparation: preparation)
         let driver = ScriptedLifecycleCommandDriver(preparation: preparation)
 
         let result = LifecycleCommandRunner(
             options: options(
                 command: .up,
                 dryRun: false,
-                confirmation: compiled.plan.planSHA256
+                confirmation: plan.planSHA256
             ),
             driver: driver
         ).run()
@@ -147,9 +143,9 @@ struct LifecycleCommandRunnerTests {
         #expect(result.exitCode == 0)
         let expectedOutput = (
             [
-                "Lifecycle succeeded: plan=\(compiled.plan.planSHA256) completed=\(compiled.plan.nodes.count)/\(compiled.plan.nodes.count) checkpoint=complete",
+                "Lifecycle succeeded: plan=\(plan.planSHA256) completed=\(plan.nodes.count)/\(plan.nodes.count) checkpoint=complete",
                 "Resource outcomes:"
-            ] + compiled.plan.nodes.map { node in
+            ] + plan.nodes.map { node in
                 "- outcome=completed project=demo service=api replica=0 resourceUUID=\(node.resourceUUID) node=\(node.key) action=\(node.action.rawValue) resourceIdentifier=\(node.resourceIdentifier!)"
             }
         ).joined(separator: "\n") + "\n"
@@ -164,16 +160,13 @@ struct LifecycleCommandRunnerTests {
     @Test
     func partialSafeHoldRendersExactCanonicalResourceOutcomesAsJSON() throws {
         let preparation = try preparation(desired: [service()])
-        let compiled = try LifecycleCommandPlanCompiler().compile(
-            options: options(command: .up, dryRun: true),
-            preparation: preparation
-        )
-        let completed = try #require(compiled.plan.nodes.first)
+        let plan = try reviewedPlan(preparation: preparation)
+        let completed = try #require(plan.nodes.first)
         let execution = LifecycleSagaExecutionResult(
             status: .safeHold,
             operationID: "11111111-1111-4111-8111-111111111111",
             groupID: "22222222-2222-4222-8222-222222222222",
-            planSHA256: compiled.plan.planSHA256,
+            planSHA256: plan.planSHA256,
             checkpoint: "\(completed.key):safe-hold",
             completedNodeKeys: [completed.key],
             recoveryHintRedacted: "Preserve the exact safe-hold checkpoint."
@@ -187,13 +180,13 @@ struct LifecycleCommandRunnerTests {
             options: options(
                 command: .up,
                 dryRun: false,
-                confirmation: compiled.plan.planSHA256,
+                confirmation: plan.planSHA256,
                 output: .json
             ),
             driver: driver
         ).run()
 
-        let resourceOutcomes = compiled.plan.nodes.map { node -> [String: Any] in
+        let resourceOutcomes = plan.nodes.map { node -> [String: Any] in
             [
                 "action": node.action.rawValue,
                 "node": node.key,
@@ -213,7 +206,7 @@ struct LifecycleCommandRunnerTests {
             "planSHA256": execution.planSHA256,
             "checkpoint": execution.checkpoint,
             "completedNodeKeys": [completed.key],
-            "nodeCount": compiled.plan.nodes.count,
+            "nodeCount": plan.nodes.count,
             "resourceOutcomes": resourceOutcomes,
             "recoveryHint": execution.recoveryHintRedacted
         ])
@@ -230,29 +223,22 @@ struct LifecycleCommandRunnerTests {
         let secondPreparation = try preparation(
             desired: [service(name: "api"), service(name: "worker")]
         )
-        let lifecycleOptions = options(command: .up, dryRun: true)
-        let firstCompiled = try LifecycleCommandPlanCompiler().compile(
-            options: lifecycleOptions,
-            preparation: firstPreparation
-        )
-        let secondCompiled = try LifecycleCommandPlanCompiler().compile(
-            options: lifecycleOptions,
-            preparation: secondPreparation
-        )
-        #expect(firstCompiled.plan == secondCompiled.plan)
+        let firstPlan = try reviewedPlan(preparation: firstPreparation)
+        let secondPlan = try reviewedPlan(preparation: secondPreparation)
+        #expect(firstPlan == secondPlan)
         let execution = LifecycleSagaExecutionResult(
             status: .succeeded,
             operationID: "33333333-3333-4333-8333-333333333333",
             groupID: "44444444-4444-4444-8444-444444444444",
-            planSHA256: firstCompiled.plan.planSHA256,
+            planSHA256: firstPlan.planSHA256,
             checkpoint: "complete",
-            completedNodeKeys: Array(firstCompiled.plan.nodes.map(\.key).reversed()),
+            completedNodeKeys: Array(firstPlan.nodes.map(\.key).reversed()),
             recoveryHintRedacted: ""
         )
         let confirmedOptions = options(
             command: .up,
             dryRun: false,
-            confirmation: firstCompiled.plan.planSHA256,
+            confirmation: firstPlan.planSHA256,
             output: .json
         )
 
@@ -279,18 +265,18 @@ struct LifecycleCommandRunnerTests {
         )
         #expect(
             object["completedNodeKeys"] as? [String] ==
-                firstCompiled.plan.nodes.map(\.key)
+                firstPlan.nodes.map(\.key)
         )
         let outcomes = try #require(
             object["resourceOutcomes"] as? [[String: Any]]
         )
         #expect(
             outcomes.compactMap { $0["node"] as? String } ==
-                firstCompiled.plan.nodes.map(\.key)
+                firstPlan.nodes.map(\.key)
         )
         #expect(
             outcomes.compactMap { $0["resourceUUID"] as? String } ==
-                firstCompiled.plan.nodes.map(\.resourceUUID)
+                firstPlan.nodes.map(\.resourceUUID)
         )
     }
 
@@ -309,7 +295,7 @@ struct LifecycleCommandRunnerTests {
 
         #expect(result.exitCode == CLIExitCode.confirmationMismatch.rawValue)
         #expect(result.standardError.contains("HW-CLI-003"))
-        #expect(driver.snapshot() == DriverSnapshot())
+        #expect(driver.snapshot() == DriverSnapshot(imageChecks: 1))
     }
 
     @Test
@@ -798,7 +784,7 @@ struct LifecycleCommandRunnerTests {
             driver: mismatchDriver
         ).run()
         #expect(mismatch.exitCode == CLIExitCode.confirmationMismatch.rawValue)
-        #expect(mismatchDriver.snapshot() == DriverSnapshot())
+        #expect(mismatchDriver.snapshot() == DriverSnapshot(imageChecks: 2))
     }
 
     @Test
@@ -856,6 +842,208 @@ struct LifecycleCommandRunnerTests {
         #expect(driver.snapshot() == DriverSnapshot(imageChecks: 1))
     }
 
+    @Test
+    func dryRunBindsMutableTagToExactDescriptorAndPlatformVariant() throws {
+        let requested = "registry.example/team/api:stable"
+        let preparation = try preparation(
+            desired: [service(image: requested)]
+        )
+        let driver = ScriptedLifecycleCommandDriver(
+            preparation: preparation,
+            descriptorBody: "d",
+            variantBody: "e"
+        )
+        let result = LifecycleCommandRunner(
+            options: options(command: .up, dryRun: true, output: .json),
+            driver: driver
+        ).run()
+
+        #expect(result.exitCode == 0)
+        let plan = try JSONDecoder().decode(
+            LifecyclePlan.self,
+            from: Data(result.standardOutput.utf8)
+        )
+        let create = try #require(
+            plan.nodes.first { $0.action == .create }
+        )
+        let desired = try LifecycleRevisionCodec.decodeRedactedDesiredJSON(
+            create.desiredSpecificationJSONRedacted
+        )
+        #expect(desired.imageLock?.requestedReference == requested)
+        #expect(
+            desired.imageLock?.descriptorDigest ==
+                "sha256:\(String(repeating: "d", count: 64))"
+        )
+        #expect(
+            desired.imageLock?.variantDigest ==
+                "sha256:\(String(repeating: "e", count: 64))"
+        )
+        #expect(desired.image == desired.imageLock?.resolvedReference)
+        #expect(driver.snapshot() == DriverSnapshot(imageChecks: 1))
+    }
+
+    @Test
+    func movedTagProducesANewPlanAndRefusesTheReviewedConfirmation() throws {
+        let preparation = try preparation(
+            desired: [service(image: "registry.example/team/api:stable")]
+        )
+        let dryDriver = ScriptedLifecycleCommandDriver(
+            preparation: preparation,
+            descriptorBody: "d"
+        )
+        let dry = LifecycleCommandRunner(
+            options: options(command: .up, dryRun: true, output: .json),
+            driver: dryDriver
+        ).run()
+        let reviewed = try JSONDecoder().decode(
+            LifecyclePlan.self,
+            from: Data(dry.standardOutput.utf8)
+        )
+
+        let movedDriver = ScriptedLifecycleCommandDriver(
+            preparation: preparation,
+            descriptorBody: "f"
+        )
+        let confirmed = LifecycleCommandRunner(
+            options: options(
+                command: .up,
+                dryRun: false,
+                confirmation: reviewed.planSHA256
+            ),
+            driver: movedDriver
+        ).run()
+
+        #expect(confirmed.exitCode == CLIExitCode.confirmationMismatch.rawValue)
+        #expect(confirmed.standardError.contains("does not match"))
+        #expect(
+            movedDriver.snapshot() ==
+                DriverSnapshot(imageChecks: 1)
+        )
+    }
+
+    @Test
+    func updatePreservesPriorTagLockWhileResolvingTheDesiredTagAgain() throws {
+        let requested = "registry.example/team/api:stable"
+        let priorLock = try RuntimeImageDigestLock(
+            requestedReference: requested,
+            resolvedReference:
+                "registry.example/team/api@sha256:\(String(repeating: "d", count: 64))",
+            descriptorDigest: "sha256:\(String(repeating: "d", count: 64))",
+            variantDigest: "sha256:\(String(repeating: "e", count: 64))",
+            operatingSystem: "linux",
+            architecture: "arm64",
+            providerID: .appleContainerCLI,
+            capabilitySHA256: String(repeating: "c", count: 64)
+        )
+        let previous = service(
+            image: priorLock.resolvedReference,
+            imageLock: priorLock
+        )
+        let desired = service(image: requested)
+        let observed = ObservedRuntimeService(
+            identity: previous.identity,
+            resourceIdentifier: previous.identity.managedResourceIdentifier,
+            image: previous.image,
+            lifecycleState: .running,
+            healthState: .healthy
+        )
+        let prepared = try preparation(
+            desired: [desired],
+            previous: DesiredRuntimeState(
+                projectName: "demo",
+                services: [previous]
+            ),
+            observed: [observed],
+            bindings: [try resourceBinding(for: observed)]
+        )
+        let driver = ScriptedLifecycleCommandDriver(
+            preparation: prepared,
+            descriptorBody: "f"
+        )
+        let result = LifecycleCommandRunner(
+            options: options(command: .update, dryRun: true, output: .json),
+            driver: driver
+        ).run()
+
+        #expect(result.exitCode == 0)
+        let plan = try JSONDecoder().decode(
+            LifecyclePlan.self,
+            from: Data(result.standardOutput.utf8)
+        )
+        let created = try #require(
+            plan.nodes.first { $0.action == .create }
+        )
+        let retired = try #require(
+            plan.nodes.first { $0.action == .retire }
+        )
+        let desiredRevision = try LifecycleRevisionCodec
+            .decodeRedactedDesiredJSON(
+                created.desiredSpecificationJSONRedacted
+            )
+        let priorRevision = try LifecycleRevisionCodec
+            .decodeRedactedDesiredJSON(
+                retired.desiredSpecificationJSONRedacted
+            )
+        #expect(
+            desiredRevision.imageLock?.descriptorDigest ==
+                "sha256:\(String(repeating: "f", count: 64))"
+        )
+        #expect(priorRevision.imageLock == priorLock)
+        #expect(driver.snapshot() == DriverSnapshot(imageChecks: 2))
+    }
+
+    @Test
+    func updateRejectsLegacyMutablePriorRevisionWithoutAnImmutableLock() throws {
+        let requested = "registry.example/team/api:stable"
+        let previous = service(image: requested)
+        let desired = service(
+            image:
+                "registry.example/team/api@sha256:\(String(repeating: "f", count: 64))"
+        )
+        let observed = ObservedRuntimeService(
+            identity: previous.identity,
+            resourceIdentifier: previous.identity.managedResourceIdentifier,
+            image: requested,
+            lifecycleState: .running,
+            healthState: .healthy
+        )
+        let prepared = try preparation(
+            desired: [desired],
+            previous: DesiredRuntimeState(
+                projectName: "demo",
+                services: [previous]
+            ),
+            observed: [observed],
+            bindings: [try resourceBinding(for: observed)]
+        )
+        let driver = ScriptedLifecycleCommandDriver(preparation: prepared)
+        let result = LifecycleCommandRunner(
+            options: options(command: .update, dryRun: true),
+            driver: driver
+        ).run()
+
+        #expect(result.exitCode == CLIExitCode.runtimeUnavailable.rawValue)
+        #expect(result.standardError.contains("Local image evidence"))
+        #expect(driver.snapshot() == DriverSnapshot(imageChecks: 1))
+    }
+
+    private func reviewedPlan(
+        preparation: LifecycleCommandPreparation,
+        command: LifecycleCommandKind = .up
+    ) throws -> LifecyclePlan {
+        let result = LifecycleCommandRunner(
+            options: options(command: command, dryRun: true, output: .json),
+            driver: ScriptedLifecycleCommandDriver(preparation: preparation)
+        ).run()
+        guard result.exitCode == 0 else {
+            throw LifecycleCommandRunnerError.invalidInput(result.standardError)
+        }
+        return try JSONDecoder().decode(
+            LifecyclePlan.self,
+            from: Data(result.standardOutput.utf8)
+        )
+    }
+
     private func options(
         command: LifecycleCommandKind,
         dryRun: Bool,
@@ -879,6 +1067,7 @@ struct LifecycleCommandRunnerTests {
     private func service(
         name: String = "api",
         image: String? = nil,
+        imageLock: RuntimeImageDigestLock? = nil,
         environment: [RuntimeEnvironmentValue] = [],
         mounts: [RuntimeMountReference] = [],
         ports: [RuntimePortMapping] = [],
@@ -892,6 +1081,7 @@ struct LifecycleCommandRunnerTests {
             ),
             image: image ??
                 "example.invalid/\(name)@sha256:\(String(repeating: "1", count: 64))",
+            imageLock: imageLock,
             environment: environment,
             ports: ports,
             mounts: mounts,
@@ -1010,16 +1200,22 @@ private final class ScriptedLifecycleCommandDriver:
     private let lock = NSLock()
     private let preparation: LifecycleCommandPreparation
     private let imageEvidenceIsValid: Bool
+    private let descriptorBodyOverride: Character?
+    private let variantBody: Character
     private let executionResult: LifecycleSagaExecutionResult?
     private var counts = DriverSnapshot()
 
     init(
         preparation: LifecycleCommandPreparation,
         imageEvidenceIsValid: Bool = true,
+        descriptorBody: Character? = nil,
+        variantBody: Character = "e",
         executionResult: LifecycleSagaExecutionResult? = nil
     ) {
         self.preparation = preparation
         self.imageEvidenceIsValid = imageEvidenceIsValid
+        self.descriptorBodyOverride = descriptorBody
+        self.variantBody = variantBody
         self.executionResult = executionResult
     }
 
@@ -1037,10 +1233,13 @@ private final class ScriptedLifecycleCommandDriver:
         lock.withLock {
             counts.imageChecks += 1
         }
+        let descriptorBody = Self.pinnedDigestBody(in: requirement.reference) ??
+            descriptorBodyOverride ??
+            "d"
         return RuntimeLocalImageEvidence(
             reference: requirement.reference,
-            descriptorDigest: "sha256:\(String(repeating: "d", count: 64))",
-            variantDigest: "sha256:\(String(repeating: "e", count: 64))",
+            descriptorDigest: "sha256:\(String(repeating: descriptorBody, count: 64))",
+            variantDigest: "sha256:\(String(repeating: variantBody, count: 64))",
             architecture: imageEvidenceIsValid
                 ? requirement.architecture
                 : "wrong-architecture",
@@ -1082,5 +1281,19 @@ private final class ScriptedLifecycleCommandDriver:
             value.preparations = 0
             return value
         }
+    }
+
+    private static func pinnedDigestBody(in reference: String?) -> Character? {
+        guard let reference,
+              let marker = reference.range(of: "@sha256:") else {
+            return nil
+        }
+        let digest = reference[marker.upperBound...]
+        guard digest.count == 64,
+              let first = digest.first,
+              digest.allSatisfy({ $0 == first }) else {
+            return nil
+        }
+        return first
     }
 }

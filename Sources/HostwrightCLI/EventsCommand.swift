@@ -1,3 +1,4 @@
+import Foundation
 import HostwrightCore
 import HostwrightRuntime
 import HostwrightState
@@ -14,7 +15,21 @@ struct EventsCommandRunner {
             let store = SQLiteStateStore(configuration: stateStoreConfiguration)
             let projectID = projectName.map { "project-\($0)" }
             var events = try store.events.loadAll()
-                .filter { event in projectID == nil || event.projectID == projectID }
+                .filter { event in
+                    guard let projectID else { return true }
+                    if event.projectID == projectID { return true }
+                    guard event.projectID == nil,
+                          event.type.hasPrefix("image.trust."),
+                          let data = event.payloadJSONRedacted.data(
+                              using: .utf8
+                          ),
+                          let object = try? JSONSerialization.jsonObject(
+                              with: data
+                          ) as? [String: Any] else {
+                        return false
+                    }
+                    return object["projectID"] as? String == projectID
+                }
                 .filter { event in filters.type == nil || event.type == filters.type }
                 .filter { event in filters.serviceName == nil || event.serviceName == filters.serviceName }
                 .filter { event in filters.severity == nil || event.severity == filters.severity }

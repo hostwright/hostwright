@@ -1,10 +1,10 @@
 # Control Surface API Boundary
 
-> **Historical boundary, expanded by v0.0.2:** the one-shot local API now includes Phase 04 non-interactive lifecycle parity. Phase 09 implements the persistent authenticated Control API v2 and Phase 14 implements the native GUI with parity.
+> **Historical boundary, expanded by v0.0.2:** the one-shot local API now includes Phase 04 non-interactive lifecycle parity and the versioned Phase 05 image, registry, and supply-chain operations. Phase 09 implements the persistent authenticated Control API v2 and Phase 14 implements the native GUI with parity.
 
 Status: Historical design record plus current contract for the bounded one-shot Control API v2.
 
-This document defines what a future local GUI or other control surface may depend on. The local process supports the established read commands plus exact-confirmed Phase 04 lifecycle operations through the shared CLI engine. It does not implement a GUI, daemon API, socket or HTTP listener, web dashboard, remote service, background service, or separate runtime mutation path.
+This document defines what a future local GUI or other control surface may depend on. The local process supports the established read commands, exact-confirmed lifecycle operations, and explicit Phase 05 image/registry operations through the shared CLI engine. It does not implement a GUI, daemon API, socket or HTTP listener, web dashboard, remote service, background service, or separate runtime mutation path.
 
 ## Principles
 
@@ -32,7 +32,8 @@ It reads one JSON object no larger than 64 KiB, writes one JSON object no larger
 | `events` | `hostwright events --output json` | Uses configured state or the secure default and reads event rows only; it does not create or migrate missing state. |
 | `recovery` | `hostwright recovery --output json` | Uses configured state or the secure default and reads recovery rows only; it does not create or migrate missing state. |
 | `doctor` | `hostwright doctor --output json` | Runs existing safe local checks; no Apple container command or state write. |
-| `up`, `down`, `run`, `start`, `stop`, `restart`, `rm`, `update` | Matching lifecycle command with `--output json` | Requires exactly one dry-run or exact plan confirmation and delegates to the shared schema-v7 lifecycle saga. |
+| `up`, `down`, `run`, `start`, `stop`, `restart`, `rm`, `update` | Matching lifecycle command with `--output json` | Requires exactly one dry-run or exact plan confirmation and delegates to the shared schema-v8 lifecycle saga with provider/platform-bound image locks. |
+| Phase 05 image, referrer, trust, SBOM, vulnerability, and provenance operations | Matching versioned `hostwright image ...` or `hostwright registry ...` command with `--output json` | Uses the exact CLI parser and coordinator. Build-provenance generation accepts a typed signing-key reference, never key bytes; recovery requires the exact operation group and plan hash. |
 
 Example request and response:
 
@@ -44,7 +45,7 @@ Example request and response:
 {"apiVersion":2,"exitCode":0,"operation":"plan","requestID":"plan-1","result":{"kind":"plan","schemaVersion":2},"success":true}
 ```
 
-The parser rejects unknown or duplicate fields, unsupported API versions, invalid identifiers and filters, oversized input, and unsupported operations such as `apply` or `cleanup`. Lifecycle input may contain only bounded service names, one dry-run or exact confirmation, provider selection, timeout, and parallelism; `run` requires one service. Launch paths must be absolute existing regular non-symlink files with safe ownership and no group/world write or set-ID bits. The tool validates those path facts before delegating, but it is a same-account local process rather than a capability sandbox.
+The parser rejects unknown or duplicate fields, unsupported API versions, invalid identifiers and filters, oversized input, and unsupported operations such as `apply` or `cleanup`. Lifecycle input may contain only bounded service names, one dry-run or exact confirmation, provider selection, timeout, and parallelism; `run` requires one service. Phase 05 request models are operation-specific and reject ambiguous fields, raw credentials, secret values, native flags, and unsupported mutation options before delegation. Launch paths must be absolute existing regular non-symlink files with safe ownership and no group/world write or set-ID bits. The tool validates those path facts before delegating, but it is a same-account local process rather than a capability sandbox.
 
 API-owned failures use `HW-API-001` for invalid requests, `HW-API-002` for unavailable or unsafe configured files, and `HW-API-003` for invalid delegated response framing or execution failure. Existing Hostwright command failures preserve their original error body and exit code inside the response. Usage errors before request processing remain text on stderr with exit code 64.
 

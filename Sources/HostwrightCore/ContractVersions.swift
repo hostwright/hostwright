@@ -3,7 +3,7 @@ public enum HostwrightContractVersions {
     public static let controlAPI = 2
     public static let runtimeProviderAPI = 2
     public static let pluginABI = 1
-    public static let stateSchema = 7
+    public static let stateSchema = 14
 }
 
 public struct HostwrightContractSnapshot: Codable, Equatable, Sendable {

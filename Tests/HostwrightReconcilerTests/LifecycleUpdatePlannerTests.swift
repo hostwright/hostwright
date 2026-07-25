@@ -418,7 +418,21 @@ final class LifecycleUpdatePlannerTests: XCTestCase {
             ),
             logicalServiceName: "worker",
             replicaIndex: 2,
-            image: "local/worker@sha256:1234",
+            image:
+                "local/worker@sha256:\(String(repeating: "d", count: 64))",
+            imageLock: try RuntimeImageDigestLock(
+                requestedReference: "local/worker:stable",
+                resolvedReference:
+                    "local/worker@sha256:\(String(repeating: "d", count: 64))",
+                descriptorDigest:
+                    "sha256:\(String(repeating: "d", count: 64))",
+                variantDigest:
+                    "sha256:\(String(repeating: "e", count: 64))",
+                operatingSystem: "linux",
+                architecture: "amd64",
+                providerID: .appleContainerCLI,
+                capabilitySHA256: String(repeating: "a", count: 64)
+            ),
             platformOperatingSystem: "linux",
             platformArchitecture: "amd64",
             cpuCount: 4,
@@ -527,6 +541,18 @@ final class LifecycleUpdatePlannerTests: XCTestCase {
         XCTAssertEqual(
             try LifecycleRevisionCodec.revisionSHA256(for: decoded),
             try LifecycleRevisionCodec.revisionSHA256(for: original)
+        )
+        XCTAssertEqual(
+            try failure(
+                from: mutate(encoded) {
+                    var imageLock = try XCTUnwrap(
+                        $0["imageLock"] as? [String: Any]
+                    )
+                    imageLock["future"] = true
+                    $0["imageLock"] = imageLock
+                }
+            ),
+            .unknownField("imageLock.future")
         )
     }
 

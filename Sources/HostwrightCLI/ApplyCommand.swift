@@ -204,10 +204,38 @@ struct ApplyCommandRunner {
                 )
             }
 
+            let existingOwnership = try store.ownership.loadAll().first { record in
+                record.resourceIdentifier == action.resourceIdentifier &&
+                    RuntimeProviderBinding.stableID(for: record.runtimeAdapter) ==
+                        observedMetadata.providerID &&
+                    record.projectID == projectID &&
+                    record.serviceName == action.identity.serviceName
+            }
+            let scopedResourceUUID = existingOwnership?.resourceUUID ??
+                HostwrightResourceUUID.legacy(
+                    kind: "service",
+                    identifier: "\(projectID):\(action.identity.serviceName)"
+                )
+            let scopedProjectUUID = existingOwnership?.projectResourceUUID ??
+                HostwrightResourceUUID.legacy(
+                    kind: "project",
+                    identifier: projectID
+                )
+            let scopedResourceGeneration =
+                existingOwnership?.resourceGeneration ?? 1
+
             let executionDesiredService: DesiredRuntimeService
             if action.executionAvailability == .availableForCreateMissingService {
                 do {
-                    executionDesiredService = try resolveSecretReferences(in: desiredService)
+                    executionDesiredService = try resolveSecretReferences(
+                        in: desiredService,
+                        workload: try lifecycleSecretWorkloadScope(
+                            projectResourceUUID: scopedProjectUUID,
+                            resourceUUID: scopedResourceUUID,
+                            generation: scopedResourceGeneration,
+                            serviceName: desiredService.logicalServiceName
+                        )
+                    )
                 } catch {
                     return failure(
                         code: .unsafeExposure,
@@ -269,23 +297,13 @@ struct ApplyCommandRunner {
             let operationID = hostwrightUniqueID(prefix: "operation-apply")
             let operationGroupID = hostwrightUniqueID(prefix: "operation-group")
             let operationFencingToken = HostwrightResourceUUID.generate()
-            let existingOwnership = try store.ownership.loadAll().first { record in
-                record.resourceIdentifier == action.resourceIdentifier &&
-                RuntimeProviderBinding.stableID(for: record.runtimeAdapter) == observedMetadata.providerID &&
-                record.projectID == projectID &&
-                record.serviceName == action.identity.serviceName
-            }
             let mutationContext = RuntimeMutationContext(
                 providerID: observedMetadata.providerID,
                 capabilitySHA256: capabilitySHA256,
                 operationID: operationID,
-                resourceUUID: existingOwnership?.resourceUUID ?? HostwrightResourceUUID.legacy(
-                    kind: "service", identifier: "\(projectID):\(action.identity.serviceName)"
-                ),
-                resourceGeneration: existingOwnership?.resourceGeneration ?? 1,
-                projectResourceUUID: existingOwnership?.projectResourceUUID ?? HostwrightResourceUUID.legacy(
-                    kind: "project", identifier: projectID
-                ),
+                resourceUUID: scopedResourceUUID,
+                resourceGeneration: scopedResourceGeneration,
+                projectResourceUUID: scopedProjectUUID,
                 projectGeneration: existingOwnership?.projectGeneration ?? 1,
                 providerGeneration: existingOwnership?.providerGeneration ?? 1,
                 fencingToken: existingOwnership?.fencingToken ?? operationFencingToken

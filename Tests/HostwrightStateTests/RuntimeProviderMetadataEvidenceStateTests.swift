@@ -7,7 +7,7 @@ import XCTest
 final class RuntimeProviderMetadataEvidenceStateTests: XCTestCase {
     private let projectID = "project-demo"
 
-    func testSchemaV7SnapshotPersistsCapabilitiesAsStringArrayWithReservedEvidenceSuffix() throws {
+    func testLatestSchemaSnapshotPersistsCapabilitiesAsStringArrayWithReservedEvidenceSuffix() throws {
         try withStore { store in
             let digest = String(repeating: "a", count: 64)
             try seedProject(store)
@@ -20,7 +20,10 @@ final class RuntimeProviderMetadataEvidenceStateTests: XCTestCase {
                 observedAt: "2026-07-19T12:00:00Z"
             )
 
-            XCTAssertEqual(try store.schemaVersion(), 7)
+            XCTAssertEqual(
+                try store.schemaVersion(),
+                MigrationRunner.latestSchemaVersion
+            )
             let record = try XCTUnwrap(try store.observedStates.loadSnapshots(projectID: projectID).first)
             let data = try XCTUnwrap(record.capabilitiesJSON.data(using: .utf8))
             let entries = try XCTUnwrap(

@@ -26,7 +26,7 @@ Implemented:
 - `AppleContainerReadOnlyAdapter` and `AppleContainerApplyAdapter` for the versioned Apple CLI path;
 - an on-demand authenticated `hostwright-containerization-helper` process that alone links exact Containerization 0.35.0;
 - helper protocol v1 over a private Unix socket using bounded length-prefixed canonical JSON frames, request IDs, deadlines, capability digests, mutation context, and idempotency keys;
-- project-generation provider binding, dry-run/confirmation migration, fencing, compensation, and checkpoint recovery in existing schema-v7 state;
+- project-generation provider binding, dry-run/confirmation migration, fencing, compensation, checkpoint recovery, and image digest locks in schema-v8 state;
 - redaction policy for command args, env values, stdout, stderr, parser errors, and runtime errors.
 
 The helper uses a private mode-`0700` runtime directory and mode-`0600` socket, authenticates same-UID peers plus the signed Hostwright code requirement, limits frames to 8 MiB, and rejects replay, duplicate IDs, truncation, overflow, protocol mismatch, unsafe paths, and replaced binaries. It implements only negotiate, observe, local-image evidence, resource usage, bounded logs, create, start, managed restart, delete, cancellation, and idle shutdown. Images must already exist locally.
@@ -143,7 +143,7 @@ If real Apple container output does not match the selected reviewed codec, Hostw
 
 ## Provider Selection, Migration, And Recovery
 
-An existing schema-v7 project-generation binding is authoritative. An unbound `auto` selection prefers a compatible Apple CLI provider and chooses Containerization only when the CLI is unavailable and the helper is fully capable. A requested provider that differs from an existing binding is refused and directed to `hostwright runtime migrate`.
+An existing schema-v8 project-generation binding is authoritative. An unbound `auto` selection prefers a compatible Apple CLI provider and chooses Containerization only when the CLI is unavailable and the helper is fully capable. A requested provider that differs from an existing binding is refused and directed to `hostwright runtime migrate`.
 
 Migration binds its dry-run token to source observation, source and target capability digests, state, planned effects, and rollback actions. Confirmed migration acquires an operation group and new fence before either provider mutates, verifies UUID-backed ownership and target continuity, and advances the provider generation only after durable verification. Recovery re-probes and re-observes after CLI/API/helper/framework/protocol/macOS changes, helper or service restart, Hostwright termination, timeout, cancellation, or ambiguous effect. Incompatible downgrade or future protocol versions stop safely rather than replaying an operation.
 

@@ -69,7 +69,8 @@ public struct SchemaMigration: Equatable, Sendable {
 }
 
 public struct MigrationRunner: Sendable {
-    public static let latestSchemaVersion = HostwrightContractVersions.stateSchema
+    public static let latestSchemaVersion =
+        HostwrightContractVersions.stateSchema
     static let applicationID = 0x48575254
 
     public init() {}
@@ -844,6 +845,682 @@ public struct MigrationRunner: Sendable {
                 "CREATE UNIQUE INDEX IF NOT EXISTS ownership_resource_uuid_idx ON ownership_records(resource_uuid)",
                 "CREATE INDEX IF NOT EXISTS ownership_project_resource_uuid_idx ON ownership_records(project_resource_uuid)",
                 "CREATE UNIQUE INDEX IF NOT EXISTS operation_groups_fencing_token_idx ON operation_groups(fencing_token)"
+            ]
+        ),
+        SchemaMigration(
+            version: 8,
+            description: "Immutable desired and observed image digest locks",
+            statements: [
+                """
+                CREATE TABLE IF NOT EXISTS image_digest_locks (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                    resource_uuid TEXT NOT NULL,
+                    service_name TEXT NOT NULL,
+                    replica_index INTEGER NOT NULL,
+                    state_kind TEXT NOT NULL,
+                    lock_schema_version INTEGER NOT NULL,
+                    requested_reference TEXT NOT NULL,
+                    resolved_reference TEXT NOT NULL,
+                    descriptor_digest TEXT NOT NULL,
+                    variant_digest TEXT NOT NULL,
+                    operating_system TEXT NOT NULL,
+                    architecture TEXT NOT NULL,
+                    runtime_provider TEXT NOT NULL,
+                    provider_generation INTEGER NOT NULL,
+                    capability_sha256 TEXT NOT NULL,
+                    plan_hash TEXT NOT NULL,
+                    operation_group_id TEXT NOT NULL,
+                    observation_sha256 TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(plan_hash, resource_uuid, state_kind)
+                )
+                """,
+                "CREATE INDEX IF NOT EXISTS image_digest_locks_project_idx ON image_digest_locks(project_id, service_name, replica_index)",
+                "CREATE INDEX IF NOT EXISTS image_digest_locks_resource_idx ON image_digest_locks(resource_uuid, state_kind)",
+                "CREATE INDEX IF NOT EXISTS image_digest_locks_plan_idx ON image_digest_locks(plan_hash, state_kind)"
+            ]
+        ),
+        SchemaMigration(
+            version: 9,
+            description: "Verified OCI referrer graphs and narrow retention",
+            statements: [
+                """
+                CREATE TABLE IF NOT EXISTS oci_referrer_discoveries (
+                    id TEXT PRIMARY KEY,
+                    registry_endpoint TEXT NOT NULL,
+                    repository TEXT NOT NULL,
+                    subject_digest TEXT NOT NULL,
+                    artifact_type TEXT,
+                    discovery_mode TEXT NOT NULL,
+                    server_filter_applied INTEGER NOT NULL,
+                    page_count INTEGER NOT NULL,
+                    descriptor_count INTEGER NOT NULL,
+                    graph_sha256 TEXT NOT NULL,
+                    etag TEXT,
+                    complete INTEGER NOT NULL,
+                    observed_at TEXT NOT NULL,
+                    UNIQUE(registry_endpoint, repository, subject_digest, graph_sha256)
+                )
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS oci_referrers (
+                    id TEXT PRIMARY KEY,
+                    discovery_id TEXT NOT NULL REFERENCES oci_referrer_discoveries(id) ON DELETE CASCADE,
+                    registry_endpoint TEXT NOT NULL,
+                    repository TEXT NOT NULL,
+                    subject_digest TEXT NOT NULL,
+                    referrer_digest TEXT NOT NULL,
+                    media_type TEXT NOT NULL,
+                    artifact_type TEXT,
+                    size_bytes INTEGER NOT NULL,
+                    annotations_json TEXT NOT NULL,
+                    verified_subject INTEGER NOT NULL,
+                    observed_at TEXT NOT NULL,
+                    UNIQUE(discovery_id, referrer_digest)
+                )
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS oci_referrer_cache_objects (
+                    digest TEXT PRIMARY KEY,
+                    media_type TEXT NOT NULL,
+                    size_bytes INTEGER NOT NULL,
+                    object_kind TEXT NOT NULL,
+                    payload_base64 TEXT NOT NULL,
+                    payload_sha256 TEXT NOT NULL,
+                    children_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    last_accessed_at TEXT NOT NULL
+                )
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS oci_referrer_graph_objects (
+                    discovery_id TEXT NOT NULL REFERENCES oci_referrer_discoveries(id) ON DELETE CASCADE,
+                    referrer_digest TEXT NOT NULL,
+                    object_digest TEXT NOT NULL REFERENCES oci_referrer_cache_objects(digest) ON DELETE RESTRICT,
+                    PRIMARY KEY(discovery_id, referrer_digest, object_digest)
+                )
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS oci_referrer_retention_leases (
+                    id TEXT PRIMARY KEY,
+                    discovery_id TEXT NOT NULL REFERENCES oci_referrer_discoveries(id) ON DELETE CASCADE,
+                    owner_id TEXT NOT NULL,
+                    fencing_token TEXT NOT NULL,
+                    acquired_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    released_at TEXT,
+                    UNIQUE(fencing_token)
+                )
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS oci_referrer_publications (
+                    id TEXT PRIMARY KEY,
+                    registry_endpoint TEXT NOT NULL,
+                    repository TEXT NOT NULL,
+                    subject_digest TEXT NOT NULL,
+                    referrer_digest TEXT NOT NULL,
+                    ownership_proof_sha256 TEXT NOT NULL,
+                    operation_group_id TEXT NOT NULL,
+                    cleanup_eligible INTEGER NOT NULL,
+                    created_at TEXT NOT NULL,
+                    observed_at TEXT NOT NULL,
+                    UNIQUE(registry_endpoint, repository, subject_digest, referrer_digest)
+                )
+                """,
+                "CREATE INDEX IF NOT EXISTS oci_referrer_discoveries_subject_idx ON oci_referrer_discoveries(registry_endpoint, repository, subject_digest, observed_at)",
+                "CREATE INDEX IF NOT EXISTS oci_referrers_subject_idx ON oci_referrers(registry_endpoint, repository, subject_digest, referrer_digest)",
+                "CREATE INDEX IF NOT EXISTS oci_referrer_graph_object_idx ON oci_referrer_graph_objects(object_digest)",
+                "CREATE INDEX IF NOT EXISTS oci_referrer_leases_active_idx ON oci_referrer_retention_leases(discovery_id, released_at, expires_at)",
+                "CREATE INDEX IF NOT EXISTS oci_referrer_publications_cleanup_idx ON oci_referrer_publications(cleanup_eligible, registry_endpoint, repository, subject_digest)"
+            ]
+        ),
+        SchemaMigration(
+            version: 10,
+            description: "Exact image trust evidence, exceptions, and subject manifest cache",
+            statements: [
+                """
+                CREATE TABLE IF NOT EXISTS image_trust_exceptions (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL,
+                    service_name TEXT NOT NULL,
+                    descriptor_digest TEXT NOT NULL,
+                    policy_sha256 TEXT NOT NULL,
+                    reason TEXT NOT NULL,
+                    approver TEXT NOT NULL,
+                    approved_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    revoked_at TEXT,
+                    idempotency_key TEXT NOT NULL
+                )
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS image_trust_verifications (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL,
+                    service_name TEXT NOT NULL,
+                    descriptor_digest TEXT NOT NULL,
+                    policy_sha256 TEXT NOT NULL,
+                    evidence_graph_sha256 TEXT NOT NULL,
+                    evidence_discovery_id TEXT NOT NULL REFERENCES oci_referrer_discoveries(id) ON DELETE RESTRICT,
+                    trusted_root_sha256 TEXT NOT NULL,
+                    verifier_version TEXT NOT NULL,
+                    matched_authority_ids_json TEXT NOT NULL,
+                    threshold INTEGER NOT NULL,
+                    outcome TEXT NOT NULL CHECK (outcome IN ('passed', 'threshold-not-met')),
+                    exception_id TEXT REFERENCES image_trust_exceptions(id) ON DELETE RESTRICT,
+                    operation_group_id TEXT NOT NULL REFERENCES operation_groups(id) ON DELETE RESTRICT,
+                    created_at TEXT NOT NULL
+                )
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS image_trust_subject_manifests (
+                    id TEXT PRIMARY KEY,
+                    registry_endpoint TEXT NOT NULL,
+                    repository TEXT NOT NULL,
+                    descriptor_digest TEXT NOT NULL,
+                    size_bytes INTEGER NOT NULL,
+                    payload_base64 TEXT NOT NULL,
+                    payload_sha256 TEXT NOT NULL,
+                    observed_at TEXT NOT NULL
+                )
+                """,
+                "CREATE UNIQUE INDEX IF NOT EXISTS image_trust_exceptions_idempotency_idx ON image_trust_exceptions(idempotency_key)",
+                "CREATE INDEX IF NOT EXISTS image_trust_exceptions_active_lookup_idx ON image_trust_exceptions(project_id, service_name, descriptor_digest, policy_sha256, approved_at, expires_at, revoked_at)",
+                "CREATE INDEX IF NOT EXISTS image_trust_verifications_lookup_idx ON image_trust_verifications(project_id, service_name, descriptor_digest, created_at)",
+                "CREATE INDEX IF NOT EXISTS image_trust_verifications_operation_idx ON image_trust_verifications(operation_group_id, created_at)",
+                "CREATE UNIQUE INDEX IF NOT EXISTS image_trust_subject_manifests_lookup_idx ON image_trust_subject_manifests(registry_endpoint, repository, descriptor_digest)"
+            ]
+        ),
+        SchemaMigration(
+            version: 11,
+            description: "Immutable normalized image SBOM evidence records",
+            statements: [
+                """
+                CREATE TABLE IF NOT EXISTS image_sbom_records (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL,
+                    service_name TEXT NOT NULL,
+                    descriptor_digest TEXT NOT NULL,
+                    policy_sha256 TEXT NOT NULL,
+                    format TEXT NOT NULL CHECK (
+                        format IN ('spdx-json', 'cyclonedx-json')
+                    ),
+                    document_digest TEXT NOT NULL,
+                    document_media_type TEXT NOT NULL,
+                    evidence_discovery_id TEXT NOT NULL REFERENCES oci_referrer_discoveries(id) ON DELETE RESTRICT,
+                    evidence_graph_sha256 TEXT NOT NULL,
+                    sbom_referrer_digest TEXT NOT NULL,
+                    provenance_descriptor_digest TEXT,
+                    provenance_referrer_digest TEXT,
+                    component_count INTEGER NOT NULL,
+                    normalized_components_sha256 TEXT NOT NULL,
+                    operation_group_id TEXT NOT NULL REFERENCES operation_groups(id) ON DELETE RESTRICT,
+                    created_at TEXT NOT NULL,
+                    CHECK (
+                        (provenance_descriptor_digest IS NULL AND provenance_referrer_digest IS NULL)
+                        OR (provenance_descriptor_digest IS NOT NULL AND provenance_referrer_digest IS NOT NULL)
+                    )
+                )
+                """,
+                "CREATE INDEX IF NOT EXISTS image_sbom_records_subject_idx ON image_sbom_records(project_id, service_name, descriptor_digest, policy_sha256, created_at)",
+                "CREATE INDEX IF NOT EXISTS image_sbom_records_operation_idx ON image_sbom_records(operation_group_id, created_at)",
+                "CREATE INDEX IF NOT EXISTS image_sbom_records_sbom_cleanup_idx ON image_sbom_records(evidence_discovery_id, sbom_referrer_digest)",
+                "CREATE INDEX IF NOT EXISTS image_sbom_records_provenance_cleanup_idx ON image_sbom_records(evidence_discovery_id, provenance_referrer_digest)"
+            ]
+        ),
+        SchemaMigration(
+            version: 12,
+            description: "Signed vulnerability reports, explainable decisions, and exact exceptions",
+            statements: [
+                """
+                CREATE TABLE IF NOT EXISTS image_vulnerability_reports (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL,
+                    service_name TEXT NOT NULL,
+                    descriptor_digest TEXT NOT NULL,
+                    report_digest TEXT NOT NULL,
+                    report_referrer_digest TEXT NOT NULL,
+                    evidence_discovery_id TEXT NOT NULL REFERENCES oci_referrer_discoveries(id) ON DELETE RESTRICT,
+                    evidence_graph_sha256 TEXT NOT NULL,
+                    database_id TEXT NOT NULL,
+                    database_version TEXT NOT NULL,
+                    database_updated_at TEXT NOT NULL,
+                    generated_at TEXT NOT NULL,
+                    signature_policy_sha256 TEXT NOT NULL,
+                    signature_proof_json TEXT NOT NULL,
+                    signature_proof_sha256 TEXT NOT NULL,
+                    operation_group_id TEXT NOT NULL REFERENCES operation_groups(id) ON DELETE RESTRICT,
+                    created_at TEXT NOT NULL,
+                    UNIQUE (
+                        project_id, service_name, descriptor_digest,
+                        report_digest, report_referrer_digest,
+                        evidence_discovery_id, evidence_graph_sha256,
+                        signature_policy_sha256
+                    )
+                )
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS image_vulnerability_exceptions (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL,
+                    service_name TEXT NOT NULL,
+                    descriptor_digest TEXT NOT NULL,
+                    decision_id TEXT NOT NULL REFERENCES image_vulnerability_decisions(id) ON DELETE RESTRICT,
+                    decision_digest TEXT NOT NULL,
+                    report_id TEXT NOT NULL REFERENCES image_vulnerability_reports(id) ON DELETE RESTRICT,
+                    report_digest TEXT NOT NULL,
+                    report_referrer_digest TEXT NOT NULL,
+                    policy_sha256 TEXT NOT NULL,
+                    signature_policy_sha256 TEXT NOT NULL,
+                    database_id TEXT NOT NULL,
+                    database_version TEXT NOT NULL,
+                    blocked_findings_sha256 TEXT NOT NULL,
+                    reason TEXT NOT NULL,
+                    approver TEXT NOT NULL,
+                    approved_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    revoked_at TEXT,
+                    idempotency_key TEXT NOT NULL,
+                    operation_group_id TEXT NOT NULL REFERENCES operation_groups(id) ON DELETE RESTRICT,
+                    CHECK (expires_at > approved_at),
+                    CHECK (revoked_at IS NULL OR revoked_at >= approved_at)
+                )
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS image_vulnerability_decisions (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL,
+                    service_name TEXT NOT NULL,
+                    descriptor_digest TEXT NOT NULL,
+                    decision_digest TEXT NOT NULL,
+                    report_id TEXT REFERENCES image_vulnerability_reports(id) ON DELETE RESTRICT,
+                    policy_sha256 TEXT NOT NULL,
+                    signature_policy_sha256 TEXT NOT NULL,
+                    evaluator_version TEXT NOT NULL,
+                    evaluated_at TEXT NOT NULL,
+                    freshness TEXT NOT NULL CHECK (
+                        freshness IN ('fresh', 'stale', 'unavailable')
+                    ),
+                    data_age_seconds INTEGER,
+                    candidate_findings_json TEXT NOT NULL,
+                    candidate_findings_sha256 TEXT NOT NULL,
+                    allowlisted_findings_json TEXT NOT NULL,
+                    allowlisted_findings_sha256 TEXT NOT NULL,
+                    blocking_findings_json TEXT NOT NULL,
+                    blocking_findings_sha256 TEXT NOT NULL,
+                    outcome TEXT NOT NULL CHECK (
+                        outcome IN ('allowed', 'blocked')
+                    ),
+                    reason_codes_json TEXT NOT NULL,
+                    reason_codes_sha256 TEXT NOT NULL,
+                    operation_group_id TEXT NOT NULL REFERENCES operation_groups(id) ON DELETE RESTRICT,
+                    created_at TEXT NOT NULL,
+                    CHECK (
+                        (freshness = 'unavailable'
+                            AND report_id IS NULL
+                            AND data_age_seconds IS NULL)
+                        OR
+                        (freshness IN ('fresh', 'stale')
+                            AND report_id IS NOT NULL
+                            AND data_age_seconds >= 0
+                            AND data_age_seconds <= 31536000)
+                    )
+                )
+                """,
+                "CREATE INDEX IF NOT EXISTS image_vulnerability_reports_subject_idx ON image_vulnerability_reports(project_id, service_name, descriptor_digest, database_id, database_version, created_at)",
+                "CREATE INDEX IF NOT EXISTS image_vulnerability_reports_cleanup_idx ON image_vulnerability_reports(evidence_discovery_id, report_referrer_digest)",
+                "CREATE UNIQUE INDEX IF NOT EXISTS image_vulnerability_exceptions_idempotency_idx ON image_vulnerability_exceptions(idempotency_key)",
+                "CREATE INDEX IF NOT EXISTS image_vulnerability_exceptions_active_idx ON image_vulnerability_exceptions(project_id, service_name, descriptor_digest, decision_id, decision_digest, report_id, report_digest, report_referrer_digest, policy_sha256, signature_policy_sha256, database_id, database_version, blocked_findings_sha256, approved_at, expires_at, revoked_at)",
+                "CREATE INDEX IF NOT EXISTS image_vulnerability_decisions_subject_idx ON image_vulnerability_decisions(project_id, service_name, descriptor_digest, policy_sha256, evaluated_at)",
+                "CREATE INDEX IF NOT EXISTS image_vulnerability_decisions_report_idx ON image_vulnerability_decisions(report_id, evaluated_at)",
+                "CREATE INDEX IF NOT EXISTS image_vulnerability_decisions_operation_idx ON image_vulnerability_decisions(operation_group_id, created_at)"
+            ]
+        ),
+        SchemaMigration(
+            version: 13,
+            description: "Immutable exact-image build provenance evidence",
+            statements: [
+                """
+                CREATE TABLE IF NOT EXISTS image_provenance_records (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+                    service_name TEXT NOT NULL,
+                    descriptor_digest TEXT NOT NULL,
+                    policy_sha256 TEXT NOT NULL,
+                    statement_digest TEXT NOT NULL,
+                    envelope_digest TEXT NOT NULL,
+                    referrer_digest TEXT NOT NULL,
+                    evidence_discovery_id TEXT NOT NULL REFERENCES oci_referrer_discoveries(id) ON DELETE RESTRICT,
+                    evidence_graph_sha256 TEXT NOT NULL,
+                    source_uri TEXT NOT NULL,
+                    source_digest TEXT NOT NULL,
+                    builder_id TEXT NOT NULL,
+                    builder_version TEXT NOT NULL,
+                    build_type TEXT NOT NULL,
+                    invocation_id TEXT NOT NULL,
+                    normalized_materials_sha256 TEXT NOT NULL,
+                    command_sha256 TEXT NOT NULL,
+                    environment_policy_sha256 TEXT NOT NULL,
+                    started_at TEXT NOT NULL,
+                    finished_at TEXT NOT NULL,
+                    reproducibility_status TEXT NOT NULL CHECK (
+                        reproducibility_status IN (
+                            'verified', 'not-verified'
+                        )
+                    ),
+                    comparison_digest TEXT,
+                    signer_id TEXT NOT NULL,
+                    signer_public_key_sha256 TEXT NOT NULL,
+                    signature_sha256 TEXT NOT NULL,
+                    verifier_version TEXT NOT NULL,
+                    verified_at TEXT NOT NULL,
+                    operation_group_id TEXT NOT NULL REFERENCES operation_groups(id) ON DELETE RESTRICT,
+                    created_at TEXT NOT NULL,
+                    CHECK (
+                        (reproducibility_status = 'verified'
+                            AND comparison_digest IS NOT NULL)
+                        OR
+                        (reproducibility_status = 'not-verified'
+                            AND comparison_digest IS NULL)
+                    )
+                )
+                """,
+                "CREATE INDEX IF NOT EXISTS image_provenance_records_subject_idx ON image_provenance_records(project_id, service_name, descriptor_digest, policy_sha256, verified_at)",
+                "CREATE INDEX IF NOT EXISTS image_provenance_records_operation_idx ON image_provenance_records(operation_group_id, created_at)",
+                "CREATE INDEX IF NOT EXISTS image_provenance_records_cleanup_idx ON image_provenance_records(evidence_discovery_id, referrer_digest)",
+                "CREATE INDEX IF NOT EXISTS image_provenance_records_statement_idx ON image_provenance_records(statement_digest, envelope_digest, referrer_digest)"
+            ]
+        ),
+        SchemaMigration(
+            version: 14,
+            description: "Bounded content accounting and fenced cache leases",
+            statements: [
+                """
+                CREATE TABLE IF NOT EXISTS content_cache_objects (
+                    provider_scope TEXT NOT NULL,
+                    digest TEXT NOT NULL,
+                    content_kind TEXT NOT NULL CHECK (
+                        content_kind IN (
+                            'runtime-image', 'oci-cache-object'
+                        )
+                    ),
+                    size_bytes INTEGER NOT NULL CHECK (
+                        size_bytes >= 0
+                        AND size_bytes <= 1099511627776
+                    ),
+                    pin_policy TEXT NOT NULL CHECK (
+                        pin_policy IN (
+                            'unpinned', 'operator', 'policy'
+                        )
+                    ),
+                    created_at TEXT NOT NULL,
+                    observed_at TEXT NOT NULL,
+                    last_used_at TEXT NOT NULL,
+                    PRIMARY KEY(provider_scope, digest),
+                    CHECK (
+                        length(provider_scope) BETWEEN 1 AND 256
+                        AND provider_scope
+                            NOT GLOB '*[^A-Za-z0-9._:/-]*'
+                        AND substr(provider_scope, 1, 1)
+                            GLOB '[A-Za-z0-9]'
+                    ),
+                    CHECK (
+                        length(digest) = 71
+                        AND substr(digest, 1, 7) = 'sha256:'
+                        AND substr(digest, 8) NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        created_at != ''
+                        AND observed_at != ''
+                        AND last_used_at != ''
+                        AND julianday(created_at) IS NOT NULL
+                        AND julianday(observed_at) IS NOT NULL
+                        AND julianday(last_used_at) IS NOT NULL
+                        AND julianday(observed_at)
+                            >= julianday(created_at)
+                        AND julianday(last_used_at)
+                            >= julianday(created_at)
+                    )
+                )
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS content_cache_references (
+                    id TEXT PRIMARY KEY,
+                    provider_scope TEXT NOT NULL,
+                    reference TEXT NOT NULL,
+                    digest TEXT NOT NULL,
+                    ownership_operation_id TEXT NOT NULL,
+                    ownership_proof_sha256 TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    observed_at TEXT NOT NULL,
+                    FOREIGN KEY(provider_scope, digest)
+                        REFERENCES content_cache_objects(
+                            provider_scope, digest
+                        ) ON DELETE RESTRICT,
+                    UNIQUE(provider_scope, reference),
+                    CHECK (
+                        length(id) = 36
+                        AND substr(id, 9, 1) = '-'
+                        AND substr(id, 14, 1) = '-'
+                        AND substr(id, 19, 1) = '-'
+                        AND substr(id, 24, 1) = '-'
+                        AND replace(id, '-', '')
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        length(provider_scope) BETWEEN 1 AND 256
+                        AND provider_scope
+                            NOT GLOB '*[^A-Za-z0-9._:/-]*'
+                        AND substr(provider_scope, 1, 1)
+                            GLOB '[A-Za-z0-9]'
+                    ),
+                    CHECK (
+                        length(reference) BETWEEN 1 AND 1024
+                    ),
+                    CHECK (
+                        length(digest) = 71
+                        AND substr(digest, 1, 7) = 'sha256:'
+                        AND substr(digest, 8) NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        length(ownership_operation_id) = 36
+                        AND substr(
+                            ownership_operation_id, 9, 1
+                        ) = '-'
+                        AND substr(
+                            ownership_operation_id, 14, 1
+                        ) = '-'
+                        AND substr(
+                            ownership_operation_id, 19, 1
+                        ) = '-'
+                        AND substr(
+                            ownership_operation_id, 24, 1
+                        ) = '-'
+                        AND replace(
+                            ownership_operation_id, '-', ''
+                        ) NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        length(ownership_proof_sha256) = 64
+                        AND ownership_proof_sha256
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        created_at != '' AND observed_at != ''
+                        AND julianday(created_at) IS NOT NULL
+                        AND julianday(observed_at) IS NOT NULL
+                        AND julianday(observed_at)
+                            >= julianday(created_at)
+                    )
+                )
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS content_cache_leases (
+                    id TEXT PRIMARY KEY,
+                    provider_scope TEXT NOT NULL,
+                    digest TEXT NOT NULL,
+                    reference TEXT,
+                    mode TEXT NOT NULL CHECK (
+                        mode IN ('shared', 'exclusive-delete')
+                    ),
+                    owner_id TEXT NOT NULL,
+                    purpose TEXT NOT NULL,
+                    fencing_token TEXT NOT NULL UNIQUE,
+                    acquired_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    released_at TEXT,
+                    CHECK (
+                        length(id) = 36
+                        AND substr(id, 9, 1) = '-'
+                        AND substr(id, 14, 1) = '-'
+                        AND substr(id, 19, 1) = '-'
+                        AND substr(id, 24, 1) = '-'
+                        AND replace(id, '-', '')
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        length(provider_scope) BETWEEN 1 AND 256
+                        AND provider_scope
+                            NOT GLOB '*[^A-Za-z0-9._:/-]*'
+                        AND substr(provider_scope, 1, 1)
+                            GLOB '[A-Za-z0-9]'
+                    ),
+                    CHECK (
+                        length(digest) = 71
+                        AND substr(digest, 1, 7) = 'sha256:'
+                        AND substr(digest, 8) NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        reference IS NULL
+                        OR length(reference) BETWEEN 1 AND 1024
+                    ),
+                    CHECK (
+                        length(owner_id) BETWEEN 1 AND 128
+                        AND owner_id NOT GLOB '*[^ -~]*'
+                    ),
+                    CHECK (
+                        length(purpose) BETWEEN 1 AND 128
+                        AND purpose NOT GLOB '*[^ -~]*'
+                    ),
+                    CHECK (
+                        length(fencing_token) = 36
+                        AND substr(fencing_token, 9, 1) = '-'
+                        AND substr(fencing_token, 14, 1) = '-'
+                        AND substr(fencing_token, 19, 1) = '-'
+                        AND substr(fencing_token, 24, 1) = '-'
+                        AND replace(fencing_token, '-', '')
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        acquired_at != ''
+                        AND expires_at != ''
+                        AND julianday(acquired_at) IS NOT NULL
+                        AND julianday(expires_at) IS NOT NULL
+                        AND julianday(expires_at)
+                            > julianday(acquired_at)
+                        AND (
+                            julianday(expires_at)
+                              - julianday(acquired_at)
+                        ) * 86400.0 <= 86400.001
+                    ),
+                    CHECK (
+                        released_at IS NULL OR (
+                            julianday(released_at) IS NOT NULL
+                            AND julianday(released_at)
+                              >= julianday(acquired_at)
+                        )
+                    )
+                )
+                """,
+                """
+                INSERT OR IGNORE INTO content_cache_objects (
+                    provider_scope, digest, content_kind, size_bytes,
+                    pin_policy, created_at, observed_at, last_used_at
+                )
+                SELECT
+                    'oci-referrer-cache', digest, 'oci-cache-object',
+                    size_bytes, 'unpinned', created_at,
+                    last_accessed_at, last_accessed_at
+                FROM oci_referrer_cache_objects
+                """,
+                """
+                CREATE TRIGGER IF NOT EXISTS
+                    content_cache_reference_exclusive_guard
+                BEFORE INSERT ON content_cache_references
+                WHEN EXISTS (
+                    SELECT 1 FROM content_cache_leases
+                    WHERE provider_scope = NEW.provider_scope
+                      AND mode = 'exclusive-delete'
+                      AND released_at IS NULL
+                      AND expires_at > NEW.observed_at
+                      AND (
+                          digest = NEW.digest
+                          OR reference = NEW.reference
+                      )
+                )
+                BEGIN
+                    SELECT RAISE(
+                        ABORT,
+                        'active exclusive deletion lease'
+                    );
+                END
+                """,
+                """
+                CREATE TRIGGER IF NOT EXISTS
+                    content_cache_lease_conflict_guard
+                BEFORE INSERT ON content_cache_leases
+                WHEN (
+                    NEW.mode = 'exclusive-delete'
+                    AND (
+                        EXISTS (
+                            SELECT 1 FROM content_cache_objects
+                            WHERE provider_scope = NEW.provider_scope
+                              AND digest = NEW.digest
+                              AND pin_policy != 'unpinned'
+                        )
+                        OR EXISTS (
+                            SELECT 1 FROM content_cache_leases
+                            WHERE provider_scope = NEW.provider_scope
+                              AND released_at IS NULL
+                              AND expires_at > NEW.acquired_at
+                              AND (
+                                  digest = NEW.digest
+                                  OR (
+                                      NEW.reference IS NOT NULL
+                                      AND reference = NEW.reference
+                                  )
+                              )
+                        )
+                    )
+                ) OR (
+                    NEW.mode = 'shared'
+                    AND EXISTS (
+                        SELECT 1 FROM content_cache_leases
+                        WHERE provider_scope = NEW.provider_scope
+                          AND mode = 'exclusive-delete'
+                          AND released_at IS NULL
+                          AND expires_at > NEW.acquired_at
+                          AND (
+                              digest = NEW.digest
+                              OR (
+                                  NEW.reference IS NOT NULL
+                                  AND reference = NEW.reference
+                              )
+                          )
+                    )
+                )
+                BEGIN
+                    SELECT RAISE(ABORT, 'content lease conflict');
+                END
+                """,
+                "CREATE INDEX IF NOT EXISTS content_cache_objects_pressure_idx ON content_cache_objects(pin_policy, last_used_at, provider_scope, digest)",
+                "CREATE INDEX IF NOT EXISTS content_cache_references_digest_idx ON content_cache_references(provider_scope, digest, reference)",
+                "CREATE INDEX IF NOT EXISTS content_cache_references_operation_idx ON content_cache_references(ownership_operation_id, ownership_proof_sha256)",
+                "CREATE INDEX IF NOT EXISTS content_cache_leases_digest_active_idx ON content_cache_leases(provider_scope, digest, released_at, expires_at)",
+                "CREATE INDEX IF NOT EXISTS content_cache_leases_reference_active_idx ON content_cache_leases(provider_scope, reference, released_at, expires_at)",
+                "CREATE INDEX IF NOT EXISTS content_cache_leases_owner_active_idx ON content_cache_leases(owner_id, released_at, expires_at)"
             ]
         )
     ]

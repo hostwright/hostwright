@@ -6,6 +6,7 @@ enum StateJSON {
         "capabilitySHA256",
         "checkpoint",
         "confirmationToken",
+        "errorCode",
         "fencingToken",
         "operationID",
         "planHash",
@@ -13,6 +14,7 @@ enum StateJSON {
         "projectUUID",
         "resourceFencingToken",
         "resourceUUID",
+        "secretReferenceSHA256",
         "verification"
     ]
 

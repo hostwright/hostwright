@@ -1,6 +1,7 @@
 import Foundation
 import HostwrightCore
 import HostwrightRuntime
+import HostwrightSecrets
 import HostwrightState
 
 public struct RuntimeProviderMigrationCLIOptions: Equatable, Sendable {
@@ -31,6 +32,30 @@ public enum RecoveryCLIAction: Equatable, Sendable {
     case rollback(groupID: String, confirmationPlanSHA256: String, timeoutSeconds: Int)
 }
 
+public enum SecretCLIAction: Equatable, Sendable {
+    case create(HostwrightSecretReference)
+    case update(HostwrightSecretReference)
+    case list
+    case check(HostwrightSecretReference)
+    case delete(HostwrightSecretReference)
+}
+
+public struct SecretCLIOptions: Equatable, Sendable {
+    public let action: SecretCLIAction
+    public let stateDatabasePath: String?
+    public let output: CLIOutputFormat
+
+    public init(
+        action: SecretCLIAction,
+        stateDatabasePath: String?,
+        output: CLIOutputFormat
+    ) {
+        self.action = action
+        self.stateDatabasePath = stateDatabasePath
+        self.output = output
+    }
+}
+
 public enum CLICommand: Equatable, Sendable {
     case version
     case capabilities(output: CLIOutputFormat)
@@ -38,6 +63,9 @@ public enum CLICommand: Equatable, Sendable {
     case runtimeMigrate(options: RuntimeProviderMigrationCLIOptions)
     case paths(stateDatabasePath: String?, output: CLIOutputFormat)
     case state(action: StateCLIAction, stateDatabasePath: String?, output: CLIOutputFormat)
+    case secret(options: SecretCLIOptions)
+    case registry(options: RegistryCLIOptions)
+    case image(options: ImageCLIOptions)
     case migrateManifestPreview(path: String, output: CLIOutputFormat)
     case initManifest
     case importStack(path: String, output: CLIOutputFormat, teamProfilePath: String?)
@@ -94,6 +122,12 @@ public enum CLICommand: Equatable, Sendable {
             return try pathsCommand(arguments: arguments)
         case "state":
             return try stateCommand(arguments: arguments)
+        case "secret":
+            return try secretCommand(arguments: arguments)
+        case "registry":
+            return try registryCommand(arguments: arguments)
+        case "image":
+            return .image(options: try ImageCLIParser.parse(arguments: arguments))
         case "migrate":
             return try migrateCommand(arguments: arguments)
         case "init":
@@ -423,6 +457,310 @@ public enum CLICommand: Equatable, Sendable {
             action: action,
             stateDatabasePath: stateDatabasePath,
             output: output
+        )
+    }
+
+    private static func secretCommand(arguments: [String]) throws -> CLICommand {
+        guard arguments.count >= 2 else {
+            throw CLIUsageError("secret requires create, update, list, check, or delete.")
+        }
+
+        let operation = arguments[1]
+        let reference: HostwrightSecretReference?
+        var index: Int
+        if operation == "list" {
+            reference = nil
+            index = 2
+        } else {
+            guard ["create", "update", "check", "delete"].contains(operation),
+                  arguments.count >= 3 else {
+                throw CLIUsageError(
+                    "secret requires create, update, list, check, or delete; item operations require keychain://<service>/<account>."
+                )
+            }
+            do {
+                let parsed = try HostwrightSecretReference.parse(arguments[2])
+                guard parsed.providerKind == .keychain else {
+                    throw CLIUsageError(
+                        "secret item references must use keychain://<service>/<account>."
+                    )
+                }
+                reference = parsed
+            } catch let error as CLIUsageError {
+                throw error
+            } catch {
+                throw CLIUsageError(
+                    "secret item references must use keychain://<service>/<account>."
+                )
+            }
+            index = 3
+        }
+
+        var stateDatabasePath: String?
+        var output: CLIOutputFormat = .text
+        var outputSelected = false
+        while index < arguments.count {
+            switch arguments[index] {
+            case "--state-db":
+                guard operation == "create" || operation == "update" || operation == "delete",
+                      stateDatabasePath == nil,
+                      index + 1 < arguments.count else {
+                    throw CLIUsageError("secret accepts one value after --state-db.")
+                }
+                let value = arguments[index + 1]
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !value.isEmpty, !value.hasPrefix("-") else {
+                    throw CLIUsageError(
+                        "secret requires a non-empty path after --state-db."
+                    )
+                }
+                stateDatabasePath = value
+                index += 2
+            case "--json":
+                guard !outputSelected else {
+                    throw CLIUsageError("secret accepts only one output selection.")
+                }
+                output = .json
+                outputSelected = true
+                index += 1
+            case "--output":
+                guard !outputSelected, index + 1 < arguments.count,
+                      let selected = CLIOutputFormat(rawValue: arguments[index + 1]) else {
+                    throw CLIUsageError("secret --output supports only text or json.")
+                }
+                output = selected
+                outputSelected = true
+                index += 2
+            default:
+                throw CLIUsageError(
+                    "secret values must be provided through stdin or an attended TTY, never command arguments."
+                )
+            }
+        }
+
+        let action: SecretCLIAction
+        switch (operation, reference) {
+        case ("create", .some(let reference)):
+            action = .create(reference)
+        case ("update", .some(let reference)):
+            action = .update(reference)
+        case ("list", .none):
+            action = .list
+        case ("check", .some(let reference)):
+            action = .check(reference)
+        case ("delete", .some(let reference)):
+            action = .delete(reference)
+        default:
+            throw CLIUsageError("Invalid secret operation.")
+        }
+        return .secret(
+            options: SecretCLIOptions(
+                action: action,
+                stateDatabasePath: stateDatabasePath,
+                output: output
+            )
+        )
+    }
+
+    private static func registryCommand(arguments: [String]) throws -> CLICommand {
+        if arguments.count > 1,
+           arguments[1] == "provenance" {
+            return .registry(
+                options: try RegistryProvenanceCLIParser.parse(
+                    arguments: arguments
+                )
+            )
+        }
+        if arguments.count > 1,
+           arguments[1] == "vulnerability" {
+            return .registry(
+                options: try RegistryVulnerabilityCLIParser.parse(
+                    arguments: arguments
+                )
+            )
+        }
+        if arguments.count > 1, arguments[1] == "sbom" {
+            return .registry(
+                options: try RegistrySBOMCLIParser.parse(
+                    arguments: arguments
+                )
+            )
+        }
+        if arguments.count > 1, arguments[1] == "trust" {
+            return .registry(
+                options: try RegistryTrustCLIParser.parse(
+                    arguments: arguments
+                )
+            )
+        }
+        if arguments.count > 1, arguments[1] == "referrers" {
+            return .registry(
+                options: try RegistryReferrerCLIParser.parse(
+                    arguments: arguments
+                )
+            )
+        }
+        guard arguments.count >= 3,
+              ["login", "logout", "status"].contains(arguments[1]) else {
+            throw CLIUsageError(
+                "registry requires login, logout, or status followed by a registry host."
+            )
+        }
+        let operation = arguments[1]
+        let server = arguments[2].trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !server.isEmpty,
+              server.utf8.count <= 512,
+              !server.hasPrefix("-") else {
+            throw CLIUsageError("registry requires a bounded registry host.")
+        }
+
+        var username: String?
+        var repository: String?
+        var actions: [String] = []
+        var stateDatabasePath: String?
+        var output: CLIOutputFormat = .text
+        var outputSelected = false
+        var index = 3
+        while index < arguments.count {
+            switch arguments[index] {
+            case "--username":
+                guard operation == "login",
+                      username == nil,
+                      index + 1 < arguments.count else {
+                    throw CLIUsageError(
+                        "registry login accepts one value after --username."
+                    )
+                }
+                let value = arguments[index + 1]
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !value.isEmpty,
+                      value.utf8.count <= 256,
+                      !value.hasPrefix("-"),
+                      value.rangeOfCharacter(from: .controlCharacters) == nil else {
+                    throw CLIUsageError(
+                        "registry login requires a bounded username."
+                    )
+                }
+                username = value
+                index += 2
+            case "--repository":
+                guard operation == "status",
+                      repository == nil,
+                      index + 1 < arguments.count else {
+                    throw CLIUsageError(
+                        "registry status accepts one value after --repository."
+                    )
+                }
+                let value = arguments[index + 1]
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !value.isEmpty,
+                      value.utf8.count <= 255,
+                      !value.hasPrefix("-") else {
+                    throw CLIUsageError(
+                        "registry status requires a bounded repository name."
+                    )
+                }
+                repository = value
+                index += 2
+            case "--action":
+                guard operation == "status",
+                      index + 1 < arguments.count,
+                      ["pull", "push"].contains(arguments[index + 1]),
+                      !actions.contains(arguments[index + 1]) else {
+                    throw CLIUsageError(
+                        "registry status --action accepts unique pull or push values."
+                    )
+                }
+                actions.append(arguments[index + 1])
+                index += 2
+            case "--state-db":
+                guard operation == "login" || operation == "logout",
+                      stateDatabasePath == nil,
+                      index + 1 < arguments.count else {
+                    throw CLIUsageError(
+                        "registry login and logout accept one value after --state-db."
+                    )
+                }
+                let value = arguments[index + 1]
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !value.isEmpty, !value.hasPrefix("-") else {
+                    throw CLIUsageError(
+                        "registry requires a non-empty path after --state-db."
+                    )
+                }
+                stateDatabasePath = value
+                index += 2
+            case "--json":
+                guard !outputSelected else {
+                    throw CLIUsageError(
+                        "registry accepts only one output selection."
+                    )
+                }
+                output = .json
+                outputSelected = true
+                index += 1
+            case "--output":
+                guard !outputSelected,
+                      index + 1 < arguments.count,
+                      let selected = CLIOutputFormat(
+                          rawValue: arguments[index + 1]
+                      ) else {
+                    throw CLIUsageError(
+                        "registry --output supports only text or json."
+                    )
+                }
+                output = selected
+                outputSelected = true
+                index += 2
+            default:
+                throw CLIUsageError(
+                    "registry credentials must be provided through stdin or configured credential stores, never command arguments."
+                )
+            }
+        }
+
+        let action: RegistryCLIAction
+        switch operation {
+        case "login":
+            guard let username else {
+                throw CLIUsageError(
+                    "registry login requires --username <name>; the secret is read from stdin or an attended TTY."
+                )
+            }
+            action = .login(server: server, username: username)
+        case "logout":
+            guard username == nil,
+                  repository == nil,
+                  actions.isEmpty else {
+                throw CLIUsageError(
+                    "registry logout accepts only the registry host and output or state options."
+                )
+            }
+            action = .logout(server: server)
+        case "status":
+            guard username == nil,
+                  stateDatabasePath == nil,
+                  repository != nil || actions.isEmpty else {
+                throw CLIUsageError(
+                    "registry status --action requires --repository."
+                )
+            }
+            action = .status(
+                server: server,
+                repository: repository,
+                actions: actions.isEmpty && repository != nil
+                    ? ["pull"]
+                    : actions.sorted()
+            )
+        default:
+            preconditionFailure("Validated registry operation was not handled.")
+        }
+        return .registry(
+            options: RegistryCLIOptions(
+                action: action,
+                stateDatabasePath: stateDatabasePath,
+                output: output
+            )
         )
     }
 
@@ -1445,6 +1783,32 @@ public enum CLIExitCode: Int32, Equatable, Sendable {
             return .stateUnavailable
         case .controlAPIExecutionFailed:
             return .partialFailure
+        case .secretInvalid:
+            return .validation
+        case .secretUnavailable:
+            return .runtimeUnavailable
+        case .secretNotFound:
+            return .stateUnavailable
+        case .secretConflict, .secretCancelled, .secretPartialEffect:
+            return .partialFailure
+        case .secretDenied:
+            return .unsafeOperation
+        case .registryInvalid:
+            return .validation
+        case .registryCredentialUnavailable, .registryTransportUnavailable:
+            return .runtimeUnavailable
+        case .registryAuthenticationDenied, .registryScopeDenied:
+            return .unsafeOperation
+        case .registryCancelled, .registryPartialEffect:
+            return .partialFailure
+        case .imageInvalid:
+            return .validation
+        case .imageUnavailable:
+            return .runtimeUnavailable
+        case .imageConflict, .imageCancelled, .imagePartialEffect:
+            return .partialFailure
+        case .imageDenied:
+            return .unsafeOperation
         case .unsupportedArchitecture, .unsupportedMacOSVersion:
             return .validation
         }

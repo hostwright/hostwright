@@ -358,7 +358,7 @@ public struct OperationGroupRepository: Sendable {
             try connection.transaction {
                 let rows = try connection.query(
                     """
-                    SELECT status, fencing_token, project_id
+                    SELECT status, fencing_token, project_id, group_idempotency_key
                     FROM operation_groups
                     WHERE id = ?
                     LIMIT 1
@@ -367,9 +367,24 @@ public struct OperationGroupRepository: Sendable {
                 )
                 guard rows.count == 1,
                       rows[0][0] == OperationGroupStatus.interrupted.rawValue,
-                      rows[0][1] == expectedFencingToken.lowercased() else {
+                      rows[0][1] == expectedFencingToken.lowercased(),
+                      let groupIdempotencyKey = rows[0][3] else {
                     throw StateStoreError.invalidRecord(
                         "Only the exact fenced interrupted operation group can be resumed."
+                    )
+                }
+                let idempotencyConflicts = try connection.query(
+                    """
+                    SELECT id
+                    FROM operation_groups
+                    WHERE group_idempotency_key = ? AND status = 'active' AND id != ?
+                    LIMIT 1
+                    """,
+                    bindings: [.text(groupIdempotencyKey), .text(groupID)]
+                )
+                guard idempotencyConflicts.isEmpty else {
+                    throw StateStoreError.invalidRecord(
+                        "Another operation with the same idempotency key is active."
                     )
                 }
                 if let projectID = rows[0][2] {

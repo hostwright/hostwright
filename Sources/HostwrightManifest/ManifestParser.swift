@@ -118,6 +118,14 @@ public enum ManifestParser {
             let message: String
             if duplicates == ["imagePolicy"] {
                 message = "Manifest imagePolicy must be declared at most once."
+            } else if duplicates == ["imageSBOM"] {
+                message = "Manifest imageSBOM must be declared at most once."
+            } else if duplicates == ["imageTrust"] {
+                message = "Manifest imageTrust must be declared at most once."
+            } else if duplicates == ["imageVulnerability"] {
+                message = "Manifest imageVulnerability must be declared at most once."
+            } else if duplicates == ["imageProvenance"] {
+                message = "Manifest imageProvenance must be declared at most once."
             } else if duplicates == ["version"] {
                 message = "Manifest version must be declared at most once."
             } else {
@@ -274,7 +282,10 @@ private struct ManifestNodeDecoder {
         let values = try mapping(
             root,
             path: "$",
-            allowed: ["version", "project", "imagePolicy", "services"]
+            allowed: [
+                "version", "project", "imagePolicy", "imageTrust", "imageSBOM",
+                "imageVulnerability", "imageProvenance", "services"
+            ]
         )
         let version = try values["version"].map(versionInteger)
         let project = try values["project"].map { try string($0, path: "$.project") }
@@ -290,13 +301,401 @@ private struct ManifestNodeDecoder {
             }
             return value
         }
+        let imageTrust = try values["imageTrust"].map {
+            try decodeImageTrust($0, path: "$.imageTrust")
+        }
+        let imageSBOM = try values["imageSBOM"].map {
+            try decodeImageSBOM($0, path: "$.imageSBOM")
+        }
+        let imageVulnerability = try values["imageVulnerability"].map {
+            try decodeImageVulnerability($0, path: "$.imageVulnerability")
+        }
+        let imageProvenance = try values["imageProvenance"].map {
+            try decodeImageProvenance($0, path: "$.imageProvenance")
+        }
         let services = try values["services"].map(decodeServices) ?? []
         return HostwrightManifest(
             version: version,
             project: project,
             imagePolicy: imagePolicy,
+            imageTrust: imageTrust,
+            imageSBOM: imageSBOM,
+            imageVulnerability: imageVulnerability,
+            imageProvenance: imageProvenance,
             services: services
         )
+    }
+
+    private func decodeImageTrust(
+        _ node: Node,
+        path: String
+    ) throws -> HostwrightImageTrustPolicy {
+        let values = try mapping(
+            node,
+            path: path,
+            allowed: ["version", "threshold", "trustedRoot", "authorities"]
+        )
+        let version = try values["version"].map { try integer($0, path: "\(path).version") }
+            ?? HostwrightImageTrustPolicy.currentVersion
+        let threshold = try requiredInteger(
+            values["threshold"],
+            path: "\(path).threshold",
+            message: "imageTrust.threshold is required."
+        )
+        let trustedRoot = try values["trustedRoot"].map {
+            try string($0, path: "\(path).trustedRoot")
+        }
+        let authorities = try decodeImageTrustAuthorities(
+            values["authorities"],
+            path: "\(path).authorities"
+        )
+        return HostwrightImageTrustPolicy(
+            version: version,
+            threshold: threshold,
+            trustedRoot: trustedRoot,
+            authorities: authorities
+        )
+    }
+
+    private func decodeImageTrustAuthorities(
+        _ node: Node?,
+        path: String
+    ) throws -> [HostwrightImageTrustAuthority] {
+        guard let node else {
+            throw ManifestParser.failure(
+                "imageTrust.authorities is required.",
+                code: .manifestValidationFailed,
+                path: path
+            )
+        }
+        guard case .sequence(let sequence) = node else {
+            throw ManifestParser.failure("Expected a sequence.", node: node, path: path)
+        }
+        return try sequence.enumerated().map { index, child in
+            try decodeImageTrustAuthority(child, path: "\(path)[\(index)]")
+        }.sorted { $0.id < $1.id }
+    }
+
+    private func decodeImageTrustAuthority(
+        _ node: Node,
+        path: String
+    ) throws -> HostwrightImageTrustAuthority {
+        let values = try mapping(
+            node,
+            path: path,
+            allowed: [
+                "id", "type", "publicKey", "issuer", "identity",
+                "notBefore", "notAfter", "revokedAt"
+            ]
+        )
+        let id = try requiredString(
+            values["id"],
+            path: "\(path).id",
+            message: "imageTrust authority id is required."
+        )
+        let type = try requiredAuthorityType(
+            values["type"],
+            path: "\(path).type"
+        )
+        return HostwrightImageTrustAuthority(
+            id: id,
+            type: type,
+            publicKey: try values["publicKey"].map { try string($0, path: "\(path).publicKey") },
+            issuer: try values["issuer"].map { try string($0, path: "\(path).issuer") },
+            identity: try values["identity"].map { try string($0, path: "\(path).identity") },
+            notBefore: try values["notBefore"].map { try string($0, path: "\(path).notBefore") },
+            notAfter: try values["notAfter"].map { try string($0, path: "\(path).notAfter") },
+            revokedAt: try values["revokedAt"].map { try string($0, path: "\(path).revokedAt") }
+        )
+    }
+
+    private func decodeImageSBOM(
+        _ node: Node,
+        path: String
+    ) throws -> HostwrightImageSBOMPolicy {
+        let values = try mapping(
+            node,
+            path: path,
+            allowed: ["version", "requirement", "formats"]
+        )
+        let version = try values["version"].map { try integer($0, path: "\(path).version") }
+            ?? HostwrightImageSBOMPolicy.currentVersion
+        let requirement = try requiredImageSBOMRequirement(
+            values["requirement"],
+            path: "\(path).requirement"
+        )
+        let formats = try decodeImageSBOMFormats(
+            values["formats"],
+            path: "\(path).formats"
+        )
+        return HostwrightImageSBOMPolicy(
+            version: version,
+            requirement: requirement,
+            formats: formats
+        )
+    }
+
+    private func decodeImageSBOMFormats(
+        _ node: Node?,
+        path: String
+    ) throws -> [HostwrightImageSBOMFormat] {
+        guard let node else {
+            throw ManifestParser.failure(
+                "imageSBOM.formats is required.",
+                code: .manifestValidationFailed,
+                path: path
+            )
+        }
+        let values = try strings(node, path: path)
+        return try values.map { raw in
+            guard let format = HostwrightImageSBOMFormat(rawValue: raw) else {
+                throw ManifestParser.failure(
+                    "imageSBOM.formats must be one of: spdx-json, cyclonedx-json.",
+                    code: .manifestValidationFailed,
+                    path: path
+                )
+            }
+            return format
+        }.sorted { $0.rawValue < $1.rawValue }
+    }
+
+    private func decodeImageVulnerability(
+        _ node: Node,
+        path: String
+    ) throws -> HostwrightImageVulnerabilityPolicy {
+        let values = try mapping(
+            node,
+            path: path,
+            allowed: [
+                "version", "severityThreshold", "minimumVulnerabilityAgeSeconds",
+                "exploitability", "fixAvailability", "maximumDatabaseAgeSeconds",
+                "staleAction", "unavailableAction", "exceptionApproval", "allowlist"
+            ]
+        )
+        let version = try values["version"].map { try integer($0, path: "\(path).version") }
+            ?? HostwrightImageVulnerabilityPolicy.currentVersion
+        let severityThreshold = try requiredImageVulnerabilityEnum(
+            values["severityThreshold"],
+            path: "\(path).severityThreshold",
+            message: "imageVulnerability.severityThreshold is required.",
+            allowed: HostwrightVulnerabilitySeverity.self,
+            allowedValues: "low, medium, high, critical"
+        )
+        let minimumVulnerabilityAgeSeconds = try requiredInteger(
+            values["minimumVulnerabilityAgeSeconds"],
+            path: "\(path).minimumVulnerabilityAgeSeconds",
+            message: "imageVulnerability.minimumVulnerabilityAgeSeconds is required."
+        )
+        let exploitability = try requiredImageVulnerabilityEnum(
+            values["exploitability"],
+            path: "\(path).exploitability",
+            message: "imageVulnerability.exploitability is required.",
+            allowed: HostwrightVulnerabilityExploitability.self,
+            allowedValues: "any, known-exploited"
+        )
+        let fixAvailability = try requiredImageVulnerabilityEnum(
+            values["fixAvailability"],
+            path: "\(path).fixAvailability",
+            message: "imageVulnerability.fixAvailability is required.",
+            allowed: HostwrightVulnerabilityFixAvailability.self,
+            allowedValues: "any, fix-available"
+        )
+        let maximumDatabaseAgeSeconds = try requiredInteger(
+            values["maximumDatabaseAgeSeconds"],
+            path: "\(path).maximumDatabaseAgeSeconds",
+            message: "imageVulnerability.maximumDatabaseAgeSeconds is required."
+        )
+        let staleAction = try requiredImageVulnerabilityEnum(
+            values["staleAction"],
+            path: "\(path).staleAction",
+            message: "imageVulnerability.staleAction is required.",
+            allowed: HostwrightVulnerabilityDataAction.self,
+            allowedValues: "fail-open, fail-closed"
+        )
+        let unavailableAction = try requiredImageVulnerabilityEnum(
+            values["unavailableAction"],
+            path: "\(path).unavailableAction",
+            message: "imageVulnerability.unavailableAction is required.",
+            allowed: HostwrightVulnerabilityDataAction.self,
+            allowedValues: "fail-open, fail-closed"
+        )
+        let exceptionApproval = try requiredImageVulnerabilityEnum(
+            values["exceptionApproval"],
+            path: "\(path).exceptionApproval",
+            message: "imageVulnerability.exceptionApproval is required.",
+            allowed: HostwrightVulnerabilityExceptionApprovalMode.self,
+            allowedValues: "required, disabled"
+        )
+        let allowlist = try decodeImageVulnerabilityAllowlist(
+            values["allowlist"],
+            path: "\(path).allowlist"
+        )
+        return HostwrightImageVulnerabilityPolicy(
+            version: version,
+            severityThreshold: severityThreshold,
+            minimumVulnerabilityAgeSeconds: minimumVulnerabilityAgeSeconds,
+            exploitability: exploitability,
+            fixAvailability: fixAvailability,
+            maximumDatabaseAgeSeconds: maximumDatabaseAgeSeconds,
+            staleAction: staleAction,
+            unavailableAction: unavailableAction,
+            exceptionApproval: exceptionApproval,
+            allowlist: allowlist
+        )
+    }
+
+    private func decodeImageVulnerabilityAllowlist(
+        _ node: Node?,
+        path: String
+    ) throws -> [HostwrightImageVulnerabilityAllowlistEntry] {
+        guard let node else {
+            return []
+        }
+        guard case .sequence(let sequence) = node else {
+            throw ManifestParser.failure("Expected a sequence.", node: node, path: path)
+        }
+        return try sequence.enumerated().map { index, child in
+            let entryPath = "\(path)[\(index)]"
+            let values = try mapping(
+                child,
+                path: entryPath,
+                allowed: ["vulnerabilityID", "packagePURL", "reason", "expiresAt"]
+            )
+            return HostwrightImageVulnerabilityAllowlistEntry(
+                vulnerabilityID: try requiredString(
+                    values["vulnerabilityID"],
+                    path: "\(entryPath).vulnerabilityID",
+                    message: "imageVulnerability allowlist vulnerabilityID is required."
+                ),
+                packagePURL: try values["packagePURL"].map {
+                    try string($0, path: "\(entryPath).packagePURL")
+                },
+                reason: try requiredString(
+                    values["reason"],
+                    path: "\(entryPath).reason",
+                    message: "imageVulnerability allowlist reason is required."
+                ),
+                expiresAt: try requiredString(
+                    values["expiresAt"],
+                    path: "\(entryPath).expiresAt",
+                    message: "imageVulnerability allowlist expiresAt is required."
+                )
+            )
+        }.sorted(by: imageVulnerabilityAllowlistPrecedes)
+    }
+
+    private func imageVulnerabilityAllowlistPrecedes(
+        _ lhs: HostwrightImageVulnerabilityAllowlistEntry,
+        _ rhs: HostwrightImageVulnerabilityAllowlistEntry
+    ) -> Bool {
+        if lhs.vulnerabilityID != rhs.vulnerabilityID {
+            return lhs.vulnerabilityID < rhs.vulnerabilityID
+        }
+        if lhs.packagePURL != rhs.packagePURL {
+            return (lhs.packagePURL ?? "") < (rhs.packagePURL ?? "")
+        }
+        if lhs.expiresAt != rhs.expiresAt {
+            return lhs.expiresAt < rhs.expiresAt
+        }
+        return lhs.reason < rhs.reason
+    }
+
+    private func decodeImageProvenance(
+        _ node: Node,
+        path: String
+    ) throws -> HostwrightImageProvenancePolicy {
+        let values = try mapping(
+            node,
+            path: path,
+            allowed: [
+                "version", "requirement", "builderIDs", "buildTypes", "signers",
+                "maximumAgeSeconds", "requireReproducible"
+            ]
+        )
+        let version = try values["version"].map { try integer($0, path: "\(path).version") }
+            ?? HostwrightImageProvenancePolicy.currentVersion
+        let requirement = try requiredImageProvenanceRequirement(
+            values["requirement"],
+            path: "\(path).requirement"
+        )
+        let builderIDs = try requiredStrings(
+            values["builderIDs"],
+            path: "\(path).builderIDs",
+            message: "imageProvenance.builderIDs is required."
+        ).sorted()
+        let buildTypes = try requiredStrings(
+            values["buildTypes"],
+            path: "\(path).buildTypes",
+            message: "imageProvenance.buildTypes is required."
+        ).sorted()
+        let signers = try decodeImageProvenanceSigners(
+            values["signers"],
+            path: "\(path).signers"
+        )
+        let maximumAgeSeconds = try requiredInteger(
+            values["maximumAgeSeconds"],
+            path: "\(path).maximumAgeSeconds",
+            message: "imageProvenance.maximumAgeSeconds is required."
+        )
+        let requireReproducible = try requiredBoolean(
+            values["requireReproducible"],
+            path: "\(path).requireReproducible",
+            message: "imageProvenance.requireReproducible is required."
+        )
+        return HostwrightImageProvenancePolicy(
+            version: version,
+            requirement: requirement,
+            builderIDs: builderIDs,
+            buildTypes: buildTypes,
+            signers: signers,
+            maximumAgeSeconds: maximumAgeSeconds,
+            requireReproducible: requireReproducible
+        )
+    }
+
+    private func decodeImageProvenanceSigners(
+        _ node: Node?,
+        path: String
+    ) throws -> [HostwrightImageProvenanceSigner] {
+        guard let node else {
+            throw ManifestParser.failure(
+                "imageProvenance.signers is required.",
+                code: .manifestValidationFailed,
+                path: path
+            )
+        }
+        guard case .sequence(let sequence) = node else {
+            throw ManifestParser.failure("Expected a sequence.", node: node, path: path)
+        }
+        return try sequence.enumerated().map { index, child in
+            let signerPath = "\(path)[\(index)]"
+            let values = try mapping(
+                child,
+                path: signerPath,
+                allowed: ["id", "publicKey", "notBefore", "notAfter", "revokedAt"]
+            )
+            return HostwrightImageProvenanceSigner(
+                id: try requiredString(
+                    values["id"],
+                    path: "\(signerPath).id",
+                    message: "imageProvenance signer id is required."
+                ),
+                publicKey: try requiredString(
+                    values["publicKey"],
+                    path: "\(signerPath).publicKey",
+                    message: "imageProvenance signer publicKey is required."
+                ),
+                notBefore: try values["notBefore"].map {
+                    try string($0, path: "\(signerPath).notBefore")
+                },
+                notAfter: try values["notAfter"].map {
+                    try string($0, path: "\(signerPath).notAfter")
+                },
+                revokedAt: try values["revokedAt"].map {
+                    try string($0, path: "\(signerPath).revokedAt")
+                }
+            )
+        }.sorted { $0.id < $1.id }
     }
 
     private func decodeServices(_ node: Node) throws -> [HostwrightService] {
@@ -582,7 +981,7 @@ private struct ManifestNodeDecoder {
                 result[key] = try HostwrightSecretReference.parse(value)
             } catch {
                 throw ManifestParser.failure(
-                    "Secret environment reference for '\(key)' must use keychain://<service>/<account>.",
+                    "Secret environment reference for '\(key)' must use one of: keychain://<service>/<account>, env-file:///absolute/path#KEY, local-file:///absolute/path, external://<provider>/<item>, or plugin://<provider>/<item>.",
                     code: .manifestValidationFailed,
                     node: node,
                     path: "\(path).\(key)"
@@ -713,6 +1112,114 @@ private struct ManifestNodeDecoder {
         }
     }
 
+    private func requiredInteger(
+        _ node: Node?,
+        path: String,
+        message: String
+    ) throws -> Int {
+        guard let node else {
+            throw ManifestParser.failure(
+                message,
+                code: .manifestValidationFailed,
+                path: path
+            )
+        }
+        return try integer(node, path: path)
+    }
+
+    private func requiredString(
+        _ node: Node?,
+        path: String,
+        message: String
+    ) throws -> String {
+        guard let node else {
+            throw ManifestParser.failure(
+                message,
+                code: .manifestValidationFailed,
+                path: path
+            )
+        }
+        return try string(node, path: path)
+    }
+
+    private func requiredAuthorityType(
+        _ node: Node?,
+        path: String
+    ) throws -> HostwrightImageTrustAuthorityType {
+        let raw = try requiredString(
+            node,
+            path: path,
+            message: "imageTrust authority type is required."
+        )
+        guard let type = HostwrightImageTrustAuthorityType(rawValue: raw) else {
+            throw ManifestParser.failure(
+                "imageTrust authority type must be one of: keyed, keyless.",
+                code: .manifestValidationFailed,
+                node: node,
+                path: path
+            )
+        }
+        return type
+    }
+
+    private func requiredImageSBOMRequirement(
+        _ node: Node?,
+        path: String
+    ) throws -> HostwrightImageSBOMRequirement {
+        let raw = try requiredString(
+            node,
+            path: path,
+            message: "imageSBOM.requirement is required."
+        )
+        guard let requirement = HostwrightImageSBOMRequirement(rawValue: raw) else {
+            throw ManifestParser.failure(
+                "imageSBOM.requirement must be one of: optional, required.",
+                code: .manifestValidationFailed,
+                path: path
+            )
+        }
+        return requirement
+    }
+
+    private func requiredImageProvenanceRequirement(
+        _ node: Node?,
+        path: String
+    ) throws -> HostwrightImageProvenanceRequirement {
+        let raw = try requiredString(
+            node,
+            path: path,
+            message: "imageProvenance.requirement is required."
+        )
+        guard let requirement = HostwrightImageProvenanceRequirement(rawValue: raw) else {
+            throw ManifestParser.failure(
+                "imageProvenance.requirement must be one of: optional, required.",
+                code: .manifestValidationFailed,
+                node: node,
+                path: path
+            )
+        }
+        return requirement
+    }
+
+    private func requiredImageVulnerabilityEnum<Value>(
+        _ node: Node?,
+        path: String,
+        message: String,
+        allowed _: Value.Type,
+        allowedValues: String
+    ) throws -> Value where Value: RawRepresentable, Value.RawValue == String {
+        let raw = try requiredString(node, path: path, message: message)
+        guard let value = Value(rawValue: raw) else {
+            throw ManifestParser.failure(
+                "\(path.dropFirst(2)) must be one of: \(allowedValues).",
+                code: .manifestValidationFailed,
+                node: node,
+                path: path
+            )
+        }
+        return value
+    }
+
     private func unsignedID(_ node: Node, path: String) throws -> UInt32 {
         let value = try integer(node, path: path)
         guard let identifier = UInt32(exactly: value) else {
@@ -748,6 +1255,36 @@ private struct ManifestNodeDecoder {
                 path: path
             )
         }
+    }
+
+    private func requiredBoolean(
+        _ node: Node?,
+        path: String,
+        message: String
+    ) throws -> Bool {
+        guard let node else {
+            throw ManifestParser.failure(
+                message,
+                code: .manifestValidationFailed,
+                path: path
+            )
+        }
+        return try boolean(node, path: path)
+    }
+
+    private func requiredStrings(
+        _ node: Node?,
+        path: String,
+        message: String
+    ) throws -> [String] {
+        guard let node else {
+            throw ManifestParser.failure(
+                message,
+                code: .manifestValidationFailed,
+                path: path
+            )
+        }
+        return try strings(node, path: path)
     }
 
     private func duration(_ node: Node?, default defaultValue: Int, path: String) throws -> Int {

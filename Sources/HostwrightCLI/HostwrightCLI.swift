@@ -6,6 +6,7 @@ import HostwrightImport
 import HostwrightManifest
 import HostwrightPolicy
 import HostwrightReconciler
+import HostwrightRegistry
 import HostwrightRuntime
 import HostwrightState
 
@@ -107,6 +108,21 @@ public enum HostwrightCLI {
                 ),
                 action: action,
                 output: output
+            ).run()
+        case .secret(let options):
+            return try SecretCommandRunner(
+                options: options,
+                environment: environment
+            ).run()
+        case .registry(let options):
+            return try RegistryCommandRunner(
+                options: options,
+                environment: environment
+            ).run()
+        case .image(let options):
+            return try ImageCommandRunner(
+                options: options,
+                environment: environment
             ).run()
         case .migrateManifestPreview(let path, let output):
             let source = try hostwrightReadManifestText(path: path, environment: environment)
@@ -262,6 +278,50 @@ public enum HostwrightCLI {
       hostwright state repair --dry-run [--state-db <path>] [--json|--output text|json]
       hostwright state repair --confirm-repair <token> [--state-db <path>] [--json|--output text|json]
       hostwright state recover [--state-db <path>] [--json|--output text|json]
+      hostwright secret create <keychain-reference> [--state-db <path>] [--json|--output text|json]
+      hostwright secret update <keychain-reference> [--state-db <path>] [--json|--output text|json]
+      hostwright secret list [--json|--output text|json]
+      hostwright secret check <keychain-reference> [--json|--output text|json]
+      hostwright secret delete <keychain-reference> [--state-db <path>] [--json|--output text|json]
+      hostwright registry login <registry> --username <name> [--state-db <path>] [--json|--output text|json]
+      hostwright registry logout <registry> [--state-db <path>] [--json|--output text|json]
+      hostwright registry status <registry> [--repository <name> [--action pull|push]...] [--json|--output text|json]
+      hostwright registry referrers discover|fetch <registry> --repository <name> --subject <digest> [--artifact-type <media-type>] [--offline] [--state-db <path>] [--json|--output text|json]
+      hostwright registry referrers publish <discovery-uuid> --target-server <registry> --target-repository <name> [--state-db <path>] [--json|--output text|json]
+      hostwright registry referrers copy <registry> --repository <name> --subject <digest> [--artifact-type <media-type>] --target-server <registry> --target-repository <name> [--state-db <path>] [--json|--output text|json]
+      hostwright registry referrers retain <discovery-uuid> --owner <id> --expires-at <timestamp> [--state-db <path>] [--json|--output text|json]
+      hostwright registry referrers release <lease-uuid> --fencing-token <uuid> [--state-db <path>] [--json|--output text|json]
+      hostwright registry referrers status <discovery-uuid> [--state-db <path>] [--json|--output text|json]
+      hostwright registry referrers prune <discovery-uuid> --digest <digest> [--confirm-plan <sha256>] [--state-db <path>] [--json|--output text|json]
+      hostwright registry referrers resume <operation-group-uuid> --confirm-plan <sha256> [--state-db <path>] [--json|--output text|json]
+      hostwright registry trust verify <discovery-uuid> --manifest <path> --subject-manifest <absolute-path> --cosign <absolute-path> [--service <name>] [--state-db <path>] [--json|--output text|json]
+      hostwright registry trust status <manifest-path> [--service <name>] [--state-db <path>] [--json|--output text|json]
+      hostwright registry trust grant-exception <absolute-approval-path> --manifest <path> [--state-db <path>] [--json|--output text|json]
+      hostwright registry trust revoke-exception <exception-uuid> [--state-db <path>] [--json|--output text|json]
+      hostwright registry sbom generate <absolute-oci-archive> --manifest <absolute-path> [--service <name>] --server <registry> --repository <name> --format spdx-json|cyclonedx-json [--provenance-descriptor-digest <digest> --provenance-referrer-digest <digest>] [--state-db <path>] [--json|--output text|json]
+      hostwright registry sbom ingest <discovery-uuid> --manifest <absolute-path> [--service <name>] [--state-db <path>] [--json|--output text|json]
+      hostwright registry sbom query <absolute-manifest-path> [--service <name>] [--state-db <path>] [--json|--output text|json]
+      hostwright registry sbom export <absolute-manifest-path> [--service <name>] --format spdx-json|cyclonedx-json --output-path <absolute-new-path> [--state-db <path>] [--json|--output text|json]
+      hostwright registry sbom resume <operation-group-uuid> --confirm-plan <sha256> [--state-db <path>] [--json|--output text|json]
+      hostwright registry vulnerability evaluate <discovery-uuid> --digest <report-referrer-digest> --manifest <absolute-path> --cosign <absolute-path> [--service <name>] [--state-db <path>] [--json|--output text|json]
+      hostwright registry vulnerability status <absolute-manifest-path> [--service <name>] [--state-db <path>] [--json|--output text|json]
+      hostwright registry vulnerability grant-exception <absolute-approval-path> --manifest <absolute-path> [--state-db <path>] [--json|--output text|json]
+      hostwright registry vulnerability revoke-exception <exception-uuid> [--state-db <path>] [--json|--output text|json]
+      hostwright registry vulnerability resume <operation-group-uuid> --confirm-plan <sha256> [--state-db <path>] [--json|--output text|json]
+      hostwright registry provenance generate <absolute-oci-archive> --record <absolute-build-record> --manifest <absolute-path> [--service <name>] --server <registry> --repository <name> --signer <id> --signing-key-ref <typed-secret-reference> [--state-db <path>] [--json|--output text|json]
+      hostwright registry provenance verify <discovery-uuid> --digest <provenance-referrer-digest> --manifest <absolute-path> [--service <name>] [--state-db <path>] [--json|--output text|json]
+      hostwright registry provenance status <absolute-manifest-path> [--service <name>] [--state-db <path>] [--json|--output text|json]
+      hostwright registry provenance resume <operation-group-uuid> --confirm-plan <sha256> [--signing-key-ref <typed-secret-reference>] [--state-db <path>] [--json|--output text|json]
+      hostwright image inspect <reference>... [--runtime-provider auto|apple-cli|containerization] [--json|--output text|json]
+      hostwright image pull|push <reference> [--platform linux/arm64|linux/amd64] [--offline] [--progress none|plain] [--state-db <path>] [--runtime-provider auto|apple-cli|containerization] [--json|--output text|json]
+      hostwright image tag <source> <target> [--state-db <path>] [--runtime-provider auto|apple-cli|containerization] [--json|--output text|json]
+      hostwright image load --input <absolute-path> --reference <expected-reference>... [--state-db <path>] [--runtime-provider auto|apple-cli|containerization] [--json|--output text|json]
+      hostwright image save <reference>... --output <absolute-path> [--platform linux/arm64|linux/amd64] [--state-db <path>] [--runtime-provider auto|apple-cli|containerization] [--json|--output text|json]
+      hostwright image build --context <absolute-path> [--file <absolute-path>] --tag <reference> [--platform linux/arm64|linux/amd64] [--offline] [--no-cache] [--state-db <path>] [--runtime-provider auto|apple-cli|containerization] [--json|--output text|json]
+      hostwright image delete <reference>... [--state-db <path>] [--runtime-provider auto|apple-cli|containerization] [--json|--output text|json]
+      hostwright image prune [--dry-run|--confirm-plan <sha256>] [--maximum-bytes <bytes> --target-bytes <bytes>] [--retain-seconds <0-31536000>] [--max-delete <1-256>] [--state-db <path>] [--runtime-provider auto|apple-cli|containerization] [--json|--output text|json]
+      hostwright image cache status [--maximum-bytes <bytes>] [--state-db <path>] [--runtime-provider auto|apple-cli|containerization] [--json|--output text|json]
+      hostwright image cache pin|unpin <managed-reference> [--state-db <path>] [--runtime-provider auto|apple-cli|containerization] [--json|--output text|json]
       hostwright migrate preview <path> [--json|--output text|json]
       hostwright init
       hostwright import-stack <path> [--output text|json] [--team-profile <path>]
@@ -303,6 +363,14 @@ public enum HostwrightCLI {
     state restore and repair require a dry-run token bound to the exact state fingerprint and planned effects.
     state repair clears only reconstructible runtime-observation and health projections; it never invents authoritative state.
     state recover completes or rolls back a journaled maintenance operation before ordinary state access resumes.
+    secret create and update read values only from stdin or an attended no-echo TTY; command arguments, output, and state contain metadata only.
+    registry login reads its secret through the same protected input boundary and persists only an exact endpoint-bound Hostwright Keychain item. status also supports guarded Docker and OCI credential stores and never emits credentials.
+    registry referrers discovers, verifies, caches, copies, publishes, retains, recovers, and exactly cleans opaque subject-bound OCI artifacts. Offline reads use only complete verified cache records; prune requires exact Hostwright ownership, no active lease, and plan confirmation.
+    registry trust verifies exact digest-bound Sigstore v0.3 bundles with a safe cosign v3 verifier, records immutable evidence, reports policy status, and manages exact time-bounded exceptions. Credentials never enter verifier argv, logs, diagnostics, or state.
+    registry sbom generates, ingests, queries, exports, and recovers exact digest-bound SPDX or CycloneDX image evidence.
+    registry vulnerability verifies signed reports, records explainable exact-digest decisions, applies only exact time-bounded approvals, and revalidates policy before lifecycle or recovery effects.
+    registry provenance generates and verifies exact-image DSSE-wrapped in-toto/SLSA v1 build attestations, persists immutable Gate 6 graph evidence, and resolves signing keys only through typed secret-provider references.
+    image mutations use the Apple CLI provider, durable intent, structured post-operation digest verification, exact ownership, and exact rollback/cleanup. Containerization image mutations report unavailable before effects.
     recovery inspects durable lifecycle groups; resume and rollback require the exact group UUID and persisted plan hash.
     migrate preview validates and prints an in-memory v1-to-v2 conversion; it never writes the source file.
     init writes hostwright.yaml only when absent.
@@ -312,7 +380,7 @@ public enum HostwrightCLI {
     Lifecycle dry-runs emit deterministic plans; confirmed up, down, run, start, stop, restart, rm, and update executions emit deterministic per-resource outcomes. Every lifecycle command supports --json or --output json.
     Cleanup deletes only exact cleanup-eligible Hostwright-owned stopped/created/exited containers after dry-run token confirmation.
     Diagnostics writes a local redacted JSON bundle only. It never uploads telemetry.
-    JSON output is supported for capabilities, paths, migrate preview, every state subcommand, import-stack, plan, status, every lifecycle command, events, recovery, extension check, doctor, and errors when --json or --output json is present.
+    JSON output is supported for capabilities, paths, migrate preview, every state, secret, registry, and image subcommand, import-stack, plan, status, every lifecycle command, events, recovery, extension check, doctor, and errors when --json or --output json is present.
     Team profiles and approvals are loaded only from explicit local paths. Profile-aware mutations require an approval bound to the exact profile, manifest, and plan or cleanup token.
     Benchmark runs are explicit local hardware evidence. They refuse image pulls and broad cleanup, use bounded disposable Hostwright-owned resources, and write only the requested non-existing report path.
     Extension check executes one reviewed-local protocol handshake from explicit absolute paths. The protocol grants no Hostwright capability, but the reviewed executable still has the invoking macOS account's ambient privileges; it is not sandboxed.

@@ -17,6 +17,11 @@ public enum ManifestValidator {
             return issues
         }
 
+        validateImageTrust(manifest, issues: &issues)
+        validateImageSBOM(manifest, issues: &issues)
+        validateImageVulnerability(manifest, issues: &issues)
+        validateImageProvenance(manifest, issues: &issues)
+
         let declaredNames = Set(manifest.services.map(\.name))
         var serviceNames = Set<String>()
         for service in manifest.services {
@@ -166,6 +171,572 @@ public enum ManifestValidator {
                 ManifestIssue(
                     code: .manifestUnsupportedFeature,
                     message: "Manifest version \(version) is newer than supported version \(HostwrightManifest.currentVersion). Upgrade requires a newer Hostwright release."
+                )
+            )
+        }
+    }
+
+    private static func validateImageTrust(
+        _ manifest: HostwrightManifest,
+        issues: inout [ManifestIssue]
+    ) {
+        guard let imageTrust = manifest.imageTrust else {
+            return
+        }
+        guard manifest.version == HostwrightManifest.currentVersion else {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "imageTrust is supported only in manifest version 2."
+                )
+            )
+            return
+        }
+        if manifest.effectiveImagePolicy != .requireDigest {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "imageTrust requires imagePolicy require-digest."
+                )
+            )
+        }
+        if imageTrust.version != HostwrightImageTrustPolicy.currentVersion {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "imageTrust.version must be 1."
+                )
+            )
+        }
+        if !(1...8).contains(imageTrust.threshold) {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "imageTrust.threshold must be between 1 and 8."
+                )
+            )
+        }
+        if !(1...8).contains(imageTrust.authorities.count) {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "imageTrust.authorities must contain between 1 and 8 authorities."
+                )
+            )
+        }
+        if imageTrust.threshold > imageTrust.authorities.count {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "imageTrust.threshold must not exceed the authority count."
+                )
+            )
+        }
+        if let trustedRoot = imageTrust.trustedRoot,
+           !isNormalizedAbsoluteHostPath(trustedRoot) {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "imageTrust.trustedRoot must be a normalized absolute host path."
+                )
+            )
+        }
+        let keylessAuthorities = imageTrust.authorities.filter { $0.type == .keyless }
+        if !keylessAuthorities.isEmpty, imageTrust.trustedRoot == nil {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "imageTrust.trustedRoot is required when any keyless authority is declared."
+                )
+            )
+        }
+
+        var authorityIDs = Set<String>()
+        for authority in imageTrust.authorities {
+            if !authorityIDs.insert(authority.id).inserted {
+                issues.append(
+                    ManifestIssue(
+                        code: .manifestValidationFailed,
+                        message: "imageTrust authority ids must be unique; duplicate id '\(authority.id)'."
+                    )
+                )
+            }
+            validateImageTrustAuthority(authority, issues: &issues)
+        }
+    }
+
+    private static func validateImageSBOM(
+        _ manifest: HostwrightManifest,
+        issues: inout [ManifestIssue]
+    ) {
+        guard let imageSBOM = manifest.imageSBOM else {
+            return
+        }
+        guard manifest.version == HostwrightManifest.currentVersion else {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "imageSBOM is supported only in manifest version 2."
+                )
+            )
+            return
+        }
+        if manifest.effectiveImagePolicy != .requireDigest {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "imageSBOM requires imagePolicy require-digest."
+                )
+            )
+        }
+        if imageSBOM.version != HostwrightImageSBOMPolicy.currentVersion {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "imageSBOM.version must be 1."
+                )
+            )
+        }
+        if imageSBOM.formats.isEmpty ||
+            imageSBOM.formats.count > 2 ||
+            Set(imageSBOM.formats).count != imageSBOM.formats.count {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "imageSBOM.formats must contain between 1 and 2 unique formats."
+                )
+            )
+        }
+    }
+
+    private static func validateImageVulnerability(
+        _ manifest: HostwrightManifest,
+        issues: inout [ManifestIssue]
+    ) {
+        guard let policy = manifest.imageVulnerability else {
+            return
+        }
+        guard manifest.version == HostwrightManifest.currentVersion else {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "imageVulnerability is supported only in manifest version 2."
+                )
+            )
+            return
+        }
+        if manifest.effectiveImagePolicy != .requireDigest {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "imageVulnerability requires imagePolicy require-digest."
+                )
+            )
+        }
+        if manifest.imageTrust == nil {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "imageVulnerability requires imageTrust."
+                )
+            )
+        }
+        if policy.version != HostwrightImageVulnerabilityPolicy.currentVersion {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "imageVulnerability.version must be 1."
+                )
+            )
+        }
+        if !(0...HostwrightImageVulnerabilityPolicy.maximumMinimumVulnerabilityAgeSeconds)
+            .contains(policy.minimumVulnerabilityAgeSeconds) {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "imageVulnerability.minimumVulnerabilityAgeSeconds must be between 0 and \(HostwrightImageVulnerabilityPolicy.maximumMinimumVulnerabilityAgeSeconds)."
+                )
+            )
+        }
+        if policy.maximumDatabaseAgeSeconds <
+            HostwrightImageVulnerabilityPolicy.minimumMaximumDatabaseAgeSeconds ||
+            policy.maximumDatabaseAgeSeconds >
+            HostwrightImageVulnerabilityPolicy.maximumMaximumDatabaseAgeSeconds {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "imageVulnerability.maximumDatabaseAgeSeconds must be between \(HostwrightImageVulnerabilityPolicy.minimumMaximumDatabaseAgeSeconds) and \(HostwrightImageVulnerabilityPolicy.maximumMaximumDatabaseAgeSeconds)."
+                )
+            )
+        }
+        if policy.allowlist.count > HostwrightImageVulnerabilityPolicy.maximumAllowlistEntries {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "imageVulnerability.allowlist must contain at most \(HostwrightImageVulnerabilityPolicy.maximumAllowlistEntries) entries."
+                )
+            )
+        }
+
+        var exactEntries = Set<String>()
+        for entry in policy.allowlist {
+            let exactKey = "\(entry.vulnerabilityID)\u{0}\(entry.packagePURL ?? "")"
+            if !exactEntries.insert(exactKey).inserted {
+                issues.append(
+                    ManifestIssue(
+                        code: .manifestValidationFailed,
+                        message: "imageVulnerability.allowlist entries must be unique by vulnerabilityID and packagePURL."
+                    )
+                )
+            }
+            if entry.vulnerabilityID.utf8.count > 128 ||
+                entry.vulnerabilityID.range(
+                    of: #"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"#,
+                    options: .regularExpression
+                ) == nil {
+                issues.append(
+                    ManifestIssue(
+                        code: .manifestValidationFailed,
+                        message: "imageVulnerability allowlist vulnerabilityID '\(entry.vulnerabilityID)' must be a bounded exact identifier."
+                    )
+                )
+            }
+            if let packagePURL = entry.packagePURL,
+               !isExactPackagePURL(packagePURL) {
+                issues.append(
+                    ManifestIssue(
+                        code: .manifestValidationFailed,
+                        message: "imageVulnerability allowlist packagePURL must be a bounded exact package URL."
+                    )
+                )
+            }
+            if !isBoundedPolicyText(entry.reason, maximum: 512) {
+                issues.append(
+                    ManifestIssue(
+                        code: .manifestValidationFailed,
+                        message: "imageVulnerability allowlist reason must be a bounded non-empty string."
+                    )
+                )
+            }
+            if parseRFC3339(entry.expiresAt) == nil {
+                issues.append(
+                    ManifestIssue(
+                        code: .manifestValidationFailed,
+                        message: "imageVulnerability allowlist expiresAt must be an RFC3339 timestamp."
+                    )
+                )
+            }
+        }
+    }
+
+    private static func validateImageTrustAuthority(
+        _ authority: HostwrightImageTrustAuthority,
+        issues: inout [ManifestIssue]
+    ) {
+        if authority.id.range(
+            of: #"^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,62}[A-Za-z0-9])?$"#,
+            options: .regularExpression
+        ) == nil {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "imageTrust authority id '\(authority.id)' must be a bounded safe identifier."
+                )
+            )
+        }
+        switch authority.type {
+        case .keyed:
+            if authority.publicKey == nil {
+                issues.append(
+                    ManifestIssue(
+                        code: .manifestValidationFailed,
+                        message: "imageTrust keyed authority '\(authority.id)' requires publicKey."
+                    )
+                )
+            } else if let publicKey = authority.publicKey,
+                      !isNormalizedAbsoluteHostPath(publicKey) {
+                issues.append(
+                    ManifestIssue(
+                        code: .manifestValidationFailed,
+                        message: "imageTrust keyed authority '\(authority.id)' publicKey must be a normalized absolute host path."
+                    )
+                )
+            }
+            if authority.issuer != nil || authority.identity != nil {
+                issues.append(
+                    ManifestIssue(
+                        code: .manifestValidationFailed,
+                        message: "imageTrust keyed authority '\(authority.id)' accepts only publicKey."
+                    )
+                )
+            }
+        case .keyless:
+            if authority.publicKey != nil {
+                issues.append(
+                    ManifestIssue(
+                        code: .manifestValidationFailed,
+                        message: "imageTrust keyless authority '\(authority.id)' must not declare publicKey."
+                    )
+                )
+            }
+            if authority.issuer == nil || authority.identity == nil {
+                issues.append(
+                    ManifestIssue(
+                        code: .manifestValidationFailed,
+                        message: "imageTrust keyless authority '\(authority.id)' requires issuer and identity."
+                    )
+                )
+            }
+            if let issuer = authority.issuer, !isExactHTTPSURL(issuer) {
+                issues.append(
+                    ManifestIssue(
+                        code: .manifestValidationFailed,
+                        message: "imageTrust keyless authority '\(authority.id)' issuer must be an exact HTTPS URL."
+                    )
+                )
+            }
+            if let identity = authority.identity,
+               !isBoundedIdentity(identity) {
+                issues.append(
+                    ManifestIssue(
+                        code: .manifestValidationFailed,
+                        message: "imageTrust keyless authority '\(authority.id)' identity must be a bounded non-empty string."
+                    )
+                )
+            }
+        }
+
+        let notBefore = authority.notBefore.flatMap(parseRFC3339)
+        let notAfter = authority.notAfter.flatMap(parseRFC3339)
+        let revokedAt = authority.revokedAt.flatMap(parseRFC3339)
+        if authority.notBefore != nil && notBefore == nil {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "imageTrust authority '\(authority.id)' notBefore must be an RFC3339 timestamp."
+                )
+            )
+        }
+        if authority.notAfter != nil && notAfter == nil {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "imageTrust authority '\(authority.id)' notAfter must be an RFC3339 timestamp."
+                )
+            )
+        }
+        if authority.revokedAt != nil && revokedAt == nil {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "imageTrust authority '\(authority.id)' revokedAt must be an RFC3339 timestamp."
+                )
+            )
+        }
+        if let notBefore, let notAfter, notBefore > notAfter {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "imageTrust authority '\(authority.id)' notBefore must not be after notAfter."
+                )
+            )
+        }
+        if let notAfter, let revokedAt, notAfter > revokedAt {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "imageTrust authority '\(authority.id)' notAfter must not be after revokedAt."
+                )
+            )
+        }
+        if let notBefore, let revokedAt, notBefore > revokedAt {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "imageTrust authority '\(authority.id)' notBefore must not be after revokedAt."
+                )
+            )
+        }
+    }
+
+    private static func validateImageProvenance(
+        _ manifest: HostwrightManifest,
+        issues: inout [ManifestIssue]
+    ) {
+        guard let policy = manifest.imageProvenance else {
+            return
+        }
+        guard manifest.version == HostwrightManifest.currentVersion else {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "imageProvenance is supported only in manifest version 2."
+                )
+            )
+            return
+        }
+        if manifest.effectiveImagePolicy != .requireDigest {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "imageProvenance requires imagePolicy require-digest."
+                )
+            )
+        }
+        if policy.version != HostwrightImageProvenancePolicy.currentVersion {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "imageProvenance.version must be 1."
+                )
+            )
+        }
+        if !(1...HostwrightImageProvenancePolicy.maximumBuilderIDs)
+            .contains(policy.builderIDs.count) ||
+            Set(policy.builderIDs).count != policy.builderIDs.count {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "imageProvenance.builderIDs must contain between 1 and \(HostwrightImageProvenancePolicy.maximumBuilderIDs) unique values."
+                )
+            )
+        }
+        for builderID in policy.builderIDs where !isBoundedProvenanceURI(builderID) {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "imageProvenance builderID '\(builderID)' must be a bounded https:// or urn: URI."
+                )
+            )
+        }
+        if !(1...HostwrightImageProvenancePolicy.maximumBuildTypes)
+            .contains(policy.buildTypes.count) ||
+            Set(policy.buildTypes).count != policy.buildTypes.count {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "imageProvenance.buildTypes must contain between 1 and \(HostwrightImageProvenancePolicy.maximumBuildTypes) unique values."
+                )
+            )
+        }
+        for buildType in policy.buildTypes where !isBoundedProvenanceURI(buildType) {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "imageProvenance buildType '\(buildType)' must be a bounded https:// or urn: URI."
+                )
+            )
+        }
+        if !(1...HostwrightImageProvenancePolicy.maximumSigners).contains(policy.signers.count) {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "imageProvenance.signers must contain between 1 and \(HostwrightImageProvenancePolicy.maximumSigners) signers."
+                )
+            )
+        }
+        var signerIDs = Set<String>()
+        for signer in policy.signers {
+            if !signerIDs.insert(signer.id).inserted {
+                issues.append(
+                    ManifestIssue(
+                        code: .manifestValidationFailed,
+                        message: "imageProvenance signer ids must be unique; duplicate id '\(signer.id)'."
+                    )
+                )
+            }
+            validateImageProvenanceSigner(signer, issues: &issues)
+        }
+        if policy.maximumAgeSeconds <
+            HostwrightImageProvenancePolicy.minimumMaximumAgeSeconds ||
+            policy.maximumAgeSeconds >
+            HostwrightImageProvenancePolicy.maximumMaximumAgeSeconds {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "imageProvenance.maximumAgeSeconds must be between \(HostwrightImageProvenancePolicy.minimumMaximumAgeSeconds) and \(HostwrightImageProvenancePolicy.maximumMaximumAgeSeconds)."
+                )
+            )
+        }
+    }
+
+    private static func validateImageProvenanceSigner(
+        _ signer: HostwrightImageProvenanceSigner,
+        issues: inout [ManifestIssue]
+    ) {
+        if signer.id.utf8.count > HostwrightImageProvenancePolicy.maximumSignerIDUTF8Bytes ||
+            signer.id.range(
+                of: #"^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,126}[A-Za-z0-9])?$"#,
+                options: .regularExpression
+            ) == nil {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "imageProvenance signer id '\(signer.id)' must be a bounded safe identifier."
+                )
+            )
+        }
+        if signer.publicKey.utf8.count > HostwrightImageProvenancePolicy.maximumPublicKeyUTF8Bytes ||
+            signer.publicKey.unicodeScalars.contains(where: {
+                CharacterSet.controlCharacters.contains($0)
+            }) ||
+            !isNormalizedAbsoluteHostPath(signer.publicKey) {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "imageProvenance signer '\(signer.id)' publicKey must be a bounded normalized absolute host path."
+                )
+            )
+        }
+
+        let notBefore = signer.notBefore.flatMap(parseRFC3339)
+        let notAfter = signer.notAfter.flatMap(parseRFC3339)
+        let revokedAt = signer.revokedAt.flatMap(parseRFC3339)
+        if signer.notBefore != nil && notBefore == nil {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "imageProvenance signer '\(signer.id)' notBefore must be an RFC3339 timestamp."
+                )
+            )
+        }
+        if signer.notAfter != nil && notAfter == nil {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "imageProvenance signer '\(signer.id)' notAfter must be an RFC3339 timestamp."
+                )
+            )
+        }
+        if signer.revokedAt != nil && revokedAt == nil {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "imageProvenance signer '\(signer.id)' revokedAt must be an RFC3339 timestamp."
+                )
+            )
+        }
+        if let notBefore, let notAfter, notBefore > notAfter {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "imageProvenance signer '\(signer.id)' notBefore must not be after notAfter."
+                )
+            )
+        }
+        if let notAfter, let revokedAt, notAfter > revokedAt {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "imageProvenance signer '\(signer.id)' notAfter must not be after revokedAt."
+                )
+            )
+        }
+        if let notBefore, let revokedAt, notBefore > revokedAt {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "imageProvenance signer '\(signer.id)' notBefore must not be after revokedAt."
                 )
             )
         }
@@ -345,7 +916,9 @@ public enum ManifestValidator {
         serviceName: String,
         issues: inout [ManifestIssue]
     ) {
-        if value.hasPrefix("\(HostwrightSecretReference.supportedScheme)://") {
+        if HostwrightSecretProviderKind.allCases.contains(where: {
+            value.hasPrefix("\($0.rawValue)://")
+        }) {
             issues.append(
                 ManifestIssue(
                     code: .manifestValidationFailed,
@@ -375,7 +948,7 @@ public enum ManifestValidator {
             issues.append(
                 ManifestIssue(
                     code: .manifestValidationFailed,
-                    message: "Service '\(serviceName)' secretEnv key '\(key)' must use keychain://<service>/<account>."
+                    message: "Service '\(serviceName)' secretEnv key '\(key)' must use one of: keychain://<service>/<account>, env-file:///absolute/path#KEY, local-file:///absolute/path, external://<provider>/<item>, or plugin://<provider>/<item>."
                 )
             )
         }
@@ -561,6 +1134,88 @@ public enum ManifestValidator {
         return value.split(separator: "/", omittingEmptySubsequences: false)
             .dropFirst()
             .allSatisfy { !$0.isEmpty && $0 != "." && $0 != ".." }
+    }
+
+    private static func isNormalizedAbsoluteHostPath(_ value: String) -> Bool {
+        guard value.hasPrefix("/"),
+              value != "/",
+              !value.contains("//"),
+              !value.contains("/./"),
+              !value.hasSuffix("/."),
+              !value.contains("/../"),
+              !value.hasSuffix("/..") else {
+            return false
+        }
+        return value.split(separator: "/", omittingEmptySubsequences: false)
+            .dropFirst()
+            .allSatisfy { !$0.isEmpty && $0 != "." && $0 != ".." }
+    }
+
+    private static func isExactHTTPSURL(_ value: String) -> Bool {
+        guard value == value.trimmingCharacters(in: .whitespacesAndNewlines),
+              let components = URLComponents(string: value),
+              components.scheme == "https",
+              components.host != nil,
+              components.user == nil,
+              components.password == nil,
+              components.fragment == nil,
+              value.rangeOfCharacter(from: .whitespacesAndNewlines) == nil else {
+            return false
+        }
+        return components.url?.absoluteString == value
+    }
+
+    private static func isBoundedProvenanceURI(_ value: String) -> Bool {
+        let hasAllowedScheme =
+            (value.hasPrefix("https://") && value.utf8.count > "https://".utf8.count) ||
+            (value.hasPrefix("urn:") && value.utf8.count > "urn:".utf8.count)
+        return hasAllowedScheme &&
+            value.utf8.count <= HostwrightImageProvenancePolicy.maximumURIUTF8Bytes &&
+            value.rangeOfCharacter(from: .whitespacesAndNewlines) == nil &&
+            !value.contains("@") &&
+            !value.contains("..") &&
+            !value.unicodeScalars.contains {
+                CharacterSet.controlCharacters.contains($0)
+            }
+    }
+
+    private static func isBoundedIdentity(_ value: String) -> Bool {
+        !value.isEmpty &&
+            value == value.trimmingCharacters(in: .whitespacesAndNewlines) &&
+            value.utf8.count <= 512 &&
+            !value.unicodeScalars.contains {
+                CharacterSet.controlCharacters.contains($0)
+            }
+    }
+
+    private static func isExactPackagePURL(_ value: String) -> Bool {
+        value.hasPrefix("pkg:") &&
+            value.utf8.count <= 1_024 &&
+            value == value.trimmingCharacters(in: .whitespacesAndNewlines) &&
+            value.dropFirst(4).contains("/") &&
+            value.rangeOfCharacter(from: .whitespacesAndNewlines) == nil &&
+            !value.unicodeScalars.contains {
+                CharacterSet.controlCharacters.contains($0)
+            }
+    }
+
+    private static func isBoundedPolicyText(_ value: String, maximum: Int) -> Bool {
+        !value.isEmpty &&
+            value.utf8.count <= maximum &&
+            value == value.trimmingCharacters(in: .whitespacesAndNewlines) &&
+            !value.unicodeScalars.contains {
+                CharacterSet.controlCharacters.contains($0)
+            }
+    }
+
+    private static func parseRFC3339(_ value: String) -> Date? {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatter.date(from: value) {
+            return date
+        }
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.date(from: value)
     }
 
     private static func issue(_ service: HostwrightService, _ message: String) -> ManifestIssue {

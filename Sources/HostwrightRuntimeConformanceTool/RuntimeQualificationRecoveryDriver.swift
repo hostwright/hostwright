@@ -668,7 +668,7 @@ struct RuntimeQualificationRecoveryStateFoundation: Sendable {
 
     func verifyRecovered(to checkpoint: String) throws -> (before: String, after: String, schema: Int) {
         let store = SQLiteStateStore(path: databaseURL.path)
-        guard try store.schemaVersion() == 7,
+        guard try store.schemaVersion() == HostwrightContractVersions.stateSchema,
               let after = try store.operationGroups.load(id: groupID),
               after.status == .succeeded,
               after.checkpoint == checkpoint,
@@ -773,7 +773,7 @@ enum RuntimeQualificationRecoveryWorker {
     ) throws {
         let store = SQLiteStateStore(path: databaseURL.path)
         try store.migrate()
-        guard try store.schemaVersion() == 7 else {
+        guard try store.schemaVersion() == HostwrightContractVersions.stateSchema else {
             throw RuntimeQualificationRecoveryDriverError.stateFoundationFailed
         }
         let timestamp = ISO8601DateFormatter().string(from: Date())
@@ -814,7 +814,7 @@ enum RuntimeQualificationRecoveryWorker {
     ) throws {
         let store = SQLiteStateStore(path: databaseURL.path)
         try store.migrate()
-        guard try store.schemaVersion() == 7,
+        guard try store.schemaVersion() == HostwrightContractVersions.stateSchema,
               let before = try store.operationGroups.load(id: groupID),
               before.status == .active,
               before.checkpoint == initialCheckpoint,

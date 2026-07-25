@@ -14,6 +14,114 @@ public enum ManifestCanonicalEncoder {
         if let imagePolicy = manifest.imagePolicy {
             lines.append("imagePolicy: \(quote(imagePolicy.rawValue))")
         }
+        if let imageTrust = manifest.imageTrust {
+            lines.append("imageTrust:")
+            lines.append("  version: \(imageTrust.version)")
+            lines.append("  threshold: \(imageTrust.threshold)")
+            if let trustedRoot = imageTrust.trustedRoot {
+                lines.append("  trustedRoot: \(quote(trustedRoot))")
+            }
+            lines.append("  authorities:")
+            for authority in imageTrust.authorities.sorted(by: { $0.id < $1.id }) {
+                lines.append("    - id: \(quote(authority.id))")
+                lines.append("      type: \(quote(authority.type.rawValue))")
+                switch authority.type {
+                case .keyed:
+                    if let publicKey = authority.publicKey {
+                        lines.append("      publicKey: \(quote(publicKey))")
+                    }
+                case .keyless:
+                    if let issuer = authority.issuer {
+                        lines.append("      issuer: \(quote(issuer))")
+                    }
+                    if let identity = authority.identity {
+                        lines.append("      identity: \(quote(identity))")
+                    }
+                }
+                if let notBefore = authority.notBefore {
+                    lines.append("      notBefore: \(quote(notBefore))")
+                }
+                if let notAfter = authority.notAfter {
+                    lines.append("      notAfter: \(quote(notAfter))")
+                }
+                if let revokedAt = authority.revokedAt {
+                    lines.append("      revokedAt: \(quote(revokedAt))")
+                }
+            }
+        }
+        if let imageSBOM = manifest.imageSBOM {
+            lines.append("imageSBOM:")
+            lines.append("  version: \(imageSBOM.version)")
+            lines.append("  requirement: \(quote(imageSBOM.requirement.rawValue))")
+            lines.append("  formats:")
+            for format in imageSBOM.formats.sorted(by: { $0.rawValue < $1.rawValue }) {
+                lines.append("    - \(quote(format.rawValue))")
+            }
+        }
+        if let imageVulnerability = manifest.imageVulnerability {
+            lines.append("imageVulnerability:")
+            lines.append("  version: \(imageVulnerability.version)")
+            lines.append("  severityThreshold: \(quote(imageVulnerability.severityThreshold.rawValue))")
+            lines.append("  minimumVulnerabilityAgeSeconds: \(imageVulnerability.minimumVulnerabilityAgeSeconds)")
+            lines.append("  exploitability: \(quote(imageVulnerability.exploitability.rawValue))")
+            lines.append("  fixAvailability: \(quote(imageVulnerability.fixAvailability.rawValue))")
+            lines.append("  maximumDatabaseAgeSeconds: \(imageVulnerability.maximumDatabaseAgeSeconds)")
+            lines.append("  staleAction: \(quote(imageVulnerability.staleAction.rawValue))")
+            lines.append("  unavailableAction: \(quote(imageVulnerability.unavailableAction.rawValue))")
+            lines.append("  exceptionApproval: \(quote(imageVulnerability.exceptionApproval.rawValue))")
+            if !imageVulnerability.allowlist.isEmpty {
+                lines.append("  allowlist:")
+                let entries = imageVulnerability.allowlist.sorted { lhs, rhs in
+                    if lhs.vulnerabilityID != rhs.vulnerabilityID {
+                        return lhs.vulnerabilityID < rhs.vulnerabilityID
+                    }
+                    if lhs.packagePURL != rhs.packagePURL {
+                        return (lhs.packagePURL ?? "") < (rhs.packagePURL ?? "")
+                    }
+                    if lhs.expiresAt != rhs.expiresAt {
+                        return lhs.expiresAt < rhs.expiresAt
+                    }
+                    return lhs.reason < rhs.reason
+                }
+                for entry in entries {
+                    lines.append("    - vulnerabilityID: \(quote(entry.vulnerabilityID))")
+                    if let packagePURL = entry.packagePURL {
+                        lines.append("      packagePURL: \(quote(packagePURL))")
+                    }
+                    lines.append("      reason: \(quote(entry.reason))")
+                    lines.append("      expiresAt: \(quote(entry.expiresAt))")
+                }
+            }
+        }
+        if let imageProvenance = manifest.imageProvenance {
+            lines.append("imageProvenance:")
+            lines.append("  version: \(imageProvenance.version)")
+            lines.append("  requirement: \(quote(imageProvenance.requirement.rawValue))")
+            lines.append("  builderIDs:")
+            for builderID in imageProvenance.builderIDs.sorted() {
+                lines.append("    - \(quote(builderID))")
+            }
+            lines.append("  buildTypes:")
+            for buildType in imageProvenance.buildTypes.sorted() {
+                lines.append("    - \(quote(buildType))")
+            }
+            lines.append("  signers:")
+            for signer in imageProvenance.signers.sorted(by: { $0.id < $1.id }) {
+                lines.append("    - id: \(quote(signer.id))")
+                lines.append("      publicKey: \(quote(signer.publicKey))")
+                if let notBefore = signer.notBefore {
+                    lines.append("      notBefore: \(quote(notBefore))")
+                }
+                if let notAfter = signer.notAfter {
+                    lines.append("      notAfter: \(quote(notAfter))")
+                }
+                if let revokedAt = signer.revokedAt {
+                    lines.append("      revokedAt: \(quote(revokedAt))")
+                }
+            }
+            lines.append("  maximumAgeSeconds: \(imageProvenance.maximumAgeSeconds)")
+            lines.append("  requireReproducible: \(imageProvenance.requireReproducible)")
+        }
         lines.append("services:")
 
         for service in manifest.services.sorted(by: { $0.name < $1.name }) {

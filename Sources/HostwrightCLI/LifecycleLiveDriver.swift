@@ -936,6 +936,7 @@ struct LifecyclePersistedRecoveryDriver {
                 plan: plan,
                 store: store
             )
+        let now = environment.registryDate()
         guard !authorizationObjects.isEmpty else {
             let serviceName = desired.keys.sorted().first ??
                 "unknown"
@@ -987,7 +988,7 @@ struct LifecyclePersistedRecoveryDriver {
                             policy: policy,
                             signaturePolicySHA256:
                                 signaturePolicySHA256,
-                            at: Date()
+                            at: now
                         ) else {
                     continue
                 }
@@ -1009,7 +1010,7 @@ struct LifecyclePersistedRecoveryDriver {
                                     currentTrust.policy,
                                 signatureMaterial:
                                     currentTrust.material,
-                                at: Date()
+                                at: now
                             ) else {
                         continue
                     }
@@ -1073,7 +1074,7 @@ struct LifecyclePersistedRecoveryDriver {
                         signaturePolicySHA256:
                             signaturePolicySHA256,
                         observation: observation,
-                        at: Date()
+                        at: now
                     ),
                     exception.id == exceptionID else {
                     continue
@@ -5149,7 +5150,8 @@ private func lifecyclePreflightDesiredExecution(
         providerID: preparation.providerID,
         desiredState: preparation.desiredState,
         store: store,
-        manifest: manifest
+        manifest: manifest,
+        at: environment.registryDate()
     )
     try lifecyclePreflightImageProvenance(
         planSHA256: compiled.plan.planSHA256,
@@ -5484,7 +5486,8 @@ func lifecyclePreflightImageVulnerability(
     providerID: RuntimeProviderID,
     desiredState: DesiredRuntimeState,
     store: SQLiteStateStore,
-    manifest: HostwrightManifest
+    manifest: HostwrightManifest,
+    at now: Date = Date()
 ) throws {
     guard manifest.imageVulnerability != nil else {
         let payload = try JSONSerialization.data(
@@ -5522,7 +5525,6 @@ func lifecyclePreflightImageVulnerability(
         grouping: desiredState.services,
         by: \.logicalServiceName
     ).compactMapValues(\.first)
-    let now = Date()
     for serviceName in services.keys.sorted() {
         guard let service = services[serviceName],
               let lock = service.imageLock else {

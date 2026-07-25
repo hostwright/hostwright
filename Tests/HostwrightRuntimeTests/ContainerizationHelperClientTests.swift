@@ -467,22 +467,32 @@ final class ContainerizationHelperClientTests: XCTestCase {
         await helper.blockOperation(.observe)
 
         let task = Task { try await client.observe() }
-        for _ in 0..<1_000 {
-            if await helper.operations().contains(.observe) { break }
-            await Task.yield()
-        }
+        let observeArrived = await waitForHelperOperation(
+            .observe,
+            helper: helper
+        )
+        XCTAssertTrue(observeArrived)
+        let recordedObserveRequestID =
+            await helper.requestID(for: .observe)
+        let observeRequestID =
+            try XCTUnwrap(recordedObserveRequestID)
         task.cancel()
         await XCTAssertThrowsErrorAsync(try await task.value) {
             XCTAssertEqual($0 as? ContainerizationHelperClientError, .cancelled)
         }
-        for _ in 0..<1_000 {
-            if await helper.operations().contains(.cancel) { break }
-            await Task.yield()
-        }
+        let cancellationArrived = await waitForHelperOperation(
+            .cancel,
+            helper: helper
+        )
+        XCTAssertTrue(cancellationArrived)
         let operations = await helper.operations()
-        let cancellationCount = await helper.cancelledRequestCount()
+        let cancellationTargets =
+            await helper.cancellationTargetIDs()
         XCTAssertTrue(operations.contains(.cancel))
-        XCTAssertEqual(cancellationCount, 1)
+        XCTAssertEqual(
+            cancellationTargets,
+            [observeRequestID]
+        )
     }
 
     func testConfigurationRejectsSymlinkAndBroadPermissions() throws {
@@ -894,6 +904,22 @@ final class ContainerizationHelperClientTests: XCTestCase {
     }
 }
 
+private func waitForHelperOperation(
+    _ operation: ContainerizationHelperOperation,
+    helper: ScriptedHelper,
+    timeout: Duration = .seconds(5)
+) async -> Bool {
+    let clock = ContinuousClock()
+    let deadline = clock.now.advanced(by: timeout)
+    while clock.now < deadline {
+        if await helper.operations().contains(operation) {
+            return true
+        }
+        try? await clock.sleep(for: .milliseconds(1))
+    }
+    return await helper.operations().contains(operation)
+}
+
 private final class ClientFixture: @unchecked Sendable {
     let rootURL: URL
     let executableURL: URL
@@ -1182,6 +1208,17 @@ private actor ScriptedHelper {
     func requestCapabilityDigests() -> [String] { recordedDigests }
     func mutationOperationIDs() -> [String] { recordedMutationOperationIDs }
     func cancelledRequestCount() -> Int { cancellationTargets.count }
+    func cancellationTargetIDs() -> [UUID] { cancellationTargets }
+    func requestID(
+        for operation: ContainerizationHelperOperation
+    ) -> UUID? {
+        guard let index =
+                recordedOperations.firstIndex(of: operation),
+              recordedIDs.indices.contains(index) else {
+            return nil
+        }
+        return recordedIDs[index]
+    }
     func allRequestIDsWereUnique() -> Bool { Set(recordedIDs).count == recordedIDs.count }
     func lastCreatePayload() -> ContainerizationHelperCreatePayload? { createPayloads.last }
 

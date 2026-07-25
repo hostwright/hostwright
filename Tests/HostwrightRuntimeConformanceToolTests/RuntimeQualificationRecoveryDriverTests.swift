@@ -274,7 +274,10 @@ final class RuntimeQualificationRecoveryDriverTests: XCTestCase {
         ])
         XCTAssertEqual(result, 0)
         let freshStore = SQLiteStateStore(path: database.path)
-        XCTAssertEqual(try freshStore.schemaVersion(), 7)
+        XCTAssertEqual(
+            try freshStore.schemaVersion(),
+            HostwrightContractVersions.stateSchema
+        )
         let recovered = try XCTUnwrap(try freshStore.operationGroups.load(id: groupID))
         XCTAssertEqual(recovered.status, .succeeded)
         XCTAssertEqual(recovered.checkpoint, "recovered-after-checkpoint-crash")
@@ -314,7 +317,7 @@ final class RuntimeQualificationRecoveryDriverTests: XCTestCase {
         )
         XCTAssertEqual(recovered.before, "runtime-effect-recorded")
         XCTAssertEqual(recovered.after, "recovered-after-checkpoint-crash")
-        XCTAssertEqual(recovered.schema, 7)
+        XCTAssertEqual(recovered.schema, HostwrightContractVersions.stateSchema)
         let commands = try await recorder.evidence()
         XCTAssertEqual(commands.map(\.exitStatus), [-1, 0])
         XCTAssertEqual(

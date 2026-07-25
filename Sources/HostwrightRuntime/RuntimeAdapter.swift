@@ -171,6 +171,10 @@ public enum RuntimeCreateSubsetPolicy {
     }
 
     private static func validateAppleContainerCLI(_ service: DesiredRuntimeService) throws {
+        try validateImageLock(
+            service,
+            providerID: .appleContainerCLI
+        )
         guard service.ports.allSatisfy({
             guard let hostPort = $0.hostPort else { return false }
             return (1_024...65_535).contains(hostPort) &&
@@ -218,6 +222,10 @@ public enum RuntimeCreateSubsetPolicy {
     }
 
     private static func validateAppleContainerization(_ service: DesiredRuntimeService) throws {
+        try validateImageLock(
+            service,
+            providerID: .appleContainerization
+        )
         guard service.mounts.isEmpty,
               service.ports.isEmpty,
               service.healthCheck == nil,
@@ -244,10 +252,31 @@ public enum RuntimeCreateSubsetPolicy {
             )
         }
     }
+
+    private static func validateImageLock(
+        _ service: DesiredRuntimeService,
+        providerID: RuntimeProviderID
+    ) throws {
+        guard let lock = service.imageLock else {
+            return
+        }
+        guard lock.providerID == providerID,
+              service.image == lock.resolvedReference,
+              service.platformOperatingSystem == lock.operatingSystem,
+              service.platformArchitecture == lock.architecture else {
+            throw RuntimeAdapterError.commandRejected(
+                classification: .mutating,
+                message:
+                    "Runtime creation requires one exact provider- and " +
+                    "platform-bound image digest lock."
+            )
+        }
+    }
 }
 
-public struct AppleContainerCLIAdapter: RuntimeAdapter {
+public struct AppleContainerCLIAdapter: RuntimeImageLifecycleProviding {
     private let applyAdapter: AppleContainerApplyAdapter
+    private let imageAdapter: AppleContainerImageLifecycleAdapter
 
     public init(
         executableResolver: RuntimeExecutableResolving = RuntimeExecutableResolver(),
@@ -255,6 +284,11 @@ public struct AppleContainerCLIAdapter: RuntimeAdapter {
         redactionPolicy: RuntimeRedactionPolicy = .default
     ) {
         self.applyAdapter = AppleContainerApplyAdapter(
+            executableResolver: executableResolver,
+            processRunner: processRunner,
+            redactionPolicy: redactionPolicy
+        )
+        self.imageAdapter = AppleContainerImageLifecycleAdapter(
             executableResolver: executableResolver,
             processRunner: processRunner,
             redactionPolicy: redactionPolicy
@@ -307,6 +341,24 @@ public struct AppleContainerCLIAdapter: RuntimeAdapter {
 
     public func execute(_ action: PlannedRuntimeAction, confirmation: RuntimeMutationConfirmation?) async throws -> RuntimeEvent {
         try await applyAdapter.execute(action, confirmation: confirmation)
+    }
+
+    public func imageOperationCapabilities()
+        async throws -> RuntimeImageOperationCapabilityContract
+    {
+        try await imageAdapter.imageOperationCapabilities()
+    }
+
+    public func performImageOperation(
+        _ request: RuntimeImageLifecycleRequest,
+        confirmation: RuntimeMutationConfirmation?,
+        progress: @escaping @Sendable (RuntimeImageProgressEvent) async -> Void
+    ) async throws -> RuntimeImageOperationResult {
+        try await imageAdapter.performImageOperation(
+            request,
+            confirmation: confirmation,
+            progress: progress
+        )
     }
 }
 

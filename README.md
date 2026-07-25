@@ -14,7 +14,7 @@ Phase 01 established the breaking contracts and evidence system:
 - Control API v2;
 - Runtime Provider API v2;
 - plugin ABI v1;
-- state schema v7;
+- state schema v14;
 - Hostwright UUID identity, project-generation provider binding, and durable operation-saga state;
 - machine-readable capability truth through `hostwright capabilities --json`;
 - deterministic read-only v1/versionless manifest migration preview.
@@ -23,7 +23,9 @@ Phase 02 qualification is complete. Its signed/notarized ZIP and `.pkg`, vendor 
 
 Phase 03 qualification is complete for the declared runtime-provider subset. Hostwright now has versioned structured codecs for Apple `container` 1.0.0 and 1.1.0, immutable capability negotiation, deterministic runtime inventory, normalized provider outcomes, stable provider IDs, an authenticated out-of-process Containerization 0.35.0 helper, cross-provider conformance, generation-bound provider migration, and upgrade/restart recovery. That provider evidence remains the boundary beneath Phase 04; it does not claim Phase 05 image/registry operations, networking, persistent storage, HA, Kubernetes/Docker compatibility, GUI, or GA qualification.
 
-Phase 04 qualification is complete for the single-host application lifecycle. Manifest v2 now uses a strict source-aware Yams 6.2.2 boundary, maps every accepted workload field into executable desired state, and drives dependency-aware replicas through one durable schema-v7 operation DAG and saga. Confirmed `up`, `down`, `run`, `start`, `stop`, `restart`, `rm`, and `update` operations share that engine; `apply` is compatibility-routed through `up`. Bounded exec/attach/copy/export/inspect/stats/log-follow operations, typed probes, rolling/recreate updates, verified rollback, and resumable recovery are capability-gated through the selected runtime provider. Images must already exist locally. Named volumes, custom networks, registry behavior, and production secret-provider lifecycle remain owned by later phases.
+Phase 04 qualification is complete for the single-host application lifecycle. Manifest v2 now uses a strict source-aware Yams 6.2.2 boundary, maps every accepted workload field into executable desired state, and drives dependency-aware replicas through one durable schema-v8 operation DAG and saga. Confirmed `up`, `down`, `run`, `start`, `stop`, `restart`, `rm`, and `update` operations share that engine; `apply` is compatibility-routed through `up`. Bounded exec/attach/copy/export/inspect/stats/log-follow operations, typed probes, rolling/recreate updates, verified rollback, and resumable recovery are capability-gated through the selected runtime provider. Phase 05 lifecycle planning resolves every locally available requested image to an immutable descriptor and platform-variant lock before producing the review hash; execution and rollback reverify that exact provider-bound content. Gate 7 additionally enforces exact digest-bound keyed/keyless signature trust from verified OCI referrer evidence before lifecycle and recovery effects. Named volumes and custom networks remain owned by later phases.
+
+Phase 05 Gates 1–11 are locally complete. Secret providers, registry authentication, exact image lifecycle, immutable digest locks, OCI referrers, trust policy, SBOM, vulnerability policy, signed build provenance, and bounded content-cache accounting share versioned CLI and one-shot Control contracts with durable schema-v14 evidence. Cache pressure plans protect active leases, operator and policy pins, desired digest locks, live references, and unmanaged content; destructive prune requires exact confirmation and post-delete verification. No Phase 05 issue is closed until the aggregate Gate 12 merge.
 
 The authoritative scope and every limitation-to-implementation mapping are in the [v0.0.2 implementation plan](docs/roadmap/v0.0.2/IMPLEMENTATION_PLAN.md). The [machine-readable issue manifest](docs/roadmap/v0.0.2/issues.json) tracks one master, 15 epics, and 167 workstreams. No research-only, blocked, fixture-only, mock-only, or dirty result closes an implementation gate.
 
@@ -127,7 +129,7 @@ Legacy `health` deterministically migrates to a typed liveness probe. Preview ne
 - Runtime operations cross `RuntimeAdapter` / Runtime Provider API boundaries.
 - Every new resource receives a Hostwright UUID; Apple names are attributes, not authority.
 - A project generation is bound to one mutation provider.
-- State schema v7 records UUIDs, provider generations, fencing, saga intent, compensation, and verification fields.
+- State schema v14 records UUIDs, provider generations, fencing, saga intent, compensation, verification fields, immutable desired/observed image digest locks, verified OCI referrer graphs with fenced retention and publication ownership evidence, immutable image-trust audit, exact image-SBOM bindings, signed vulnerability-report decisions and exceptions, exact signed build-provenance evidence, and provider-scoped content accounting with fenced leases and pins.
 - Local state uses the secure Application Support default unless an explicit CLI or environment override wins.
 - Names or similar configuration never authorize deletion.
 - Hostwright does not delete unmanaged resources.

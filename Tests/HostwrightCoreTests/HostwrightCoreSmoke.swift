@@ -104,7 +104,7 @@ final class HostwrightCoreTests: XCTestCase {
         XCTAssertEqual(HostwrightIdentity.daemonName, "hostwrightd")
         XCTAssertEqual(HostwrightIdentity.manifestFileName, "hostwright.yaml")
         XCTAssertEqual(HostwrightIdentity.domain, "hostwright.dev")
-        XCTAssertEqual(HostwrightIdentity.version, "0.0.2-dev.12")
+        XCTAssertEqual(HostwrightIdentity.version, "0.0.2-dev.14")
     }
 
     func testCompatibilityGateRejectsUnsupportedPlatform() {
@@ -185,21 +185,22 @@ final class HostwrightCoreTests: XCTestCase {
         let secretStoreSource = try read("Sources/HostwrightSecrets/SecretStore.swift", root: root)
         let publicDocs = [boundary, manifest, security, limitations].joined(separator: "\n")
 
-        XCTAssertTrue(boundary.contains("Status: Phase 24 local boundary."))
+        XCTAssertTrue(boundary.contains("Status: Phase 05 provider boundary."))
         XCTAssertTrue(boundary.contains("secretEnv:"))
-        XCTAssertTrue(boundary.contains("`MacOSKeychainSecretStore` is a read-only production backend"))
+        XCTAssertTrue(boundary.contains("`MacOSKeychainSecretStore` is the production backend for managed local generic-password items"))
         XCTAssertTrue(boundary.contains("There is no conditional skip path"))
-        XCTAssertTrue(boundary.contains("Live macOS Keychain access is not enabled by default in Phase 24"))
+        XCTAssertTrue(boundary.contains("The default workload resolver supports Keychain plus guarded environment and local files."))
+        XCTAssertTrue(boundary.contains("require an explicitly registered provider"))
         XCTAssertTrue(manifest.contains("secretEnv"))
-        XCTAssertTrue(security.contains("unit-contract tests inject a test-only in-memory secret store"))
-        XCTAssertTrue(security.contains("Production Hostwright code does not create, update, or delete Keychain items."))
-        XCTAssertTrue(limitations.contains("no live Keychain default"))
+        XCTAssertTrue(security.contains("only for the exact project, resource generation, service, and environment key granted"))
+        XCTAssertTrue(security.contains("creates, updates, lists metadata for, and exactly deletes only Hostwright-owned Keychain items"))
+        XCTAssertTrue(limitations.contains("grant mismatches fail before runtime mutation"))
         XCTAssertTrue(secretStoreSource.contains("SecItemCopyMatching"))
         XCTAssertTrue(secretStoreSource.contains("interactionNotAllowed = true"))
-        XCTAssertFalse(secretStoreSource.contains("SecItemAdd"))
-        XCTAssertFalse(secretStoreSource.contains("SecItemDelete"))
+        XCTAssertTrue(secretStoreSource.contains("SecItemAdd"))
+        XCTAssertTrue(secretStoreSource.contains("SecItemDelete"))
 
-        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("live macOS Keychain access is enabled"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("supports mounted secret files"))
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright writes Keychain items"))
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("supports cloud secret"))
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("supports registry credential"))
@@ -207,7 +208,7 @@ final class HostwrightCoreTests: XCTestCase {
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("supports Compose secrets"))
     }
 
-    func testSupplyChainImageTrustDocsDescribeLocalPolicyOnly() throws {
+    func testSupplyChainImageTrustDocsSeparateDigestLocksFromTrustPolicy() throws {
         let root = try packageRoot()
         let boundary = try read("docs/architecture/supply-chain-image-trust.md", root: root)
         let manifest = try read("docs/reference/manifest.md", root: root)
@@ -215,17 +216,22 @@ final class HostwrightCoreTests: XCTestCase {
         let limitations = try read("docs/reference/limitations.md", root: root)
         let publicDocs = [boundary, manifest, security, limitations].joined(separator: "\n")
 
-        XCTAssertTrue(boundary.contains("Status: Phase 25 local policy and research boundary."))
+        XCTAssertTrue(boundary.contains("Status: Phase 05 Gate 7 exact image-signature trust boundary."))
         XCTAssertTrue(boundary.contains("imagePolicy: require-digest"))
-        XCTAssertTrue(manifest.contains("Digest pinning gives Hostwright a stable content identifier string"))
-        XCTAssertTrue(security.contains("local string validation only"))
-        XCTAssertTrue(limitations.contains("Hostwright does not query registries, resolve tags, verify signatures, inspect SBOMs, scan vulnerabilities, or prove provenance."))
+        XCTAssertTrue(manifest.contains("Lifecycle image resolution remains local and offline"))
+        XCTAssertTrue(security.contains("digest locks remain content identity rather than publisher trust"))
+        XCTAssertTrue(limitations.contains("Lifecycle review resolves locally available image references"))
 
-        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright verifies signatures"))
+        XCTAssertTrue(publicDocs.localizedCaseInsensitiveContains("signature verification"))
+        XCTAssertTrue(publicDocs.contains("Sigstore bundle v0.3"))
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright scans vulnerabilities"))
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright generates SBOM"))
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright proves provenance"))
-        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright pulls images"))
+        XCTAssertFalse(
+            publicDocs.localizedCaseInsensitiveContains(
+                "lifecycle resolution pulls missing images automatically"
+            )
+        )
     }
 
     func testResourceIntelligenceDocsDescribeLocalReportingOnly() throws {

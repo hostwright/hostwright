@@ -8,7 +8,7 @@ public enum HostwrightIdentity {
     public static let domain = "hostwright.dev"
     public static let description = "Mac-native desired-state control plane for Apple container workloads."
     public static let tagline = "Desired-state container control for Apple silicon Macs."
-    public static let version = "0.0.2-dev.12"
+    public static let version = "0.0.2-dev.14"
     public static let releaseTarget = "v0.0.2"
 }
 
@@ -40,6 +40,26 @@ public enum HostwrightErrorCode: String, Sendable {
     case controlAPIInvalid = "HW-API-001"
     case controlAPIUnavailable = "HW-API-002"
     case controlAPIExecutionFailed = "HW-API-003"
+    case secretInvalid = "HW-SECRET-001"
+    case secretUnavailable = "HW-SECRET-002"
+    case secretNotFound = "HW-SECRET-003"
+    case secretConflict = "HW-SECRET-004"
+    case secretDenied = "HW-SECRET-005"
+    case secretCancelled = "HW-SECRET-006"
+    case secretPartialEffect = "HW-SECRET-007"
+    case registryInvalid = "HW-REGISTRY-001"
+    case registryCredentialUnavailable = "HW-REGISTRY-002"
+    case registryAuthenticationDenied = "HW-REGISTRY-003"
+    case registryTransportUnavailable = "HW-REGISTRY-004"
+    case registryScopeDenied = "HW-REGISTRY-005"
+    case registryCancelled = "HW-REGISTRY-006"
+    case registryPartialEffect = "HW-REGISTRY-007"
+    case imageInvalid = "HW-IMAGE-001"
+    case imageUnavailable = "HW-IMAGE-002"
+    case imageConflict = "HW-IMAGE-003"
+    case imageDenied = "HW-IMAGE-004"
+    case imageCancelled = "HW-IMAGE-005"
+    case imagePartialEffect = "HW-IMAGE-006"
 }
 
 public struct HostwrightDiagnostic: Error, Equatable, Sendable {

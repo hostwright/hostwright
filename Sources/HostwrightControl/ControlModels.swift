@@ -15,6 +15,8 @@ public enum LocalControlOperation: String, Codable, CaseIterable, Equatable, Sen
     case restart
     case rm
     case update
+    case image
+    case registry
 }
 
 public struct LocalControlRequest: Codable, Equatable, Sendable {
@@ -33,6 +35,53 @@ public struct LocalControlRequest: Codable, Equatable, Sendable {
     public let runtimeProvider: String?
     public let timeout: Int?
     public let parallelism: Int?
+    public let imageOperation: String?
+    public let imageReferences: [String]?
+    public let imageTargetReference: String?
+    public let imageContextPath: String?
+    public let imageFilePath: String?
+    public let imageArchivePath: String?
+    public let imagePlatform: String?
+    public let imageOffline: Bool?
+    public let imageNoCache: Bool?
+    public let imageProgress: String?
+    public let imageMaximumBytes: Int64?
+    public let imageTargetBytes: Int64?
+    public let imageRetentionSeconds: Int?
+    public let imageMaximumDeletions: Int?
+    public let registryReferrerOperation: String?
+    public let registryServer: String?
+    public let registryRepository: String?
+    public let registrySubjectDigest: String?
+    public let registryArtifactType: String?
+    public let registryTargetServer: String?
+    public let registryTargetRepository: String?
+    public let registryDiscoveryID: String?
+    public let registryReferrerDigest: String?
+    public let registryLeaseID: String?
+    public let registryFencingToken: String?
+    public let registryOwnerID: String?
+    public let registryExpiresAt: String?
+    public let registryOperationGroupID: String?
+    public let registryOffline: Bool?
+    public let registryTrustOperation: String?
+    public let registrySBOMOperation: String?
+    public let registryVulnerabilityOperation: String?
+    public let registryProvenanceOperation: String?
+    public let registrySBOMArchivePath: String?
+    public let registrySBOMFormat: String?
+    public let registrySBOMOutputPath: String?
+    public let registryProvenanceArchivePath: String?
+    public let registryProvenanceBuildRecordPath: String?
+    public let registryProvenanceDescriptorDigest: String?
+    public let registryProvenanceReferrerDigest: String?
+    public let registryProvenanceSignerID: String?
+    public let registryProvenanceSigningKeyReference: String?
+    public let registrySubjectManifestPath: String?
+    public let registryCosignPath: String?
+    public let registryServiceName: String?
+    public let registryApprovalRecordPath: String?
+    public let registryExceptionID: String?
 
     public init(
         apiVersion: Int = HostwrightContractVersions.controlAPI,
@@ -49,7 +98,54 @@ public struct LocalControlRequest: Codable, Equatable, Sendable {
         confirmPlan: String? = nil,
         runtimeProvider: String? = nil,
         timeout: Int? = nil,
-        parallelism: Int? = nil
+        parallelism: Int? = nil,
+        imageOperation: String? = nil,
+        imageReferences: [String]? = nil,
+        imageTargetReference: String? = nil,
+        imageContextPath: String? = nil,
+        imageFilePath: String? = nil,
+        imageArchivePath: String? = nil,
+        imagePlatform: String? = nil,
+        imageOffline: Bool? = nil,
+        imageNoCache: Bool? = nil,
+        imageProgress: String? = nil,
+        imageMaximumBytes: Int64? = nil,
+        imageTargetBytes: Int64? = nil,
+        imageRetentionSeconds: Int? = nil,
+        imageMaximumDeletions: Int? = nil,
+        registryReferrerOperation: String? = nil,
+        registryServer: String? = nil,
+        registryRepository: String? = nil,
+        registrySubjectDigest: String? = nil,
+        registryArtifactType: String? = nil,
+        registryTargetServer: String? = nil,
+        registryTargetRepository: String? = nil,
+        registryDiscoveryID: String? = nil,
+        registryReferrerDigest: String? = nil,
+        registryLeaseID: String? = nil,
+        registryFencingToken: String? = nil,
+        registryOwnerID: String? = nil,
+        registryExpiresAt: String? = nil,
+        registryOperationGroupID: String? = nil,
+        registryOffline: Bool? = nil,
+        registryTrustOperation: String? = nil,
+        registrySBOMOperation: String? = nil,
+        registryVulnerabilityOperation: String? = nil,
+        registryProvenanceOperation: String? = nil,
+        registrySBOMArchivePath: String? = nil,
+        registrySBOMFormat: String? = nil,
+        registrySBOMOutputPath: String? = nil,
+        registryProvenanceArchivePath: String? = nil,
+        registryProvenanceBuildRecordPath: String? = nil,
+        registryProvenanceDescriptorDigest: String? = nil,
+        registryProvenanceReferrerDigest: String? = nil,
+        registryProvenanceSignerID: String? = nil,
+        registryProvenanceSigningKeyReference: String? = nil,
+        registrySubjectManifestPath: String? = nil,
+        registryCosignPath: String? = nil,
+        registryServiceName: String? = nil,
+        registryApprovalRecordPath: String? = nil,
+        registryExceptionID: String? = nil
     ) {
         self.apiVersion = apiVersion
         self.requestID = requestID
@@ -66,6 +162,61 @@ public struct LocalControlRequest: Codable, Equatable, Sendable {
         self.runtimeProvider = runtimeProvider
         self.timeout = timeout
         self.parallelism = parallelism
+        self.imageOperation = imageOperation
+        self.imageReferences = imageReferences
+        self.imageTargetReference = imageTargetReference
+        self.imageContextPath = imageContextPath
+        self.imageFilePath = imageFilePath
+        self.imageArchivePath = imageArchivePath
+        self.imagePlatform = imagePlatform
+        self.imageOffline = imageOffline
+        self.imageNoCache = imageNoCache
+        self.imageProgress = imageProgress
+        self.imageMaximumBytes = imageMaximumBytes
+        self.imageTargetBytes = imageTargetBytes
+        self.imageRetentionSeconds = imageRetentionSeconds
+        self.imageMaximumDeletions = imageMaximumDeletions
+        self.registryReferrerOperation = registryReferrerOperation
+        self.registryServer = registryServer
+        self.registryRepository = registryRepository
+        self.registrySubjectDigest = registrySubjectDigest
+        self.registryArtifactType = registryArtifactType
+        self.registryTargetServer = registryTargetServer
+        self.registryTargetRepository = registryTargetRepository
+        self.registryDiscoveryID = registryDiscoveryID
+        self.registryReferrerDigest = registryReferrerDigest
+        self.registryLeaseID = registryLeaseID
+        self.registryFencingToken = registryFencingToken
+        self.registryOwnerID = registryOwnerID
+        self.registryExpiresAt = registryExpiresAt
+        self.registryOperationGroupID = registryOperationGroupID
+        self.registryOffline = registryOffline
+        self.registryTrustOperation = registryTrustOperation
+        self.registrySBOMOperation = registrySBOMOperation
+        self.registryVulnerabilityOperation =
+            registryVulnerabilityOperation
+        self.registryProvenanceOperation =
+            registryProvenanceOperation
+        self.registrySBOMArchivePath = registrySBOMArchivePath
+        self.registrySBOMFormat = registrySBOMFormat
+        self.registrySBOMOutputPath = registrySBOMOutputPath
+        self.registryProvenanceArchivePath =
+            registryProvenanceArchivePath
+        self.registryProvenanceBuildRecordPath =
+            registryProvenanceBuildRecordPath
+        self.registryProvenanceDescriptorDigest =
+            registryProvenanceDescriptorDigest
+        self.registryProvenanceReferrerDigest =
+            registryProvenanceReferrerDigest
+        self.registryProvenanceSignerID =
+            registryProvenanceSignerID
+        self.registryProvenanceSigningKeyReference =
+            registryProvenanceSigningKeyReference
+        self.registrySubjectManifestPath = registrySubjectManifestPath
+        self.registryCosignPath = registryCosignPath
+        self.registryServiceName = registryServiceName
+        self.registryApprovalRecordPath = registryApprovalRecordPath
+        self.registryExceptionID = registryExceptionID
     }
 }
 

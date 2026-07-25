@@ -13,6 +13,34 @@ public struct SQLiteStateStore: StateStore {
         ObservedStateRepository(store: self)
     }
 
+    public var imageDigestLocks: ImageDigestLockRepository {
+        ImageDigestLockRepository(store: self)
+    }
+
+    public var ociReferrers: OCIReferrerRepository {
+        OCIReferrerRepository(store: self)
+    }
+
+    public var imageTrust: ImageTrustRepository {
+        ImageTrustRepository(store: self)
+    }
+
+    public var imageSBOM: ImageSBOMRepository {
+        ImageSBOMRepository(store: self)
+    }
+
+    public var imageVulnerability: ImageVulnerabilityRepository {
+        ImageVulnerabilityRepository(store: self)
+    }
+
+    public var imageProvenance: ImageProvenanceRepository {
+        ImageProvenanceRepository(store: self)
+    }
+
+    public var contentCache: ContentCacheRepository {
+        ContentCacheRepository(store: self)
+    }
+
     public var events: EventLedger {
         EventLedger(store: self)
     }

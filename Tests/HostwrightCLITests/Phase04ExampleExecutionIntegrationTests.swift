@@ -357,9 +357,24 @@ final class Phase04ExampleExecutionIntegrationTests: XCTestCase {
             driver: driver
         ).run()
         XCTAssertEqual(dryRun.exitCode, 0, dryRun.standardError)
-        let plan = try LifecycleCommandPlanCompiler().compile(
+        let compiler = LifecycleCommandPlanCompiler()
+        let initial = try compiler.compile(
             options: dryOptions,
             preparation: preparation
+        )
+        var expectedImageChecksPerRun = 0
+        let lockedPreparation = try LifecycleImageLockBinder.bind(
+            preparation: preparation,
+            initialCompiled: initial,
+            options: dryOptions,
+            resolve: { requirement, _ in
+                expectedImageChecksPerRun += 1
+                return exampleImageEvidence(for: requirement)
+            }
+        )
+        let plan = try compiler.compile(
+            options: dryOptions,
+            preparation: lockedPreparation
         ).plan
         if output == .json {
             XCTAssertEqual(
@@ -398,7 +413,7 @@ final class Phase04ExampleExecutionIntegrationTests: XCTestCase {
         XCTAssertEqual(driver.revalidationCount, 1)
         XCTAssertEqual(
             driver.imageCheckCount,
-            plan.nodes.contains { $0.action == .create } ? 2 : 0
+            expectedImageChecksPerRun * 2
         )
         XCTAssertTrue(
             temporaryRoot.path.hasPrefix(FileManager.default.temporaryDirectory.path)
@@ -714,13 +729,7 @@ private final class ExampleLifecycleDriver:
         preparation: LifecycleCommandPreparation
     ) throws -> RuntimeLocalImageEvidence {
         lock.withLock { imageChecks += 1 }
-        return RuntimeLocalImageEvidence(
-            reference: requirement.reference,
-            descriptorDigest: "sha256:\(String(repeating: "d", count: 64))",
-            variantDigest: "sha256:\(String(repeating: "e", count: 64))",
-            architecture: requirement.architecture,
-            operatingSystem: requirement.operatingSystem
-        )
+        return exampleImageEvidence(for: requirement)
     }
 
     func revalidate(
@@ -752,6 +761,36 @@ private final class ExampleLifecycleDriver:
                 : "The prior verified revision was restored."
         )
     }
+}
+
+private func exampleImageEvidence(
+    for requirement: LifecycleLocalImageRequirement
+) -> RuntimeLocalImageEvidence {
+    let marker = "@sha256:"
+    let descriptorDigest: String
+    if let range = requirement.reference.range(
+        of: marker,
+        options: .backwards
+    ) {
+        let body = String(requirement.reference[range.upperBound...])
+        if body.range(
+            of: "^[a-f0-9]{64}$",
+            options: .regularExpression
+        ) != nil {
+            descriptorDigest = "sha256:\(body)"
+        } else {
+            descriptorDigest = "sha256:\(String(repeating: "d", count: 64))"
+        }
+    } else {
+        descriptorDigest = "sha256:\(String(repeating: "d", count: 64))"
+    }
+    return RuntimeLocalImageEvidence(
+        reference: requirement.reference,
+        descriptorDigest: descriptorDigest,
+        variantDigest: "sha256:\(String(repeating: "e", count: 64))",
+        architecture: requirement.architecture,
+        operatingSystem: requirement.operatingSystem
+    )
 }
 
 private final class ExampleInteractiveDriver:

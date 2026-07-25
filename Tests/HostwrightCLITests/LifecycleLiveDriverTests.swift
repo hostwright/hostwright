@@ -254,20 +254,11 @@ final class LifecycleLiveDriverTests: XCTestCase {
         let secretValue = "phase04-secret-\(UUID().uuidString)"
         let secretStore = RecordingLifecycleSecretStore(value: secretValue)
         try withFixture(secretStore: secretStore, includesSecret: true) { fixture in
-            let dryOptions = fixture.options(command: .up, dryRun: true)
-            let dryDriver = LifecycleLiveDriver(
-                environment: fixture.environment,
-                options: dryOptions
-            )
-            let dryPreparation = try dryDriver.prepare(options: dryOptions)
-            let compiled = try LifecycleCommandPlanCompiler().compile(
-                options: dryOptions,
-                preparation: dryPreparation
-            )
+            let plan = try reviewedPlan(fixture, command: .up)
             let confirmedOptions = fixture.options(
                 command: .up,
                 dryRun: false,
-                confirmation: compiled.plan.planSHA256
+                confirmation: plan.planSHA256
             )
             let result = LifecycleCommandRunner(
                 options: confirmedOptions,
@@ -286,13 +277,13 @@ final class LifecycleLiveDriverTests: XCTestCase {
 
             let ownership = try XCTUnwrap(fixture.store.ownership.loadAll().first)
             let createNode = try XCTUnwrap(
-                compiled.plan.nodes.first { $0.action == .create }
+                plan.nodes.first { $0.action == .create }
             )
             XCTAssertEqual(ownership.resourceUUID, createNode.resourceUUID)
             XCTAssertEqual(ownership.resourceGeneration, createNode.resourceGeneration)
             XCTAssertEqual(
                 ownership.projectResourceUUID,
-                compiled.plan.projectResourceUUID
+                plan.projectResourceUUID
             )
             XCTAssertEqual(
                 ownership.runtimeAdapter,
@@ -302,9 +293,59 @@ final class LifecycleLiveDriverTests: XCTestCase {
 
             let groups = try fixture.store.operationGroups.loadAll()
             XCTAssertEqual(groups.count, 1)
-            XCTAssertEqual(groups.first?.planHash, compiled.plan.planSHA256)
+            XCTAssertEqual(groups.first?.planHash, plan.planSHA256)
             XCTAssertEqual(groups.first?.status, .succeeded)
             XCTAssertFalse(groups.first?.intentJSONRedacted.isEmpty ?? true)
+            let imageLocks = try fixture.store.imageDigestLocks.load(
+                projectID: fixture.projectID
+            )
+            XCTAssertEqual(
+                imageLocks.map(\.stateKind),
+                [.desired, .observed]
+            )
+            XCTAssertEqual(
+                Set(imageLocks.map(\.planSHA256)),
+                [plan.planSHA256]
+            )
+            XCTAssertEqual(
+                imageLocks.map(\.lock.descriptorDigest),
+                Array(
+                    repeating:
+                        "sha256:\(String(repeating: "a", count: 64))",
+                    count: 2
+                )
+            )
+            let status = HostwrightCLI.run(
+                arguments: [
+                    "status",
+                    fixture.manifestPath,
+                    "--state-db",
+                    fixture.databasePath,
+                    "--runtime-provider",
+                    "apple-cli",
+                    "--output",
+                    "json"
+                ],
+                environment: fixture.environment
+            )
+            XCTAssertEqual(status.exitCode, 0, status.standardError)
+            let statusObject = try XCTUnwrap(
+                JSONSerialization.jsonObject(
+                    with: Data(status.standardOutput.utf8)
+                ) as? [String: Any]
+            )
+            let statusLocks = try XCTUnwrap(
+                statusObject["imageDigestLocks"]
+                    as? [[String: Any]]
+            )
+            XCTAssertEqual(statusLocks.count, 2)
+            XCTAssertEqual(
+                Set(statusLocks.compactMap {
+                    $0["state"] as? String
+                }),
+                ["desired", "observed"]
+            )
+            XCTAssertFalse(status.standardOutput.contains(secretValue))
             XCTAssertFalse(try fixture.stateBytesContain(secretValue))
         }
     }
@@ -417,20 +458,11 @@ final class LifecycleLiveDriverTests: XCTestCase {
             secretStore: secretStore,
             manifestOverride: manifest
         ) { fixture in
-            let dryOptions = fixture.options(command: .up, dryRun: true)
-            let dryDriver = LifecycleLiveDriver(
-                environment: fixture.environment,
-                options: dryOptions
-            )
-            let preparation = try dryDriver.prepare(options: dryOptions)
-            let compiled = try LifecycleCommandPlanCompiler().compile(
-                options: dryOptions,
-                preparation: preparation
-            )
+            let plan = try reviewedPlan(fixture, command: .up)
             let confirmedOptions = fixture.options(
                 command: .up,
                 dryRun: false,
-                confirmation: compiled.plan.planSHA256
+                confirmation: plan.planSHA256
             )
             let result = LifecycleCommandRunner(
                 options: confirmedOptions,
@@ -465,20 +497,11 @@ final class LifecycleLiveDriverTests: XCTestCase {
 
         """
         try withFixture(manifestOverride: manifest) { fixture in
-            let dryOptions = fixture.options(command: .up, dryRun: true)
-            let dryDriver = LifecycleLiveDriver(
-                environment: fixture.environment,
-                options: dryOptions
-            )
-            let preparation = try dryDriver.prepare(options: dryOptions)
-            let compiled = try LifecycleCommandPlanCompiler().compile(
-                options: dryOptions,
-                preparation: preparation
-            )
+            let plan = try reviewedPlan(fixture, command: .up)
             let confirmedOptions = fixture.options(
                 command: .up,
                 dryRun: false,
-                confirmation: compiled.plan.planSHA256
+                confirmation: plan.planSHA256
             )
             let result = LifecycleCommandRunner(
                 options: confirmedOptions,
@@ -768,6 +791,10 @@ final class LifecycleLiveDriverTests: XCTestCase {
             try persistLifecycleProject(
                 fixture: fixture,
                 preparation: preparation
+            )
+            try appendSupplyChainNotRequiredMarkers(
+                store: fixture.store,
+                plan: compiled.plan
             )
             let node = try XCTUnwrap(compiled.plan.nodes.first)
             let groupID = HostwrightResourceUUID.legacy(
@@ -1354,6 +1381,12 @@ final class LifecycleLiveDriverTests: XCTestCase {
                     #"{"result":"compensated"}"#,
                 recoveryStateJSONRedacted:
                     try lifecycleRecoveryStateJSONRedacted(healthySnapshot)
+            )
+            XCTAssertEqual(
+                try fixture.store.desiredStates.loadProject(
+                    id: fixture.projectID
+                ).manifestHash,
+                update.plan.manifestSHA256
             )
             try fixture.wait {
                 await fixture.adapter.setStrictOwnedHintFences(true)
@@ -2021,6 +2054,11 @@ private func persistLifecycleGroup(
         identifier: groupID
     )
     let timestamp = "2026-07-23T12:00:00Z"
+    try appendSupplyChainNotRequiredMarkers(
+        store: store,
+        plan: plan,
+        timestamp: timestamp
+    )
     let record = OperationGroupRecord(
         id: groupID,
         operationID: operationID,
@@ -2089,6 +2127,64 @@ private func persistLifecycleGroup(
         metadataJSONRedacted: terminalMetadataJSONRedacted
     )
     return try XCTUnwrap(store.operationGroups.load(id: groupID))
+}
+
+private func appendSupplyChainNotRequiredMarkers(
+    store: SQLiteStateStore,
+    plan: LifecyclePlan,
+    timestamp: String = "2026-07-23T12:00:00Z"
+) throws {
+    let vulnerabilityPayload = try JSONSerialization.data(
+        withJSONObject: [
+            "planSHA256": plan.planSHA256,
+            "projectID": plan.projectID,
+            "required": false
+        ],
+        options: [.sortedKeys, .withoutEscapingSlashes]
+    )
+    let provenancePayload = try JSONSerialization.data(
+        withJSONObject: [
+            "planSHA256": plan.planSHA256,
+            "projectID": plan.projectID,
+            "required": false,
+            "policySHA256": NSNull()
+        ],
+        options: [.sortedKeys, .withoutEscapingSlashes]
+    )
+    try store.events.append([
+        EventRecord(
+            id: UUID().uuidString.lowercased(),
+            timestamp: timestamp,
+            severity: .info,
+            type: "image.vulnerability.lifecycle.not-required",
+            source: "hostwright.lifecycle",
+            projectID: nil,
+            serviceName: nil,
+            runtimeAdapter: plan.providerID.rawValue,
+            message:
+                "Image vulnerability policy was not required for this exact lifecycle plan.",
+            payloadJSONRedacted: String(
+                decoding: vulnerabilityPayload,
+                as: UTF8.self
+            )
+        ),
+        EventRecord(
+            id: UUID().uuidString.lowercased(),
+            timestamp: timestamp,
+            severity: .info,
+            type: "image.provenance.lifecycle.not-required",
+            source: "hostwright.lifecycle",
+            projectID: nil,
+            serviceName: nil,
+            runtimeAdapter: plan.providerID.rawValue,
+            message:
+                "Image provenance policy was not required for this exact lifecycle plan.",
+            payloadJSONRedacted: String(
+                decoding: provenancePayload,
+                as: UTF8.self
+            )
+        )
+    ])
 }
 
 private struct LifecycleLiveAdapterSnapshot: Equatable, Sendable {
@@ -2773,7 +2869,7 @@ private struct LifecycleLiveDriverFixture {
 
         let imageEvidence = RuntimeLocalImageEvidence(
             reference: image,
-            descriptorDigest: "sha256:\(String(repeating: "b", count: 64))",
+            descriptorDigest: "sha256:\(String(repeating: "a", count: 64))",
             variantDigest: "sha256:\(String(repeating: "c", count: 64))",
             architecture: "arm64",
             operatingSystem: "linux"
@@ -2906,20 +3002,11 @@ services:
 private func runConfirmedUp(
     _ fixture: LifecycleLiveDriverFixture
 ) throws -> CLIRunResult {
-    let dryOptions = fixture.options(command: .up, dryRun: true)
-    let dryDriver = LifecycleLiveDriver(
-        environment: fixture.environment,
-        options: dryOptions
-    )
-    let preparation = try dryDriver.prepare(options: dryOptions)
-    let compiled = try LifecycleCommandPlanCompiler().compile(
-        options: dryOptions,
-        preparation: preparation
-    )
+    let plan = try reviewedPlan(fixture, command: .up)
     let confirmed = fixture.options(
         command: .up,
         dryRun: false,
-        confirmation: compiled.plan.planSHA256
+        confirmation: plan.planSHA256
     )
     return LifecycleCommandRunner(
         options: confirmed,
@@ -2928,6 +3015,29 @@ private func runConfirmedUp(
             options: confirmed
         )
     ).run()
+}
+
+private func reviewedPlan(
+    _ fixture: LifecycleLiveDriverFixture,
+    command: LifecycleCommandKind
+) throws -> LifecyclePlan {
+    let options = fixture.options(command: command, dryRun: true)
+    let result = LifecycleCommandRunner(
+        options: options,
+        driver: LifecycleLiveDriver(
+            environment: fixture.environment,
+            options: options
+        )
+    ).run()
+    guard result.exitCode == 0 else {
+        throw LifecycleCommandRunnerError.invalidInput(
+            result.standardError
+        )
+    }
+    return try JSONDecoder().decode(
+        LifecyclePlan.self,
+        from: Data(result.standardOutput.utf8)
+    )
 }
 
 private func withFixture(

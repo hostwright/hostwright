@@ -1,4 +1,5 @@
 import Foundation
+import HostwrightCore
 import HostwrightRuntime
 import XCTest
 @testable import HostwrightRuntimeConformanceTool
@@ -426,7 +427,7 @@ final class RuntimeQualificationRecoveryReportTests: XCTestCase {
             durableCheckpointAfter: checkpointAfter,
             terminatedExecutable: processCycle ? "hostwright-runtime-conformance" : nil,
             processTreeTerminated: processCycle,
-            stateSchemaVersion: processCycle ? 7 : nil,
+            stateSchemaVersion: processCycle ? HostwrightContractVersions.stateSchema : nil,
             passedAssertions: 8,
             failedAssertions: 0,
             cleanupComplete: true,

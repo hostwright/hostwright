@@ -743,6 +743,27 @@ final class HostwrightRuntimeTests: XCTestCase {
         XCTAssertFalse(result.spec.environment.values.contains(opaqueSecret))
     }
 
+    func testSecureRuntimeProcessRunnerRedactsBoundedStandardInput() async throws {
+        let secret = "opaque-runtime-standard-input"
+        let spec = RuntimeCommandSpec(
+            executablePath: "/bin/cat",
+            arguments: [],
+            classification: .readOnly,
+            executableResolution: .resolvedByRuntimeExecutableResolver,
+            purpose: "Verify bounded standard-input transport."
+        )
+
+        let result = try await SecureRuntimeProcessRunner().run(
+            spec,
+            standardInput: Data((secret + "\n").utf8)
+        )
+
+        XCTAssertEqual(result.exitStatus, 0)
+        XCTAssertFalse(result.standardOutput.contains(secret))
+        XCTAssertEqual(result.standardOutput, "[REDACTED]")
+        XCTAssertTrue(result.spec.sensitiveValues.isEmpty)
+    }
+
     func testSecureRuntimeProcessRunnerReportsTimeoutAndCancellationSeparately() async {
         let runner = SecureRuntimeProcessRunner()
 
@@ -1003,6 +1024,173 @@ final class HostwrightRuntimeTests: XCTestCase {
         XCTAssertEqual(event.resourceIdentifier, proofIdentity.managedResourceIdentifier)
         XCTAssertFalse(event.message.contains("fake-token"))
         XCTAssertTrue(event.message.contains("verified"))
+    }
+
+    func testAppleContainerApplyAdapterCreatesFromExactLockedDigest() async throws {
+        let imageFixture = try fixture(
+            "apple-container-1.1.0-image-list.json"
+        )
+        let createdFixture = try containerListOutput(
+            identity: proofIdentity,
+            state: "stopped",
+            context: proofObservationMutationContext
+        )
+        let runner = RoutingRuntimeProcessRunner { spec in
+            switch spec.arguments {
+            case ["image", "list", "--format", "json"]:
+                return RuntimeCommandResult(
+                    spec: spec,
+                    exitStatus: 0,
+                    standardOutput: imageFixture,
+                    standardError: ""
+                )
+            case ["list", "--all", "--format", "json"]:
+                return RuntimeCommandResult(
+                    spec: spec,
+                    exitStatus: 0,
+                    standardOutput: createdFixture,
+                    standardError: ""
+                )
+            default:
+                if spec.arguments.first == "create" {
+                    return RuntimeCommandResult(
+                        spec: spec,
+                        exitStatus: 0,
+                        standardOutput: "created",
+                        standardError: ""
+                    )
+                }
+                throw RuntimeAdapterError.commandRejected(
+                    classification: spec.classification,
+                    message: "unexpected command"
+                )
+            }
+        }
+        let descriptor =
+            "sha256:\(String(repeating: "c", count: 64))"
+        let resolved = "ghcr.io/example/api@\(descriptor)"
+        let lock = try RuntimeImageDigestLock(
+            requestedReference: "ghcr.io/example/api:1.1.0",
+            resolvedReference: resolved,
+            descriptorDigest: descriptor,
+            variantDigest:
+                "sha256:\(String(repeating: "d", count: 64))",
+            operatingSystem: "linux",
+            architecture: "arm64",
+            providerID: .appleContainerCLI,
+            capabilitySHA256:
+                proofObservationMutationContext.capabilitySHA256
+        )
+        let service = DesiredRuntimeService(
+            identity: proofIdentity,
+            image: resolved,
+            imageLock: lock,
+            ports: [
+                RuntimePortMapping(
+                    hostPort: 18080,
+                    containerPort: 80
+                )
+            ]
+        )
+        let adapter = AppleContainerApplyAdapter(
+            executableResolver: resolvedContainer,
+            processRunner: runner
+        )
+
+        _ = try await adapter.execute(
+            PlannedRuntimeAction(
+                kind: .create,
+                identity: proofIdentity,
+                resourceIdentifier:
+                    proofIdentity.managedResourceIdentifier,
+                isDestructive: false,
+                summary: "create exact digest",
+                desiredService: service
+            ),
+            confirmation: mutationConfirmation(
+                context: proofObservationMutationContext
+            )
+        )
+
+        let create = try XCTUnwrap(
+            runner.calls.first { $0.arguments.first == "create" }
+        )
+        XCTAssertTrue(create.arguments.contains(resolved))
+        XCTAssertFalse(
+            create.arguments.contains("ghcr.io/example/api:1.1.0")
+        )
+    }
+
+    func testAppleContainerApplyAdapterRejectsLockedContentDriftBeforeMutation() async throws {
+        let imageFixture = try fixture(
+            "apple-container-1.1.0-image-list.json"
+        )
+        let runner = RoutingRuntimeProcessRunner { spec in
+            if spec.arguments ==
+                ["image", "list", "--format", "json"] {
+                return RuntimeCommandResult(
+                    spec: spec,
+                    exitStatus: 0,
+                    standardOutput: imageFixture,
+                    standardError: ""
+                )
+            }
+            XCTFail("Content drift must fail before native mutation.")
+            throw RuntimeAdapterError.commandRejected(
+                classification: spec.classification,
+                message: "must not mutate"
+            )
+        }
+        let descriptor =
+            "sha256:\(String(repeating: "c", count: 64))"
+        let resolved = "ghcr.io/example/api@\(descriptor)"
+        let lock = try RuntimeImageDigestLock(
+            requestedReference: "ghcr.io/example/api:1.1.0",
+            resolvedReference: resolved,
+            descriptorDigest: descriptor,
+            variantDigest:
+                "sha256:\(String(repeating: "e", count: 64))",
+            operatingSystem: "linux",
+            architecture: "arm64",
+            providerID: .appleContainerCLI,
+            capabilitySHA256:
+                proofObservationMutationContext.capabilitySHA256
+        )
+        let adapter = AppleContainerApplyAdapter(
+            executableResolver: resolvedContainer,
+            processRunner: runner
+        )
+
+        do {
+            _ = try await adapter.execute(
+                PlannedRuntimeAction(
+                    kind: .create,
+                    identity: proofIdentity,
+                    resourceIdentifier:
+                        proofIdentity.managedResourceIdentifier,
+                    isDestructive: false,
+                    summary: "reject drift",
+                    desiredService: DesiredRuntimeService(
+                        identity: proofIdentity,
+                        image: resolved,
+                        imageLock: lock
+                    )
+                ),
+                confirmation: mutationConfirmation(
+                    context: proofObservationMutationContext
+                )
+            )
+            XCTFail("Expected locked content drift rejection.")
+        } catch {
+            guard case RuntimeAdapterError.commandRejected(
+                classification: .mutating,
+                message: let message
+            ) = error else {
+                return XCTFail("Expected mutating rejection, got \(error).")
+            }
+            XCTAssertTrue(message.contains("no longer matches"))
+        }
+        XCTAssertEqual(runner.calls.count, 1)
     }
 
     func testAppleContainerApplyAdapterRejectsIdentitylessMutationContextBeforeRuntimeAccess() async {

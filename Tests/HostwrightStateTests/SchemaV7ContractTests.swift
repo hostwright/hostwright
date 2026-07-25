@@ -58,7 +58,10 @@ final class SchemaV7ContractTests: XCTestCase {
 
             try store.migrate()
 
-            XCTAssertEqual(try store.schemaVersion(), 7)
+            XCTAssertEqual(
+                try store.schemaVersion(),
+                HostwrightContractVersions.stateSchema
+            )
             XCTAssertEqual(Set(try columns(in: "projects", connection: connection)), Set([
                 "id", "name", "manifest_path", "manifest_hash", "created_at", "updated_at",
                 "resource_uuid", "manifest_version", "mutation_provider", "provider_generation"

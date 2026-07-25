@@ -1,3 +1,4 @@
+import Foundation
 import HostwrightReconciler
 import HostwrightRuntime
 import HostwrightSecrets
@@ -25,20 +26,27 @@ extension ApplyCommandRunner {
         return nil
     }
 
-    func resolveSecretReferences(in service: DesiredRuntimeService) throws -> DesiredRuntimeService {
+    func resolveSecretReferences(
+        in service: DesiredRuntimeService,
+        workload: HostwrightSecretWorkloadScope
+    ) throws -> DesiredRuntimeService {
         guard service.environment.contains(where: { $0.secretReference != nil }) else {
             return service
         }
 
-        let store = environment.secretStore()
+        let resolver = environment.secretResolver()
         let resolvedEnvironment = try service.environment.map { value in
             guard let reference = value.secretReference else {
                 return value
             }
-
             return RuntimeEnvironmentValue(
                 name: value.name,
-                value: try store.readString(reference: reference),
+                value: try resolver.resolve(
+                    reference: reference,
+                    for: workload,
+                    environmentKey: value.name,
+                    at: Date()
+                ).stringValue(),
                 isSensitive: true
             )
         }
@@ -48,6 +56,7 @@ extension ApplyCommandRunner {
             logicalServiceName: service.logicalServiceName,
             replicaIndex: service.replicaIndex,
             image: service.image,
+            imageLock: service.imageLock,
             platformOperatingSystem: service.platformOperatingSystem,
             platformArchitecture: service.platformArchitecture,
             cpuCount: service.cpuCount,

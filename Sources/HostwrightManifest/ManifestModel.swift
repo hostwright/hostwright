@@ -8,6 +8,10 @@ public struct HostwrightManifest: Equatable, Sendable {
     public var version: Int?
     public var project: String?
     public var imagePolicy: HostwrightImagePolicy?
+    public var imageTrust: HostwrightImageTrustPolicy?
+    public var imageSBOM: HostwrightImageSBOMPolicy?
+    public var imageVulnerability: HostwrightImageVulnerabilityPolicy?
+    public var imageProvenance: HostwrightImageProvenancePolicy?
     public var services: [HostwrightService]
 
     public var effectiveVersion: Int {
@@ -19,11 +23,49 @@ public struct HostwrightManifest: Equatable, Sendable {
     }
 
     public init(project: String?, services: [HostwrightService]) {
-        self.init(version: nil, project: project, imagePolicy: nil, services: services)
+        self.init(
+            version: nil,
+            project: project,
+            imagePolicy: nil,
+            imageTrust: nil,
+            imageSBOM: nil,
+            imageVulnerability: nil,
+            imageProvenance: nil,
+            services: services
+        )
     }
 
     public init(version: Int?, project: String?, services: [HostwrightService]) {
-        self.init(version: version, project: project, imagePolicy: nil, services: services)
+        self.init(
+            version: version,
+            project: project,
+            imagePolicy: nil,
+            imageTrust: nil,
+            imageSBOM: nil,
+            imageVulnerability: nil,
+            imageProvenance: nil,
+            services: services
+        )
+    }
+
+    public init(
+        version: Int?,
+        project: String?,
+        imagePolicy: HostwrightImagePolicy?,
+        imageTrust: HostwrightImageTrustPolicy?,
+        imageSBOM: HostwrightImageSBOMPolicy?,
+        imageVulnerability: HostwrightImageVulnerabilityPolicy? = nil,
+        imageProvenance: HostwrightImageProvenancePolicy? = nil,
+        services: [HostwrightService]
+    ) {
+        self.version = version
+        self.project = project
+        self.imagePolicy = imagePolicy
+        self.imageTrust = imageTrust
+        self.imageSBOM = imageSBOM
+        self.imageVulnerability = imageVulnerability
+        self.imageProvenance = imageProvenance
+        self.services = services
     }
 
     public init(
@@ -32,16 +74,280 @@ public struct HostwrightManifest: Equatable, Sendable {
         imagePolicy: HostwrightImagePolicy?,
         services: [HostwrightService]
     ) {
-        self.version = version
-        self.project = project
-        self.imagePolicy = imagePolicy
-        self.services = services
+        self.init(
+            version: version,
+            project: project,
+            imagePolicy: imagePolicy,
+            imageTrust: nil,
+            imageSBOM: nil,
+            imageVulnerability: nil,
+            imageProvenance: nil,
+            services: services
+        )
+    }
+
+    public init(
+        version: Int?,
+        project: String?,
+        imagePolicy: HostwrightImagePolicy?,
+        imageTrust: HostwrightImageTrustPolicy?,
+        services: [HostwrightService]
+    ) {
+        self.init(
+            version: version,
+            project: project,
+            imagePolicy: imagePolicy,
+            imageTrust: imageTrust,
+            imageSBOM: nil,
+            imageVulnerability: nil,
+            imageProvenance: nil,
+            services: services
+        )
     }
 }
 
 public enum HostwrightImagePolicy: String, Equatable, Sendable {
     case allowTags = "allow-tags"
     case requireDigest = "require-digest"
+}
+
+public struct HostwrightImageTrustPolicy: Equatable, Sendable {
+    public static let currentVersion = 1
+
+    public var version: Int
+    public var threshold: Int
+    public var trustedRoot: String?
+    public var authorities: [HostwrightImageTrustAuthority]
+
+    public init(
+        version: Int = Self.currentVersion,
+        threshold: Int,
+        trustedRoot: String? = nil,
+        authorities: [HostwrightImageTrustAuthority]
+    ) {
+        self.version = version
+        self.threshold = threshold
+        self.trustedRoot = trustedRoot
+        self.authorities = authorities
+    }
+}
+
+public enum HostwrightImageTrustAuthorityType: String, Equatable, Sendable {
+    case keyed
+    case keyless
+}
+
+public struct HostwrightImageTrustAuthority: Equatable, Sendable {
+    public var id: String
+    public var type: HostwrightImageTrustAuthorityType
+    public var publicKey: String?
+    public var issuer: String?
+    public var identity: String?
+    public var notBefore: String?
+    public var notAfter: String?
+    public var revokedAt: String?
+
+    public init(
+        id: String,
+        type: HostwrightImageTrustAuthorityType,
+        publicKey: String? = nil,
+        issuer: String? = nil,
+        identity: String? = nil,
+        notBefore: String? = nil,
+        notAfter: String? = nil,
+        revokedAt: String? = nil
+    ) {
+        self.id = id
+        self.type = type
+        self.publicKey = publicKey
+        self.issuer = issuer
+        self.identity = identity
+        self.notBefore = notBefore
+        self.notAfter = notAfter
+        self.revokedAt = revokedAt
+    }
+}
+
+public enum HostwrightImageSBOMRequirement: String, Equatable, Sendable {
+    case optional
+    case required
+}
+
+public enum HostwrightImageSBOMFormat: String, Equatable, Sendable {
+    case spdxJSON = "spdx-json"
+    case cyclonedxJSON = "cyclonedx-json"
+}
+
+public struct HostwrightImageSBOMPolicy: Equatable, Sendable {
+    public static let currentVersion = 1
+
+    public var version: Int
+    public var requirement: HostwrightImageSBOMRequirement
+    public var formats: [HostwrightImageSBOMFormat]
+
+    public init(
+        version: Int = Self.currentVersion,
+        requirement: HostwrightImageSBOMRequirement,
+        formats: [HostwrightImageSBOMFormat]
+    ) {
+        self.version = version
+        self.requirement = requirement
+        self.formats = formats
+    }
+}
+
+public enum HostwrightVulnerabilitySeverity: String, Equatable, Sendable {
+    case low
+    case medium
+    case high
+    case critical
+}
+
+public enum HostwrightVulnerabilityExploitability: String, Equatable, Sendable {
+    case any
+    case knownExploited = "known-exploited"
+}
+
+public enum HostwrightVulnerabilityFixAvailability: String, Equatable, Sendable {
+    case any
+    case fixAvailable = "fix-available"
+}
+
+public enum HostwrightVulnerabilityDataAction: String, Equatable, Sendable {
+    case failOpen = "fail-open"
+    case failClosed = "fail-closed"
+}
+
+public enum HostwrightVulnerabilityExceptionApprovalMode: String, Equatable, Sendable {
+    case required
+    case disabled
+}
+
+public struct HostwrightImageVulnerabilityAllowlistEntry: Equatable, Sendable {
+    public var vulnerabilityID: String
+    public var packagePURL: String?
+    public var reason: String
+    public var expiresAt: String
+
+    public init(
+        vulnerabilityID: String,
+        packagePURL: String? = nil,
+        reason: String,
+        expiresAt: String
+    ) {
+        self.vulnerabilityID = vulnerabilityID
+        self.packagePURL = packagePURL
+        self.reason = reason
+        self.expiresAt = expiresAt
+    }
+}
+
+public struct HostwrightImageVulnerabilityPolicy: Equatable, Sendable {
+    public static let currentVersion = 1
+    public static let maximumMinimumVulnerabilityAgeSeconds = 31_536_000
+    public static let minimumMaximumDatabaseAgeSeconds = 60
+    public static let maximumMaximumDatabaseAgeSeconds = 2_592_000
+    public static let maximumAllowlistEntries = 256
+
+    public var version: Int
+    public var severityThreshold: HostwrightVulnerabilitySeverity
+    public var minimumVulnerabilityAgeSeconds: Int
+    public var exploitability: HostwrightVulnerabilityExploitability
+    public var fixAvailability: HostwrightVulnerabilityFixAvailability
+    public var maximumDatabaseAgeSeconds: Int
+    public var staleAction: HostwrightVulnerabilityDataAction
+    public var unavailableAction: HostwrightVulnerabilityDataAction
+    public var exceptionApproval: HostwrightVulnerabilityExceptionApprovalMode
+    public var allowlist: [HostwrightImageVulnerabilityAllowlistEntry]
+
+    public init(
+        version: Int = Self.currentVersion,
+        severityThreshold: HostwrightVulnerabilitySeverity,
+        minimumVulnerabilityAgeSeconds: Int,
+        exploitability: HostwrightVulnerabilityExploitability,
+        fixAvailability: HostwrightVulnerabilityFixAvailability,
+        maximumDatabaseAgeSeconds: Int,
+        staleAction: HostwrightVulnerabilityDataAction,
+        unavailableAction: HostwrightVulnerabilityDataAction,
+        exceptionApproval: HostwrightVulnerabilityExceptionApprovalMode,
+        allowlist: [HostwrightImageVulnerabilityAllowlistEntry] = []
+    ) {
+        self.version = version
+        self.severityThreshold = severityThreshold
+        self.minimumVulnerabilityAgeSeconds = minimumVulnerabilityAgeSeconds
+        self.exploitability = exploitability
+        self.fixAvailability = fixAvailability
+        self.maximumDatabaseAgeSeconds = maximumDatabaseAgeSeconds
+        self.staleAction = staleAction
+        self.unavailableAction = unavailableAction
+        self.exceptionApproval = exceptionApproval
+        self.allowlist = allowlist
+    }
+}
+
+public enum HostwrightImageProvenanceRequirement: String, Equatable, Sendable {
+    case optional
+    case required
+}
+
+public struct HostwrightImageProvenanceSigner: Equatable, Sendable {
+    public var id: String
+    public var publicKey: String
+    public var notBefore: String?
+    public var notAfter: String?
+    public var revokedAt: String?
+
+    public init(
+        id: String,
+        publicKey: String,
+        notBefore: String? = nil,
+        notAfter: String? = nil,
+        revokedAt: String? = nil
+    ) {
+        self.id = id
+        self.publicKey = publicKey
+        self.notBefore = notBefore
+        self.notAfter = notAfter
+        self.revokedAt = revokedAt
+    }
+}
+
+public struct HostwrightImageProvenancePolicy: Equatable, Sendable {
+    public static let currentVersion = 1
+    public static let maximumBuilderIDs = 16
+    public static let maximumBuildTypes = 16
+    public static let maximumSigners = 8
+    public static let maximumURIUTF8Bytes = 512
+    public static let maximumSignerIDUTF8Bytes = 128
+    public static let maximumPublicKeyUTF8Bytes = 4_096
+    public static let minimumMaximumAgeSeconds = 60
+    public static let maximumMaximumAgeSeconds = 31_536_000
+
+    public var version: Int
+    public var requirement: HostwrightImageProvenanceRequirement
+    public var builderIDs: [String]
+    public var buildTypes: [String]
+    public var signers: [HostwrightImageProvenanceSigner]
+    public var maximumAgeSeconds: Int
+    public var requireReproducible: Bool
+
+    public init(
+        version: Int = Self.currentVersion,
+        requirement: HostwrightImageProvenanceRequirement,
+        builderIDs: [String],
+        buildTypes: [String],
+        signers: [HostwrightImageProvenanceSigner],
+        maximumAgeSeconds: Int,
+        requireReproducible: Bool
+    ) {
+        self.version = version
+        self.requirement = requirement
+        self.builderIDs = builderIDs
+        self.buildTypes = buildTypes
+        self.signers = signers
+        self.maximumAgeSeconds = maximumAgeSeconds
+        self.requireReproducible = requireReproducible
+    }
 }
 
 public struct HostwrightService: Equatable, Sendable {

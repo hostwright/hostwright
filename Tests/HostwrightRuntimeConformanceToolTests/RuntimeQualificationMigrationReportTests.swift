@@ -1,4 +1,5 @@
 import Foundation
+import HostwrightCore
 import HostwrightRuntime
 import XCTest
 @testable import HostwrightRuntimeConformanceTool
@@ -172,7 +173,7 @@ final class RuntimeQualificationMigrationReportTests: XCTestCase {
             checkpointRecovered: true,
             forwardCheckpoint: "sourceRetired",
             reverseCheckpoint: "sourceRetired",
-            stateSchemaVersion: 7,
+            stateSchemaVersion: HostwrightContractVersions.stateSchema,
             sourceInventoryBeforeSHA256: String(repeating: "c", count: 64),
             sourceInventoryAfterSHA256: String(repeating: "c", count: 64),
             targetInventoryBeforeSHA256: String(repeating: "d", count: 64),

@@ -40,7 +40,10 @@ final class LifecycleProbeCheckpointStoreTests: XCTestCase {
         }
 
         let reopened = SQLiteStateStore(path: fixture.databaseURL.path)
-        XCTAssertEqual(try reopened.schemaVersion(), 7)
+        XCTAssertEqual(
+            try reopened.schemaVersion(),
+            HostwrightContractVersions.stateSchema
+        )
         let group = try XCTUnwrap(
             reopened.operationGroups.load(id: fixture.groupID)
         )
@@ -448,7 +451,7 @@ private struct ProbeRestartFixture {
         }
         let store = SQLiteStateStore(path: databaseURL.path)
         try store.migrate()
-        guard try store.schemaVersion() == 7 else {
+        guard try store.schemaVersion() == HostwrightContractVersions.stateSchema else {
             throw ProbeRestartError.invalidFixture
         }
         let acquired = try store.operationGroups.acquire(

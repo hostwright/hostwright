@@ -83,7 +83,10 @@ final class RuntimeQualificationMigrationDriverTests: XCTestCase {
             image: "docker.io/library/python:alpine",
             parentDirectory: parent
         )
-        XCTAssertEqual(try foundation.store.schemaVersion(), 7)
+        XCTAssertEqual(
+            try foundation.store.schemaVersion(),
+            HostwrightContractVersions.stateSchema
+        )
         let project = try foundation.store.desiredStates.loadProject(id: foundation.projectID)
         let desired = try XCTUnwrap(
             try foundation.store.desiredStates.loadDesiredServices(
@@ -130,7 +133,7 @@ final class RuntimeQualificationMigrationDriverTests: XCTestCase {
             checkpointRecovered: true,
             forwardCheckpoint: "sourceRetired",
             reverseCheckpoint: "sourceRetired",
-            stateSchemaVersion: 7,
+            stateSchemaVersion: HostwrightContractVersions.stateSchema,
             sourceInventoryBeforeSHA256: digest,
             sourceInventoryAfterSHA256: digest,
             targetInventoryBeforeSHA256: digest,

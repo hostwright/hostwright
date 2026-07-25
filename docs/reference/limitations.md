@@ -6,7 +6,7 @@ Phase 02 qualification is complete. The immutable unsupported `v0.0.2-dev.11` an
 
 Phase 03 qualification is complete for Apple `container` 1.0.0 and 1.1.0 plus the exact Containerization 0.35.0 helper. The two providers share capability negotiation, deterministic observation, normalized outcomes, provider fencing/migration, and restart/upgrade recovery. Containerization is not linked into the main process.
 
-Phase 04 qualification is complete for the single-host capability subset each provider advertises. Strict Manifest v2, dependency/replica reconciliation, `up/down/run/start/stop/restart/rm/update`, typed probes, bounded interactive operations, rolling/recreate updates, verified rollback, and resumable recovery use one schema-v7 saga. Images must already exist locally. Image pull/build/load, named volumes and snapshots, custom networks/DNS/ingress, unattended daemon mutation, and later-phase behavior remain unavailable. This evidence does not make Hostwright GA or production ready.
+Phase 04 qualification is complete for the single-host capability subset each provider advertises. Strict Manifest v2, dependency/replica reconciliation, `up/down/run/start/stop/restart/rm/update`, typed probes, bounded interactive operations, rolling/recreate updates, verified rollback, and resumable recovery use the durable state saga, now at schema v14. Phase 05 image commands provide Apple CLI inspection, pull, push, tag, load, save, build, exact owned delete, and exact owned-unreferenced prune; the Containerization helper advertises image mutation as unavailable before effects. Lifecycle review resolves locally available image references to provider/platform-bound descriptor and variant locks, persists desired and observed evidence, and refuses tag or capability drift. OCI referrer discovery, graph verification, cache, copy/publication, fenced retention, offline reads, exact owned cleanup, exact offline Sigstore bundle v0.3 signature trust, bounded SPDX/CycloneDX image-SBOM generation and binding, exact signed vulnerability-report policy, and DSSE-wrapped in-toto/SLSA build-provenance generation and verification with lifecycle/recovery enforcement are available. Bounded provider-scoped cache accounting, operator and policy pins, cancellation-safe shared/exclusive leases, deterministic pressure plans, exact confirmation-bound owned-content pruning, and recovery accounting are also available. Hostwright does not run a vulnerability scanner or database updater, build images as part of provenance generation, establish a remote builder trust service, or perform native/global/unmanaged garbage collection. This evidence does not make Hostwright GA or production ready.
 
 Permanent exclusions are limited to private Apple APIs, unsupported Intel/old-macOS emulation, unsafe writes without cluster quorum, silent telemetry, unauthenticated public exposure, and destructive garbage collection of unmanaged resources. Homebrew-core and direct guest accelerator constraints have implemented fallback tracks.
 
@@ -36,7 +36,7 @@ Hostwright is not production ready.
 - `hostwright validate` for a restricted Hostwright manifest subset.
 - Manifest `version: 1` support with versionless alpha manifests treated as legacy version 1 input.
 - Manifest `imagePolicy: require-digest` support for local `@sha256:<64 lowercase hex characters>` image reference validation before planning or mutation.
-- Manifest `secretEnv` support for local `keychain://<service>/<account>` secret references, with a test-only in-memory store, an opt-in noninteractive read-only macOS Keychain backend, live exact-cleanup tests, and no live Keychain default.
+- Manifest `secretEnv` support for exact-scoped Keychain, guarded environment-file, guarded local-file, explicitly registered external, and explicitly registered plugin references. Production Keychain CRUD remains limited to exact Hostwright-owned items; unregistered providers, stale results, unsafe files, and grant mismatches fail before runtime mutation.
 - Fail-closed unsupported-field, unsupported-version, unsupported DNS/discovery/networking-field, unsafe env-key, and unsafe host-root or parent-traversal mount-source validation for untrusted manifests.
 - `hostwright import-stack <path>` conversion for a narrow safe stack-file subset, printing converted `hostwright.yaml` text without writing files, observing runtime, touching state, or claiming Compose compatibility.
 - `hostwright plan` as non-mutating manifest-level dry-run output.
@@ -46,7 +46,7 @@ Hostwright is not production ready.
 - Local extension declaration policy decisions plus `hostwright extension check` for one explicit reviewed-local, read-only, digest-bound, bounded version-1 process handshake with strict response binding and exact private-stage cleanup.
 - Explicit local team profiles, strict-only digest/review requirements, exact mutation approval bindings, and redacted append-only local audit records.
 - Local advisory scheduler reports for declared memory requests, workload class, port/policy blockers, fairness scoring, overcommit blockers, accelerator blockers, and remote-placement blockers. Reports are in-memory recommendations only and are not CLI placement commands.
-- Local control-surface requirements plus `hostwright-control`, a bounded one-request JSON process for plan, status, events, recovery, and doctor with launch-fixed explicit paths and no mutation operation. GUI/design implementation remains future work.
+- Local control-surface requirements plus `hostwright-control`, a bounded one-request JSON process for existing command contracts and strict image lifecycle parity with launch-fixed paths. GUI/design implementation remains future work.
 - `hostwright status [path] --state-db <path>` with live RuntimeAdapter observation and event/snapshot persistence.
 - `hostwright logs <service>` with bounded tail output through RuntimeAdapter and redaction.
 - `hostwright events --state-db <path>` for persisted event ledger records, with project/type/service/severity/limit/sort filtering.
@@ -110,8 +110,8 @@ Hostwright is not production ready.
 - General runtime mutation.
 - Automatic manifest upgrade, downgrade, or runtime compatibility conversion.
 - General YAML parsing, broad stack-file import, or full orchestrator schema compatibility.
-- Default CLI activation of live macOS Keychain access; production Keychain writes/deletes; Keychain prompts; Keychain access groups; synchronizable Keychain items; registry credential storage; credential sync; credential upload; or cloud identity integration.
-- Registry image resolution, tag-to-digest lookup, automatic image pulls, signature verification, OCI referrer inspection, SBOM generation/validation, vulnerability scanning, dependency provenance, or source-build integrity automation.
+- Keychain access groups, synchronizable Keychain items, registry credential sync/upload, or cloud identity integration. Hostwright registry credentials are local, this-device-only Keychain items; guarded Docker/OCI lookup is read-only.
+- Vulnerability scanner/database execution, remote-builder attestation, or source-build integrity automation. Gate 10 build-provenance verification does not imply any of those later capabilities.
 - Runtime density measurement, VM-per-container overhead measurement, sustained battery-efficiency testing, sustained thermal testing, automatic sleep/wake proofing, or production workload-capacity benchmarking.
 - Hosted-CI Apple container benchmarks, benchmark number publication, performance comparison claims, production capacity claims, or hosted performance monitoring.
 - Production capacity planning, automatic placement decisions, daemon-enforced scheduling, or resource reservations.
@@ -124,13 +124,13 @@ Hostwright is not production ready.
 - Broad non-empty Apple container image list parsing beyond the verified object shape.
 - JSON output for `validate`, `apply`, `logs`, and `cleanup` success paths.
 - Shell completion installation or shell profile mutation.
-- User-facing Apple container stop/restart commands, remove, broad cleanup, image deletion, volume deletion, log follow, attach, exec, or detailed inspect operations.
-- Automatic rollback or inverse runtime mutation after partial failure.
+- User-facing broad Apple container cleanup, volume deletion, or unmanaged deletion.
+- Automatic rollback outside the exact lifecycle and image effects whose inverse ownership and identity are durably proven.
 - Runtime mutation beyond create-missing-service, managed start, managed restart, and exact cleanup-eligible container delete.
 - Container-exec or interactive health checks.
 - Aggressive restart loops or daemon-enforced restart mutation.
 - Background daemon service, launch agent installation, keepalive, or unattended runtime mutation.
-- Broad cleanup, teardown, garbage collection, image deletion, volume deletion, or unmanaged deletion.
+- Broad cleanup, teardown, destructive garbage collection, volume deletion, or unmanaged image/container deletion.
 - Hidden global state writes.
 - GA durability SLO, generalized file-pressure/disk-fault qualification, and long-soak evidence; authoritative-row or arbitrary-page salvage remains forbidden.
 - Remote policy service, team policy workflow, central policy distribution, silent policy bypass, policy-driven runtime mutation, or automatic policy remediation.
@@ -189,7 +189,7 @@ External orchestration compatibility remains research-only. Phase 29 rejects cur
 
 Multi-host platform work remains research-only. Phase 30 keeps current core single-host and rejects current-core remote host agents, membership service, peer discovery, state replication, remote mutation, remote placement, cloud control plane, and scheduler API behavior because those contracts require host identity, transport trust, state authority, quorum or other replication semantics, failure recovery, audit, and scheduler policy outside the current local state model. Any prototype requires a separate maintainer-approved issue.
 
-Manifest image trust is limited to local reference policy. `imagePolicy: require-digest` rejects tag-only service images unless they include a `sha256` digest. Hostwright does not query registries, resolve tags, verify signatures, inspect SBOMs, scan vulnerabilities, or prove provenance.
+`imagePolicy: require-digest` rejects tag-only service images unless they include a `sha256` digest. Optional Manifest v2 `imageTrust` verifies exact cached Sigstore bundle v0.3 signatures offline and gates lifecycle mutation. Optional Manifest v2 `imageSBOM` generates, ingests, queries, exports, and enforces exact digest-bound SPDX/CycloneDX evidence from verified OCI referrers before lifecycle mutation. Optional Manifest v2 `imageVulnerability` evaluates exact signed reports, and `imageProvenance` generates or verifies exact DSSE-wrapped in-toto/SLSA evidence from a supplied build record. Hostwright does not implicitly query registries or resolve tags during lifecycle execution, run a vulnerability scanner, perform a build during provenance generation, or infer facts absent from the supplied signed evidence.
 
 ## Runtime Truth
 
@@ -199,7 +199,7 @@ The runtime parser accepts the fixture-defined `hostwright.apple-container.obser
 
 Apply is not general lifecycle management. It uses `container create` only after explicit plan confirmation, idempotency checks, operation intent persistence, local image confirmation, and safe-subset validation. Created port bindings are emitted as explicit `127.0.0.1:host:container` publishes. It uses `container start <id>` only for one observed Hostwright-owned stopped/created/exited service when restart policy allows a managed start. It uses an internal `container stop <id>` then `container start <id>` sequence only for one exact Hostwright-owned running service when restart policy allows managed restart, the explicit state database has a fresh unhealthy health result for the service, and recovery records are written. Cleanup uses `container delete <id>` only after dry-run token confirmation and ownership/live-state eligibility checks.
 
-Recovery is diagnostic and manual. `hostwright recovery` reads operation groups and steps from the explicit state database and reports whether an apply operation completed, failed, or was interrupted. It does not observe Apple container, retry mutation, stop/start/delete resources, or roll back changes automatically.
+Recovery inspection is diagnostic. Confirmed `hostwright recovery resume|rollback` executes only the persisted operation type's fenced driver. For image lifecycle groups it rechecks the provider capability digest, exact intent plan, current immutable image digests, ownership, and live references before committing an observed creation, resuming exact removal/push, or deleting only persisted created references/output. Ambiguous archive completion, partial creation, capability drift, or lost ownership remains in safe hold.
 
 Diagnostics are local and manual. `hostwright diagnostics` reads existing state rows from the explicit state database and writes a redacted JSON bundle to an explicit file path. It does not observe Apple container, run health checks, create or migrate a missing database, overwrite existing bundle files, upload telemetry, or prove service reachability.
 
@@ -209,7 +209,7 @@ Diagnostics are local and manual. `hostwright diagnostics` reads existing state 
 
 Policy evaluation is local and deterministic. Team workflow command wiring may persist bound audit records through explicit `HostwrightState` paths, but policy code itself does not execute Apple container commands, write SQLite, contact registries, resolve DNS, configure tunnels, distribute team policy, or weaken required gates. `HostwrightExtensions` is separate from policy and can run only the fixed reviewed-local handshake; it receives no RuntimeAdapter, SQLite, state, secret, networking, accelerator, or mutation authority.
 
-`hostwright-control` is also separate from runtime and state modules. It validates one strict request, fixes all file paths at process launch, and delegates only to existing Hostwright CLI JSON contracts. Its operations do not mutate runtime. State-backed status can still observe runtime and perform the existing explicit-database schema migration, snapshot, and audit writes; events and recovery read an existing explicit database. The process opens no listener and exposes no apply, cleanup, logs, diagnostics export, benchmark, extension execution, arbitrary command, or default path.
+`hostwright-control` validates one strict request, fixes configuration paths at process launch, and delegates only to existing Hostwright CLI JSON contracts. Its `image` operation has one-shot parity for all nine strict image contracts and uses the same provider, durable coordinator, ownership ledger, recovery, and exact cleanup boundary; it is not a generic mutation endpoint. State-backed status can still observe runtime and perform compatible schema migration, snapshot, and audit writes; events and recovery read existing state. The process opens no listener and exposes no apply compatibility, cleanup, logs, diagnostics export, benchmark, extension execution, arbitrary command, or request-selected state path.
 
 Advisory scheduling is local and diagnostic. It produces deterministic in-memory recommendations, scores, reason codes, and remediation text from declared inputs and existing policy decisions, but it does not execute Apple container commands, write state, reserve capacity, mutate manifests, update runtime placement, expose a scheduler API, place workloads remotely, or schedule accelerators.
 

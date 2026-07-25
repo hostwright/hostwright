@@ -428,17 +428,19 @@ final class StateMaintenanceTests: XCTestCase {
             try writer.execute("ROLLBACK")
             XCTAssertEqual(try backupEntries(maintenance.paths.backupDirectory), [])
 
+            let futureVersion = MigrationRunner.latestSchemaVersion + 1
             try writer.run(
                 """
                 INSERT INTO schema_migrations (version, description, checksum, applied_at)
-                VALUES (8, 'future schema', 'future-checksum', '2026-07-13T12:00:00Z')
-                """
+                VALUES (?, 'future schema', 'future-checksum', '2026-07-13T12:00:00Z')
+                """,
+                bindings: [.int(futureVersion)]
             )
             XCTAssertThrowsError(try maintenance.createBackup()) { error in
                 guard case .incompatibleSchema(let foundVersion, let latestSupported, _) = error as? StateStoreError else {
                     return XCTFail("Expected incompatibleSchema, got \(error)")
                 }
-                XCTAssertEqual(foundVersion, 8)
+                XCTAssertEqual(foundVersion, futureVersion)
                 XCTAssertEqual(latestSupported, MigrationRunner.latestSchemaVersion)
             }
             XCTAssertEqual(try backupEntries(maintenance.paths.backupDirectory), [])

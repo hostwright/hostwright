@@ -27,6 +27,26 @@ Stable error codes are used for CLI and manifest diagnostics.
 | `HW-BENCH-003` | Hardware benchmark command, version, identity, ownership, report, or cleanup evidence failed. | Implemented with exit code 72 and a written failed report when possible |
 | `HW-DIST-001` | Distribution arguments, source binding, artifact verification, command, ownership, installed lifecycle, or recovery failed. | Implemented by `hostwright-dist`; exit categories 64, 65, 69, 71, or 72 identify the failure class, including downgrade/version refusal, ownership refusal, and durable recovery failure |
 | `HW-DIST-002` | Unsigned artifact assembly or temp-prefix lifecycle succeeded, but required distribution trust stages remain blocked. | Implemented with exit code 69 and blocked `distribution-artifact` evidence |
+| `HW-SECRET-001` | Secret reference, value, or managed metadata is invalid. | Implemented before unsafe mutation |
+| `HW-SECRET-002` | The selected secret backend is unavailable or cannot interact noninteractively. | Implemented with exit code 69 |
+| `HW-SECRET-003` | The exact managed secret item does not exist. | Implemented with exit code 66 |
+| `HW-SECRET-004` | A duplicate, unmanaged item, replacement race, or active same-secret mutation conflicts. | Implemented with exit code 72 |
+| `HW-SECRET-005` | Keychain denied the requested operation. | Implemented with exit code 71 |
+| `HW-SECRET-006` | The secret operation was cancelled before a safe terminal result. | Implemented with exit code 72 |
+| `HW-SECRET-007` | The Keychain effect or durable checkpoint is partial or ambiguous. | Implemented with exit code 72 and recovery guidance |
+| `HW-REGISTRY-001` | Registry endpoint, scope, challenge, token, credential configuration, or response is invalid. | Implemented with exit code 65 |
+| `HW-REGISTRY-002` | No exact registry credential or required credential helper is available. | Implemented with exit code 69 |
+| `HW-REGISTRY-003` | The registry or Keychain denied authentication. | Implemented with exit code 71 |
+| `HW-REGISTRY-004` | Registry TLS transport, token service, or credential helper is unavailable. | Implemented with exit code 69 |
+| `HW-REGISTRY-005` | A challenge or token denied or attempted to expand the requested registry scope. | Implemented with exit code 71 |
+| `HW-REGISTRY-006` | Registry authentication or credential lookup was cancelled. | Implemented with exit code 72 |
+| `HW-REGISTRY-007` | Registry credential mutation or its durable checkpoint has a partial or ambiguous effect. | Implemented with exit code 72 |
+| `HW-IMAGE-001` | Image request, reference, path, platform, progress, or structured provider result is invalid. | Implemented before unsafe mutation |
+| `HW-IMAGE-002` | The selected provider or image operation is unavailable. | Implemented with exit code 69 |
+| `HW-IMAGE-003` | A target collision, ownership mismatch, digest drift, live reference, or active image intent conflicts. | Implemented with exit code 72 |
+| `HW-IMAGE-004` | Image ownership, filesystem identity, or destructive-operation policy denied the operation. | Implemented with exit code 71 |
+| `HW-IMAGE-005` | Image execution was cancelled and exact compensation was attempted. | Implemented with exit code 72 |
+| `HW-IMAGE-006` | An image provider or durable checkpoint has a partial or ambiguous effect requiring recovery. | Implemented with exit code 72 |
 
 ## Process Exit Codes
 

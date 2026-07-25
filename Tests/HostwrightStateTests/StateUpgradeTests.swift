@@ -1,9 +1,165 @@
 import Foundation
 import Synchronization
 import XCTest
+@testable import HostwrightCore
 @testable import HostwrightState
 
 final class StateUpgradeTests: XCTestCase {
+    func testSchemaV13MigratesAdditivelyToV14ContentCacheState()
+        throws
+    {
+        try withTemporaryStore(throughVersion: 13) { store, _ in
+            try store.withConnection { connection in
+                try connection.run(
+                    """
+                    INSERT INTO oci_referrer_cache_objects (
+                        digest, media_type, size_bytes, object_kind,
+                        payload_base64, payload_sha256, children_json,
+                        created_at, last_accessed_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    bindings: [
+                        .text(
+                            "sha256:6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d"
+                        ),
+                        .text("application/octet-stream"),
+                        .int(1), .text("blob"),
+                        .text(Data([0]).base64EncodedString()),
+                        .text(
+                            "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d"
+                        ),
+                        .text("[]"),
+                        .text("2026-07-25T12:00:00Z"),
+                        .text("2026-07-25T12:01:00Z")
+                    ]
+                )
+            }
+
+            try store.migrate()
+
+            XCTAssertEqual(
+                try store.schemaVersion(),
+                HostwrightContractVersions.stateSchema
+            )
+            XCTAssertEqual(
+                try store.contentCache.listContent(),
+                [
+                    ContentCacheRecord(
+                        providerScope: "oci-referrer-cache",
+                        digest:
+                            "sha256:6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+                        kind: .ociCacheObject,
+                        sizeBytes: 1,
+                        createdAt: "2026-07-25T12:00:00Z",
+                        observedAt: "2026-07-25T12:01:00Z",
+                        lastUsedAt: "2026-07-25T12:01:00Z"
+                    )
+                ]
+            )
+            let report = StateIntegrityService(store: store).inspect()
+            XCTAssertNotEqual(
+                report.health,
+                .unrecoverable,
+                String(describing: report.checks)
+            )
+        }
+    }
+
+    func testSchemaV10MigratesToV11ImageSBOMStateWithoutGaps()
+        throws
+    {
+        try withTemporaryStore(throughVersion: 10) { store, _ in
+            XCTAssertEqual(try store.schemaVersion(), 10)
+
+            try store.migrate()
+
+            XCTAssertEqual(
+                try store.schemaVersion(),
+                HostwrightContractVersions.stateSchema
+            )
+            let evidence = try store.withConnection(
+                createIfNeeded: false,
+                readOnly: true
+            ) { connection in
+                let versions = try connection.query(
+                    """
+                    SELECT version
+                    FROM schema_migrations
+                    ORDER BY version
+                    """
+                ).compactMap { $0.first ?? nil }.compactMap(Int.init)
+                let tables = Set(
+                    try connection.query(
+                        """
+                        SELECT name
+                        FROM sqlite_master
+                        WHERE type = 'table'
+                          AND name LIKE 'image_sbom%'
+                        ORDER BY name
+                        """
+                    ).compactMap { $0.first ?? nil }
+                )
+                return (versions, tables)
+            }
+            XCTAssertEqual(
+                evidence.0,
+                Array(1...HostwrightContractVersions.stateSchema)
+            )
+            XCTAssertEqual(evidence.1, Set(["image_sbom_records"]))
+        }
+    }
+
+    func testSchemaV8MigratesThroughV11ReferrerStateWithoutGaps()
+        throws
+    {
+        try withTemporaryStore(throughVersion: 8) { store, _ in
+            XCTAssertEqual(try store.schemaVersion(), 8)
+
+            try store.migrate()
+
+            XCTAssertEqual(
+                try store.schemaVersion(),
+                HostwrightContractVersions.stateSchema
+            )
+            let evidence = try store.withConnection(
+                createIfNeeded: false,
+                readOnly: true
+            ) { connection in
+                let versions = try connection.query(
+                    """
+                    SELECT version
+                    FROM schema_migrations
+                    ORDER BY version
+                    """
+                ).compactMap { $0.first ?? nil }.compactMap(Int.init)
+                let tables = Set(
+                    try connection.query(
+                        """
+                        SELECT name
+                        FROM sqlite_master
+                        WHERE type = 'table'
+                          AND name LIKE 'oci_referrer%'
+                        ORDER BY name
+                        """
+                    ).compactMap { $0.first ?? nil }
+                )
+                return (versions, tables)
+            }
+            XCTAssertEqual(
+                evidence.0,
+                Array(1...HostwrightContractVersions.stateSchema)
+            )
+            XCTAssertEqual(evidence.1, Set([
+                "oci_referrer_cache_objects",
+                "oci_referrer_discoveries",
+                "oci_referrer_graph_objects",
+                "oci_referrer_publications",
+                "oci_referrer_retention_leases",
+                "oci_referrers"
+            ]))
+        }
+    }
+
     func testExclusiveLifecycleFenceRejectsConcurrentWriterAndAllowsNestedStateWork() throws {
         try withTemporaryStore(throughVersion: MigrationRunner.latestSchemaVersion) { store, _ in
             let finished = expectation(description: "concurrent state writer refused")

@@ -657,6 +657,131 @@ final class ContainerizationHelperClientTests: XCTestCase {
         )
     }
 
+    func testRuntimeAdapterBindsHelperCreateToExactDigestLock() async throws {
+        let fixture = try ClientFixture()
+        let helper = ScriptedHelper(snapshot: snapshot())
+        let client = directClient(fixture: fixture, helper: helper)
+        let adapter = AppleContainerizationRuntimeAdapter(client: client)
+        let negotiated = try await adapter.capabilitySnapshot()
+        let identity = RuntimeServiceIdentity(
+            projectName: "demo",
+            serviceName: "api"
+        )
+        let context = mutationContext(digest: negotiated.canonicalSHA256)
+        let descriptor =
+            "sha256:\(String(repeating: "a", count: 64))"
+        let resolved = "example.local/demo@\(descriptor)"
+        let lock = try RuntimeImageDigestLock(
+            requestedReference: "example.local/demo:latest",
+            resolvedReference: resolved,
+            descriptorDigest: descriptor,
+            variantDigest:
+                "sha256:\(String(repeating: "b", count: 64))",
+            operatingSystem: "linux",
+            architecture: "arm64",
+            providerID: .appleContainerization,
+            capabilitySHA256: negotiated.canonicalSHA256
+        )
+        let service = DesiredRuntimeService(
+            identity: identity,
+            image: resolved,
+            imageLock: lock,
+            command: ["/bin/demo"]
+        )
+
+        _ = try await adapter.execute(
+            PlannedRuntimeAction(
+                kind: .create,
+                identity: identity,
+                resourceIdentifier: identity.managedResourceIdentifier,
+                isDestructive: false,
+                summary: "create locked",
+                desiredService: service
+            ),
+            confirmation: RuntimeMutationConfirmation(
+                confirmed: true,
+                reason: "test",
+                planHash: String(repeating: "9", count: 64),
+                context: context
+            )
+        )
+
+        let createPayload = await helper.lastCreatePayload()
+        let operations = await helper.operations()
+        XCTAssertEqual(createPayload?.image.reference, resolved)
+        XCTAssertEqual(
+            Array(operations.suffix(2)),
+            [.localImageEvidence, .create]
+        )
+    }
+
+    func testRuntimeAdapterRejectsHelperDigestLockDriftBeforeCreate() async throws {
+        let fixture = try ClientFixture()
+        let helper = ScriptedHelper(snapshot: snapshot())
+        let client = directClient(fixture: fixture, helper: helper)
+        let adapter = AppleContainerizationRuntimeAdapter(client: client)
+        let negotiated = try await adapter.capabilitySnapshot()
+        let identity = RuntimeServiceIdentity(
+            projectName: "demo",
+            serviceName: "api"
+        )
+        let descriptor =
+            "sha256:\(String(repeating: "a", count: 64))"
+        let resolved = "example.local/demo@\(descriptor)"
+        let lock = try RuntimeImageDigestLock(
+            requestedReference: "example.local/demo:latest",
+            resolvedReference: resolved,
+            descriptorDigest: descriptor,
+            variantDigest:
+                "sha256:\(String(repeating: "c", count: 64))",
+            operatingSystem: "linux",
+            architecture: "arm64",
+            providerID: .appleContainerization,
+            capabilitySHA256: negotiated.canonicalSHA256
+        )
+
+        await XCTAssertThrowsErrorAsync(
+            try await adapter.execute(
+                PlannedRuntimeAction(
+                    kind: .create,
+                    identity: identity,
+                    resourceIdentifier:
+                        identity.managedResourceIdentifier,
+                    isDestructive: false,
+                    summary: "reject drift",
+                    desiredService: DesiredRuntimeService(
+                        identity: identity,
+                        image: resolved,
+                        imageLock: lock
+                    )
+                ),
+                confirmation: RuntimeMutationConfirmation(
+                    confirmed: true,
+                    reason: "test",
+                    planHash: String(repeating: "9", count: 64),
+                    context: mutationContext(
+                        digest: negotiated.canonicalSHA256
+                    )
+                )
+            )
+        ) { error in
+            guard case RuntimeAdapterError.commandRejected(
+                classification: .mutating,
+                message: let message
+            ) = error else {
+                return XCTFail("Expected mutating rejection, got \(error).")
+            }
+            XCTAssertTrue(message.contains("no longer matches"))
+        }
+        let operations = await helper.operations()
+        let createPayload = await helper.lastCreatePayload()
+        XCTAssertEqual(
+            operations,
+            [.negotiate, .localImageEvidence]
+        )
+        XCTAssertNil(createPayload)
+    }
+
     private var inertLauncher: ContainerizationHelperProcessLauncher {
         ContainerizationHelperProcessLauncher { _ in
             ContainerizationHelperProcessLease(

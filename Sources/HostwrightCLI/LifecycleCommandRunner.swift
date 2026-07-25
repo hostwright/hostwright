@@ -257,6 +257,238 @@ public protocol LifecycleCommandDriving: Sendable {
     ) throws -> LifecycleSagaExecutionResult
 }
 
+enum LifecycleImageLockBinder {
+    static func bind(
+        preparation: LifecycleCommandPreparation,
+        initialCompiled: LifecycleCompiledCommand,
+        options: LifecycleCLIOptions,
+        resolve: (
+            LifecycleLocalImageRequirement,
+            LifecycleCommandPreparation
+        ) throws -> RuntimeLocalImageEvidence
+    ) throws -> LifecycleCommandPreparation {
+        let targetIdentities: Set<RuntimeServiceIdentity>
+        if options.command == .update {
+            let selected = Set(options.serviceNames)
+            targetIdentities = Set(
+                preparation.desiredState.services.compactMap { service in
+                    selected.isEmpty ||
+                        selected.contains(service.logicalServiceName)
+                        ? service.identity
+                        : nil
+                }
+            )
+        } else {
+            let createKeys = Set(
+                initialCompiled.plan.nodes.compactMap {
+                    $0.action == .create ? $0.key : nil
+                }
+            )
+            targetIdentities = Set(
+                initialCompiled.desiredServicesByNodeKey.compactMap {
+                    createKeys.contains($0.key) ? $0.value.identity : nil
+                }
+            )
+        }
+        guard !targetIdentities.isEmpty else {
+            return preparation
+        }
+
+        struct RequirementKey: Hashable {
+            let reference: String
+            let operatingSystem: String
+            let architecture: String
+        }
+        var locks: [RequirementKey: RuntimeImageDigestLock] = [:]
+        func lockedServices(
+            _ source: [DesiredRuntimeService],
+            identities: Set<RuntimeServiceIdentity>,
+            requirePinnedLegacyReference: Bool
+        ) throws -> [DesiredRuntimeService] {
+            var services: [DesiredRuntimeService] = []
+            for service in source {
+                guard identities.contains(service.identity) else {
+                    services.append(service)
+                    continue
+                }
+
+                if let existingLock = service.imageLock {
+                    let key = RequirementKey(
+                        reference: existingLock.resolvedReference,
+                        operatingSystem: service.platformOperatingSystem,
+                        architecture: service.platformArchitecture
+                    )
+                    do {
+                        guard service.image == existingLock.resolvedReference else {
+                            throw RuntimeImageDigestLockError.evidenceMismatch
+                        }
+                        if let verified = locks[key] {
+                            guard verified == existingLock else {
+                                throw RuntimeImageDigestLockError.evidenceMismatch
+                            }
+                        } else {
+                            let evidence = try resolve(
+                                LifecycleLocalImageRequirement(
+                                    reference: existingLock.resolvedReference,
+                                    operatingSystem:
+                                        service.platformOperatingSystem,
+                                    architecture:
+                                        service.platformArchitecture
+                                ),
+                                preparation
+                            )
+                            try existingLock.verify(
+                                evidence,
+                                providerID: preparation.providerID,
+                                capabilitySHA256:
+                                    preparation.capabilitySHA256
+                            )
+                            locks[key] = existingLock
+                        }
+                    } catch {
+                        throw LifecycleCommandRunnerError
+                            .invalidLocalImageEvidence(
+                                existingLock.resolvedReference
+                            )
+                    }
+                    services.append(copy(service, lock: existingLock))
+                    continue
+                }
+
+                let requestedReference = service.image
+                if requirePinnedLegacyReference,
+                   requestedReference.range(
+                    of: "@sha256:[a-f0-9]{64}$",
+                    options: .regularExpression
+                   ) == nil {
+                    throw LifecycleCommandRunnerError
+                        .invalidLocalImageEvidence(requestedReference)
+                }
+                let key = RequirementKey(
+                    reference: requestedReference,
+                    operatingSystem: service.platformOperatingSystem,
+                    architecture: service.platformArchitecture
+                )
+                let lock: RuntimeImageDigestLock
+                if let existing = locks[key] {
+                    lock = existing
+                } else {
+                    let requirement = LifecycleLocalImageRequirement(
+                        reference: requestedReference,
+                        operatingSystem: service.platformOperatingSystem,
+                        architecture: service.platformArchitecture
+                    )
+                    let evidence: RuntimeLocalImageEvidence
+                    do {
+                        evidence = try resolve(requirement, preparation)
+                        guard evidence.reference == requestedReference,
+                              evidence.operatingSystem ==
+                                service.platformOperatingSystem,
+                              evidence.architecture ==
+                                service.platformArchitecture else {
+                            throw RuntimeImageDigestLockError.evidenceMismatch
+                        }
+                        lock = try RuntimeImageDigestLock.resolve(
+                            requestedReference: requestedReference,
+                            evidence: evidence,
+                            providerID: preparation.providerID,
+                            capabilitySHA256: preparation.capabilitySHA256
+                        )
+                    } catch {
+                        throw LifecycleCommandRunnerError
+                            .invalidLocalImageEvidence(requestedReference)
+                    }
+                    locks[key] = lock
+                }
+                services.append(copy(service, lock: lock))
+            }
+            return services
+        }
+        let services = try lockedServices(
+            preparation.desiredState.services,
+            identities: targetIdentities,
+            requirePinnedLegacyReference: false
+        )
+        let previousDesiredState: DesiredRuntimeState?
+        if let previous = preparation.previousDesiredState {
+            let previousServices = try lockedServices(
+                previous.services,
+                identities: targetIdentities,
+                requirePinnedLegacyReference: true
+            )
+            previousDesiredState = DesiredRuntimeState(
+                projectName: previous.projectName,
+                services: previousServices,
+                ownedResourceHints: previous.ownedResourceHints
+            )
+        } else {
+            previousDesiredState = nil
+        }
+
+        return LifecycleCommandPreparation(
+            manifestSHA256: preparation.manifestSHA256,
+            manifestBaseDirectory: preparation.manifestBaseDirectory,
+            mappingIssues: preparation.mappingIssues,
+            desiredState: DesiredRuntimeState(
+                projectName: preparation.desiredState.projectName,
+                services: services,
+                ownedResourceHints:
+                    preparation.desiredState.ownedResourceHints
+            ),
+            previousDesiredState: previousDesiredState,
+            observedState: preparation.observedState,
+            observationSHA256: preparation.observationSHA256,
+            projectID: preparation.projectID,
+            projectResourceUUID: preparation.projectResourceUUID,
+            projectGeneration: preparation.projectGeneration,
+            providerID: preparation.providerID,
+            providerGeneration: preparation.providerGeneration,
+            capabilitySHA256: preparation.capabilitySHA256,
+            planFencingToken: preparation.planFencingToken,
+            resourceBindings: preparation.resourceBindings,
+            unmanagedResourceIdentifiers:
+                preparation.unmanagedResourceIdentifiers
+        )
+    }
+
+    private static func copy(
+        _ service: DesiredRuntimeService,
+        lock: RuntimeImageDigestLock
+    ) -> DesiredRuntimeService {
+        DesiredRuntimeService(
+            identity: service.identity,
+            logicalServiceName: service.logicalServiceName,
+            replicaIndex: service.replicaIndex,
+            image: lock.resolvedReference,
+            imageLock: lock,
+            platformOperatingSystem: service.platformOperatingSystem,
+            platformArchitecture: service.platformArchitecture,
+            cpuCount: service.cpuCount,
+            memoryBytes: service.memoryBytes,
+            userID: service.userID,
+            groupID: service.groupID,
+            workingDirectory: service.workingDirectory,
+            entrypoint: service.entrypoint,
+            command: service.command,
+            initProcess: service.initProcess,
+            dependencies: service.dependencies,
+            environment: service.environment,
+            labels: service.labels,
+            ports: service.ports,
+            mounts: service.mounts,
+            healthCheck: service.healthCheck,
+            probes: service.probes,
+            restartPolicy: service.restartPolicy,
+            updatePolicy: service.updatePolicy,
+            hooks: service.hooks,
+            rosetta: service.rosetta,
+            virtualization: service.virtualization,
+            readOnlyRootFilesystem: service.readOnlyRootFilesystem,
+            sharedMemoryBytes: service.sharedMemoryBytes
+        )
+    }
+}
+
 public struct LifecycleCommandRunner: Sendable {
     public let options: LifecycleCLIOptions
     public let driver: any LifecycleCommandDriving
@@ -279,8 +511,21 @@ public struct LifecycleCommandRunner: Sendable {
                     "Lifecycle execution requires exactly one of dry-run or exact plan confirmation."
                 )
             }
-            let preparation = try driver.prepare(options: options)
-            let compiled = try compiler.compile(options: options, preparation: preparation)
+            let initialPreparation = try driver.prepare(options: options)
+            let initialCompiled = try compiler.compile(
+                options: options,
+                preparation: initialPreparation
+            )
+            let preparation = try LifecycleImageLockBinder.bind(
+                preparation: initialPreparation,
+                initialCompiled: initialCompiled,
+                options: options,
+                resolve: driver.localImageEvidence
+            )
+            let compiled = try compiler.compile(
+                options: options,
+                preparation: preparation
+            )
 
             if let provided = options.confirmationPlanSHA256,
                provided != compiled.plan.planSHA256 {
@@ -291,14 +536,12 @@ public struct LifecycleCommandRunner: Sendable {
             }
 
             if options.dryRun {
-                try verifyLocalImages(compiled, preparation: preparation)
                 return CLIRunResult(
                     standardOutput: try renderPlan(compiled.plan, output: options.output)
                 )
             }
 
             try driver.revalidate(compiled: compiled, preparation: preparation)
-            try verifyLocalImages(compiled, preparation: preparation)
             let result = try driver.execute(
                 compiled: compiled,
                 preparation: preparation,
@@ -337,38 +580,6 @@ public struct LifecycleCommandRunner: Sendable {
                     message: RuntimeRedactionPolicy.default.redact(String(describing: error))
                 )
             )
-        }
-    }
-
-    private func verifyLocalImages(
-        _ compiled: LifecycleCompiledCommand,
-        preparation: LifecycleCommandPreparation
-    ) throws {
-        for requirement in compiled.localImageRequirements {
-            let evidence: RuntimeLocalImageEvidence
-            do {
-                evidence = try driver.localImageEvidence(
-                    for: requirement,
-                    preparation: preparation
-                )
-            } catch {
-                throw LifecycleCommandRunnerError.missingLocalImage(requirement.reference)
-            }
-            guard evidence.reference == requirement.reference,
-                  evidence.descriptorDigest.range(
-                    of: "^sha256:[a-f0-9]{64}$",
-                    options: .regularExpression
-                  ) != nil,
-                  evidence.variantDigest.range(
-                    of: "^sha256:[a-f0-9]{64}$",
-                    options: .regularExpression
-                  ) != nil,
-                  evidence.operatingSystem == requirement.operatingSystem,
-                  evidence.architecture == requirement.architecture else {
-                throw LifecycleCommandRunnerError.invalidLocalImageEvidence(
-                    requirement.reference
-                )
-            }
         }
     }
 
@@ -1400,6 +1611,7 @@ public struct LifecycleCommandPlanCompiler: Sendable {
             logicalServiceName: service.logicalServiceName,
             replicaIndex: service.replicaIndex,
             image: service.image,
+            imageLock: service.imageLock,
             platformOperatingSystem: service.platformOperatingSystem,
             platformArchitecture: service.platformArchitecture,
             cpuCount: service.cpuCount,

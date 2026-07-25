@@ -8,7 +8,7 @@ Reconciliation is the loop that compares desired state with observed state and p
 2. Observe runtime state through `RuntimeAdapter`.
 3. Bind the immutable provider capability digest and compute drift.
 4. Compile a canonical dependency DAG with preconditions, postconditions, timeouts, idempotency keys, and compensation.
-5. Persist complete schema-v7 intent before the first external effect.
+5. Persist complete schema-v14 intent, including immutable image locks, exact supply-chain policy bindings, and content-lease accounting, before the first external effect.
 6. Execute ready nodes with deterministic bounded parallelism.
 7. Re-observe and persist verification after each mutation wave.
 8. Complete, compensate, resume, or enter a precise safe hold.
@@ -19,11 +19,11 @@ Hostwright maps strict Manifest v2 into executable desired state and compiles `u
 
 `hostwright plan` still does not perform live runtime observation by default. It renders desired-state and policy diagnostics and states that runtime observation is not connected in the CLI path.
 
-Lifecycle dry-runs observe without acquiring a mutation group and return the exact confirmation hash. Confirmed execution re-observes, rejects a stale hash before mutation, acquires one operation group per project, and persists canonical intent plus precomputed compensation before calling a provider. `hostwright apply` is a compatibility entry point for the same confirmed `up` engine, not a separate executor.
+Lifecycle dry-runs observe without acquiring a mutation group and return the exact confirmation hash. Confirmed execution re-observes, rejects a stale hash before mutation, acquires one operation group per project, and persists canonical intent plus precomputed compensation before calling a provider. When declared, image signature, SBOM, vulnerability, and build-provenance preflights reload the exact verified Gate 6 graph and current policy material before the first provider effect. `hostwright apply` is a compatibility entry point for the same confirmed `up` engine, not a separate executor.
 
 Replicas and service dependencies expand into deterministic nodes. `started`, `ready`, and `completed` dependencies gate subsequent work; scale-down and removal use safe reverse order. Repeated desired state emits no mutation. Rolling and recreate updates keep the prior revision until the candidate satisfies startup and readiness gates. Failure restores the prior verified revision only when every inverse effect and ownership identity is provable; otherwise recovery records a safe hold.
 
-Node starts, attempts, provider results, observations, health results, and checkpoints are durable. After timeout, cancellation, crash, or ambiguous provider output, Hostwright observes before deciding whether to retry, compensate, or hold. Retry is capped at three attempts and allowed only by normalized retry safety.
+Node starts, attempts, provider results, observations, health results, supply-chain authorization events, and checkpoints are durable. After timeout, cancellation, crash, or ambiguous provider output, Hostwright observes before deciding whether to retry, compensate, or hold. Recovery revalidates current signature, SBOM, vulnerability, and provenance evidence and rebinds that authorization to any derived rollback plan. Retry is capped at three attempts and allowed only by normalized retry safety.
 
 `hostwrightd --foreground` runs a non-mutating reconciliation loop. It reads the explicit config path, observes through `RuntimeAdapter`, computes a plan, and records daemon events and operation records to the selected state database (Application Support by default). It does not call `RuntimeAdapter.execute`.
 

@@ -66,8 +66,8 @@ def main() -> int:
     roadmap = read("docs/roadmap/v0.0.2/IMPLEMENTATION_PLAN.md")
     historical_plan = read("docs/IMPLEMENTATION_PLAN.md")
 
-    version_match = re.search(r'version = "(0\.0\.2-dev\.1[012])"', identity)
-    require(version_match is not None, "HostwrightIdentity version is not a Phase 02 qualification build", errors)
+    version_match = re.search(r'version = "(0\.0\.2-dev\.1[0-4])"', identity)
+    require(version_match is not None, "HostwrightIdentity version is not a supported v0.0.2 development build", errors)
     if version_match is not None:
         version_golden = json.loads(read("contracts/v0.0.2/versions.json"))
         require(
@@ -76,7 +76,7 @@ def main() -> int:
             errors,
         )
     require('releaseTarget = "v0.0.2"' in identity, "HostwrightIdentity release target is not v0.0.2", errors)
-    for fragment in ["manifest = 2", "controlAPI = 2", "runtimeProviderAPI = 2", "pluginABI = 1", "stateSchema = 7"]:
+    for fragment in ["manifest = 2", "controlAPI = 2", "runtimeProviderAPI = 2", "pluginABI = 1", "stateSchema = 14"]:
         require(fragment in contracts, f"missing contract truth: {fragment}", errors)
 
     require("0.0.2-dev" in readme and "v0.0.2" in readme, "README lacks current version/release truth", errors)
@@ -84,6 +84,7 @@ def main() -> int:
     require("Phase 02 qualification is complete" in readme, "README does not record completed Phase 02 qualification", errors)
     require("Phase 03 qualification is complete" in readme, "README does not record completed Phase 03 qualification", errors)
     require("Phase 04 qualification is complete" in readme, "README does not record completed Phase 04 qualification", errors)
+    require("Phase 05 Gates 1–11 are locally complete" in readme, "README does not record completed Phase 05 Gate 11", errors)
     require("brew install hostwright/tap/hostwright" in readme, "README lacks the available vendor-tap command", errors)
     require("`brew install hostwright` does not exist today" in install, "install docs must state the unqualified brew command does not exist", errors)
     require(
@@ -121,7 +122,7 @@ def main() -> int:
     ]:
         pattern = rf'capability\("{re.escape(identifier)}"[^\n]+\.stable, 4, {issue}'
         require(re.search(pattern, capability_catalog) is not None, f"capability catalog does not report qualified Phase 04 capability: {identifier}", errors)
-    require("Schema version 7 is the latest" in state, "state docs do not name schema v7", errors)
+    require("Schema version 14 is the latest" in state, "state docs do not name schema v14", errors)
     require("secure selected state paths" in requirements, "requirements lack the secure selected-state contract", errors)
     require("Implemented for API version 2" in requirements, "requirements retain the obsolete Control API version", errors)
     require("uses the secure selected state database" in acceptance, "acceptance matrix lacks the state-default contract", errors)

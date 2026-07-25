@@ -1489,6 +1489,22 @@ public struct AppleContainerizationRuntimeAdapter: RuntimeAdapter {
             }
             try RuntimeCreateSubsetPolicy.validate(service, providerID: .appleContainerization)
             let image = try await localImageEvidence(for: service.image)
+            if let lock = service.imageLock {
+                do {
+                    try lock.verify(
+                        image,
+                        providerID: context.providerID,
+                        capabilitySHA256: context.capabilitySHA256
+                    )
+                } catch {
+                    throw RuntimeAdapterError.commandRejected(
+                        classification: .mutating,
+                        message:
+                            "Containerization local image content no longer " +
+                            "matches the confirmed digest lock."
+                    )
+                }
+            }
             let labels = try RuntimeManagedResourceIdentity.labels(
                 for: action.identity,
                 resourceIdentifier: action.resourceIdentifier,

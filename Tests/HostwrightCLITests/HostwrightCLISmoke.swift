@@ -907,7 +907,7 @@ final class HostwrightCLITests: XCTestCase {
             XCTAssertEqual(state["status"] as? String, "ready")
             XCTAssertEqual(
                 (state["details"] as? [String: Any])?["stateSchemaVersion"] as? String,
-                "7"
+                String(HostwrightContractVersions.stateSchema)
             )
             XCTAssertEqual(try doctorFileSetSnapshot(directory: parent), before)
         }

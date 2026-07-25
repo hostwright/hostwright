@@ -14,7 +14,7 @@ Hostwright uses macOS-native per-user locations. A state-writing command creates
 | Runtime files | `~/Library/Application Support/Hostwright/run` | Contains daemon locks and the reserved local-control socket path. |
 | Runtime metadata | `~/Library/Application Support/Hostwright/metadata` | Contains the legacy migration journal, state access/writer fences, and pending state-maintenance journal. |
 | Backups | `~/Library/Application Support/Hostwright/backups` | Verified online state-backup catalogs. |
-| Cache | `~/Library/Caches/Hostwright` | Private cache root; image/content cache behavior is implemented in later phases. |
+| Cache | `~/Library/Caches/Hostwright` | Private cache root. Provider-managed image bytes remain in the selected runtime; Hostwright stores bounded content accounting, pins, and fenced leases in schema-v14 SQLite state. |
 | Logs | `~/Library/Logs/Hostwright` | Private log root; structured daemon logging is implemented in Phase 08. |
 | Daemon lock | `~/Library/Application Support/Hostwright/run/hostwrightd.lock` | Real `0600` non-symlink lock for the default state database. |
 | Control socket | `~/Library/Application Support/Hostwright/run/control-v2.sock` | Canonical reserved path; the current one-shot control process does not create a socket. |

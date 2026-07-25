@@ -1,4 +1,5 @@
 import Foundation
+import HostwrightCore
 import HostwrightRuntime
 
 struct RuntimeQualificationRecoveryDetails: Codable, Equatable, Sendable {
@@ -240,7 +241,7 @@ struct RuntimeQualificationRecoveryReport: Codable, Equatable, Sendable {
             evidence.durableCheckpointAfter == after &&
             evidence.terminatedExecutable == "hostwright-runtime-conformance" &&
             evidence.processTreeTerminated &&
-            evidence.stateSchemaVersion == 7 &&
+            evidence.stateSchemaVersion == HostwrightContractVersions.stateSchema &&
             !evidence.cleanupIdentifiers.isEmpty
     }
 

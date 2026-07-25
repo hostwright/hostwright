@@ -21,10 +21,10 @@ struct ApplyLifecycleCompatibilityTests {
                 runtimeProvider: .appleCLI,
                 output: .text
             )
-            let confirmed = try LifecycleCommandPlanCompiler().compile(
+            let confirmed = try digestBoundPlanSHA256(
                 options: previewOptions,
                 preparation: preparation
-            ).plan.planSHA256
+            )
             try fixture.writeApproval(planHash: confirmed)
             let driver = CapturingApplyLifecycleDriver(preparation: preparation)
 
@@ -203,6 +203,36 @@ struct ApplyLifecycleCompatibilityTests {
         )
     }
 
+    private func digestBoundPlanSHA256(
+        options: LifecycleCLIOptions,
+        preparation: LifecycleCommandPreparation
+    ) throws -> String {
+        let compiler = LifecycleCommandPlanCompiler()
+        let initial = try compiler.compile(
+            options: options,
+            preparation: preparation
+        )
+        let bound = try LifecycleImageLockBinder.bind(
+            preparation: preparation,
+            initialCompiled: initial,
+            options: options
+        ) { requirement, _ in
+            RuntimeLocalImageEvidence(
+                reference: requirement.reference,
+                descriptorDigest:
+                    "sha256:\(String(repeating: "1", count: 64))",
+                variantDigest:
+                    "sha256:\(String(repeating: "e", count: 64))",
+                architecture: requirement.architecture,
+                operatingSystem: requirement.operatingSystem
+            )
+        }
+        return try compiler.compile(
+            options: options,
+            preparation: bound
+        ).plan.planSHA256
+    }
+
     private func withFixture(
         _ body: (ApplyCompatibilityFixture) throws -> Void
     ) throws {
@@ -335,7 +365,7 @@ private final class CapturingApplyLifecycleDriver:
         }
         return RuntimeLocalImageEvidence(
             reference: requirement.reference,
-            descriptorDigest: "sha256:\(String(repeating: "d", count: 64))",
+            descriptorDigest: "sha256:\(String(repeating: "1", count: 64))",
             variantDigest: "sha256:\(String(repeating: "e", count: 64))",
             architecture: requirement.architecture,
             operatingSystem: requirement.operatingSystem

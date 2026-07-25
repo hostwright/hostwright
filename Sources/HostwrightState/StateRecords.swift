@@ -193,6 +193,57 @@ public struct ObservedServiceRecord: Equatable, Sendable {
     }
 }
 
+public enum ImageDigestLockStateKind: String, Codable, Equatable, Sendable {
+    case desired
+    case observed
+}
+
+public struct ImageDigestLockRecord: Codable, Equatable, Sendable {
+    public let id: String
+    public let projectID: String
+    public let resourceUUID: String
+    public let serviceName: String
+    public let replicaIndex: Int
+    public let stateKind: ImageDigestLockStateKind
+    public let lock: RuntimeImageDigestLock
+    public let providerGeneration: Int
+    public let planSHA256: String
+    public let operationGroupID: String
+    public let observationSHA256: String?
+    public let createdAt: String
+    public let updatedAt: String
+
+    public init(
+        id: String,
+        projectID: String,
+        resourceUUID: String,
+        serviceName: String,
+        replicaIndex: Int,
+        stateKind: ImageDigestLockStateKind,
+        lock: RuntimeImageDigestLock,
+        providerGeneration: Int,
+        planSHA256: String,
+        operationGroupID: String,
+        observationSHA256: String?,
+        createdAt: String,
+        updatedAt: String
+    ) {
+        self.id = id
+        self.projectID = projectID
+        self.resourceUUID = resourceUUID
+        self.serviceName = serviceName
+        self.replicaIndex = replicaIndex
+        self.stateKind = stateKind
+        self.lock = lock
+        self.providerGeneration = providerGeneration
+        self.planSHA256 = planSHA256
+        self.operationGroupID = operationGroupID
+        self.observationSHA256 = observationSHA256
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+}
+
 public enum StateEventSeverity: String, Equatable, Sendable {
     case info
     case warning

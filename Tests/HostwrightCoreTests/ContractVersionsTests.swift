@@ -6,7 +6,7 @@ final class ContractVersionsTests: XCTestCase {
     func testReleaseAndBreakingContractVersionsHaveOneAuthority() {
         XCTAssertNotNil(
             HostwrightIdentity.version.range(
-                of: #"^0\.0\.2-dev\.12$"#,
+                of: #"^0\.0\.2-dev\.13$"#,
                 options: .regularExpression
             )
         )
@@ -15,7 +15,7 @@ final class ContractVersionsTests: XCTestCase {
         XCTAssertEqual(HostwrightContractVersions.controlAPI, 2)
         XCTAssertEqual(HostwrightContractVersions.runtimeProviderAPI, 2)
         XCTAssertEqual(HostwrightContractVersions.pluginABI, 1)
-        XCTAssertEqual(HostwrightContractVersions.stateSchema, 7)
+        XCTAssertEqual(HostwrightContractVersions.stateSchema, 14)
     }
 
     func testCapabilityCatalogIsDeterministicUniqueAndCoversEveryRoadmapPhase() {
@@ -95,6 +95,28 @@ final class ContractVersionsTests: XCTestCase {
             Set(phase04Capabilities.map(\.issue)),
             Set([130, 131, 140])
         )
+
+        guard let keychainSecrets = report.capabilities.first(where: {
+            $0.identifier == "secrets.keychain"
+        }) else {
+            return XCTFail("Keychain secret capability is missing.")
+        }
+        XCTAssertEqual(keychainSecrets.state, .experimental)
+        XCTAssertEqual(keychainSecrets.phase, 5)
+        XCTAssertTrue(keychainSecrets.reason.contains("Production Keychain CRUD"))
+        XCTAssertTrue(keychainSecrets.reason.contains("guarded environment-file"))
+        XCTAssertTrue(keychainSecrets.reason.contains("explicit registered providers"))
+
+        guard let registryAuthentication = report.capabilities.first(where: {
+            $0.identifier == "registries.authentication"
+        }) else {
+            return XCTFail("Registry authentication capability is missing.")
+        }
+        XCTAssertEqual(registryAuthentication.state, .experimental)
+        XCTAssertEqual(registryAuthentication.phase, 5)
+        XCTAssertEqual(registryAuthentication.issue, 142)
+        XCTAssertTrue(registryAuthentication.reason.contains("Keychain-backed"))
+        XCTAssertTrue(registryAuthentication.reason.contains("token expiry"))
     }
 
     func testVerificationConstitutionIncludesEveryV002EvidenceClass() {

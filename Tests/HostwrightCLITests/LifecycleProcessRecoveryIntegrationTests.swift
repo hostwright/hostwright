@@ -21,7 +21,10 @@ final class LifecycleProcessRecoveryIntegrationTests: XCTestCase {
         for scenario in ProcessRecoveryScenario.allCases {
             let foundation = try ProcessRecoveryFoundation.make(scenario: scenario)
             do {
-                XCTAssertEqual(try foundation.store.schemaVersion(), 7)
+                XCTAssertEqual(
+                    try foundation.store.schemaVersion(),
+                    HostwrightContractVersions.stateSchema
+                )
                 let killed = try launchWorker(
                     foundation: foundation,
                     stage: .kill
@@ -480,7 +483,7 @@ private struct ProcessRecoveryFoundation: Sendable {
 
     func runWorker() async throws {
         guard Self.validOwnedDirectory(directory),
-              try store.schemaVersion() == 7 else {
+              try store.schemaVersion() == HostwrightContractVersions.stateSchema else {
             throw ProcessRecoveryError.invalidFoundation
         }
         let result = try await LifecycleSagaExecutor(

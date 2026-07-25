@@ -19,6 +19,47 @@ hostwright state restore --backup <id> --confirm-restore <token> [--state-db <pa
 hostwright state repair --dry-run [--state-db <path>] [--json | --output text|json]
 hostwright state repair --confirm-repair <token> [--state-db <path>] [--json | --output text|json]
 hostwright state recover [--state-db <path>] [--json | --output text|json]
+hostwright secret create <keychain-reference> [--state-db <path>] [--json | --output text|json]
+hostwright secret update <keychain-reference> [--state-db <path>] [--json | --output text|json]
+hostwright secret list [--json | --output text|json]
+hostwright secret check <keychain-reference> [--json | --output text|json]
+hostwright secret delete <keychain-reference> [--state-db <path>] [--json | --output text|json]
+hostwright registry login <registry> --username <name> [--state-db <path>] [--json | --output text|json]
+hostwright registry logout <registry> [--state-db <path>] [--json | --output text|json]
+hostwright registry status <registry> [--repository <name> [--action pull|push]...] [--json | --output text|json]
+hostwright registry referrers discover|fetch <registry> --repository <name> --subject <digest> [--artifact-type <media-type>] [--offline] [--state-db <path>] [--json | --output text|json]
+hostwright registry referrers publish <discovery-uuid> --target-server <registry> --target-repository <name> [--state-db <path>] [--json | --output text|json]
+hostwright registry referrers copy <registry> --repository <name> --subject <digest> [--artifact-type <media-type>] --target-server <registry> --target-repository <name> [--state-db <path>] [--json | --output text|json]
+hostwright registry referrers retain <discovery-uuid> --owner <id> --expires-at <timestamp> [--state-db <path>] [--json | --output text|json]
+hostwright registry referrers release <lease-uuid> --fencing-token <uuid> [--state-db <path>] [--json | --output text|json]
+hostwright registry referrers status <discovery-uuid> [--state-db <path>] [--json | --output text|json]
+hostwright registry referrers prune <discovery-uuid> --digest <digest> [--confirm-plan <sha256>] [--state-db <path>] [--json | --output text|json]
+hostwright registry referrers resume <operation-group-uuid> --confirm-plan <sha256> [--state-db <path>] [--json | --output text|json]
+hostwright registry sbom generate <absolute-oci-archive> --manifest <absolute-path> [--service <name>] --server <registry> --repository <name> --format spdx-json|cyclonedx-json [--provenance-descriptor-digest <digest> --provenance-referrer-digest <digest>] [--state-db <path>] [--json | --output text|json]
+hostwright registry sbom ingest <discovery-uuid> --manifest <absolute-path> [--service <name>] [--state-db <path>] [--json | --output text|json]
+hostwright registry sbom query <absolute-manifest-path> [--service <name>] [--state-db <path>] [--json | --output text|json]
+hostwright registry sbom export <absolute-manifest-path> [--service <name>] --format spdx-json|cyclonedx-json --output-path <absolute-new-path> [--state-db <path>] [--json | --output text|json]
+hostwright registry sbom resume <operation-group-uuid> --confirm-plan <sha256> [--state-db <path>] [--json | --output text|json]
+hostwright registry vulnerability evaluate <discovery-uuid> --digest <report-referrer-digest> --manifest <absolute-path> --cosign <absolute-path> [--service <name>] [--state-db <path>] [--json | --output text|json]
+hostwright registry vulnerability status <absolute-manifest-path> [--service <name>] [--state-db <path>] [--json | --output text|json]
+hostwright registry vulnerability grant-exception <absolute-approval-path> --manifest <absolute-path> [--state-db <path>] [--json | --output text|json]
+hostwright registry vulnerability revoke-exception <exception-uuid> [--state-db <path>] [--json | --output text|json]
+hostwright registry vulnerability resume <operation-group-uuid> --confirm-plan <sha256> [--state-db <path>] [--json | --output text|json]
+hostwright registry provenance generate <absolute-oci-archive> --record <absolute-build-record> --manifest <absolute-path> [--service <name>] --server <registry> --repository <name> --signer <id> --signing-key-ref <typed-secret-reference> [--state-db <path>] [--json | --output text|json]
+hostwright registry provenance verify <discovery-uuid> --digest <provenance-referrer-digest> --manifest <absolute-path> [--service <name>] [--state-db <path>] [--json | --output text|json]
+hostwright registry provenance status <absolute-manifest-path> [--service <name>] [--state-db <path>] [--json | --output text|json]
+hostwright registry provenance resume <operation-group-uuid> --confirm-plan <sha256> [--signing-key-ref <typed-secret-reference>] [--state-db <path>] [--json | --output text|json]
+hostwright image inspect <reference>... [--runtime-provider auto|apple-cli|containerization] [--output text|json]
+hostwright image pull <reference> [--platform linux/arm64|linux/amd64] [--offline] [--progress none|plain] [--state-db <path>] [--runtime-provider auto|apple-cli|containerization] [--output text|json]
+hostwright image push <reference> [--platform linux/arm64|linux/amd64] [--offline] [--progress none|plain] [--state-db <path>] [--runtime-provider auto|apple-cli|containerization] [--output text|json]
+hostwright image tag <source> <target> [--state-db <path>] [--runtime-provider auto|apple-cli|containerization] [--output text|json]
+hostwright image load --input <absolute-path> --reference <expected-reference>... [--state-db <path>] [--runtime-provider auto|apple-cli|containerization] [--output text|json]
+hostwright image save <reference>... --output <absolute-path> [--platform linux/arm64|linux/amd64] [--state-db <path>] [--runtime-provider auto|apple-cli|containerization] [--output text|json]
+hostwright image build --context <absolute-path> [--file <absolute-path-beneath-context>] --tag <reference> [--platform linux/arm64|linux/amd64] [--offline] [--no-cache] [--state-db <path>] [--runtime-provider auto|apple-cli|containerization] [--output text|json]
+hostwright image delete <reference>... [--state-db <path>] [--runtime-provider auto|apple-cli|containerization] [--output text|json]
+hostwright image prune (--dry-run | --confirm-plan <sha256>) [--maximum-bytes <bytes> --target-bytes <bytes>] [--retain-seconds <0-31536000>] [--max-delete <1-256>] [--state-db <path>] [--runtime-provider auto|apple-cli|containerization] [--output text|json]
+hostwright image cache status [--maximum-bytes <bytes>] [--state-db <path>] [--runtime-provider auto|apple-cli|containerization] [--output text|json]
+hostwright image cache pin|unpin <managed-reference> [--state-db <path>] [--runtime-provider auto|apple-cli|containerization] [--output text|json]
 hostwright migrate preview <path> [--json | --output text|json]
 hostwright init
 hostwright import-stack <path> [--output text|json] [--team-profile <path>]
@@ -70,7 +111,7 @@ hostwright-dist help
 
 Text output is the default for `hostwright` commands. Installed-lifecycle `hostwright-dist` commands require `--output json`; release and developer-evidence commands retain their documented text/report output.
 
-`capabilities`, `runtime providers`, `runtime migrate`, `paths`, every `state` subcommand, `migrate preview`, `import-stack`, `plan`, `status`, every lifecycle command, non-TTY interactive operations, `events`, `recovery`, `extension check`, and `doctor` accept JSON output where shown above. JSON streaming uses bounded NDJSON frames with base64 payloads. Interactive TTY mode and JSON mode are mutually exclusive. JSON output does not weaken mutation gates.
+`capabilities`, `runtime providers`, `runtime migrate`, `paths`, every `state`, `secret`, `registry`, and `image` subcommand, `migrate preview`, `import-stack`, `plan`, `status`, every lifecycle command, non-TTY interactive operations, `events`, `recovery`, `extension check`, and `doctor` accept JSON output where shown above. JSON streaming uses bounded NDJSON frames with base64 payloads. Interactive TTY mode and JSON mode are mutually exclusive. JSON output does not weaken mutation gates.
 
 When JSON mode is requested and the CLI can classify the failure, stderr uses this envelope:
 
@@ -86,7 +127,7 @@ Runs one versioned local JSON request through existing `hostwright` command cont
 
 Launch arguments require an explicit absolute manifest path. Optional `--state-db` and `--team-profile` paths are also fixed at launch; request JSON cannot provide or override any path. Configured files must already exist as regular non-symlink files with safe ownership and mode.
 
-Supported operations are `plan`, `status`, `events`, `recovery`, `doctor`, `up`, `down`, `run`, `start`, `stop`, `restart`, `rm`, and `update`. Requests use a strict top-level shape:
+Supported operations are `plan`, `status`, `events`, `recovery`, `doctor`, `up`, `down`, `run`, `start`, `stop`, `restart`, `rm`, `update`, and `image`. Requests use a strict top-level shape:
 
 ```json
 {"apiVersion":2,"requestID":"request-1","operation":"events","project":"demo","eventType":"apply.failed","service":"api","severity":"error","limit":100,"sort":"desc"}
@@ -95,6 +136,14 @@ Supported operations are `plan`, `status`, `events`, `recovery`, `doctor`, `up`,
 Only `events` accepts all filters. `recovery` accepts only `project`; `plan`, `status`, and `doctor` accept no filters. Input is limited to 64 KiB with a five-second read deadline. Output is limited to one 1 MiB JSON object.
 
 Lifecycle requests accept only `services`, `dryRun`, `confirmPlan`, `runtimeProvider`, `timeout`, and `parallelism`. They require exactly one of `"dryRun": true` or an exact lowercase SHA-256 `confirmPlan`; `run` requires exactly one service. These operations delegate to the same lifecycle planner, saga, provider binding, and result envelopes as the CLI.
+
+Image requests use `"operation":"image"` plus one of `inspect`, `pull`, `push`, `tag`, `load`, `save`, `build`, `delete`, or `prune` in `imageOperation`. The operation-specific image fields map to the same strict CLI parser and durable coordinator. For example:
+
+```json
+{"apiVersion":2,"requestID":"image-pull-1","operation":"image","runtimeProvider":"apple-cli","imageOperation":"pull","imageReferences":["registry.example/app:v1"],"imagePlatform":"linux/arm64","imageProgress":"none"}
+```
+
+The request cannot provide credentials or arbitrary native options. Mutating image requests use the launch-fixed state database, immutable capability binding, durable intent, post-operation observation, exact ownership, and the same recovery path as the CLI.
 
 Success wraps the delegated CLI JSON under `result`. A delegated CLI failure preserves that command's exit code and JSON body under `error`. Invalid requests, unavailable configured files, and control execution failures use `HW-API-001`, `HW-API-002`, and `HW-API-003` respectively.
 
@@ -157,6 +206,52 @@ Prints the current product version, release target, locked contract versions, an
 
 JSON is the machine-readable current-support source. The command performs no runtime observation, network access, state access, or mutation. It reports what this exact build declares; it does not convert a planned capability into support.
 
+## `hostwright secret ...`
+
+Manages only Hostwright-owned `keychain://<service>/<account>` generic-password items. `create` and `update` read a bounded UTF-8 value from stdin or an attended no-echo terminal; secret values are never accepted in argv. `list` and `check` return metadata only. `delete` verifies exact ownership and item identity before removal.
+
+Mutations persist a redacted schema-v8 intent before touching Keychain. Interrupted operations are inspected with `hostwright recovery` and may be resumed or, for an exactly verified create, rolled back with the existing confirmation-bound recovery command. Recovery re-observes item identity and enters safe hold when replay or compensation cannot be proven without persisting secret bytes.
+
+Manifest workload injection additionally accepts guarded `env-file:///absolute/path#KEY` and `local-file:///absolute/path` references. `external://<provider>/<item>` and `plugin://<provider>/<item>` require an explicitly registered provider. Resolution is authorized for one exact project/resource generation and environment key, and failure occurs before runtime mutation. Resolved values are carried outside argv and never enter Hostwright state or diagnostic output.
+
+## `hostwright registry ...`
+
+`registry login` accepts only an HTTPS registry origin and a bounded username in arguments; it reads the secret from stdin or an attended no-echo terminal. Hostwright probes the registry through bounded TLS transport before storing a schema-versioned credential in one endpoint-derived, non-revealing Keychain account. The create or update uses the schema-v9 durable secret-mutation record. `registry logout` removes only that exact Hostwright-owned item through the same durable boundary.
+
+`registry status` reports the authentication scheme, exact requested and granted scopes, token expiry/refresh availability, API-version header evidence, and credential source. Resolution checks the Hostwright Keychain first, then guarded Docker and OCI auth files with Docker's exact `credHelpers`-before-`credsStore` precedence. Credential helpers receive the exact registry on stdin and only `get` in argv. Basic authorization is TLS-only. Bearer challenges and token responses are bounded, scope escalation is rejected, tokens refresh only at the original HTTPS realm, and redirects are limited to three same-origin HTTPS hops.
+
+`registry referrers` treats signatures, attestations, SBOMs, and provenance as opaque typed OCI artifacts; Gate 6 assigns no trust meaning. Discovery uses the OCI 1.1 referrers API with bounded same-origin pagination and the subject-digest fallback tag only when that truncated tag preserves exact identity; a SHA-512 native-API `404` reports unsupported fallback before any tag request. Fetch verifies every digest, size, media type, graph edge, and root subject before schema-v9 cache publication. Publish and copy persist durable intent before effects, upload children before manifests, observe exact remote content after mutations, use conditional fallback-index updates, and can resume the exact fenced operation group. `retain` and `release` use exact fencing tokens. `prune` first emits an exact plan hash and executes only when the confirmed hash, Hostwright publication proof, inactive lease state, remote manifest, and subject binding all match; it never deletes blobs or unrelated manifests.
+
+`registry trust verify` consumes one complete cached Gate 6 discovery, exact subject-manifest bytes, a validated Manifest v2 `imageTrust` policy, and an absolute cosign executable path. It supports cosign major 3 from v3.0.6, accepts only Sigstore bundle v0.3 message signatures, and verifies the subject on stdin with either an exact keyed authority or exact keyless issuer/identity plus a caller-managed TrustedRoot JSON document. Trust material is copied into a private temporary directory, verifier I/O and time are bounded, and cleanup removes only the exact files created by the verification.
+
+`registry trust status`, `grant-exception`, and `revoke-exception` use schema-v10 immutable verification, subject-manifest, and exception evidence. Exception approvals are strict bounded JSON records bound to one project, service, descriptor digest, reason, approver, approval/expiry timestamps, and idempotency UUID. Lifecycle execution accepts only a current policy/material match with a revalidated graph and subject manifest, or one exact unexpired and unrevoked exception. Recovery revalidates its plan-bound authorization before further effects. The one-shot Control API maps all four operations to the same CLI implementation.
+
+`registry sbom generate` securely inspects an OCI image-layout tar archive, verifies the exact digest-pinned image configuration, manifest, layers, and package-database extraction, and emits a deterministic SPDX 2.3 or CycloneDX 1.6 OCI artifact graph. It does not contact a registry; publish remains the explicit Gate 6 operation. `ingest` accepts only a complete digest-verified Gate 6 graph and persists an immutable schema-v11 record bound to the image descriptor, policy, document, normalized components, SBOM referrer, operation group, and optional provenance descriptor/referrer identities. `query` and `export` re-observe that graph and verify content digests rather than treating state rows or mutation output as truth. Export creates one `0600` file without overwrite and removes only that exact newly created file after failure. Generate, ingest, and export persist bounded non-secret intent; cancellation leaves an interrupted group, and `resume` requires its exact plan hash. The one-shot Control API maps all five operations to the same CLI implementation and exposes no credential fields.
+
+`registry vulnerability evaluate` consumes one complete Gate 6 graph, one exact vulnerability-report referrer digest, a Manifest v2 `imageVulnerability` policy, and the manifest's `imageTrust` policy. It accepts only a bounded `hostwright.dev/image-vulnerability-report/v1` document whose subject, report digest, referrer, database identity/version/update time, generated time, normalized findings, and Sigstore bundle bind exactly. Cosign verifies the report bytes, not merely the image signature. Schema-v12 state stores the canonical passed signature proof, exact bundle digests, verifier identity, trust-material hashes, immutable report evidence, and explainable decisions with candidate, allowlisted, and blocking findings plus stable reason codes.
+
+Severity, minimum age, exploitability, and fix-availability selectors are ANDed. Database staleness or report unavailability follows the explicit fail-open/fail-closed policy, but fail-open never overrides a known matching finding or a report signed under different trust material. The newest `databaseUpdatedAt`, then newest `generatedAt`, is authoritative; equally fresh conflicting reports fail closed. `status` re-observes the exact graph, exact signature bundles, active authority windows, and current trust-material hashes before reevaluating freshness. Exceptions require strict external JSON approval bound to one prior blocked decision, report/referrer, image digest, vulnerability and signature policy hashes, database identity/version, and blocked-findings digest; expiry or revocation takes effect immediately. Evaluate, grant, and revoke persist non-secret durable intent, cancellation becomes an interrupted checkpoint, and `resume` requires the exact plan hash. Lifecycle execution and recovery reload the exact plan-bound manifest and reevaluate current signed evidence before effects. The one-shot Control API maps all five operations to the same implementation and rejects credential fields.
+
+`registry provenance generate` reads a strict bounded build record and a verified local OCI archive, proves the archive root is the exact manifest digest named by the selected service, emits an in-toto Statement v1 with the SLSA provenance v1 predicate, and wraps it in a DSSE Ed25519 envelope. Source, dependency, and material URIs are limited to bounded credential-free HTTPS or URN values; the command model records digests and approved names rather than native argv, host paths, environment values, or secret values. The signing key is resolved only from the exact typed secret-provider reference and is never accepted as a value argument or persisted.
+
+`verify` accepts only the exact provenance referrer from one complete digest-verified Gate 6 graph, revalidates its OCI subject and DSSE envelope, resolves the current Manifest v2 signer material, and checks the exact image, builder, build type, timestamps, materials, reproducibility requirement, signature, and policy hash before immutable schema-v14 persistence. `status`, lifecycle execution, and recovery reload the exact graph and current policy material instead of treating a prior row or generation output as current state. Generation and verification persist bounded redacted intent, interruption requires the exact plan hash, and resumed generation requires the same typed signing-key reference digest. The one-shot Control API maps all four operations to the same CLI implementation and rejects credential values.
+
+No registry credential, username, access token, refresh token, helper stderr, or auth-file content is written to command arguments, state, output, or diagnostics. Registry commands authenticate and report capability; image commands consume only provider-managed authentication and never copy credentials into their request, argv, state, progress, or result.
+
+## `hostwright image ...`
+
+Provides versioned `inspect`, `pull`, `push`, `tag`, `load`, `save`, `build`, `delete`, and `prune` contracts. Apple `container` is the full image provider after exact version and capability negotiation. The Containerization helper exposes structured inspection only; every image mutation reports unavailable before a provider effect.
+
+Mutation stdout is discarded and never establishes success. Each operation is proven from bounded structured image inventory observed before and after the exact native command, including immutable descriptor digests and platform variants. Push, tag, save, delete, and prune bind every source reference to its pre-observed digest and refuse drift before mutation. Load compares the complete pre/post inventory; an undeclared imported reference is rejected and exactly compensated, or held for recovery when restoration cannot be proven. Network operations are HTTPS-only; `--offline` rejects pull, push, and build before observation or mutation. Archive and build paths must be normalized absolute paths, and a build file must remain beneath its context.
+
+Image mutations write a durable `image-lifecycle` intent before effects. Pull, build, tag, and load refuse existing target-reference collisions. Interrupted creation can commit or roll back only when its durable partial-effect evidence binds each newly created reference to the same currently observed digest; missing or changed evidence enters safe hold without adopting or deleting content. Push resumes only when its local source digest is unchanged. Save recovery refuses to infer archive completeness; rollback opens and identity-checks the exact caller-owned regular output before unlinking it.
+
+`delete` requires an exact Hostwright ownership record with the same provider, reference, and digest. A live container reference or digest blocks deletion. `image cache status` reports bounded provider-scoped size, ownership, pin, lease, pressure, stale-reference, and live-reference evidence. `pin` and `unpin` apply only to exact managed references; a desired digest lock remains policy-pinned even after an operator unpin.
+
+`prune --dry-run` deterministically selects only exact Hostwright-owned content after applying size targets, retention, and deletion bounds. Active leases, operator or policy pins, desired digest locks, live references or digests, unmanaged aliases, missing ownership proof, and changed provider observations exclude content. Execution requires the exact plan SHA-256, re-observes before mutation, acquires exclusive fenced leases, invokes only `image delete <exact-reference>...`, verifies absence, and persists recovery accounting. It never invokes a native prune command. Neither delete nor prune accepts `--force`, `--all`, unmanaged content, global cleanup, or automatic background garbage collection.
+
+Result JSON is schema version 1 and includes the provider, provider version, operation UUID, confirmed plan SHA-256, disposition, verified image records, exact created/deleted references and digests, and bounded progress. Cache status, pin, and prune use separate schema-versioned reports with redacted accounting and confirmation evidence. Results contain no mutation stdout, stderr, native argv, credential, token, secret value, or unbounded diagnostic data.
+
 ## `hostwright runtime providers [--json]`
 
 Negotiates immutable capability snapshots for the Apple CLI and installed Containerization helper without changing state or runtime resources. Output names stable provider IDs, detected CLI/API/helper/framework/protocol versions, macOS and architecture compatibility, per-feature states and reasons, and the canonical capability digest.
@@ -167,7 +262,7 @@ An unavailable component remains an explicit unavailable or blocked result. Unkn
 
 `--dry-run` observes the bound source and requested target, checks local-image and capability requirements, and emits planned effects, rollback actions, observation/capability digests, and an exact confirmation token without acquiring an operation or mutating either provider.
 
-`--confirm-migration <token>` recomputes the plan, refuses stale capabilities, observations, ownership, or state, then uses the existing schema-v7 operation group and fencing records to quiesce the source, create and verify the target, preserve UUID identity and prior running state, and advance the provider generation. A failed target verification removes only verified target resources and restores the source when safe. Active operations, ambiguous ownership, collisions, unavailable images, or an incompatible target fail closed.
+`--confirm-migration <token>` recomputes the plan, refuses stale capabilities, observations, ownership, or state, then uses the existing schema-v8 operation group and fencing records to quiesce the source, create and verify the target, preserve UUID identity and prior running state, and advance the provider generation. A failed target verification removes only verified target resources and restores the source when safe. Active operations, ambiguous ownership, collisions, unavailable images, or an incompatible target fail closed.
 
 `status` and `apply` accept `--runtime-provider auto|apple-cli|containerization`. An existing project binding always wins; selecting another provider requires the migration command. For an unbound project, `auto` prefers a compatible Apple CLI provider and selects Containerization only when the CLI is unavailable and the helper is fully capable.
 
@@ -353,7 +448,7 @@ JSON shape:
 
 ## `hostwright apply [path] [--state-db <path>] --confirm-plan <hash> [--team-profile <path> --approval-record <path>]`
 
-`apply` is the compatibility entry point for a confirmed `up` lifecycle plan. Generate the exact hash with `hostwright up --dry-run`; confirmed execution then uses the same durable operation DAG, schema-v7 saga, provider binding, observation, verification, retry, compensation, and recovery behavior as `up`.
+`apply` is the compatibility entry point for a confirmed `up` lifecycle plan. Generate the exact hash with `hostwright up --dry-run`; confirmed execution then uses the same durable operation DAG, schema-v8 saga, provider binding, observation, verification, retry, compensation, and recovery behavior as `up`.
 
 When `--team-profile` is selected, `--approval-record` remains mandatory and must bind the exact profile, manifest, current plan, and `apply` scope. `apply` does not add a separate mutation path or loosen lifecycle checks.
 

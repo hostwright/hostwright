@@ -3,7 +3,9 @@ import Foundation
 import HostwrightCore
 import HostwrightManifest
 import HostwrightReconciler
+import HostwrightRegistry
 import HostwrightRuntime
+import HostwrightSecrets
 import HostwrightState
 
 struct LifecycleLiveDriver: LifecycleCommandDriving {
@@ -26,6 +28,10 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
             environment: environment
         )
         let manifest = validated.manifest
+        let effectiveManifestSHA256 = try lifecycleManifestSHA256(
+            text: manifestText,
+            manifest: manifest
+        )
         let mapping = ManifestRuntimeMapper.map(
             manifest,
             bindMountBaseDirectory: manifestBaseDirectory(for: options.manifestPath)
@@ -107,7 +113,7 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
             : options.serviceNames.sorted()
         let planFence = lifecyclePlanFence(
             command: options.command,
-            manifestSHA256: sha256(manifestText),
+            manifestSHA256: effectiveManifestSHA256,
             observationSHA256: inventory.semanticSHA256,
             capabilitySHA256: selectedProvider.selection.capabilitySHA256,
             projectID: projectID,
@@ -120,7 +126,7 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
         )
 
         return LifecycleCommandPreparation(
-            manifestSHA256: sha256(manifestText),
+            manifestSHA256: effectiveManifestSHA256,
             manifestBaseDirectory: manifestBaseDirectory(for: options.manifestPath),
             mappingIssues: mapping.issues,
             desiredState: desiredState,
@@ -156,8 +162,19 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
         compiled: LifecycleCompiledCommand,
         preparation: LifecycleCommandPreparation
     ) throws {
-        let fresh = try prepare(options: options)
-        let freshPlan = try LifecycleCommandPlanCompiler().compile(
+        let freshInitial = try prepare(options: options)
+        let compiler = LifecycleCommandPlanCompiler()
+        let freshInitialPlan = try compiler.compile(
+            options: options,
+            preparation: freshInitial
+        )
+        let fresh = try LifecycleImageLockBinder.bind(
+            preparation: freshInitial,
+            initialCompiled: freshInitialPlan,
+            options: options,
+            resolve: localImageEvidence
+        )
+        let freshPlan = try compiler.compile(
             options: options,
             preparation: fresh
         )
@@ -185,7 +202,15 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
             path: options.manifestPath,
             environment: environment
         )
-        let executionManifestSHA256 = sha256(manifestText)
+        let validated = try hostwrightValidatedManifest(
+            text: manifestText,
+            teamProfilePath: nil,
+            environment: environment
+        )
+        let executionManifestSHA256 = try lifecycleManifestSHA256(
+            text: manifestText,
+            manifest: validated.manifest
+        )
         guard executionManifestSHA256 == preparation.manifestSHA256,
               executionManifestSHA256 == compiled.plan.manifestSHA256 else {
             throw LifecycleCommandRunnerError.confirmationMismatch(
@@ -199,12 +224,9 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
             preparation: preparation,
             options: options,
             environment: environment,
-            adapter: adapter
-        )
-        let validated = try hostwrightValidatedManifest(
-            text: manifestText,
-            teamProfilePath: nil,
-            environment: environment
+            adapter: adapter,
+            store: store,
+            manifest: validated.manifest
         )
         let now = hostwrightTimestamp()
         let recoverySnapshot: DesiredStateRecoverySnapshot?
@@ -223,6 +245,14 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
         let recoveryStateJSONRedacted = try recoverySnapshot.map(
             lifecycleRecoveryStateJSONRedacted
         )
+        let operationID = HostwrightResourceUUID.legacy(
+            kind: "lifecycle-operation",
+            identifier: compiled.plan.planSHA256
+        )
+        let groupID = HostwrightResourceUUID.legacy(
+            kind: "lifecycle-group",
+            identifier: compiled.plan.planSHA256
+        )
         try store.desiredStates.saveManifestSnapshot(
             projectID: preparation.projectID,
             manifestPath: options.manifestPath,
@@ -231,6 +261,14 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
             manifest: validated.manifest,
             timestamp: now,
             mutationProvider: preparation.providerID.rawValue
+        )
+        try lifecyclePersistDesiredImageLocks(
+            plan: compiled.plan,
+            desiredServicesByNodeKey:
+                compiled.desiredServicesByNodeKey,
+            groupID: groupID,
+            store: store,
+            timestamp: now
         )
         try store.observedStates.saveSnapshot(
             snapshotID: HostwrightResourceUUID.generate(),
@@ -273,14 +311,6 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
             validator: validator,
             recoveryStateJSONRedacted: recoveryStateJSONRedacted
         )
-        let operationID = HostwrightResourceUUID.legacy(
-            kind: "lifecycle-operation",
-            identifier: compiled.plan.planSHA256
-        )
-        let groupID = HostwrightResourceUUID.legacy(
-            kind: "lifecycle-group",
-            identifier: compiled.plan.planSHA256
-        )
         let result = try hostwrightWaitForAsync {
             try await executor.execute(
                 plan: compiled.plan,
@@ -298,6 +328,44 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
             )
         }
         return result
+    }
+}
+
+private func lifecyclePersistDesiredImageLocks(
+    plan: LifecyclePlan,
+    desiredServicesByNodeKey: [String: DesiredRuntimeService],
+    groupID: String,
+    store: SQLiteStateStore,
+    timestamp: String
+) throws {
+    var persistedResourceUUIDs = Set<String>()
+    for node in plan.nodes.sorted(by: { $0.key < $1.key }) {
+        guard !persistedResourceUUIDs.contains(node.resourceUUID),
+              let service = desiredServicesByNodeKey[node.key],
+              let lock = service.imageLock else {
+            continue
+        }
+        let record = ImageDigestLockRecord(
+            id: HostwrightResourceUUID.legacy(
+                kind: "image-digest-lock-desired",
+                identifier:
+                    "\(plan.planSHA256):\(node.resourceUUID)"
+            ),
+            projectID: plan.projectID,
+            resourceUUID: node.resourceUUID,
+            serviceName: service.logicalServiceName,
+            replicaIndex: service.replicaIndex,
+            stateKind: .desired,
+            lock: lock,
+            providerGeneration: plan.providerGeneration,
+            planSHA256: plan.planSHA256,
+            operationGroupID: groupID,
+            observationSHA256: nil,
+            createdAt: timestamp,
+            updatedAt: timestamp
+        )
+        try store.imageDigestLocks.save(record)
+        persistedResourceUUIDs.insert(node.resourceUUID)
     }
 }
 
@@ -537,6 +605,25 @@ struct LifecyclePersistedRecoveryDriver {
               }) else {
             throw LifecyclePersistedRecoveryError.confirmationMismatch
         }
+        if request.action != .rollback ||
+            !isCompletedCompensation(sourceGroup) {
+            try preflightImageTrustRecovery(
+                plan: persistedPlan,
+                store: store
+            )
+            try preflightImageSBOMRecovery(
+                plan: persistedPlan,
+                store: store
+            )
+            try preflightImageVulnerabilityRecovery(
+                plan: persistedPlan,
+                store: store
+            )
+            try preflightImageProvenanceRecovery(
+                plan: persistedPlan,
+                store: store
+            )
+        }
         let recoverySnapshot = try lifecycleRecoverySnapshot(
             from: sourceGroup
         )
@@ -576,6 +663,729 @@ struct LifecyclePersistedRecoveryDriver {
                 "The confirmed recovery timeout expired before persisted execution could begin. No runtime mutation was attempted."
             )
         }
+    }
+
+    func preflightImageTrustRecovery(
+        plan: LifecyclePlan,
+        store: SQLiteStateStore
+    ) throws {
+        let authorizationObjects = try store.events.loadAll()
+            .filter {
+                $0.type == "image.trust.lifecycle.authorized"
+            }
+            .compactMap { event -> [String: Any]? in
+                guard let data = event.payloadJSONRedacted.data(
+                    using: .utf8
+                ),
+                let object = try? JSONSerialization.jsonObject(
+                    with: data
+                ) as? [String: Any],
+                object["planSHA256"] as? String ==
+                    plan.planSHA256 else {
+                    return nil
+                }
+                return object
+            }
+        guard !authorizationObjects.isEmpty else {
+            return
+        }
+        let desired = Dictionary(
+            grouping: recoveryDesiredServices(plan: plan).values,
+            by: \.logicalServiceName
+        ).compactMapValues(\.first)
+        for serviceName in desired.keys.sorted() {
+            guard let service = desired[serviceName],
+                  let lock = service.imageLock else {
+                throw recoveryTrustSafeHold(
+                    plan: plan,
+                    serviceName: serviceName
+                )
+            }
+            let candidates = authorizationObjects.filter {
+                $0["projectID"] as? String == plan.projectID &&
+                    $0["serviceName"] as? String == serviceName &&
+                    $0["descriptorDigest"] as? String ==
+                        lock.descriptorDigest
+            }
+            var authorized = false
+            for object in candidates {
+                guard let policySHA256 =
+                        object["policySHA256"] as? String,
+                      policySHA256.range(
+                          of: "^[a-f0-9]{64}$",
+                          options: .regularExpression
+                      ) != nil,
+                      let authorization =
+                        object["decision"] as? String else {
+                    continue
+                }
+                if authorization == "verified",
+                   let verification =
+                    object["verification"] as? [String: Any],
+                   let createdAt =
+                    verification["createdAt"] as? String,
+                   let discoveryID =
+                    verification["discoveryID"] as? String,
+                   let graphSHA256 =
+                    verification["graphSHA256"] as? String,
+                   let rootSHA256 =
+                    verification["trustedRootSHA256"] as? String,
+                   let record = try store.imageTrust
+                    .loadVerifications(
+                        projectID: plan.projectID,
+                        serviceName: serviceName,
+                        descriptorDigest: lock.descriptorDigest
+                    )
+                    .first(where: {
+                        $0.policySHA256 == policySHA256 &&
+                            $0.createdAt == createdAt &&
+                            $0.evidenceDiscoveryID ==
+                                discoveryID &&
+                            $0.evidenceGraphSHA256 ==
+                                graphSHA256 &&
+                            $0.trustedRootSHA256 ==
+                                rootSHA256 &&
+                            $0.outcome ==
+                                ImageTrustVerificationOutcome
+                                    .passed.rawValue &&
+                            $0.matchedAuthorityIDs.count >=
+                                $0.threshold
+                    }),
+                   let discovery =
+                    try store.ociReferrers.loadDiscovery(
+                        id: record.evidenceDiscoveryID
+                    ),
+                   discovery.complete,
+                   discovery.graphSHA256 ==
+                    record.evidenceGraphSHA256,
+                   discovery.subjectDigest ==
+                    lock.descriptorDigest,
+                   let graph = try store.ociReferrers.loadGraph(
+                       discoveryID: record.evidenceDiscoveryID
+                   ),
+                   let subject =
+                    try store.imageTrust.loadSubjectManifest(
+                        endpoint: discovery.registryEndpoint,
+                        repository: discovery.repository,
+                        descriptorDigest: lock.descriptorDigest
+                    ),
+                   lifecycleSHA256(subject.payload) ==
+                    subject.payloadSHA256,
+                   subject.descriptorDigest ==
+                    lock.descriptorDigest,
+                   (try? ImageTrustEvidenceExtractor.bundles(
+                       from: graph
+                   )) != nil {
+                    authorized = true
+                    break
+                }
+                if authorization == "exception",
+                   let exceptionID =
+                    object["exceptionID"] as? String,
+                   let exception =
+                    try store.imageTrust.activeException(
+                        projectID: plan.projectID,
+                        serviceName: serviceName,
+                        descriptorDigest: lock.descriptorDigest,
+                        policySHA256: policySHA256,
+                        currentTimestamp: hostwrightTimestamp()
+                    ),
+                   exception.id == exceptionID {
+                    authorized = true
+                    break
+                }
+            }
+            guard authorized else {
+                throw recoveryTrustSafeHold(
+                    plan: plan,
+                    serviceName: serviceName
+                )
+            }
+        }
+    }
+
+    func preflightImageSBOMRecovery(
+        plan: LifecyclePlan,
+        store: SQLiteStateStore
+    ) throws {
+        let authorizationObjects = try store.events.loadAll()
+            .filter {
+                $0.type == "image.sbom.lifecycle.authorized"
+            }
+            .compactMap { event -> [String: Any]? in
+                guard let data = event.payloadJSONRedacted.data(
+                    using: .utf8
+                ),
+                let object = try? JSONSerialization.jsonObject(
+                    with: data
+                ) as? [String: Any],
+                object["planSHA256"] as? String ==
+                    plan.planSHA256 else {
+                    return nil
+                }
+                return object
+            }
+        guard !authorizationObjects.isEmpty else {
+            return
+        }
+        let desired = Dictionary(
+            grouping: recoveryDesiredServices(plan: plan).values,
+            by: \.logicalServiceName
+        ).compactMapValues(\.first)
+        for serviceName in desired.keys.sorted() {
+            guard let service = desired[serviceName],
+                  let lock = service.imageLock else {
+                throw recoverySBOMSafeHold(
+                    plan: plan,
+                    serviceName: serviceName
+                )
+            }
+            let candidates = authorizationObjects.filter {
+                $0["projectID"] as? String == plan.projectID &&
+                    $0["serviceName"] as? String == serviceName &&
+                    $0["descriptorDigest"] as? String ==
+                        lock.descriptorDigest
+            }
+            var authorized = false
+            for object in candidates {
+                guard let policySHA256 =
+                    object["policySHA256"] as? String,
+                    policySHA256.range(
+                        of: "^[a-f0-9]{64}$",
+                        options: .regularExpression
+                    ) != nil,
+                    let formats = object["formats"] as? [String],
+                    !formats.isEmpty else {
+                    continue
+                }
+                let records = try store.imageSBOM.loadRecords(
+                    projectID: plan.projectID,
+                    serviceName: serviceName,
+                    descriptorDigest: lock.descriptorDigest,
+                    policySHA256: policySHA256
+                )
+                let required = Set(formats)
+                let verified = try lifecycleVerifiedSBOMFormats(
+                    records: records,
+                    descriptorDigest: lock.descriptorDigest,
+                    store: store
+                )
+                if required.isSubset(of: verified) {
+                    authorized = true
+                    break
+                }
+            }
+            guard authorized else {
+                throw recoverySBOMSafeHold(
+                    plan: plan,
+                    serviceName: serviceName
+                )
+            }
+        }
+    }
+
+    func preflightImageVulnerabilityRecovery(
+        plan: LifecyclePlan,
+        store: SQLiteStateStore
+    ) throws {
+        let authorizationObjects = try store.events.loadAll()
+            .filter {
+                $0.type ==
+                    "image.vulnerability.lifecycle.authorized"
+            }
+            .compactMap { event -> [String: Any]? in
+                guard let data = event.payloadJSONRedacted.data(
+                    using: .utf8
+                ),
+                let object = try? JSONSerialization.jsonObject(
+                    with: data
+                ) as? [String: Any],
+                object["planSHA256"] as? String ==
+                    plan.planSHA256 else {
+                    return nil
+                }
+                return object
+            }
+        let notRequired = try store.events.loadAll().contains {
+            event in
+            guard event.type ==
+                    "image.vulnerability.lifecycle.not-required",
+                  let data = event.payloadJSONRedacted.data(
+                      using: .utf8
+                  ),
+                  let object =
+                    try? JSONSerialization.jsonObject(
+                        with: data
+                    ) as? [String: Any] else {
+                return false
+            }
+            return object["planSHA256"] as? String ==
+                plan.planSHA256 &&
+                object["projectID"] as? String ==
+                plan.projectID
+        }
+        if authorizationObjects.isEmpty, notRequired {
+            return
+        }
+        let desired = Dictionary(
+            grouping: recoveryDesiredServices(plan: plan).values,
+            by: \.logicalServiceName
+        ).compactMapValues(\.first)
+        let currentTrust =
+            try? recoveryVulnerabilityTrustMapping(
+                plan: plan,
+                store: store
+            )
+        guard !authorizationObjects.isEmpty else {
+            let serviceName = desired.keys.sorted().first ??
+                "unknown"
+            throw recoveryVulnerabilitySafeHold(
+                plan: plan,
+                serviceName: serviceName
+            )
+        }
+        for serviceName in desired.keys.sorted() {
+            guard let service = desired[serviceName],
+                  let lock = service.imageLock else {
+                throw recoveryVulnerabilitySafeHold(
+                    plan: plan,
+                    serviceName: serviceName
+                )
+            }
+            let candidates = authorizationObjects.filter {
+                $0["projectID"] as? String == plan.projectID &&
+                    $0["serviceName"] as? String ==
+                        serviceName &&
+                    $0["descriptorDigest"] as? String ==
+                        lock.descriptorDigest
+            }
+            var authorized = false
+            for object in candidates {
+                guard let policyObject =
+                        object["policy"] as? [String: Any],
+                      let policy =
+                        try? lifecycleVulnerabilityPolicy(
+                            from: policyObject
+                        ),
+                      object["policySHA256"] as? String ==
+                        policy.policySHA256,
+                      let signaturePolicySHA256 =
+                        object[
+                            "signaturePolicySHA256"
+                        ] as? String,
+                      signaturePolicySHA256.range(
+                        of: "^[a-f0-9]{64}$",
+                        options: .regularExpression
+                      ) != nil,
+                      var observation =
+                        try? lifecycleCurrentVulnerabilityObservation(
+                            store: store,
+                            projectID: plan.projectID,
+                            serviceName: serviceName,
+                            descriptorDigest:
+                                lock.descriptorDigest,
+                            policy: policy,
+                            signaturePolicySHA256:
+                                signaturePolicySHA256,
+                            at: Date()
+                        ) else {
+                    continue
+                }
+                if observation.report != nil {
+                    guard let currentTrust,
+                          currentTrust.material.policySHA256 ==
+                            signaturePolicySHA256,
+                          let revalidated =
+                            try? lifecycleCurrentVulnerabilityObservation(
+                                store: store,
+                                projectID: plan.projectID,
+                                serviceName: serviceName,
+                                descriptorDigest:
+                                    lock.descriptorDigest,
+                                policy: policy,
+                                signaturePolicySHA256:
+                                    signaturePolicySHA256,
+                                signaturePolicy:
+                                    currentTrust.policy,
+                                signatureMaterial:
+                                    currentTrust.material,
+                                at: Date()
+                            ) else {
+                        continue
+                    }
+                    observation = revalidated
+                }
+                if let report = observation.report {
+                    guard object["reportID"] as? String ==
+                            report.id,
+                          object[
+                              "signatureProofSHA256"
+                          ] as? String ==
+                            report.signatureProofSHA256,
+                          object["reportDigest"] as? String ==
+                            report.reportDigest,
+                          object[
+                              "reportReferrerDigest"
+                          ] as? String ==
+                            report.reportReferrerDigest,
+                          object["databaseID"] as? String ==
+                            report.databaseID,
+                          object[
+                              "databaseVersion"
+                          ] as? String ==
+                            report.databaseVersion else {
+                        continue
+                    }
+                } else {
+                    guard object["reportID"] as? NSNull != nil,
+                          object[
+                              "signatureProofSHA256"
+                          ] as? NSNull != nil,
+                          object["reportDigest"] as? NSNull != nil,
+                          object[
+                              "reportReferrerDigest"
+                          ] as? NSNull != nil else {
+                        continue
+                    }
+                }
+                if observation.decision.outcome ==
+                    HostwrightRegistry
+                    .ImageVulnerabilityDecisionOutcome.allowed {
+                    guard object["decisionMode"] as? String ==
+                            "policy-pass" else {
+                        continue
+                    }
+                    authorized = true
+                    break
+                }
+                guard let exceptionID =
+                    object["exceptionID"] as? String,
+                    object["decisionMode"] as? String ==
+                        "approved-exception",
+                    let exception =
+                    try lifecycleActiveVulnerabilityException(
+                        store: store,
+                        projectID: plan.projectID,
+                        serviceName: serviceName,
+                        descriptorDigest:
+                            lock.descriptorDigest,
+                        policy: policy,
+                        signaturePolicySHA256:
+                            signaturePolicySHA256,
+                        observation: observation,
+                        at: Date()
+                    ),
+                    exception.id == exceptionID else {
+                    continue
+                }
+                authorized = true
+                break
+            }
+            guard authorized else {
+                throw recoveryVulnerabilitySafeHold(
+                    plan: plan,
+                    serviceName: serviceName
+                )
+            }
+        }
+    }
+
+    func preflightImageProvenanceRecovery(
+        plan: LifecyclePlan,
+        store: SQLiteStateStore
+    ) throws {
+        let allEvents = try store.events.loadAll()
+        let notRequiredObjects = allEvents.compactMap {
+            event -> [String: Any]? in
+            guard event.type ==
+                    "image.provenance.lifecycle.not-required",
+                  let data = event.payloadJSONRedacted.data(
+                      using: .utf8
+                  ),
+                  let object =
+                    try? JSONSerialization.jsonObject(
+                        with: data
+                    ) as? [String: Any],
+                  object["planSHA256"] as? String ==
+                    plan.planSHA256,
+                  object["projectID"] as? String ==
+                    plan.projectID,
+                  object["required"] as? Bool == false else {
+                return nil
+            }
+            return object
+        }
+        if notRequiredObjects.contains(where: {
+            $0["policySHA256"] as? NSNull != nil
+        }) {
+            let project = try store.desiredStates.loadProject(
+                id: plan.projectID
+            )
+            guard project.manifestHash == plan.manifestSHA256 else {
+                throw LifecyclePersistedRecoveryError
+                    .confirmationMismatch
+            }
+            return
+        }
+        let mapping = try recoveryImageProvenanceMapping(
+            plan: plan,
+            store: store
+        )
+        let notRequired = notRequiredObjects.contains { object in
+            if let mapping {
+                return object["policySHA256"] as? String ==
+                    mapping.material.policySHA256 &&
+                    mapping.policy.requirement == .optional
+            }
+            return object["policySHA256"] as? NSNull != nil
+        }
+        guard let mapping,
+              mapping.policy.requirement == .required else {
+            guard notRequired else {
+                throw recoveryProvenanceSafeHold(
+                    plan: plan,
+                    serviceName:
+                        recoveryDesiredServices(plan: plan)
+                        .values.map(\.logicalServiceName)
+                        .sorted().first ?? "unknown"
+                )
+            }
+            return
+        }
+
+        let authorizationObjects = allEvents
+            .filter {
+                $0.type ==
+                    "image.provenance.lifecycle.authorized"
+            }
+            .compactMap { event -> [String: Any]? in
+                guard let data =
+                        event.payloadJSONRedacted.data(using: .utf8),
+                      let object =
+                        try? JSONSerialization.jsonObject(
+                            with: data
+                        ) as? [String: Any],
+                      object["planSHA256"] as? String ==
+                        plan.planSHA256,
+                      object["projectID"] as? String ==
+                        plan.projectID,
+                      object["policySHA256"] as? String ==
+                        mapping.material.policySHA256 else {
+                    return nil
+                }
+                return object
+            }
+        let desired = Dictionary(
+            grouping: recoveryDesiredServices(plan: plan).values,
+            by: \.logicalServiceName
+        ).compactMapValues(\.first)
+        for serviceName in desired.keys.sorted() {
+            guard let service = desired[serviceName],
+                  let lock = service.imageLock else {
+                throw recoveryProvenanceSafeHold(
+                    plan: plan,
+                    serviceName: serviceName
+                )
+            }
+            let records = try store.imageProvenance.loadRecords(
+                projectID: plan.projectID,
+                serviceName: serviceName,
+                descriptorDigest: lock.descriptorDigest,
+                policySHA256: mapping.material.policySHA256
+            )
+            let candidates = authorizationObjects.filter {
+                $0["serviceName"] as? String == serviceName &&
+                    $0["descriptorDigest"] as? String ==
+                        lock.descriptorDigest
+            }
+            var authorized = false
+            for object in candidates {
+                guard let recordID = object["recordID"] as? String,
+                      let record = records.first(where: {
+                          $0.id == recordID
+                      }),
+                      lifecycleProvenanceEvent(
+                          object,
+                          exactlyMatches: record
+                      ),
+                      let current =
+                        try lifecycleCurrentProvenanceRecord(
+                            records: [record],
+                            descriptorDigest:
+                                lock.descriptorDigest,
+                            policy: mapping.policy,
+                            material: mapping.material,
+                            store: store,
+                            at: Date()
+                        ),
+                      current.id == record.id else {
+                    continue
+                }
+                authorized = true
+                break
+            }
+            guard authorized else {
+                throw recoveryProvenanceSafeHold(
+                    plan: plan,
+                    serviceName: serviceName
+                )
+            }
+        }
+    }
+
+    private func recoveryImageProvenanceMapping(
+        plan: LifecyclePlan,
+        store: SQLiteStateStore
+    ) throws -> ImageProvenancePolicyContext? {
+        let project = try store.desiredStates.loadProject(
+            id: plan.projectID
+        )
+        guard project.manifestHash == plan.manifestSHA256,
+              let manifestPath = project.manifestPath else {
+            throw LifecyclePersistedRecoveryError.unavailable(
+                "Recovery cannot resolve the exact persisted manifest for image provenance revalidation."
+            )
+        }
+        let manifestText = try hostwrightReadManifestText(
+            path: manifestPath,
+            environment: environment
+        )
+        let validated = try hostwrightValidatedManifest(
+            text: manifestText,
+            teamProfilePath: nil,
+            environment: environment
+        )
+        guard try lifecycleManifestSHA256(
+            text: manifestText,
+            manifest: validated.manifest
+        ) == plan.manifestSHA256,
+              validated.manifest.project.map({
+                  "project-\($0)"
+              }) == plan.projectID else {
+            throw LifecyclePersistedRecoveryError
+                .confirmationMismatch
+        }
+        guard validated.manifest.imageProvenance != nil else {
+            return nil
+        }
+        return try ImageProvenancePolicyMapping.map(
+            validated.manifest
+        )
+    }
+
+    private func recoveryVulnerabilityTrustMapping(
+        plan: LifecyclePlan,
+        store: SQLiteStateStore
+    ) throws -> (
+        policy: ImageTrustVerificationPolicy,
+        material: ImageTrustPolicyMaterial
+    ) {
+        let project = try store.desiredStates.loadProject(
+            id: plan.projectID
+        )
+        guard project.manifestHash == plan.manifestSHA256,
+              let manifestPath = project.manifestPath else {
+            throw LifecyclePersistedRecoveryError.unavailable(
+                "Recovery cannot resolve the exact persisted manifest for vulnerability signature revalidation."
+            )
+        }
+        let manifestText = try hostwrightReadManifestText(
+            path: manifestPath,
+            environment: environment
+        )
+        let validated = try hostwrightValidatedManifest(
+            text: manifestText,
+            teamProfilePath: nil,
+            environment: environment
+        )
+        guard try lifecycleManifestSHA256(
+            text: manifestText,
+            manifest: validated.manifest
+        ) == plan.manifestSHA256,
+              validated.manifest.project.map({
+                  "project-\($0)"
+              }) == plan.projectID else {
+            throw LifecyclePersistedRecoveryError
+                .confirmationMismatch
+        }
+        return try ImageTrustPolicyMapping.map(
+            validated.manifest
+        )
+    }
+
+    private func recoverySBOMSafeHold(
+        plan: LifecyclePlan,
+        serviceName: String
+    ) -> LifecyclePersistedRecoveryError {
+        .unavailable(
+            "Recovery requires the exact previously authorized image SBOM evidence for plan \(plan.planSHA256) and service '\(RuntimeRedactionPolicy.default.redact(serviceName))'. No runtime mutation was attempted."
+        )
+    }
+
+    private func recoveryTrustSafeHold(
+        plan: LifecyclePlan,
+        serviceName: String
+    ) -> LifecyclePersistedRecoveryError {
+        .safeHold(
+            LifecycleRecoverySafeHold(
+                reason:
+                    "Image trust authorization for recovery is missing, expired, or no longer matches exact evidence.",
+                affectedNodeKeys: plan.nodes.filter {
+                    (try? LifecycleRevisionCodec
+                        .decodeRedactedDesiredJSON(
+                            $0.desiredSpecificationJSONRedacted
+                        ).logicalServiceName) == serviceName
+                }.map(\.key),
+                operatorCommands: [
+                    "hostwright registry trust status <manifest> --service \(serviceName) --output json",
+                    "hostwright recovery --output json"
+                ]
+            )
+        )
+    }
+
+    private func recoveryVulnerabilitySafeHold(
+        plan: LifecyclePlan,
+        serviceName: String
+    ) -> LifecyclePersistedRecoveryError {
+        .safeHold(
+            LifecycleRecoverySafeHold(
+                reason:
+                    "Image vulnerability authorization for recovery is missing, expired, or no longer matches exact signed evidence.",
+                affectedNodeKeys: plan.nodes.filter {
+                    (try? LifecycleRevisionCodec
+                        .decodeRedactedDesiredJSON(
+                            $0.desiredSpecificationJSONRedacted
+                        ).logicalServiceName) == serviceName
+                }.map(\.key),
+                operatorCommands: [
+                    "hostwright registry vulnerability status <manifest> --service \(serviceName) --output json",
+                    "hostwright recovery --output json"
+                ]
+            )
+        )
+    }
+
+    private func recoveryProvenanceSafeHold(
+        plan: LifecyclePlan,
+        serviceName: String
+    ) -> LifecyclePersistedRecoveryError {
+        .safeHold(
+            LifecycleRecoverySafeHold(
+                reason:
+                    "Image provenance authorization for recovery is missing, expired, or no longer matches the exact signed attestation.",
+                affectedNodeKeys: plan.nodes.filter {
+                    (try? LifecycleRevisionCodec
+                        .decodeRedactedDesiredJSON(
+                            $0.desiredSpecificationJSONRedacted
+                        ).logicalServiceName) == serviceName
+                }.map(\.key),
+                operatorCommands: [
+                    "hostwright registry provenance status <manifest> --service \(serviceName) --output json",
+                    "hostwright recovery --output json"
+                ]
+            )
+        )
     }
 
     private func executeValidated(
@@ -698,6 +1508,11 @@ struct LifecyclePersistedRecoveryDriver {
                 store: store,
                 deadline: deadline
             )
+            try rebindImageRecoveryAuthorizations(
+                sourcePlan: persistedPlan,
+                targetPlan: rollbackPlan,
+                store: store
+            )
             let rollbackOperationID = HostwrightResourceUUID.legacy(
                 kind: "lifecycle-rollback-operation",
                 identifier: "\(sourceGroup.id):\(rollbackPlan.planSHA256)"
@@ -729,6 +1544,83 @@ struct LifecyclePersistedRecoveryDriver {
                 )
             }
             return result
+        }
+    }
+
+    private func rebindImageRecoveryAuthorizations(
+        sourcePlan: LifecyclePlan,
+        targetPlan: LifecyclePlan,
+        store: SQLiteStateStore
+    ) throws {
+        guard sourcePlan.planSHA256 != targetPlan.planSHA256,
+              sourcePlan.projectID == targetPlan.projectID,
+              sourcePlan.manifestSHA256 == targetPlan.manifestSHA256 else {
+            return
+        }
+        let copiedTypes = Set([
+            "image.trust.lifecycle.authorized",
+            "image.sbom.lifecycle.authorized",
+            "image.vulnerability.lifecycle.authorized",
+            "image.vulnerability.lifecycle.not-required",
+            "image.provenance.lifecycle.authorized",
+            "image.provenance.lifecycle.not-required"
+        ])
+        let allEvents = try store.events.loadAll()
+        let existing = Set(allEvents.compactMap {
+            event -> String? in
+            guard copiedTypes.contains(event.type),
+                  event.payloadJSONRedacted.contains(
+                      targetPlan.planSHA256
+                  ) else {
+                return nil
+            }
+            return "\(event.type)\u{1f}\(event.payloadJSONRedacted)"
+        })
+        var rebound: [EventRecord] = []
+        for event in allEvents where copiedTypes.contains(event.type) {
+            guard let data =
+                    event.payloadJSONRedacted.data(using: .utf8),
+                  var object =
+                    try JSONSerialization.jsonObject(with: data)
+                        as? [String: Any],
+                  object["planSHA256"] as? String ==
+                    sourcePlan.planSHA256,
+                  object["projectID"] as? String ==
+                    sourcePlan.projectID else {
+                continue
+            }
+            object["planSHA256"] = targetPlan.planSHA256
+            let payload = try JSONSerialization.data(
+                withJSONObject: object,
+                options: [.sortedKeys, .withoutEscapingSlashes]
+            )
+            let payloadText = String(
+                decoding: payload,
+                as: UTF8.self
+            )
+            guard !existing.contains(
+                "\(event.type)\u{1f}\(payloadText)"
+            ) else {
+                continue
+            }
+            rebound.append(
+                EventRecord(
+                    id: UUID().uuidString.lowercased(),
+                    timestamp: hostwrightTimestamp(),
+                    severity: event.severity,
+                    type: event.type,
+                    source: "hostwright.recovery",
+                    projectID: event.projectID,
+                    serviceName: event.serviceName,
+                    runtimeAdapter: event.runtimeAdapter,
+                    message:
+                        "Revalidated image authorization was bound to the exact recovery plan.",
+                    payloadJSONRedacted: payloadText
+                )
+            )
+        }
+        if !rebound.isEmpty {
+            try store.events.append(rebound)
         }
     }
 
@@ -765,6 +1657,14 @@ struct LifecyclePersistedRecoveryDriver {
         deadline: LifecycleRecoveryDeadline,
         recoveryStateJSONRedacted: String? = nil
     ) async throws -> LifecycleSagaExecutionResult {
+        let desiredByNode = recoveryDesiredServices(plan: plan)
+        try lifecyclePersistDesiredImageLocks(
+            plan: plan,
+            desiredServicesByNodeKey: desiredByNode,
+            groupID: groupID,
+            store: store,
+            timestamp: hostwrightTimestamp()
+        )
         let runtime = try await recoveryRuntime(
             plan: plan,
             store: store,
@@ -1694,6 +2594,22 @@ struct LifecycleLiveEffects: LifecycleSagaEffects {
                 manifestHash: context.plan.manifestSHA256,
                 context: mutationContext(node: node, context: context)
             )
+            let imageContentLease =
+                try await acquireImageContentLeaseIfNeeded(
+                    action: action,
+                    node: node,
+                    context: context
+                )
+            defer {
+                if let imageContentLease {
+                    _ = try? store.contentCache.releaseLease(
+                        id: imageContentLease.id,
+                        expectedFencingToken:
+                            imageContentLease.fencingToken,
+                        releasedAt: hostwrightTimestamp()
+                    )
+                }
+            }
             if action.requiresProcessCompletion {
                 return await applyCompletionAwareStart(
                     action,
@@ -1727,6 +2643,182 @@ struct LifecycleLiveEffects: LifecycleSagaEffects {
                 )
             )
         }
+    }
+
+    private func acquireImageContentLeaseIfNeeded(
+        action: PlannedRuntimeAction,
+        node: LifecyclePlanNode,
+        context: LifecycleSagaContext
+    ) async throws -> ContentCacheLeaseRecord? {
+        guard action.kind == .create,
+              let desired = action.desiredService,
+              let lock = desired.imageLock,
+              lock.providerID == context.plan.providerID else {
+            return nil
+        }
+        let projection = try store.imageOwnership.load()
+        guard let ownership = projection.record(
+            forReference: lock.requestedReference,
+            providerID: context.plan.providerID.rawValue
+        ) ?? projection.records.first(where: {
+            $0.providerID == context.plan.providerID.rawValue &&
+                $0.digest == lock.descriptorDigest
+        }),
+        ownership.digest == lock.descriptorDigest,
+        let ownershipOperationID =
+            ownership.ownershipOperationID,
+        let ownershipProofSHA256 =
+            ownership.ownershipProofSHA256 else {
+            return nil
+        }
+        guard let imageProvider =
+                adapter as? any RuntimeImageLifecycleProviding else {
+            throw HostwrightDiagnostic(
+                code: .imageUnavailable,
+                message:
+                    "The selected provider cannot lease exact owned image content before creation."
+            )
+        }
+        let capability =
+            try await imageProvider.imageOperationCapabilities()
+        guard capability.providerID == context.plan.providerID,
+              capability.capabilitySHA256 ==
+                context.plan.capabilitySHA256,
+              capability.status(for: .inspect).state == .available,
+              capability.status(for: .inspect).reason ==
+                .implemented else {
+            throw HostwrightDiagnostic(
+                code: .imageUnavailable,
+                message:
+                    "Exact image inspection is unavailable before lifecycle creation."
+            )
+        }
+        let timestamp = hostwrightTimestamp()
+        var snapshot = try store.contentCache.snapshot(
+            providerScope: context.plan.providerID.rawValue,
+            currentTimestamp: timestamp,
+            limit: ImageCacheLimits.maximumRecords
+        )
+        if snapshot.contents.first(where: {
+            $0.digest == lock.descriptorDigest
+        }) == nil {
+            let request = try RuntimeImageLifecycleRequest(
+                operation: .inspect,
+                operationID: UUID().uuidString.lowercased(),
+                idempotencyKey: sha256(
+                    [
+                        "lifecycle-image-content-lease",
+                        context.groupID,
+                        node.key,
+                        ownership.reference,
+                        lock.descriptorDigest
+                    ].joined(separator: "\u{1f}")
+                ),
+                capabilitySHA256:
+                    capability.capabilitySHA256,
+                sourceReferences: [ownership.reference]
+            )
+            let result =
+                try await imageProvider.performImageOperation(
+                    request,
+                    confirmation: nil,
+                    progress: { _ in }
+                )
+            guard let image = result.images.first(where: {
+                $0.digest == lock.descriptorDigest
+            }) else {
+                throw HostwrightDiagnostic(
+                    code: .imageConflict,
+                    message:
+                        "Exact owned image content disappeared before lifecycle creation."
+                )
+            }
+            try store.contentCache.upsert(
+                ContentCacheRecord(
+                    providerScope:
+                        context.plan.providerID.rawValue,
+                    digest: lock.descriptorDigest,
+                    kind: .runtimeImage,
+                    sizeBytes: image.sizeBytes,
+                    pinPolicy: .policyManaged,
+                    createdAt: timestamp,
+                    observedAt: timestamp,
+                    lastUsedAt: timestamp
+                )
+            )
+            snapshot = try store.contentCache.snapshot(
+                providerScope:
+                    context.plan.providerID.rawValue,
+                currentTimestamp: timestamp,
+                limit: ImageCacheLimits.maximumRecords
+            )
+        } else {
+            let existingPinPolicy = snapshot.contents.first {
+                $0.digest == lock.descriptorDigest
+            }?.pinPolicy
+            guard try store.contentCache.setPinPolicy(
+                providerScope:
+                    context.plan.providerID.rawValue,
+                digest: lock.descriptorDigest,
+                pinPolicy: existingPinPolicy == .operatorManaged
+                    ? .operatorManaged
+                    : .policyManaged,
+                observedAt: timestamp
+            ) else {
+                throw HostwrightDiagnostic(
+                    code: .imageConflict,
+                    message:
+                        "Owned image accounting changed before lifecycle creation."
+                )
+            }
+        }
+        let existing = snapshot.references.first(where: {
+            $0.reference == ownership.reference
+        })
+        if let existing {
+            guard existing.digest == ownership.digest,
+                  existing.ownershipOperationID ==
+                    ownershipOperationID,
+                  existing.ownershipProofSHA256 ==
+                    ownershipProofSHA256 else {
+                throw HostwrightDiagnostic(
+                    code: .imageConflict,
+                    message:
+                        "Owned image reference accounting changed before lifecycle creation."
+                )
+            }
+        }
+        try store.contentCache.saveReference(
+            ContentCacheReferenceRecord(
+                id: existing?.id ??
+                    HostwrightResourceUUID.legacy(
+                        kind: "image-content-reference",
+                        identifier:
+                            "\(ownership.providerID):\(ownership.reference)"
+                    ),
+                providerScope: ownership.providerID,
+                reference: ownership.reference,
+                digest: ownership.digest,
+                ownershipOperationID: ownershipOperationID,
+                ownershipProofSHA256:
+                    ownershipProofSHA256,
+                createdAt: existing?.createdAt ?? timestamp,
+                observedAt: timestamp
+            )
+        )
+        return try store.contentCache.acquireLease(
+            providerScope: context.plan.providerID.rawValue,
+            digest: lock.descriptorDigest,
+            reference: ownership.reference,
+            mode: .shared,
+            ownerID: context.groupID,
+            purpose: "lifecycle-create",
+            acquiredAt: timestamp,
+            expiresAt: hostwrightTimestampAdding(
+                seconds: 86_400,
+                to: timestamp
+            )
+        )
     }
 
     func observe(
@@ -3197,19 +4289,25 @@ struct LifecycleLiveEffects: LifecycleSagaEffects {
     }
 
     private func resolveSecretReferences(
-        _ service: DesiredRuntimeService
+        _ service: DesiredRuntimeService,
+        workload: HostwrightSecretWorkloadScope
     ) throws -> DesiredRuntimeService {
         guard service.environment.contains(where: { $0.secretReference != nil }) else {
             return service
         }
-        let secretStore = environment.secretStore()
+        let secretResolver = environment.secretResolver()
         let resolved = try service.environment.map { entry in
             guard let reference = entry.secretReference else {
                 return entry
             }
             return RuntimeEnvironmentValue(
                 name: entry.name,
-                value: try secretStore.readString(reference: reference),
+                value: try secretResolver.resolve(
+                    reference: reference,
+                    for: workload,
+                    environmentKey: entry.name,
+                    at: Date()
+                ).stringValue(),
                 isSensitive: true
             )
         }
@@ -3236,7 +4334,15 @@ struct LifecycleLiveEffects: LifecycleSagaEffects {
         }
         let desiredService: DesiredRuntimeService?
         if kind == .create, let service = await state.desiredService(for: node.key) {
-            desiredService = try resolveSecretReferences(service)
+            desiredService = try resolveSecretReferences(
+                service,
+                workload: try lifecycleSecretWorkloadScope(
+                    projectResourceUUID: plan.projectResourceUUID,
+                    resourceUUID: node.resourceUUID,
+                    generation: node.resourceGeneration,
+                    serviceName: service.logicalServiceName
+                )
+            )
         } else {
             desiredService = nil
         }
@@ -3402,6 +4508,32 @@ struct LifecycleLiveEffects: LifecycleSagaEffects {
     ) async throws {
         let now = hostwrightTimestamp()
         let desiredForNode = await state.desiredService(for: node.key)
+        if context.direction == .forward,
+           node.action == .create,
+           exactContainer != nil,
+           let desiredForNode,
+           let imageLock = desiredForNode.imageLock {
+            let record = ImageDigestLockRecord(
+                id: HostwrightResourceUUID.legacy(
+                    kind: "image-digest-lock-observed",
+                    identifier:
+                        "\(context.plan.planSHA256):\(node.resourceUUID)"
+                ),
+                projectID: context.plan.projectID,
+                resourceUUID: node.resourceUUID,
+                serviceName: desiredForNode.logicalServiceName,
+                replicaIndex: desiredForNode.replicaIndex,
+                stateKind: .observed,
+                lock: imageLock,
+                providerGeneration: context.plan.providerGeneration,
+                planSHA256: context.plan.planSHA256,
+                operationGroupID: context.groupID,
+                observationSHA256: observationSHA256,
+                createdAt: now,
+                updatedAt: now
+            )
+            try store.imageDigestLocks.save(record)
+        }
         if node.action == .create, let exactContainer {
             let record = OwnershipRecord(
                 id: HostwrightResourceUUID.generate(),
@@ -3969,7 +5101,9 @@ private func lifecyclePreflightDesiredExecution(
     preparation: LifecycleCommandPreparation,
     options: LifecycleCLIOptions,
     environment: CLIEnvironment,
-    adapter: any RuntimeAdapter
+    adapter: any RuntimeAdapter,
+    store: SQLiteStateStore,
+    manifest: HostwrightManifest
 ) throws {
     let executesDesiredFields = compiled.plan.nodes.contains {
         $0.action == .create ||
@@ -3993,11 +5127,42 @@ private func lifecyclePreflightDesiredExecution(
             "Runtime capability changed before lifecycle preflight. No runtime mutation was attempted."
         )
     }
+    try lifecyclePreflightImageTrust(
+        planSHA256: compiled.plan.planSHA256,
+        projectID: preparation.projectID,
+        providerID: preparation.providerID,
+        desiredState: preparation.desiredState,
+        store: store,
+        manifest: manifest
+    )
+    try lifecyclePreflightImageSBOM(
+        planSHA256: compiled.plan.planSHA256,
+        projectID: preparation.projectID,
+        providerID: preparation.providerID,
+        desiredState: preparation.desiredState,
+        store: store,
+        manifest: manifest
+    )
+    try lifecyclePreflightImageVulnerability(
+        planSHA256: compiled.plan.planSHA256,
+        projectID: preparation.projectID,
+        providerID: preparation.providerID,
+        desiredState: preparation.desiredState,
+        store: store,
+        manifest: manifest
+    )
+    try lifecyclePreflightImageProvenance(
+        planSHA256: compiled.plan.planSHA256,
+        projectID: preparation.projectID,
+        providerID: preparation.providerID,
+        desiredState: preparation.desiredState,
+        store: store,
+        manifest: manifest
+    )
     let probeCapabilities = lifecycleProbeCapabilities(for: capability)
     let interactiveCapabilities = RuntimeInteractiveCapabilityContract(
         snapshot: capability
     )
-    let secretStore = environment.secretStore()
     for service in preparation.desiredState.services.sorted(by: {
         $0.identity.displayName < $1.identity.displayName
     }) {
@@ -4027,14 +5192,38 @@ private func lifecyclePreflightDesiredExecution(
                 declaredContainerPorts: []
             )
         }
+        let secretResolver = environment.secretResolver()
+        let secretNode = compiled.plan.nodes.first { node in
+            node.action == .create &&
+                compiled.desiredServicesByNodeKey[node.key]?.identity ==
+                    service.identity
+        }
         let sanitizedEnvironment = try service.environment
             .sorted { $0.name < $1.name }
             .map { entry -> RuntimeEnvironmentValue in
                 guard let reference = entry.secretReference else {
                     return entry
                 }
+                guard let secretNode else {
+                    return RuntimeEnvironmentValue(
+                        name: entry.name,
+                        value: RuntimeRedactionPolicy.default.replacement,
+                        isSensitive: true
+                    )
+                }
                 do {
-                    _ = try secretStore.readString(reference: reference)
+                    let workload = try lifecycleSecretWorkloadScope(
+                        projectResourceUUID: compiled.plan.projectResourceUUID,
+                        resourceUUID: secretNode.resourceUUID,
+                        generation: secretNode.resourceGeneration,
+                        serviceName: service.logicalServiceName
+                    )
+                    _ = try secretResolver.resolve(
+                        reference: reference,
+                        for: workload,
+                        environmentKey: entry.name,
+                        at: Date()
+                    )
                 } catch {
                     throw RuntimeAdapterError.mutationUnavailableByPolicy(
                         "Configured secret for \(service.identity.displayName) environment variable '\(RuntimeRedactionPolicy.default.redact(entry.name))' is unavailable. No runtime mutation was attempted."
@@ -4054,6 +5243,1233 @@ private func lifecyclePreflightDesiredExecution(
             providerID: preparation.providerID
         )
     }
+}
+
+func lifecyclePreflightImageTrust(
+    planSHA256: String,
+    projectID: String,
+    providerID: RuntimeProviderID,
+    desiredState: DesiredRuntimeState,
+    store: SQLiteStateStore,
+    manifest: HostwrightManifest
+) throws {
+    guard manifest.imageTrust != nil else { return }
+    let mapping = try ImageTrustPolicyMapping.map(manifest)
+    let now = Date()
+    let timestamp = hostwrightTimestamp()
+    let rootSHA256 =
+        mapping.material.trustedRootSHA256 ?? lifecycleSHA256(Data())
+    let activeAuthorityIDs = Set(
+        mapping.policy.authorities.filter { authority in
+            if let notBefore = authority.notBefore, now < notBefore {
+                return false
+            }
+            if let notAfter = authority.notAfter, now > notAfter {
+                return false
+            }
+            if let revokedAt = authority.revokedAt, now >= revokedAt {
+                return false
+            }
+            return true
+        }.map(\.id)
+    )
+    let services = Dictionary(
+        grouping: desiredState.services,
+        by: \.logicalServiceName
+    ).compactMapValues(\.first)
+
+    for serviceName in services.keys.sorted() {
+        guard let service = services[serviceName],
+              let lock = service.imageLock else {
+            throw RuntimeAdapterError.mutationUnavailableByPolicy(
+                "Image trust requires an exact provider-bound digest lock for every desired service. No runtime mutation was attempted."
+            )
+        }
+        let verifications = try store.imageTrust.loadVerifications(
+            projectID: projectID,
+            serviceName: serviceName,
+            descriptorDigest: lock.descriptorDigest
+        )
+        var verified = false
+        for record in verifications.reversed() {
+            let matched = Set(record.matchedAuthorityIDs)
+            guard record.policySHA256 == mapping.material.policySHA256,
+                  record.trustedRootSHA256 == rootSHA256,
+                  record.outcome ==
+                    ImageTrustVerificationOutcome.passed.rawValue,
+                  record.threshold == mapping.policy.threshold,
+                  matched.count >= record.threshold,
+                  matched.isSubset(of: activeAuthorityIDs),
+                  let discovery = try store.ociReferrers.loadDiscovery(
+                      id: record.evidenceDiscoveryID
+                  ),
+                  discovery.complete,
+                  discovery.graphSHA256 == record.evidenceGraphSHA256,
+                  discovery.subjectDigest == lock.descriptorDigest,
+                  let graph = try store.ociReferrers.loadGraph(
+                      discoveryID: record.evidenceDiscoveryID
+                  ),
+                  graph.discovery.subjectDigest.canonicalValue ==
+                    lock.descriptorDigest,
+                  let subject = try store.imageTrust.loadSubjectManifest(
+                      endpoint: discovery.registryEndpoint,
+                      repository: discovery.repository,
+                      descriptorDigest: lock.descriptorDigest
+                  ),
+                  subject.payloadSHA256 ==
+                    String(lock.descriptorDigest.dropFirst(7)),
+                  lifecycleSHA256(subject.payload) ==
+                    subject.payloadSHA256,
+                  (try? ImageTrustEvidenceExtractor.bundles(
+                      from: graph
+                  )) != nil else {
+                continue
+            }
+            verified = true
+            try lifecycleRecordTrustAuthorization(
+                store: store,
+                timestamp: timestamp,
+                planSHA256: planSHA256,
+                projectID: projectID,
+                providerID: providerID,
+                serviceName: serviceName,
+                descriptorDigest: lock.descriptorDigest,
+                policySHA256: mapping.material.policySHA256,
+                authorization: "verified",
+                verification: record,
+                exception: nil
+            )
+            break
+        }
+        if verified { continue }
+
+        if let exception = try store.imageTrust.activeException(
+            projectID: projectID,
+            serviceName: serviceName,
+            descriptorDigest: lock.descriptorDigest,
+            policySHA256: mapping.material.policySHA256,
+            currentTimestamp: timestamp
+        ) {
+            let payload = try JSONSerialization.data(
+                withJSONObject: [
+                    "exceptionID": exception.id,
+                    "descriptorDigest": lock.descriptorDigest,
+                    "policySHA256": mapping.material.policySHA256
+                ],
+                options: [.sortedKeys, .withoutEscapingSlashes]
+            )
+            try store.events.append([
+                EventRecord(
+                    id: UUID().uuidString.lowercased(),
+                    timestamp: timestamp,
+                    severity: .warning,
+                    type: "image.trust.exception.used",
+                    source: "hostwright.lifecycle",
+                    projectID: projectID,
+                    serviceName: serviceName,
+                    runtimeAdapter: providerID.rawValue,
+                    message: "An exact active image trust exception authorized lifecycle preflight.",
+                    payloadJSONRedacted:
+                        String(decoding: payload, as: UTF8.self)
+                ),
+                try lifecycleTrustAuthorizationEvent(
+                    timestamp: timestamp,
+                    planSHA256: planSHA256,
+                    projectID: projectID,
+                    providerID: providerID,
+                    serviceName: serviceName,
+                    descriptorDigest: lock.descriptorDigest,
+                    policySHA256:
+                        mapping.material.policySHA256,
+                    authorization: "exception",
+                    verification: nil,
+                    exception: exception
+                )
+            ])
+            continue
+        }
+        throw RuntimeAdapterError.mutationUnavailableByPolicy(
+            "No current image trust verification or exact active exception matches service '\(RuntimeRedactionPolicy.default.redact(serviceName))'. No runtime mutation was attempted."
+        )
+    }
+}
+
+func lifecyclePreflightImageSBOM(
+    planSHA256: String,
+    projectID: String,
+    providerID: RuntimeProviderID,
+    desiredState: DesiredRuntimeState,
+    store: SQLiteStateStore,
+    manifest: HostwrightManifest
+) throws {
+    guard let source = manifest.imageSBOM,
+          source.requirement == .required else {
+        return
+    }
+    let policy = try ImageSBOMPolicyMapping.map(manifest)
+    let requiredFormats = Set(policy.formats.map(\.rawValue))
+    let services = Dictionary(
+        grouping: desiredState.services,
+        by: \.logicalServiceName
+    ).compactMapValues(\.first)
+    for serviceName in services.keys.sorted() {
+        guard let service = services[serviceName],
+              let lock = service.imageLock else {
+            throw RuntimeAdapterError.mutationUnavailableByPolicy(
+                "Required image SBOM policy needs an exact provider-bound digest lock for every desired service. No runtime mutation was attempted."
+            )
+        }
+        let records = try store.imageSBOM.loadRecords(
+            projectID: projectID,
+            serviceName: serviceName,
+            descriptorDigest: lock.descriptorDigest,
+            policySHA256: policy.policySHA256
+        )
+        let verified = try lifecycleVerifiedSBOMFormats(
+            records: records,
+            descriptorDigest: lock.descriptorDigest,
+            store: store
+        )
+        guard requiredFormats.isSubset(of: verified) else {
+            throw RuntimeAdapterError.mutationUnavailableByPolicy(
+                "Required exact image SBOM evidence is missing or invalid for service '\(RuntimeRedactionPolicy.default.redact(serviceName))'. No runtime mutation was attempted."
+            )
+        }
+        let applicable = records.filter {
+            verified.contains($0.format.rawValue)
+        }
+        let object: [String: Any] = [
+            "planSHA256": planSHA256,
+            "projectID": projectID,
+            "serviceName": serviceName,
+            "descriptorDigest": lock.descriptorDigest,
+            "policySHA256": policy.policySHA256,
+            "formats": requiredFormats.sorted(),
+            "records": applicable.map {
+                [
+                    "format": $0.format.rawValue,
+                    "documentDigest": $0.documentDigest,
+                    "discoveryID": $0.evidenceDiscoveryID,
+                    "graphSHA256": $0.evidenceGraphSHA256,
+                    "referrerDigest": $0.sbomReferrerDigest
+                ]
+            }
+        ]
+        let payload = try JSONSerialization.data(
+            withJSONObject: object,
+            options: [.sortedKeys, .withoutEscapingSlashes]
+        )
+        try store.events.append([
+            EventRecord(
+                id: UUID().uuidString.lowercased(),
+                timestamp: hostwrightTimestamp(),
+                severity: .info,
+                type: "image.sbom.lifecycle.authorized",
+                source: "hostwright.lifecycle",
+                projectID: projectID,
+                serviceName: serviceName,
+                runtimeAdapter: providerID.rawValue,
+                message:
+                    "Exact image SBOM evidence authorized lifecycle execution.",
+                payloadJSONRedacted:
+                    String(decoding: payload, as: UTF8.self)
+            )
+        ])
+    }
+}
+
+func lifecyclePreflightImageVulnerability(
+    planSHA256: String,
+    projectID: String,
+    providerID: RuntimeProviderID,
+    desiredState: DesiredRuntimeState,
+    store: SQLiteStateStore,
+    manifest: HostwrightManifest
+) throws {
+    guard manifest.imageVulnerability != nil else {
+        let payload = try JSONSerialization.data(
+            withJSONObject: [
+                "planSHA256": planSHA256,
+                "projectID": projectID,
+                "required": false
+            ],
+            options: [.sortedKeys, .withoutEscapingSlashes]
+        )
+        try store.events.append([
+            EventRecord(
+                id: UUID().uuidString.lowercased(),
+                timestamp: hostwrightTimestamp(),
+                severity: .info,
+                type:
+                    "image.vulnerability.lifecycle.not-required",
+                source: "hostwright.lifecycle",
+                projectID: nil,
+                serviceName: nil,
+                runtimeAdapter: providerID.rawValue,
+                message:
+                    "Image vulnerability policy was not required for this exact lifecycle plan.",
+                payloadJSONRedacted:
+                    String(decoding: payload, as: UTF8.self)
+            )
+        ])
+        return
+    }
+    let policy = try ImageVulnerabilityPolicyMapping.map(manifest)
+    let trust = try ImageTrustPolicyMapping.map(manifest)
+    let signaturePolicySHA256 =
+        trust.material.policySHA256
+    let services = Dictionary(
+        grouping: desiredState.services,
+        by: \.logicalServiceName
+    ).compactMapValues(\.first)
+    let now = Date()
+    for serviceName in services.keys.sorted() {
+        guard let service = services[serviceName],
+              let lock = service.imageLock else {
+            throw RuntimeAdapterError.mutationUnavailableByPolicy(
+                "Image vulnerability policy requires an exact provider-bound digest lock for every desired service. No runtime mutation was attempted."
+            )
+        }
+        let observation =
+            try lifecycleCurrentVulnerabilityObservation(
+                store: store,
+                projectID: projectID,
+                serviceName: serviceName,
+                descriptorDigest: lock.descriptorDigest,
+                policy: policy,
+                signaturePolicySHA256:
+                    signaturePolicySHA256,
+                signaturePolicy: trust.policy,
+                signatureMaterial: trust.material,
+                at: now
+            )
+        var exception:
+            ImageVulnerabilityExceptionRecord?
+        if observation.decision.outcome ==
+            HostwrightRegistry
+            .ImageVulnerabilityDecisionOutcome.blocked {
+            exception =
+                try lifecycleActiveVulnerabilityException(
+                    store: store,
+                    projectID: projectID,
+                    serviceName: serviceName,
+                    descriptorDigest: lock.descriptorDigest,
+                    policy: policy,
+                    signaturePolicySHA256:
+                        signaturePolicySHA256,
+                    observation: observation,
+                    at: now
+                )
+            guard exception != nil else {
+                throw RuntimeAdapterError
+                    .mutationUnavailableByPolicy(
+                        "Image vulnerability policy blocked service '\(RuntimeRedactionPolicy.default.redact(serviceName))'. No runtime mutation was attempted."
+                    )
+            }
+        }
+        let object: [String: Any] = [
+            "planSHA256": planSHA256,
+            "projectID": projectID,
+            "serviceName": serviceName,
+            "descriptorDigest": lock.descriptorDigest,
+            "policySHA256": policy.policySHA256,
+            "signaturePolicySHA256":
+                signaturePolicySHA256,
+            "policy":
+                lifecycleVulnerabilityPolicyObject(policy),
+            "authorization":
+                exception == nil ? "policy" : "exception",
+            "decisionMode":
+                exception == nil
+                    ? "policy-pass" : "approved-exception",
+            "exceptionID": exception?.id ?? NSNull(),
+            "reportID":
+                observation.report?.id ?? NSNull(),
+            "signatureProofSHA256":
+                observation.report?.signatureProofSHA256 ??
+                NSNull(),
+            "reportDigest":
+                observation.decision.reportDigest ?? NSNull(),
+            "reportReferrerDigest":
+                observation.decision.referrerDigest ??
+                NSNull(),
+            "databaseID":
+                observation.decision.databaseID ?? NSNull(),
+            "databaseVersion":
+                observation.decision.databaseVersion ??
+                NSNull(),
+            "decisionID":
+                observation.decision.decisionID,
+            "decisionDigest":
+                observation.decision.decisionDigest,
+            "decisionOutcome":
+                observation.decision.outcome.rawValue,
+            "blockedFindingsSHA256":
+                observation.decision.blockedFindingsSHA256,
+            "reasonCodes":
+                observation.decision.reasonCodes.map(\.rawValue)
+        ]
+        let payload = try JSONSerialization.data(
+            withJSONObject: object,
+            options: [.sortedKeys, .withoutEscapingSlashes]
+        )
+        var events = [
+            EventRecord(
+                id: UUID().uuidString.lowercased(),
+                timestamp: hostwrightTimestamp(),
+                severity:
+                    exception == nil ? .info : .warning,
+                type:
+                    "image.vulnerability.lifecycle.authorized",
+                source: "hostwright.lifecycle",
+                projectID: projectID,
+                serviceName: serviceName,
+                runtimeAdapter: providerID.rawValue,
+                message:
+                    "Exact image vulnerability policy evidence authorized lifecycle execution.",
+                payloadJSONRedacted:
+                    String(decoding: payload, as: UTF8.self)
+            )
+        ]
+        if let exception {
+            let exceptionPayload = try JSONSerialization.data(
+                withJSONObject: [
+                    "planSHA256": planSHA256,
+                    "projectID": projectID,
+                    "serviceName": serviceName,
+                    "descriptorDigest":
+                        lock.descriptorDigest,
+                    "exceptionID": exception.id,
+                    "decisionID": exception.decisionID,
+                    "reportID": exception.reportID,
+                    "expiresAt": exception.expiresAt
+                ],
+                options: [.sortedKeys, .withoutEscapingSlashes]
+            )
+            events.append(
+                EventRecord(
+                    id: UUID().uuidString.lowercased(),
+                    timestamp: hostwrightTimestamp(),
+                    severity: .warning,
+                    type:
+                        "image.vulnerability.exception.used",
+                    source: "hostwright.lifecycle",
+                    projectID: projectID,
+                    serviceName: serviceName,
+                    runtimeAdapter: providerID.rawValue,
+                    message:
+                        "An exact active image vulnerability exception authorized lifecycle preflight.",
+                    payloadJSONRedacted: String(
+                        decoding: exceptionPayload,
+                        as: UTF8.self
+                    )
+                )
+            )
+        }
+        try store.events.append(events)
+    }
+}
+
+func lifecyclePreflightImageProvenance(
+    planSHA256: String,
+    projectID: String,
+    providerID: RuntimeProviderID,
+    desiredState: DesiredRuntimeState,
+    store: SQLiteStateStore,
+    manifest: HostwrightManifest
+) throws {
+    let mapping = try manifest.imageProvenance.map { _ in
+        try ImageProvenancePolicyMapping.map(manifest)
+    }
+    guard let mapping,
+          mapping.policy.requirement == .required else {
+        let payload = try JSONSerialization.data(
+            withJSONObject: [
+                "planSHA256": planSHA256,
+                "projectID": projectID,
+                "required": false,
+                "policySHA256": mapping.map {
+                    $0.material.policySHA256 as Any
+                } ?? NSNull()
+            ],
+            options: [.sortedKeys, .withoutEscapingSlashes]
+        )
+        try store.events.append([
+            EventRecord(
+                id: UUID().uuidString.lowercased(),
+                timestamp: hostwrightTimestamp(),
+                severity: .info,
+                type:
+                    "image.provenance.lifecycle.not-required",
+                source: "hostwright.lifecycle",
+                projectID: nil,
+                serviceName: nil,
+                runtimeAdapter: providerID.rawValue,
+                message:
+                    "Image provenance policy was not required for this exact lifecycle plan.",
+                payloadJSONRedacted:
+                    String(decoding: payload, as: UTF8.self)
+            )
+        ])
+        return
+    }
+
+    let services = Dictionary(
+        grouping: desiredState.services,
+        by: \.logicalServiceName
+    ).compactMapValues(\.first)
+    let now = Date()
+    for serviceName in services.keys.sorted() {
+        guard let service = services[serviceName],
+              let lock = service.imageLock else {
+            throw RuntimeAdapterError.mutationUnavailableByPolicy(
+                "Required image provenance policy needs an exact provider-bound digest lock for every desired service. No runtime mutation was attempted."
+            )
+        }
+        let records = try store.imageProvenance.loadRecords(
+            projectID: projectID,
+            serviceName: serviceName,
+            descriptorDigest: lock.descriptorDigest,
+            policySHA256: mapping.material.policySHA256
+        )
+        guard let record = try lifecycleCurrentProvenanceRecord(
+            records: records,
+            descriptorDigest: lock.descriptorDigest,
+            policy: mapping.policy,
+            material: mapping.material,
+            store: store,
+            at: now
+        ) else {
+            throw RuntimeAdapterError.mutationUnavailableByPolicy(
+                "Required exact image provenance is missing, expired, or invalid for service '\(RuntimeRedactionPolicy.default.redact(serviceName))'. No runtime mutation was attempted."
+            )
+        }
+        try store.events.append([
+            try lifecycleProvenanceAuthorizationEvent(
+                planSHA256: planSHA256,
+                projectID: projectID,
+                providerID: providerID,
+                serviceName: serviceName,
+                descriptorDigest: lock.descriptorDigest,
+                record: record
+            )
+        ])
+    }
+}
+
+private struct LifecycleVulnerabilityObservation {
+    let report: ImageVulnerabilityReportRecord?
+    let evidence: ImageVulnerabilityEvidence?
+    let decision:
+        HostwrightRegistry.ImageVulnerabilityDecision
+}
+
+private func lifecycleCurrentVulnerabilityObservation(
+    store: SQLiteStateStore,
+    projectID: String,
+    serviceName: String,
+    descriptorDigest: String,
+    policy: ImageVulnerabilityPolicy,
+    signaturePolicySHA256: String,
+    signaturePolicy: ImageTrustVerificationPolicy? = nil,
+    signatureMaterial: ImageTrustPolicyMaterial? = nil,
+    at now: Date
+) throws -> LifecycleVulnerabilityObservation {
+    let persistedReports =
+        try store.imageVulnerability.loadReports(
+        projectID: projectID,
+        serviceName: serviceName,
+        descriptorDigest: descriptorDigest
+    )
+    let reports = persistedReports.filter {
+        $0.signaturePolicySHA256 ==
+            signaturePolicySHA256
+    }
+    guard !reports.isEmpty || persistedReports.isEmpty else {
+        throw RuntimeAdapterError.mutationUnavailableByPolicy(
+            "Persisted vulnerability reports do not match the active signature trust material. No runtime mutation was attempted."
+        )
+    }
+    let selected:
+        (ImageVulnerabilityReportRecord,
+         ImageVulnerabilityEvidence)?
+    if let report = try lifecycleAuthoritativeVulnerabilityReport(
+        reports
+    ) {
+        do {
+            selected = (
+                report,
+                try lifecycleVerifiedVulnerabilityEvidence(
+                    store: store,
+                    report: report,
+                    descriptorDigest: descriptorDigest,
+                    signaturePolicy: signaturePolicy,
+                    signatureMaterial: signatureMaterial,
+                    at: now
+                )
+            )
+        } catch {
+            throw RuntimeAdapterError.mutationUnavailableByPolicy(
+                "The latest persisted vulnerability report failed exact graph revalidation. No runtime mutation was attempted."
+            )
+        }
+    } else {
+        selected = nil
+    }
+    let decision =
+        try ImageVulnerabilityPolicyEvaluator.evaluate(
+            evidence: selected?.1,
+            expectedSubjectDigest:
+                OCIContentDigest(descriptorDigest),
+            policy: policy,
+            signaturePolicySHA256:
+                signaturePolicySHA256,
+            at: now
+        )
+    return LifecycleVulnerabilityObservation(
+        report: selected?.0,
+        evidence: selected?.1,
+        decision: decision
+    )
+}
+
+private func lifecycleAuthoritativeVulnerabilityReport(
+    _ reports: [ImageVulnerabilityReportRecord]
+) throws -> ImageVulnerabilityReportRecord? {
+    let ordered = try reports.sorted { lhs, rhs in
+        guard let leftDatabase =
+                lifecycleEpochMilliseconds(
+                    lhs.databaseUpdatedAt
+                ),
+              let rightDatabase =
+                lifecycleEpochMilliseconds(
+                    rhs.databaseUpdatedAt
+                ),
+              let leftGenerated =
+                lifecycleEpochMilliseconds(lhs.generatedAt),
+              let rightGenerated =
+                lifecycleEpochMilliseconds(rhs.generatedAt) else {
+            throw RuntimeAdapterError.mutationUnavailableByPolicy(
+                "Persisted vulnerability report timestamps are invalid. No runtime mutation was attempted."
+            )
+        }
+        if leftDatabase != rightDatabase {
+            return leftDatabase < rightDatabase
+        }
+        if leftGenerated != rightGenerated {
+            return leftGenerated < rightGenerated
+        }
+        return lhs.reportDigest < rhs.reportDigest
+    }
+    guard let selected = ordered.last else { return nil }
+    let peers = ordered.filter {
+        $0.databaseUpdatedAt == selected.databaseUpdatedAt &&
+        $0.generatedAt == selected.generatedAt
+    }
+    let identities = Set(peers.map {
+        [
+            $0.reportDigest,
+            $0.reportReferrerDigest,
+            $0.databaseID,
+            $0.databaseVersion
+        ].joined(separator: "\u{1f}")
+    })
+    guard identities.count == 1 else {
+        throw RuntimeAdapterError.mutationUnavailableByPolicy(
+            "The newest vulnerability database evidence is ambiguous. No runtime mutation was attempted."
+        )
+    }
+    return selected
+}
+
+private func lifecycleVerifiedVulnerabilityEvidence(
+    store: SQLiteStateStore,
+    report: ImageVulnerabilityReportRecord,
+    descriptorDigest: String,
+    signaturePolicy: ImageTrustVerificationPolicy?,
+    signatureMaterial: ImageTrustPolicyMaterial?,
+    at now: Date
+) throws -> ImageVulnerabilityEvidence {
+    guard let discovery = try store.ociReferrers.loadDiscovery(
+            id: report.evidenceDiscoveryID
+          ),
+          discovery.complete,
+          discovery.subjectDigest == descriptorDigest,
+          discovery.graphSHA256 ==
+            report.evidenceGraphSHA256,
+          let graph = try store.ociReferrers.loadGraph(
+              discoveryID: report.evidenceDiscoveryID
+          ),
+          graph.discovery.subjectDigest.canonicalValue ==
+            descriptorDigest else {
+        throw ImageVulnerabilityError.invalidGraph
+    }
+    let evidence = try ImageVulnerabilityEvidenceExtractor.extract(
+        from: graph,
+        expectedSubjectDigest:
+            OCIContentDigest(descriptorDigest)
+    ).filter {
+        $0.referrerDigest.canonicalValue ==
+            report.reportReferrerDigest &&
+        $0.report.reportDigest.canonicalValue ==
+            report.reportDigest &&
+        $0.report.database.id == report.databaseID &&
+        $0.report.database.version ==
+            report.databaseVersion &&
+        $0.report.database.updatedAt ==
+            report.databaseUpdatedAt &&
+        $0.report.generatedAt == report.generatedAt &&
+        !$0.signatureBundles.isEmpty
+    }
+    guard evidence.count == 1, let value = evidence.first else {
+        throw ImageVulnerabilityError.invalidGraph
+    }
+    try lifecycleValidateVulnerabilitySignatureProof(
+        report.signatureProof,
+        evidence: value,
+        signaturePolicy: signaturePolicy,
+        signatureMaterial: signatureMaterial,
+        at: now
+    )
+    return value
+}
+
+private func lifecycleValidateVulnerabilitySignatureProof(
+    _ proof: ImageVulnerabilitySignatureProof,
+    evidence: ImageVulnerabilityEvidence,
+    signaturePolicy: ImageTrustVerificationPolicy?,
+    signatureMaterial: ImageTrustPolicyMaterial?,
+    at now: Date
+) throws {
+    guard proof.outcome == .passed,
+          proof.bundleDigests ==
+            evidence.signatureBundles.map(\.digest).sorted()
+    else {
+        throw ImageVulnerabilityError.invalidGraph
+    }
+    guard let signaturePolicy, let signatureMaterial else {
+        return
+    }
+    let activeAuthorityIDs = Set(
+        signaturePolicy.authorities.compactMap {
+            authority -> String? in
+            if let notBefore = authority.notBefore,
+               now < notBefore {
+                return nil
+            }
+            if let notAfter = authority.notAfter,
+               now > notAfter {
+                return nil
+            }
+            if let revokedAt = authority.revokedAt,
+               now >= revokedAt {
+                return nil
+            }
+            return authority.id
+        }
+    )
+    let matchedAuthorityIDs = Set(proof.matchedAuthorityIDs)
+    guard proof.threshold == signaturePolicy.threshold,
+          matchedAuthorityIDs.count >= proof.threshold,
+          matchedAuthorityIDs.isSubset(of: activeAuthorityIDs),
+          proof.trustedRootSHA256 ==
+            signatureMaterial.trustedRootSHA256,
+          proof.authorityMaterialSHA256 ==
+            signatureMaterial.authorityMaterialSHA256 else {
+        throw ImageVulnerabilityError.invalidGraph
+    }
+}
+
+private func lifecycleActiveVulnerabilityException(
+    store: SQLiteStateStore,
+    projectID: String,
+    serviceName: String,
+    descriptorDigest: String,
+    policy: ImageVulnerabilityPolicy,
+    signaturePolicySHA256: String,
+    observation: LifecycleVulnerabilityObservation,
+    at now: Date
+) throws -> ImageVulnerabilityExceptionRecord? {
+    let current = observation.decision
+    guard current.outcome ==
+            HostwrightRegistry
+            .ImageVulnerabilityDecisionOutcome.blocked,
+          current.exceptionApproval == .required,
+          let currentReport = observation.report else {
+        return nil
+    }
+    let decisions = try store.imageVulnerability.loadDecisions(
+        projectID: projectID,
+        serviceName: serviceName,
+        descriptorDigest: descriptorDigest,
+        policySHA256: policy.policySHA256
+    )
+    for decision in decisions.reversed()
+    where decision.outcome ==
+        HostwrightState
+        .ImageVulnerabilityDecisionOutcome.blocked &&
+        decision.signaturePolicySHA256 ==
+            signaturePolicySHA256
+    {
+        guard let reportID = decision.reportID,
+              let report = try store.imageVulnerability
+                .loadReport(id: reportID),
+              report.id == currentReport.id,
+              current.reportDigest == report.reportDigest,
+              current.referrerDigest ==
+                report.reportReferrerDigest,
+              current.databaseID == report.databaseID,
+              current.databaseVersion ==
+                report.databaseVersion,
+              current.policySHA256 ==
+                decision.policySHA256,
+              current.signaturePolicySHA256 ==
+                decision.signaturePolicySHA256,
+              current.blockedFindingsSHA256 ==
+                decision.blockingFindingsSHA256 else {
+            continue
+        }
+        if let exception = try store.imageVulnerability
+            .activeException(
+                projectID: projectID,
+                serviceName: serviceName,
+                descriptorDigest: descriptorDigest,
+                decisionID: decision.id,
+                decisionDigest: decision.decisionDigest,
+                reportID: report.id,
+                reportDigest: report.reportDigest,
+                reportReferrerDigest:
+                    report.reportReferrerDigest,
+                policySHA256: decision.policySHA256,
+                signaturePolicySHA256:
+                    decision.signaturePolicySHA256,
+                databaseID: report.databaseID,
+                databaseVersion: report.databaseVersion,
+                blockedFindingsSHA256:
+                    decision.blockingFindingsSHA256,
+                currentTimestamp:
+                    lifecycleVulnerabilityTimestamp(now)
+            ) {
+            return exception
+        }
+    }
+    return nil
+}
+
+private func lifecycleVulnerabilityPolicyObject(
+    _ policy: ImageVulnerabilityPolicy
+) -> [String: Any] {
+    [
+        "version": policy.version,
+        "severityThreshold":
+            policy.severityThreshold.rawValue,
+        "minimumVulnerabilityAgeSeconds":
+            policy.minimumVulnerabilityAgeSeconds,
+        "exploitability": policy.exploitability.rawValue,
+        "fixAvailability":
+            policy.fixAvailability.rawValue,
+        "maximumDatabaseAgeSeconds":
+            policy.maximumDatabaseAgeSeconds,
+        "staleAction": policy.staleAction.rawValue,
+        "unavailableAction":
+            policy.unavailableAction.rawValue,
+        "exceptionApproval":
+            policy.exceptionApproval.rawValue,
+        "allowlist": policy.allowlist.map {
+            [
+                "vulnerabilityID": $0.vulnerabilityID,
+                "packagePURL": $0.packagePURL ?? NSNull(),
+                "reason": $0.reason,
+                "expiresAt": $0.expiresAt
+            ] as [String: Any]
+        }
+    ]
+}
+
+private func lifecycleVulnerabilityPolicy(
+    from object: [String: Any]
+) throws -> ImageVulnerabilityPolicy {
+    guard Set(object.keys) == [
+        "version", "severityThreshold",
+        "minimumVulnerabilityAgeSeconds", "exploitability",
+        "fixAvailability", "maximumDatabaseAgeSeconds",
+        "staleAction", "unavailableAction",
+        "exceptionApproval", "allowlist"
+    ],
+    let version = object["version"] as? Int,
+    let severityRaw = object["severityThreshold"] as? String,
+    let severity =
+        ImageVulnerabilitySeverity(rawValue: severityRaw),
+    let minimumAge =
+        object["minimumVulnerabilityAgeSeconds"] as? Int,
+    let exploitabilityRaw =
+        object["exploitability"] as? String,
+    let exploitability =
+        ImageVulnerabilityExploitabilitySelector(
+            rawValue: exploitabilityRaw
+        ),
+    let fixRaw = object["fixAvailability"] as? String,
+    let fix = ImageVulnerabilityFixSelector(
+        rawValue: fixRaw
+    ),
+    let maximumAge =
+        object["maximumDatabaseAgeSeconds"] as? Int,
+    let staleRaw = object["staleAction"] as? String,
+    let stale = ImageVulnerabilityDataAction(
+        rawValue: staleRaw
+    ),
+    let unavailableRaw =
+        object["unavailableAction"] as? String,
+    let unavailable = ImageVulnerabilityDataAction(
+        rawValue: unavailableRaw
+    ),
+    let approvalRaw =
+        object["exceptionApproval"] as? String,
+    let approval =
+        ImageVulnerabilityExceptionApprovalMode(
+            rawValue: approvalRaw
+        ),
+    let rawAllowlist =
+        object["allowlist"] as? [[String: Any]] else {
+        throw ImageVulnerabilityError.invalidPolicy
+    }
+    let allowlist = try rawAllowlist.map { entry in
+        guard Set(entry.keys) == [
+            "vulnerabilityID", "packagePURL",
+            "reason", "expiresAt"
+        ],
+        let vulnerabilityID =
+            entry["vulnerabilityID"] as? String,
+        entry["packagePURL"] is NSNull ||
+            entry["packagePURL"] is String,
+        let reason = entry["reason"] as? String,
+        let expiresAt = entry["expiresAt"] as? String else {
+            throw ImageVulnerabilityError.invalidPolicy
+        }
+        return try ImageVulnerabilityAllowlistEntry(
+            vulnerabilityID: vulnerabilityID,
+            packagePURL: entry["packagePURL"] as? String,
+            reason: reason,
+            expiresAt: expiresAt
+        )
+    }
+    return try ImageVulnerabilityPolicy(
+        version: version,
+        severityThreshold: severity,
+        minimumVulnerabilityAgeSeconds: minimumAge,
+        exploitability: exploitability,
+        fixAvailability: fix,
+        maximumDatabaseAgeSeconds: maximumAge,
+        staleAction: stale,
+        unavailableAction: unavailable,
+        exceptionApproval: approval,
+        allowlist: allowlist
+    )
+}
+
+private func lifecycleVulnerabilityTimestamp(
+    _ date: Date
+) -> String {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [
+        .withInternetDateTime,
+        .withFractionalSeconds
+    ]
+    return formatter.string(from: date)
+}
+
+private func lifecycleVerifiedSBOMFormats(
+    records: [ImageSBOMRecord],
+    descriptorDigest: String,
+    store: SQLiteStateStore
+) throws -> Set<String> {
+    var verified = Set<String>()
+    for record in records.reversed() {
+        guard let discovery = try store.ociReferrers
+            .loadDiscovery(id: record.evidenceDiscoveryID),
+            discovery.complete,
+            discovery.subjectDigest == descriptorDigest,
+            discovery.graphSHA256 ==
+                record.evidenceGraphSHA256,
+            let graph = try store.ociReferrers.loadGraph(
+                discoveryID: record.evidenceDiscoveryID
+            ),
+            let format = ImageSBOMFormat(
+                rawValue: record.format.rawValue
+            ),
+            let evidence = try? ImageSBOMEvidenceExtractor.extract(
+                from: graph,
+                expectedSubjectDigest:
+                    OCIContentDigest(descriptorDigest),
+                allowedFormats: [format]
+            ),
+            evidence.contains(where: {
+                $0.document.documentDigest.canonicalValue ==
+                    record.documentDigest &&
+                $0.rootDescriptor.digest.canonicalValue ==
+                    record.sbomReferrerDigest &&
+                $0.document.components.count ==
+                    record.componentCount &&
+                $0.document.normalizedComponentsSHA256 ==
+                    record.normalizedComponentsSHA256 &&
+                $0.provenanceDescriptorDigest?.canonicalValue ==
+                    record.provenanceDescriptorDigest &&
+                $0.provenanceReferrerDigest?.canonicalValue ==
+                    record.provenanceReferrerDigest
+            }) else {
+            continue
+        }
+        verified.insert(record.format.rawValue)
+    }
+    return verified
+}
+
+private func lifecycleCurrentProvenanceRecord(
+    records: [ImageProvenanceRecord],
+    descriptorDigest: String,
+    policy: ImageProvenancePolicy,
+    material: ImageProvenancePolicyMaterial,
+    store: SQLiteStateStore,
+    at date: Date
+) throws -> ImageProvenanceRecord? {
+    let expectedDigest = try OCIContentDigest(descriptorDigest)
+    for record in records.reversed() {
+        guard record.descriptorDigest == descriptorDigest,
+              record.policySHA256 == material.policySHA256,
+              record.verifierVersion ==
+                ImageProvenanceVerification.verifierVersion,
+              let discovery =
+                try store.ociReferrers.loadDiscovery(
+                    id: record.evidenceDiscoveryID
+                ),
+              discovery.complete,
+              discovery.subjectDigest == descriptorDigest,
+              discovery.graphSHA256 ==
+                record.evidenceGraphSHA256,
+              let graph = try store.ociReferrers.loadGraph(
+                  discoveryID: record.evidenceDiscoveryID
+              ),
+              graph.discovery.subjectDigest == expectedDigest,
+              let evidence =
+                try? ImageProvenanceEvidenceExtractor.extract(
+                    from: graph,
+                    expectedSubjectDigest: expectedDigest
+                ).first(where: {
+                    $0.referrerDigest.canonicalValue ==
+                        record.referrerDigest &&
+                        $0.envelopeDescriptor.digest
+                            .canonicalValue ==
+                        record.envelopeDigest
+                }),
+              let verification =
+                try? ImageProvenanceVerifier.verify(
+                    envelopePayload: evidence.envelopePayload,
+                    expectedSubjectDigest: expectedDigest,
+                    policy: policy,
+                    material: material,
+                    at: date
+                ),
+              lifecycleProvenanceRecord(
+                  record,
+                  exactlyMatches: verification,
+                  referrerDigest:
+                    evidence.referrerDigest.canonicalValue
+              ) else {
+            continue
+        }
+        return record
+    }
+    return nil
+}
+
+private func lifecycleProvenanceRecord(
+    _ record: ImageProvenanceRecord,
+    exactlyMatches verification: ImageProvenanceVerification,
+    referrerDigest: String
+) -> Bool {
+    let statement = verification.statement
+    return record.descriptorDigest ==
+        statement.subjectDigest.canonicalValue &&
+        record.policySHA256 == verification.policySHA256 &&
+        record.statementDigest ==
+        statement.statementDigest.canonicalValue &&
+        record.envelopeDigest ==
+        verification.envelopeDigest.canonicalValue &&
+        record.referrerDigest == referrerDigest &&
+        record.sourceURI == statement.source.uri &&
+        record.sourceDigest ==
+        statement.source.digest.canonicalValue &&
+        record.builderID == statement.builderID &&
+        record.builderVersion == statement.builderVersion &&
+        record.buildType == statement.buildType &&
+        record.invocationID == statement.invocationID &&
+        record.normalizedMaterialsSHA256 ==
+        statement.normalizedMaterialsSHA256 &&
+        record.commandSHA256 == statement.commandSHA256 &&
+        record.environmentPolicySHA256 ==
+        statement.environmentPolicySHA256 &&
+        record.startedAt == statement.startedAt &&
+        record.finishedAt == statement.finishedAt &&
+        record.reproducibilityStatus ==
+        statement.reproducibility.status &&
+        record.comparisonDigest ==
+        statement.reproducibility.comparisonDigest?
+            .canonicalValue &&
+        record.signerID == verification.signerID &&
+        record.signerPublicKeySHA256 ==
+        verification.signerPublicKeySHA256 &&
+        record.signatureSHA256 ==
+        verification.signatureSHA256
+}
+
+private func lifecycleProvenanceEvent(
+    _ object: [String: Any],
+    exactlyMatches record: ImageProvenanceRecord
+) -> Bool {
+    object["recordID"] as? String == record.id &&
+        object["policySHA256"] as? String ==
+        record.policySHA256 &&
+        object["statementDigest"] as? String ==
+        record.statementDigest &&
+        object["envelopeDigest"] as? String ==
+        record.envelopeDigest &&
+        object["referrerDigest"] as? String ==
+        record.referrerDigest &&
+        object["discoveryID"] as? String ==
+        record.evidenceDiscoveryID &&
+        object["graphSHA256"] as? String ==
+        record.evidenceGraphSHA256 &&
+        object["signerID"] as? String ==
+        record.signerID &&
+        object["signerPublicKeySHA256"] as? String ==
+        record.signerPublicKeySHA256 &&
+        object["signatureSHA256"] as? String ==
+        record.signatureSHA256
+}
+
+private func lifecycleProvenanceAuthorizationEvent(
+    planSHA256: String,
+    projectID: String,
+    providerID: RuntimeProviderID,
+    serviceName: String,
+    descriptorDigest: String,
+    record: ImageProvenanceRecord
+) throws -> EventRecord {
+    let payload = try JSONSerialization.data(
+        withJSONObject: [
+            "planSHA256": planSHA256,
+            "projectID": projectID,
+            "serviceName": serviceName,
+            "descriptorDigest": descriptorDigest,
+            "policySHA256": record.policySHA256,
+            "recordID": record.id,
+            "statementDigest": record.statementDigest,
+            "envelopeDigest": record.envelopeDigest,
+            "referrerDigest": record.referrerDigest,
+            "discoveryID": record.evidenceDiscoveryID,
+            "graphSHA256": record.evidenceGraphSHA256,
+            "signerID": record.signerID,
+            "signerPublicKeySHA256":
+                record.signerPublicKeySHA256,
+            "signatureSHA256": record.signatureSHA256
+        ],
+        options: [.sortedKeys, .withoutEscapingSlashes]
+    )
+    return EventRecord(
+        id: UUID().uuidString.lowercased(),
+        timestamp: hostwrightTimestamp(),
+        severity: .info,
+        type: "image.provenance.lifecycle.authorized",
+        source: "hostwright.lifecycle",
+        projectID: projectID,
+        serviceName: serviceName,
+        runtimeAdapter: providerID.rawValue,
+        message:
+            "Exact signed image provenance authorized lifecycle execution.",
+        payloadJSONRedacted:
+            String(decoding: payload, as: UTF8.self)
+    )
+}
+
+private func lifecycleRecordTrustAuthorization(
+    store: SQLiteStateStore,
+    timestamp: String,
+    planSHA256: String,
+    projectID: String,
+    providerID: RuntimeProviderID,
+    serviceName: String,
+    descriptorDigest: String,
+    policySHA256: String,
+    authorization: String,
+    verification: ImageTrustVerificationRecord?,
+    exception: ImageTrustExceptionRecord?
+) throws {
+    try store.events.append([
+        try lifecycleTrustAuthorizationEvent(
+            timestamp: timestamp,
+            planSHA256: planSHA256,
+            projectID: projectID,
+            providerID: providerID,
+            serviceName: serviceName,
+            descriptorDigest: descriptorDigest,
+            policySHA256: policySHA256,
+            authorization: authorization,
+            verification: verification,
+            exception: exception
+        )
+    ])
+}
+
+private func lifecycleTrustAuthorizationEvent(
+    timestamp: String,
+    planSHA256: String,
+    projectID: String,
+    providerID: RuntimeProviderID,
+    serviceName: String,
+    descriptorDigest: String,
+    policySHA256: String,
+    authorization: String,
+    verification: ImageTrustVerificationRecord?,
+    exception: ImageTrustExceptionRecord?
+) throws -> EventRecord {
+    var object: [String: Any] = [
+        "decision": authorization,
+        "planSHA256": planSHA256,
+        "projectID": projectID,
+        "serviceName": serviceName,
+        "descriptorDigest": descriptorDigest,
+        "policySHA256": policySHA256
+    ]
+    if let verification {
+        object["verification"] = [
+            "createdAt": verification.createdAt,
+            "discoveryID": verification.evidenceDiscoveryID,
+            "graphSHA256": verification.evidenceGraphSHA256,
+            "trustedRootSHA256":
+                verification.trustedRootSHA256
+        ]
+    }
+    if let exception {
+        object["exceptionID"] = exception.id
+    }
+    let payload = try JSONSerialization.data(
+        withJSONObject: object,
+        options: [.sortedKeys, .withoutEscapingSlashes]
+    )
+    return EventRecord(
+        id: UUID().uuidString.lowercased(),
+        timestamp: timestamp,
+        severity: authorization == "exception"
+            ? .warning : .info,
+        type: "image.trust.lifecycle.authorized",
+        source: "hostwright.lifecycle",
+        projectID: projectID,
+        serviceName: serviceName,
+        runtimeAdapter: providerID.rawValue,
+        message:
+            "Exact image trust evidence authorized lifecycle execution.",
+        payloadJSONRedacted: String(decoding: payload, as: UTF8.self)
+    )
 }
 
 func lifecycleRestartPolicyKey(
@@ -4103,6 +6519,7 @@ private func lifecycleReplacingEnvironment(
         logicalServiceName: service.logicalServiceName,
         replicaIndex: service.replicaIndex,
         image: service.image,
+        imageLock: service.imageLock,
         platformOperatingSystem: service.platformOperatingSystem,
         platformArchitecture: service.platformArchitecture,
         cpuCount: service.cpuCount,
@@ -4127,6 +6544,26 @@ private func lifecycleReplacingEnvironment(
         virtualization: service.virtualization,
         readOnlyRootFilesystem: service.readOnlyRootFilesystem,
         sharedMemoryBytes: service.sharedMemoryBytes
+    )
+}
+
+func lifecycleSecretWorkloadScope(
+    projectResourceUUID: String,
+    resourceUUID: String,
+    generation: Int,
+    serviceName: String
+) throws -> HostwrightSecretWorkloadScope {
+    guard let projectID = UUID(uuidString: projectResourceUUID),
+          let resourceID = UUID(uuidString: resourceUUID) else {
+        throw SecretStoreError.invalidReference(
+            "Secret workload scope requires exact Hostwright resource identities."
+        )
+    }
+    return try HostwrightSecretWorkloadScope(
+        projectID: projectID,
+        resourceID: resourceID,
+        generation: generation,
+        serviceName: serviceName
     )
 }
 
@@ -4201,6 +6638,44 @@ private func lifecycleEpochMilliseconds(_ timestamp: String) -> Int64? {
 
 private func sha256(_ text: String) -> String {
     SHA256.hash(data: Data(text.utf8))
+        .map { String(format: "%02x", $0) }
+        .joined()
+}
+
+func lifecycleManifestSHA256(
+    text: String,
+    manifest: HostwrightManifest
+) throws -> String {
+    var bound = text
+    if manifest.imageTrust != nil {
+        let material = try ImageTrustPolicyMapping.map(
+            manifest
+        ).material
+        bound += "\u{1f}imageTrustPolicySHA256=" +
+            material.policySHA256
+    }
+    if manifest.imageSBOM != nil {
+        let material = try ImageSBOMPolicyMapping.map(manifest)
+        bound += "\u{1f}imageSBOMPolicySHA256=" +
+            material.policySHA256
+    }
+    if manifest.imageVulnerability != nil {
+        let material =
+            try ImageVulnerabilityPolicyMapping.map(manifest)
+        bound += "\u{1f}imageVulnerabilityPolicySHA256=" +
+            material.policySHA256
+    }
+    if manifest.imageProvenance != nil {
+        let material =
+            try ImageProvenancePolicyMapping.map(manifest).material
+        bound += "\u{1f}imageProvenancePolicySHA256=" +
+            material.policySHA256
+    }
+    return sha256(bound)
+}
+
+private func lifecycleSHA256(_ data: Data) -> String {
+    SHA256.hash(data: data)
         .map { String(format: "%02x", $0) }
         .joined()
 }

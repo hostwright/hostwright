@@ -68,6 +68,9 @@ struct StatusCommandRunner {
                 restartPolicyStates: restartPolicyStates,
                 currentTimestamp: timestamp
             )
+            let imageDigestLocks = try store.imageDigestLocks.loadCurrent(
+                projectID: projectID
+            )
 
             try store.desiredStates.saveManifestSnapshot(
                 projectID: projectID,
@@ -112,11 +115,20 @@ struct StatusCommandRunner {
                         stateDatabasePath: stateDatabasePath,
                         manifest: manifest,
                         observed: observedForPlanning,
-                        plan: plan
+                        plan: plan,
+                        imageDigestLocks: imageDigestLocks
                     )
                 )
             }
-            return CLIRunResult(standardOutput: render(manifest: manifest, observed: observedForPlanning, plan: plan, stateDatabasePath: stateDatabasePath))
+            return CLIRunResult(
+                standardOutput: render(
+                    manifest: manifest,
+                    observed: observedForPlanning,
+                    plan: plan,
+                    imageDigestLocks: imageDigestLocks,
+                    stateDatabasePath: stateDatabasePath
+                )
+            )
         } catch let error as HostwrightDiagnostic {
             return failure(code: error.code, message: error.message)
         } catch let error as ManifestParseError {
@@ -131,7 +143,13 @@ struct StatusCommandRunner {
         }
     }
 
-    private func render(manifest: HostwrightManifest, observed: ObservedRuntimeState, plan: ReconciliationPlan, stateDatabasePath: String) -> String {
+    private func render(
+        manifest: HostwrightManifest,
+        observed: ObservedRuntimeState,
+        plan: ReconciliationPlan,
+        imageDigestLocks: [ImageDigestLockRecord],
+        stateDatabasePath: String
+    ) -> String {
         let observedByName = Dictionary(uniqueKeysWithValues: observed.services.map { ($0.identity.serviceName, $0) })
         var lines = [
             "Hostwright status",
@@ -155,6 +173,16 @@ struct StatusCommandRunner {
                 lines.append("- \(service.name): id=\(observed.resourceIdentifier) desired image=\(service.image ?? "<missing>") observed image=\(observed.image ?? "<unknown>") lifecycle=\(observed.lifecycleState.rawValue) health=\(observed.healthState.rawValue) ports=\(ports.isEmpty ? "none" : ports)")
             } else {
                 lines.append("- \(service.name): desired image=\(service.image ?? "<missing>") observed=missing")
+            }
+        }
+
+        lines.append("")
+        lines.append("Image digest locks:")
+        if imageDigestLocks.isEmpty {
+            lines.append("- none")
+        } else {
+            lines += imageDigestLocks.map { record in
+                "- \(record.serviceName)[\(record.replicaIndex)] \(record.stateKind.rawValue): requested=\(record.lock.requestedReference) resolved=\(record.lock.resolvedReference) variant=\(record.lock.variantDigest) provider=\(record.lock.providerID.rawValue) plan=\(record.planSHA256)"
             }
         }
 

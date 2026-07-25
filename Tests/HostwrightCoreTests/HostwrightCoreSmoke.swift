@@ -216,7 +216,7 @@ final class HostwrightCoreTests: XCTestCase {
         let limitations = try read("docs/reference/limitations.md", root: root)
         let publicDocs = [boundary, manifest, security, limitations].joined(separator: "\n")
 
-        XCTAssertTrue(boundary.contains("Status: Phase 05 Gate 7 exact image-signature trust boundary."))
+        XCTAssertTrue(boundary.contains("Status: Phase 05 Gates 7–10 exact image-signature, SBOM, vulnerability, and build-provenance boundary."))
         XCTAssertTrue(boundary.contains("imagePolicy: require-digest"))
         XCTAssertTrue(manifest.contains("Lifecycle image resolution remains local and offline"))
         XCTAssertTrue(security.contains("digest locks remain content identity rather than publisher trust"))

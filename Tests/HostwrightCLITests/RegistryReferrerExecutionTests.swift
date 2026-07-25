@@ -333,7 +333,7 @@ final class RegistryReferrerExecutionTests: XCTestCase {
                 authenticationClient: RegistryAuthenticationClient(
                     transport: transport,
                     now: {
-                        Date(timeIntervalSince1970: 1_753_380_000)
+                        Date(timeIntervalSince1970: 1_784_916_000)
                     }
                 )
             ),
@@ -345,7 +345,7 @@ final class RegistryReferrerExecutionTests: XCTestCase {
                 )
             },
             now: {
-                Date(timeIntervalSince1970: 1_753_380_000)
+                Date(timeIntervalSince1970: 1_784_916_000)
             }
         )
     }

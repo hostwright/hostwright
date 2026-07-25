@@ -1,170 +1,172 @@
 # Hostwright
 
-Hostwright is a Mac-native desired-state container platform for Apple silicon.
+Hostwright is a macOS command-line control plane for declaring and managing Apple container workloads on one Apple silicon Mac. It reads strict Manifest v2 YAML, produces plans for review, executes confirmed lifecycle actions through runtime providers, and records local state in SQLite schema v14.
 
-## Current Status
+Status: `0.0.2-dev`, targeting `v0.0.2`. Hostwright is not production-ready.
 
-The repository is on the `0.0.2-dev` development line. The release target is `v0.0.2`; it has not reached GA and is not production ready.
+## Requirements
 
-GA requires all 15 phases plus two clean release-candidate qualification runs; no partial or blocked phase is hidden behind the version number.
+- An Apple silicon Mac. Intel Macs are unsupported.
+- macOS 26 or later. `Package.swift` declares macOS 26 as the package target.
+- Xcode command-line tools with a Swift 6.2-compatible toolchain for source builds. The package uses Swift tools 6.2.
+- Apple `container` for live image, runtime, status, and lifecycle commands. Hostwright has conformance coverage for Apple `container` 1.0.0 and 1.1.0. Validation and manifest planning do not require the runtime.
 
-Phase 01 established the breaking contracts and evidence system:
+See [Compatibility](docs/reference/compatibility.md) for the tested matrix and failure behavior.
 
-- Manifest v2;
-- Control API v2;
-- Runtime Provider API v2;
-- plugin ABI v1;
-- state schema v14;
-- Hostwright UUID identity, project-generation provider binding, and durable operation-saga state;
-- machine-readable capability truth through `hostwright capabilities --json`;
-- deterministic read-only v1/versionless manifest migration preview.
+## Installation
 
-Phase 02 qualification is complete. Its signed/notarized ZIP and `.pkg`, vendor tap, clean macOS 26 lifecycle, state, doctor, abrupt-power, and exact-cleanup gates passed.
+### Vendor tap
 
-Phase 03 qualification is complete for the declared runtime-provider subset. Hostwright now has versioned structured codecs for Apple `container` 1.0.0 and 1.1.0, immutable capability negotiation, deterministic runtime inventory, normalized provider outcomes, stable provider IDs, an authenticated out-of-process Containerization 0.35.0 helper, cross-provider conformance, generation-bound provider migration, and upgrade/restart recovery. That provider evidence remains the boundary beneath Phase 04; it does not claim Phase 05 image/registry operations, networking, persistent storage, HA, Kubernetes/Docker compatibility, GUI, or GA qualification.
-
-Phase 04 qualification is complete for the single-host application lifecycle. Manifest v2 now uses a strict source-aware Yams 6.2.2 boundary, maps every accepted workload field into executable desired state, and drives dependency-aware replicas through one durable schema-v8 operation DAG and saga. Confirmed `up`, `down`, `run`, `start`, `stop`, `restart`, `rm`, and `update` operations share that engine; `apply` is compatibility-routed through `up`. Bounded exec/attach/copy/export/inspect/stats/log-follow operations, typed probes, rolling/recreate updates, verified rollback, and resumable recovery are capability-gated through the selected runtime provider. Phase 05 lifecycle planning resolves every locally available requested image to an immutable descriptor and platform-variant lock before producing the review hash; execution and rollback reverify that exact provider-bound content. Gate 7 additionally enforces exact digest-bound keyed/keyless signature trust from verified OCI referrer evidence before lifecycle and recovery effects. Named volumes and custom networks remain owned by later phases.
-
-Phase 05 Gates 1–11 are locally complete. Secret providers, registry authentication, exact image lifecycle, immutable digest locks, OCI referrers, trust policy, SBOM, vulnerability policy, signed build provenance, and bounded content-cache accounting share versioned CLI and one-shot Control contracts with durable schema-v14 evidence. Cache pressure plans protect active leases, operator and policy pins, desired digest locks, live references, and unmanaged content; destructive prune requires exact confirmation and post-delete verification. No Phase 05 issue is closed until the aggregate Gate 12 merge.
-
-The authoritative scope and every limitation-to-implementation mapping are in the [v0.0.2 implementation plan](docs/roadmap/v0.0.2/IMPLEMENTATION_PLAN.md). The [machine-readable issue manifest](docs/roadmap/v0.0.2/issues.json) tracks one master, 15 epics, and 167 workstreams. No research-only, blocked, fixture-only, mock-only, or dirty result closes an implementation gate.
-
-## Installation Truth
-
-`brew install hostwright` does not exist today. The Hostwright-controlled qualification channel is available from the maintained [`hostwright/homebrew-tap`](https://github.com/hostwright/homebrew-tap) repository:
+The Hostwright-maintained tap installs an unsupported qualification build:
 
 ```bash
 brew install hostwright/tap/hostwright
+hostwright --version
+hostwright capabilities --json
 ```
 
-The tap installs immutable signed/notarized `0.0.2-dev` qualification artifacts. It is not a `v0.0.2` GA or production-readiness claim. Phase 15 owns Homebrew-core submission; unqualified installation remains subject to external Homebrew acceptance.
+`brew install hostwright` does not exist today.
 
-For current development, build from source:
+### Build from source
 
 ```bash
 git clone https://github.com/hostwright/hostwright.git
 cd hostwright
 swift build
 swift test
-scripts/integration.sh
-```
-
-Requirements:
-
-- Apple silicon;
-- macOS 26 or later for the current package target;
-- Swift 6.2-compatible toolchain;
-- Apple `container` only for commands that explicitly observe or mutate that runtime.
-
-See [installation](docs/reference/install.md) and [compatibility](docs/reference/compatibility.md) for exact current evidence and target scope.
-
-## Development Commands
-
-```bash
 swift run hostwright --version
 swift run hostwright capabilities --json
-swift run hostwright runtime providers --json
-swift run hostwright runtime migrate hostwright.yaml --to containerization --dry-run --json
-swift run hostwright paths --json
-swift run hostwright state integrity --json
-swift run hostwright state backup --json
-swift run hostwright state backups --json
-swift run hostwright init
-swift run hostwright migrate preview hostwright.yaml
-swift run hostwright validate
-swift run hostwright plan
-swift run hostwright status --runtime-provider auto
-swift run hostwright up hostwright.yaml --dry-run --output json
-swift run hostwright update hostwright.yaml --dry-run --output json
-swift run hostwright inspect api --manifest hostwright.yaml --output json
-swift run hostwright logs api hostwright.yaml --follow
-swift run hostwright events
-swift run hostwright recovery --output json
-swift run hostwright cleanup --dry-run
-swift run hostwright doctor
-swift run hostwrightd --foreground --config hostwright.yaml --max-iterations 1
 ```
 
-State-backed commands default to `~/Library/Application Support/Hostwright/state/state.sqlite`; `--state-db` remains an explicit override. Hostwright creates private `0700` directories, requires `0600` sensitive files, and safely migrates a compatible `~/.hostwright/state.sqlite` through a resumable journal. `hostwright state` provides full integrity reports, SQLite online backup, verified catalogs, confirmation-bound atomic restore, reconstruction-only repair, and interrupted-maintenance recovery. See [state-store architecture](docs/architecture/state-store.md), [CLI reference](docs/reference/cli.md), and [local paths](docs/reference/local-paths.md).
+SwiftPM fetches the pinned Containerization 0.35.0 and Yams 6.2.2 dependencies during the build. Read [Install and Upgrade](docs/reference/install.md) for tap, source, package, upgrade, and uninstall details.
 
-Lifecycle mutation still requires an exact plan confirmation; cleanup retains its separate exact token. `hostwrightd` is not yet installed as a LaunchAgent and does not yet perform the Phase 08 unattended reconciliation contract.
+## Quick start
 
-## Manifest v2
-
-New manifests require an explicit version:
+Start a supported Apple `container` runtime, then save this Manifest v2 file as `hostwright.yaml`:
 
 ```yaml
 version: 2
-project: api-local
+project: quickstart
+imagePolicy: require-digest
 
 services:
-  api:
-    image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-    replicas: 2
+  web:
+    image: docker.io/library/python@sha256:26730869004e2b9c4b9ad09cab8625e81d256d1ce97e72df5520e806b1709f92
+    command: ["python3", "-m", "http.server", "8080", "--bind", "0.0.0.0"]
     ports:
-      - "8080:8080"
-    probes:
-      readiness:
-        http:
-          port: 8080
-          path: /health
-        interval: 10s
-    update:
-      strategy: rolling
-      maxSurge: 1
-      maxUnavailable: 0
+      - "18080:8080"
+    restart:
+      policy: unless-stopped
 ```
 
-The maintained parser accepts one UTF-8 YAML document up to 1 MiB, depth 64, and 100,000 nodes. It rejects duplicate keys, anchors, aliases, merge keys, custom tags, unknown fields, ambiguous scalar coercion, and multiple documents with stable source locations and manifest paths. Versionless and explicit v1 files are legacy input and fail execution with migration guidance. Preview a deterministic, non-writing conversion:
+Validate the file, pull its Linux ARM64 image, and inspect the lifecycle plan:
 
 ```bash
-hostwright migrate preview hostwright.yaml
-hostwright migrate preview hostwright.yaml --json
+hostwright runtime providers --json
+hostwright validate hostwright.yaml
+hostwright image pull \
+  docker.io/library/python@sha256:26730869004e2b9c4b9ad09cab8625e81d256d1ce97e72df5520e806b1709f92 \
+  --platform linux/arm64 \
+  --runtime-provider apple-cli
+hostwright up hostwright.yaml --dry-run --runtime-provider apple-cli
 ```
 
-Legacy `health` deterministically migrates to a typed liveness probe. Preview never writes the source, state, or runtime.
+Copy the plan hash from the dry run into the confirmed command:
 
-## Runtime and State Safety
+```bash
+hostwright up hostwright.yaml \
+  --confirm-plan <plan-hash> \
+  --runtime-provider apple-cli
+hostwright status hostwright.yaml --runtime-provider apple-cli
+curl http://127.0.0.1:18080
+```
 
-- Runtime operations cross `RuntimeAdapter` / Runtime Provider API boundaries.
-- Every new resource receives a Hostwright UUID; Apple names are attributes, not authority.
-- A project generation is bound to one mutation provider.
-- State schema v14 records UUIDs, provider generations, fencing, saga intent, compensation, verification fields, immutable desired/observed image digest locks, verified OCI referrer graphs with fenced retention and publication ownership evidence, immutable image-trust audit, exact image-SBOM bindings, signed vulnerability-report decisions and exceptions, exact signed build-provenance evidence, and provider-scoped content accounting with fenced leases and pins.
-- Local state uses the secure Application Support default unless an explicit CLI or environment override wins.
-- Names or similar configuration never authorize deletion.
-- Hostwright does not delete unmanaged resources.
-- Secrets are resolved only at execution boundaries and must not enter argv, state, logs, diagnostics, crash bundles, or provenance.
-- Cluster mutation will stop on quorum loss when multi-Mac support arrives.
+`down` and `rm` each require a new dry run and plan hash:
 
-Architecture decisions:
+```bash
+hostwright down hostwright.yaml --dry-run --runtime-provider apple-cli
+hostwright down hostwright.yaml --confirm-plan <down-plan-hash> --runtime-provider apple-cli
+hostwright rm hostwright.yaml --dry-run --runtime-provider apple-cli
+hostwright rm hostwright.yaml --confirm-plan <rm-plan-hash> --runtime-provider apple-cli
+```
 
+In a source checkout, replace `hostwright` with `swift run hostwright`. The [Manifest reference](docs/reference/manifest.md) documents the supported YAML subset.
+
+## Commands and surfaces
+
+| Surface | Purpose |
+| --- | --- |
+| `hostwright validate`, `plan`, `migrate preview`, `import-stack` | Validate Manifest v2, produce deterministic plans, preview legacy migration, and convert a narrow stack-file subset. |
+| `hostwright up`, `down`, `run`, `start`, `stop`, `restart`, `rm`, `update` | Execute plan-hash-gated lifecycle operations. `apply` routes to a confirmed `up` plan for compatibility. |
+| `hostwright exec`, `attach`, `copy`, `export`, `inspect`, `stats`, `logs` | Use provider-gated interactive, transfer, inspection, and streaming operations. |
+| `hostwright image`, `registry`, `secret` | Manage provider images, registry authentication and OCI evidence, and typed local secret references. |
+| `hostwright status`, `events`, `recovery`, `state`, `cleanup`, `doctor`, `diagnostics` | Observe workloads, inspect and maintain local state, recover fenced operations, and remove verified Hostwright-owned resources. |
+| `hostwright-control` | Accept one bounded local JSON request, return one JSON response, and exit. It opens no socket or HTTP listener. |
+| `hostwrightd` | Run a foreground observation and planning loop. It does not install a LaunchAgent or perform unattended runtime mutation. |
+| `hostwright-dist` | Build, verify, install, upgrade, repair, roll back, and uninstall Hostwright distributions through explicit paths. |
+
+Run `hostwright help` or read the [CLI reference](docs/reference/cli.md) for arguments, JSON contracts, and exit codes.
+
+## Architecture
+
+SwiftPM separates contracts, runtime access, orchestration, state, and process surfaces:
+
+| Boundary | Modules and executables |
+| --- | --- |
+| Contracts and input | `HostwrightCore`, `HostwrightManifest`, `HostwrightImport`, and `HostwrightPolicy` define identities, contract versions, Manifest v2 decoding, conversion, and local policy. |
+| Runtime providers | `HostwrightRuntime` owns `RuntimeAdapter`, capability negotiation, observation, and mutation contracts. `hostwright-containerization-helper` keeps the pinned Containerization framework in an authenticated out-of-process helper. |
+| Planning and state | `HostwrightReconciler` builds lifecycle plans and recovery actions. `HostwrightState` persists desired state, observations, ownership, operation records, and schema v14 migrations in SQLite. |
+| Registry and secrets | `HostwrightRegistry` handles registry authentication and digest-bound OCI evidence. `HostwrightSecrets` handles Keychain and typed secret-provider boundaries. |
+| User and automation surfaces | `HostwrightCLI`, `HostwrightControl`, `HostwrightDaemonCore`, and their executable targets expose the CLI, one-shot JSON process, and foreground daemon loop. |
+| Supporting boundaries | `HostwrightHealth`, `HostwrightNetworking`, `HostwrightObservability`, `HostwrightExtensions`, and `HostwrightDistribution` keep health, network policy, diagnostics, reviewed extensions, and distribution logic outside the core command router. |
+
+Apple runtime behavior crosses `RuntimeAdapter`; the CLI, reconciler, and state store do not invoke Apple `container` as independent runtime paths. State-backed commands use `~/Library/Application Support/Hostwright/state/state.sqlite` unless `--state-db` or `HOSTWRIGHT_STATE_DB` selects another safe path.
+
+Architecture references:
+
+- [Runtime adapter](docs/architecture/runtime-adapter.md)
+- [State store](docs/architecture/state-store.md)
 - [Resource identity and provider binding](docs/design/adr-0007-resource-identity-provider-binding.md)
 - [Durable operation DAG and saga](docs/design/adr-0008-durable-operation-dag-saga.md)
 - [v0.0.2 platform contracts](docs/design/adr-0009-v0.0.2-platform-contracts.md)
 
-## Verification
+## Compatibility and limitations
+
+- Hostwright supports Apple silicon and targets macOS 26 or later.
+- The Apple CLI provider supports tested Apple `container` 1.0.0 and 1.1.0 contracts. Unknown or mixed versions fail before mutation.
+- The package pins Containerization 0.35.0. Its helper exposes a smaller local-image subset and reports image mutations as unavailable.
+- Hostwright runs on one Mac. It has no multi-host control plane or high-availability state authority.
+- The manifest parser accepts the documented Hostwright YAML subset. It rejects unsupported YAML, unknown Kubernetes or Compose fields, and unsafe paths.
+- Hostwright has no Kubernetes or CRI compatibility, Docker API, full Compose compatibility, GUI, or cloud service.
+- Named-volume lifecycle, custom networks, DNS, ingress, tunnels, and broad public exposure remain outside the supported lifecycle surface.
+- `hostwright-control` has no persistent listener. `hostwrightd` has no background service installation or unattended mutation.
+- Cleanup and image pruning require exact ownership and confirmation. Hostwright does not delete unmanaged resources or run global garbage collection.
+- Hostwright is not production-ready and has no support SLA.
+
+Read [Limitations](docs/reference/limitations.md) and [Compatibility](docs/reference/compatibility.md) before relying on a runtime or provider combination.
+
+## Development and verification
 
 ```bash
 swift build
 swift test list || swift test --list-tests
 swift test
 scripts/integration.sh
+scripts/check-docs.sh
 scripts/grep-orchard.sh .
 scripts/test.sh
 scripts/lint.sh
 ```
 
-Evidence classes and issue closure rules are documented in [Testing and Evidence](docs/reference/testing-evidence.md). Public claims are limited to the exact tested platform and version scope.
+Live runtime verification requires Apple silicon, macOS 26 or later, and a supported Apple `container` version. Source-only checks can run without the runtime.
 
-## Roadmap
+See [Contributing](CONTRIBUTING.md) and [Governance](GOVERNANCE.md) before changing runtime, state, distribution, or public contracts.
 
-The 15 phases cover trusted install; Apple providers; complete lifecycle; images/registries/secrets; storage; networking; autonomous recovery and observability; API/security/extensions; scheduler/optimization/accelerators; multi-Mac HA; Kubernetes; Docker ecosystem; GUI/team/cloud; and exhaustive GA qualification.
+## Security and support
 
-Permanent boundaries are limited to private Apple APIs, unsupported Intel/old-macOS emulation, unsafe quorum writes, silent telemetry, unauthenticated public exposure, and unmanaged destructive garbage collection. Each technically constrained user outcome has a safe fallback in the roadmap.
+Hostwright gates lifecycle mutation with exact plan hashes and gates cleanup with a separate token. It resolves secrets at execution boundaries, scopes created port publishes to loopback, keeps diagnostics local, and refuses unmanaged deletion. Redaction cannot remove every piece of sensitive context, so review diagnostic bundles before sharing them.
 
-## Historical Material
-
-Earlier release notes, research records, and the former phase plan remain available for traceability. They are historical snapshots and do not override current-main documentation, `hostwright capabilities --json`, or the `v0.0.2` roadmap.
-
-- Historical [Control-plane direction](docs/architecture/control-plane-direction.md)
-- Historical [Documentation-site source-of-truth plan](docs/architecture/documentation-site-public-education.md)
+- Read [Security and Safety Notes](docs/reference/security-safety.md) for runtime, state, secret, registry, cleanup, and diagnostics boundaries.
+- Follow the [Security Policy](SECURITY.md) to report a vulnerability.
+- Use the [local team workflow](docs/reference/team-workflow.md) for profile-bound approvals.
+- Use [GitHub Issues](https://github.com/hostwright/hostwright/issues) for reproducible bugs and usage questions.

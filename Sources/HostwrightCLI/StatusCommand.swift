@@ -150,7 +150,7 @@ struct StatusCommandRunner {
         imageDigestLocks: [ImageDigestLockRecord],
         stateDatabasePath: String
     ) -> String {
-        let observedByName = Dictionary(uniqueKeysWithValues: observed.services.map { ($0.identity.serviceName, $0) })
+        let observedByName = hostwrightObservedServicesByLogicalName(observed)
         var lines = [
             "Hostwright status",
             "Manifest: \(manifestPath) valid",
@@ -166,11 +166,15 @@ struct StatusCommandRunner {
 
         lines.append("Services:")
         for service in manifest.services.sorted(by: { $0.name < $1.name }) {
-            if let observed = observedByName[service.name] {
-                let ports = observed.ports.map { port in
-                    "\((port.bindAddress ?? "localhost")):\(port.hostPort.map(String.init) ?? "?")->\(port.containerPort)/\(port.protocolName.rawValue)"
-                }.joined(separator: ", ")
-                lines.append("- \(service.name): id=\(observed.resourceIdentifier) desired image=\(service.image ?? "<missing>") observed image=\(observed.image ?? "<unknown>") lifecycle=\(observed.lifecycleState.rawValue) health=\(observed.healthState.rawValue) ports=\(ports.isEmpty ? "none" : ports)")
+            if let observedServices = observedByName[service.name],
+               !observedServices.isEmpty {
+                for observed in observedServices {
+                    let ports = observed.ports.map { port in
+                        "\((port.bindAddress ?? "localhost")):\(port.hostPort.map(String.init) ?? "?")->\(port.containerPort)/\(port.protocolName.rawValue)"
+                    }.joined(separator: ", ")
+                    let instance = observed.identity.instanceName.map { "[\($0)]" } ?? ""
+                    lines.append("- \(service.name)\(instance): id=\(observed.resourceIdentifier) desired image=\(service.image ?? "<missing>") observed image=\(observed.image ?? "<unknown>") lifecycle=\(observed.lifecycleState.rawValue) health=\(observed.healthState.rawValue) ports=\(ports.isEmpty ? "none" : ports)")
+                }
             } else {
                 lines.append("- \(service.name): desired image=\(service.image ?? "<missing>") observed=missing")
             }

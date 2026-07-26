@@ -2534,7 +2534,7 @@ public struct MigrationRunner: Sendable {
         ),
         SchemaMigration(
             version: 16,
-            description: "Fenced project network identity and attachment state",
+            description: "Fenced project network, attachment, and DNS state",
             statements: [
                 """
                 CREATE TABLE IF NOT EXISTS network_resources (
@@ -2803,12 +2803,121 @@ public struct MigrationRunner: Sendable {
                     )
                 )
                 """,
+                """
+                CREATE TABLE IF NOT EXISTS network_dns_instances (
+                    id TEXT PRIMARY KEY,
+                    project_uuid TEXT NOT NULL
+                        REFERENCES projects(resource_uuid)
+                        ON DELETE RESTRICT,
+                    generation INTEGER NOT NULL CHECK (
+                        generation >= 1
+                    ),
+                    provider_id TEXT NOT NULL CHECK (
+                        provider_id IN (
+                            'apple-container-cli',
+                            'apple-containerization'
+                        )
+                    ),
+                    provider_generation INTEGER NOT NULL CHECK (
+                        provider_generation >= 1
+                    ),
+                    fencing_token TEXT NOT NULL,
+                    desired_sha256 TEXT NOT NULL,
+                    observed_sha256 TEXT,
+                    lifecycle_state TEXT NOT NULL CHECK (
+                        lifecycle_state IN (
+                            'creating', 'available', 'deleting',
+                            'deleted', 'faulted'
+                        )
+                    ),
+                    finalizer_state TEXT NOT NULL CHECK (
+                        finalizer_state IN (
+                            'pending', 'active', 'releasing',
+                            'released', 'quarantined'
+                        )
+                    ),
+                    last_ready_record_sha256 TEXT,
+                    operation_group_id TEXT NOT NULL
+                        REFERENCES operation_groups(id)
+                        ON DELETE RESTRICT,
+                    UNIQUE(project_uuid),
+                    CHECK (
+                        length(id) = 36
+                        AND substr(id, 9, 1) = '-'
+                        AND substr(id, 14, 1) = '-'
+                        AND substr(id, 19, 1) = '-'
+                        AND substr(id, 24, 1) = '-'
+                        AND replace(id, '-', '')
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        length(project_uuid) = 36
+                        AND substr(project_uuid, 9, 1) = '-'
+                        AND substr(project_uuid, 14, 1) = '-'
+                        AND substr(project_uuid, 19, 1) = '-'
+                        AND substr(project_uuid, 24, 1) = '-'
+                        AND replace(project_uuid, '-', '')
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        length(fencing_token) = 36
+                        AND substr(fencing_token, 9, 1) = '-'
+                        AND substr(fencing_token, 14, 1) = '-'
+                        AND substr(fencing_token, 19, 1) = '-'
+                        AND substr(fencing_token, 24, 1) = '-'
+                        AND replace(fencing_token, '-', '')
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        length(desired_sha256) = 64
+                        AND desired_sha256
+                            NOT GLOB '*[^0-9a-f]*'
+                        AND (
+                            observed_sha256 IS NULL
+                            OR (
+                                length(observed_sha256) = 64
+                                AND observed_sha256
+                                    NOT GLOB '*[^0-9a-f]*'
+                            )
+                        )
+                        AND (
+                            last_ready_record_sha256 IS NULL
+                            OR (
+                                length(last_ready_record_sha256) = 64
+                                AND last_ready_record_sha256
+                                    NOT GLOB '*[^0-9a-f]*'
+                            )
+                        )
+                    ),
+                    CHECK (
+                        (lifecycle_state = 'creating'
+                            AND finalizer_state = 'pending'
+                            AND observed_sha256 IS NULL
+                            AND last_ready_record_sha256 IS NULL)
+                        OR (lifecycle_state = 'available'
+                            AND finalizer_state = 'active'
+                            AND observed_sha256 IS NOT NULL
+                            AND last_ready_record_sha256 IS NOT NULL)
+                        OR (lifecycle_state = 'deleting'
+                            AND finalizer_state = 'releasing')
+                        OR (lifecycle_state = 'deleted'
+                            AND finalizer_state = 'released'
+                            AND observed_sha256 IS NOT NULL)
+                        OR (lifecycle_state = 'faulted'
+                            AND finalizer_state IN (
+                                'active', 'releasing', 'quarantined'
+                            ))
+                    )
+                )
+                """,
                 "CREATE INDEX IF NOT EXISTS network_resources_project_idx ON network_resources(project_uuid, lifecycle_state, name, id)",
                 "CREATE INDEX IF NOT EXISTS network_resources_provider_idx ON network_resources(provider_id, runtime_name, lifecycle_state)",
                 "CREATE INDEX IF NOT EXISTS network_resources_operation_idx ON network_resources(operation_group_id, updated_at)",
                 "CREATE INDEX IF NOT EXISTS network_attachments_network_idx ON network_attachments(network_uuid, lifecycle_state, resource_uuid, id)",
                 "CREATE INDEX IF NOT EXISTS network_attachments_resource_idx ON network_attachments(project_uuid, resource_uuid, lifecycle_state, network_uuid)",
-                "CREATE INDEX IF NOT EXISTS network_attachments_operation_idx ON network_attachments(operation_group_id, updated_at)"
+                "CREATE INDEX IF NOT EXISTS network_attachments_operation_idx ON network_attachments(operation_group_id, updated_at)",
+                "CREATE INDEX IF NOT EXISTS network_dns_instances_project_idx ON network_dns_instances(project_uuid, lifecycle_state, id)",
+                "CREATE INDEX IF NOT EXISTS network_dns_instances_operation_idx ON network_dns_instances(operation_group_id, generation)"
             ]
         )
     ]

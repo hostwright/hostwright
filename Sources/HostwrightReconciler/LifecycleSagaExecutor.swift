@@ -13,6 +13,7 @@ public enum LifecyclePersistedIntentCodec {
         let schemaVersion: Int
         let planBase64: String
         let planSHA256: String
+        let capabilitySHA256: String?
         let recoveryStateBase64: String?
     }
 
@@ -45,6 +46,7 @@ public enum LifecyclePersistedIntentCodec {
                 schemaVersion: schemaVersion,
                 planBase64: planData.base64EncodedString(),
                 planSHA256: plan.planSHA256,
+                capabilitySHA256: plan.capabilitySHA256,
                 recoveryStateBase64: recoveryStateBase64
             )
         ), let encoded = String(data: value, encoding: .utf8) else {
@@ -63,7 +65,9 @@ public enum LifecyclePersistedIntentCodec {
                   LifecyclePlan.self,
                   from: planData
               ),
-              plan.planSHA256 == envelope.planSHA256 else {
+              plan.planSHA256 == envelope.planSHA256,
+              envelope.capabilitySHA256 == nil ||
+                envelope.capabilitySHA256 == plan.capabilitySHA256 else {
             throw LifecyclePersistedIntentCodecError.decodingFailed
         }
         return plan

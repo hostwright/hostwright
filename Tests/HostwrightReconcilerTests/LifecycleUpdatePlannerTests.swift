@@ -410,6 +410,10 @@ final class LifecycleUpdatePlannerTests: XCTestCase {
     }
 
     func testRevisionCodecRoundTripPreservesEveryNonSecretExecutableField() throws {
+        let network = try RuntimeNetworkIdentity(
+            logicalName: "mesh",
+            projectUUID: "22222222-2222-4222-8222-222222222222"
+        )
         let original = DesiredRuntimeService(
             identity: RuntimeServiceIdentity(
                 projectName: "demo",
@@ -464,6 +468,12 @@ final class LifecycleUpdatePlannerTests: XCTestCase {
                     containerPort: 9443,
                     protocolName: .udp,
                     bindAddress: "127.0.0.1"
+                )
+            ],
+            networks: [
+                try RuntimeDesiredNetworkAttachment(
+                    network: network,
+                    aliases: ["api", "backend"]
                 )
             ],
             mounts: [

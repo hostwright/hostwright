@@ -216,6 +216,25 @@ public enum LifecycleRevisionCodec {
                 "target": $0.target
             ]
         }
+        let networks = service.networks.sorted {
+            if $0.networkRuntimeIdentifier !=
+                $1.networkRuntimeIdentifier {
+                return $0.networkRuntimeIdentifier <
+                    $1.networkRuntimeIdentifier
+            }
+            if $0.networkResourceUUID !=
+                $1.networkResourceUUID {
+                return $0.networkResourceUUID <
+                    $1.networkResourceUUID
+            }
+            return $0.aliases.lexicographicallyPrecedes($1.aliases)
+        }.map {
+            [
+                "aliases": $0.aliases,
+                "networkResourceUUID": $0.networkResourceUUID,
+                "networkRuntimeIdentifier": $0.networkRuntimeIdentifier
+            ]
+        }
         var probeObject: [String: Any] = [:]
         for kind in RuntimeProbeKind.allCases {
             if let probe = service.probes[kind] {
@@ -258,6 +277,7 @@ public enum LifecycleRevisionCodec {
             "logicalServiceName": service.logicalServiceName,
             "memoryBytes": service.memoryBytes.map { String($0) as Any } ?? NSNull(),
             "mounts": mounts,
+            "networks": networks,
             "platform": [
                 "architecture": service.platformArchitecture,
                 "operatingSystem": service.platformOperatingSystem
@@ -427,6 +447,7 @@ public enum LifecycleRevisionCodec {
         let logicalServiceName: String
         let memoryBytes: String?
         let mounts: [MountDocument]
+        let networks: [NetworkDocument]
         let platform: PlatformDocument
         let ports: [PortDocument]
         let probes: ProbesDocument
@@ -448,7 +469,7 @@ public enum LifecycleRevisionCodec {
                     "command", "cpuCount", "dependencies", "entrypoint",
                     "environment", "groupID", "healthCheck", "hooks", "identity",
                     "image", "init", "labels", "logicalServiceName",
-                    "memoryBytes", "mounts", "platform", "ports", "probes",
+                    "memoryBytes", "mounts", "networks", "platform", "ports", "probes",
                     "readOnlyRootFilesystem", "replicaIndex", "restartPolicy",
                     "rosetta", "sharedMemoryBytes", "updatePolicy", "userID",
                     "virtualization", "workingDirectory"
@@ -490,6 +511,10 @@ public enum LifecycleRevisionCodec {
                 forKey: "memoryBytes"
             )
             mounts = try container.decode([MountDocument].self, forKey: "mounts")
+            networks = try container.decode(
+                [NetworkDocument].self,
+                forKey: "networks"
+            )
             platform = try container.decode(PlatformDocument.self, forKey: "platform")
             ports = try container.decode([PortDocument].self, forKey: "ports")
             probes = try container.decode(ProbesDocument.self, forKey: "probes")
@@ -556,6 +581,7 @@ public enum LifecycleRevisionCodec {
                 environment: try environment.map { try $0.value },
                 labels: labels,
                 ports: try ports.map { try $0.value },
+                networks: try networks.map { try $0.value },
                 mounts: try mounts.map { try $0.value },
                 healthCheck: healthCheck?.value,
                 probes: try probes.value,
@@ -865,6 +891,50 @@ public enum LifecycleRevisionCodec {
                     source: source,
                     target: target,
                     access: decoded
+                )
+            }
+        }
+    }
+
+    private struct NetworkDocument: Decodable {
+        let aliases: [String]
+        let networkResourceUUID: String
+        let networkRuntimeIdentifier: String
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: RevisionCodingKey.self)
+            try LifecycleRevisionCodec.validateKeys(
+                container,
+                required: [
+                    "aliases",
+                    "networkResourceUUID",
+                    "networkRuntimeIdentifier"
+                ],
+                path: "networks"
+            )
+            aliases = try container.decode([String].self, forKey: "aliases")
+            networkResourceUUID = try container.decode(
+                String.self,
+                forKey: "networkResourceUUID"
+            )
+            networkRuntimeIdentifier = try container.decode(
+                String.self,
+                forKey: "networkRuntimeIdentifier"
+            )
+        }
+
+        var value: RuntimeDesiredNetworkAttachment {
+            get throws {
+                return try JSONDecoder().decode(
+                    RuntimeDesiredNetworkAttachment.self,
+                    from: JSONSerialization.data(
+                        withJSONObject: [
+                            "aliases": aliases,
+                            "networkResourceUUID": networkResourceUUID,
+                            "networkRuntimeIdentifier": networkRuntimeIdentifier
+                        ],
+                        options: [.sortedKeys, .withoutEscapingSlashes]
+                    )
                 )
             }
         }

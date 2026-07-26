@@ -60,6 +60,8 @@ public enum AppleContainerCommand {
         desiredService: DesiredRuntimeService,
         mutationContext: RuntimeMutationContext,
         resourceIdentifier: String? = nil,
+        dnsServers: [String] = [],
+        dnsSearchDomains: [String] = [],
         timeout: RuntimeCommandTimeout = RuntimeCommandTimeout()
     ) throws -> RuntimeCommandSpec {
         RuntimeCommandSpec(
@@ -68,7 +70,9 @@ public enum AppleContainerCommand {
                 for: kind,
                 desiredService: desiredService,
                 mutationContext: mutationContext,
-                resourceIdentifier: resourceIdentifier
+                resourceIdentifier: resourceIdentifier,
+                dnsServers: dnsServers,
+                dnsSearchDomains: dnsSearchDomains
             ),
             environment: inheritedSensitiveEnvironment(for: desiredService),
             sensitiveValues: desiredService.environment.filter(\.isSensitive).map(\.value),
@@ -87,6 +91,8 @@ public enum AppleContainerCommand {
         desiredService: DesiredRuntimeService,
         mutationContext: RuntimeMutationContext,
         resourceIdentifier: String? = nil,
+        dnsServers: [String] = [],
+        dnsSearchDomains: [String] = [],
         timeout: RuntimeCommandTimeout = RuntimeCommandTimeout()
     ) throws -> RuntimeCommandSpec {
         RuntimeCommandSpec(
@@ -96,6 +102,8 @@ public enum AppleContainerCommand {
                 desiredService: desiredService,
                 mutationContext: mutationContext,
                 resourceIdentifier: resourceIdentifier,
+                dnsServers: dnsServers,
+                dnsSearchDomains: dnsSearchDomains,
                 codec: codec
             ),
             environment: inheritedSensitiveEnvironment(for: desiredService),
@@ -178,13 +186,17 @@ public enum AppleContainerCommand {
         for kind: MutatingKind,
         desiredService: DesiredRuntimeService,
         mutationContext: RuntimeMutationContext,
-        resourceIdentifier: String? = nil
+        resourceIdentifier: String? = nil,
+        dnsServers: [String] = [],
+        dnsSearchDomains: [String] = []
     ) throws -> [String] {
         try arguments(
             for: kind,
             desiredService: desiredService,
             mutationContext: mutationContext,
             resourceIdentifier: resourceIdentifier,
+            dnsServers: dnsServers,
+            dnsSearchDomains: dnsSearchDomains,
             codec: .v1_1_0
         )
     }
@@ -194,6 +206,8 @@ public enum AppleContainerCommand {
         desiredService: DesiredRuntimeService,
         mutationContext: RuntimeMutationContext,
         resourceIdentifier: String? = nil,
+        dnsServers: [String] = [],
+        dnsSearchDomains: [String] = [],
         codec: AppleContainerCLICodec
     ) throws -> [String] {
         switch kind {
@@ -256,6 +270,12 @@ public enum AppleContainerCommand {
                 $0.networkRuntimeIdentifier < $1.networkRuntimeIdentifier
             }) {
                 arguments += ["--network", network.networkRuntimeIdentifier]
+            }
+            for server in dnsServers.sorted() {
+                arguments += ["--dns", server]
+            }
+            for domain in dnsSearchDomains.sorted() {
+                arguments += ["--dns-search", domain]
             }
             for mount in desiredService.mounts.sorted(by: stableMountOrdering) {
                 arguments += try mountArguments(for: mount, codec: codec)

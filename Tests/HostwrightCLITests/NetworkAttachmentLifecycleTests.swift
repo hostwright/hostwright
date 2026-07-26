@@ -362,6 +362,121 @@ final class NetworkAttachmentLifecycleTests: XCTestCase {
         }
     }
 
+    func testReverseReleaseOrderIgnoresUnrelatedQuarantinedAttachmentWhenScoped()
+        throws
+    {
+        try withStore { store in
+            try seedProject(store)
+            let network = try availableNetwork(
+                name: "mesh",
+                operation: "network-mesh-scoped",
+                store: store
+            )
+            let attachGroup = try operationGroup(
+                "attach-scoped",
+                store: store
+            )
+            let primary = try descriptor(
+                network: network,
+                service: "api",
+                resourceUUID:
+                    "20000000-0000-4000-8000-000000000051",
+                group: attachGroup
+            )
+            let secondary = try NetworkAttachmentCreateDescriptor(
+                network: network,
+                containerRuntimeIdentifier:
+                    RuntimeServiceIdentity(
+                        projectName: "web",
+                        serviceName: "api",
+                        instanceName: "replica-1"
+                    ).managedResourceIdentifier,
+                containerContext: mutationContext(
+                    service: "api",
+                    resourceUUID:
+                        "20000000-0000-4000-8000-000000000052",
+                    group: attachGroup
+                )
+            )
+            let exactInventory = try inventory(
+                networks: [network],
+                descriptors: [primary, secondary]
+            )
+            let attachAuthority = authority(attachGroup)
+            let primaryIntent = try NetworkAttachmentLifecycle
+                .persistCreateIntent(
+                    primary,
+                    authority: attachAuthority,
+                    timestamp: timestamp,
+                    repository: store.networks
+                )
+            let secondaryIntent = try NetworkAttachmentLifecycle
+                .persistCreateIntent(
+                    secondary,
+                    authority: attachAuthority,
+                    timestamp: timestamp,
+                    repository: store.networks
+                )
+            guard case .attached(let primaryAttached) =
+                try NetworkAttachmentLifecycle
+                .resolveCreateObservation(
+                    record: primaryIntent,
+                    descriptor: primary,
+                    inventory: exactInventory,
+                    trigger: .postMutation,
+                    authority: attachAuthority,
+                    timestamp: "2026-07-26T12:01:00Z",
+                    repository: store.networks
+                ),
+                case .attached(let secondaryAttached) =
+                try NetworkAttachmentLifecycle
+                .resolveCreateObservation(
+                    record: secondaryIntent,
+                    descriptor: secondary,
+                    inventory: exactInventory,
+                    trigger: .postMutation,
+                    authority: attachAuthority,
+                    timestamp: "2026-07-26T12:01:00Z",
+                    repository: store.networks
+                ) else {
+                return XCTFail("Attachment setup did not converge.")
+            }
+            try finish(attachGroup.id, store: store)
+
+            let quarantineGroup = try operationGroup(
+                "quarantine-scoped",
+                store: store
+            )
+            _ = try store.networks.quarantineAttachment(
+                id: secondaryAttached.id,
+                expected: version(secondaryAttached),
+                authority: authority(quarantineGroup),
+                observedSHA256: exactInventory.semanticSHA256,
+                updatedAt: "2026-07-26T12:02:00Z"
+            )
+
+            let scoped = try NetworkAttachmentLifecycle
+                .reverseReleaseOrder(
+                    projectUUID: projectUUID,
+                    resourceUUID: primaryAttached.resourceUUID,
+                    providerID: .appleContainerCLI,
+                    providerGeneration: 1,
+                    repository: store.networks
+                )
+            XCTAssertEqual(scoped.map(\.id), [primaryAttached.id])
+
+            XCTAssertThrowsError(
+                try NetworkAttachmentLifecycle
+                    .reverseReleaseOrder(
+                        projectUUID: projectUUID,
+                        providerID: .appleContainerCLI,
+                        providerGeneration: 1,
+                        repository: store.networks
+                    )
+            )
+        }
+    }
+
     func testReleaseIntentUsesNewExactAuthorityAndIsIdempotent()
         throws
     {
@@ -826,6 +941,15 @@ final class NetworkAttachmentLifecycleTests: XCTestCase {
 
     private func version(
         _ record: NetworkStateResourceRecord
+    ) -> NetworkStateExpectedVersion {
+        NetworkStateExpectedVersion(
+            generation: record.generation,
+            fencingToken: record.fencingToken
+        )
+    }
+
+    private func version(
+        _ record: NetworkStateAttachmentRecord
     ) -> NetworkStateExpectedVersion {
         NetworkStateExpectedVersion(
             generation: record.generation,

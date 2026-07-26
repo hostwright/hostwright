@@ -242,13 +242,18 @@ enum NetworkAttachmentLifecycle {
 
     static func reverseReleaseOrder(
         projectUUID: String,
+        resourceUUID: String? = nil,
         providerID: RuntimeProviderID,
         providerGeneration: Int,
         repository: NetworkStateRepository
     ) throws -> [NetworkStateAttachmentRecord] {
         let targets = try repository.reverseTeardownOrder(
             projectUUID: projectUUID
-        ).filter { $0.kind == .attachment }
+        ).filter {
+            $0.kind == .attachment &&
+                (resourceUUID == nil ||
+                    $0.resourceUUID == resourceUUID)
+        }
         return try targets.map { target in
             guard let record = try repository.loadAttachment(
                 id: target.id

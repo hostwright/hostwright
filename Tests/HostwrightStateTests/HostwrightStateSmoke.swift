@@ -1255,6 +1255,88 @@ final class HostwrightStateTests: XCTestCase {
         }
     }
 
+    func testOwnershipHintsPreserveExactPrimaryAndReplicaLifecycleIdentities() throws {
+        try withTemporaryStore { store, _ in
+            try saveDesiredState(in: store)
+            let primary = RuntimeServiceIdentity(
+                projectName: "api-local",
+                serviceName: "api"
+            )
+            let replica = RuntimeServiceIdentity(
+                projectName: "api-local",
+                serviceName: "api",
+                instanceName: "replica-1"
+            )
+            let mismatchedReplica = RuntimeServiceIdentity(
+                projectName: "api-local",
+                serviceName: "api",
+                instanceName: "replica-2"
+            )
+            let records = [
+                OwnershipRecord(
+                    id: "primary",
+                    resourceIdentifier: primary.managedResourceIdentifier,
+                    resourceType: "container",
+                    projectID: projectID,
+                    serviceName: "api",
+                    runtimeAdapter: RuntimeProviderID.appleContainerCLI.rawValue,
+                    createdAt: timestamp,
+                    observedAt: timestamp,
+                    cleanupEligible: true,
+                    metadataJSONRedacted: lifecycleOwnershipMetadata(for: primary),
+                    identityVersion: RuntimeManagedResourceIdentity.currentVersion
+                ),
+                OwnershipRecord(
+                    id: "replica",
+                    resourceIdentifier: replica.managedResourceIdentifier,
+                    resourceType: "container",
+                    projectID: projectID,
+                    serviceName: "api",
+                    runtimeAdapter: RuntimeProviderID.appleContainerCLI.rawValue,
+                    createdAt: timestamp,
+                    observedAt: timestamp,
+                    cleanupEligible: true,
+                    metadataJSONRedacted: lifecycleOwnershipMetadata(for: replica),
+                    identityVersion: RuntimeManagedResourceIdentity.currentVersion
+                ),
+                OwnershipRecord(
+                    id: "mismatched-replica",
+                    resourceIdentifier: mismatchedReplica.managedResourceIdentifier,
+                    resourceType: "container",
+                    projectID: projectID,
+                    serviceName: "api",
+                    runtimeAdapter: RuntimeProviderID.appleContainerCLI.rawValue,
+                    createdAt: timestamp,
+                    observedAt: timestamp,
+                    cleanupEligible: true,
+                    metadataJSONRedacted: lifecycleOwnershipMetadata(for: replica),
+                    identityVersion: RuntimeManagedResourceIdentity.currentVersion
+                )
+            ]
+            for record in records {
+                try store.ownership.upsert(record)
+            }
+
+            let hints = try store.ownership.runtimeHints(
+                projectID: projectID,
+                projectName: "api-local"
+            )
+
+            let identitiesByResource = Dictionary(
+                uniqueKeysWithValues: hints.map {
+                    ($0.resourceIdentifier, $0.identity)
+                }
+            )
+            XCTAssertEqual(
+                identitiesByResource,
+                [
+                    primary.managedResourceIdentifier: primary,
+                    replica.managedResourceIdentifier: replica
+                ]
+            )
+        }
+    }
+
     func testOpeningDirectoryAsDatabaseFailsSafely() throws {
         try withTemporaryDirectory { directory in
             let invalidStore = SQLiteStateStore(path: directory.path)
@@ -1269,6 +1351,15 @@ final class HostwrightStateTests: XCTestCase {
     private let snapshotID = "snapshot-1"
     private let timestamp = "2026-07-01T00:00:00Z"
     private let fakeSecret = "plain-secret-token"
+
+    private func lifecycleOwnershipMetadata(
+        for identity: RuntimeServiceIdentity
+    ) -> String {
+        let instanceName = identity.instanceName.map { "\"\($0)\"" } ?? "null"
+        return """
+        {"schemaVersion":1,"projectName":"\(identity.projectName)","serviceName":"\(identity.serviceName)","instanceName":\(instanceName)}
+        """
+    }
 
     private func withTemporaryStore(_ body: (SQLiteStateStore, URL) throws -> Void) throws {
         try withTemporaryDirectory { directory in

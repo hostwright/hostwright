@@ -123,6 +123,30 @@ public enum ManifestRuntimeMapper {
                     secretReference: reference
                 )
             }
+        var labels = service.labels
+        if !networks.isEmpty {
+            do {
+                labels.merge(
+                    try RuntimeProjectDNSContract.workloadLabels(
+                        projectUUID: projectResourceUUID
+                    )
+                ) { _, internalValue in
+                    internalValue
+                }
+            } catch {
+                issues.append(
+                    PlanIssue(
+                        kind: .invalidDesiredIdentity,
+                        severity: .blocker,
+                        identity: identity,
+                        message:
+                            "Project DNS identity could not be derived from the exact project UUID.",
+                        stableDetailKey:
+                            "project-dns:\(projectResourceUUID)"
+                    )
+                )
+            }
+        }
 
         let duplicateEnvironmentKeys = Set(service.env.keys).intersection(Set(service.secretEnv.keys)).sorted()
         for key in duplicateEnvironmentKeys {
@@ -161,7 +185,7 @@ public enum ManifestRuntimeMapper {
                     )
                 },
             environment: (literalEnvironment + secretEnvironment).sorted { $0.name < $1.name },
-            labels: service.labels,
+            labels: labels,
             ports: ports,
             networks: networks,
             mounts: mounts,

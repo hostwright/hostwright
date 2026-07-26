@@ -310,6 +310,29 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
             store: store,
             manifest: validated.manifest
         )
+        let recoverySnapshot: DesiredStateRecoverySnapshot?
+        if compiled.plan.command == .update {
+            guard let snapshot = try store.desiredStates.loadRecoverySnapshot(
+                projectID: preparation.projectID
+            ) else {
+                throw StateStoreError.invalidRecord(
+                    "Lifecycle update requires one authoritative healthy desired-state snapshot."
+                )
+            }
+            recoverySnapshot = snapshot
+        } else {
+            recoverySnapshot = nil
+        }
+        let now = hostwrightTimestamp()
+        try store.desiredStates.saveManifestSnapshot(
+            projectID: preparation.projectID,
+            manifestPath: options.manifestPath,
+            manifestHash: preparation.manifestSHA256,
+            desiredGeneration: preparation.providerGeneration,
+            manifest: validated.manifest,
+            timestamp: now,
+            mutationProvider: preparation.providerID.rawValue
+        )
         let networkReconciliation:
             NetworkLifecycleReconciliationResult?
         if lifecycleRequiresProjectNetworkProvisioning(
@@ -325,6 +348,48 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
             }
         } else {
             networkReconciliation = nil
+        }
+        let projectDNSHelper: LiveProjectDNSHelperDriver?
+        let projectDNSRuntime: LiveProjectDNSRuntimeDriver?
+        let projectDNSReconciliation:
+            ProjectDNSLifecycleReconciliationResult?
+        let hasPersistedProjectDNS =
+            try store.projectDNS.load(
+                projectUUID: preparation.projectResourceUUID
+            ) != nil
+        if !preparation.desiredState.networks.isEmpty ||
+            hasPersistedProjectDNS {
+            let helper = try LiveProjectDNSHelperDriver(
+                environment: environment,
+                stateDatabasePath: options.stateDatabasePath
+            )
+            let runtime = LiveProjectDNSRuntimeDriver(
+                adapter: adapter
+            )
+            projectDNSHelper = helper
+            projectDNSRuntime = runtime
+            if lifecycleRequiresProjectDNSProvisioning(
+                compiled.plan.command
+            ) {
+                projectDNSReconciliation =
+                    try hostwrightWaitForAsync {
+                        try await ProjectDNSLifecycleCoordinator
+                            .reconcile(
+                                preparation: preparation,
+                                planSHA256:
+                                    compiled.plan.planSHA256,
+                                store: store,
+                                helper: helper,
+                                runtime: runtime
+                            )
+                    }
+            } else {
+                projectDNSReconciliation = nil
+            }
+        } else {
+            projectDNSHelper = nil
+            projectDNSRuntime = nil
+            projectDNSReconciliation = nil
         }
         let storageReconciliation:
             StorageLifecycleReconciliationResult?
@@ -346,20 +411,6 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
         } else {
             storageReconciliation = nil
         }
-        let now = hostwrightTimestamp()
-        let recoverySnapshot: DesiredStateRecoverySnapshot?
-        if compiled.plan.command == .update {
-            guard let snapshot = try store.desiredStates.loadRecoverySnapshot(
-                projectID: preparation.projectID
-            ) else {
-                throw StateStoreError.invalidRecord(
-                    "Lifecycle update requires one authoritative healthy desired-state snapshot."
-                )
-            }
-            recoverySnapshot = snapshot
-        } else {
-            recoverySnapshot = nil
-        }
         let recoveryStateJSONRedacted = try recoverySnapshot.map(
             lifecycleRecoveryStateJSONRedacted
         )
@@ -370,15 +421,6 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
         let groupID = HostwrightResourceUUID.legacy(
             kind: "lifecycle-group",
             identifier: compiled.plan.planSHA256
-        )
-        try store.desiredStates.saveManifestSnapshot(
-            projectID: preparation.projectID,
-            manifestPath: options.manifestPath,
-            manifestHash: preparation.manifestSHA256,
-            desiredGeneration: preparation.providerGeneration,
-            manifest: validated.manifest,
-            timestamp: now,
-            mutationProvider: preparation.providerID.rawValue
         )
         try lifecyclePersistDesiredImageLocks(
             plan: compiled.plan,
@@ -449,6 +491,40 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
             !validated.manifest.volumes.isEmpty
         if result.status == .succeeded ||
             result.status == .alreadySucceeded {
+            if compiled.plan.command != .remove,
+               !preparation.desiredState.networks.isEmpty,
+               let projectDNSHelper,
+               let projectDNSRuntime {
+                let freshObserved = try hostwrightWaitForAsync {
+                    try await lifecycleProjectDNSRefreshObservation(
+                        adapter: adapter,
+                        preparation: preparation,
+                        store: store
+                    )
+                }
+                guard freshObserved.adapterMetadata?.providerID ==
+                        preparation.providerID,
+                      freshObserved.capabilitySHA256 ==
+                        preparation.capabilitySHA256 else {
+                    throw HostwrightDiagnostic(
+                        code: .runtimeUnavailable,
+                        message:
+                            "Project DNS ready-record refresh refused stale provider observation."
+                    )
+                }
+                try hostwrightWaitForAsync {
+                    try await ProjectDNSLifecycleCoordinator
+                        .refresh(
+                            preparation: preparation,
+                            observedState: freshObserved,
+                            planSHA256:
+                                compiled.plan.planSHA256,
+                            store: store,
+                            helper: projectDNSHelper,
+                            runtime: projectDNSRuntime
+                        )
+                }
+            }
             if manifestDeclaresNamedVolumes &&
                 lifecycleRequiresNamedVolumeDetach(
                 compiled.plan.command
@@ -495,6 +571,20 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
                 }
             }
             if compiled.plan.command == .remove {
+                if let projectDNSHelper,
+                   let projectDNSRuntime {
+                    try hostwrightWaitForAsync {
+                        try await ProjectDNSLifecycleCoordinator
+                            .remove(
+                                preparation: preparation,
+                                planSHA256:
+                                    compiled.plan.planSHA256,
+                                store: store,
+                                helper: projectDNSHelper,
+                                runtime: projectDNSRuntime
+                            )
+                    }
+                }
                 try hostwrightWaitForAsync {
                     try await NetworkLifecycleCoordinator
                         .removeNetworks(
@@ -540,6 +630,23 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
             }
         }
         if result.status == .compensated,
+           let projectDNSReconciliation,
+           let projectDNSHelper,
+           let projectDNSRuntime {
+            try hostwrightWaitForAsync {
+                try await ProjectDNSLifecycleCoordinator
+                    .compensateNewlyCreated(
+                        projectDNSReconciliation,
+                        preparation: preparation,
+                        planSHA256:
+                            compiled.plan.planSHA256,
+                        store: store,
+                        helper: projectDNSHelper,
+                        runtime: projectDNSRuntime
+                    )
+            }
+        }
+        if result.status == .compensated,
            let networkReconciliation,
            !networkReconciliation
             .newlyCreatedNetworkUUIDs.isEmpty {
@@ -571,6 +678,45 @@ private func lifecycleRequiresProjectNetworkProvisioning(
     case .down, .stop, .remove, .resume, .rollback:
         false
     }
+}
+
+private func lifecycleRequiresProjectDNSProvisioning(
+    _ command: LifecycleCommand
+) -> Bool {
+    switch command {
+    case .up, .run, .start, .restart, .update, .apply,
+            .resume, .rollback:
+        true
+    case .down, .stop, .remove:
+        false
+    }
+}
+
+func lifecycleProjectDNSRefreshObservation(
+    adapter: any RuntimeAdapter,
+    preparation: LifecycleCommandPreparation,
+    store: SQLiteStateStore
+) async throws -> ObservedRuntimeState {
+    let bindings = try lifecycleBindings(
+        store: store,
+        projectID: preparation.projectID,
+        providerID: preparation.providerID,
+        desiredState: preparation.desiredState
+    )
+    let desiredState = DesiredRuntimeState(
+        projectName: preparation.desiredState.projectName,
+        networks: preparation.desiredState.networks,
+        services: preparation.desiredState.services,
+        ownedResourceHints: bindings.map {
+            RuntimeOwnedResourceHint(
+                resourceIdentifier: $0.resourceIdentifier,
+                identity: $0.identity,
+                identityVersion: $0.identityVersion,
+                ownership: $0.ownershipEvidence
+            )
+        }.sorted { $0.resourceIdentifier < $1.resourceIdentifier }
+    )
+    return try await adapter.observe(desiredState: desiredState)
 }
 
 private func lifecycleRequiresNamedVolumeProvisioning(
@@ -3446,12 +3592,12 @@ struct LifecycleLiveEffects: LifecycleSagaEffects {
                 .reverseReleaseOrder(
                     projectUUID:
                         context.plan.projectResourceUUID,
+                    resourceUUID: node.resourceUUID,
                     providerID: context.plan.providerID,
                     providerGeneration:
                         context.plan.providerGeneration,
                     repository: repository
                 )
-                .filter { $0.resourceUUID == node.resourceUUID }
             for record in records {
                 _ = try NetworkAttachmentLifecycle
                     .persistReleaseIntent(
@@ -3558,12 +3704,12 @@ struct LifecycleLiveEffects: LifecycleSagaEffects {
                 .reverseReleaseOrder(
                     projectUUID:
                         context.plan.projectResourceUUID,
+                    resourceUUID: node.resourceUUID,
                     providerID: context.plan.providerID,
                     providerGeneration:
                         context.plan.providerGeneration,
                     repository: repository
                 )
-                .filter { $0.resourceUUID == node.resourceUUID }
             for record in records {
                 try NetworkAttachmentLifecycle
                     .releaseAfterVerifiedAbsence(
@@ -5030,7 +5176,9 @@ struct LifecycleLiveEffects: LifecycleSagaEffects {
                     observedService?.lifecycleState ?? .unknown
                 )
         case .delete, .retire:
-            return exactContainer == nil && observedService == nil
+            return exactContainer == nil &&
+                (observedService == nil ||
+                    observedService?.lifecycleState == .missing)
         case .verify:
             guard let observedService else { return false }
             return node.postconditions.allSatisfy { condition in

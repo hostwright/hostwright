@@ -103,6 +103,40 @@ final class BenchmarkRuntimeTests: XCTestCase {
         XCTAssertEqual(evidence.variantDigest, "sha256:\(armVariant)")
     }
 
+    func testLocalImageEvidenceParserAcceptsPinnedPlatformManifestDigest() throws {
+        let descriptor = String(repeating: "a", count: 64)
+        let armVariant = String(repeating: "b", count: 64)
+        let expected =
+            "docker.io/coredns/coredns@sha256:\(armVariant)"
+        let output = """
+        [{
+          "configuration": {
+            "descriptor": {"digest": "sha256:\(descriptor)"},
+            "name": "\(expected)"
+          },
+          "variants": [{
+            "digest": "sha256:\(armVariant)",
+            "platform": {"architecture": "arm64", "os": "linux"}
+          }]
+        }]
+        """
+
+        let evidence = try AppleContainerImageEvidenceParser.parse(
+            output,
+            expectedReference: expected,
+            preferredArchitecture: "arm64"
+        )
+
+        XCTAssertEqual(
+            evidence.descriptorDigest,
+            "sha256:\(descriptor)"
+        )
+        XCTAssertEqual(
+            evidence.variantDigest,
+            "sha256:\(armVariant)"
+        )
+    }
+
     func testLocalImageEvidenceParserRejectsConflictingDigestPinnedAliases() {
         let descriptor = String(repeating: "a", count: 64)
         let variant = String(repeating: "b", count: 64)

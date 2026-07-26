@@ -8,6 +8,27 @@ import Darwin
 import Glibc
 #endif
 
+private struct NetworkStateOperationIntent: Decodable {
+    let schemaVersion: Int
+    let action: String
+    let projectUUID: String
+    let networkUUID: String
+    let runtimeName: String
+    let providerID: String
+    let providerGeneration: Int
+    let capabilitySHA256: String
+    let desiredSHA256: String
+    let runtimeResourceGeneration: Int
+}
+
+private struct NetworkStateOperationHistory {
+    let id: String
+    let plannedAction: String
+    let status: String
+    let checkpoint: String
+    let intent: NetworkStateOperationIntent
+}
+
 public struct NetworkStateRepository: Sendable {
     private let store: SQLiteStateStore
 
@@ -81,7 +102,10 @@ public struct NetworkStateRepository: Sendable {
                     )
                 } else {
                     guard expected == nil,
-                          record.generation == 1,
+                          try Self.validAbsentNetworkInsertion(
+                            record,
+                            on: connection
+                          ),
                           record.lifecycleState == .creating,
                           record.finalizerState == .pending,
                           record.observedSHA256 == nil,
@@ -142,6 +166,129 @@ public struct NetworkStateRepository: Sendable {
                 return record
             }
         }
+    }
+
+    private static func validAbsentNetworkInsertion(
+        _ record: NetworkStateResourceRecord,
+        on connection: SQLiteConnection
+    ) throws -> Bool {
+        if record.generation == 1 {
+            return true
+        }
+        guard record.generation > 1,
+              record.generation < Int64.max else {
+            return false
+        }
+        let rows = try connection.query(
+            """
+            SELECT id, planned_action_type, status, checkpoint,
+                   intent_json_redacted
+            FROM operation_groups
+            WHERE project_id = ? AND group_kind = 'network-resource'
+            ORDER BY created_at ASC, rowid ASC
+            """,
+            bindings: [.text(recordProjectID(
+                projectUUID: record.projectUUID,
+                on: connection
+            ))]
+        )
+        let decoder = JSONDecoder()
+        var history: [NetworkStateOperationHistory] = []
+        for row in rows {
+            guard row.count == 5,
+                  let id = row[0],
+                  let plannedAction = row[1],
+                  let status = row[2],
+                  let checkpoint = row[3],
+                  let encodedIntent = row[4],
+                  let data = encodedIntent.data(using: .utf8),
+                  let intent = try? decoder.decode(
+                    NetworkStateOperationIntent.self,
+                    from: data
+                  ) else {
+                throw StateStoreError.invalidRecord(
+                    "Network recreation operation history is ambiguous."
+                )
+            }
+            guard intent.networkUUID == record.id else {
+                continue
+            }
+            guard intent.schemaVersion == 1,
+                  intent.projectUUID == record.projectUUID,
+                  intent.runtimeName == record.runtimeName,
+                  intent.providerID == record.providerID,
+                  Int64(intent.providerGeneration) ==
+                    record.providerGeneration,
+                  plannedAction == intent.action,
+                  intent.action == "create" ||
+                    intent.action == "delete",
+                  intent.runtimeResourceGeneration > 0 else {
+                throw StateStoreError.invalidRecord(
+                    "Network recreation operation history lost exact provider authority."
+                )
+            }
+            history.append(
+                NetworkStateOperationHistory(
+                    id: id,
+                    plannedAction: plannedAction,
+                    status: status,
+                    checkpoint: checkpoint,
+                    intent: intent
+                )
+            )
+        }
+        guard history.count >= 2,
+              let current = history.last,
+              current.id == record.operationGroupID,
+              current.plannedAction == "create",
+              current.status == OperationGroupStatus.active.rawValue,
+              current.checkpoint == "intent-persisted",
+              current.intent.desiredSHA256 ==
+                record.desiredSHA256 else {
+            return false
+        }
+        for pair in zip(history, history.dropFirst()) {
+            guard pair.0.intent.runtimeResourceGeneration <
+                    pair.1.intent.runtimeResourceGeneration else {
+                return false
+            }
+        }
+        let prior = history[history.count - 2]
+        guard prior.plannedAction == "delete",
+              prior.status ==
+                OperationGroupStatus.succeeded.rawValue,
+              prior.checkpoint == "state-committed" else {
+            return false
+        }
+        let priorGeneration = Int64(
+            prior.intent.runtimeResourceGeneration
+        )
+        let currentGeneration = Int64(
+            current.intent.runtimeResourceGeneration
+        )
+        return priorGeneration <= Int64.max - 2 &&
+            priorGeneration + 2 == record.generation &&
+            currentGeneration == record.generation + 1
+    }
+
+    private static func recordProjectID(
+        projectUUID: String,
+        on connection: SQLiteConnection
+    ) throws -> String {
+        let rows = try connection.query(
+            """
+            SELECT id FROM projects
+            WHERE resource_uuid = ?
+            LIMIT 1
+            """,
+            bindings: [.text(projectUUID)]
+        )
+        guard let projectID = rows.first?.first ?? nil else {
+            throw StateStoreError.invalidRecord(
+                "Network recreation requires the exact project identity."
+            )
+        }
+        return projectID
     }
 
     @discardableResult
@@ -709,6 +856,7 @@ public struct NetworkStateRepository: Sendable {
                     kind: .attachment,
                     id: $0.id,
                     networkUUID: $0.networkUUID,
+                    resourceUUID: $0.resourceUUID,
                     generation: $0.generation,
                     fencingToken: $0.fencingToken
                 )
@@ -1635,12 +1783,38 @@ public struct NetworkStateRepository: Sendable {
               Set(values).count == values.count,
               values.allSatisfy({
                   $0.utf8.count <= 64 &&
-                    validIPAddress($0, family: family)
+                    validObservedAddress(
+                        $0,
+                        family: family
+                    )
               }) else {
             throw StateStoreError.invalidRecord(
-                "Observed IPv\(family) addresses must be bounded, unique, sorted, and valid."
+                "Observed IPv\(family) addresses and subnets must be bounded, unique, sorted, and valid."
             )
         }
+    }
+
+    private static func validObservedAddress(
+        _ value: String,
+        family: Int
+    ) -> Bool {
+        if validIPAddress(value, family: family) {
+            return true
+        }
+        let fields = value.split(
+            separator: "/",
+            maxSplits: 1,
+            omittingEmptySubsequences: false
+        )
+        guard fields.count == 2,
+              let prefix = Int(fields[1]),
+              (0...(family == 4 ? 32 : 128)).contains(prefix) else {
+            return false
+        }
+        return validIPAddress(
+            String(fields[0]),
+            family: family
+        )
     }
 
     private static func validIPAddress(

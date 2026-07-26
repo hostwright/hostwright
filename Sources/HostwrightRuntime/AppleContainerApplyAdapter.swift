@@ -1,5 +1,6 @@
 import Foundation
 import HostwrightCore
+import HostwrightNetworking
 
 public struct AppleContainerApplyAdapter: RuntimeAdapter {
     public let executableResolver: RuntimeExecutableResolving
@@ -284,13 +285,19 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
             }
         }
 
+        let projectDNS = try await projectDNSResolution(
+            for: desiredService,
+            context: context
+        )
         let createSpec = try AppleContainerCommand.spec(
             kind: .createContainer,
             codec: codec,
             executable: executable,
             desiredService: desiredService,
             mutationContext: context,
-            resourceIdentifier: action.resourceIdentifier
+            resourceIdentifier: action.resourceIdentifier,
+            dnsServers: projectDNS.servers,
+            dnsSearchDomains: projectDNS.searchDomains
         )
         try RuntimeCommandPolicy.validateCreateMissingServiceMutation(createSpec)
         try revalidateBindMountLeases(bindMountLeases)
@@ -316,6 +323,110 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
             message: "Created and verified missing service \(desiredService.identity.displayName).",
             resourceIdentifier: resourceIdentifier
         )
+    }
+
+    private func projectDNSResolution(
+        for service: DesiredRuntimeService,
+        context: RuntimeMutationContext
+    ) async throws -> (
+        servers: [String],
+        searchDomains: [String]
+    ) {
+        let requirement: RuntimeProjectDNSRequirement?
+        do {
+            requirement = try RuntimeProjectDNSContract.requirement(
+                from: service.labels,
+                projectUUID: context.projectResourceUUID
+            )
+        } catch {
+            throw RuntimeAdapterError.commandRejected(
+                classification: .mutating,
+                message:
+                    "Project DNS binding is incomplete or conflicts with the exact project identity."
+            )
+        }
+        guard let requirement,
+              !RuntimeProjectDNSContract.isInfrastructure(
+                service.labels
+              ) else {
+            return ([], [])
+        }
+
+        let inventory = try await readOnlyAdapter.inventory()
+        let matches = inventory.containers.filter { container in
+            guard let ownership = container.ownership,
+                  ownership.resourceUUID ==
+                    requirement.resourceUUID,
+                  ownership.projectUUID ==
+                    requirement.projectUUID,
+                  ownership.projectGeneration ==
+                    context.projectGeneration,
+                  ownership.providerID == context.providerID,
+                  ownership.providerGeneration ==
+                    context.providerGeneration,
+                  container.lifecycle == .running,
+                  container.imageReference ==
+                    CoreDNSInfrastructureImage
+                        .immutableLinuxARM64Reference else {
+                return false
+            }
+            let labels = Dictionary(
+                uniqueKeysWithValues: container.labels.map {
+                    ($0.key, $0.value)
+                }
+            )
+            return RuntimeProjectDNSContract
+                .isInfrastructure(labels) &&
+                labels[
+                    RuntimeProjectDNSContract.resourceUUIDLabel
+                ] == requirement.resourceUUID &&
+                labels[RuntimeProjectDNSContract.zoneLabel] ==
+                    requirement.zone
+        }
+        guard matches.count == 1,
+              let infrastructure = matches.first else {
+            throw RuntimeAdapterError.commandRejected(
+                classification: .mutating,
+                message:
+                    "Project DNS requires one exact running UUID-owned CoreDNS instance before workload creation."
+            )
+        }
+        let desiredNetworks = Set(
+            service.networks.map(\.networkRuntimeIdentifier)
+        )
+        let servers = Array(
+            Set(
+                infrastructure.networks
+                    .filter {
+                        desiredNetworks.contains($0.networkID)
+                    }
+                    .flatMap(\.addresses)
+                    .compactMap(Self.addressWithoutPrefix)
+            )
+        ).sorted()
+        guard !servers.isEmpty else {
+            throw RuntimeAdapterError.commandRejected(
+                classification: .mutating,
+                message:
+                    "Project DNS has no observed address on a network shared with the workload."
+            )
+        }
+        return (servers, [requirement.zone])
+    }
+
+    private static func addressWithoutPrefix(
+        _ value: String
+    ) -> String? {
+        let address = value.split(
+            separator: "/",
+            maxSplits: 1,
+            omittingEmptySubsequences: false
+        ).first.map(String.init) ?? value
+        guard !address.isEmpty,
+              !address.contains("%") else {
+            return nil
+        }
+        return address
     }
 
     private func executeStart(

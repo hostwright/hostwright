@@ -253,6 +253,92 @@ final class NetworkLifecycleCoordinatorTests: XCTestCase {
         let networkNames = await fixture.runtime.networkNames()
         XCTAssertEqual(networkNames, [])
     }
+
+    func testCommittedDeleteAllowsMonotonicRecreateAndReplay()
+        async throws
+    {
+        let fixture = try makeFixture(networkNames: ["backend"])
+        defer { fixture.cleanup() }
+        let desired = try XCTUnwrap(
+            fixture.preparation.desiredState.networks.first
+        )
+
+        _ = try await NetworkLifecycleCoordinator.reconcile(
+            preparation: fixture.preparation,
+            planSHA256: digest("d"),
+            store: fixture.store,
+            environment: fixture.environment
+        )
+        let initial = try XCTUnwrap(
+            try fixture.store.networks.loadNetwork(
+                id: desired.identity.resourceUUID
+            )
+        )
+        XCTAssertEqual(initial.generation, 2)
+
+        try await NetworkLifecycleCoordinator.removeNetworks(
+            networkUUIDs: nil,
+            preparation: fixture.preparation,
+            planSHA256: digest("e"),
+            store: fixture.store,
+            environment: fixture.environment
+        )
+        XCTAssertNil(
+            try fixture.store.networks.loadNetwork(
+                id: desired.identity.resourceUUID
+            )
+        )
+
+        let recreated = try await NetworkLifecycleCoordinator
+            .reconcile(
+                preparation: fixture.preparation,
+                planSHA256: digest("d"),
+                store: fixture.store,
+                environment: fixture.environment
+            )
+        XCTAssertEqual(
+            recreated.newlyCreatedNetworkUUIDs,
+            [desired.identity.resourceUUID]
+        )
+        let persisted = try XCTUnwrap(
+            try fixture.store.networks.loadNetwork(
+                id: desired.identity.resourceUUID
+            )
+        )
+        XCTAssertEqual(persisted.generation, 6)
+        XCTAssertGreaterThan(
+            persisted.generation,
+            initial.generation
+        )
+        let observedOwnership = await fixture.runtime.ownership(
+            runtimeName: desired.identity.runtimeIdentifier
+        )
+        let ownership = try XCTUnwrap(observedOwnership)
+        XCTAssertEqual(ownership.resourceGeneration, 6)
+
+        let replayed = try await NetworkLifecycleCoordinator.reconcile(
+            preparation: fixture.preparation,
+            planSHA256: digest("d"),
+            store: fixture.store,
+            environment: fixture.environment
+        )
+        XCTAssertEqual(replayed.newlyCreatedNetworkUUIDs, [])
+        let audit = await fixture.runtime.audit()
+        XCTAssertEqual(
+            audit.operations,
+            [
+                .create("backend"),
+                .delete("backend"),
+                .create("backend"),
+            ]
+        )
+        XCTAssertEqual(audit.createIntentChecks, [true, true])
+        XCTAssertEqual(audit.deleteIntentChecks, [true])
+        XCTAssertEqual(
+            try fixture.store.operationGroups.loadAll().map(\.status),
+            [.succeeded, .succeeded, .succeeded]
+        )
+    }
 }
 
 private enum NetworkCoordinatorTestError: Error {
@@ -332,6 +418,12 @@ private actor NetworkCoordinatorRuntime:
 
     func networkNames() -> [String] {
         networks.values.map(\.name).sorted()
+    }
+
+    func ownership(
+        runtimeName: String
+    ) -> RuntimeInventoryOwnershipEvidence? {
+        networks[runtimeName]?.ownership
     }
 
     func networkCapabilities()

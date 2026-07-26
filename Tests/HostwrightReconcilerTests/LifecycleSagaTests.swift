@@ -103,6 +103,67 @@ final class LifecyclePlanTests: XCTestCase {
         XCTAssertThrowsError(try plan(nodes: nodes, fence: fence, parallelism: 33))
     }
 
+    func testPersistedIntentBindsTopLevelCapabilityDigestToPlan() throws {
+        let fence = HostwrightResourceUUID.generate()
+        let value = try plan(
+            nodes: [try node(key: "create-web", fence: fence)],
+            fence: fence
+        )
+        let encoded = try LifecyclePersistedIntentCodec.encode(value)
+        let encodedData = try XCTUnwrap(encoded.data(using: .utf8))
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encodedData) as? [String: Any]
+        )
+
+        XCTAssertEqual(
+            object["capabilitySHA256"] as? String,
+            value.capabilitySHA256
+        )
+
+        object["capabilitySHA256"] = String(repeating: "d", count: 64)
+        let tamperedData = try JSONSerialization.data(
+            withJSONObject: object,
+            options: [.sortedKeys]
+        )
+        let tampered = try XCTUnwrap(
+            String(data: tamperedData, encoding: .utf8)
+        )
+        XCTAssertThrowsError(
+            try LifecyclePersistedIntentCodec.decode(tampered)
+        ) { error in
+            XCTAssertEqual(
+                error as? LifecyclePersistedIntentCodecError,
+                .decodingFailed
+            )
+        }
+    }
+
+    func testPersistedIntentDecodesLegacyEnvelopeWithoutTopLevelCapabilityDigest() throws {
+        let fence = HostwrightResourceUUID.generate()
+        let value = try plan(
+            nodes: [try node(key: "create-web", fence: fence)],
+            fence: fence
+        )
+        let encoded = try LifecyclePersistedIntentCodec.encode(value)
+        let encodedData = try XCTUnwrap(encoded.data(using: .utf8))
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encodedData) as? [String: Any]
+        )
+        object.removeValue(forKey: "capabilitySHA256")
+        let legacyData = try JSONSerialization.data(
+            withJSONObject: object,
+            options: [.sortedKeys]
+        )
+        let legacy = try XCTUnwrap(
+            String(data: legacyData, encoding: .utf8)
+        )
+
+        XCTAssertEqual(
+            try LifecyclePersistedIntentCodec.decode(legacy),
+            value
+        )
+    }
+
     private func plan(
         nodes: [LifecyclePlanNode],
         fence: String,
@@ -193,6 +254,16 @@ final class LifecycleSagaExecutorTests: XCTestCase {
         XCTAssertEqual(
             persistedPlan.nodes.map(\.idempotencyKey),
             fixture.plan.nodes.map(\.idempotencyKey)
+        )
+        let intentData = try XCTUnwrap(
+            group.intentJSONRedacted.data(using: .utf8)
+        )
+        let intentObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: intentData) as? [String: Any]
+        )
+        XCTAssertEqual(
+            intentObject["capabilitySHA256"] as? String,
+            fixture.plan.capabilitySHA256
         )
         XCTAssertFalse(group.intentJSONRedacted.contains("keychain://"))
         XCTAssertFalse(group.intentJSONRedacted.contains("demo/api"))

@@ -18,6 +18,10 @@ let package = Package(
             name: "hostwright-storage-helper",
             targets: ["HostwrightStorageProviderHelper"]
         ),
+        .executable(
+            name: "hostwright-network-helper",
+            targets: ["HostwrightNetworkHelper"]
+        ),
         .executable(name: "hostwrightd", targets: ["HostwrightDaemon"]),
         .executable(name: "hostwright-dist", targets: ["HostwrightDistributionTool"]),
         .executable(
@@ -64,6 +68,8 @@ let package = Package(
                 "HostwrightHealth",
                 "HostwrightImport",
                 "HostwrightManifest",
+                "HostwrightNetworkHelperCore",
+                "HostwrightNetworking",
                 "HostwrightPolicy",
                 "HostwrightReconciler",
                 "HostwrightRegistry",
@@ -116,6 +122,17 @@ let package = Package(
             dependencies: [
                 "HostwrightStorage",
                 "HostwrightStorageHelper"
+            ]
+        ),
+        .executableTarget(
+            name: "HostwrightNetworkHelper",
+            dependencies: ["HostwrightNetworkHelperCore"]
+        ),
+        .target(
+            name: "HostwrightNetworkHelperCore",
+            dependencies: ["HostwrightRuntime"],
+            linkerSettings: [
+                .linkedFramework("Security")
             ]
         ),
         .target(name: "HostwrightCore"),
@@ -402,6 +419,13 @@ let package = Package(
         .testTarget(
             name: "HostwrightNetworkingTests",
             dependencies: ["HostwrightNetworking"]
+        ),
+        .testTarget(
+            name: "HostwrightNetworkHelperTests",
+            dependencies: [
+                "HostwrightNetworkHelperCore",
+                "HostwrightRuntime"
+            ]
         ),
         .testTarget(
             name: "HostwrightObservabilityTests",

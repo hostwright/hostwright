@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 public enum RuntimeCommandClassification: String, Equatable, Sendable {
@@ -263,16 +264,21 @@ public enum RuntimeCommandPolicy {
             RuntimeManagedResourceIdentity.providerGenerationLabel,
             RuntimeManagedResourceIdentity.fencingTokenLabel
         ]
-        let expectedKeys = Set(RuntimeManagedResourceIdentity.labels(for: identity).keys)
-            .union(ownershipKeys)
+        let expectedKeys = Set(
+            RuntimeManagedResourceIdentity.labels(for: identity).keys
+        ).union(ownershipKeys)
         let hostwrightKeys = Set(
             labels.keys.filter { $0.hasPrefix("dev.hostwright.") }
+        )
+        let projectDNSKeys = hostwrightKeys.intersection(
+            RuntimeProjectDNSContract.internalLabelKeys
         )
         let userLabels = labels.filter {
             !$0.key.hasPrefix("dev.hostwright.")
         }
-        guard ownership != nil,
-              hostwrightKeys == expectedKeys,
+        guard let ownership,
+              hostwrightKeys ==
+                expectedKeys.union(projectDNSKeys),
               labels.count <= RuntimeInventoryLimits.maximumLabelsPerResource,
               userLabels.allSatisfy({
                   !$0.key.isEmpty &&
@@ -283,6 +289,55 @@ public enum RuntimeCommandPolicy {
                 classification: spec.classification,
                 message: "Create-missing-service command specs require complete ownership labels bound to the exact container identifier."
             )
+        }
+        let dnsRequirement: RuntimeProjectDNSRequirement?
+        do {
+            dnsRequirement = try RuntimeProjectDNSContract.requirement(
+                from: labels,
+                projectUUID: ownership.projectUUID
+            )
+        } catch {
+            throw RuntimeAdapterError.commandRejected(
+                classification: spec.classification,
+                message:
+                    "Create-missing-service project DNS labels are incomplete or invalid."
+            )
+        }
+        let dnsServers = values(
+            for: "--dns",
+            in: spec.arguments,
+            before: imageIndex
+        )
+        let searchDomains = values(
+            for: "--dns-search",
+            in: spec.arguments,
+            before: imageIndex
+        )
+        if let dnsRequirement,
+           !RuntimeProjectDNSContract.isInfrastructure(labels) {
+            guard !dnsServers.isEmpty,
+                  dnsServers.count <=
+                    RuntimeInventoryLimits
+                        .maximumAddressesPerNetwork,
+                  Set(dnsServers).count == dnsServers.count,
+                  dnsServers == dnsServers.sorted(),
+                  dnsServers.allSatisfy(isIPAddress),
+                  searchDomains == [dnsRequirement.zone] else {
+                throw RuntimeAdapterError.commandRejected(
+                    classification: spec.classification,
+                    message:
+                        "Create-missing-service project DNS requires unique observed IP addresses and its exact project search zone."
+                )
+            }
+        } else {
+            guard dnsServers.isEmpty,
+                  searchDomains.isEmpty else {
+                throw RuntimeAdapterError.commandRejected(
+                    classification: spec.classification,
+                    message:
+                        "Create-missing-service DNS options require an exact non-infrastructure project DNS binding."
+                )
+            }
         }
 
         var networkIdentifiers = Set<String>()
@@ -863,6 +918,8 @@ public enum RuntimeCommandPolicy {
         "--env",
         "--publish",
         "--network",
+        "--dns",
+        "--dns-search",
         "--os",
         "--arch",
         "--cpus",
@@ -886,11 +943,38 @@ public enum RuntimeCommandPolicy {
 
     private static let rejectedCreateFlags: Set<String> = [
         "--rm",
-        "--dns",
         "--privileged",
         "--cap-add",
         "--cap-drop"
     ]
+
+    private static func values(
+        for flag: String,
+        in arguments: [String],
+        before limit: Int
+    ) -> [String] {
+        arguments.indices.compactMap { index in
+            guard index < limit,
+                  arguments[index] == flag,
+                  index + 1 < limit else {
+                return nil
+            }
+            return arguments[index + 1]
+        }
+    }
+
+    private static func isIPAddress(_ value: String) -> Bool {
+        var ipv4 = in_addr()
+        if value.withCString({
+            inet_pton(AF_INET, $0, &ipv4)
+        }) == 1 {
+            return true
+        }
+        var ipv6 = in6_addr()
+        return value.withCString({
+            inet_pton(AF_INET6, $0, &ipv6)
+        }) == 1
+    }
 }
 
 public protocol RuntimeProcessRunning: Sendable {

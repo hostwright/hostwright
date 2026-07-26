@@ -1966,6 +1966,84 @@ final class HostwrightCLITests: XCTestCase {
         }
     }
 
+    func testStatusReportsMultipleReplicasWithoutDuplicateKeyFailure() throws {
+        try withTemporaryDatabase { databasePath in
+            let manifest = """
+            version: 2
+            project: demo
+            services:
+              api:
+                image: local/demo:latest
+                replicas: 2
+
+            """
+            let primaryIdentity = RuntimeServiceIdentity(
+                projectName: "demo",
+                serviceName: "api"
+            )
+            let replicaIdentity = RuntimeServiceIdentity(
+                projectName: "demo",
+                serviceName: "api",
+                instanceName: "replica-1"
+            )
+            let observed = ObservedRuntimeState(
+                projectName: "demo",
+                services: [
+                    ObservedRuntimeService(
+                        identity: replicaIdentity,
+                        resourceIdentifier: replicaIdentity.managedResourceIdentifier,
+                        image: "local/demo:latest",
+                        lifecycleState: .running,
+                        healthState: .healthy
+                    ),
+                    ObservedRuntimeService(
+                        identity: primaryIdentity,
+                        resourceIdentifier: primaryIdentity.managedResourceIdentifier,
+                        image: "local/demo:latest",
+                        lifecycleState: .running,
+                        healthState: .healthy
+                    )
+                ],
+                adapterMetadata: fakeAdapterMetadata
+            )
+            let files = FileBox(files: [
+                HostwrightIdentity.manifestFileName: manifest
+            ])
+            let adapter = ScriptedApplyRuntimeAdapter(observedState: observed)
+
+            let textResult = HostwrightCLI.run(
+                arguments: ["status", "--state-db", databasePath],
+                environment: environment(files: files, runtimeAdapter: adapter)
+            )
+            XCTAssertEqual(textResult.exitCode, 0)
+            XCTAssertTrue(textResult.standardOutput.contains("- api: id="))
+            XCTAssertTrue(
+                textResult.standardOutput.contains("- api[replica-1]: id=")
+            )
+
+            let jsonResult = HostwrightCLI.run(
+                arguments: [
+                    "status", "--state-db", databasePath, "--output", "json"
+                ],
+                environment: environment(files: files, runtimeAdapter: adapter)
+            )
+            XCTAssertEqual(jsonResult.exitCode, 0)
+            let json = try jsonObject(jsonResult.standardOutput)
+            let services = try XCTUnwrap(json["services"] as? [[String: Any]])
+            let instances = try XCTUnwrap(
+                services.first?["instances"] as? [[String: Any]]
+            )
+            XCTAssertEqual(
+                instances.compactMap { $0["instance"] as? String },
+                ["replica-1"]
+            )
+            XCTAssertEqual(
+                instances.compactMap { $0["identity"] as? String },
+                ["demo/api", "demo/api/replica-1"]
+            )
+        }
+    }
+
     func testStatusRejectsChangedObservedCapabilityBeforeRecordingState() throws {
         try withTemporaryDatabase { databasePath in
             let files = FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest])

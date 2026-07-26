@@ -350,6 +350,137 @@ final class LifecycleLiveDriverTests: XCTestCase {
         }
     }
 
+    func testFirstConfirmedNetworkRunPersistsExactProjectProviderBindingBeforeMutation()
+        throws
+    {
+        let manifest = """
+        version: 2
+        project: demo
+        imagePolicy: require-digest
+        networks:
+          backend: {}
+        services:
+          api:
+            image: registry.example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+
+        """
+        try withFixture(manifestOverride: manifest) { fixture in
+            let result = try runConfirmedUp(fixture)
+
+            XCTAssertTrue(
+                result.standardError.contains(
+                    lifecycleLiveNetworkMutationBoundary
+                ),
+                result.standardError
+            )
+            let snapshot = try fixture.adapterSnapshot()
+            XCTAssertEqual(snapshot.networkCreateAttempts.count, 1)
+            let attempt = try XCTUnwrap(snapshot.networkCreateAttempts.first)
+            XCTAssertEqual(
+                attempt.project.resourceUUID,
+                attempt.context.projectResourceUUID
+            )
+            XCTAssertEqual(
+                attempt.project.mutationProvider,
+                attempt.context.providerID.rawValue
+            )
+            XCTAssertEqual(
+                attempt.project.providerGeneration,
+                attempt.context.providerGeneration
+            )
+        }
+    }
+
+    func testProjectDNSRefreshObservationUsesFreshReplicaOwnershipHints()
+        throws
+    {
+        let manifest = """
+        version: 2
+        project: demo
+        imagePolicy: require-digest
+        networks:
+          backend: {}
+        services:
+          api:
+            image: registry.example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+            replicas: 2
+            networks:
+              - backend
+
+        """
+        try withFixture(manifestOverride: manifest) { fixture in
+            let options = fixture.options(command: .up, dryRun: true)
+            let preparation = try LifecycleLiveDriver(
+                environment: fixture.environment,
+                options: options
+            ).prepare(options: options)
+            XCTAssertTrue(preparation.resourceBindings.isEmpty)
+            XCTAssertTrue(
+                preparation.desiredState.ownedResourceHints.isEmpty
+            )
+            try fixture.store.desiredStates.saveManifestSnapshot(
+                projectID: preparation.projectID,
+                manifestPath: fixture.manifestPath,
+                manifestHash: preparation.manifestSHA256,
+                desiredGeneration: preparation.providerGeneration,
+                manifest: try ManifestValidator.validated(manifest),
+                timestamp: "2026-07-26T12:00:00Z",
+                mutationProvider: preparation.providerID.rawValue
+            )
+            XCTAssertEqual(
+                try fixture.store.desiredStates.loadProject(
+                    id: preparation.projectID
+                ).resourceUUID,
+                preparation.projectResourceUUID
+            )
+
+            let expected = try preparation.desiredState.services.map {
+                service -> RuntimeOwnedResourceHint in
+                let resourceUUID = HostwrightResourceUUID.generate()
+                let fence = HostwrightResourceUUID.generate()
+                let ownership = try addOwnership(
+                    store: fixture.store,
+                    id: HostwrightResourceUUID.generate(),
+                    projectID: preparation.projectID,
+                    serviceName: service.logicalServiceName,
+                    resourceIdentifier:
+                        service.identity.managedResourceIdentifier,
+                    resourceUUID: resourceUUID,
+                    projectResourceUUID:
+                        preparation.projectResourceUUID,
+                    fencingToken: fence
+                )
+                return RuntimeOwnedResourceHint(
+                    resourceIdentifier:
+                        service.identity.managedResourceIdentifier,
+                    identity: service.identity,
+                    identityVersion:
+                        RuntimeManagedResourceIdentity.currentVersion,
+                    ownership: ownership
+                )
+            }.sorted { $0.resourceIdentifier < $1.resourceIdentifier }
+
+            _ = try fixture.wait {
+                try await lifecycleProjectDNSRefreshObservation(
+                    adapter: fixture.adapter,
+                    preparation: preparation,
+                    store: fixture.store
+                )
+            }
+
+            XCTAssertEqual(
+                try fixture.adapterSnapshot()
+                    .observationDesiredStates.last?.ownedResourceHints,
+                expected
+            )
+            XCTAssertEqual(
+                Set(expected.map(\.identity)),
+                Set(preparation.desiredState.services.map(\.identity))
+            )
+            XCTAssertEqual(expected.count, 2)
+        }
+    }
+
     func testConfirmedUpReplacesMissingOwnedRuntimeAtNextGeneration() throws {
         try withFixture { fixture in
             XCTAssertEqual(try runConfirmedUp(fixture).exitCode, 0)
@@ -713,6 +844,45 @@ final class LifecycleLiveDriverTests: XCTestCase {
             XCTAssertEqual(snapshot.mutations, [.stop, .remove])
             XCTAssertFalse(snapshot.resourceUUIDs.contains(targetBefore.resourceUUID))
             XCTAssertTrue(snapshot.resourceUUIDs.contains(sentinelBefore.resourceUUID))
+        }
+    }
+
+    func testRemoveAcceptsStructuredMissingPlaceholderAfterExactDeletion()
+        throws
+    {
+        try withFixture(existingManagedResource: true) { fixture in
+            try fixture.wait {
+                await fixture.adapter.setIncludeMissingDesiredServices(true)
+            }
+            let target = try XCTUnwrap(
+                fixture.store.ownership.loadAll().first {
+                    $0.projectID == fixture.projectID
+                }
+            )
+            let plan = try reviewedPlan(fixture, command: .rm)
+            let confirmed = fixture.options(
+                command: .rm,
+                dryRun: false,
+                confirmation: plan.planSHA256
+            )
+            let result = LifecycleCommandRunner(
+                options: confirmed,
+                driver: LifecycleLiveDriver(
+                    environment: fixture.environment,
+                    options: confirmed
+                )
+            ).run()
+
+            XCTAssertEqual(result.exitCode, 0, result.standardError)
+            XCTAssertFalse(
+                try fixture.store.ownership.loadAll().contains {
+                    $0.resourceUUID == target.resourceUUID
+                }
+            )
+            XCTAssertEqual(
+                try fixture.adapterSnapshot().mutations,
+                [.stop, .remove]
+            )
         }
     }
 
@@ -2324,6 +2494,13 @@ private struct LifecycleLiveAdapterSnapshot: Equatable, Sendable {
     let intentWasPresentBeforeEveryMutation: Bool
     let createdSecretValues: [String]
     let resourceUUIDs: [String]
+    let networkCreateAttempts: [LifecycleLiveNetworkCreateAttempt]
+    let observationDesiredStates: [DesiredRuntimeState]
+}
+
+private struct LifecycleLiveNetworkCreateAttempt: Equatable, Sendable {
+    let context: RuntimeMutationContext
+    let project: StateProjectRecord
 }
 
 private struct LifecycleLiveTestResource: Sendable {
@@ -2349,16 +2526,22 @@ private struct LifecycleLiveTestResource: Sendable {
     }
 }
 
-private actor LifecycleLiveTestAdapter: RuntimeAdapter {
+private actor LifecycleLiveTestAdapter:
+    RuntimeAdapter,
+    RuntimeNetworkProvider
+{
     private var providerSnapshot: RuntimeCapabilitySnapshot
     private var resources: [LifecycleLiveTestResource]
     private let imageEvidence: RuntimeLocalImageEvidence
     private let stateDatabasePath: String
+    private let projectID: String
     private var mutations: [PlannedRuntimeActionKind] = []
     private var completionRequirements: [Bool] = []
     private var mutationResourceUUIDs: [String] = []
     private var intentChecks: [Bool] = []
     private var createdSecretValues: [String] = []
+    private var networkCreateAttempts: [LifecycleLiveNetworkCreateAttempt] = []
+    private var observationDesiredStates: [DesiredRuntimeState] = []
     private var cancellationMutationIndex: Int?
     private var mutationDelayNanoseconds: UInt64 = 0
     private var completionStartFails = false
@@ -2366,18 +2549,21 @@ private actor LifecycleLiveTestAdapter: RuntimeAdapter {
     private var strictOwnedHintFences = false
     private var preserveExistingOwnershipFenceOnMutation = false
     private var ignoreRemoveMutation = false
+    private var includeMissingDesiredServices = false
     private var shouldFailNextObservation = false
 
     init(
         capability: RuntimeCapabilitySnapshot,
         resources: [LifecycleLiveTestResource],
         imageEvidence: RuntimeLocalImageEvidence,
-        stateDatabasePath: String
+        stateDatabasePath: String,
+        projectID: String
     ) {
         providerSnapshot = capability
         self.resources = resources
         self.imageEvidence = imageEvidence
         self.stateDatabasePath = stateDatabasePath
+        self.projectID = projectID
     }
 
     func metadata() async -> RuntimeAdapterMetadata {
@@ -2437,6 +2623,7 @@ private actor LifecycleLiveTestAdapter: RuntimeAdapter {
     }
 
     func observe(desiredState: DesiredRuntimeState) async throws -> ObservedRuntimeState {
+        observationDesiredStates.append(desiredState)
         if shouldFailNextObservation {
             shouldFailNextObservation = false
             throw RuntimeAdapterError.outputParseFailed(
@@ -2461,20 +2648,40 @@ private actor LifecycleLiveTestAdapter: RuntimeAdapter {
             desiredState.services.map(\.identity) +
                 desiredState.ownedResourceHints.map(\.identity)
         )
+        var services: [ObservedRuntimeService] = resources.compactMap {
+            resource in
+            guard desiredIdentities.contains(resource.desired.identity) else {
+                return nil
+            }
+            return ObservedRuntimeService(
+                identity: resource.desired.identity,
+                resourceIdentifier: resource.resourceIdentifier,
+                image: resource.desired.image,
+                lifecycleState: lifecycleState(resource.lifecycle),
+                healthState: .notConfigured
+            )
+        }
+        if includeMissingDesiredServices {
+            for desired in desiredState.services where
+                !services.contains(where: {
+                    $0.identity == desired.identity
+                })
+            {
+                services.append(
+                    ObservedRuntimeService(
+                        identity: desired.identity,
+                        resourceIdentifier:
+                            desired.identity.managedResourceIdentifier,
+                        image: desired.image,
+                        lifecycleState: .missing,
+                        healthState: .notConfigured
+                    )
+                )
+            }
+        }
         return ObservedRuntimeState(
             projectName: desiredState.projectName,
-            services: resources.compactMap { resource in
-                guard desiredIdentities.contains(resource.desired.identity) else {
-                    return nil
-                }
-                return ObservedRuntimeService(
-                    identity: resource.desired.identity,
-                    resourceIdentifier: resource.resourceIdentifier,
-                    image: resource.desired.image,
-                    lifecycleState: lifecycleState(resource.lifecycle),
-                    healthState: .notConfigured
-                )
-            },
+            services: services,
             adapterMetadata: await metadata(),
             capabilitySHA256: providerSnapshot.canonicalSHA256
         )
@@ -2517,6 +2724,66 @@ private actor LifecycleLiveTestAdapter: RuntimeAdapter {
             )
         }
         return imageEvidence
+    }
+
+    func networkCapabilities()
+        async throws -> RuntimeNetworkProviderCapabilities
+    {
+        .appleContainerCLI
+    }
+
+    func networkInspect(
+        _ request: RuntimeNetworkInspectRequest
+    ) async throws -> RuntimeNetworkOperationResult {
+        throw RuntimeAdapterError.capabilityUnavailable(
+            .readOnlyObservation
+        )
+    }
+
+    func networkCreate(
+        _ request: RuntimeNetworkCreateRequest,
+        context: RuntimeMutationContext
+    ) async throws -> RuntimeNetworkOperationResult {
+        let project = try SQLiteStateStore(path: stateDatabasePath)
+            .desiredStates.loadProject(id: projectID)
+        networkCreateAttempts.append(
+            LifecycleLiveNetworkCreateAttempt(
+                context: context,
+                project: project
+            )
+        )
+        throw RuntimeAdapterError.commandFailed(
+            exitStatus: 75,
+            message: lifecycleLiveNetworkMutationBoundary,
+            standardError: ""
+        )
+    }
+
+    func networkAttach(
+        _ request: RuntimeNetworkAttachmentRequest,
+        context: RuntimeMutationContext
+    ) async throws -> RuntimeNetworkOperationResult {
+        throw RuntimeAdapterError.capabilityUnavailable(
+            .lifecycleMutation
+        )
+    }
+
+    func networkDetach(
+        _ request: RuntimeNetworkAttachmentRequest,
+        context: RuntimeMutationContext
+    ) async throws -> RuntimeNetworkOperationResult {
+        throw RuntimeAdapterError.capabilityUnavailable(
+            .lifecycleMutation
+        )
+    }
+
+    func networkDelete(
+        _ request: RuntimeNetworkDeleteRequest,
+        context: RuntimeMutationContext
+    ) async throws -> RuntimeNetworkOperationResult {
+        throw RuntimeAdapterError.capabilityUnavailable(
+            .cleanup
+        )
     }
 
     func execute(
@@ -2652,7 +2919,9 @@ private actor LifecycleLiveTestAdapter: RuntimeAdapter {
             mutationResourceUUIDs: mutationResourceUUIDs,
             intentWasPresentBeforeEveryMutation: intentChecks.allSatisfy { $0 },
             createdSecretValues: createdSecretValues,
-            resourceUUIDs: resources.compactMap(\.ownership?.resourceUUID).sorted()
+            resourceUUIDs: resources.compactMap(\.ownership?.resourceUUID).sorted(),
+            networkCreateAttempts: networkCreateAttempts,
+            observationDesiredStates: observationDesiredStates
         )
     }
 
@@ -2729,6 +2998,10 @@ private actor LifecycleLiveTestAdapter: RuntimeAdapter {
 
     func setIgnoreRemoveMutation(_ enabled: Bool) {
         ignoreRemoveMutation = enabled
+    }
+
+    func setIncludeMissingDesiredServices(_ enabled: Bool) {
+        includeMissingDesiredServices = enabled
     }
 
     func failNextObservation() {
@@ -3026,7 +3299,8 @@ private struct LifecycleLiveDriverFixture {
             capability: lifecycleLiveCapability(build: "25F90"),
             resources: resources,
             imageEvidence: imageEvidence,
-            stateDatabasePath: databasePath
+            stateDatabasePath: databasePath,
+            projectID: projectID
         )
         let resolution = try HostwrightLocalPathResolver.resolve(
             explicitStateDatabasePath: databasePath,
@@ -3048,6 +3322,12 @@ private struct LifecycleLiveDriverFixture {
             localPathResolution: { _ in resolution },
             runtimeAdapter: { adapter },
             runtimeAdapterForProvider: { providerID in
+                guard providerID == .appleContainerCLI else {
+                    throw RuntimeProviderSelectionError.providerUnavailable(providerID)
+                }
+                return adapter
+            },
+            networkProviderForProvider: { providerID in
                 guard providerID == .appleContainerCLI else {
                     throw RuntimeProviderSelectionError.providerUnavailable(providerID)
                 }
@@ -3146,6 +3426,9 @@ services:
       prepare: completed
 
 """
+
+private let lifecycleLiveNetworkMutationBoundary =
+    "Lifecycle live test stopped after persisted network intent."
 
 private func runConfirmedUp(
     _ fixture: LifecycleLiveDriverFixture

@@ -1,3 +1,4 @@
+import Foundation
 import HostwrightCore
 import HostwrightRuntime
 
@@ -435,13 +436,16 @@ public struct OwnershipRepository: Sendable {
                   record.resourceGeneration > 0,
                   record.projectGeneration > 0,
                   record.providerGeneration > 0,
-                  (record.identityVersion == 1 || record.identityVersion == RuntimeManagedResourceIdentity.currentVersion),
-                  RuntimeManagedResourceIdentity.isSupportedIdentifier(record.resourceIdentifier) else {
+                  let identity = runtimeHintIdentity(
+                      for: record,
+                      projectName: projectName,
+                      serviceName: serviceName
+                  ) else {
                 return nil
             }
             return RuntimeOwnedResourceHint(
                 resourceIdentifier: record.resourceIdentifier,
-                identity: RuntimeServiceIdentity(projectName: projectName, serviceName: serviceName),
+                identity: identity,
                 identityVersion: record.identityVersion,
                 ownership: RuntimeInventoryOwnershipEvidence(
                     resourceUUID: record.resourceUUID,
@@ -454,6 +458,57 @@ public struct OwnershipRepository: Sendable {
                 )
             )
         }.sorted { $0.resourceIdentifier < $1.resourceIdentifier }
+    }
+
+    private func runtimeHintIdentity(
+        for record: OwnershipRecord,
+        projectName: String,
+        serviceName: String
+    ) -> RuntimeServiceIdentity? {
+        let primaryIdentity = RuntimeServiceIdentity(
+            projectName: projectName,
+            serviceName: serviceName
+        )
+        if record.identityVersion == 1 {
+            return record.resourceIdentifier == primaryIdentity.legacyManagedResourceIdentifier
+                ? primaryIdentity
+                : nil
+        }
+        guard record.identityVersion == RuntimeManagedResourceIdentity.currentVersion else {
+            return nil
+        }
+
+        if let metadata = lifecycleIdentityMetadata(from: record.metadataJSONRedacted),
+           metadata.schemaVersion == 1,
+           metadata.projectName == projectName,
+           metadata.serviceName == serviceName {
+            let recordedIdentity = RuntimeServiceIdentity(
+                projectName: metadata.projectName,
+                serviceName: metadata.serviceName,
+                instanceName: metadata.instanceName
+            )
+            guard record.resourceIdentifier == recordedIdentity.managedResourceIdentifier else {
+                return nil
+            }
+            return recordedIdentity
+        }
+
+        return record.resourceIdentifier == primaryIdentity.managedResourceIdentifier
+            ? primaryIdentity
+            : nil
+    }
+
+    private func lifecycleIdentityMetadata(
+        from metadataJSONRedacted: String
+    ) -> OwnershipLifecycleIdentityMetadata? {
+        guard metadataJSONRedacted.utf8.count <= 1_048_576,
+              let data = metadataJSONRedacted.data(using: .utf8) else {
+            return nil
+        }
+        return try? JSONDecoder().decode(
+            OwnershipLifecycleIdentityMetadata.self,
+            from: data
+        )
     }
 
     public func markCleanupCompleted(
@@ -535,4 +590,11 @@ public struct OwnershipRepository: Sendable {
             }
         }
     }
+}
+
+private struct OwnershipLifecycleIdentityMetadata: Decodable {
+    let schemaVersion: Int
+    let projectName: String
+    let serviceName: String
+    let instanceName: String?
 }

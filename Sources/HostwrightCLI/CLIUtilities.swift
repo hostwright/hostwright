@@ -30,6 +30,22 @@ final class CLIAsyncResultBox<T: Sendable>: @unchecked Sendable {
     var result: Result<T, Error>?
 }
 
+func hostwrightObservedServicesByLogicalName(
+    _ observed: ObservedRuntimeState
+) -> [String: [ObservedRuntimeService]] {
+    Dictionary(grouping: observed.services, by: \.identity.serviceName)
+        .mapValues { services in
+            services.sorted {
+                let lhsInstance = $0.identity.instanceName ?? ""
+                let rhsInstance = $1.identity.instanceName ?? ""
+                if lhsInstance != rhsInstance {
+                    return lhsInstance < rhsInstance
+                }
+                return $0.resourceIdentifier < $1.resourceIdentifier
+            }
+        }
+}
+
 struct HostwrightSelectedRuntimeProvider {
     let adapter: any RuntimeAdapter
     let selection: RuntimeProviderSelectionResult
@@ -771,7 +787,7 @@ enum CLIJSON {
         plan: ReconciliationPlan,
         imageDigestLocks: [ImageDigestLockRecord]
     ) -> String {
-        let observedByName = Dictionary(uniqueKeysWithValues: observed.services.map { ($0.identity.serviceName, $0) })
+        let observedByName = hostwrightObservedServicesByLogicalName(observed)
         return render([
             "kind": "status",
             "manifest": [
@@ -820,42 +836,18 @@ enum CLIJSON {
                 ].compactNilValues()
             },
             "services": manifest.services.sorted { $0.name < $1.name }.map { service in
-                let observedService = observedByName[service.name]
-                return [
+                let observedServices = observedByName[service.name] ?? []
+                var payload: [String: Any] = [
                     "name": service.name,
-                    "desiredImage": service.image as Any,
-                    "observed": observedService.map { observed in
-                        [
-                            "resourceIdentifier": observed.resourceIdentifier,
-                            "image": observed.image as Any,
-                            "lifecycle": observed.lifecycleState.rawValue,
-                            "health": observed.healthState.rawValue,
-                            "ports": observed.ports.map { port in
-                                [
-                                    "bindAddress": port.bindAddress as Any,
-                                    "hostPort": port.hostPort as Any,
-                                    "containerPort": port.containerPort,
-                                    "protocol": port.protocolName.rawValue
-                                ].compactNilValues()
-                            },
-                            "networks": observed.networks.map { network in
-                                [
-                                    "name": network.name,
-                                    "kind": network.kind as Any,
-                                    "address": network.address as Any,
-                                    "gateway": network.gateway as Any,
-                                    "interface": network.interfaceName as Any,
-                                    "hostname": network.hostname as Any,
-                                    "ipv4Address": network.ipv4Address as Any,
-                                    "ipv4Gateway": network.ipv4Gateway as Any,
-                                    "ipv6Address": network.ipv6Address as Any,
-                                    "macAddress": network.macAddress as Any,
-                                    "mtu": network.mtu as Any
-                                ].compactNilValues()
-                            }
-                        ].compactNilValues()
-                    } as Any
+                    "desiredImage": service.image as Any
                 ].compactNilValues()
+                if let primary = observedServices.first {
+                    payload["observed"] = statusObservedService(primary)
+                }
+                if observedServices.count > 1 {
+                    payload["instances"] = observedServices.map(statusObservedService)
+                }
+                return payload
             },
             "drift": plan.drift.map { drift in
                 [
@@ -875,6 +867,42 @@ enum CLIJSON {
                 ]
             }
         ].compactNilValues())
+    }
+
+    private static func statusObservedService(
+        _ observed: ObservedRuntimeService
+    ) -> [String: Any] {
+        [
+            "identity": observed.identity.displayName,
+            "instance": observed.identity.instanceName as Any,
+            "resourceIdentifier": observed.resourceIdentifier,
+            "image": observed.image as Any,
+            "lifecycle": observed.lifecycleState.rawValue,
+            "health": observed.healthState.rawValue,
+            "ports": observed.ports.map { port in
+                [
+                    "bindAddress": port.bindAddress as Any,
+                    "hostPort": port.hostPort as Any,
+                    "containerPort": port.containerPort,
+                    "protocol": port.protocolName.rawValue
+                ].compactNilValues()
+            },
+            "networks": observed.networks.map { network in
+                [
+                    "name": network.name,
+                    "kind": network.kind as Any,
+                    "address": network.address as Any,
+                    "gateway": network.gateway as Any,
+                    "interface": network.interfaceName as Any,
+                    "hostname": network.hostname as Any,
+                    "ipv4Address": network.ipv4Address as Any,
+                    "ipv4Gateway": network.ipv4Gateway as Any,
+                    "ipv6Address": network.ipv6Address as Any,
+                    "macAddress": network.macAddress as Any,
+                    "mtu": network.mtu as Any
+                ].compactNilValues()
+            }
+        ].compactNilValues()
     }
 }
 

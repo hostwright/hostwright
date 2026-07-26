@@ -41,7 +41,8 @@ final class NetworkStateRepositoryTests: XCTestCase {
                 }),
                 Set([
                     "network_resources",
-                    "network_attachments"
+                    "network_attachments",
+                    "network_dns_instances"
                 ])
             )
             XCTAssertEqual(
@@ -226,6 +227,53 @@ final class NetworkStateRepositoryTests: XCTestCase {
         }
     }
 
+    func testAbsentNetworkRecreateRequiresExactCommittedDeleteSuccessor()
+        throws
+    {
+        try withStore { store in
+            try seedProject(store)
+            let create = try networkLifecycleOperationGroup(
+                store,
+                suffix: "91",
+                action: "create",
+                runtimeGeneration: 2
+            )
+            try finishCommitted(store, create.id)
+            let delete = try networkLifecycleOperationGroup(
+                store,
+                suffix: "92",
+                action: "delete",
+                runtimeGeneration: 3
+            )
+            try finishCommitted(store, delete.id)
+            let recreate = try networkLifecycleOperationGroup(
+                store,
+                suffix: "93",
+                action: "create",
+                runtimeGeneration: 6
+            )
+
+            XCTAssertThrowsError(
+                try store.networks.saveNetwork(
+                    network(
+                        generation: 4,
+                        fence: recreate.fence,
+                        operationGroupID: recreate.id
+                    )
+                )
+            )
+            let creating = network(
+                generation: 5,
+                fence: recreate.fence,
+                operationGroupID: recreate.id
+            )
+            XCTAssertEqual(
+                try store.networks.saveNetwork(creating),
+                creating
+            )
+        }
+    }
+
     func testListsAreDeterministicAndExactUUIDsAreRequired()
         throws
     {
@@ -315,6 +363,73 @@ final class NetworkStateRepositoryTests: XCTestCase {
                         $0.affectedRows >= 1
                 }
             )
+        }
+    }
+
+    func testObservedEvidenceAcceptsCanonicalSubnetsAndGatewaysAndRejectsInvalidCIDRs()
+        throws
+    {
+        try withStore { store in
+            try seedProject(store)
+            let create = try operationGroup(store, suffix: "22")
+            let creating = network(
+                generation: 1,
+                fence: create.fence,
+                requestedIPv6: .cidr("fd44::/64"),
+                operationGroupID: create.id
+            )
+            _ = try store.networks.saveNetwork(
+                creating,
+                authority: authority(create)
+            )
+            try finish(store, create.id)
+
+            let observe = try operationGroup(store, suffix: "23")
+            for invalid in [
+                (ipv4: ["fd44::/64"], ipv6: []),
+                (ipv4: [], ipv6: ["10.44.0.0/24"]),
+                (ipv4: ["10.44.0.0/33"], ipv6: []),
+                (ipv4: [], ipv6: ["fd44::/129"])
+            ] {
+                XCTAssertThrowsError(
+                    try store.networks.saveNetwork(
+                        network(
+                            generation: 2,
+                            fence: observe.fence,
+                            lifecycle: .available,
+                            finalizer: .active,
+                            requestedIPv6: .cidr("fd44::/64"),
+                            observedIPv4: invalid.ipv4,
+                            observedIPv6: invalid.ipv6,
+                            observedSHA256: digest("b"),
+                            operationGroupID: observe.id
+                        ),
+                        replacing: version(creating),
+                        authority: authority(observe)
+                    )
+                )
+            }
+
+            let available = network(
+                generation: 2,
+                fence: observe.fence,
+                lifecycle: .available,
+                finalizer: .active,
+                requestedIPv6: .cidr("fd44::/64"),
+                observedIPv4: ["10.44.0.0/24", "10.44.0.1"],
+                observedIPv6: ["fd44::/64", "fd44::1"],
+                observedSHA256: digest("b"),
+                operationGroupID: observe.id
+            )
+            XCTAssertEqual(
+                try store.networks.saveNetwork(
+                    available,
+                    replacing: version(creating),
+                    authority: authority(observe)
+                ),
+                available
+            )
+            try finish(store, observe.id)
         }
     }
 
@@ -823,7 +938,9 @@ final class NetworkStateRepositoryTests: XCTestCase {
         fence: String,
         lifecycle: NetworkStateResourceLifecycle = .creating,
         finalizer: NetworkStateFinalizer = .pending,
+        requestedIPv6: NetworkStateAddressRequest = .disabled,
         observedIPv4: [String] = [],
+        observedIPv6: [String] = [],
         observedSHA256: String? = nil,
         operationGroupID: String
     ) -> NetworkStateResourceRecord {
@@ -844,9 +961,9 @@ final class NetworkStateRepositoryTests: XCTestCase {
             fencingToken: fence,
             driver: .nat,
             requestedIPv4: .cidr("10.44.0.0/24"),
-            requestedIPv6: .disabled,
+            requestedIPv6: requestedIPv6,
             observedIPv4: observedIPv4,
-            observedIPv6: [],
+            observedIPv6: observedIPv6,
             desiredSHA256: digest("a"),
             observedSHA256: observedSHA256,
             lifecycleState: lifecycle,
@@ -1042,6 +1159,70 @@ final class NetworkStateRepositoryTests: XCTestCase {
             group
         )
         return (id, fence)
+    }
+
+    private func networkLifecycleOperationGroup(
+        _ store: SQLiteStateStore,
+        suffix: String,
+        action: String,
+        runtimeGeneration: Int
+    ) throws -> (id: String, fence: String) {
+        let id =
+            "70000000-0000-4000-8000-0000000000\(suffix)"
+        let fence =
+            "80000000-0000-4000-8000-0000000000\(suffix)"
+        let identity = try RuntimeNetworkIdentity(
+            logicalName: "backend",
+            resourceUUID: networkID,
+            projectUUID: projectUUID
+        )
+        let intent =
+            """
+            {"action":"\(action)","capabilitySHA256":"\(digest("7"))","desiredSHA256":"\(digest("a"))","networkUUID":"\(networkID)","projectUUID":"\(projectUUID)","providerGeneration":1,"providerID":"apple-container-cli","runtimeName":"\(identity.runtimeIdentifier)","runtimeResourceGeneration":\(runtimeGeneration),"schemaVersion":1}
+            """
+        let group = OperationGroupRecord(
+            id: id,
+            operationID: id,
+            groupKind: "network-resource",
+            projectID: projectID,
+            serviceName: nil,
+            plannedActionType: action,
+            status: .active,
+            groupIdempotencyKey:
+                "network:\(networkID):\(runtimeGeneration)",
+            planHash: digest("9"),
+            checkpoint: "intent-persisted",
+            lockOwner: "network-state-test",
+            lockExpiresAt: "2027-07-26T12:00:00Z",
+            rollbackAvailable: action == "create",
+            manualRecoveryHintRedacted: "",
+            createdAt:
+                "2026-07-26T12:\(String(format: "%02d", runtimeGeneration)):00Z",
+            updatedAt:
+                "2026-07-26T12:\(String(format: "%02d", runtimeGeneration)):00Z",
+            metadataJSONRedacted: "{}",
+            fencingToken: fence,
+            intentJSONRedacted: intent
+        )
+        XCTAssertEqual(
+            try store.operationGroups.acquire(group).acquired,
+            group
+        )
+        return (id, fence)
+    }
+
+    private func finishCommitted(
+        _ store: SQLiteStateStore,
+        _ groupID: String
+    ) throws {
+        try store.operationGroups.finish(
+            groupID: groupID,
+            status: .succeeded,
+            checkpoint: "state-committed",
+            manualRecoveryHintRedacted: "",
+            updatedAt: "2026-07-26T12:30:00Z",
+            metadataJSONRedacted: "{}"
+        )
     }
 
     private func finish(

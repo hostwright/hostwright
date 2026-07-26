@@ -194,6 +194,7 @@ public struct NetworkStateTeardownTarget:
     public let kind: NetworkStateTeardownKind
     public let id: String
     public let networkUUID: String
+    public let resourceUUID: String?
     public let generation: Int64
     public let fencingToken: String
 
@@ -201,12 +202,14 @@ public struct NetworkStateTeardownTarget:
         kind: NetworkStateTeardownKind,
         id: String,
         networkUUID: String,
+        resourceUUID: String? = nil,
         generation: Int64,
         fencingToken: String
     ) {
         self.kind = kind
         self.id = id
         self.networkUUID = networkUUID
+        self.resourceUUID = resourceUUID
         self.generation = generation
         self.fencingToken = fencingToken
     }

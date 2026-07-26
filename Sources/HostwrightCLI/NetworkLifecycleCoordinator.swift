@@ -25,6 +25,11 @@ private struct NetworkLifecycleOperationIntent:
     let runtimeResourceGeneration: Int
 }
 
+private struct NetworkCreateGeneration: Equatable, Sendable {
+    let state: Int64
+    let runtime: Int
+}
+
 enum NetworkLifecycleCoordinator {
     static func reconcile(
         preparation: LifecycleCommandPreparation,
@@ -113,11 +118,17 @@ enum NetworkLifecycleCoordinator {
                 continue
             }
 
+            let createGeneration = try createGeneration(
+                desired: desired,
+                preparation: preparation,
+                store: store
+            )
             let group = try acquireOperation(
                 action: "create",
                 desired: desired,
                 desiredSHA256: desiredSHA256,
-                runtimeResourceGeneration: 2,
+                runtimeResourceGeneration:
+                    createGeneration.runtime,
                 preparation: preparation,
                 planSHA256: planSHA256,
                 fencingToken: nil,
@@ -134,7 +145,7 @@ enum NetworkLifecycleCoordinator {
                 projectUUID: desired.identity.projectUUID,
                 name: desired.identity.logicalName,
                 runtimeName: desired.identity.runtimeIdentifier,
-                generation: 1,
+                generation: createGeneration.state,
                 providerID: preparation.providerID.rawValue,
                 providerGeneration:
                     Int64(preparation.providerGeneration),
@@ -930,6 +941,97 @@ enum NetworkLifecycleCoordinator {
             )
         }
         return existing
+    }
+
+    private static func createGeneration(
+        desired: DesiredRuntimeNetwork,
+        preparation: LifecycleCommandPreparation,
+        store: SQLiteStateStore
+    ) throws -> NetworkCreateGeneration {
+        let groups = try store.operationGroups.loadProject(
+            projectID: preparation.projectID
+        ).filter {
+            $0.groupKind == "network-resource"
+        }
+        guard !groups.isEmpty else {
+            return NetworkCreateGeneration(state: 1, runtime: 2)
+        }
+
+        let decoder = JSONDecoder()
+        var exactHistory: [
+            (
+                group: OperationGroupRecord,
+                intent: NetworkLifecycleOperationIntent
+            )
+        ] = []
+        for group in groups {
+            guard let data = group.intentJSONRedacted.data(
+                using: .utf8
+            ),
+            let intent = try? decoder.decode(
+                NetworkLifecycleOperationIntent.self,
+                from: data
+            ) else {
+                throw conflict(
+                    "Network recreation found ambiguous operation history."
+                )
+            }
+            guard intent.networkUUID ==
+                    desired.identity.resourceUUID else {
+                continue
+            }
+            guard group.projectID == preparation.projectID,
+                  intent.schemaVersion == 1,
+                  intent.projectUUID ==
+                    preparation.projectResourceUUID,
+                  intent.runtimeName ==
+                    desired.identity.runtimeIdentifier,
+                  intent.providerID ==
+                    preparation.providerID.rawValue,
+                  intent.providerGeneration ==
+                    preparation.providerGeneration,
+                  group.plannedActionType == intent.action,
+                  intent.action == "create" ||
+                    intent.action == "delete",
+                  intent.runtimeResourceGeneration > 0 else {
+                throw conflict(
+                    "Network recreation history does not match the exact project and provider authority."
+                )
+            }
+            exactHistory.append((group, intent))
+        }
+        guard let latest = exactHistory.last else {
+            return NetworkCreateGeneration(state: 1, runtime: 2)
+        }
+        for pair in zip(exactHistory, exactHistory.dropFirst()) {
+            guard pair.0.intent.runtimeResourceGeneration <
+                    pair.1.intent.runtimeResourceGeneration else {
+                throw conflict(
+                    "Network recreation found ambiguous non-monotonic operation history."
+                )
+            }
+        }
+        guard latest.group.status == .succeeded,
+              latest.group.checkpoint == "state-committed",
+              latest.intent.action == "delete" else {
+            throw conflict(
+                "Missing network state can only be recreated after an exact committed delete."
+            )
+        }
+        guard latest.intent.runtimeResourceGeneration <=
+                Int.max - 3 else {
+            throw conflict(
+                "Network recreation exhausted the resource generation range."
+            )
+        }
+
+        // A committed delete advances once for deletion and once for
+        // durable absence before the next create intent is persisted.
+        let state = latest.intent.runtimeResourceGeneration + 2
+        return NetworkCreateGeneration(
+            state: Int64(state),
+            runtime: state + 1
+        )
     }
 
     private static func exactNetwork(

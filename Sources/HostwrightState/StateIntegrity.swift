@@ -633,12 +633,16 @@ public struct StateIntegrityService: Sendable {
             let invalidNetworkContent =
                 try NetworkStateRepository
                     .invalidStoredRecordCount(on: connection)
+            let invalidProjectDNSContent =
+                try ProjectDNSStateRepository
+                    .invalidStoredRecordCount(on: connection)
             let authoritativeProblems = sqlAuthoritativeProblems +
                 invalidIdentityProblems + invalidReferrerContent +
                 invalidImageTrustContent + invalidImageSBOMContent +
                 invalidImageVulnerabilityContent +
                 invalidImageProvenanceContent +
                 invalidStorageContent + invalidNetworkContent
+                + invalidProjectDNSContent
             if authoritativeProblems == 0 {
                 checks.append(.init(identifier: "hostwright.authoritative-records", status: .passed, message: "Authoritative state records satisfy the v\(MigrationRunner.latestSchemaVersion) logical contract."))
             } else {
@@ -792,6 +796,10 @@ public struct StateIntegrityService: Sendable {
             UNION ALL SELECT resource_uuid FROM network_attachments
             UNION ALL SELECT fencing_token FROM network_attachments
             UNION ALL SELECT operation_group_id FROM network_attachments
+            UNION ALL SELECT id FROM network_dns_instances
+            UNION ALL SELECT project_uuid FROM network_dns_instances
+            UNION ALL SELECT fencing_token FROM network_dns_instances
+            UNION ALL SELECT operation_group_id FROM network_dns_instances
             """
         ).compactMap { $0.first ?? nil }
         return identities.filter { !HostwrightResourceUUID.isValid($0) }.count
@@ -1784,7 +1792,8 @@ public struct StateIntegrityService: Sendable {
         "storage_quotas",
         "storage_capacity_admissions",
         "network_resources",
-        "network_attachments"
+        "network_attachments",
+        "network_dns_instances"
     ]
 
     private static let requiredIndexes = [
@@ -1872,6 +1881,8 @@ public struct StateIntegrityService: Sendable {
         "network_resources_operation_idx",
         "network_attachments_network_idx",
         "network_attachments_resource_idx",
-        "network_attachments_operation_idx"
+        "network_attachments_operation_idx",
+        "network_dns_instances_project_idx",
+        "network_dns_instances_operation_idx"
     ]
 }

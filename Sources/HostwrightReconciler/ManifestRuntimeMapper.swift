@@ -19,12 +19,28 @@ public enum ManifestRuntimeMapper {
     public static func map(
         _ manifest: HostwrightManifest,
         policy: PlanningPolicy = .default,
+        projectResourceUUID: String? = nil,
         bindMountBaseDirectory: String? = nil,
         namedVolumeSources: [String: String] = [:]
     ) -> ManifestRuntimeMappingResult {
         let projectName = manifest.project ?? ""
+        let resolvedProjectUUID = projectResourceUUID ??
+            HostwrightResourceUUID.legacy(
+                kind: "project",
+                identifier: "project-\(projectName)"
+            )
         var issues: [PlanIssue] = []
 
+        let networks = manifest.networks
+            .sorted { $0.key < $1.key }
+            .compactMap { name, definition in
+                map(
+                    definition,
+                    name: name,
+                    projectResourceUUID: resolvedProjectUUID,
+                    issues: &issues
+                )
+            }
         let services = manifest.services
             .sorted { $0.name < $1.name }
             .flatMap { service in
@@ -33,6 +49,8 @@ public enum ManifestRuntimeMapper {
                         service,
                         replicaIndex: replicaIndex,
                         projectName: projectName,
+                        projectResourceUUID: resolvedProjectUUID,
+                        networkDefinitions: manifest.networks,
                         policy: policy,
                         bindMountBaseDirectory: bindMountBaseDirectory,
                         namedVolumeSources: namedVolumeSources,
@@ -42,7 +60,11 @@ public enum ManifestRuntimeMapper {
             }
 
         return ManifestRuntimeMappingResult(
-            desiredState: DesiredRuntimeState(projectName: projectName, services: services),
+            desiredState: DesiredRuntimeState(
+                projectName: projectName,
+                networks: networks,
+                services: services
+            ),
             issues: issues
         )
     }
@@ -51,6 +73,8 @@ public enum ManifestRuntimeMapper {
         _ service: HostwrightService,
         replicaIndex: Int,
         projectName: String,
+        projectResourceUUID: String,
+        networkDefinitions: [String: HostwrightNetworkDefinition],
         policy: PlanningPolicy,
         bindMountBaseDirectory: String?,
         namedVolumeSources: [String: String],
@@ -62,6 +86,15 @@ public enum ManifestRuntimeMapper {
             instanceName: replicaIndex == 0 ? nil : "replica-\(replicaIndex)"
         )
         let ports = service.ports.compactMap { parsePort($0, identity: identity, issues: &issues) }
+        let networks = service.networks.compactMap { attachment in
+            map(
+                attachment,
+                projectResourceUUID: projectResourceUUID,
+                networkDefinitions: networkDefinitions,
+                identity: identity,
+                issues: &issues
+            )
+        }
         let mounts = service.mounts.compactMap {
             parseMount(
                 $0,
@@ -130,6 +163,7 @@ public enum ManifestRuntimeMapper {
             environment: (literalEnvironment + secretEnvironment).sorted { $0.name < $1.name },
             labels: service.labels,
             ports: ports,
+            networks: networks,
             mounts: mounts,
             healthCheck: mapHealthCheck(service),
             probes: RuntimeProbeManifestMapper.map(service.probes),
@@ -149,6 +183,101 @@ public enum ManifestRuntimeMapper {
             readOnlyRootFilesystem: service.readOnlyRootFilesystem,
             sharedMemoryBytes: service.shmSize.flatMap(parseSizeBytes)
         )
+    }
+
+    private static func map(
+        _ definition: HostwrightNetworkDefinition,
+        name: String,
+        projectResourceUUID: String,
+        issues: inout [PlanIssue]
+    ) -> DesiredRuntimeNetwork? {
+        let resourceUUID = HostwrightNetworkIdentity.resourceUUID(
+            projectUUID: projectResourceUUID,
+            networkName: name
+        )
+        do {
+            return DesiredRuntimeNetwork(
+                identity: try RuntimeNetworkIdentity(
+                    logicalName: name,
+                    resourceUUID: resourceUUID,
+                    projectUUID: projectResourceUUID
+                ),
+                mode: definition.driver == .nat ? .nat : .hostOnly,
+                ipv4: map(definition.ipv4),
+                ipv6: map(definition.ipv6)
+            )
+        } catch {
+            issues.append(
+                PlanIssue(
+                    kind: .invalidDesiredIdentity,
+                    severity: .blocker,
+                    identity: nil,
+                    message: "Network '\(name)' could not be mapped to an exact project-scoped runtime identity.",
+                    stableDetailKey: name
+                )
+            )
+            return nil
+        }
+    }
+
+    private static func map(
+        _ attachment: HostwrightServiceNetworkAttachment,
+        projectResourceUUID: String,
+        networkDefinitions: [String: HostwrightNetworkDefinition],
+        identity: RuntimeServiceIdentity,
+        issues: inout [PlanIssue]
+    ) -> RuntimeDesiredNetworkAttachment? {
+        guard networkDefinitions[attachment.network] != nil else {
+            issues.append(
+                PlanIssue(
+                    kind: .unsupportedFeature,
+                    severity: .blocker,
+                    identity: identity,
+                    message: "Network attachment '\(attachment.network)' does not reference a declared project network.",
+                    stableDetailKey: attachment.network
+                )
+            )
+            return nil
+        }
+        let resourceUUID = HostwrightNetworkIdentity.resourceUUID(
+            projectUUID: projectResourceUUID,
+            networkName: attachment.network
+        )
+        do {
+            let networkIdentity = try RuntimeNetworkIdentity(
+                logicalName: attachment.network,
+                resourceUUID: resourceUUID,
+                projectUUID: projectResourceUUID
+            )
+            return try RuntimeDesiredNetworkAttachment(
+                network: networkIdentity,
+                aliases: attachment.aliases
+            )
+        } catch {
+            issues.append(
+                PlanIssue(
+                    kind: .invalidDesiredIdentity,
+                    severity: .blocker,
+                    identity: identity,
+                    message: "Network attachment '\(attachment.network)' could not be mapped to an exact runtime identity.",
+                    stableDetailKey: attachment.network
+                )
+            )
+            return nil
+        }
+    }
+
+    private static func map(
+        _ request: HostwrightNetworkAddressRequest
+    ) -> RuntimeNetworkAddressRequest {
+        switch request {
+        case .auto:
+            return .automatic
+        case .disabled:
+            return .disabled
+        case .cidr(let value):
+            return .cidr(value)
+        }
     }
 
     private static func mapHealthCheck(_ service: HostwrightService) -> RuntimeHealthCheckSpec? {

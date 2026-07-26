@@ -4,6 +4,49 @@ import XCTest
 @testable import HostwrightRuntime
 
 final class ManifestRuntimeV2MappingTests: XCTestCase {
+    func testMapsProjectNetworksAndServiceAttachmentsWithoutDiscardingAliases() throws {
+        let manifest = try ManifestValidator.validated(
+            """
+            version: 2
+            project: demo
+            networks:
+              frontend: {}
+              backend:
+                driver: hostOnly
+                ipv4: 10.42.0.0/24
+                ipv6: fd42::/64
+            services:
+              api:
+                image: local/api:latest
+                networks:
+                  - frontend
+                  - network: backend
+                    aliases: [z-api, api]
+            """
+        )
+        let projectUUID = "10000000-0000-4000-8000-000000000001"
+
+        let mapping = ManifestRuntimeMapper.map(
+            manifest,
+            projectResourceUUID: projectUUID
+        )
+
+        XCTAssertTrue(mapping.issues.isEmpty)
+        XCTAssertEqual(mapping.desiredState.networks.map(\.identity.logicalName), ["backend", "frontend"])
+        let backend = try XCTUnwrap(mapping.desiredState.networks.first)
+        XCTAssertEqual(backend.identity.projectUUID, projectUUID)
+        XCTAssertEqual(backend.mode, .hostOnly)
+        XCTAssertEqual(backend.ipv4, .cidr("10.42.0.0/24"))
+        XCTAssertEqual(backend.ipv6, .cidr("fd42::/64"))
+        XCTAssertTrue(backend.identity.runtimeIdentifier.hasPrefix("hw-"))
+
+        let service = try XCTUnwrap(mapping.desiredState.services.first)
+        XCTAssertEqual(service.networks.map(\.networkRuntimeIdentifier), mapping.desiredState.networks.map(\.identity.runtimeIdentifier))
+        XCTAssertEqual(service.networks[0].aliases, ["api", "z-api"])
+        XCTAssertTrue(service.networks[1].aliases.isEmpty)
+        XCTAssertEqual(service.networks[0].networkResourceUUID, backend.identity.resourceUUID)
+    }
+
     func testMapsEveryExecutableManifestV2FieldWithoutDiscardingIt() throws {
         let service = HostwrightService(
             name: "api",

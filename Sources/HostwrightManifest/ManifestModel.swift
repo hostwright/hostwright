@@ -1,4 +1,5 @@
 import HostwrightCore
+import HostwrightNetworking
 import HostwrightSecrets
 
 public struct HostwrightManifest: Equatable, Sendable {
@@ -13,6 +14,7 @@ public struct HostwrightManifest: Equatable, Sendable {
     public var imageVulnerability: HostwrightImageVulnerabilityPolicy?
     public var imageProvenance: HostwrightImageProvenancePolicy?
     public var volumes: [String: HostwrightVolumeDeclaration]
+    public var networks: [String: HostwrightNetworkDefinition]
     public var services: [HostwrightService]
 
     public var effectiveVersion: Int {
@@ -33,6 +35,7 @@ public struct HostwrightManifest: Equatable, Sendable {
             imageVulnerability: nil,
             imageProvenance: nil,
             volumes: [:],
+            networks: [:],
             services: services
         )
     }
@@ -47,6 +50,7 @@ public struct HostwrightManifest: Equatable, Sendable {
             imageVulnerability: nil,
             imageProvenance: nil,
             volumes: [:],
+            networks: [:],
             services: services
         )
     }
@@ -62,6 +66,32 @@ public struct HostwrightManifest: Equatable, Sendable {
         volumes: [String: HostwrightVolumeDeclaration] = [:],
         services: [HostwrightService]
     ) {
+        self.init(
+            version: version,
+            project: project,
+            imagePolicy: imagePolicy,
+            imageTrust: imageTrust,
+            imageSBOM: imageSBOM,
+            imageVulnerability: imageVulnerability,
+            imageProvenance: imageProvenance,
+            volumes: volumes,
+            networks: [:],
+            services: services
+        )
+    }
+
+    public init(
+        version: Int?,
+        project: String?,
+        imagePolicy: HostwrightImagePolicy?,
+        imageTrust: HostwrightImageTrustPolicy?,
+        imageSBOM: HostwrightImageSBOMPolicy?,
+        imageVulnerability: HostwrightImageVulnerabilityPolicy? = nil,
+        imageProvenance: HostwrightImageProvenancePolicy? = nil,
+        volumes: [String: HostwrightVolumeDeclaration] = [:],
+        networks: [String: HostwrightNetworkDefinition],
+        services: [HostwrightService]
+    ) {
         self.version = version
         self.project = project
         self.imagePolicy = imagePolicy
@@ -70,6 +100,7 @@ public struct HostwrightManifest: Equatable, Sendable {
         self.imageVulnerability = imageVulnerability
         self.imageProvenance = imageProvenance
         self.volumes = volumes
+        self.networks = networks
         self.services = services
     }
 
@@ -88,6 +119,7 @@ public struct HostwrightManifest: Equatable, Sendable {
             imageVulnerability: nil,
             imageProvenance: nil,
             volumes: [:],
+            networks: [:],
             services: services
         )
     }
@@ -108,6 +140,7 @@ public struct HostwrightManifest: Equatable, Sendable {
             imageVulnerability: nil,
             imageProvenance: nil,
             volumes: [:],
+            networks: [:],
             services: services
         )
     }
@@ -473,6 +506,7 @@ public struct HostwrightService: Equatable, Sendable {
     public var secretEnv: [String: HostwrightSecretReference]
     public var labels: [String: String]
     public var ports: [String]
+    public var networks: [HostwrightServiceNetworkAttachment]
     public var volumes: [String]
     public var mounts: [HostwrightMountSpec]
     public var probes: HostwrightProbes
@@ -514,6 +548,68 @@ public struct HostwrightService: Equatable, Sendable {
         readOnlyRootFilesystem: Bool = false,
         shmSize: String? = nil
     ) {
+        self.init(
+            name: name,
+            image: image,
+            replicas: replicas,
+            platform: platform,
+            resources: resources,
+            user: user,
+            group: group,
+            workdir: workdir,
+            entrypoint: entrypoint,
+            command: command,
+            initProcess: initProcess,
+            dependsOn: dependsOn,
+            env: env,
+            secretEnv: secretEnv,
+            labels: labels,
+            ports: ports,
+            networks: [],
+            volumes: volumes,
+            mounts: mounts,
+            probes: probes,
+            health: health,
+            restart: restart,
+            update: update,
+            hooks: hooks,
+            rosetta: rosetta,
+            virtualization: virtualization,
+            readOnlyRootFilesystem: readOnlyRootFilesystem,
+            shmSize: shmSize
+        )
+    }
+
+    public init(
+        name: String,
+        image: String?,
+        replicas: Int = 1,
+        platform: HostwrightPlatform = HostwrightPlatform(),
+        resources: HostwrightResources? = nil,
+        user: UInt32? = nil,
+        group: UInt32? = nil,
+        workdir: String? = nil,
+        entrypoint: [String] = [],
+        command: [String] = [],
+        initProcess: Bool = false,
+        dependsOn: [String: HostwrightDependencyCondition] = [:],
+        env: [String: String] = [:],
+        secretEnv: [String: HostwrightSecretReference] = [:],
+        labels: [String: String] = [:],
+        ports: [String] = [],
+        networks: [HostwrightServiceNetworkAttachment],
+        volumes: [String] = [],
+        mounts: [HostwrightMountSpec] = [],
+        probes: HostwrightProbes = HostwrightProbes(),
+        health: HostwrightHealthCheck? = nil,
+        restart: HostwrightRestart? = nil,
+        update: HostwrightUpdatePolicy = HostwrightUpdatePolicy(),
+        hooks: HostwrightHooks = HostwrightHooks(),
+        rosetta: Bool = false,
+        virtualization: Bool = false,
+        readOnlyRootFilesystem: Bool = false,
+        shmSize: String? = nil
+    ) {
         self.name = name
         self.image = image
         self.replicas = replicas
@@ -530,6 +626,7 @@ public struct HostwrightService: Equatable, Sendable {
         self.secretEnv = secretEnv
         self.labels = labels
         self.ports = ports
+        self.networks = networks
         self.volumes = volumes
         self.mounts = mounts.isEmpty ? volumes.compactMap(HostwrightMountSpec.legacy) : mounts
         self.probes = probes

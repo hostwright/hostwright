@@ -244,6 +244,7 @@ public struct ContainerizationHelperCreatePayload: Codable, Equatable, Sendable 
     public let command: [String]
     public let environment: [RuntimeInventoryEnvironmentEntry]
     public let labels: [RuntimeInventoryLabel]
+    public let networks: [RuntimeDesiredNetworkAttachment]
 
     public init(
         resourceIdentifier: String,
@@ -252,7 +253,8 @@ public struct ContainerizationHelperCreatePayload: Codable, Equatable, Sendable 
         image: ContainerizationHelperImageEvidence,
         command: [String],
         environment: [RuntimeInventoryEnvironmentEntry],
-        labels: [RuntimeInventoryLabel]
+        labels: [RuntimeInventoryLabel],
+        networks: [RuntimeDesiredNetworkAttachment] = []
     ) {
         self.resourceIdentifier = resourceIdentifier
         self.resourceUUID = resourceUUID
@@ -261,6 +263,52 @@ public struct ContainerizationHelperCreatePayload: Codable, Equatable, Sendable 
         self.command = command
         self.environment = environment
         self.labels = labels
+        self.networks = networks
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case resourceIdentifier
+        case resourceUUID
+        case projectUUID
+        case image
+        case command
+        case environment
+        case labels
+        case networks
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            resourceIdentifier: try values.decode(String.self, forKey: .resourceIdentifier),
+            resourceUUID: try values.decode(String.self, forKey: .resourceUUID),
+            projectUUID: try values.decode(String.self, forKey: .projectUUID),
+            image: try values.decode(ContainerizationHelperImageEvidence.self, forKey: .image),
+            command: try values.decode([String].self, forKey: .command),
+            environment: try values.decode(
+                [RuntimeInventoryEnvironmentEntry].self,
+                forKey: .environment
+            ),
+            labels: try values.decode([RuntimeInventoryLabel].self, forKey: .labels),
+            networks: try values.decodeIfPresent(
+                [RuntimeDesiredNetworkAttachment].self,
+                forKey: .networks
+            ) ?? []
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(resourceIdentifier, forKey: .resourceIdentifier)
+        try values.encode(resourceUUID, forKey: .resourceUUID)
+        try values.encode(projectUUID, forKey: .projectUUID)
+        try values.encode(image, forKey: .image)
+        try values.encode(command, forKey: .command)
+        try values.encode(environment, forKey: .environment)
+        try values.encode(labels, forKey: .labels)
+        if !networks.isEmpty {
+            try values.encode(networks, forKey: .networks)
+        }
     }
 }
 
@@ -337,6 +385,26 @@ public protocol ContainerizationHelperBackend: Sendable {
     func localImageEvidence(_ request: ContainerizationHelperImageRequest) async throws -> ContainerizationHelperImageEvidence
     func resourceUsage(_ request: ContainerizationHelperResourceRequest) async throws -> ContainerizationHelperResourceUsage
     func logs(_ request: ContainerizationHelperLogsRequest) async throws -> ContainerizationHelperLogs
+    func networkCapabilities() async throws -> RuntimeNetworkProviderCapabilities
+    func networkInspect(
+        _ request: RuntimeNetworkInspectRequest
+    ) async throws -> RuntimeNetworkOperationResult
+    func networkCreate(
+        _ request: RuntimeNetworkCreateRequest,
+        context: RuntimeMutationContext
+    ) async throws -> RuntimeNetworkOperationResult
+    func networkAttach(
+        _ request: RuntimeNetworkAttachmentRequest,
+        context: RuntimeMutationContext
+    ) async throws -> RuntimeNetworkOperationResult
+    func networkDetach(
+        _ request: RuntimeNetworkAttachmentRequest,
+        context: RuntimeMutationContext
+    ) async throws -> RuntimeNetworkOperationResult
+    func networkDelete(
+        _ request: RuntimeNetworkDeleteRequest,
+        context: RuntimeMutationContext
+    ) async throws -> RuntimeNetworkOperationResult
     func create(
         _ request: ContainerizationHelperCreatePayload,
         context: RuntimeMutationContext
@@ -359,6 +427,65 @@ public protocol ContainerizationHelperBackend: Sendable {
     ) async throws -> ContainerizationHelperMutationResult
     func cancel(requestID: UUID) async
     func shutdown() async
+}
+
+public extension ContainerizationHelperBackend {
+    func networkCapabilities() async throws -> RuntimeNetworkProviderCapabilities {
+        .appleContainerizationUnavailable
+    }
+
+    func networkInspect(
+        _ request: RuntimeNetworkInspectRequest
+    ) async throws -> RuntimeNetworkOperationResult {
+        _ = request
+        throw ContainerizationHelperBackendError.unavailable(
+            "Containerization helper network inspection is unavailable."
+        )
+    }
+
+    func networkCreate(
+        _ request: RuntimeNetworkCreateRequest,
+        context: RuntimeMutationContext
+    ) async throws -> RuntimeNetworkOperationResult {
+        _ = request
+        _ = context
+        throw ContainerizationHelperBackendError.unavailable(
+            "Containerization 0.35.0 is not configured with an owned network lifecycle."
+        )
+    }
+
+    func networkAttach(
+        _ request: RuntimeNetworkAttachmentRequest,
+        context: RuntimeMutationContext
+    ) async throws -> RuntimeNetworkOperationResult {
+        _ = request
+        _ = context
+        throw ContainerizationHelperBackendError.unavailable(
+            "Containerization 0.35.0 mutable network attachment is unavailable."
+        )
+    }
+
+    func networkDetach(
+        _ request: RuntimeNetworkAttachmentRequest,
+        context: RuntimeMutationContext
+    ) async throws -> RuntimeNetworkOperationResult {
+        _ = request
+        _ = context
+        throw ContainerizationHelperBackendError.unavailable(
+            "Containerization 0.35.0 mutable network detachment is unavailable."
+        )
+    }
+
+    func networkDelete(
+        _ request: RuntimeNetworkDeleteRequest,
+        context: RuntimeMutationContext
+    ) async throws -> RuntimeNetworkOperationResult {
+        _ = request
+        _ = context
+        throw ContainerizationHelperBackendError.unavailable(
+            "Containerization 0.35.0 owned network deletion is unavailable."
+        )
+    }
 }
 
 public enum ContainerizationHelperServiceError: Error, Equatable, Sendable {
@@ -478,6 +605,142 @@ public actor ContainerizationHelperDispatcher {
                     }
                 },
                 action: { [backend] request in try await backend.logs(request.payload) }
+            )
+        case .networkCapabilities:
+            return try await execute(
+                payload: payload,
+                operation: operation,
+                nowUnixMilliseconds: nowUnixMilliseconds,
+                payloadType: ContainerizationHelperEmptyPayload.self,
+                validate: { request in
+                    try Self.requireReadOnly(request)
+                },
+                action: { [backend] _ in try await backend.networkCapabilities() }
+            )
+        case .networkInspect:
+            return try await execute(
+                payload: payload,
+                operation: operation,
+                nowUnixMilliseconds: nowUnixMilliseconds,
+                payloadType: RuntimeNetworkInspectRequest.self,
+                validate: { request in
+                    try Self.requireReadOnly(request)
+                    try Self.validateNetworkIdentity(request.payload.identity)
+                },
+                action: { [backend] request in
+                    let result = try await backend.networkInspect(request.payload)
+                    return try Self.requireNetworkResult(
+                        result,
+                        operation: .inspect,
+                        identity: request.payload.identity,
+                        state: .present
+                    )
+                }
+            )
+        case .networkCreate:
+            return try await execute(
+                payload: payload,
+                operation: operation,
+                nowUnixMilliseconds: nowUnixMilliseconds,
+                payloadType: RuntimeNetworkCreateRequest.self,
+                validate: { request in
+                    let context = try Self.requireMutation(
+                        request,
+                        resourceUUID: request.payload.identity.resourceUUID
+                    )
+                    guard context.projectResourceUUID ==
+                            request.payload.identity.projectUUID else {
+                        throw ContainerizationHelperServiceError.mutationIdentityMismatch
+                    }
+                    try Self.validateNetworkIdentity(request.payload.identity)
+                },
+                action: { [backend] request in
+                    let context = try Self.requireMutation(
+                        request,
+                        resourceUUID: request.payload.identity.resourceUUID
+                    )
+                    let result = try await backend.networkCreate(
+                        request.payload,
+                        context: context
+                    )
+                    return try Self.requireNetworkResult(
+                        result,
+                        operation: .create,
+                        identity: request.payload.identity,
+                        state: .present
+                    )
+                }
+            )
+        case .networkAttach, .networkDetach:
+            return try await execute(
+                payload: payload,
+                operation: operation,
+                nowUnixMilliseconds: nowUnixMilliseconds,
+                payloadType: RuntimeNetworkAttachmentRequest.self,
+                validate: { request in
+                    _ = try Self.requireMutation(
+                        request,
+                        resourceUUID: request.payload.attachmentUUID
+                    )
+                    try Self.requireText(request.payload.networkRuntimeIdentifier)
+                    try Self.requireText(request.payload.containerRuntimeIdentifier)
+                },
+                action: { [backend] request in
+                    let context = try Self.requireMutation(
+                        request,
+                        resourceUUID: request.payload.attachmentUUID
+                    )
+                    let result = operation == .networkAttach
+                        ? try await backend.networkAttach(request.payload, context: context)
+                        : try await backend.networkDetach(request.payload, context: context)
+                    guard result.operation ==
+                            (operation == .networkAttach ? .attach : .detach),
+                          result.networkRuntimeIdentifier ==
+                            request.payload.networkRuntimeIdentifier,
+                          result.networkResourceUUID ==
+                            request.payload.networkResourceUUID,
+                          result.attachmentUUID == request.payload.attachmentUUID,
+                          result.state ==
+                            (operation == .networkAttach ? .attached : .detached),
+                          result.verified else {
+                        throw ContainerizationHelperServiceError.invalidPayload
+                    }
+                    return result
+                }
+            )
+        case .networkDelete:
+            return try await execute(
+                payload: payload,
+                operation: operation,
+                nowUnixMilliseconds: nowUnixMilliseconds,
+                payloadType: RuntimeNetworkDeleteRequest.self,
+                validate: { request in
+                    let context = try Self.requireMutation(
+                        request,
+                        resourceUUID: request.payload.identity.resourceUUID
+                    )
+                    guard context.projectResourceUUID ==
+                            request.payload.identity.projectUUID else {
+                        throw ContainerizationHelperServiceError.mutationIdentityMismatch
+                    }
+                    try Self.validateNetworkIdentity(request.payload.identity)
+                },
+                action: { [backend] request in
+                    let context = try Self.requireMutation(
+                        request,
+                        resourceUUID: request.payload.identity.resourceUUID
+                    )
+                    let result = try await backend.networkDelete(
+                        request.payload,
+                        context: context
+                    )
+                    return try Self.requireNetworkResult(
+                        result,
+                        operation: .delete,
+                        identity: request.payload.identity,
+                        state: .missing
+                    )
+                }
             )
         case .create:
             return try await execute(
@@ -733,7 +996,8 @@ public actor ContainerizationHelperDispatcher {
               HostwrightResourceUUID.isValid(payload.projectUUID),
               payload.command.count <= RuntimeInventoryLimits.maximumArgumentsPerContainer,
               payload.environment.count <= RuntimeInventoryLimits.maximumEnvironmentEntriesPerContainer,
-              payload.labels.count <= RuntimeInventoryLimits.maximumLabelsPerResource else {
+              payload.labels.count <= RuntimeInventoryLimits.maximumLabelsPerResource,
+              payload.networks.count <= RuntimeInventoryLimits.maximumNetworksPerContainer else {
             throw ContainerizationHelperServiceError.invalidPayload
         }
         for item in payload.command {
@@ -747,6 +1011,15 @@ public actor ContainerizationHelperDispatcher {
             try requireText(label.key)
             try requireText(label.value)
         }
+        var networkIdentifiers = Set<String>()
+        for network in payload.networks {
+            guard RuntimeNetworkIdentity.isRuntimeIdentifier(
+                network.networkRuntimeIdentifier
+            ),
+            networkIdentifiers.insert(network.networkRuntimeIdentifier).inserted else {
+                throw ContainerizationHelperServiceError.invalidPayload
+            }
+        }
     }
 
     private static func requireVerifiedResult(
@@ -756,6 +1029,39 @@ public actor ContainerizationHelperDispatcher {
     ) throws -> ContainerizationHelperMutationResult {
         guard result.resourceIdentifier == resourceIdentifier,
               result.lifecycle == lifecycle,
+              result.verified else {
+            throw ContainerizationHelperServiceError.invalidPayload
+        }
+        return result
+    }
+
+    private static func validateNetworkIdentity(
+        _ identity: RuntimeNetworkIdentity
+    ) throws {
+        do {
+            _ = try RuntimeNetworkIdentity(
+                logicalName: identity.logicalName,
+                resourceUUID: identity.resourceUUID,
+                projectUUID: identity.projectUUID,
+                runtimeIdentifier: identity.runtimeIdentifier
+            )
+        } catch {
+            throw ContainerizationHelperServiceError.invalidPayload
+        }
+    }
+
+    private static func requireNetworkResult(
+        _ result: RuntimeNetworkOperationResult,
+        operation: RuntimeNetworkProviderOperation,
+        identity: RuntimeNetworkIdentity,
+        state: RuntimeNetworkResultState
+    ) throws -> RuntimeNetworkOperationResult {
+        guard result.providerID == .appleContainerization,
+              result.operation == operation,
+              result.networkRuntimeIdentifier == identity.runtimeIdentifier,
+              result.networkResourceUUID == identity.resourceUUID,
+              result.attachmentUUID == nil,
+              result.state == state,
               result.verified else {
             throw ContainerizationHelperServiceError.invalidPayload
         }

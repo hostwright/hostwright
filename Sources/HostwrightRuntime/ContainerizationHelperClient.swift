@@ -944,6 +944,97 @@ public actor ContainerizationHelperClient {
         )
     }
 
+    public func networkCapabilities() async throws -> RuntimeNetworkProviderCapabilities {
+        let snapshot = try await requireSnapshot()
+        let result: RuntimeNetworkProviderCapabilities = try await request(
+            operation: .networkCapabilities,
+            capabilityDigest: snapshot.canonicalSHA256,
+            mutationContext: nil,
+            idempotencyKey: "network-capabilities/\(UUID().uuidString.lowercased())",
+            payload: ContainerizationHelperEmptyPayload()
+        )
+        guard result.providerID == .appleContainerization,
+              result.schemaVersion == RuntimeNetworkProviderCapabilities.currentSchemaVersion,
+              Set(result.operations.map(\.operation)) ==
+                Set(RuntimeNetworkProviderOperation.allCases) else {
+            throw ContainerizationHelperClientError.responseMismatch
+        }
+        return result
+    }
+
+    public func networkInspect(
+        _ payload: RuntimeNetworkInspectRequest
+    ) async throws -> RuntimeNetworkOperationResult {
+        let snapshot = try await requireSnapshot()
+        let result: RuntimeNetworkOperationResult = try await request(
+            operation: .networkInspect,
+            capabilityDigest: snapshot.canonicalSHA256,
+            mutationContext: nil,
+            idempotencyKey: "network-inspect/\(UUID().uuidString.lowercased())",
+            payload: payload
+        )
+        return try validatedNetworkResult(
+            result,
+            operation: .inspect,
+            identity: payload.identity,
+            state: .present
+        )
+    }
+
+    public func networkCreate(
+        _ payload: RuntimeNetworkCreateRequest,
+        context: RuntimeMutationContext
+    ) async throws -> RuntimeNetworkOperationResult {
+        try await networkMutation(
+            .networkCreate,
+            operation: .create,
+            identity: payload.identity,
+            state: .present,
+            payload: payload,
+            context: context
+        )
+    }
+
+    public func networkAttach(
+        _ payload: RuntimeNetworkAttachmentRequest,
+        context: RuntimeMutationContext
+    ) async throws -> RuntimeNetworkOperationResult {
+        try await networkAttachmentMutation(
+            .networkAttach,
+            operation: .attach,
+            state: .attached,
+            payload: payload,
+            context: context
+        )
+    }
+
+    public func networkDetach(
+        _ payload: RuntimeNetworkAttachmentRequest,
+        context: RuntimeMutationContext
+    ) async throws -> RuntimeNetworkOperationResult {
+        try await networkAttachmentMutation(
+            .networkDetach,
+            operation: .detach,
+            state: .detached,
+            payload: payload,
+            context: context
+        )
+    }
+
+    public func networkDelete(
+        _ payload: RuntimeNetworkDeleteRequest,
+        context: RuntimeMutationContext
+    ) async throws -> RuntimeNetworkOperationResult {
+        try await networkMutation(
+            .networkDelete,
+            operation: .delete,
+            identity: payload.identity,
+            state: .missing,
+            payload: payload,
+            context: context
+        )
+    }
+
     public func create(
         _ payload: ContainerizationHelperCreatePayload,
         context: RuntimeMutationContext
@@ -1022,6 +1113,92 @@ public actor ContainerizationHelperClient {
             payload: payload
         )
         guard result.verified else { throw ContainerizationHelperClientError.invalidResponse }
+        return result
+    }
+
+    private func networkMutation<Payload: Codable & Sendable>(
+        _ helperOperation: ContainerizationHelperOperation,
+        operation: RuntimeNetworkProviderOperation,
+        identity: RuntimeNetworkIdentity,
+        state: RuntimeNetworkResultState,
+        payload: Payload,
+        context: RuntimeMutationContext
+    ) async throws -> RuntimeNetworkOperationResult {
+        guard context.providerID == .appleContainerization,
+              context.resourceUUID == identity.resourceUUID,
+              context.projectResourceUUID == identity.projectUUID,
+              context.validationIssue == nil else {
+            throw ContainerizationHelperClientError.invalidResponse
+        }
+        let current = try await requireSnapshot()
+        guard current.canonicalSHA256 == context.capabilitySHA256 else {
+            throw staleCapabilityFailure(context)
+        }
+        let result: RuntimeNetworkOperationResult = try await request(
+            operation: helperOperation,
+            capabilityDigest: current.canonicalSHA256,
+            mutationContext: context,
+            idempotencyKey: context.operationID,
+            payload: payload
+        )
+        return try validatedNetworkResult(
+            result,
+            operation: operation,
+            identity: identity,
+            state: state
+        )
+    }
+
+    private func networkAttachmentMutation(
+        _ helperOperation: ContainerizationHelperOperation,
+        operation: RuntimeNetworkProviderOperation,
+        state: RuntimeNetworkResultState,
+        payload: RuntimeNetworkAttachmentRequest,
+        context: RuntimeMutationContext
+    ) async throws -> RuntimeNetworkOperationResult {
+        guard context.providerID == .appleContainerization,
+              context.resourceUUID == payload.attachmentUUID,
+              context.validationIssue == nil else {
+            throw ContainerizationHelperClientError.invalidResponse
+        }
+        let current = try await requireSnapshot()
+        guard current.canonicalSHA256 == context.capabilitySHA256 else {
+            throw staleCapabilityFailure(context)
+        }
+        let result: RuntimeNetworkOperationResult = try await request(
+            operation: helperOperation,
+            capabilityDigest: current.canonicalSHA256,
+            mutationContext: context,
+            idempotencyKey: context.operationID,
+            payload: payload
+        )
+        guard result.providerID == .appleContainerization,
+              result.operation == operation,
+              result.networkRuntimeIdentifier == payload.networkRuntimeIdentifier,
+              result.networkResourceUUID == payload.networkResourceUUID,
+              result.attachmentUUID == payload.attachmentUUID,
+              result.state == state,
+              result.verified else {
+            throw ContainerizationHelperClientError.responseMismatch
+        }
+        return result
+    }
+
+    private func validatedNetworkResult(
+        _ result: RuntimeNetworkOperationResult,
+        operation: RuntimeNetworkProviderOperation,
+        identity: RuntimeNetworkIdentity,
+        state: RuntimeNetworkResultState
+    ) throws -> RuntimeNetworkOperationResult {
+        guard result.providerID == .appleContainerization,
+              result.operation == operation,
+              result.networkRuntimeIdentifier == identity.runtimeIdentifier,
+              result.networkResourceUUID == identity.resourceUUID,
+              result.attachmentUUID == nil,
+              result.state == state,
+              result.verified else {
+            throw ContainerizationHelperClientError.responseMismatch
+        }
         return result
     }
 
@@ -1492,6 +1669,11 @@ public struct AppleContainerizationRuntimeAdapter: RuntimeAdapter {
                     "Containerization 0.35.0 create does not execute mounts; remove mounts or select the Apple CLI provider before mutation."
                 )
             }
+            guard service.networks.isEmpty else {
+                throw RuntimeAdapterError.mutationUnavailableByPolicy(
+                    "Containerization 0.35.0 helper network attachment is unavailable; select the Apple CLI provider before mutation."
+                )
+            }
             try RuntimeCreateSubsetPolicy.validate(service, providerID: .appleContainerization)
             let image = try await localImageEvidence(for: service.image)
             if let lock = service.imageLock {
@@ -1528,7 +1710,8 @@ public struct AppleContainerizationRuntimeAdapter: RuntimeAdapter {
                         environment: service.environment.map {
                             RuntimeInventoryEnvironmentEntry(name: $0.name, value: $0.value)
                         },
-                        labels: labels
+                        labels: labels,
+                        networks: service.networks
                     ),
                     context: context
                 )

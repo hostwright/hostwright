@@ -1,4 +1,5 @@
 import Foundation
+import HostwrightNetworking
 
 public enum ManifestCanonicalEncoder {
     public static func encode(_ manifest: HostwrightManifest) throws -> String {
@@ -123,6 +124,7 @@ public enum ManifestCanonicalEncoder {
             lines.append("  requireReproducible: \(imageProvenance.requireReproducible)")
         }
         appendVolumeDeclarations(manifest.volumes, to: &lines)
+        appendNetworkDefinitions(manifest.networks, to: &lines)
         lines.append("services:")
 
         for service in manifest.services.sorted(by: { $0.name < $1.name }) {
@@ -174,6 +176,7 @@ public enum ManifestCanonicalEncoder {
             )
             appendStringMap(service.labels, key: "labels", to: &lines)
             appendBlockArray(service.ports, key: "ports", to: &lines)
+            appendServiceNetworks(service.networks, to: &lines)
             appendMounts(service.mounts, to: &lines)
 
             let probes = canonicalProbes(for: service)
@@ -234,6 +237,56 @@ public enum ManifestCanonicalEncoder {
                 lines.append("    reclaimPolicy: \(quote(volume.reclaimPolicy.rawValue))")
             }
             appendStringMap(volume.labels, key: "labels", indent: 4, to: &lines)
+        }
+    }
+
+    private static func appendNetworkDefinitions(
+        _ networks: [String: HostwrightNetworkDefinition],
+        to lines: inout [String]
+    ) {
+        guard !networks.isEmpty else { return }
+        lines.append("networks:")
+        for (name, network) in networks.sorted(by: { $0.key < $1.key }) {
+            lines.append("  \(quote(name)):")
+            let usesDefaults =
+                network.driver == .nat &&
+                network.ipv4 == .auto &&
+                network.ipv6 == .auto
+            if usesDefaults {
+                lines.append("    {}")
+                continue
+            }
+            if network.driver != .nat {
+                lines.append("    driver: \(quote(network.driver.rawValue))")
+            }
+            if network.ipv4 != .auto {
+                lines.append("    ipv4: \(quote(network.ipv4.manifestValue))")
+            }
+            if network.ipv6 != .auto {
+                lines.append("    ipv6: \(quote(network.ipv6.manifestValue))")
+            }
+        }
+    }
+
+    private static func appendServiceNetworks(
+        _ networks: [HostwrightServiceNetworkAttachment],
+        to lines: inout [String]
+    ) {
+        guard !networks.isEmpty else { return }
+        lines.append("    networks:")
+        for attachment in networks.sorted(by: {
+            if $0.network != $1.network {
+                return $0.network < $1.network
+            }
+            return $0.aliases.lexicographicallyPrecedes($1.aliases)
+        }) {
+            lines.append("      - network: \(quote(attachment.network))")
+            let aliases = attachment.aliases.sorted()
+            guard !aliases.isEmpty else { continue }
+            lines.append("        aliases:")
+            for alias in aliases {
+                lines.append("          - \(quote(alias))")
+            }
         }
     }
 

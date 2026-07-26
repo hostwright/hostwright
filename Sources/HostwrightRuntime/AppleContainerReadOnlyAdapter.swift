@@ -23,7 +23,7 @@ public struct AppleContainerReadOnlyAdapter: RuntimeAdapter {
             runtimeName: "Apple container CLI",
             runtimeVersion: nil,
             supportsMutation: false,
-            capabilities: [.readOnlyObservation]
+            capabilities: [.readOnlyObservation, .networkInspection]
         )
     }
 
@@ -33,7 +33,7 @@ public struct AppleContainerReadOnlyAdapter: RuntimeAdapter {
         }
         _ = try await selectedCodec(executable: executable)
 
-        return [.readOnlyObservation]
+        return [.readOnlyObservation, .networkInspection]
     }
 
     public func capabilitySnapshot() async throws -> RuntimeCapabilitySnapshot {

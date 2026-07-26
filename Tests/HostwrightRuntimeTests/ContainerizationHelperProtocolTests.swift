@@ -16,6 +16,8 @@ final class ContainerizationHelperProtocolTests: XCTestCase {
             ContainerizationHelperOperation.allCases.map(\.rawValue),
             [
                 "negotiate", "observe", "localImageEvidence", "resourceUsage", "logs",
+                "networkCapabilities", "networkInspect", "networkCreate",
+                "networkAttach", "networkDetach", "networkDelete",
                 "create", "start", "stop", "restart", "delete", "cancel", "shutdown"
             ]
         )

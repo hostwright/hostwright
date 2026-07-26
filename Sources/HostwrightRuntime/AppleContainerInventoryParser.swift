@@ -335,7 +335,7 @@ public enum AppleContainerInventoryParser {
             kind: "\(evidence.plugin):\(evidence.mode.rawValue)",
             addresses: addresses,
             labels: inventoryLabels(evidence.labels),
-            ownership: try ownership(
+            ownership: try networkOwnership(
                 labels: evidence.labels,
                 resourceIdentifier: evidence.id
             )
@@ -592,6 +592,33 @@ public enum AppleContainerInventoryParser {
               ) else {
             throw RuntimeAdapterError.outputParseFailed(
                 "Apple container inventory contained conflicting managed identity labels."
+            )
+        }
+        return evidence
+    }
+
+    private static func networkOwnership(
+        labels: [String: String],
+        resourceIdentifier: String
+    ) throws -> RuntimeInventoryOwnershipEvidence? {
+        let evidence = try RuntimeManagedResourceIdentity.ownershipEvidence(
+            from: labels,
+            expectedProviderID: .appleContainerCLI
+        )
+        guard let evidence else { return nil }
+        guard labels[RuntimeManagedResourceIdentity.resourceIdentifierLabel] ==
+                resourceIdentifier,
+              labels[RuntimeNetworkOwnership.resourceKindLabel] ==
+                RuntimeNetworkOwnership.resourceKind,
+              let logicalName = labels[RuntimeNetworkOwnership.networkNameLabel],
+              let identity = try? RuntimeNetworkIdentity(
+                  logicalName: logicalName,
+                  resourceUUID: evidence.resourceUUID,
+                  projectUUID: evidence.projectUUID
+              ),
+              identity.runtimeIdentifier == resourceIdentifier else {
+            throw RuntimeAdapterError.outputParseFailed(
+                "Apple container inventory contained conflicting managed network identity labels."
             )
         }
         return evidence

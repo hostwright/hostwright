@@ -252,6 +252,11 @@ public enum AppleContainerCommand {
                     arguments += ["--publish", publishSpec(for: port, hostPort: hostPort)]
                 }
             }
+            for network in desiredService.networks.sorted(by: {
+                $0.networkRuntimeIdentifier < $1.networkRuntimeIdentifier
+            }) {
+                arguments += ["--network", network.networkRuntimeIdentifier]
+            }
             for mount in desiredService.mounts.sorted(by: stableMountOrdering) {
                 arguments += try mountArguments(for: mount, codec: codec)
             }

@@ -1,5 +1,6 @@
 import Foundation
 import HostwrightCore
+import HostwrightNetworking
 import HostwrightSecrets
 import Yams
 
@@ -284,7 +285,8 @@ private struct ManifestNodeDecoder {
             path: "$",
             allowed: [
                 "version", "project", "imagePolicy", "imageTrust", "imageSBOM",
-                "imageVulnerability", "imageProvenance", "volumes", "services"
+                "imageVulnerability", "imageProvenance", "volumes", "networks",
+                "services"
             ]
         )
         let version = try values["version"].map(versionInteger)
@@ -316,6 +318,9 @@ private struct ManifestNodeDecoder {
         let volumes = try values["volumes"].map {
             try decodeVolumeDeclarations($0, path: "$.volumes")
         } ?? [:]
+        let networks = try values["networks"].map {
+            try decodeNetworkDefinitions($0, path: "$.networks")
+        } ?? [:]
         let services = try values["services"].map(decodeServices) ?? []
         return HostwrightManifest(
             version: version,
@@ -326,8 +331,71 @@ private struct ManifestNodeDecoder {
             imageVulnerability: imageVulnerability,
             imageProvenance: imageProvenance,
             volumes: volumes,
+            networks: networks,
             services: services
         )
+    }
+
+    private func decodeNetworkDefinitions(
+        _ node: Node,
+        path: String
+    ) throws -> [String: HostwrightNetworkDefinition] {
+        var result: [String: HostwrightNetworkDefinition] = [:]
+        for pair in try rawMapping(node, path: path) {
+            let name = try keyString(pair.key, path: path)
+            let definitionPath = "\(path).\(name)"
+            let values = try mapping(
+                pair.value,
+                path: definitionPath,
+                allowed: ["driver", "ipv4", "ipv6"]
+            )
+            let driverRaw = try values["driver"].map {
+                try string($0, path: "\(definitionPath).driver")
+            } ?? HostwrightNetworkDriver.nat.rawValue
+            guard let driver = HostwrightNetworkDriver(rawValue: driverRaw) else {
+                throw ManifestParser.failure(
+                    "Network driver must be one of: nat, hostOnly.",
+                    code: .manifestValidationFailed,
+                    node: values["driver"],
+                    path: "\(definitionPath).driver"
+                )
+            }
+            let ipv4 = try decodeNetworkAddressRequest(
+                values["ipv4"],
+                default: .auto,
+                path: "\(definitionPath).ipv4"
+            )
+            let ipv6 = try decodeNetworkAddressRequest(
+                values["ipv6"],
+                default: .auto,
+                path: "\(definitionPath).ipv6"
+            )
+            result[name] = HostwrightNetworkDefinition(
+                name: name,
+                driver: driver,
+                ipv4: ipv4,
+                ipv6: ipv6
+            )
+        }
+        return result
+    }
+
+    private func decodeNetworkAddressRequest(
+        _ node: Node?,
+        default defaultValue: HostwrightNetworkAddressRequest,
+        path: String
+    ) throws -> HostwrightNetworkAddressRequest {
+        guard let node else { return defaultValue }
+        let raw = try string(node, path: path)
+        guard let value = HostwrightNetworkAddressRequest(manifestValue: raw) else {
+            throw ManifestParser.failure(
+                "Network address request must be auto, disabled, or a CIDR.",
+                code: .manifestValidationFailed,
+                node: node,
+                path: path
+            )
+        }
+        return value
     }
 
     private func decodeVolumeDeclarations(
@@ -778,7 +846,7 @@ private struct ManifestNodeDecoder {
             allowed: [
                 "image", "replicas", "platform", "resources", "user", "group", "workdir",
                 "entrypoint", "command", "init", "dependsOn", "env", "secretEnv", "labels",
-                "ports", "volumes", "health", "probes", "restart", "update", "hooks",
+                "ports", "networks", "volumes", "health", "probes", "restart", "update", "hooks",
                 "rosetta", "virtualization", "readOnlyRootFilesystem", "shmSize"
             ]
         )
@@ -798,6 +866,9 @@ private struct ManifestNodeDecoder {
         let secretEnv = try values["secretEnv"].map { try secrets($0, path: "\(path).secretEnv") } ?? [:]
         let labels = try values["labels"].map { try stringMap($0, path: "\(path).labels") } ?? [:]
         let ports = try values["ports"].map { try strings($0, path: "\(path).ports") } ?? []
+        let networks = try values["networks"].map {
+            try decodeServiceNetworks($0, path: "\(path).networks")
+        } ?? []
         let decodedVolumes = try values["volumes"].map { try decodeMounts($0, path: "\(path).volumes") }
         let volumes = decodedVolumes?.legacyVolumes ?? []
         let mounts = decodedVolumes?.mounts ?? []
@@ -845,6 +916,7 @@ private struct ManifestNodeDecoder {
             secretEnv: secretEnv,
             labels: labels,
             ports: ports,
+            networks: networks,
             volumes: volumes,
             mounts: mounts,
             probes: probes,
@@ -857,6 +929,48 @@ private struct ManifestNodeDecoder {
             readOnlyRootFilesystem: readOnlyRoot,
             shmSize: shmSize
         )
+    }
+
+    private func decodeServiceNetworks(
+        _ node: Node,
+        path: String
+    ) throws -> [HostwrightServiceNetworkAttachment] {
+        guard case .sequence(let sequence) = node else {
+            throw ManifestParser.failure("Expected a sequence.", node: node, path: path)
+        }
+
+        return try sequence.enumerated().map { index, child in
+            let itemPath = "\(path)[\(index)]"
+            if case .scalar = child {
+                return HostwrightServiceNetworkAttachment(
+                    network: try string(child, path: itemPath)
+                )
+            }
+
+            let values = try mapping(
+                child,
+                path: itemPath,
+                allowed: ["network", "aliases"]
+            )
+            let network = try requiredString(
+                values["network"],
+                path: "\(itemPath).network",
+                message: "Service network attachment requires network."
+            )
+            let aliases = try values["aliases"].map {
+                try strings($0, path: "\(itemPath).aliases")
+            } ?? []
+            return HostwrightServiceNetworkAttachment(
+                network: network,
+                aliases: aliases.sorted()
+            )
+        }
+        .sorted {
+            if $0.network != $1.network {
+                return $0.network < $1.network
+            }
+            return $0.aliases.lexicographicallyPrecedes($1.aliases)
+        }
     }
 
     private func decodePlatform(_ node: Node, path: String) throws -> HostwrightPlatform {
@@ -1175,6 +1289,8 @@ private struct ManifestNodeDecoder {
                     context = "top-level manifest"
                 } else if path.contains(".volumes.") {
                     context = "top-level volume"
+                } else if path.contains(".networks."), !path.contains(".services.") {
+                    context = "top-level network"
                 } else if path.hasSuffix(".health") {
                     context = "health"
                 } else if path.hasSuffix(".restart") {

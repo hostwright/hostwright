@@ -255,6 +255,7 @@ func hostwrightDesiredStateWithOwnershipHints(
 ) throws -> DesiredRuntimeState {
     DesiredRuntimeState(
         projectName: desiredState.projectName,
+        networks: desiredState.networks,
         services: desiredState.services,
         ownedResourceHints: try store.ownership.runtimeHints(
             projectID: projectID,

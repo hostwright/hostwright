@@ -9,6 +9,85 @@ import Testing
 @Suite
 struct LifecycleCommandRunnerTests {
     @Test
+    func imageLockingAndMountNormalizationPreserveNetworkIntent() throws {
+        let manifestDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "hostwright-phase07-network-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        try FileManager.default.createDirectory(
+            at: manifestDirectory.appendingPathComponent(
+                "data",
+                isDirectory: true
+            ),
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: manifestDirectory) }
+
+        let projectUUID = HostwrightResourceUUID.legacy(
+            kind: "project",
+            identifier: "project-demo"
+        )
+        let networkIdentity = try RuntimeNetworkIdentity(
+            logicalName: "backend",
+            projectUUID: projectUUID
+        )
+        let desiredNetwork = DesiredRuntimeNetwork(
+            identity: networkIdentity,
+            mode: .nat
+        )
+        let attachment = try RuntimeDesiredNetworkAttachment(
+            network: networkIdentity,
+            aliases: ["api"]
+        )
+        let preparation = try preparation(
+            desired: [
+                service(
+                    networks: [attachment],
+                    mounts: [
+                        RuntimeMountReference(
+                            source: "./data",
+                            target: "/data",
+                            access: .unknown
+                        )
+                    ]
+                )
+            ],
+            networks: [desiredNetwork],
+            manifestBaseDirectory: manifestDirectory.path
+        )
+        let options = options(command: .up, dryRun: true)
+        let compiler = LifecycleCommandPlanCompiler()
+        let initial = try compiler.compile(
+            options: options,
+            preparation: preparation
+        )
+        let normalized = try #require(
+            initial.desiredServicesByNodeKey.values.first
+        )
+        #expect(normalized.networks == [attachment])
+
+        let bound = try LifecycleImageLockBinder.bind(
+            preparation: preparation,
+            initialCompiled: initial,
+            options: options
+        ) { requirement, _ in
+            RuntimeLocalImageEvidence(
+                reference: requirement.reference,
+                descriptorDigest:
+                    "sha256:\(String(repeating: "1", count: 64))",
+                variantDigest:
+                    "sha256:\(String(repeating: "e", count: 64))",
+                architecture: requirement.architecture,
+                operatingSystem: requirement.operatingSystem
+            )
+        }
+
+        #expect(bound.desiredState.networks == [desiredNetwork])
+        #expect(bound.desiredState.services.first?.networks == [attachment])
+    }
+
+    @Test
     func dryRunCompilesSharedSagaPlanNormalizesBindsAndNeverPersistsSecrets() throws {
         let manifestDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent(
@@ -1113,6 +1192,7 @@ struct LifecycleCommandRunnerTests {
         image: String? = nil,
         imageLock: RuntimeImageDigestLock? = nil,
         environment: [RuntimeEnvironmentValue] = [],
+        networks: [RuntimeDesiredNetworkAttachment] = [],
         mounts: [RuntimeMountReference] = [],
         ports: [RuntimePortMapping] = [],
         probes: RuntimeProbeSet = RuntimeProbeSet(),
@@ -1128,6 +1208,7 @@ struct LifecycleCommandRunnerTests {
             imageLock: imageLock,
             environment: environment,
             ports: ports,
+            networks: networks,
             mounts: mounts,
             probes: probes,
             hooks: hooks,
@@ -1158,6 +1239,7 @@ struct LifecycleCommandRunnerTests {
 
     private func preparation(
         desired: [DesiredRuntimeService],
+        networks: [DesiredRuntimeNetwork] = [],
         previous: DesiredRuntimeState? = nil,
         observed: [ObservedRuntimeService] = [],
         bindings: [LifecycleResourceBinding] = [],
@@ -1169,6 +1251,7 @@ struct LifecycleCommandRunnerTests {
             manifestBaseDirectory: manifestBaseDirectory,
             desiredState: DesiredRuntimeState(
                 projectName: "demo",
+                networks: networks,
                 services: desired
             ),
             previousDesiredState: previous,

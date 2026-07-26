@@ -147,6 +147,7 @@ let package = Package(
             name: "HostwrightManifest",
             dependencies: [
                 "HostwrightCore",
+                "HostwrightNetworking",
                 "HostwrightSecrets",
                 .product(name: "Yams", package: "Yams")
             ]
@@ -155,6 +156,7 @@ let package = Package(
             name: "HostwrightRuntime",
             dependencies: [
                 "HostwrightCore",
+                "HostwrightNetworking",
                 "HostwrightSecrets"
             ]
         ),
@@ -327,7 +329,9 @@ let package = Package(
             name: "HostwrightContainerizationHelperTests",
             dependencies: [
                 "HostwrightContainerizationHelper",
-                "HostwrightRuntime"
+                "HostwrightCore",
+                "HostwrightRuntime",
+                .product(name: "Containerization", package: "containerization")
             ]
         ),
         .testTarget(

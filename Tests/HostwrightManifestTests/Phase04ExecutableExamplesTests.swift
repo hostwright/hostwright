@@ -168,9 +168,9 @@ final class Phase04ExecutableExamplesTests: XCTestCase {
                   let issue = parseError.issues.first else {
                 return XCTFail("Expected one structured manifest issue: \(error)")
             }
-            XCTAssertEqual(issue.code.rawValue, "HW-MANIFEST-003")
+            XCTAssertEqual(issue.code.rawValue, "HW-MANIFEST-002")
             XCTAssertTrue(
-                issue.message.contains("DNS, service discovery"),
+                issue.message.contains("must reference a declared top-level network"),
                 issue.message
             )
             XCTAssertEqual(issue.path, "$.services.app.networks")

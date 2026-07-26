@@ -184,6 +184,7 @@ public struct RuntimeProviderCapabilityProbe: Sendable {
                  .processControl,
                  .streaming,
                  .images,
+                 .networks,
                  .cancellation,
                  .timeouts,
                  .errors,
@@ -193,7 +194,7 @@ public struct RuntimeProviderCapabilityProbe: Sendable {
                     state: .available,
                     reason: .implemented
                 )
-            case .networks, .storage:
+            case .storage:
                 RuntimeProviderFeatureStatus(
                     feature: feature,
                     state: .unavailable,

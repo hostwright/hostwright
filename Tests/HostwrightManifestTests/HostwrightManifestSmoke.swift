@@ -1672,7 +1672,7 @@ final class HostwrightManifestTests: XCTestCase {
     }
 
     func testUnsupportedNetworkingAndDiscoveryFieldsFailClosed() {
-        for field in ["dns", "dns_search", "domainname", "hostname", "network_mode", "networks", "aliases", "expose", "extra_hosts"] {
+        for field in ["dns", "dns_search", "domainname", "hostname", "network_mode", "aliases", "expose", "extra_hosts"] {
             assertManifestFailure(
                 """
                 version: 2

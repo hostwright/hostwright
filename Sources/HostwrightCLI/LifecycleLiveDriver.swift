@@ -96,6 +96,7 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
         )
         var mapping = ManifestRuntimeMapper.map(
             manifest,
+            projectResourceUUID: initialProjectResourceUUID,
             bindMountBaseDirectory:
                 manifestBaseDirectory(for: options.manifestPath),
             namedVolumeSources:
@@ -132,6 +133,7 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
         if projectResourceUUID != initialProjectResourceUUID {
             mapping = ManifestRuntimeMapper.map(
                 manifest,
+                projectResourceUUID: projectResourceUUID,
                 bindMountBaseDirectory:
                     manifestBaseDirectory(for: options.manifestPath),
                 namedVolumeSources:
@@ -157,6 +159,7 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
         )
         let desiredState = DesiredRuntimeState(
             projectName: mapping.desiredState.projectName,
+            networks: mapping.desiredState.networks,
             services: mapping.desiredState.services,
             ownedResourceHints: resourceBindings.map {
                 RuntimeOwnedResourceHint(
@@ -2533,6 +2536,7 @@ actor LifecycleRuntimeExecutionState {
     func desiredStateSnapshot() -> DesiredRuntimeState {
         DesiredRuntimeState(
             projectName: desiredState.projectName,
+            networks: desiredState.networks,
             services: desiredState.services,
             ownedResourceHints: bindingsByResourceUUID.values
                 .map {
@@ -3147,6 +3151,7 @@ struct LifecycleLiveEffects: LifecycleSagaEffects {
                 )
                 desired = DesiredRuntimeState(
                     projectName: desired.projectName,
+                    networks: desired.networks,
                     services: desired.services,
                     ownedResourceHints: hints.sorted {
                         $0.resourceIdentifier <

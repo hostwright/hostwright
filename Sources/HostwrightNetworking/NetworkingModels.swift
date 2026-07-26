@@ -23,6 +23,119 @@ public enum PortProtocol: String, Equatable, Sendable {
     case udp
 }
 
+public enum HostwrightNetworkDriver: String, Codable, Equatable, Sendable {
+    case nat
+    case hostOnly
+}
+
+public enum HostwrightNetworkAddressRequest: Codable, Equatable, Sendable {
+    case auto
+    case disabled
+    case cidr(String)
+
+    public init?(manifestValue: String) {
+        switch manifestValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "auto":
+            self = .auto
+        case "disabled":
+            self = .disabled
+        case let value where !value.isEmpty:
+            self = .cidr(value)
+        default:
+            return nil
+        }
+    }
+
+    public var manifestValue: String {
+        switch self {
+        case .auto:
+            return "auto"
+        case .disabled:
+            return "disabled"
+        case .cidr(let value):
+            return value
+        }
+    }
+
+    public init(from decoder: Decoder) throws {
+        let value = try decoder.singleValueContainer().decode(String.self)
+        guard let request = Self(manifestValue: value) else {
+            throw DecodingError.dataCorrupted(
+                .init(
+                    codingPath: decoder.codingPath,
+                    debugDescription:
+                        "Network address request must be auto, disabled, or a CIDR."
+                )
+            )
+        }
+        self = request
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var value = encoder.singleValueContainer()
+        try value.encode(manifestValue)
+    }
+}
+
+public struct HostwrightNetworkDefinition: Codable, Equatable, Sendable {
+    public var name: String
+    public var driver: HostwrightNetworkDriver
+    public var ipv4: HostwrightNetworkAddressRequest
+    public var ipv6: HostwrightNetworkAddressRequest
+
+    public init(
+        name: String,
+        driver: HostwrightNetworkDriver = .nat,
+        ipv4: HostwrightNetworkAddressRequest = .auto,
+        ipv6: HostwrightNetworkAddressRequest = .auto
+    ) {
+        self.name = name
+        self.driver = driver
+        self.ipv4 = ipv4
+        self.ipv6 = ipv6
+    }
+}
+
+public struct HostwrightServiceNetworkAttachment: Codable, Equatable, Sendable {
+    public static let maximumAliases = 64
+
+    public var network: String
+    public var aliases: [String]
+
+    public init(network: String, aliases: [String] = []) {
+        self.network = network
+        self.aliases = aliases
+    }
+}
+
+public enum HostwrightNetworkIdentity {
+    public static func resourceUUID(projectUUID: String, networkName: String) -> String {
+        HostwrightResourceUUID.legacy(
+            kind: "network",
+            identifier: "\(projectUUID):\(networkName)"
+        )
+    }
+
+    public static func runtimeName(projectUUID: String, networkName: String) -> String {
+        let uuid = resourceUUID(projectUUID: projectUUID, networkName: networkName)
+            .replacingOccurrences(of: "-", with: "")
+        return "hw-\(uuid)"
+    }
+
+    public static func isValidManifestName(_ value: String) -> Bool {
+        guard !value.isEmpty, value.utf8.count <= 63,
+              value.first?.isLetter == true || value.first?.isNumber == true,
+              value.last?.isLetter == true || value.last?.isNumber == true else {
+            return false
+        }
+        return value.utf8.allSatisfy {
+            ($0 >= 97 && $0 <= 122) ||
+                ($0 >= 48 && $0 <= 57) ||
+                $0 == 45
+        }
+    }
+}
+
 public enum NetworkBindAddressPolicy {
     public static let localhostBindAddress = "127.0.0.1"
     public static let localhostAliases: Set<String> = ["127.0.0.1", "::1", "localhost"]

@@ -418,6 +418,7 @@ enum LifecycleImageLockBinder {
             )
             previousDesiredState = DesiredRuntimeState(
                 projectName: previous.projectName,
+                networks: previous.networks,
                 services: previousServices,
                 ownedResourceHints: previous.ownedResourceHints
             )
@@ -431,6 +432,7 @@ enum LifecycleImageLockBinder {
             mappingIssues: preparation.mappingIssues,
             desiredState: DesiredRuntimeState(
                 projectName: preparation.desiredState.projectName,
+                networks: preparation.desiredState.networks,
                 services: services,
                 ownedResourceHints:
                     preparation.desiredState.ownedResourceHints
@@ -475,6 +477,7 @@ enum LifecycleImageLockBinder {
             environment: service.environment,
             labels: service.labels,
             ports: service.ports,
+            networks: service.networks,
             mounts: service.mounts,
             healthCheck: service.healthCheck,
             probes: service.probes,
@@ -1139,6 +1142,7 @@ public struct LifecycleCommandPlanCompiler: Sendable {
         let identities = Set(services.map(\.identity))
         return DesiredRuntimeState(
             projectName: state.projectName,
+            networks: state.networks,
             services: services,
             ownedResourceHints: state.ownedResourceHints.filter {
                 identities.contains($0.identity)
@@ -1178,6 +1182,7 @@ public struct LifecycleCommandPlanCompiler: Sendable {
         }
         return DesiredRuntimeState(
             projectName: state.projectName,
+            networks: state.networks,
             services: state.services,
             ownedResourceHints: Dictionary(
                 hints.map { ("\($0.identity.displayName)|\($0.resourceIdentifier)", $0) },
@@ -1199,6 +1204,7 @@ public struct LifecycleCommandPlanCompiler: Sendable {
             .standardizedFileURL
         return DesiredRuntimeState(
             projectName: state.projectName,
+            networks: state.networks,
             services: try state.services.map { service in
                 let mounts = try service.mounts.map { mount -> RuntimeMountReference in
                     if mount.kind == .tmpfs {
@@ -1643,6 +1649,7 @@ public struct LifecycleCommandPlanCompiler: Sendable {
             environment: service.environment,
             labels: service.labels,
             ports: service.ports,
+            networks: service.networks,
             mounts: mounts,
             healthCheck: service.healthCheck,
             probes: service.probes,

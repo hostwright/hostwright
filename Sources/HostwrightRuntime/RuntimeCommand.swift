@@ -18,6 +18,7 @@ public enum RuntimeMutationCommandKind: String, Equatable, Sendable {
     case restartManagedService
     case deleteManagedContainer
     case imageLifecycle
+    case networkLifecycle
 }
 
 public enum RuntimeCommandExitStatusPolicy: Equatable, Sendable {
@@ -284,6 +285,18 @@ public enum RuntimeCommandPolicy {
             )
         }
 
+        var networkIdentifiers = Set<String>()
+        for index in createArguments where spec.arguments[index] == "--network" {
+            let valueIndex = spec.arguments.index(after: index)
+            guard valueIndex < imageIndex,
+                  RuntimeNetworkIdentity.isRuntimeIdentifier(spec.arguments[valueIndex]),
+                  networkIdentifiers.insert(spec.arguments[valueIndex]).inserted else {
+                throw RuntimeAdapterError.commandRejected(
+                    classification: spec.classification,
+                    message: "Create-missing-service network attachments require unique exact Hostwright network identifiers."
+                )
+            }
+        }
     }
 
     public static func validateSupportedMutation(_ spec: RuntimeCommandSpec) throws {
@@ -298,6 +311,8 @@ public enum RuntimeCommandPolicy {
             try validateDeleteManagedContainerMutation(spec)
         case .imageLifecycle:
             try validateImageLifecycleMutation(spec)
+        case .networkLifecycle:
+            try validateNetworkLifecycleMutation(spec)
         case nil:
             throw RuntimeAdapterError.commandRejected(
                 classification: spec.classification,
@@ -408,6 +423,111 @@ public enum RuntimeCommandPolicy {
             classification: spec.classification,
             message: "Image lifecycle mutation command shape is not part of the qualified Apple CLI contract."
         )
+    }
+
+    public static func validateNetworkLifecycleMutation(_ spec: RuntimeCommandSpec) throws {
+        guard spec.executableResolution == .resolvedByRuntimeExecutableResolver,
+              spec.classification == .mutating,
+              spec.mutationKind == .networkLifecycle,
+              spec.exitStatusPolicy == .zeroOnly,
+              spec.environment.isEmpty,
+              spec.sensitiveValues.isEmpty,
+              spec.arguments.count >= 3,
+              spec.arguments[0] == "network",
+              !spec.arguments.contains("--all"),
+              !spec.arguments.contains("-a"),
+              !spec.arguments.contains("--plugin"),
+              !spec.arguments.contains("--option"),
+              !spec.arguments.contains("--debug"),
+              !spec.arguments.contains("prune") else {
+            throw RuntimeAdapterError.commandRejected(
+                classification: spec.classification,
+                message: "Network lifecycle mutation requires one resolved, exact, credential-free network command."
+            )
+        }
+
+        switch spec.arguments[1] {
+        case "delete":
+            guard spec.arguments.count == 3,
+                  RuntimeNetworkIdentity.isRuntimeIdentifier(spec.arguments[2]) else {
+                throw RuntimeAdapterError.commandRejected(
+                    classification: spec.classification,
+                    message: "Network deletion requires one exact Hostwright network identifier."
+                )
+            }
+        case "create":
+            guard let identifier = spec.arguments.last,
+                  RuntimeNetworkIdentity.isRuntimeIdentifier(identifier),
+                  spec.arguments.filter({ $0 == "--label" }).count >= 9 else {
+                throw RuntimeAdapterError.commandRejected(
+                    classification: spec.classification,
+                    message: "Network creation requires one exact Hostwright network identifier and complete ownership labels."
+                )
+            }
+            let labels = try networkCreateLabels(spec.arguments)
+            guard labels[RuntimeManagedResourceIdentity.managedLabel] == "true",
+                  labels[RuntimeManagedResourceIdentity.resourceIdentifierLabel] == identifier,
+                  labels[RuntimeNetworkOwnership.resourceKindLabel] ==
+                    RuntimeNetworkOwnership.resourceKind,
+                  let provider = labels[RuntimeManagedResourceIdentity.providerIDLabel],
+                  provider == RuntimeProviderID.appleContainerCLI.rawValue,
+                  (try? RuntimeManagedResourceIdentity.ownershipEvidence(
+                      from: labels,
+                      expectedProviderID: .appleContainerCLI
+                  )) != nil else {
+                throw RuntimeAdapterError.commandRejected(
+                    classification: spec.classification,
+                    message: "Network creation requires complete UUID ownership and fencing labels."
+                )
+            }
+        default:
+            throw RuntimeAdapterError.commandRejected(
+                classification: spec.classification,
+                message: "Network lifecycle mutation accepts only exact create or delete commands."
+            )
+        }
+    }
+
+    private static func networkCreateLabels(_ arguments: [String]) throws -> [String: String] {
+        var labels: [String: String] = [:]
+        var index = 2
+        while index < arguments.count - 1 {
+            let argument = arguments[index]
+            switch argument {
+            case "--internal":
+                index += 1
+            case "--label", "--subnet", "--subnet-v6":
+                guard index + 1 < arguments.count - 1 else {
+                    throw RuntimeAdapterError.commandRejected(
+                        classification: .mutating,
+                        message: "Network create option is missing its value."
+                    )
+                }
+                if argument == "--label" {
+                    let pair = arguments[index + 1].split(
+                        separator: "=",
+                        maxSplits: 1,
+                        omittingEmptySubsequences: false
+                    )
+                    guard pair.count == 2,
+                          !pair[0].isEmpty,
+                          labels[String(pair[0])] == nil else {
+                        throw RuntimeAdapterError.commandRejected(
+                            classification: .mutating,
+                            message: "Network create contains an invalid or duplicate label."
+                        )
+                    }
+                    labels[String(pair[0])] = String(pair[1])
+                }
+                index += 2
+            default:
+                throw RuntimeAdapterError.commandRejected(
+                    classification: .mutating,
+                    message: "Network create contains an unsupported option."
+                )
+            }
+        }
+        return labels
     }
 
     private static func rejectNonReadOnlyCommand(_ spec: RuntimeCommandSpec) throws {
@@ -742,6 +862,7 @@ public enum RuntimeCommandPolicy {
         "--label",
         "--env",
         "--publish",
+        "--network",
         "--os",
         "--arch",
         "--cpus",
@@ -765,7 +886,6 @@ public enum RuntimeCommandPolicy {
 
     private static let rejectedCreateFlags: Set<String> = [
         "--rm",
-        "--network",
         "--dns",
         "--privileged",
         "--cap-add",

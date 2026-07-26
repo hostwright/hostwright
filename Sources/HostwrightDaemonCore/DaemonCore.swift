@@ -284,6 +284,7 @@ public struct DaemonLoopRunner {
             let projectID = "project-\(mapping.desiredState.projectName)"
             let observationDesiredState = DesiredRuntimeState(
                 projectName: mapping.desiredState.projectName,
+                networks: mapping.desiredState.networks,
                 services: mapping.desiredState.services,
                 ownedResourceHints: try store.ownership.runtimeHints(
                     projectID: projectID,

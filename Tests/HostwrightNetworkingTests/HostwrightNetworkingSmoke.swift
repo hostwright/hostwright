@@ -2,6 +2,91 @@ import XCTest
 @testable import HostwrightNetworking
 
 final class HostwrightNetworkingTests: XCTestCase {
+    func testNetworkAddressRequestsRoundTripManifestValues() {
+        XCTAssertEqual(HostwrightNetworkAddressRequest(manifestValue: "auto"), .auto)
+        XCTAssertEqual(HostwrightNetworkAddressRequest(manifestValue: " DISABLED "), .disabled)
+        XCTAssertEqual(
+            HostwrightNetworkAddressRequest(manifestValue: "10.44.0.0/24"),
+            .cidr("10.44.0.0/24")
+        )
+        XCTAssertNil(HostwrightNetworkAddressRequest(manifestValue: "   "))
+
+        XCTAssertEqual(HostwrightNetworkAddressRequest.auto.manifestValue, "auto")
+        XCTAssertEqual(HostwrightNetworkAddressRequest.disabled.manifestValue, "disabled")
+        XCTAssertEqual(
+            HostwrightNetworkAddressRequest.cidr("fd00:44::/64").manifestValue,
+            "fd00:44::/64"
+        )
+    }
+
+    func testNetworkAddressRequestCodableUsesStableStringContract() throws {
+        let encoder = JSONEncoder()
+        let decoder = JSONDecoder()
+
+        for request in [
+            HostwrightNetworkAddressRequest.auto,
+            .disabled,
+            .cidr("10.44.0.0/24")
+        ] {
+            let encoded = try encoder.encode(request)
+            XCTAssertEqual(
+                try decoder.decode(
+                    HostwrightNetworkAddressRequest.self,
+                    from: encoded
+                ),
+                request
+            )
+            XCTAssertEqual(
+                encoded,
+                try encoder.encode(request.manifestValue)
+            )
+        }
+    }
+
+    func testNetworkDefinitionDefaultsAreStable() {
+        let definition = HostwrightNetworkDefinition(name: "backend")
+
+        XCTAssertEqual(definition.driver, .nat)
+        XCTAssertEqual(definition.ipv4, .auto)
+        XCTAssertEqual(definition.ipv6, .auto)
+    }
+
+    func testManifestNetworkNamesUseBoundedLowercaseDNSLabels() {
+        for name in ["a", "default", "app-net", "network-7"] {
+            XCTAssertTrue(HostwrightNetworkIdentity.isValidManifestName(name), name)
+        }
+
+        for name in ["", "-network", "network-", "App", "app_net", "app.net", String(repeating: "a", count: 64)] {
+            XCTAssertFalse(HostwrightNetworkIdentity.isValidManifestName(name), name)
+        }
+    }
+
+    func testRuntimeNetworkIdentityIsUUIDBackedAndDeterministic() {
+        let first = HostwrightNetworkIdentity.resourceUUID(
+            projectUUID: "11111111-1111-1111-1111-111111111111",
+            networkName: "backend"
+        )
+        let repeated = HostwrightNetworkIdentity.resourceUUID(
+            projectUUID: "11111111-1111-1111-1111-111111111111",
+            networkName: "backend"
+        )
+        let otherProject = HostwrightNetworkIdentity.resourceUUID(
+            projectUUID: "22222222-2222-2222-2222-222222222222",
+            networkName: "backend"
+        )
+
+        XCTAssertEqual(first, repeated)
+        XCTAssertNotEqual(first, otherProject)
+        XCTAssertNotNil(UUID(uuidString: first))
+        XCTAssertEqual(
+            HostwrightNetworkIdentity.runtimeName(
+                projectUUID: "11111111-1111-1111-1111-111111111111",
+                networkName: "backend"
+            ),
+            "hw-\(first.replacingOccurrences(of: "-", with: ""))"
+        )
+    }
+
     func testNonLocalExposureScopesAreRejectedForFirstRelease() {
         for scope in [NetworkExposureScope.lan, .tunnel, .public] {
             let binding = PortBinding(target: 443, published: 443, protocolName: .tcp, scope: scope)

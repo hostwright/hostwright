@@ -372,7 +372,7 @@ final class HostwrightRuntimeTests: XCTestCase {
         )
 
         var preImageArguments = valid.arguments
-        preImageArguments.insert("--network", at: imageIndex)
+        preImageArguments.insert("--dns", at: imageIndex)
         let unsupportedCreateOption = RuntimeCommandSpec(
             executablePath: "/usr/bin/container-fixture",
             arguments: preImageArguments,

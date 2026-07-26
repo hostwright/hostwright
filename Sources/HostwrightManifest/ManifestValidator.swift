@@ -1,5 +1,7 @@
+import Darwin
 import Foundation
 import HostwrightCore
+import HostwrightNetworking
 import HostwrightSecrets
 
 public enum ManifestValidator {
@@ -22,9 +24,11 @@ public enum ManifestValidator {
         validateImageVulnerability(manifest, issues: &issues)
         validateImageProvenance(manifest, issues: &issues)
         validateVolumeDeclarations(manifest.volumes, issues: &issues)
+        validateNetworkDefinitions(manifest.networks, issues: &issues)
 
         let declaredNames = Set(manifest.services.map(\.name))
         let declaredVolumes = Set(manifest.volumes.keys)
+        let declaredNetworks = Set(manifest.networks.keys)
         var serviceNames = Set<String>()
         for service in manifest.services {
             validateService(
@@ -32,6 +36,7 @@ public enum ManifestValidator {
                 imagePolicy: manifest.effectiveImagePolicy,
                 declaredNames: declaredNames,
                 declaredVolumes: declaredVolumes,
+                declaredNetworks: declaredNetworks,
                 issues: &issues
             )
             if !serviceNames.insert(service.name).inserted {
@@ -68,6 +73,7 @@ public enum ManifestValidator {
         imagePolicy: HostwrightImagePolicy,
         declaredNames: Set<String>,
         declaredVolumes: Set<String>,
+        declaredNetworks: Set<String>,
         issues: inout [ManifestIssue]
     ) {
         validateName(service.name, field: "service name", issues: &issues)
@@ -112,6 +118,12 @@ public enum ManifestValidator {
         if Set(service.ports).count != service.ports.count {
             issues.append(issue(service, "ports must not contain duplicates."))
         }
+        validateServiceNetworks(
+            service.networks,
+            service: service,
+            declaredNetworks: declaredNetworks,
+            issues: &issues
+        )
         for volume in service.volumes {
             validateVolume(volume, serviceName: service.name, issues: &issues)
         }
@@ -174,6 +186,140 @@ public enum ManifestValidator {
             validateVolumeProvider(declaration.provider, volumeName: name, issues: &issues)
             validateVolumeCapacity(declaration.capacity, volumeName: name, issues: &issues)
             validateVolumeLabels(declaration.labels, volumeName: name, issues: &issues)
+        }
+    }
+
+    private static func validateNetworkDefinitions(
+        _ networks: [String: HostwrightNetworkDefinition],
+        issues: inout [ManifestIssue]
+    ) {
+        for (name, definition) in networks.sorted(by: { $0.key < $1.key }) {
+            guard HostwrightNetworkIdentity.isValidManifestName(name) else {
+                issues.append(
+                    ManifestIssue(
+                        code: .manifestValidationFailed,
+                        message: "Network name '\(name)' must be lowercase DNS-like text: letters, numbers, hyphens, no leading or trailing hyphen.",
+                        path: "$.networks.\(name)"
+                    )
+                )
+                continue
+            }
+            if definition.name != name {
+                issues.append(
+                    ManifestIssue(
+                        code: .manifestValidationFailed,
+                        message: "Network declaration key '\(name)' must match its network identity '\(definition.name)'.",
+                        path: "$.networks.\(name)"
+                    )
+                )
+            }
+            if definition.ipv4 == .disabled, definition.ipv6 == .disabled {
+                issues.append(
+                    ManifestIssue(
+                        code: .manifestValidationFailed,
+                        message: "Network '\(name)' must enable at least one address family.",
+                        path: "$.networks.\(name)"
+                    )
+                )
+            }
+            validateNetworkAddressRequest(
+                definition.ipv4,
+                family: .ipv4,
+                networkName: name,
+                issues: &issues
+            )
+            validateNetworkAddressRequest(
+                definition.ipv6,
+                family: .ipv6,
+                networkName: name,
+                issues: &issues
+            )
+        }
+    }
+
+    private static func validateNetworkAddressRequest(
+        _ request: HostwrightNetworkAddressRequest,
+        family: NetworkAddressFamily,
+        networkName: String,
+        issues: inout [ManifestIssue]
+    ) {
+        guard case .cidr(let rawValue) = request else { return }
+        let path = "$.networks.\(networkName).\(family.field)"
+        guard isValidCIDR(rawValue, family: family) else {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "Network '\(networkName)' \(family.field) must be auto, disabled, or a valid \(family.label) CIDR.",
+                    path: path
+                )
+            )
+            return
+        }
+    }
+
+    private static func validateServiceNetworks(
+        _ attachments: [HostwrightServiceNetworkAttachment],
+        service: HostwrightService,
+        declaredNetworks: Set<String>,
+        issues: inout [ManifestIssue]
+    ) {
+        let path = "$.services.\(service.name).networks"
+        func networkIssue(_ message: String) -> ManifestIssue {
+            ManifestIssue(
+                code: .manifestValidationFailed,
+                message: "Service '\(service.name)' \(message)",
+                path: path
+            )
+        }
+
+        var attachedNetworks = Set<String>()
+        for attachment in attachments {
+            if !HostwrightNetworkIdentity.isValidManifestName(attachment.network) {
+                issues.append(
+                    networkIssue(
+                        "network attachment '\(attachment.network)' must use a lowercase DNS-like network name."
+                    )
+                )
+            } else if !declaredNetworks.contains(attachment.network) {
+                issues.append(
+                    networkIssue(
+                        "network attachment '\(attachment.network)' must reference a declared top-level network."
+                    )
+                )
+            }
+            if !attachedNetworks.insert(attachment.network).inserted {
+                issues.append(
+                    networkIssue(
+                        "must not attach network '\(attachment.network)' more than once."
+                    )
+                )
+            }
+
+            if attachment.aliases.count >
+                HostwrightServiceNetworkAttachment.maximumAliases {
+                issues.append(
+                    networkIssue(
+                        "network '\(attachment.network)' must declare at most \(HostwrightServiceNetworkAttachment.maximumAliases) aliases."
+                    )
+                )
+            }
+            var aliases = Set<String>()
+            for alias in attachment.aliases {
+                if !HostwrightNetworkIdentity.isValidManifestName(alias) {
+                    issues.append(
+                        networkIssue(
+                            "network alias '\(alias)' must be lowercase DNS-like text."
+                        )
+                    )
+                }
+                if !aliases.insert(alias).inserted {
+                    issues.append(
+                        networkIssue(
+                            "network '\(attachment.network)' aliases must not contain duplicate '\(alias)'."
+                        )
+                    )
+                }
+            }
         }
     }
 
@@ -1444,6 +1590,64 @@ public enum ManifestValidator {
         }
         formatter.formatOptions = [.withInternetDateTime]
         return formatter.date(from: value)
+    }
+
+    private enum NetworkAddressFamily: Equatable {
+        case ipv4
+        case ipv6
+
+        var field: String {
+            switch self {
+            case .ipv4: return "ipv4"
+            case .ipv6: return "ipv6"
+            }
+        }
+
+        var label: String {
+            switch self {
+            case .ipv4: return "IPv4"
+            case .ipv6: return "IPv6"
+            }
+        }
+
+        var byteCount: Int {
+            switch self {
+            case .ipv4: return 4
+            case .ipv6: return 16
+            }
+        }
+
+        var addressFamily: Int32 {
+            switch self {
+            case .ipv4: return AF_INET
+            case .ipv6: return AF_INET6
+            }
+        }
+    }
+
+    private static func isValidCIDR(
+        _ rawValue: String,
+        family: NetworkAddressFamily
+    ) -> Bool {
+        guard rawValue == rawValue.trimmingCharacters(in: .whitespacesAndNewlines),
+              rawValue.utf8.count <= 128 else {
+            return false
+        }
+        let parts = rawValue.split(separator: "/", omittingEmptySubsequences: false)
+        guard parts.count == 2,
+              !parts[0].isEmpty,
+              let prefixLength = Int(parts[1]),
+              String(prefixLength) == String(parts[1]),
+              (0...(family.byteCount * 8)).contains(prefixLength) else {
+            return false
+        }
+
+        var addressBytes = [UInt8](repeating: 0, count: family.byteCount)
+        return String(parts[0]).withCString { address in
+            addressBytes.withUnsafeMutableBytes { storage in
+                inet_pton(family.addressFamily, address, storage.baseAddress)
+            }
+        } == 1
     }
 
     private static func issue(_ service: HostwrightService, _ message: String) -> ManifestIssue {

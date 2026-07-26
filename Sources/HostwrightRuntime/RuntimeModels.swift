@@ -455,6 +455,7 @@ public struct DesiredRuntimeService: Equatable, Sendable {
     public let environment: [RuntimeEnvironmentValue]
     public let labels: [String: String]
     public let ports: [RuntimePortMapping]
+    public let networks: [RuntimeDesiredNetworkAttachment]
     public let mounts: [RuntimeMountReference]
     public let healthCheck: RuntimeHealthCheckSpec?
     public let probes: RuntimeProbeSet
@@ -497,6 +498,72 @@ public struct DesiredRuntimeService: Equatable, Sendable {
         readOnlyRootFilesystem: Bool = false,
         sharedMemoryBytes: UInt64? = nil
     ) {
+        self.init(
+            identity: identity,
+            logicalServiceName: logicalServiceName,
+            replicaIndex: replicaIndex,
+            image: image,
+            imageLock: imageLock,
+            platformOperatingSystem: platformOperatingSystem,
+            platformArchitecture: platformArchitecture,
+            cpuCount: cpuCount,
+            memoryBytes: memoryBytes,
+            userID: userID,
+            groupID: groupID,
+            workingDirectory: workingDirectory,
+            entrypoint: entrypoint,
+            command: command,
+            initProcess: initProcess,
+            dependencies: dependencies,
+            environment: environment,
+            labels: labels,
+            ports: ports,
+            networks: [],
+            mounts: mounts,
+            healthCheck: healthCheck,
+            probes: probes,
+            restartPolicy: restartPolicy,
+            updatePolicy: updatePolicy,
+            hooks: hooks,
+            rosetta: rosetta,
+            virtualization: virtualization,
+            readOnlyRootFilesystem: readOnlyRootFilesystem,
+            sharedMemoryBytes: sharedMemoryBytes
+        )
+    }
+
+    public init(
+        identity: RuntimeServiceIdentity,
+        logicalServiceName: String? = nil,
+        replicaIndex: Int = 0,
+        image: String,
+        imageLock: RuntimeImageDigestLock? = nil,
+        platformOperatingSystem: String = "linux",
+        platformArchitecture: String = "arm64",
+        cpuCount: Int? = nil,
+        memoryBytes: UInt64? = nil,
+        userID: UInt32? = nil,
+        groupID: UInt32? = nil,
+        workingDirectory: String? = nil,
+        entrypoint: [String] = [],
+        command: [String] = [],
+        initProcess: Bool = false,
+        dependencies: [RuntimeServiceDependency] = [],
+        environment: [RuntimeEnvironmentValue] = [],
+        labels: [String: String] = [:],
+        ports: [RuntimePortMapping] = [],
+        networks: [RuntimeDesiredNetworkAttachment],
+        mounts: [RuntimeMountReference] = [],
+        healthCheck: RuntimeHealthCheckSpec? = nil,
+        probes: RuntimeProbeSet = RuntimeProbeSet(),
+        restartPolicy: RuntimeRestartPolicy = .no,
+        updatePolicy: RuntimeUpdatePolicy = RuntimeUpdatePolicy(),
+        hooks: RuntimeLifecycleHooks = RuntimeLifecycleHooks(),
+        rosetta: Bool = false,
+        virtualization: Bool = false,
+        readOnlyRootFilesystem: Bool = false,
+        sharedMemoryBytes: UInt64? = nil
+    ) {
         self.identity = identity
         self.logicalServiceName = logicalServiceName ?? identity.serviceName
         self.replicaIndex = replicaIndex
@@ -516,6 +583,7 @@ public struct DesiredRuntimeService: Equatable, Sendable {
         self.environment = environment
         self.labels = labels
         self.ports = ports
+        self.networks = networks
         self.mounts = mounts
         self.healthCheck = healthCheck
         self.probes = probes
@@ -801,6 +869,7 @@ public struct ObservedRuntimeService: Equatable, Sendable {
 
 public struct DesiredRuntimeState: Equatable, Sendable {
     public let projectName: String
+    public let networks: [DesiredRuntimeNetwork]
     public let services: [DesiredRuntimeService]
     public let ownedResourceHints: [RuntimeOwnedResourceHint]
 
@@ -809,7 +878,22 @@ public struct DesiredRuntimeState: Equatable, Sendable {
         services: [DesiredRuntimeService],
         ownedResourceHints: [RuntimeOwnedResourceHint] = []
     ) {
+        self.init(
+            projectName: projectName,
+            networks: [],
+            services: services,
+            ownedResourceHints: ownedResourceHints
+        )
+    }
+
+    public init(
+        projectName: String,
+        networks: [DesiredRuntimeNetwork],
+        services: [DesiredRuntimeService],
+        ownedResourceHints: [RuntimeOwnedResourceHint] = []
+    ) {
         self.projectName = projectName
+        self.networks = networks
         self.services = services
         self.ownedResourceHints = ownedResourceHints
     }
@@ -929,6 +1013,7 @@ public enum RuntimeCapability: String, Codable, Equatable, Hashable, Sendable {
     case cleanup
     case volumeInspection
     case networkInspection
+    case networkLifecycle
 }
 
 public struct RuntimeAdapterMetadata: Codable, Equatable, Sendable {

@@ -1,10 +1,10 @@
 # Control Surface API Boundary
 
-> **Historical boundary, expanded by v0.0.2:** the one-shot local API now includes Phase 04 non-interactive lifecycle parity and the versioned Phase 05 image, registry, and supply-chain operations. Phase 09 implements the persistent authenticated Control API v2 and Phase 14 implements the native GUI with parity.
+> **Historical boundary, expanded by v0.0.2:** the one-shot local API now includes Phase 04 non-interactive lifecycle parity, Phase 05 image/registry/supply-chain operations, and Phase 06 storage operations. Phase 09 implements the persistent authenticated Control API v2 and Phase 14 implements the native GUI with parity.
 
 Status: Historical design record plus current contract for the bounded one-shot Control API v2.
 
-This document defines what a future local GUI or other control surface may depend on. The local process supports the established read commands, exact-confirmed lifecycle operations, and explicit Phase 05 image/registry operations through the shared CLI engine. It does not implement a GUI, daemon API, socket or HTTP listener, web dashboard, remote service, background service, or separate runtime mutation path.
+This document defines what a future local GUI or other control surface may depend on. The local process supports the established read commands and exact-confirmed lifecycle, image/registry, and storage operations through the shared CLI engine. It does not implement a GUI, daemon API, socket or HTTP listener, web dashboard, remote service, background service, or separate mutation path.
 
 ## Principles
 
@@ -32,8 +32,9 @@ It reads one JSON object no larger than 64 KiB, writes one JSON object no larger
 | `events` | `hostwright events --output json` | Uses configured state or the secure default and reads event rows only; it does not create or migrate missing state. |
 | `recovery` | `hostwright recovery --output json` | Uses configured state or the secure default and reads recovery rows only; it does not create or migrate missing state. |
 | `doctor` | `hostwright doctor --output json` | Runs existing safe local checks; no Apple container command or state write. |
-| `up`, `down`, `run`, `start`, `stop`, `restart`, `rm`, `update` | Matching lifecycle command with `--output json` | Requires exactly one dry-run or exact plan confirmation and delegates to the shared schema-v8 lifecycle saga with provider/platform-bound image locks. |
+| `up`, `down`, `run`, `start`, `stop`, `restart`, `rm`, `update` | Matching lifecycle command with `--output json` | Requires exactly one dry-run or exact plan confirmation and delegates to the shared schema-v15 lifecycle saga with provider/platform-bound image and storage locks. |
 | Phase 05 image, referrer, trust, SBOM, vulnerability, and provenance operations | Matching versioned `hostwright image ...` or `hostwright registry ...` command with `--output json` | Uses the exact CLI parser and coordinator. Build-provenance generation accepts a typed signing-key reference, never key bytes; recovery requires the exact operation group and plan hash. |
+| Phase 06 volume, snapshot, backup, capacity, reclaim, and recovery operations | Matching versioned `hostwright volume ...` command with `--output json` | Uses the exact CLI parser and storage coordinator. Destructive requests require dry-run or exact plan confirmation; backup keys remain typed secret references. |
 
 Example request and response:
 
@@ -45,7 +46,7 @@ Example request and response:
 {"apiVersion":2,"exitCode":0,"operation":"plan","requestID":"plan-1","result":{"kind":"plan","schemaVersion":2},"success":true}
 ```
 
-The parser rejects unknown or duplicate fields, unsupported API versions, invalid identifiers and filters, oversized input, and unsupported operations such as `apply` or `cleanup`. Lifecycle input may contain only bounded service names, one dry-run or exact confirmation, provider selection, timeout, and parallelism; `run` requires one service. Phase 05 request models are operation-specific and reject ambiguous fields, raw credentials, secret values, native flags, and unsupported mutation options before delegation. Launch paths must be absolute existing regular non-symlink files with safe ownership and no group/world write or set-ID bits. The tool validates those path facts before delegating, but it is a same-account local process rather than a capability sandbox.
+The parser rejects unknown or duplicate fields, unsupported API versions, invalid identifiers and filters, oversized input, and unsupported operations such as `apply` or `cleanup`. Lifecycle input may contain only bounded service names, one dry-run or exact confirmation, provider selection, timeout, and parallelism; `run` requires one service. Phase 05 and Phase 06 request models are operation-specific and reject ambiguous fields, raw credentials, secret values, native flags, unsafe paths, and unsupported mutation options before delegation. Launch paths must be absolute existing regular non-symlink files with safe ownership and no group/world write or set-ID bits. The tool validates those path facts before delegating, but it is a same-account local process rather than a capability sandbox.
 
 API-owned failures use `HW-API-001` for invalid requests, `HW-API-002` for unavailable or unsafe configured files, and `HW-API-003` for invalid delegated response framing or execution failure. Existing Hostwright command failures preserve their original error body and exit code inside the response. Usage errors before request processing remain text on stderr with exit code 64.
 
@@ -62,6 +63,7 @@ The current approved surfaces are existing command contracts:
 | Lifecycle confirmation | `hostwright up|down|run|start|stop|restart|rm|update --dry-run` then `--confirm-plan <hash>` | Present the exact current plan and require explicit confirmation. Do not synthesize or cache hashes across runtime observations. `apply` remains an `up` compatibility entry point. |
 | Status | `hostwright status [--state-db <path>] --output json` | Use observed/runtime fields only when Hostwright reports observation. Do not infer reachability or health beyond reported data. |
 | Interactive operations | `hostwright exec|attach|copy|export|inspect|stats` and `logs --follow` | Use only advertised provider capabilities and the CLI's bounded stream, TTY, path-confinement, cancellation, and redaction contracts. The one-shot API does not expose these streams. |
+| Storage | `hostwright volume ... --output json` | Use the exact Hostwright-owned UUID, generation, fence, policy, capacity, snapshot, backup, and orphan records. Destructive operations require the current dry-run plan hash; never infer ownership from names or paths. |
 | Events | `hostwright events [--state-db <path>] --output json` | Use filters and sort options from the CLI. Event rows are local forensic records, not telemetry. |
 | Recovery | `hostwright recovery [--state-db <path>] --output json` plus confirmed `resume`/`rollback` | Render exact redacted recovery state. Invoke resume or rollback only with the exact group UUID and persisted plan hash. |
 | Cleanup preview | `hostwright cleanup [--state-db <path>] --dry-run` | Render every classification: eligible, ambiguous, stale, running, unknown, blocked, and never-delete. Confirmation authority is limited to the current token. |

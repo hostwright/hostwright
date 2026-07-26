@@ -3,6 +3,7 @@ import HostwrightRuntime
 
 enum StateJSON {
     private static let nonSecretIdentityKeys: Set<String> = [
+        "authorizationPlanSHA256",
         "capabilitySHA256",
         "checkpoint",
         "confirmationToken",

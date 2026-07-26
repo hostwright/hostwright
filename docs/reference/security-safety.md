@@ -14,9 +14,9 @@ Production subprocess execution uses one shared bounded implementation. It passe
 
 ## Mutation Boundaries
 
-Supported application mutation requires an exact lifecycle plan hash and one durable schema-v8 operation group. `up`, `down`, `run`, `start`, `stop`, `restart`, `rm`, and `update` revalidate provider identity, capability digest, project/resource generation, ownership UUID, and fence before every mutation wave. Intent and compensation are persisted before effects; ambiguous results are re-observed; automatic rollback runs only when ownership and every inverse effect are provable. Otherwise Hostwright records a safe hold.
+Supported application mutation requires an exact lifecycle plan hash and one durable schema-v15 operation group. `up`, `down`, `run`, `start`, `stop`, `restart`, `rm`, and `update` revalidate provider identity, capability digest, project/resource generation, ownership UUID, and fence before every mutation wave. Intent and compensation are persisted before effects; ambiguous results are re-observed; automatic rollback runs only when ownership and every inverse effect are provable. Otherwise Hostwright records a safe hold.
 
-Phase 04 workload lifecycle remains separate from Phase 05 image preparation. Phase 05 image commands implement strict Apple CLI pull/build/push/tag/load/save/inspect plus exact Hostwright-owned delete/prune. They do not add named-volume lifecycle, snapshots, custom networking/DNS/ingress, broad bind exposure, unattended daemon mutation, or broad/unmanaged cleanup. Existing bind mounts and localhost port publishing remain path- and policy-gated.
+Phase 04 workload lifecycle remains separate from Phase 05 image preparation and Phase 06 storage. Image commands implement strict Apple CLI pull/build/push/tag/load/save/inspect plus exact Hostwright-owned delete/prune. Storage commands implement exact Hostwright-owned named volumes, snapshots, verified backup/restore, quotas, reclaim, and orphan recovery. Neither surface adds custom networking/DNS/ingress, unattended daemon mutation, or broad/unmanaged cleanup.
 
 Restart policy state can block managed restart through backoff, operator hold, manual disable, and crash-loop protection. The foreground daemon records restart state but does not start or restart services by itself.
 
@@ -110,6 +110,16 @@ Cleanup is destructive and requires all of these:
 Dry-run reports ambiguous, stale, running, unknown, blocked, and never-delete records without deleting them. Confirmation deletes only records classified as eligible in the current dry-run plan.
 
 Cleanup does not delete images, volumes, networks, Apple builder resources, base images, or unmanaged containers.
+
+## Storage Boundary
+
+Named-volume authority comes from schema-v15 project/resource UUIDs, provider ID, generation, fencing token, ownership proof, and current provider observation. A name or filesystem path is never sufficient. The shipped `hostwright-local` provider confines managed data below its private Application Support root; its signed helper validates peer UID, process identity, code signature, bounded protocol frames, capability digest, deadline, idempotency key, and mutation context.
+
+Bind mounts use descriptor-based no-symlink validation and reject host root, devices, traversal, unsafe ownership or permissions, and identity swaps. Writable attachment, detach, snapshot, restore, expansion, delete, and reclaim revalidate generation and fencing immediately before effects. One-writer and read-only-many rules are enforced from both durable state and provider observation.
+
+Snapshot and backup promotion requires exact content and metadata hashes. Backup key material and S3 credentials are resolved only from typed Keychain references inside the provider; credential values never enter argv, state, logs, result JSON, or diagnostics. Remote targets require one validated HTTPS origin and exact bucket, region, prefix, and credential-reference identity. Restore creates a new target identity and promotes it only after complete verification.
+
+Volume deletion and prune require a current dry-run hash. Active attachments, durable operations, holds, retained policy, changed metadata, unknown ownership, unmanaged data, and unverified snapshot/backup prerequisites fail closed. Abrupt or ambiguous effects remain in an exact resumable record; recovery re-observes before retrying. `hostwright cleanup` remains container-only—storage deletion occurs only through `hostwright volume` and its independent confirmation boundary.
 
 ## Secrets And Redaction
 

@@ -308,7 +308,8 @@ public struct LifecycleSagaExecutor: Sendable {
         groupID: String,
         fencingToken: String,
         lockOwner: String,
-        lockExpiresAt: String? = nil
+        lockExpiresAt: String? = nil,
+        allowFailedSafeHoldResume: Bool = false
     ) async throws -> LifecycleSagaExecutionResult {
         guard HostwrightResourceUUID.isValid(operationID),
               HostwrightResourceUUID.isValid(groupID),
@@ -325,7 +326,8 @@ public struct LifecycleSagaExecutor: Sendable {
             groupID: groupID.lowercased(),
             fencingToken: normalizedFence,
             lockOwner: lockOwner,
-            lockExpiresAt: lockExpiresAt
+            lockExpiresAt: lockExpiresAt,
+            allowFailedSafeHoldResume: allowFailedSafeHoldResume
         )
         if group.status == .succeeded {
             return result(
@@ -868,7 +870,8 @@ public struct LifecycleSagaExecutor: Sendable {
         groupID: String,
         fencingToken: String,
         lockOwner: String,
-        lockExpiresAt: String?
+        lockExpiresAt: String?,
+        allowFailedSafeHoldResume: Bool
     ) throws -> OperationGroupRecord {
         let now = clock.now()
         let renewedLease = try lockExpiresAt ??
@@ -909,6 +912,19 @@ public struct LifecycleSagaExecutor: Sendable {
                     updatedAt: now
                 )
             case .failed:
+                if allowFailedSafeHoldResume {
+                    guard latest.id == groupID else {
+                        throw LifecycleSagaError.persistedPlanMismatch
+                    }
+                    return try store.operationGroups.resumeFailedSafeHold(
+                        groupID: latest.id,
+                        expectedPlanHash: plan.planSHA256,
+                        expectedFencingToken: fencingToken,
+                        lockOwner: lockOwner,
+                        lockExpiresAt: renewedLease,
+                        updatedAt: now
+                    )
+                }
                 return latest
             }
         }

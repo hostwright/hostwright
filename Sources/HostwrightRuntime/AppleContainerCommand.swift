@@ -180,6 +180,22 @@ public enum AppleContainerCommand {
         mutationContext: RuntimeMutationContext,
         resourceIdentifier: String? = nil
     ) throws -> [String] {
+        try arguments(
+            for: kind,
+            desiredService: desiredService,
+            mutationContext: mutationContext,
+            resourceIdentifier: resourceIdentifier,
+            codec: .v1_1_0
+        )
+    }
+
+    public static func arguments(
+        for kind: MutatingKind,
+        desiredService: DesiredRuntimeService,
+        mutationContext: RuntimeMutationContext,
+        resourceIdentifier: String? = nil,
+        codec: AppleContainerCLICodec
+    ) throws -> [String] {
         switch kind {
         case .createContainer:
             let resourceIdentifier =
@@ -237,7 +253,7 @@ public enum AppleContainerCommand {
                 }
             }
             for mount in desiredService.mounts.sorted(by: stableMountOrdering) {
-                arguments += ["--volume", volumeSpec(for: mount)]
+                arguments += try mountArguments(for: mount, codec: codec)
             }
             if desiredService.readOnlyRootFilesystem {
                 arguments.append("--read-only")
@@ -257,24 +273,6 @@ public enum AppleContainerCommand {
             return arguments
         case .startContainer, .stopForManagedRestart, .startForManagedRestart, .deleteContainer:
             return arguments(for: kind)
-        }
-    }
-
-    public static func arguments(
-        for kind: MutatingKind,
-        desiredService: DesiredRuntimeService,
-        mutationContext: RuntimeMutationContext,
-        resourceIdentifier: String? = nil,
-        codec: AppleContainerCLICodec
-    ) throws -> [String] {
-        switch codec {
-        case .v1_0_0, .v1_1_0:
-            return try arguments(
-                for: kind,
-                desiredService: desiredService,
-                mutationContext: mutationContext,
-                resourceIdentifier: resourceIdentifier
-            )
         }
     }
 
@@ -390,13 +388,56 @@ public enum AppleContainerCommand {
         _ lhs: RuntimeMountReference,
         _ rhs: RuntimeMountReference
     ) -> Bool {
-        [lhs.source, lhs.target, lhs.access.rawValue].joined(separator: ":") <
-            [rhs.source, rhs.target, rhs.access.rawValue].joined(separator: ":")
+        [lhs.kind.rawValue, lhs.source, lhs.target, lhs.access.rawValue].joined(separator: ":") <
+            [rhs.kind.rawValue, rhs.source, rhs.target, rhs.access.rawValue].joined(separator: ":")
     }
 
-    private static func volumeSpec(for mount: RuntimeMountReference) -> String {
-        let base = "\(mount.source):\(mount.target)"
-        return mount.access == .readOnly ? "\(base):ro" : base
+    private static func mountArguments(
+        for mount: RuntimeMountReference,
+        codec: AppleContainerCLICodec
+    ) throws -> [String] {
+        switch mount.kind {
+        case .bind, .volume:
+            try validateMountComponent(mount.source, field: "bind source", forbidEquals: codec == .v1_1_0)
+            try validateMountComponent(mount.target, field: "bind target", forbidEquals: codec == .v1_1_0)
+            switch codec {
+            case .v1_0_0:
+                let base = "\(mount.source):\(mount.target)"
+                return ["--volume", mount.access == .readOnly ? "\(base):ro" : base]
+            case .v1_1_0:
+                var value = "type=bind,source=\(mount.source),target=\(mount.target)"
+                if mount.access == .readOnly {
+                    value += ",readonly"
+                }
+                return ["--mount", value]
+            }
+        case .tmpfs:
+            guard codec == .v1_1_0 else {
+                throw RuntimeAdapterError.mutationUnavailableByPolicy(
+                    "Apple container CLI 1.0.0 does not qualify tmpfs create arguments."
+                )
+            }
+            guard mount.mode == nil, mount.sizeBytes == nil else {
+                throw RuntimeAdapterError.mutationUnavailableByPolicy(
+                    "Apple container CLI tmpfs create accepts only target paths; tmpfs size and mode are unavailable."
+                )
+            }
+            try validateMountComponent(mount.target, field: "tmpfs target", forbidEquals: false)
+            return ["--tmpfs", mount.target]
+        }
+    }
+
+    private static func validateMountComponent(
+        _ value: String,
+        field: String,
+        forbidEquals: Bool
+    ) throws {
+        if value.contains(",") || value.contains("\n") || value.contains("\r") || (forbidEquals && value.contains("=")) {
+            throw RuntimeAdapterError.commandRejected(
+                classification: .mutating,
+                message: "Apple container CLI create rejects \(field) values containing mount delimiters."
+            )
+        }
     }
 
     private static func publishSpec(for port: RuntimePortMapping, hostPort: Int) -> String {

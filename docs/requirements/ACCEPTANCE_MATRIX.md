@@ -89,7 +89,7 @@ Phase 8A is a required preflight before this mutation gate. It proves real read-
 | --- | --- | --- | --- |
 | HW-CLI-009, HW-OBS-002, HW-OBS-003 | `status`, `logs`, and `events` render useful facts, use the secure selected state database when reading or persisting, and redact fake secrets. | Automated | CLI XCTest cases for status observation, logs redaction, and event rendering. |
 | HW-RECON-004, HW-RUNTIME-006 | `apply` executes exactly one restart-policy-allowed managed start and no other non-create action. | Automated + manual | Reconciler and CLI XCTest cases; runtime boundary scans. |
-| HW-SAFE-002, HW-SAFE-003, HW-STATE-005 | Cleanup requires ownership records, live observation, non-running lifecycle, dry-run token, and exact confirmation before delete. | Automated + manual | CLI cleanup XCTest case; review that no image/volume deletion exists. |
+| HW-SAFE-002, HW-SAFE-003, HW-STATE-005 | General cleanup requires ownership records, live observation, non-running lifecycle, dry-run token, and exact confirmation before container delete. Volume deletion remains a separate retain-by-default, policy- and confirmation-bound storage operation. | Automated + manual | CLI cleanup XCTest plus storage reclaim/orphan, fencing, SIGKILL recovery, and unmanaged-preservation suites. |
 | HW-RUNTIME-004, HW-RUNTIME-006 | Command policy rejects attach, interactive, all, force, stop, restart, remove, prune, pull, push, build, exec, run, unresolved, unknown, and forbidden specs. | Automated | Runtime XCTest cases for managed start/delete policies and fake/live runner validation. |
 | HW-REL-002 | Build and XCTest gates still pass after operability changes. | Automated | `swift build`, `swift test list`, `swift test`, `scripts/test.sh`. |
 

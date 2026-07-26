@@ -9,6 +9,13 @@ version: 2
 project: api-local
 imagePolicy: allow-tags
 
+volumes:
+  database-data:
+    provider: hostwright-local
+    capacity: 2GiB
+    accessMode: read-write-once
+    reclaimPolicy: retain
+
 services:
   api:
     image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
@@ -27,6 +34,10 @@ services:
     init: true
     ports:
       - "8080:8080"
+    volumes:
+      - type: volume
+        source: database-data
+        target: /var/lib/api
     env:
       APP_ENV: development
     secretEnv:
@@ -89,7 +100,7 @@ Hostwright pins Yams 6.2.2 only inside `HostwrightManifest` and applies its own 
 
 Duplicate keys are rejected at every level. Anchors, aliases, merge keys, custom tags, multiple documents, ambiguous scalar coercion, unknown fields, and limit violations fail with stable line, column, and manifest-path diagnostics. Canonical encoding uses fixed field order and lexically sorted maps; every checked-in manifest must satisfy parse → canonical encode → parse equality.
 
-The service schema accepts `image`, `replicas`, `platform`, `resources`, numeric `user` and `group`, `workdir`, `entrypoint`, `command`, `init`, `dependsOn`, `env`, `secretEnv`, `labels`, `ports`, bind `volumes`, `probes`, legacy `health`, `restart`, `update`, `hooks`, `rosetta`, `virtualization`, `readOnlyRootFilesystem`, and `shmSize`. No accepted field is inert: it maps to desired runtime behavior or fails before mutation when the selected provider cannot execute it.
+The top-level schema accepts exact named-volume declarations. The service schema accepts `image`, `replicas`, `platform`, `resources`, numeric `user` and `group`, `workdir`, `entrypoint`, `command`, `init`, `dependsOn`, `env`, `secretEnv`, `labels`, `ports`, typed bind/named-volume/tmpfs `volumes`, `probes`, legacy `health`, `restart`, `update`, `hooks`, `rosetta`, `virtualization`, `readOnlyRootFilesystem`, and `shmSize`. No accepted field is inert: it maps to desired runtime behavior or fails before mutation when the selected provider cannot execute it.
 
 Unsupported Kubernetes, Compose, or other orchestrator fields fail closed. This includes `apiVersion`, `kind`, `metadata`, `build`, `depends_on`, `deploy`, `networks`, `network_mode`, `dns`, `dns_search`, `domainname`, `hostname`, `extra_hosts`, `aliases`, `expose`, `configs`, and `secrets`.
 
@@ -120,7 +131,8 @@ Validation currently checks:
 - the same environment key must not appear in both `env` and `secretEnv`;
 - labels are bounded and cannot use the reserved `dev.hostwright.` ownership prefix;
 - ports use `"host:container"` with values from 1 to 65535; fixed localhost ports cannot collide or be shared by replicas;
-- volumes use `source:/absolute/container/path[:ro|rw]` and do not use host-root or parent-traversal sources;
+- named-volume declarations require normalized capacity, a supported provider, `read-write-once` or `read-only-many`, a declared reclaim policy, and non-reserved labels;
+- typed mounts use `bind`, `volume`, or `tmpfs`; bind sources cannot expose host root, devices, traversal, symlinks, or unsafe ownership, and named-volume sources must reference a declaration;
 - each probe declares exactly one `exec`, loopback `http`, or loopback `tcp` action with bounded timing and thresholds;
 - HTTP/TCP probes reference a declared container port;
 - restart policy is `no`, `on-failure`, or `unless-stopped`;
@@ -256,7 +268,7 @@ services:
 
 The policy is Manifest v2 only and requires `imagePolicy: require-digest`. Version is locked to `1`; `requirement` is `optional` or `required`; builder and build-type entries are unique bounded credential-free HTTPS or URN values; signer identifiers are unique; public-key paths are normalized absolute host paths; optional authority timestamps are RFC3339 and chronologically ordered. `maximumAgeSeconds` is between 60 seconds and one year. Canonical encoding sorts builders, build types, and signers, and unknown or duplicate fields fail closed. The policy and current signer material are bound into lifecycle confirmation. A required policy revalidates immutable schema-v14 evidence, the exact Gate 6 graph and referrer, DSSE signature, in-toto/SLSA subject and materials, signer authority, age, and optional reproducibility proof before execution and again during persisted recovery.
 
-The executable Manifest v2 contract does not expose a bind-address field. Hostwright-created runtime port publishes default to `127.0.0.1`. Phase 04 executes only existing bind mounts; named volumes fail before mutation with a Phase 06 diagnostic. DNS, custom networks, service aliases, ingress, and network policy fail before mutation and remain owned by Phase 07.
+The executable Manifest v2 contract does not expose a bind-address field. Hostwright-created runtime port publishes default to `127.0.0.1`. Existing bind mounts remain path- and policy-gated, and named volumes now execute through the exact Hostwright-owned Phase 06 storage lifecycle. DNS, custom networks, service aliases, ingress, and network policy still fail before mutation and remain owned by Phase 07.
 
 Typed probes never use a host shell. Exec probes cross the provider’s bounded process-control boundary. HTTP and TCP probes target only implicit container loopback and a declared service port; HTTP follows at most three same-origin loopback redirects. Startup gates readiness and liveness, readiness gates dependencies and rollout promotion, and liveness uses the existing bounded restart policy.
 

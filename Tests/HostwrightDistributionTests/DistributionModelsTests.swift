@@ -4,6 +4,55 @@ import HostwrightCore
 import XCTest
 
 final class DistributionModelsTests: XCTestCase {
+    func testInstallManifestPreservesPriorShippedLayoutAndEmitsCurrentLayout() throws {
+        let sourceCommit = String(repeating: "a", count: 40)
+        let prior = DistributionInstallManifest(
+            schemaVersion: 2,
+            artifactID:
+                "hostwright-0.0.2-macos-arm64-\(sourceCommit.prefix(12))",
+            sourceCommit: sourceCommit,
+            packageVersion: "0.0.2",
+            files: DistributionLayout.legacyPayloadModesV2.keys.sorted().map {
+                DistributionFileRecord(
+                    path: $0,
+                    sha256: String(repeating: "b", count: 64),
+                    sizeBytes: 1,
+                    mode: DistributionLayout.legacyPayloadModesV2[$0]!
+                )
+            },
+            createdDirectories: []
+        )
+        XCTAssertNoThrow(try prior.validate())
+
+        let current = DistributionInstallManifest(
+            artifact: DistributionArtifactManifest(
+                artifactID:
+                    "hostwright-0.0.2-macos-arm64-\(sourceCommit.prefix(12))",
+                packageVersion: "0.0.2",
+                sourceCommit: sourceCommit,
+                sourceDirty: false,
+                architecture: "arm64",
+                createdAt: "2026-07-25T12:00:00Z",
+                files: DistributionLayout.payloadModes.keys.sorted().map {
+                    DistributionFileRecord(
+                        path: $0,
+                        sha256: String(repeating: "c", count: 64),
+                        sizeBytes: 1,
+                        mode: DistributionLayout.payloadModes[$0]!
+                    )
+                }
+            ),
+            createdDirectories: []
+        )
+        XCTAssertEqual(current.schemaVersion, 3)
+        XCTAssertNoThrow(try current.validate())
+        XCTAssertTrue(
+            current.files.contains {
+                $0.path == "bin/hostwright-storage-helper"
+            }
+        )
+    }
+
     private let commit = String(repeating: "a", count: 40)
     private let digest = String(repeating: "b", count: 64)
 

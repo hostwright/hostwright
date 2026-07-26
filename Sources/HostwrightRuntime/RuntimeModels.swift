@@ -198,15 +198,45 @@ public enum RuntimeMountAccess: String, Equatable, Sendable {
     case unknown
 }
 
+public enum RuntimeMountKind: String, Equatable, Sendable {
+    case bind
+    case volume
+    case tmpfs
+}
+
 public struct RuntimeMountReference: Equatable, Sendable {
     public let source: String
     public let target: String
+    public let kind: RuntimeMountKind
     public let access: RuntimeMountAccess
+    public let mode: String?
+    public let sizeBytes: UInt64?
 
-    public init(source: String, target: String, access: RuntimeMountAccess = .unknown) {
+    public init(
+        source: String,
+        target: String,
+        kind: RuntimeMountKind = .bind,
+        access: RuntimeMountAccess = .unknown,
+        mode: String? = nil,
+        sizeBytes: UInt64? = nil
+    ) {
         self.source = source
         self.target = target
+        self.kind = kind
         self.access = access
+        self.mode = mode
+        self.sizeBytes = sizeBytes
+    }
+
+    public init(source: String, target: String, access: RuntimeMountAccess = .unknown) {
+        self.init(
+            source: source,
+            target: target,
+            kind: .bind,
+            access: access,
+            mode: nil,
+            sizeBytes: nil
+        )
     }
 }
 

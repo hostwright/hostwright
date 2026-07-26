@@ -22,6 +22,7 @@ public enum DistributionLayout {
         "hostwright",
         "hostwright-control",
         "hostwright-containerization-helper",
+        "hostwright-storage-helper",
         "hostwright-dist",
         "hostwrightd"
     ]
@@ -34,11 +35,24 @@ public enum DistributionLayout {
         "share/doc/hostwright/LICENSE": 0o644,
         "share/doc/hostwright/README.md": 0o644
     ]
+    static let legacyPayloadModesV2: [String: Int] = [
+        "bin/hostwright": 0o755,
+        "bin/hostwright-control": 0o755,
+        "bin/hostwright-containerization-helper": 0o755,
+        "bin/hostwright-dist": 0o755,
+        "bin/hostwrightd": 0o755,
+        "share/hostwright/examples/hostwright.yaml": 0o644,
+        "share/doc/hostwright/LICENSE": 0o644,
+        "share/doc/hostwright/README.md": 0o644
+    ].merging(DistributionContainerizationAssets.payloadModes) { _, _ in
+        preconditionFailure("duplicate legacy distribution payload path")
+    }
 
     public static let payloadModes: [String: Int] = [
         "bin/hostwright": 0o755,
         "bin/hostwright-control": 0o755,
         "bin/hostwright-containerization-helper": 0o755,
+        "bin/hostwright-storage-helper": 0o755,
         "bin/hostwright-dist": 0o755,
         "bin/hostwrightd": 0o755,
         "share/hostwright/examples/hostwright.yaml": 0o644,
@@ -767,7 +781,7 @@ public struct DistributionInstallManifest: Codable, Equatable, Sendable {
     public let createdDirectories: [String]
 
     public init(artifact: DistributionArtifactManifest, createdDirectories: [String]) {
-        self.schemaVersion = 2
+        self.schemaVersion = 3
         self.artifactID = artifact.artifactID
         self.sourceCommit = artifact.sourceCommit
         self.packageVersion = artifact.packageVersion
@@ -797,6 +811,8 @@ public struct DistributionInstallManifest: Codable, Equatable, Sendable {
         case 1:
             expectedModes = DistributionLayout.legacyPayloadModesV1
         case 2:
+            expectedModes = DistributionLayout.legacyPayloadModesV2
+        case 3:
             expectedModes = DistributionLayout.payloadModes
         default:
             throw DistributionError.invalidManifest("install ownership manifest schema is unsupported")

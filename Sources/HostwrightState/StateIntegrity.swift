@@ -627,11 +627,15 @@ public struct StateIntegrityService: Sendable {
             let invalidImageProvenanceContent =
                 try ImageProvenanceRepository
                     .invalidStoredRecordCount(on: connection)
+            let invalidStorageContent =
+                try StorageStateRepository
+                    .invalidStoredRecordCount(on: connection)
             let authoritativeProblems = sqlAuthoritativeProblems +
                 invalidIdentityProblems + invalidReferrerContent +
                 invalidImageTrustContent + invalidImageSBOMContent +
                 invalidImageVulnerabilityContent +
-                invalidImageProvenanceContent
+                invalidImageProvenanceContent +
+                invalidStorageContent
             if authoritativeProblems == 0 {
                 checks.append(.init(identifier: "hostwright.authoritative-records", status: .passed, message: "Authoritative state records satisfy the v\(MigrationRunner.latestSchemaVersion) logical contract."))
             } else {
@@ -1756,7 +1760,16 @@ public struct StateIntegrityService: Sendable {
         "image_provenance_records",
         "content_cache_objects",
         "content_cache_references",
-        "content_cache_leases"
+        "content_cache_leases",
+        "storage_volumes",
+        "storage_attachments",
+        "storage_snapshots",
+        "storage_backups",
+        "storage_holds",
+        "storage_orphans",
+        "storage_capacity_samples",
+        "storage_quotas",
+        "storage_capacity_admissions"
     ]
 
     private static let requiredIndexes = [
@@ -1815,6 +1828,29 @@ public struct StateIntegrityService: Sendable {
         "content_cache_references_operation_idx",
         "content_cache_leases_digest_active_idx",
         "content_cache_leases_reference_active_idx",
-        "content_cache_leases_owner_active_idx"
+        "content_cache_leases_owner_active_idx",
+        "storage_volumes_provider_idx",
+        "storage_volumes_project_idx",
+        "storage_volumes_topology_idx",
+        "storage_volumes_operation_idx",
+        "storage_attachments_volume_idx",
+        "storage_attachments_operation_idx",
+        "storage_attachments_lease_idx",
+        "storage_attachments_single_writer_idx",
+        "storage_attachments_holder_active_idx",
+        "storage_snapshots_source_idx",
+        "storage_snapshots_operation_idx",
+        "storage_backups_volume_idx",
+        "storage_backups_operation_idx",
+        "storage_holds_resource_idx",
+        "storage_holds_active_idx",
+        "storage_orphans_provider_idx",
+        "storage_orphans_operation_idx",
+        "storage_capacity_samples_latest_idx",
+        "storage_capacity_samples_operation_idx",
+        "storage_quotas_resource_idx",
+        "storage_quotas_operation_idx",
+        "storage_capacity_admissions_operation_idx",
+        "storage_capacity_admissions_sample_idx"
     ]
 }

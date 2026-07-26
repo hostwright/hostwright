@@ -69,6 +69,24 @@ final class RuntimeCreateSubsetPolicyTests: XCTestCase {
         )
     }
 
+    func testAppleContainerCLIAcceptsTmpfsWithoutUnsupportedMetadata() {
+        XCTAssertNoThrow(
+            try RuntimeCreateSubsetPolicy.validate(
+                makeService(
+                    mounts: [
+                        RuntimeMountReference(
+                            source: "tmpfs",
+                            target: "/tmp",
+                            kind: .tmpfs,
+                            access: .readWrite
+                        )
+                    ]
+                ),
+                providerID: .appleContainerCLI
+            )
+        )
+    }
+
     func testAppleContainerCLIRejectsInvalidPlatformAndPortCombinations() {
         let cases: [(String, DesiredRuntimeService)] = [
             (
@@ -109,6 +127,34 @@ final class RuntimeCreateSubsetPolicyTests: XCTestCase {
                             hostPort: 18_080,
                             containerPort: 65_536,
                             bindAddress: "127.0.0.1"
+                        )
+                    ]
+                )
+            ),
+            (
+                "tmpfs-mode",
+                makeService(
+                    mounts: [
+                        RuntimeMountReference(
+                            source: "tmpfs",
+                            target: "/tmp",
+                            kind: .tmpfs,
+                            access: .readWrite,
+                            mode: "1777"
+                        )
+                    ]
+                )
+            ),
+            (
+                "tmpfs-size",
+                makeService(
+                    mounts: [
+                        RuntimeMountReference(
+                            source: "tmpfs",
+                            target: "/tmp",
+                            kind: .tmpfs,
+                            access: .readWrite,
+                            sizeBytes: 65_536
                         )
                     ]
                 )

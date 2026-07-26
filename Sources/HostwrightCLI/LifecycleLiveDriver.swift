@@ -7,6 +7,53 @@ import HostwrightRegistry
 import HostwrightRuntime
 import HostwrightSecrets
 import HostwrightState
+import HostwrightStorage
+
+func lifecycleStorageQuiescenceProof(
+    inventory: RuntimeInventory,
+    preparation: LifecycleCommandPreparation,
+    compiled: LifecycleCompiledCommand
+) throws -> StorageRuntimeQuiescenceProof {
+    let workloadUUIDs = Set(
+        compiled.plan.nodes.map(\.resourceUUID)
+    )
+    for workloadUUID in workloadUUIDs.sorted() {
+        let matches = inventory.containers.filter {
+            $0.ownership?.resourceUUID == workloadUUID
+        }
+        guard matches.count <= 1 else {
+            throw HostwrightDiagnostic(
+                code: .storageConflict,
+                message:
+                    "Runtime quiescence found duplicate holders for workload \(workloadUUID); no attachment fence was advanced."
+            )
+        }
+        guard let container = matches.first else {
+            continue
+        }
+        guard let ownership = container.ownership,
+              ownership.projectUUID ==
+                preparation.projectResourceUUID,
+              ownership.projectGeneration ==
+                preparation.projectGeneration,
+              ownership.providerID == preparation.providerID,
+              ownership.providerGeneration ==
+                preparation.providerGeneration,
+              [.created, .stopped, .exited].contains(
+                  container.lifecycle
+              ) else {
+            throw HostwrightDiagnostic(
+                code: .storageConflict,
+                message:
+                    "Workload \(workloadUUID) is still active or has conflicting runtime authority; no attachment fence was advanced."
+            )
+        }
+    }
+    return try StorageRuntimeQuiescenceProof(
+        observationSHA256: inventory.semanticSHA256,
+        workloadUUIDs: workloadUUIDs
+    )
+}
 
 struct LifecycleLiveDriver: LifecycleCommandDriving {
     let environment: CLIEnvironment
@@ -32,10 +79,6 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
             text: manifestText,
             manifest: manifest
         )
-        let mapping = ManifestRuntimeMapper.map(
-            manifest,
-            bindMountBaseDirectory: manifestBaseDirectory(for: options.manifestPath)
-        )
         let store = SQLiteStateStore(
             configuration: try hostwrightStateStoreConfiguration(
                 explicitPath: options.stateDatabasePath,
@@ -44,8 +87,24 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
         )
         try store.migrate()
 
-        let projectName = mapping.desiredState.projectName
+        let projectName = manifest.project ?? ""
         let projectID = "project-\(projectName)"
+        let initialProjectResourceUUID = try currentProjectResourceUUID(
+            store: store,
+            projectID: projectID,
+            fallbackBindings: []
+        )
+        var mapping = ManifestRuntimeMapper.map(
+            manifest,
+            bindMountBaseDirectory:
+                manifestBaseDirectory(for: options.manifestPath),
+            namedVolumeSources:
+                StorageLifecycleCoordinator.namedVolumeSources(
+                    manifest: manifest,
+                    projectResourceUUID: initialProjectResourceUUID,
+                    providerRootURL: environment.storageProviderRootURL()
+                )
+        )
         let selectedProvider = try hostwrightSelectRuntimeProvider(
             requested: options.runtimeProvider,
             store: store,
@@ -59,12 +118,37 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
             projectID: projectID,
             providerID: providerID
         )
-        let resourceBindings = try lifecycleBindings(
+        var resourceBindings = try lifecycleBindings(
             store: store,
             projectID: projectID,
             providerID: providerID,
             desiredState: mapping.desiredState
         )
+        let projectResourceUUID = try currentProjectResourceUUID(
+            store: store,
+            projectID: projectID,
+            fallbackBindings: resourceBindings
+        )
+        if projectResourceUUID != initialProjectResourceUUID {
+            mapping = ManifestRuntimeMapper.map(
+                manifest,
+                bindMountBaseDirectory:
+                    manifestBaseDirectory(for: options.manifestPath),
+                namedVolumeSources:
+                    StorageLifecycleCoordinator.namedVolumeSources(
+                        manifest: manifest,
+                        projectResourceUUID: projectResourceUUID,
+                        providerRootURL:
+                            environment.storageProviderRootURL()
+                    )
+            )
+            resourceBindings = try lifecycleBindings(
+                store: store,
+                projectID: projectID,
+                providerID: providerID,
+                desiredState: mapping.desiredState
+            )
+        }
         let previousDesiredState = try lifecycleHealthyDesiredState(
             store: store,
             projectID: projectID,
@@ -99,11 +183,6 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
         let inventory = try hostwrightWaitForAsync {
             try await adapter.inventory()
         }
-        let projectResourceUUID = try currentProjectResourceUUID(
-            store: store,
-            projectID: projectID,
-            fallbackBindings: resourceBindings
-        )
         let projectGeneration = max(
             resourceBindings.map(\.projectGeneration).max() ?? 1,
             1
@@ -228,6 +307,26 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
             store: store,
             manifest: validated.manifest
         )
+        let storageReconciliation:
+            StorageLifecycleReconciliationResult?
+        if lifecycleRequiresNamedVolumeProvisioning(
+            compiled.plan.command
+        ) {
+            storageReconciliation = try hostwrightWaitForAsync {
+                try await StorageLifecycleCoordinator
+                    .reconcileNamedVolumes(
+                        manifest: validated.manifest,
+                        preparation: preparation,
+                        compiled: compiled,
+                        planSHA256: compiled.plan.planSHA256,
+                        timeoutSeconds: options.timeoutSeconds,
+                        store: store,
+                        environment: environment
+                    )
+            }
+        } else {
+            storageReconciliation = nil
+        }
         let now = hostwrightTimestamp()
         let recoverySnapshot: DesiredStateRecoverySnapshot?
         if compiled.plan.command == .update {
@@ -327,7 +426,111 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
                 store: store
             )
         }
+        let manifestDeclaresNamedVolumes =
+            !validated.manifest.volumes.isEmpty
+        if result.status == .succeeded ||
+            result.status == .alreadySucceeded {
+            if manifestDeclaresNamedVolumes &&
+                lifecycleRequiresNamedVolumeDetach(
+                compiled.plan.command
+                ) {
+                let quiescenceProof = try hostwrightWaitForAsync {
+                    try lifecycleStorageQuiescenceProof(
+                        inventory: try await adapter.inventory(),
+                        preparation: preparation,
+                        compiled: compiled
+                    )
+                }
+                try hostwrightWaitForAsync {
+                    try await StorageLifecycleCoordinator
+                        .detachNamedVolumes(
+                            preparation: preparation,
+                            compiled: compiled,
+                            planSHA256:
+                                compiled.plan.planSHA256,
+                            timeoutSeconds:
+                                options.timeoutSeconds,
+                            quiescenceProof:
+                                quiescenceProof,
+                            store: store,
+                            environment: environment
+                        )
+                }
+            }
+            if manifestDeclaresNamedVolumes &&
+                compiled.plan.command == .remove {
+                try hostwrightWaitForAsync {
+                    try await StorageLifecycleCoordinator
+                        .applyReclaimPolicies(
+                            manifest: validated.manifest,
+                            preparation: preparation,
+                            planSHA256:
+                                compiled.plan.planSHA256,
+                            timeoutSeconds:
+                                options.timeoutSeconds,
+                            stateDatabasePath:
+                                options.stateDatabasePath,
+                            output: options.output,
+                            environment: environment
+                        )
+                }
+            }
+        } else if result.status == .compensated,
+                  manifestDeclaresNamedVolumes,
+                  let storageReconciliation,
+                  !storageReconciliation
+                    .newlyAttachedIDs.isEmpty {
+            let quiescenceProof = try hostwrightWaitForAsync {
+                try lifecycleStorageQuiescenceProof(
+                    inventory: try await adapter.inventory(),
+                    preparation: preparation,
+                    compiled: compiled
+                )
+            }
+            try hostwrightWaitForAsync {
+                try await StorageLifecycleCoordinator
+                    .detachNamedVolumes(
+                        preparation: preparation,
+                        compiled: compiled,
+                        planSHA256:
+                            compiled.plan.planSHA256,
+                        timeoutSeconds:
+                            options.timeoutSeconds,
+                        quiescenceProof:
+                            quiescenceProof,
+                        onlyAttachmentIDs: Set(
+                            storageReconciliation
+                                .newlyAttachedIDs
+                        ),
+                        store: store,
+                        environment: environment
+                    )
+            }
+        }
         return result
+    }
+}
+
+private func lifecycleRequiresNamedVolumeProvisioning(
+    _ command: LifecycleCommand
+) -> Bool {
+    switch command {
+    case .up, .run, .start, .restart, .update, .apply:
+        true
+    case .down, .stop, .remove, .resume, .rollback:
+        false
+    }
+}
+
+private func lifecycleRequiresNamedVolumeDetach(
+    _ command: LifecycleCommand
+) -> Bool {
+    switch command {
+    case .down, .stop, .remove:
+        true
+    case .up, .run, .start, .restart, .update, .apply,
+         .resume, .rollback:
+        false
     }
 }
 
@@ -1400,9 +1603,10 @@ struct LifecyclePersistedRecoveryDriver {
         switch request.action {
         case .resume:
             guard sourceGroup.status == .interrupted ||
-                    isExpiredActive(sourceGroup) else {
+                    isExpiredActive(sourceGroup) ||
+                    isFailedSafeHold(sourceGroup) else {
                 throw LifecyclePersistedRecoveryError.unavailable(
-                    "Only an interrupted lifecycle operation or its exact expired active lease can be resumed."
+                    "Only an interrupted lifecycle operation, its exact expired active lease, or an exact failed safe-hold can be resumed."
                 )
             }
             let result = try await execute(
@@ -1416,7 +1620,8 @@ struct LifecyclePersistedRecoveryDriver {
                 recoveryStateJSONRedacted:
                     try recoverySnapshot.map(
                         lifecycleRecoveryStateJSONRedacted
-                    )
+                    ),
+                allowFailedSafeHoldResume: isFailedSafeHold(sourceGroup)
             )
             if let recoverySnapshot,
                result.status == .compensated ||
@@ -1639,6 +1844,21 @@ struct LifecyclePersistedRecoveryDriver {
             LifecycleSagaExecutionStatus.compensated.rawValue
     }
 
+    private func isFailedSafeHold(
+        _ group: OperationGroupRecord
+    ) -> Bool {
+        guard group.status == .failed,
+              group.checkpoint != "compensated",
+              let data = group.metadataJSONRedacted.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data)
+                as? [String: Any] else {
+            return false
+        }
+        return object["result"] as? String ==
+                LifecycleSagaExecutionStatus.safeHold.rawValue &&
+            object["planSHA256"] as? String == group.planHash
+    }
+
     private func isExpiredActive(_ group: OperationGroupRecord) -> Bool {
         guard group.status == .active,
               let lockExpiresAt = group.lockExpiresAt,
@@ -1656,7 +1876,8 @@ struct LifecyclePersistedRecoveryDriver {
         lockOwner: String,
         store: SQLiteStateStore,
         deadline: LifecycleRecoveryDeadline,
-        recoveryStateJSONRedacted: String? = nil
+        recoveryStateJSONRedacted: String? = nil,
+        allowFailedSafeHoldResume: Bool = false
     ) async throws -> LifecycleSagaExecutionResult {
         let desiredByNode = recoveryDesiredServices(plan: plan)
         try lifecyclePersistDesiredImageLocks(
@@ -1688,7 +1909,8 @@ struct LifecyclePersistedRecoveryDriver {
             operationID: operationID,
             groupID: groupID,
             fencingToken: fencingToken,
-            lockOwner: lockOwner
+            lockOwner: lockOwner,
+            allowFailedSafeHoldResume: allowFailedSafeHoldResume
         )
     }
 
@@ -1725,16 +1947,45 @@ struct LifecyclePersistedRecoveryDriver {
             plan: plan,
             desiredByNode: desiredByNode
         )
+        var ownedResourceHints = bindings.map {
+            RuntimeOwnedResourceHint(
+                resourceIdentifier: $0.resourceIdentifier,
+                identity: $0.identity,
+                identityVersion: $0.identityVersion,
+                ownership: $0.ownershipEvidence
+            )
+        }
+        for node in plan.nodes where node.action == .create {
+            guard let desired = desiredByNode[node.key] else { continue }
+            ownedResourceHints.removeAll {
+                $0.resourceIdentifier == node.resourceIdentifier ||
+                    $0.ownership?.resourceUUID == node.resourceUUID
+            }
+            ownedResourceHints.append(
+                RuntimeOwnedResourceHint(
+                    resourceIdentifier:
+                        node.resourceIdentifier ??
+                        desired.identity.managedResourceIdentifier,
+                    identity: desired.identity,
+                    identityVersion:
+                        RuntimeManagedResourceIdentity.currentVersion,
+                    ownership: RuntimeInventoryOwnershipEvidence(
+                        resourceUUID: node.resourceUUID,
+                        projectUUID: plan.projectResourceUUID,
+                        resourceGeneration: node.resourceGeneration,
+                        projectGeneration: plan.projectGeneration,
+                        providerID: plan.providerID,
+                        providerGeneration: plan.providerGeneration,
+                        fencingToken: node.fencingToken
+                    )
+                )
+            )
+        }
         let desiredState = DesiredRuntimeState(
             projectName: plan.projectName,
             services: desiredServices,
-            ownedResourceHints: bindings.map {
-                RuntimeOwnedResourceHint(
-                    resourceIdentifier: $0.resourceIdentifier,
-                    identity: $0.identity,
-                    identityVersion: $0.identityVersion,
-                    ownership: $0.ownershipEvidence
-                )
+            ownedResourceHints: ownedResourceHints.sorted {
+                $0.resourceIdentifier < $1.resourceIdentifier
             }
         )
         let observed = try await deadline.run {
@@ -2348,6 +2599,29 @@ struct LifecycleLiveValidator: LifecycleSagaContextValidating {
             (node.action == .create || node.action == .validate) &&
             record == nil &&
             containers.isEmpty
+        let absentReplacementCandidate =
+            node.action == .create &&
+            containers.isEmpty &&
+            record.map {
+                $0.resourceIdentifier == node.resourceIdentifier &&
+                    $0.resourceUUID == node.resourceUUID &&
+                    $0.resourceGeneration + 1 ==
+                        node.resourceGeneration &&
+                    $0.projectResourceUUID ==
+                        plan.projectResourceUUID &&
+                    $0.projectGeneration == plan.projectGeneration &&
+                    $0.providerGeneration == plan.providerGeneration &&
+                    RuntimeProviderBinding.stableID(
+                        for: $0.runtimeAdapter
+                    ) == plan.providerID &&
+                    binding?.resourceIdentifier ==
+                        $0.resourceIdentifier &&
+                    binding?.resourceUUID == $0.resourceUUID &&
+                    binding?.resourceGeneration ==
+                        $0.resourceGeneration &&
+                    binding?.currentFencingToken ==
+                        $0.fencingToken
+            } == true
         let absentVerifiedInverse =
             node.compensation?.action == .create &&
             record == nil &&
@@ -2389,6 +2663,7 @@ struct LifecycleLiveValidator: LifecycleSagaContextValidating {
             fencingToken: expectedFencingToken,
             ownershipVerified:
                 absentCandidate ||
+                absentReplacementCandidate ||
                 absentVerifiedInverse ||
                 absentVerifiedRollbackCreate ||
                 (stateOwned && runtimeOwned)
@@ -2837,7 +3112,48 @@ struct LifecycleLiveEffects: LifecycleSagaEffects {
             )
         }
         do {
-            let desired = await state.desiredStateSnapshot()
+            var desired = await state.desiredStateSnapshot()
+            if node.action == .create {
+                let identity = await state.identity(
+                    for: node,
+                    projectName: context.plan.projectName
+                )
+                var hints = desired.ownedResourceHints.filter {
+                    $0.resourceIdentifier != node.resourceIdentifier &&
+                        $0.ownership?.resourceUUID != node.resourceUUID
+                }
+                hints.append(
+                    RuntimeOwnedResourceHint(
+                        resourceIdentifier:
+                            node.resourceIdentifier ??
+                            identity.managedResourceIdentifier,
+                        identity: identity,
+                        identityVersion:
+                            RuntimeManagedResourceIdentity.currentVersion,
+                        ownership: RuntimeInventoryOwnershipEvidence(
+                            resourceUUID: node.resourceUUID,
+                            projectUUID:
+                                context.plan.projectResourceUUID,
+                            resourceGeneration:
+                                node.resourceGeneration,
+                            projectGeneration:
+                                context.plan.projectGeneration,
+                            providerID: context.plan.providerID,
+                            providerGeneration:
+                                context.plan.providerGeneration,
+                            fencingToken: context.fencingToken
+                        )
+                    )
+                )
+                desired = DesiredRuntimeState(
+                    projectName: desired.projectName,
+                    services: desired.services,
+                    ownedResourceHints: hints.sorted {
+                        $0.resourceIdentifier <
+                            $1.resourceIdentifier
+                    }
+                )
+            }
             let inventory = try await adapter.inventory()
             let observed = try await adapter.observe(desiredState: desired)
             guard observed.adapterMetadata?.providerID == context.plan.providerID,
@@ -6585,6 +6901,7 @@ func lifecyclePlanFence(
     HostwrightResourceUUID.legacy(
         kind: "lifecycle-fence",
         identifier: [
+            "compiler-v2",
             command.rawValue,
             manifestSHA256,
             observationSHA256,

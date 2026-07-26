@@ -1487,6 +1487,11 @@ public struct AppleContainerizationRuntimeAdapter: RuntimeAdapter {
                     "Containerization create requires the supported local-image lifecycle subset."
                 )
             }
+            guard service.mounts.isEmpty else {
+                throw RuntimeAdapterError.mutationUnavailableByPolicy(
+                    "Containerization 0.35.0 create does not execute mounts; remove mounts or select the Apple CLI provider before mutation."
+                )
+            }
             try RuntimeCreateSubsetPolicy.validate(service, providerID: .appleContainerization)
             let image = try await localImageEvidence(for: service.image)
             if let lock = service.imageLock {

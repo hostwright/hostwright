@@ -66,6 +66,9 @@ final class ManifestV2StrictTests: XCTestCase {
             """
             version: 2
             project: demo
+            volumes:
+              cache-data:
+                capacity: 256MiB
             services:
               api:
                 image: local/demo:latest
@@ -200,6 +203,231 @@ final class ManifestV2StrictTests: XCTestCase {
         let migrated = try ManifestValidator.validated(preview.migratedManifest)
         XCTAssertEqual(migrated.services[0].probes.liveness?.action, .exec(["/usr/bin/check", "--ready"]))
         XCTAssertEqual(migrated.services[0].probes.liveness?.interval, 7)
+    }
+
+    func testTypedMountObjectsParseValidateAndRoundTripCanonically() throws {
+        let manifest = try ManifestValidator.validated(
+            """
+            version: 2
+            project: demo
+            volumes:
+              cache-data:
+                capacity: 256MiB
+            services:
+              api:
+                image: local/demo:latest
+                volumes:
+                  - type: bind
+                    source: ./data
+                    target: /data
+                    readOnly: true
+                  - type: volume
+                    source: cache-data
+                    target: /cache
+                  - type: tmpfs
+                    target: /tmp
+                    mode: "1777"
+                    size: 64MiB
+            """
+        )
+
+        let mounts = manifest.services[0].mounts
+        XCTAssertEqual(mounts.count, 3)
+        XCTAssertEqual(mounts[0], HostwrightMountSpec(kind: .bind, source: "./data", target: "/data", readOnly: true))
+        XCTAssertEqual(mounts[1], HostwrightMountSpec(kind: .volume, source: "cache-data", target: "/cache"))
+        XCTAssertEqual(mounts[2], HostwrightMountSpec(kind: .tmpfs, target: "/tmp", mode: "1777", size: "64MiB"))
+        let canonical = try ManifestCanonicalEncoder.encode(manifest)
+        XCTAssertEqual(try ManifestValidator.validated(canonical), manifest)
+    }
+
+    func testTypedMountObjectsRejectUnknownFieldsAndInvalidTmpfsMode() {
+        assertFailure(
+            """
+            version: 2
+            project: demo
+            services:
+              api:
+                image: local/demo:latest
+                volumes:
+                  - type: bind
+                    source: ./data
+                    target: /data
+                    mystery: true
+            """,
+            contains: "Unsupported service field 'mystery'",
+            path: "$.services.api.volumes[0].mystery"
+        )
+
+        assertFailure(
+            """
+            version: 2
+            project: demo
+            services:
+              api:
+                image: local/demo:latest
+                volumes:
+                  - type: tmpfs
+                    target: /tmp
+                    mode: "888"
+            """,
+            contains: "three- or four-digit octal string",
+            requireSource: false
+        )
+    }
+
+    func testTopLevelVolumesParseValidateAndRoundTripCanonically() throws {
+        let manifest = try ManifestValidator.validated(
+            """
+            version: 2
+            project: demo
+            volumes:
+              archive:
+                provider: acme.storage-v1
+                capacity: 2GiB
+                accessMode: read-only-many
+                reclaimPolicy: backup-before-delete
+                labels:
+                  com.example.tier: cold
+                  com.example.zone: z1
+              cache:
+                capacity: 512MiB
+            services:
+              api:
+                image: local/demo:latest
+                volumes:
+                  - type: volume
+                    source: cache
+                    target: /cache
+            """
+        )
+
+        XCTAssertEqual(
+            manifest.volumes["archive"],
+            HostwrightVolumeDeclaration(
+                provider: "acme.storage-v1",
+                capacity: "2GiB",
+                accessMode: .readOnlyMany,
+                reclaimPolicy: .backupBeforeDelete,
+                labels: [
+                    "com.example.tier": "cold",
+                    "com.example.zone": "z1"
+                ]
+            )
+        )
+        XCTAssertEqual(
+            manifest.volumes["cache"],
+            HostwrightVolumeDeclaration(capacity: "512MiB")
+        )
+        let canonical = try ManifestCanonicalEncoder.encode(manifest)
+        XCTAssertEqual(try ManifestValidator.validated(canonical), manifest)
+        XCTAssertLessThan(
+            try XCTUnwrap(canonical.range(of: #""archive":"#)?.lowerBound),
+            try XCTUnwrap(canonical.range(of: #""cache":"#)?.lowerBound)
+        )
+    }
+
+    func testTopLevelVolumesRejectUnsupportedFieldsInvalidValuesAndReservedLabels() {
+        assertFailure(
+            """
+            version: 2
+            project: demo
+            volumes:
+              cache:
+                capacity: 512MiB
+                mystery: true
+            services:
+              api:
+                image: local/demo:latest
+            """,
+            contains: "Unsupported top-level volume field 'mystery'",
+            path: "$.volumes.cache.mystery"
+        )
+        assertFailure(
+            """
+            version: 2
+            project: demo
+            volumes:
+              cache:
+                provider: Bad/Provider
+                capacity: 512MiB
+            services:
+              api:
+                image: local/demo:latest
+            """,
+            contains: "bounded stable provider ID",
+            requireSource: false
+        )
+        assertFailure(
+            """
+            version: 2
+            project: demo
+            volumes:
+              cache:
+                capacity: 0GiB
+            services:
+              api:
+                image: local/demo:latest
+            """,
+            contains: "capacity must be a normalized positive size",
+            requireSource: false
+        )
+        assertFailure(
+            """
+            version: 2
+            project: demo
+            volumes:
+              cache:
+                capacity: 512MiB
+                labels:
+                  dev.hostwright.owner: reserved
+            services:
+              api:
+                image: local/demo:latest
+            """,
+            contains: "reserved Hostwright ownership prefix",
+            requireSource: false
+        )
+    }
+
+    func testVolumeMountMustReferenceDeclaredTopLevelVolumeButUnusedDeclarationsAreAllowed() throws {
+        let valid = try ManifestValidator.validated(
+            """
+            version: 2
+            project: demo
+            volumes:
+              cache:
+                capacity: 512MiB
+              unused:
+                capacity: 1GiB
+            services:
+              api:
+                image: local/demo:latest
+                volumes:
+                  - type: volume
+                    source: cache
+                    target: /cache
+            """
+        )
+        XCTAssertEqual(Set(valid.volumes.keys), ["cache", "unused"])
+
+        assertFailure(
+            """
+            version: 2
+            project: demo
+            volumes:
+              cache:
+                capacity: 512MiB
+            services:
+              api:
+                image: local/demo:latest
+                volumes:
+                  - type: volume
+                    source: missing
+                    target: /cache
+            """,
+            contains: "must reference a declared top-level volume",
+            requireSource: false
+        )
     }
 
     func testSizeValidationAcceptsUInt64ByteBoundaries() {

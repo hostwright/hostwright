@@ -12,6 +12,7 @@ public struct HostwrightManifest: Equatable, Sendable {
     public var imageSBOM: HostwrightImageSBOMPolicy?
     public var imageVulnerability: HostwrightImageVulnerabilityPolicy?
     public var imageProvenance: HostwrightImageProvenancePolicy?
+    public var volumes: [String: HostwrightVolumeDeclaration]
     public var services: [HostwrightService]
 
     public var effectiveVersion: Int {
@@ -31,6 +32,7 @@ public struct HostwrightManifest: Equatable, Sendable {
             imageSBOM: nil,
             imageVulnerability: nil,
             imageProvenance: nil,
+            volumes: [:],
             services: services
         )
     }
@@ -44,6 +46,7 @@ public struct HostwrightManifest: Equatable, Sendable {
             imageSBOM: nil,
             imageVulnerability: nil,
             imageProvenance: nil,
+            volumes: [:],
             services: services
         )
     }
@@ -56,6 +59,7 @@ public struct HostwrightManifest: Equatable, Sendable {
         imageSBOM: HostwrightImageSBOMPolicy?,
         imageVulnerability: HostwrightImageVulnerabilityPolicy? = nil,
         imageProvenance: HostwrightImageProvenancePolicy? = nil,
+        volumes: [String: HostwrightVolumeDeclaration] = [:],
         services: [HostwrightService]
     ) {
         self.version = version
@@ -65,6 +69,7 @@ public struct HostwrightManifest: Equatable, Sendable {
         self.imageSBOM = imageSBOM
         self.imageVulnerability = imageVulnerability
         self.imageProvenance = imageProvenance
+        self.volumes = volumes
         self.services = services
     }
 
@@ -82,6 +87,7 @@ public struct HostwrightManifest: Equatable, Sendable {
             imageSBOM: nil,
             imageVulnerability: nil,
             imageProvenance: nil,
+            volumes: [:],
             services: services
         )
     }
@@ -101,8 +107,46 @@ public struct HostwrightManifest: Equatable, Sendable {
             imageSBOM: nil,
             imageVulnerability: nil,
             imageProvenance: nil,
+            volumes: [:],
             services: services
         )
+    }
+}
+
+public enum HostwrightVolumeAccessMode: String, Equatable, Sendable {
+    case readWriteOnce = "read-write-once"
+    case readOnlyMany = "read-only-many"
+}
+
+public enum HostwrightVolumeReclaimPolicy: String, Equatable, Sendable {
+    case retain
+    case delete
+    case snapshotBeforeDelete = "snapshot-before-delete"
+    case backupBeforeDelete = "backup-before-delete"
+    case recycle
+}
+
+public struct HostwrightVolumeDeclaration: Equatable, Sendable {
+    public static let defaultProvider = "hostwright-local"
+
+    public var provider: String
+    public var capacity: String
+    public var accessMode: HostwrightVolumeAccessMode
+    public var reclaimPolicy: HostwrightVolumeReclaimPolicy
+    public var labels: [String: String]
+
+    public init(
+        provider: String = Self.defaultProvider,
+        capacity: String,
+        accessMode: HostwrightVolumeAccessMode = .readWriteOnce,
+        reclaimPolicy: HostwrightVolumeReclaimPolicy = .retain,
+        labels: [String: String] = [:]
+    ) {
+        self.provider = provider
+        self.capacity = capacity
+        self.accessMode = accessMode
+        self.reclaimPolicy = reclaimPolicy
+        self.labels = labels
     }
 }
 
@@ -350,6 +394,68 @@ public struct HostwrightImageProvenancePolicy: Equatable, Sendable {
     }
 }
 
+public enum HostwrightMountKind: String, Equatable, Sendable {
+    case bind
+    case volume
+    case tmpfs
+}
+
+public struct HostwrightMountSpec: Equatable, Sendable {
+    public var kind: HostwrightMountKind
+    public var source: String?
+    public var target: String
+    public var readOnly: Bool
+    public var mode: String?
+    public var size: String?
+    public var legacyLiteral: String?
+
+    public init(
+        kind: HostwrightMountKind,
+        source: String? = nil,
+        target: String,
+        readOnly: Bool = false,
+        mode: String? = nil,
+        size: String? = nil,
+        legacyLiteral: String? = nil
+    ) {
+        self.kind = kind
+        self.source = source
+        self.target = target
+        self.readOnly = readOnly
+        self.mode = mode
+        self.size = size
+        self.legacyLiteral = legacyLiteral
+    }
+
+    public var canonicalLegacyLiteral: String? {
+        switch kind {
+        case .bind, .volume:
+            guard let source else { return nil }
+            return readOnly ? "\(source):\(target):ro" : "\(source):\(target)"
+        case .tmpfs:
+            return nil
+        }
+    }
+
+    public static func legacy(_ value: String) -> HostwrightMountSpec? {
+        let parts = value.split(separator: ":", omittingEmptySubsequences: false)
+        guard parts.count == 2 || parts.count == 3,
+              !parts[0].isEmpty,
+              !parts[1].isEmpty else {
+            return nil
+        }
+        let source = String(parts[0])
+        let kind: HostwrightMountKind = (source.hasPrefix("/") || source.hasPrefix(".")) ? .bind : .volume
+        return HostwrightMountSpec(
+            kind: kind,
+            source: source,
+            target: String(parts[1]),
+            readOnly: parts.count == 3 ? parts[2] == "ro" : false,
+            legacyLiteral: value
+        )
+    }
+}
+
 public struct HostwrightService: Equatable, Sendable {
     public var name: String
     public var image: String?
@@ -368,6 +474,7 @@ public struct HostwrightService: Equatable, Sendable {
     public var labels: [String: String]
     public var ports: [String]
     public var volumes: [String]
+    public var mounts: [HostwrightMountSpec]
     public var probes: HostwrightProbes
     public var health: HostwrightHealthCheck?
     public var restart: HostwrightRestart?
@@ -396,6 +503,7 @@ public struct HostwrightService: Equatable, Sendable {
         labels: [String: String] = [:],
         ports: [String] = [],
         volumes: [String] = [],
+        mounts: [HostwrightMountSpec] = [],
         probes: HostwrightProbes = HostwrightProbes(),
         health: HostwrightHealthCheck? = nil,
         restart: HostwrightRestart? = nil,
@@ -423,6 +531,7 @@ public struct HostwrightService: Equatable, Sendable {
         self.labels = labels
         self.ports = ports
         self.volumes = volumes
+        self.mounts = mounts.isEmpty ? volumes.compactMap(HostwrightMountSpec.legacy) : mounts
         self.probes = probes
         self.health = health
         self.restart = restart

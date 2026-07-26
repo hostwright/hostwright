@@ -420,6 +420,22 @@ final class TrustedReleaseTests: XCTestCase {
                 "--sign", fingerprint, "/private/tmp/release/bin/hostwright"
             ]
         )
+        XCTAssertEqual(
+            TrustedReleaseCodeSigningPolicy.signingArguments(
+                relativePath: "bin/hostwright-storage-helper",
+                binary: URL(
+                    fileURLWithPath:
+                        "/private/tmp/release/bin/hostwright-storage-helper"
+                ),
+                fingerprint: fingerprint,
+                entitlements: entitlements
+            ),
+            [
+                "--force", "--options", "runtime", "--timestamp",
+                "--sign", fingerprint,
+                "/private/tmp/release/bin/hostwright-storage-helper"
+            ]
+        )
 
         let plist = try XCTUnwrap(
             String(
@@ -587,8 +603,22 @@ final class TrustedReleaseTests: XCTestCase {
         XCTAssertTrue(formula.contains("class Hostwright < Formula"))
         XCTAssertTrue(formula.contains("sha256 \"\(manifest.archive.sha256)\""))
         XCTAssertTrue(formula.contains(
-            "%w[hostwright hostwright-control hostwright-containerization-helper hostwright-dist hostwrightd]"
+            """
+            executables = %w[
+                  hostwright
+                  hostwright-control
+                  hostwright-containerization-helper
+                  hostwright-storage-helper
+                  hostwright-dist
+                  hostwrightd
+                ]
+            """
         ))
+        XCTAssertTrue(formula.contains(
+            "storage_helper_version = shell_output(" +
+                "\"#{bin}/hostwright-storage-helper --version\").strip"
+        ))
+        XCTAssertTrue(formula.contains("assert_equal \"1.0.0\", storage_helper_version"))
         XCTAssertTrue(formula.contains("pkgshare.install \"share/hostwright/containerization\""))
         XCTAssertTrue(formula.contains("service do"))
         XCTAssertTrue(formula.contains("depends_on arch: :arm64"))

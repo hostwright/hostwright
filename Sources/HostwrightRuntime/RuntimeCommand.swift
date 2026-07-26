@@ -751,6 +751,8 @@ public enum RuntimeCommandPolicy {
         "--workdir",
         "--entrypoint",
         "--volume",
+        "--mount",
+        "--tmpfs",
         "--shm-size"
     ]
 
@@ -763,7 +765,6 @@ public enum RuntimeCommandPolicy {
 
     private static let rejectedCreateFlags: Set<String> = [
         "--rm",
-        "--mount",
         "--network",
         "--dns",
         "--privileged",

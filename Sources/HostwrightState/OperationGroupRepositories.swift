@@ -438,6 +438,123 @@ public struct OperationGroupRepository: Sendable {
         }
     }
 
+    public func resumeFailedSafeHold(
+        groupID: String,
+        expectedPlanHash: String,
+        expectedFencingToken: String,
+        lockOwner: String,
+        lockExpiresAt: String?,
+        updatedAt: String
+    ) throws -> OperationGroupRecord {
+        guard expectedPlanHash.range(
+            of: "^[a-f0-9]{64}$",
+            options: .regularExpression
+        ) != nil,
+        HostwrightResourceUUID.isValid(expectedFencingToken),
+        !lockOwner.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw StateStoreError.invalidRecord(
+                "Safe-hold resume requires an exact plan, fence, and lock owner."
+            )
+        }
+        let redactedOwner = RuntimeRedactionPolicy.default.redact(lockOwner)
+        return try store.withValidatedConnection { connection in
+            try connection.transaction {
+                let rows = try connection.query(
+                    """
+                    SELECT status, fencing_token, project_id, group_idempotency_key,
+                           plan_hash, checkpoint, metadata_json_redacted
+                    FROM operation_groups
+                    WHERE id = ?
+                    LIMIT 1
+                    """,
+                    bindings: [.text(groupID)]
+                )
+                guard rows.count == 1,
+                      rows[0][0] == OperationGroupStatus.failed.rawValue,
+                      rows[0][1] == expectedFencingToken.lowercased(),
+                      rows[0][4] == expectedPlanHash,
+                      rows[0][5] != "compensated",
+                      let groupIdempotencyKey = rows[0][3],
+                      let metadata = rows[0][6]?.data(using: .utf8),
+                      let object = try JSONSerialization.jsonObject(with: metadata)
+                        as? [String: Any],
+                      object["result"] as? String == "safe-hold",
+                      object["planSHA256"] as? String == expectedPlanHash else {
+                    throw StateStoreError.invalidRecord(
+                        "Only the exact fenced failed safe-hold can be resumed."
+                    )
+                }
+                let idempotencyConflicts = try connection.query(
+                    """
+                    SELECT id
+                    FROM operation_groups
+                    WHERE group_idempotency_key = ? AND status = 'active' AND id != ?
+                    LIMIT 1
+                    """,
+                    bindings: [.text(groupIdempotencyKey), .text(groupID)]
+                )
+                guard idempotencyConflicts.isEmpty else {
+                    throw StateStoreError.invalidRecord(
+                        "Another operation with the same idempotency key is active."
+                    )
+                }
+                if let projectID = rows[0][2] {
+                    let conflicts = try connection.query(
+                        """
+                        SELECT id
+                        FROM operation_groups
+                        WHERE project_id = ? AND status = 'active' AND id != ?
+                        LIMIT 1
+                        """,
+                        bindings: [.text(projectID), .text(groupID)]
+                    )
+                    guard conflicts.isEmpty else {
+                        throw StateStoreError.invalidRecord(
+                            "Another mutating operation is active for this project."
+                        )
+                    }
+                }
+                try connection.run(
+                    """
+                    UPDATE operation_groups
+                    SET status = 'active', lock_owner = ?, lock_expires_at = ?, updated_at = ?
+                    WHERE id = ? AND status = 'failed' AND plan_hash = ?
+                      AND fencing_token = ?
+                    """,
+                    bindings: [
+                        .text(redactedOwner),
+                        optionalText(lockExpiresAt),
+                        .text(updatedAt),
+                        .text(groupID),
+                        .text(expectedPlanHash),
+                        .text(expectedFencingToken.lowercased())
+                    ]
+                )
+                let loaded = try connection.query(
+                    """
+                    SELECT id, operation_id, group_kind, project_id, service_name,
+                           planned_action_type, status, group_idempotency_key, plan_hash,
+                           checkpoint, lock_owner, lock_expires_at, rollback_available,
+                           manual_recovery_hint_redacted, created_at, updated_at,
+                           metadata_json_redacted, fencing_token, intent_json_redacted,
+                           compensation_json_redacted, verification_json_redacted
+                    FROM operation_groups
+                    WHERE id = ?
+                    LIMIT 1
+                    """,
+                    bindings: [.text(groupID)]
+                )
+                guard let record = try loaded.first.map(operationGroupRecord(from:)),
+                      record.status == .active else {
+                    throw StateStoreError.invalidRecord(
+                        "Failed safe-hold resume lost the exact fenced transition."
+                    )
+                }
+                return record
+            }
+        }
+    }
+
     public func loadAll() throws -> [OperationGroupRecord] {
         try store.withValidatedConnection(readOnly: true) { connection in
             let rows = try connection.query(

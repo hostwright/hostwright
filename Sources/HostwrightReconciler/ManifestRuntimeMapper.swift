@@ -1,4 +1,5 @@
 import Foundation
+import HostwrightCore
 import HostwrightManifest
 import HostwrightNetworking
 import HostwrightRuntime
@@ -18,7 +19,8 @@ public enum ManifestRuntimeMapper {
     public static func map(
         _ manifest: HostwrightManifest,
         policy: PlanningPolicy = .default,
-        bindMountBaseDirectory: String? = nil
+        bindMountBaseDirectory: String? = nil,
+        namedVolumeSources: [String: String] = [:]
     ) -> ManifestRuntimeMappingResult {
         let projectName = manifest.project ?? ""
         var issues: [PlanIssue] = []
@@ -33,6 +35,7 @@ public enum ManifestRuntimeMapper {
                         projectName: projectName,
                         policy: policy,
                         bindMountBaseDirectory: bindMountBaseDirectory,
+                        namedVolumeSources: namedVolumeSources,
                         issues: &issues
                     )
                 }
@@ -50,6 +53,7 @@ public enum ManifestRuntimeMapper {
         projectName: String,
         policy: PlanningPolicy,
         bindMountBaseDirectory: String?,
+        namedVolumeSources: [String: String],
         issues: inout [PlanIssue]
     ) -> DesiredRuntimeService {
         let identity = RuntimeServiceIdentity(
@@ -58,11 +62,12 @@ public enum ManifestRuntimeMapper {
             instanceName: replicaIndex == 0 ? nil : "replica-\(replicaIndex)"
         )
         let ports = service.ports.compactMap { parsePort($0, identity: identity, issues: &issues) }
-        let mounts = service.volumes.compactMap {
+        let mounts = service.mounts.compactMap {
             parseMount(
                 $0,
                 identity: identity,
                 bindMountBaseDirectory: bindMountBaseDirectory,
+                namedVolumeSources: namedVolumeSources,
                 issues: &issues
             )
         }
@@ -216,66 +221,95 @@ public enum ManifestRuntimeMapper {
     }
 
     private static func parseMount(
-        _ value: String,
+        _ mount: HostwrightMountSpec,
         identity: RuntimeServiceIdentity,
         bindMountBaseDirectory: String?,
+        namedVolumeSources: [String: String],
         issues: inout [PlanIssue]
     ) -> RuntimeMountReference? {
-        let parts = value.split(separator: ":", omittingEmptySubsequences: false)
-        guard parts.count == 2 || parts.count == 3 else {
-            issues.append(
-                PlanIssue(
-                    kind: .ambiguousVolumeReference,
-                    severity: .blocker,
-                    identity: identity,
-                    message: "Volume '\(value)' cannot be mapped to a supported runtime mount.",
-                    stableDetailKey: value
+        let source = mount.source
+        switch mount.kind {
+        case .bind:
+            guard let source else {
+                issues.append(
+                    PlanIssue(
+                        kind: .ambiguousVolumeReference,
+                        severity: .blocker,
+                        identity: identity,
+                        message: "Bind mount requires an exact source path.",
+                        stableDetailKey: mount.target
+                    )
                 )
-            )
-            return nil
-        }
-
-        let access: RuntimeMountAccess
-        if parts.count == 3 {
-            switch parts[2] {
-            case "ro":
-                access = .readOnly
-            case "rw":
-                access = .readWrite
-            default:
-                access = .unknown
+                return nil
             }
-        } else {
-            access = .readWrite
-        }
-
-        let source = String(parts[0])
-        if !source.hasPrefix("/") && !source.hasPrefix(".") {
-            issues.append(
-                PlanIssue(
-                    kind: .unsupportedFeature,
-                    severity: .blocker,
-                    identity: identity,
-                    message: "Named volume '\(source)' requires the Phase 06 storage provider and is unavailable in Phase 04.",
-                    stableDetailKey: value
+            if HostwrightPathPolicy.isHostRootMountSource(source) {
+                issues.append(
+                    PlanIssue(
+                        kind: .unsafeVolumePath,
+                        severity: .blocker,
+                        identity: identity,
+                        message: "Bind mount source '\(source)' must not mount the host root.",
+                        stableDetailKey: source
+                    )
                 )
+                return nil
+            }
+            if HostwrightPathPolicy.containsParentDirectoryTraversal(source) {
+                issues.append(
+                    PlanIssue(
+                        kind: .unsafeVolumePath,
+                        severity: .blocker,
+                        identity: identity,
+                        message: "Bind mount source '\(source)' must not contain parent-directory traversal.",
+                        stableDetailKey: source
+                    )
+                )
+                return nil
+            }
+            let resolvedSource: String
+            if let bindMountBaseDirectory, !source.hasPrefix("/") {
+                resolvedSource = URL(
+                    fileURLWithPath: source,
+                    relativeTo: URL(fileURLWithPath: bindMountBaseDirectory, isDirectory: true)
+                ).standardizedFileURL.path
+            } else {
+                resolvedSource = source
+            }
+            return RuntimeMountReference(
+                source: resolvedSource,
+                target: mount.target,
+                access: mount.readOnly ? .readOnly : .readWrite
+            )
+        case .volume:
+            guard let name = mount.source,
+                  let resolvedSource = namedVolumeSources[name] else {
+                issues.append(
+                    PlanIssue(
+                        kind: .unsupportedFeature,
+                        severity: .blocker,
+                        identity: identity,
+                        message: "Named volume '\(mount.source ?? "")' is not resolved by the selected storage provider.",
+                        stableDetailKey: mount.source ?? mount.target
+                    )
+                )
+                return nil
+            }
+            return RuntimeMountReference(
+                source: resolvedSource,
+                target: mount.target,
+                kind: .volume,
+                access: mount.readOnly ? .readOnly : .readWrite
+            )
+        case .tmpfs:
+            return RuntimeMountReference(
+                source: "",
+                target: mount.target,
+                kind: .tmpfs,
+                access: mount.readOnly ? .readOnly : .readWrite,
+                mode: mount.mode,
+                sizeBytes: mount.size.flatMap(parseSizeBytes)
             )
         }
-        let resolvedSource: String
-        if let bindMountBaseDirectory,
-           !source.hasPrefix("/") {
-            resolvedSource = URL(
-                fileURLWithPath: source,
-                relativeTo: URL(fileURLWithPath: bindMountBaseDirectory, isDirectory: true)
-            ).standardizedFileURL.path
-        } else {
-            resolvedSource = source
-        }
-        return RuntimeMountReference(
-            source: resolvedSource,
-            target: String(parts[1]),
-            access: access
-        )
     }
 
     private static func parseSeconds(_ value: String?) -> Int? {

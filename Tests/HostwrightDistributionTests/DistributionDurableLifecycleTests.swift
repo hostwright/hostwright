@@ -1,6 +1,7 @@
 import Darwin
 import Foundation
 import HostwrightCore
+import HostwrightStorage
 @testable import HostwrightState
 @testable import HostwrightDistribution
 import XCTest
@@ -941,7 +942,7 @@ final class DistributionDurableLifecycleTests: XCTestCase {
 
             let repaired = try lifecycle.install(artifact: artifact, prefix: prefix)
             XCTAssertEqual(repaired.generation, 2)
-            XCTAssertEqual(repaired.installedManifest.schemaVersion, 2)
+            XCTAssertEqual(repaired.installedManifest.schemaVersion, 3)
             XCTAssertTrue(try DistributionFileSystem.isRegularNonSymlink(
                 prefix.appendingPathComponent("bin/hostwright-dist")
             ))
@@ -964,6 +965,128 @@ final class DistributionDurableLifecycleTests: XCTestCase {
             XCTAssertFalse(DistributionFileSystem.entryExists(
                 tamperedPrefix.appendingPathComponent(DistributionLayout.lifecycleDirectoryName)
             ))
+        }
+    }
+
+    func testSchemaTwoInstallationUpgradesRollsBackAndUninstallsExactly() throws {
+        try withTemporaryRoot { root in
+            let baseline = try makeVerifiedArtifact(
+                root: root,
+                name: "schema-two-baseline",
+                version: "0.0.1",
+                commit: String(repeating: "1", count: 40)
+            )
+            let candidate = try makeVerifiedArtifact(
+                root: root,
+                name: "schema-three-candidate",
+                version: "0.0.2",
+                commit: String(repeating: "2", count: 40)
+            )
+            let prefix = root.appendingPathComponent(
+                "schema-two-prefix",
+                isDirectory: true
+            )
+            try FileManager.default.createDirectory(
+                at: prefix,
+                withIntermediateDirectories: false
+            )
+            let lifecycle = DistributionInstalledLifecycle()
+            let initial = try lifecycle.install(
+                artifact: baseline,
+                prefix: prefix
+            )
+
+            let priorFiles = baseline.manifest.files.filter {
+                DistributionLayout.legacyPayloadModesV2[$0.path] != nil
+            }
+            let priorManifest = DistributionInstallManifest(
+                schemaVersion: 2,
+                artifactID: baseline.manifest.artifactID,
+                sourceCommit: baseline.manifest.sourceCommit,
+                packageVersion: baseline.manifest.packageVersion,
+                files: priorFiles,
+                createdDirectories: initial.installedManifest.createdDirectories
+            )
+            try priorManifest.validate()
+            try FileManager.default.removeItem(
+                at: prefix.appendingPathComponent(
+                    "bin/hostwright-storage-helper"
+                )
+            )
+            let installManifestURL = prefix.appendingPathComponent(
+                DistributionLayout.installManifestFileName
+            )
+            try FileManager.default.removeItem(at: installManifestURL)
+            try DistributionFileSystem.writeNewFile(
+                try DistributionJSON.encode(priorManifest),
+                to: installManifestURL,
+                mode: 0o644
+            )
+
+            let priorStatus = DistributionInstallationStatus(
+                installationID: initial.installationID,
+                generation: initial.generation,
+                prefix: initial.prefix,
+                installedManifest: priorManifest,
+                stateDatabasePath: initial.stateDatabasePath,
+                service: initial.service,
+                rollbackOperationID: nil,
+                updatedAt: initial.updatedAt
+            )
+            let statusURL = prefix
+                .appendingPathComponent(
+                    DistributionLayout.lifecycleDirectoryName,
+                    isDirectory: true
+                )
+                .appendingPathComponent(
+                    DistributionLayout.lifecycleStatusFileName
+                )
+            try FileManager.default.removeItem(at: statusURL)
+            try DistributionFileSystem.writeNewFile(
+                try DistributionJSON.encode(priorStatus),
+                to: statusURL,
+                mode: 0o600
+            )
+            XCTAssertEqual(
+                try lifecycle.inspect(prefix: prefix).status?.installedManifest
+                    .schemaVersion,
+                2
+            )
+
+            let upgraded = try lifecycle.install(
+                artifact: candidate,
+                prefix: prefix
+            )
+            XCTAssertEqual(upgraded.installedManifest.schemaVersion, 3)
+            XCTAssertTrue(try DistributionFileSystem.isRegularNonSymlink(
+                prefix.appendingPathComponent(
+                    "bin/hostwright-storage-helper"
+                )
+            ))
+
+            let rolledBack = try lifecycle.rollback(prefix: prefix)
+            XCTAssertEqual(rolledBack.installedManifest.schemaVersion, 2)
+            XCTAssertFalse(DistributionFileSystem.entryExists(
+                prefix.appendingPathComponent(
+                    "bin/hostwright-storage-helper"
+                )
+            ))
+
+            let removed = try lifecycle.uninstall(
+                prefix: prefix,
+                dataPolicy: .preserve
+            )
+            XCTAssertFalse(
+                removed.removedPaths.contains(
+                    "bin/hostwright-storage-helper"
+                )
+            )
+            XCTAssertEqual(
+                try FileManager.default.contentsOfDirectory(
+                    atPath: prefix.path
+                ),
+                []
+            )
         }
     }
 
@@ -2513,6 +2636,10 @@ final class DistributionDurableLifecycleTests: XCTestCase {
                 hostwrightBinary: binary,
                 hostwrightControlBinary: binary,
                 hostwrightContainerizationHelperBinary: binary,
+                hostwrightStorageHelperBinary: try storageHelperFixture(
+                    root: root,
+                    version: LocalStorageProviderContract.providerVersion
+                ),
                 hostwrightDistributionBinary: binary,
                 hostwrightDaemonBinary: binary,
                 containerizationAssets: try makeDistributionTestContainerizationAssets(at: fixture),
@@ -2535,6 +2662,43 @@ final class DistributionDurableLifecycleTests: XCTestCase {
                 isDirectory: true
             )
         )
+    }
+
+    private func storageHelperFixture(
+        root: URL,
+        version: String
+    ) throws -> URL {
+        let source = root.appendingPathComponent(
+            "storage-helper-fixture.swift"
+        )
+        let binary = root.appendingPathComponent(
+            "hostwright-storage-helper"
+        )
+        if DistributionFileSystem.entryExists(binary) {
+            return binary
+        }
+        let program = """
+        import Foundation
+        if Array(CommandLine.arguments.dropFirst()) == ["--version"] {
+            print("\(version)")
+        } else {
+            FileHandle.standardError.write(
+                Data("unsupported storage helper fixture command\\n".utf8)
+            )
+            exit(64)
+        }
+        """ + "\n"
+        try Data(program.utf8).write(
+            to: source,
+            options: .withoutOverwriting
+        )
+        let compile = Process()
+        compile.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
+        compile.arguments = ["swiftc", source.path, "-o", binary.path]
+        try compile.run()
+        compile.waitUntilExit()
+        XCTAssertEqual(compile.terminationStatus, 0)
+        return binary
     }
 
     private func makePackageStaging(

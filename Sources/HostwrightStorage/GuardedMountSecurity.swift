@@ -1,0 +1,7 @@
+import HostwrightRuntime
+
+public typealias GuardedMountSecurityError = HostwrightRuntime.GuardedMountSecurityError
+public typealias GuardedMountIdentity = HostwrightRuntime.GuardedMountIdentity
+public typealias GuardedMountPathComponent = HostwrightRuntime.GuardedMountPathComponent
+public typealias GuardedMountLease = HostwrightRuntime.GuardedMountLease
+public typealias GuardedMountSecurity = HostwrightRuntime.GuardedMountSecurity

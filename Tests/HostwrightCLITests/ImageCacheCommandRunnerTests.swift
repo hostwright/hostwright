@@ -94,6 +94,7 @@ final class ImageCacheCommandRunnerTests: XCTestCase {
                         RuntimeProviderID.appleContainerCLI.rawValue
                 ).first
             )
+            let acquiredAt = imageLifecycleTimestamp()
             let lease = try store.contentCache.acquireLease(
                 providerScope:
                     RuntimeProviderID.appleContainerCLI.rawValue,
@@ -101,14 +102,17 @@ final class ImageCacheCommandRunnerTests: XCTestCase {
                 mode: .shared,
                 ownerID: "test-export",
                 purpose: "test-export",
-                acquiredAt: "2026-07-25T00:00:00Z",
-                expiresAt: "2026-07-25T23:59:59Z"
+                acquiredAt: acquiredAt,
+                expiresAt: hostwrightTimestampAdding(
+                    seconds: 86_400,
+                    to: acquiredAt
+                )
             )
             defer {
                 _ = try? store.contentCache.releaseLease(
                     id: lease.id,
                     expectedFencingToken: lease.fencingToken,
-                    releasedAt: "2026-07-25T12:00:00Z"
+                    releasedAt: imageLifecycleTimestamp()
                 )
             }
 

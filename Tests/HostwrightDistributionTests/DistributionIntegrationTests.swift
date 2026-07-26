@@ -66,6 +66,8 @@ final class DistributionIntegrationTests: XCTestCase {
                 "--hostwright-control-binary", binaries.appendingPathComponent("hostwright-control").path,
                 "--hostwright-containerization-helper-binary",
                 binaries.appendingPathComponent("hostwright-containerization-helper").path,
+                "--hostwright-storage-helper-binary",
+                binaries.appendingPathComponent("hostwright-storage-helper").path,
                 "--hostwright-dist-binary", binaries.appendingPathComponent("hostwright-dist").path,
                 "--hostwrightd-binary", binaries.appendingPathComponent("hostwrightd").path,
                 "--containerization-asset-root", root.appendingPathComponent("unused-assets").path,
@@ -855,6 +857,8 @@ final class DistributionIntegrationTests: XCTestCase {
                 hostwrightControlBinary: binaries.appendingPathComponent("hostwright-control"),
                 hostwrightContainerizationHelperBinary: binaries
                     .appendingPathComponent("hostwright-containerization-helper"),
+                hostwrightStorageHelperBinary: binaries
+                    .appendingPathComponent("hostwright-storage-helper"),
                 hostwrightDistributionBinary: binaries.appendingPathComponent("hostwright-dist"),
                 hostwrightDaemonBinary: binaries.appendingPathComponent("hostwrightd"),
                 containerizationAssets: try makeDistributionTestContainerizationAssets(at: root),

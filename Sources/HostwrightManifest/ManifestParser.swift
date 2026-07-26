@@ -284,7 +284,7 @@ private struct ManifestNodeDecoder {
             path: "$",
             allowed: [
                 "version", "project", "imagePolicy", "imageTrust", "imageSBOM",
-                "imageVulnerability", "imageProvenance", "services"
+                "imageVulnerability", "imageProvenance", "volumes", "services"
             ]
         )
         let version = try values["version"].map(versionInteger)
@@ -313,6 +313,9 @@ private struct ManifestNodeDecoder {
         let imageProvenance = try values["imageProvenance"].map {
             try decodeImageProvenance($0, path: "$.imageProvenance")
         }
+        let volumes = try values["volumes"].map {
+            try decodeVolumeDeclarations($0, path: "$.volumes")
+        } ?? [:]
         let services = try values["services"].map(decodeServices) ?? []
         return HostwrightManifest(
             version: version,
@@ -322,7 +325,66 @@ private struct ManifestNodeDecoder {
             imageSBOM: imageSBOM,
             imageVulnerability: imageVulnerability,
             imageProvenance: imageProvenance,
+            volumes: volumes,
             services: services
+        )
+    }
+
+    private func decodeVolumeDeclarations(
+        _ node: Node,
+        path: String
+    ) throws -> [String: HostwrightVolumeDeclaration] {
+        var result: [String: HostwrightVolumeDeclaration] = [:]
+        for pair in try rawMapping(node, path: path) {
+            let name = try keyString(pair.key, path: path)
+            result[name] = try decodeVolumeDeclaration(pair.value, path: "\(path).\(name)")
+        }
+        return result
+    }
+
+    private func decodeVolumeDeclaration(
+        _ node: Node,
+        path: String
+    ) throws -> HostwrightVolumeDeclaration {
+        let values = try mapping(
+            node,
+            path: path,
+            allowed: ["provider", "capacity", "accessMode", "reclaimPolicy", "labels"]
+        )
+        let provider = try values["provider"].map { try string($0, path: "\(path).provider") }
+            ?? HostwrightVolumeDeclaration.defaultProvider
+        let capacity = try requiredString(
+            values["capacity"],
+            path: "\(path).capacity",
+            message: "Volume capacity is required."
+        )
+        let accessModeRaw = try values["accessMode"].map { try string($0, path: "\(path).accessMode") }
+            ?? HostwrightVolumeAccessMode.readWriteOnce.rawValue
+        guard let accessMode = HostwrightVolumeAccessMode(rawValue: accessModeRaw) else {
+            throw ManifestParser.failure(
+                "Volume accessMode must be read-write-once or read-only-many.",
+                code: .manifestValidationFailed,
+                node: values["accessMode"],
+                path: "\(path).accessMode"
+            )
+        }
+        let reclaimPolicyRaw = try values["reclaimPolicy"].map { try string($0, path: "\(path).reclaimPolicy") }
+            ?? HostwrightVolumeReclaimPolicy.retain.rawValue
+        guard let reclaimPolicy = HostwrightVolumeReclaimPolicy(rawValue: reclaimPolicyRaw) else {
+            throw ManifestParser.failure(
+                "Volume reclaimPolicy must be retain, delete, snapshot-before-delete, backup-before-delete, or recycle.",
+                code: .manifestValidationFailed,
+                node: values["reclaimPolicy"],
+                path: "\(path).reclaimPolicy"
+            )
+        }
+        let labels = try values["labels"].map { try stringMap($0, path: "\(path).labels") } ?? [:]
+        return HostwrightVolumeDeclaration(
+            provider: provider,
+            capacity: capacity,
+            accessMode: accessMode,
+            reclaimPolicy: reclaimPolicy,
+            labels: labels
         )
     }
 
@@ -736,7 +798,9 @@ private struct ManifestNodeDecoder {
         let secretEnv = try values["secretEnv"].map { try secrets($0, path: "\(path).secretEnv") } ?? [:]
         let labels = try values["labels"].map { try stringMap($0, path: "\(path).labels") } ?? [:]
         let ports = try values["ports"].map { try strings($0, path: "\(path).ports") } ?? []
-        let volumes = try values["volumes"].map { try strings($0, path: "\(path).volumes") } ?? []
+        let decodedVolumes = try values["volumes"].map { try decodeMounts($0, path: "\(path).volumes") }
+        let volumes = decodedVolumes?.legacyVolumes ?? []
+        let mounts = decodedVolumes?.mounts ?? []
         let legacyHealth = try values["health"].map { try health($0, path: "\(path).health") }
         var probes = try values["probes"].map { try decodeProbes($0, path: "\(path).probes") } ?? HostwrightProbes()
         if let legacyHealth {
@@ -782,6 +846,7 @@ private struct ManifestNodeDecoder {
             labels: labels,
             ports: ports,
             volumes: volumes,
+            mounts: mounts,
             probes: probes,
             health: projectedHealth,
             restart: restart,
@@ -1009,6 +1074,97 @@ private struct ManifestNodeDecoder {
         }
     }
 
+    private func decodeMounts(
+        _ node: Node,
+        path: String
+    ) throws -> (legacyVolumes: [String], mounts: [HostwrightMountSpec]) {
+        guard case .sequence(let sequence) = node else {
+            throw ManifestParser.failure("Expected a sequence.", node: node, path: path)
+        }
+
+        var legacyVolumes: [String] = []
+        var mounts: [HostwrightMountSpec] = []
+        legacyVolumes.reserveCapacity(sequence.count)
+        mounts.reserveCapacity(sequence.count)
+
+        for (index, child) in sequence.enumerated() {
+            let itemPath = "\(path)[\(index)]"
+            if case .scalar = child {
+                let value = try string(child, path: itemPath)
+                legacyVolumes.append(value)
+                if let mount = HostwrightMountSpec.legacy(value) {
+                    mounts.append(mount)
+                }
+                continue
+            }
+
+            let mount = try decodeMount(child, path: itemPath)
+            mounts.append(mount)
+        }
+
+        return (legacyVolumes, mounts)
+    }
+
+    private func decodeMount(_ node: Node, path: String) throws -> HostwrightMountSpec {
+        let values = try mapping(
+            node,
+            path: path,
+            allowed: ["type", "source", "target", "readOnly", "mode", "size"]
+        )
+        let kindRaw = try requiredString(values["type"], path: "\(path).type", message: "Mount type is required.")
+        guard let kind = HostwrightMountKind(rawValue: kindRaw) else {
+            throw ManifestParser.failure(
+                "Mount type must be bind, volume, or tmpfs.",
+                code: .manifestValidationFailed,
+                node: values["type"],
+                path: "\(path).type"
+            )
+        }
+
+        let source = try values["source"].map { try string($0, path: "\(path).source") }
+        let target = try requiredString(values["target"], path: "\(path).target", message: "Mount target is required.")
+        let readOnly = try values["readOnly"].map { try boolean($0, path: "\(path).readOnly") } ?? false
+        let mode = try values["mode"].map { try string($0, path: "\(path).mode") }
+        let size = try values["size"].map { try string($0, path: "\(path).size") }
+
+        switch kind {
+        case .bind, .volume:
+            guard source != nil else {
+                throw ManifestParser.failure(
+                    "Mount source is required for \(kind.rawValue) mounts.",
+                    code: .manifestValidationFailed,
+                    path: "\(path).source"
+                )
+            }
+            if values["mode"] != nil || values["size"] != nil {
+                throw ManifestParser.failure(
+                    "\(kind.rawValue) mounts accept only type, source, target, and readOnly.",
+                    code: .manifestValidationFailed,
+                    node: node,
+                    path: path
+                )
+            }
+        case .tmpfs:
+            if values["source"] != nil {
+                throw ManifestParser.failure(
+                    "tmpfs mounts must not declare source.",
+                    code: .manifestValidationFailed,
+                    node: values["source"],
+                    path: "\(path).source"
+                )
+            }
+        }
+
+        return HostwrightMountSpec(
+            kind: kind,
+            source: source,
+            target: target,
+            readOnly: readOnly,
+            mode: mode,
+            size: size
+        )
+    }
+
     private func mapping(_ node: Node, path: String, allowed: Set<String>) throws -> [String: Node] {
         var result: [String: Node] = [:]
         for pair in try rawMapping(node, path: path) {
@@ -1017,6 +1173,8 @@ private struct ManifestNodeDecoder {
                 let context: String
                 if path == "$" {
                     context = "top-level manifest"
+                } else if path.contains(".volumes.") {
+                    context = "top-level volume"
                 } else if path.hasSuffix(".health") {
                     context = "health"
                 } else if path.hasSuffix(".restart") {

@@ -1,6 +1,6 @@
 # Hostwright
 
-Hostwright is a macOS command-line control plane for declaring and managing Apple container workloads on one Apple silicon Mac. It reads strict Manifest v2 YAML, produces plans for review, executes confirmed lifecycle actions through runtime providers, and records local state in SQLite schema v14.
+Hostwright is a macOS command-line control plane for declaring and managing Apple container workloads on one Apple silicon Mac. It reads strict Manifest v2 YAML, produces plans for review, executes confirmed lifecycle actions through runtime providers, and records local state in SQLite schema v15.
 
 Status: `0.0.2-dev`, targeting `v0.0.2`. Hostwright is not production-ready.
 
@@ -99,7 +99,7 @@ In a source checkout, replace `hostwright` with `swift run hostwright`. The [Man
 | `hostwright validate`, `plan`, `migrate preview`, `import-stack` | Validate Manifest v2, produce deterministic plans, preview legacy migration, and convert a narrow stack-file subset. |
 | `hostwright up`, `down`, `run`, `start`, `stop`, `restart`, `rm`, `update` | Execute plan-hash-gated lifecycle operations. `apply` routes to a confirmed `up` plan for compatibility. |
 | `hostwright exec`, `attach`, `copy`, `export`, `inspect`, `stats`, `logs` | Use provider-gated interactive, transfer, inspection, and streaming operations. |
-| `hostwright image`, `registry`, `secret` | Manage provider images, registry authentication and OCI evidence, and typed local secret references. |
+| `hostwright image`, `registry`, `secret`, `volume` | Manage provider images, registry authentication and OCI evidence, typed local secret references, and exact Hostwright-owned named-volume, snapshot, backup, quota, reclaim, and orphan workflows. |
 | `hostwright status`, `events`, `recovery`, `state`, `cleanup`, `doctor`, `diagnostics` | Observe workloads, inspect and maintain local state, recover fenced operations, and remove verified Hostwright-owned resources. |
 | `hostwright-control` | Accept one bounded local JSON request, return one JSON response, and exit. It opens no socket or HTTP listener. |
 | `hostwrightd` | Run a foreground observation and planning loop. It does not install a LaunchAgent or perform unattended runtime mutation. |
@@ -115,8 +115,9 @@ SwiftPM separates contracts, runtime access, orchestration, state, and process s
 | --- | --- |
 | Contracts and input | `HostwrightCore`, `HostwrightManifest`, `HostwrightImport`, and `HostwrightPolicy` define identities, contract versions, Manifest v2 decoding, conversion, and local policy. |
 | Runtime providers | `HostwrightRuntime` owns `RuntimeAdapter`, capability negotiation, observation, and mutation contracts. `hostwright-containerization-helper` keeps the pinned Containerization framework in an authenticated out-of-process helper. |
-| Planning and state | `HostwrightReconciler` builds lifecycle plans and recovery actions. `HostwrightState` persists desired state, observations, ownership, operation records, and schema v14 migrations in SQLite. |
+| Planning and state | `HostwrightReconciler` builds lifecycle plans and recovery actions. `HostwrightState` persists desired state, observations, ownership, operation records, and schema-v15 migrations in SQLite. |
 | Registry and secrets | `HostwrightRegistry` handles registry authentication and digest-bound OCI evidence. `HostwrightSecrets` handles Keychain and typed secret-provider boundaries. |
+| Storage | `HostwrightStorage` defines Storage Provider API v1, the built-in local provider, guarded mounts, snapshots, verified local/S3-compatible backup and restore, capacity policy, reclaim, and orphan recovery. `hostwright-storage-helper` keeps provider execution out of process. |
 | User and automation surfaces | `HostwrightCLI`, `HostwrightControl`, `HostwrightDaemonCore`, and their executable targets expose the CLI, one-shot JSON process, and foreground daemon loop. |
 | Supporting boundaries | `HostwrightHealth`, `HostwrightNetworking`, `HostwrightObservability`, `HostwrightExtensions`, and `HostwrightDistribution` keep health, network policy, diagnostics, reviewed extensions, and distribution logic outside the core command router. |
 
@@ -126,6 +127,7 @@ Architecture references:
 
 - [Runtime adapter](docs/architecture/runtime-adapter.md)
 - [State store](docs/architecture/state-store.md)
+- [Storage](docs/reference/storage.md)
 - [Resource identity and provider binding](docs/design/adr-0007-resource-identity-provider-binding.md)
 - [Durable operation DAG and saga](docs/design/adr-0008-durable-operation-dag-saga.md)
 - [v0.0.2 platform contracts](docs/design/adr-0009-v0.0.2-platform-contracts.md)
@@ -138,7 +140,7 @@ Architecture references:
 - Hostwright runs on one Mac. It has no multi-host control plane or high-availability state authority.
 - The manifest parser accepts the documented Hostwright YAML subset. It rejects unsupported YAML, unknown Kubernetes or Compose fields, and unsafe paths.
 - Hostwright has no Kubernetes or CRI compatibility, Docker API, full Compose compatibility, GUI, or cloud service.
-- Named-volume lifecycle, custom networks, DNS, ingress, tunnels, and broad public exposure remain outside the supported lifecycle surface.
+- Hostwright supports exact Hostwright-owned named volumes, guarded mounts, snapshots, verified online backup/restore, quota and pressure accounting, reclaim policy, and orphan quarantine/GC. Custom networks, DNS, ingress, tunnels, and broad public exposure remain outside the supported surface.
 - `hostwright-control` has no persistent listener. `hostwrightd` has no background service installation or unattended mutation.
 - Cleanup and image pruning require exact ownership and confirmation. Hostwright does not delete unmanaged resources or run global garbage collection.
 - Hostwright is not production-ready and has no support SLA.

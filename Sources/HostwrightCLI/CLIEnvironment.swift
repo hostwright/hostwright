@@ -5,6 +5,7 @@ import HostwrightHealth
 import HostwrightRegistry
 import HostwrightRuntime
 import HostwrightSecrets
+import HostwrightStorage
 
 public struct CLIEnvironment: @unchecked Sendable {
     public var fileExists: (String) -> Bool
@@ -19,6 +20,9 @@ public struct CLIEnvironment: @unchecked Sendable {
     public var secretStore: () -> any SecretStore
     public var secretResolver: () -> any HostwrightSecretResolving
     public var secretManager: () -> any SecretManager
+    public var storageProvider:
+        @Sendable () async throws -> any StorageProviderSPI
+    public var storageProviderRootURL: @Sendable () -> URL
     public var readSecretInput: () throws -> Data
     public var registryTransport: () -> any RegistrySynchronousHTTPTransporting
     public var registryCredentialDocuments: () throws -> [DockerCredentialConfigurationDocument]
@@ -62,6 +66,10 @@ public struct CLIEnvironment: @unchecked Sendable {
         secretManager: @escaping () -> any SecretManager = {
             UnavailableKeychainSecretManager()
         },
+        storageProvider:
+            (@Sendable () async throws -> any StorageProviderSPI)? = nil,
+        storageProviderRootURL:
+            (@Sendable () -> URL)? = nil,
         readSecretInput: @escaping () throws -> Data = {
             throw SecretStoreError.backendUnavailable(
                 "Secret input is unavailable in this execution environment."
@@ -141,6 +149,13 @@ public struct CLIEnvironment: @unchecked Sendable {
             hostwrightDefaultSecretResolver(store: secretStore())
         }
         self.secretManager = secretManager
+        self.storageProvider = storageProvider ?? {
+            throw StorageProviderHelperBootstrapError
+                .executableUnavailable
+        }
+        self.storageProviderRootURL = storageProviderRootURL ?? {
+            LocalStorageProvider.defaultRootURL()
+        }
         self.readSecretInput = readSecretInput
         self.registryTransport = registryTransport
         self.registryCredentialDocuments = registryCredentialDocuments
@@ -194,6 +209,16 @@ public struct CLIEnvironment: @unchecked Sendable {
             )
         },
         secretManager: { MacOSKeychainSecretStore() },
+        storageProvider: {
+            StorageProviderHelperClient(
+                configuration:
+                    try StorageProviderHelperBootstrapConfiguration
+                        .installed()
+            )
+        },
+        storageProviderRootURL: {
+            LocalStorageProvider.defaultRootURL()
+        },
         readSecretInput: { try HostwrightSecretInputReader.read() },
         swiftVersion: { ProcessLookup.swiftVersionSummary() },
         platformSnapshot: { PlatformSnapshot.current },

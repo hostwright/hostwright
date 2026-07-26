@@ -65,7 +65,7 @@ public enum LocalControlToolCommand: Equatable, Sendable {
       hostwright-control --manifest <absolute-path> [--state-db <absolute-path>] [--team-profile <absolute-path>]
 
     Reads exactly one version-2 JSON request from stdin, writes exactly one JSON response to stdout, and exits.
-    Supported operations: plan, status, events, recovery, doctor, lifecycle, image, and registry.
+    Supported operations: plan, status, events, recovery, doctor, lifecycle, image, registry, and volume.
     Manifest, state, and team-profile paths are fixed by launch arguments and cannot be supplied by a request.
     This process does not expose apply, cleanup, logs, diagnostics export, benchmark, extension execution, or any generic mutation operation.
 

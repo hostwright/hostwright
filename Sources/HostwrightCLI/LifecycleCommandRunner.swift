@@ -43,7 +43,7 @@ public enum LifecycleCommandRunnerError: Error, Equatable, Sendable {
         case .unsupportedStorage(let source):
             HostwrightDiagnostic(
                 code: .manifestUnsupportedFeature,
-                message: "Mount source '\(source)' is not an existing bind mount. Named volumes and other storage providers require Phase 06. No mutation was attempted."
+                message: "Mount source '\(source)' is neither a declared named volume nor an existing guarded bind mount. No mutation was attempted."
             )
         case .updateRequiresRolloutPlanner:
             HostwrightDiagnostic(
@@ -1201,6 +1201,19 @@ public struct LifecycleCommandPlanCompiler: Sendable {
             projectName: state.projectName,
             services: try state.services.map { service in
                 let mounts = try service.mounts.map { mount -> RuntimeMountReference in
+                    if mount.kind == .tmpfs {
+                        return RuntimeMountReference(
+                            source: "",
+                            target: mount.target,
+                            kind: .tmpfs,
+                            access:
+                                mount.access == .unknown
+                                    ? .readWrite
+                                    : mount.access,
+                            mode: mount.mode,
+                            sizeBytes: mount.sizeBytes
+                        )
+                    }
                     let source: String
                     if mount.source.hasPrefix("/") {
                         source = URL(fileURLWithPath: mount.source).standardizedFileURL.path
@@ -1212,12 +1225,16 @@ public struct LifecycleCommandPlanCompiler: Sendable {
                     } else {
                         throw LifecycleCommandRunnerError.unsupportedStorage(mount.source)
                     }
-                    guard FileManager.default.fileExists(atPath: source) else {
+                    guard mount.kind == .volume ||
+                            FileManager.default.fileExists(
+                                atPath: source
+                            ) else {
                         throw LifecycleCommandRunnerError.unsupportedStorage(source)
                     }
                     return RuntimeMountReference(
                         source: source,
                         target: mount.target,
+                        kind: .bind,
                         access: mount.access == .unknown ? .readWrite : mount.access
                     )
                 }
@@ -1502,7 +1519,7 @@ public struct LifecycleCommandPlanCompiler: Sendable {
                 identifier: "\(preparation.projectID):\(draft.identity.displayName)"
             )
             let resourceGeneration: Int
-            if draft.action == .create, let existing {
+            if createIdentities.contains(draft.identity), let existing {
                 resourceGeneration = existing.resourceGeneration + 1
             } else {
                 resourceGeneration = existing?.resourceGeneration ?? 1

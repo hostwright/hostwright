@@ -229,6 +229,7 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
             )
         }
         try RuntimeCreateSubsetPolicy.validate(desiredService, providerID: .appleContainerCLI)
+        let bindMountLeases = try openBindMountLeases(for: desiredService)
 
         let imageListSpec = AppleContainerCommand.spec(
             kind: .listImages,
@@ -278,15 +279,21 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
             resourceIdentifier: action.resourceIdentifier
         )
         try RuntimeCommandPolicy.validateCreateMissingServiceMutation(createSpec)
+        try revalidateBindMountLeases(bindMountLeases)
         let result = try await runRedacted(createSpec)
         try codec.discardMutationOutput(result.standardOutput)
         let resourceIdentifier = AppleContainerCommand.containerName(for: desiredService.identity)
-        try await verifyMutation(
+        let observedService = try await verifyMutation(
             action,
             expected: .present,
             context: context,
             codec: codec,
             executable: executable
+        )
+        try revalidateBindMountLeases(bindMountLeases)
+        try verifyBindMountPostcondition(
+            desired: desiredService.mounts,
+            observed: observedService?.mounts ?? []
         )
 
         return RuntimeEvent(
@@ -435,6 +442,61 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
         return .managedRestartStartFailedAfterStop(message: redacted, standardError: "")
     }
 
+    private func openBindMountLeases(for desiredService: DesiredRuntimeService) throws -> [GuardedMountLease] {
+        try desiredService.mounts.compactMap { mount in
+            guard mount.kind == .bind else {
+                return nil
+            }
+            guard mount.mode == nil, mount.sizeBytes == nil else {
+                throw RuntimeAdapterError.mutationUnavailableByPolicy(
+                    "Apple container CLI bind mounts do not support mode or size options."
+                )
+            }
+            return try GuardedMountSecurity.openBindSource(mount.source)
+        }
+    }
+
+    private func revalidateBindMountLeases(_ leases: [GuardedMountLease]) throws {
+        for lease in leases {
+            try GuardedMountSecurity.revalidate(lease)
+        }
+    }
+
+    private func verifyBindMountPostcondition(
+        desired: [RuntimeMountReference],
+        observed: [RuntimeMountReference]
+    ) throws {
+        let desiredBindMounts = desired
+            .filter { $0.kind == .bind }
+            .sorted(by: stableMountOrdering)
+        guard !desiredBindMounts.isEmpty else {
+            return
+        }
+
+        let observedByTarget = Dictionary(grouping: observed, by: \.target)
+        for mount in desiredBindMounts {
+            guard let candidates = observedByTarget[mount.target],
+                  candidates.count == 1,
+                  candidates[0] == mount else {
+                throw RuntimeAdapterError.outputParseFailed(
+                    "Structured post-create observation did not preserve the exact guarded bind-mount source, target, kind, access, mode, and size."
+                )
+            }
+        }
+    }
+
+    private func stableMountOrdering(
+        _ lhs: RuntimeMountReference,
+        _ rhs: RuntimeMountReference
+    ) -> Bool {
+        if lhs.target != rhs.target { return lhs.target < rhs.target }
+        if lhs.source != rhs.source { return lhs.source < rhs.source }
+        if lhs.kind != rhs.kind { return lhs.kind.rawValue < rhs.kind.rawValue }
+        if lhs.access != rhs.access { return lhs.access.rawValue < rhs.access.rawValue }
+        if lhs.mode != rhs.mode { return (lhs.mode ?? "") < (rhs.mode ?? "") }
+        return (lhs.sizeBytes ?? 0) < (rhs.sizeBytes ?? 0)
+    }
+
     private func executeDelete(
         _ action: PlannedRuntimeAction,
         context: RuntimeMutationContext,
@@ -482,17 +544,19 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
         case absent
     }
 
+    @discardableResult
     private func verifyMutation(
         _ action: PlannedRuntimeAction,
         expected: MutationPostcondition,
         context: RuntimeMutationContext,
         codec: AppleContainerCLICodec,
         executable: ResolvedRuntimeExecutable
-    ) async throws {
-        let lifecycle = try await exactOwnedLifecycle(
+    ) async throws -> ObservedRuntimeService? {
+        let service = try await exactOwnedService(
             action,
             context: context
         )
+        let lifecycle = service?.lifecycleState
         let satisfied: Bool
         switch expected {
         case .present:
@@ -511,12 +575,23 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
                 "Structured post-mutation observation did not satisfy the exact owned-resource postcondition."
             )
         }
+        return service
     }
 
     private func exactOwnedLifecycle(
         _ action: PlannedRuntimeAction,
         context: RuntimeMutationContext
     ) async throws -> RuntimeLifecycleState? {
+        try await exactOwnedService(
+            action,
+            context: context
+        )?.lifecycleState
+    }
+
+    private func exactOwnedService(
+        _ action: PlannedRuntimeAction,
+        context: RuntimeMutationContext
+    ) async throws -> ObservedRuntimeService? {
         let desiredServices = action.desiredService.map { [$0] } ?? []
         let identityVersion = RuntimeManagedResourceIdentity.isLegacyIdentifier(action.resourceIdentifier)
             ? 1
@@ -550,7 +625,7 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
                 "Structured owned-resource observation returned conflicting exact matches."
             )
         }
-        return matching.first?.lifecycleState
+        return matching.first
     }
 
     private func runRedacted(_ spec: RuntimeCommandSpec) async throws -> RuntimeCommandResult {

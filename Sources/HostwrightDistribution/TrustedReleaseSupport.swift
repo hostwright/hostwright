@@ -1,6 +1,7 @@
 import CryptoKit
 import Foundation
 import HostwrightCore
+import HostwrightStorage
 import Security
 
 public enum DeveloperIDIdentityParser {
@@ -319,7 +320,14 @@ public enum HomebrewFormulaRenderer {
           depends_on macos: :tahoe
 
           def install
-            executables = %w[hostwright hostwright-control hostwright-containerization-helper hostwright-dist hostwrightd]
+            executables = %w[
+              hostwright
+              hostwright-control
+              hostwright-containerization-helper
+              hostwright-storage-helper
+              hostwright-dist
+              hostwrightd
+            ]
             executables.each do |name|
               system "/usr/bin/codesign", "--verify", "--strict", "--verbose=2", "bin/#{name}"
             end
@@ -351,6 +359,8 @@ public enum HomebrewFormulaRenderer {
             assert_equal version.to_s, shell_output("#{bin}/hostwright --version").strip
             assert_equal version.to_s, shell_output("#{bin}/hostwright-control --version").strip
             assert_equal version.to_s, shell_output("#{bin}/hostwright-containerization-helper --version").strip
+            storage_helper_version = shell_output("#{bin}/hostwright-storage-helper --version").strip
+            assert_equal "\(LocalStorageProviderContract.providerVersion)", storage_helper_version
             assert_equal version.to_s, shell_output("#{bin}/hostwright-dist --version").strip
             assert_equal version.to_s, shell_output("#{bin}/hostwrightd --version").strip
             assert_path_exists pkgshare/"containerization/kernel/\(DistributionContainerizationAssets.kernelFileName)"

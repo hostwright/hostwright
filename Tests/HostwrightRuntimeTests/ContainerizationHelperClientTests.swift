@@ -792,6 +792,60 @@ final class ContainerizationHelperClientTests: XCTestCase {
         XCTAssertNil(createPayload)
     }
 
+    func testRuntimeAdapterRejectsMountsBeforeAnyHelperCreateInvocation() async throws {
+        let fixture = try ClientFixture()
+        let helper = ScriptedHelper(snapshot: snapshot())
+        let client = directClient(fixture: fixture, helper: helper)
+        let adapter = AppleContainerizationRuntimeAdapter(client: client)
+        let negotiated = try await adapter.capabilitySnapshot()
+        let identity = RuntimeServiceIdentity(
+            projectName: "demo",
+            serviceName: "api"
+        )
+        let service = DesiredRuntimeService(
+            identity: identity,
+            image: "example.local/demo:latest",
+            mounts: [
+                RuntimeMountReference(
+                    source: "/tmp/input",
+                    target: "/input",
+                    access: .readOnly
+                )
+            ]
+        )
+
+        await XCTAssertThrowsErrorAsync(
+            try await adapter.execute(
+                PlannedRuntimeAction(
+                    kind: .create,
+                    identity: identity,
+                    resourceIdentifier: identity.managedResourceIdentifier,
+                    isDestructive: false,
+                    summary: "reject mounts",
+                    desiredService: service
+                ),
+                confirmation: RuntimeMutationConfirmation(
+                    confirmed: true,
+                    reason: "test",
+                    planHash: String(repeating: "9", count: 64),
+                    context: mutationContext(
+                        digest: negotiated.canonicalSHA256
+                    )
+                )
+            )
+        ) { error in
+            guard case RuntimeAdapterError.mutationUnavailableByPolicy(let message) = error else {
+                return XCTFail("Expected mutationUnavailableByPolicy, got \(error).")
+            }
+            XCTAssertTrue(message.contains("does not execute mounts"))
+        }
+
+        let operations = await helper.operations()
+        let createPayload = await helper.lastCreatePayload()
+        XCTAssertEqual(operations, [.negotiate])
+        XCTAssertNil(createPayload)
+    }
+
     private var inertLauncher: ContainerizationHelperProcessLauncher {
         ContainerizationHelperProcessLauncher { _ in
             ContainerizationHelperProcessLease(

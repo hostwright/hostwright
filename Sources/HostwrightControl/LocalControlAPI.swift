@@ -35,7 +35,12 @@ public struct LocalControlAPI: Sendable {
                 cliResult: cliResult,
                 forbiddenResponseValues: [
                     parsedRequest
-                        .registryProvenanceSigningKeyReference
+                        .registryProvenanceSigningKeyReference,
+                    parsedRequest.volumeKeyReference,
+                    parsedRequest
+                        .volumeRemoteS3AccessKeyReference,
+                    parsedRequest
+                        .volumeRemoteS3SecretKeyReference,
                 ].compactMap({ $0 })
             )
         } catch let diagnostic as HostwrightDiagnostic {
@@ -134,6 +139,11 @@ public struct LocalControlAPI: Sendable {
             )
         case .registry:
             return try registryCommandArguments(
+                for: request,
+                configuration: configuration
+            )
+        case .volume:
+            return try volumeCommandArguments(
                 for: request,
                 configuration: configuration
             )
@@ -254,6 +264,7 @@ public struct LocalControlAPI: Sendable {
 
     private func validateConfiguration(for request: LocalControlRequest) throws {
         if request.operation != .image &&
+            request.operation != .volume &&
             (request.operation != .registry ||
                 request.registryTrustOperation != nil ||
                 request.registrySBOMOperation != nil ||
@@ -267,6 +278,7 @@ public struct LocalControlAPI: Sendable {
         }
         if let stateDatabasePath = configuration.stateDatabasePath {
             if (request.operation == .image ||
+                request.operation == .volume ||
                 request.operation == .registry),
                try Self.pathDoesNotExist(stateDatabasePath) {
                 // The shared CLI state-path boundary validates and creates the
@@ -400,6 +412,183 @@ public struct LocalControlAPI: Sendable {
         }
         arguments.append("--json")
         return arguments
+    }
+
+    private static func volumeCommandArguments(
+        for request: LocalControlRequest,
+        configuration: LocalControlConfiguration
+    ) throws -> [String] {
+        guard let operation = request.volumeOperation else {
+            throw HostwrightDiagnostic(
+                code: .controlAPIInvalid,
+                message: "Local control volumeOperation is required."
+            )
+        }
+        let ids = request.volumeIDs ?? []
+        var arguments: [String]
+        switch operation {
+        case "list":
+            arguments = ["volume", "list"]
+            if let project = request.project {
+                arguments += ["--project", project]
+            }
+        case "inspect":
+            arguments = ["volume", "inspect", ids[0]]
+        case "capacity", "health":
+            arguments = ["volume", operation]
+        case "recover":
+            arguments = [
+                "volume", "recover", ids[0],
+                "--idempotency-key",
+                request.volumeIdempotencyKey!,
+            ]
+        case "delete":
+            arguments = ["volume", "delete", ids[0]]
+            addConfirmation(request, to: &arguments)
+        case "prune":
+            arguments = ["volume", "prune"]
+            addConfirmation(request, to: &arguments)
+        case "snapshot-create":
+            arguments = [
+                "volume", "snapshot", "create", ids[0],
+                "--snapshot-id", request.volumeResourceID!,
+                "--name", request.volumeName!,
+            ]
+        case "snapshot-list":
+            arguments = [
+                "volume", "snapshot", "list", ids[0],
+            ]
+        case "snapshot-inspect":
+            arguments = [
+                "volume", "snapshot", "inspect", ids[0],
+                request.volumeResourceID!,
+            ]
+        case "snapshot-retain":
+            arguments = [
+                "volume", "snapshot", "retain", ids[0],
+                request.volumeResourceID!,
+                "--owner", request.volumeOwner!,
+            ]
+        case "snapshot-export":
+            arguments = [
+                "volume", "snapshot", "export", ids[0],
+                request.volumeResourceID!,
+                "--output", request.volumeOutputPath!,
+            ]
+        case "snapshot-restore":
+            arguments = [
+                "volume", "snapshot", "restore",
+                request.volumeResourceID!,
+                "--source-volume", ids[0],
+                "--to-volume", request.volumeTargetVolumeID!,
+                "--reference-id", request.volumeReferenceID!,
+            ]
+            addConfirmation(request, to: &arguments)
+        case "snapshot-delete":
+            arguments = [
+                "volume", "snapshot", "delete", ids[0],
+                request.volumeResourceID!,
+            ]
+            addConfirmation(request, to: &arguments)
+        case "backup-create":
+            arguments = ["volume", "backup", "create"]
+            for volumeID in ids.sorted() {
+                arguments += ["--volume", volumeID]
+            }
+            arguments += [
+                "--backup-id", request.volumeResourceID!,
+                "--name", request.volumeName!,
+                "--key-ref", request.volumeKeyReference!,
+            ]
+            addRemoteBackupDestination(request, to: &arguments)
+        case "backup-list":
+            arguments = ["volume", "backup", "list", ids[0]]
+        case "backup-inspect":
+            arguments = [
+                "volume", "backup", "inspect", ids[0],
+                request.volumeResourceID!,
+            ]
+        case "backup-verify":
+            arguments = [
+                "volume", "backup", "verify", ids[0],
+                request.volumeResourceID!,
+                "--key-ref", request.volumeKeyReference!,
+            ]
+            addRemoteBackupDestination(request, to: &arguments)
+        case "backup-retain":
+            arguments = [
+                "volume", "backup", "retain", ids[0],
+                request.volumeResourceID!,
+                "--owner", request.volumeOwner!,
+            ]
+            addRemoteBackupDestination(request, to: &arguments)
+        case "backup-restore":
+            arguments = [
+                "volume", "backup", "restore",
+                request.volumeResourceID!,
+                "--key-ref", request.volumeKeyReference!,
+            ]
+            for target in request.volumeRestoreTargets!.sorted() {
+                arguments += ["--target", target]
+            }
+            addRemoteBackupDestination(request, to: &arguments)
+            addConfirmation(request, to: &arguments)
+        case "backup-delete":
+            arguments = [
+                "volume", "backup", "delete", ids[0],
+                request.volumeResourceID!,
+            ]
+            addRemoteBackupDestination(request, to: &arguments)
+            addConfirmation(request, to: &arguments)
+        default:
+            throw HostwrightDiagnostic(
+                code: .controlAPIInvalid,
+                message:
+                    "Unsupported local control volume operation."
+            )
+        }
+        if let stateDatabasePath = configuration.stateDatabasePath {
+            arguments += ["--state-db", stateDatabasePath]
+        }
+        if let timeout = request.timeout {
+            arguments += ["--timeout", String(timeout)]
+        }
+        arguments.append("--json")
+        return arguments
+    }
+
+    private static func addRemoteBackupDestination(
+        _ request: LocalControlRequest,
+        to arguments: inout [String]
+    ) {
+        guard let endpoint = request.volumeRemoteS3Endpoint else {
+            return
+        }
+        arguments += [
+            "--remote-s3-endpoint", endpoint,
+            "--remote-s3-bucket", request.volumeRemoteS3Bucket!,
+            "--remote-s3-region", request.volumeRemoteS3Region!,
+        ]
+        if let prefix = request.volumeRemoteS3Prefix {
+            arguments += ["--remote-s3-prefix", prefix]
+        }
+        arguments += [
+            "--remote-s3-access-key-ref",
+            request.volumeRemoteS3AccessKeyReference!,
+            "--remote-s3-secret-key-ref",
+            request.volumeRemoteS3SecretKeyReference!,
+        ]
+    }
+
+    private static func addConfirmation(
+        _ request: LocalControlRequest,
+        to arguments: inout [String]
+    ) {
+        if request.dryRun == true {
+            arguments.append("--dry-run")
+        } else if let confirmation = request.confirmPlan {
+            arguments += ["--confirm-plan", confirmation]
+        }
     }
 
     private static func registryCommandArguments(

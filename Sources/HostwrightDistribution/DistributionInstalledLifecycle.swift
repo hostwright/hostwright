@@ -3,6 +3,7 @@ import Darwin
 import Foundation
 import HostwrightCore
 import HostwrightState
+import HostwrightStorage
 
 public enum DistributionLifecycleReadiness: String, Codable, Equatable, Sendable {
     case notInstalled = "not-installed"
@@ -1560,6 +1561,20 @@ public struct DistributionInstalledLifecycle: Sendable {
                     to: prefix.appendingPathComponent(file.path)
                 )
             }
+            if let fromManifest {
+                let targetPaths = Set(toManifest.files.map(\.path))
+                for file in fromManifest.files where !targetPaths.contains(file.path) {
+                    try requireNotCancelled(
+                        cancellation,
+                        operation: "remove superseded installed lifecycle payload"
+                    )
+                    let destination = prefix.appendingPathComponent(file.path)
+                    guard try fileMatches(file, at: destination) else {
+                        throw DistributionError.installOwnershipMismatch(file.path)
+                    }
+                    try removeExactOwnedFile(destination)
+                }
+            }
             try atomicMoveReplacing(
                 from: staged.appendingPathComponent(DistributionLayout.installManifestFileName),
                 to: installManifestURL(prefix)
@@ -2386,7 +2401,12 @@ public struct DistributionInstalledLifecycle: Sendable {
     ) throws {
         try verifyOwnedFiles(manifest, prefix: prefix, cancellation: cancellation)
         let installedPaths = Set(manifest.files.map(\.path))
-        for executable in ["hostwright", "hostwright-control", "hostwright-dist"]
+        for executable in [
+            "hostwright",
+            "hostwright-control",
+            "hostwright-containerization-helper",
+            "hostwright-dist"
+        ]
             where installedPaths.contains("bin/\(executable)") {
             let result = try runner.run(
                 executablePath: prefix.appendingPathComponent("bin/\(executable)").path,
@@ -2399,6 +2419,22 @@ public struct DistributionInstalledLifecycle: Sendable {
                 == manifest.packageVersion else {
                 throw DistributionError.lifecycleFailed(
                     "installed \(executable) version output did not match its manifest"
+                )
+            }
+        }
+        if installedPaths.contains("bin/hostwright-storage-helper") {
+            let result = try runner.run(
+                executablePath: prefix
+                    .appendingPathComponent("bin/hostwright-storage-helper").path,
+                arguments: ["--version"],
+                label: "verify installed hostwright-storage-helper version",
+                timeoutSeconds: 30,
+                cancellation: cancellation
+            )
+            guard result.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+                == LocalStorageProviderContract.providerVersion else {
+                throw DistributionError.lifecycleFailed(
+                    "installed hostwright-storage-helper version output did not match its provider contract"
                 )
             }
         }

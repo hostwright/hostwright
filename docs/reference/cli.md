@@ -60,6 +60,16 @@ hostwright image delete <reference>... [--state-db <path>] [--runtime-provider a
 hostwright image prune (--dry-run | --confirm-plan <sha256>) [--maximum-bytes <bytes> --target-bytes <bytes>] [--retain-seconds <0-31536000>] [--max-delete <1-256>] [--state-db <path>] [--runtime-provider auto|apple-cli|containerization] [--output text|json]
 hostwright image cache status [--maximum-bytes <bytes>] [--state-db <path>] [--runtime-provider auto|apple-cli|containerization] [--output text|json]
 hostwright image cache pin|unpin <managed-reference> [--state-db <path>] [--runtime-provider auto|apple-cli|containerization] [--output text|json]
+hostwright volume list [--project <id>] [--state-db <path>] [--output text|json]
+hostwright volume inspect <volume-uuid> [--state-db <path>] [--output text|json]
+hostwright volume capacity|health [--state-db <path>] [--output text|json]
+hostwright volume recover <volume-uuid> --idempotency-key <key> [--state-db <path>] [--output text|json]
+hostwright volume delete <volume-uuid> (--dry-run | --confirm-plan <sha256>) [--state-db <path>] [--output text|json]
+hostwright volume prune (--dry-run | --confirm-plan <sha256>) [--state-db <path>] [--output text|json]
+hostwright volume snapshot create <volume-uuid> --snapshot-id <uuid> --name <name> [--state-db <path>] [--output text|json]
+hostwright volume snapshot list <volume-uuid> [--state-db <path>] [--output text|json]
+hostwright volume snapshot inspect|retain|export|restore|delete ...
+hostwright volume backup create|list|inspect|verify|retain|restore|delete ...
 hostwright migrate preview <path> [--json | --output text|json]
 hostwright init
 hostwright import-stack <path> [--output text|json] [--team-profile <path>]
@@ -251,6 +261,16 @@ Image mutations write a durable `image-lifecycle` intent before effects. Pull, b
 `prune --dry-run` deterministically selects only exact Hostwright-owned content after applying size targets, retention, and deletion bounds. Active leases, operator or policy pins, desired digest locks, live references or digests, unmanaged aliases, missing ownership proof, and changed provider observations exclude content. Execution requires the exact plan SHA-256, re-observes before mutation, acquires exclusive fenced leases, invokes only `image delete <exact-reference>...`, verifies absence, and persists recovery accounting. It never invokes a native prune command. Neither delete nor prune accepts `--force`, `--all`, unmanaged content, global cleanup, or automatic background garbage collection.
 
 Result JSON is schema version 1 and includes the provider, provider version, operation UUID, confirmed plan SHA-256, disposition, verified image records, exact created/deleted references and digests, and bounded progress. Cache status, pin, and prune use separate schema-versioned reports with redacted accounting and confirmation evidence. Results contain no mutation stdout, stderr, native argv, credential, token, secret value, or unbounded diagnostic data.
+
+## `hostwright volume ...`
+
+Provides schema-v15 inspection, capacity, health, recovery, exact deletion/prune, snapshot, and verified backup/restore operations through Storage Provider API v1. The shipped `hostwright-local` provider stores exact Hostwright-owned resources on one Mac. `list`, `inspect`, `capacity`, and `health` are read-only. `recover` requires the persisted idempotency key for the exact interrupted volume operation.
+
+Every destructive operation requires exactly one `--dry-run` or `--confirm-plan <sha256>`. Confirmation binds provider and capability identity, project/resource UUIDs, generation, fence, ownership, attachments, holds, reclaim policy, protection evidence, and current observation. Changed or ambiguous evidence fails before provider mutation. `prune` never invokes global or name-based cleanup.
+
+Snapshots are created, inspected, retained, exported, restored into a new target volume, and exactly deleted through the provider boundary. Backups accept one or more `--volume` values and only typed `--key-ref` secret references. Backup verification checks the complete encrypted catalog and content/metadata hashes. Restore accepts one or more unique `--target <source-uuid>=<new-target-uuid>` mappings and verifies every source before promotion.
+
+The one-shot Control API exposes the same non-interactive volume operations through the same parser and coordinator. See [Storage](storage.md) for Manifest examples, exact command shapes, capacity/pressure behavior, reclaim rules, recovery, and unsupported shared/remote storage boundaries.
 
 ## `hostwright runtime providers [--json]`
 
@@ -478,7 +498,7 @@ Command semantics:
 - `rm` removes only verified Hostwright-owned resources in safe reverse dependency order;
 - `update` performs the declared rolling or recreate transition, health-gates promotion, retains the prior revision until success, and restores the last verified revision when exact compensation is provable.
 
-Manifest-declared ports publish only to localhost. Phase 04 supports existing bind mounts; named volumes, custom networks, registry operations, and other later-phase capabilities fail before mutation. Secret references are resolved only when the configured backend is available and never enter plan output, state, logs, or diagnostics.
+Manifest-declared ports publish only to localhost. Guarded binds, tmpfs, and declared `hostwright-local` named volumes execute through the Phase 06 storage boundary. Custom networks and other Phase 07 capabilities still fail before mutation. Secret references are resolved only when the configured backend is available and never enter plan output, state, logs, or diagnostics.
 
 ## Interactive and streaming commands
 

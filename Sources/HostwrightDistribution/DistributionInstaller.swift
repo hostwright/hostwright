@@ -1,6 +1,7 @@
 import Darwin
 import Foundation
 import HostwrightCore
+import HostwrightStorage
 
 struct DistributionInstaller: Sendable {
     private let runner: DistributionProcessRunner
@@ -155,35 +156,37 @@ struct DistributionInstaller: Sendable {
         }
         try verifyOwnedFiles(installed, prefix: prefix, cancellation: cancellation)
 
-        let version = try runner.run(
-            executablePath: prefix.appendingPathComponent("bin/hostwright").path,
-            arguments: ["--version"],
-            label: "run installed hostwright --version",
-            timeoutSeconds: 30,
-            cancellation: cancellation
-        )
-        guard version.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines) == installed.packageVersion else {
-            throw DistributionError.lifecycleFailed("installed hostwright version output did not match its manifest")
+        let installedPaths = Set(installed.files.map(\.path))
+        var commands: [HostwrightEvidenceCommand] = []
+        for executable in [
+            "hostwright",
+            "hostwright-control",
+            "hostwright-containerization-helper",
+            "hostwright-dist"
+        ] where installedPaths.contains("bin/\(executable)") {
+            let result = try verifyInstalledVersion(
+                executable,
+                expectedVersion: installed.packageVersion,
+                prefix: prefix,
+                cancellation: cancellation
+            )
+            commands.append(
+                evidenceCommand("installed \(executable) --version", result: result)
+            )
         }
-        let control = try runner.run(
-            executablePath: prefix.appendingPathComponent("bin/hostwright-control").path,
-            arguments: ["--version"],
-            label: "run installed hostwright-control --version",
-            timeoutSeconds: 30,
-            cancellation: cancellation
-        )
-        guard control.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines) == installed.packageVersion else {
-            throw DistributionError.lifecycleFailed("installed hostwright-control version output did not match its manifest")
-        }
-        let distribution = try runner.run(
-            executablePath: prefix.appendingPathComponent("bin/hostwright-dist").path,
-            arguments: ["--version"],
-            label: "run installed hostwright-dist --version",
-            timeoutSeconds: 30,
-            cancellation: cancellation
-        )
-        guard distribution.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines) == installed.packageVersion else {
-            throw DistributionError.lifecycleFailed("installed hostwright-dist version output did not match its manifest")
+        if installedPaths.contains("bin/hostwright-storage-helper") {
+            let result = try verifyInstalledVersion(
+                "hostwright-storage-helper",
+                expectedVersion: LocalStorageProviderContract.providerVersion,
+                prefix: prefix,
+                cancellation: cancellation
+            )
+            commands.append(
+                evidenceCommand(
+                    "installed hostwright-storage-helper --version",
+                    result: result
+                )
+            )
         }
         let daemon = try runner.run(
             executablePath: prefix.appendingPathComponent("bin/hostwrightd").path,
@@ -196,12 +199,30 @@ struct DistributionInstaller: Sendable {
               daemon.standardOutput.contains("does not perform unattended runtime mutation") else {
             throw DistributionError.lifecycleFailed("installed hostwrightd help did not preserve its safety boundary")
         }
-        return [
-            evidenceCommand("installed hostwright --version", result: version),
-            evidenceCommand("installed hostwright-control --version", result: control),
-            evidenceCommand("installed hostwright-dist --version", result: distribution),
-            evidenceCommand("installed hostwrightd --help", result: daemon)
-        ]
+        commands.append(evidenceCommand("installed hostwrightd --help", result: daemon))
+        return commands
+    }
+
+    private func verifyInstalledVersion(
+        _ executable: String,
+        expectedVersion: String,
+        prefix: URL,
+        cancellation: SecureSubprocessCancellation
+    ) throws -> DistributionCommandResult {
+        let result = try runner.run(
+            executablePath: prefix.appendingPathComponent("bin/\(executable)").path,
+            arguments: ["--version"],
+            label: "run installed \(executable) --version",
+            timeoutSeconds: 30,
+            cancellation: cancellation
+        )
+        guard result.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+            == expectedVersion else {
+            throw DistributionError.lifecycleFailed(
+                "installed \(executable) version output did not match its contract"
+            )
+        }
+        return result
     }
 
     @discardableResult

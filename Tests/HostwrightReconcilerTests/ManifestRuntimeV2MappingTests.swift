@@ -194,11 +194,33 @@ final class ManifestRuntimeV2MappingTests: XCTestCase {
         XCTAssertEqual(mapping.desiredState.services[0].mounts[0].access, .readWrite)
     }
 
-    func testNamedVolumeIsRejectedAtThePhaseSixBoundaryBeforeMutation() {
+    func testTypedBindMountResolvesAgainstManifestDirectory() {
         let service = HostwrightService(
             name: "api",
             image: "example.invalid/api:local",
-            volumes: ["database:/data:rw"]
+            mounts: [
+                HostwrightMountSpec(kind: .bind, source: "./data", target: "/data", readOnly: true)
+            ]
+        )
+
+        let mapping = ManifestRuntimeMapper.map(
+            HostwrightManifest(version: 2, project: "demo", services: [service]),
+            bindMountBaseDirectory: "/tmp/hostwright-project"
+        )
+
+        XCTAssertTrue(mapping.issues.isEmpty)
+        XCTAssertEqual(mapping.desiredState.services[0].mounts, [
+            RuntimeMountReference(source: "/tmp/hostwright-project/data", target: "/data", access: .readOnly)
+        ])
+    }
+
+    func testUnresolvedNamedVolumeIsRejectedBeforeMutation() {
+        let service = HostwrightService(
+            name: "api",
+            image: "example.invalid/api:local",
+            mounts: [
+                HostwrightMountSpec(kind: .volume, source: "database", target: "/data")
+            ]
         )
 
         let mapping = ManifestRuntimeMapper.map(
@@ -207,7 +229,38 @@ final class ManifestRuntimeV2MappingTests: XCTestCase {
 
         XCTAssertTrue(mapping.issues.contains {
             $0.severity == .blocker &&
-                $0.message.contains("Phase 06 storage provider")
+                $0.message.contains(
+                    "not resolved by the selected storage provider"
+                )
         })
+    }
+
+    func testTmpfsMountMapsThroughToRuntimeWithOptionalSizeAndModeMetadata() {
+        let service = HostwrightService(
+            name: "api",
+            image: "example.invalid/api:local",
+            mounts: [
+                HostwrightMountSpec(kind: .tmpfs, target: "/tmp", readOnly: true, mode: "1777", size: "64MiB")
+            ]
+        )
+
+        let mapping = ManifestRuntimeMapper.map(
+            HostwrightManifest(version: 2, project: "demo", services: [service])
+        )
+
+        XCTAssertTrue(mapping.issues.isEmpty)
+        XCTAssertEqual(
+            mapping.desiredState.services[0].mounts,
+            [
+                RuntimeMountReference(
+                    source: "",
+                    target: "/tmp",
+                    kind: .tmpfs,
+                    access: .readOnly,
+                    mode: "1777",
+                    sizeBytes: 67_108_864
+                )
+            ]
+        )
     }
 }

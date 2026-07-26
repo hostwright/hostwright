@@ -66,6 +66,7 @@ public enum CLICommand: Equatable, Sendable {
     case secret(options: SecretCLIOptions)
     case registry(options: RegistryCLIOptions)
     case image(options: ImageCLIOptions)
+    case volume(options: StorageCLIOptions)
     case migrateManifestPreview(path: String, output: CLIOutputFormat)
     case initManifest
     case importStack(path: String, output: CLIOutputFormat, teamProfilePath: String?)
@@ -128,6 +129,8 @@ public enum CLICommand: Equatable, Sendable {
             return try registryCommand(arguments: arguments)
         case "image":
             return .image(options: try ImageCLIParser.parse(arguments: arguments))
+        case "volume":
+            return .volume(options: try StorageCLIParser.parse(arguments: arguments))
         case "migrate":
             return try migrateCommand(arguments: arguments)
         case "init":
@@ -1808,6 +1811,15 @@ public enum CLIExitCode: Int32, Equatable, Sendable {
         case .imageConflict, .imageCancelled, .imagePartialEffect:
             return .partialFailure
         case .imageDenied:
+            return .unsafeOperation
+        case .storageInvalid:
+            return .validation
+        case .storageUnavailable:
+            return .runtimeUnavailable
+        case .storageConflict, .storageCancelled,
+             .storagePartialEffect:
+            return .partialFailure
+        case .storageDenied:
             return .unsafeOperation
         case .unsupportedArchitecture, .unsupportedMacOSVersion:
             return .validation

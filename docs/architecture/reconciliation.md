@@ -8,7 +8,7 @@ Reconciliation is the loop that compares desired state with observed state and p
 2. Observe runtime state through `RuntimeAdapter`.
 3. Bind the immutable provider capability digest and compute drift.
 4. Compile a canonical dependency DAG with preconditions, postconditions, timeouts, idempotency keys, and compensation.
-5. Persist complete schema-v14 intent, including immutable image locks, exact supply-chain policy bindings, and content-lease accounting, before the first external effect.
+5. Persist complete schema-v15 intent, including immutable image locks, exact supply-chain policy bindings, content leases, and storage authority, before the first external effect.
 6. Execute ready nodes with deterministic bounded parallelism.
 7. Re-observe and persist verification after each mutation wave.
 8. Complete, compensate, resume, or enter a precise safe hold.

@@ -547,6 +547,50 @@ struct LifecycleCommandRunnerTests {
     }
 
     @Test
+    func resolvedNamedVolumeCompilesBeforeProviderPathExists()
+        throws
+    {
+        let source =
+            "/private/tmp/hostwright-local/volumes/"
+            + "11111111-1111-4111-8111-111111111111/data"
+        let compiled = try LifecycleCommandPlanCompiler()
+            .compile(
+                options: options(
+                    command: .up,
+                    dryRun: true
+                ),
+                preparation: try preparation(
+                    desired: [
+                        service(
+                            mounts: [
+                                RuntimeMountReference(
+                                    source: source,
+                                    target: "/var/lib/data",
+                                    kind: .volume,
+                                    access: .readWrite
+                                ),
+                            ]
+                        ),
+                    ]
+                )
+            )
+        let create = try #require(
+            compiled.desiredServicesByNodeKey.values
+                .first
+        )
+        #expect(
+            create.mounts == [
+                RuntimeMountReference(
+                    source: source,
+                    target: "/var/lib/data",
+                    kind: .bind,
+                    access: .readWrite
+                ),
+            ]
+        )
+    }
+
+    @Test
     func missingRelativeAndAbsoluteBindSourcesFailBeforeMutation() throws {
         let manifestDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent(

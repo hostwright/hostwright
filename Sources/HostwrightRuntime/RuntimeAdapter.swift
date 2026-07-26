@@ -211,12 +211,20 @@ public enum RuntimeCreateSubsetPolicy {
             )
         }
         guard service.mounts.allSatisfy({
-            $0.source.hasPrefix("/") &&
-                $0.target.hasPrefix("/") &&
-                $0.access != .unknown
+            switch $0.kind {
+            case .bind, .volume:
+                return $0.source.hasPrefix("/") &&
+                    $0.target.hasPrefix("/") &&
+                    $0.access != .unknown
+            case .tmpfs:
+                return $0.target.hasPrefix("/") &&
+                    $0.access != .unknown &&
+                    $0.mode == nil &&
+                    $0.sizeBytes == nil
+            }
         }) else {
             throw RuntimeAdapterError.mutationUnavailableByPolicy(
-                "Apple container CLI create accepts only validated absolute bind mounts with explicit read-only or read-write access."
+                "Apple container CLI create accepts only validated absolute bind mounts or tmpfs mounts with explicit read-only or read-write access; tmpfs size and mode are unavailable."
             )
         }
     }

@@ -14,6 +14,10 @@ let package = Package(
             name: "hostwright-containerization-helper",
             targets: ["HostwrightContainerizationHelper"]
         ),
+        .executable(
+            name: "hostwright-storage-helper",
+            targets: ["HostwrightStorageProviderHelper"]
+        ),
         .executable(name: "hostwrightd", targets: ["HostwrightDaemon"]),
         .executable(name: "hostwright-dist", targets: ["HostwrightDistributionTool"]),
         .executable(
@@ -34,7 +38,12 @@ let package = Package(
         .library(name: "HostwrightObservability", targets: ["HostwrightObservability"]),
         .library(name: "HostwrightPolicy", targets: ["HostwrightPolicy"]),
         .library(name: "HostwrightRegistry", targets: ["HostwrightRegistry"]),
-        .library(name: "HostwrightSecrets", targets: ["HostwrightSecrets"])
+        .library(name: "HostwrightSecrets", targets: ["HostwrightSecrets"]),
+        .library(name: "HostwrightStorage", targets: ["HostwrightStorage"]),
+        .library(
+            name: "HostwrightStorageHelper",
+            targets: ["HostwrightStorageHelper"]
+        )
     ],
     dependencies: [
         .package(
@@ -60,7 +69,8 @@ let package = Package(
                 "HostwrightRegistry",
                 "HostwrightRuntime",
                 "HostwrightSecrets",
-                "HostwrightState"
+                "HostwrightState",
+                "HostwrightStorage"
             ]
         ),
         .executableTarget(
@@ -101,6 +111,13 @@ let package = Package(
                 "HostwrightState"
             ]
         ),
+        .executableTarget(
+            name: "HostwrightStorageProviderHelper",
+            dependencies: [
+                "HostwrightStorage",
+                "HostwrightStorageHelper"
+            ]
+        ),
         .target(name: "HostwrightCore"),
         .target(
             name: "HostwrightControl",
@@ -115,7 +132,8 @@ let package = Package(
             name: "HostwrightDistribution",
             dependencies: [
                 "HostwrightCore",
-                "HostwrightState"
+                "HostwrightState",
+                "HostwrightStorage"
             ]
         ),
         .target(
@@ -147,6 +165,7 @@ let package = Package(
                 "HostwrightManifest",
                 "HostwrightRegistry",
                 "HostwrightRuntime",
+                "HostwrightStorage",
                 "HostwrightSQLiteSupport"
             ],
             linkerSettings: [
@@ -169,7 +188,8 @@ let package = Package(
                 "HostwrightPolicy",
                 "HostwrightRuntime",
                 "HostwrightSecrets",
-                "HostwrightState"
+                "HostwrightState",
+                "HostwrightStorage"
             ]
         ),
         .target(
@@ -229,6 +249,21 @@ let package = Package(
             ]
         ),
         .target(
+            name: "HostwrightStorage",
+            dependencies: [
+                "HostwrightCore",
+                "HostwrightRuntime",
+                "HostwrightSecrets"
+            ]
+        ),
+        .target(
+            name: "HostwrightStorageHelper",
+            dependencies: ["HostwrightStorage"],
+            linkerSettings: [
+                .linkedFramework("Security")
+            ]
+        ),
+        .target(
             name: "HostwrightTestSupport",
             dependencies: [
                 "HostwrightCore",
@@ -259,7 +294,8 @@ let package = Package(
             name: "HostwrightDistributionTests",
             dependencies: [
                 "HostwrightDistribution",
-                "HostwrightState"
+                "HostwrightState",
+                "HostwrightStorage"
             ]
         ),
         .testTarget(
@@ -310,7 +346,8 @@ let package = Package(
                 "HostwrightManifest",
                 "HostwrightRegistry",
                 "HostwrightRuntime",
-                "HostwrightState"
+                "HostwrightState",
+                "HostwrightStorage"
             ]
         ),
         .testTarget(
@@ -340,6 +377,7 @@ let package = Package(
                 "HostwrightRuntime",
                 "HostwrightSecrets",
                 "HostwrightState",
+                "HostwrightStorage",
                 "HostwrightTestSupport"
             ]
         ),
@@ -384,6 +422,13 @@ let package = Package(
             name: "HostwrightSecretsTests",
             dependencies: [
                 "HostwrightSecrets",
+                "HostwrightTestSupport"
+            ]
+        ),
+        .testTarget(
+            name: "HostwrightStorageTests",
+            dependencies: [
+                "HostwrightStorage",
                 "HostwrightTestSupport"
             ]
         )

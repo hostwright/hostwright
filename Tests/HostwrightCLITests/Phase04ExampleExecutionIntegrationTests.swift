@@ -216,34 +216,22 @@ final class Phase04ExampleExecutionIntegrationTests: XCTestCase {
 
     func testCheckedInExpectedFailuresStopBeforeExecution() throws {
         try withTemporaryRoot { temporaryRoot in
-            let namedVolume = try example("expected-failures/named-volume.yaml")
-            let preparation = try lifecyclePreparation(
-                example: namedVolume,
-                previous: nil,
-                observedLifecycle: nil
+            let namedVolumeURL = examplesRoot.appendingPathComponent(
+                "expected-failures/named-volume.yaml"
             )
-            let namedVolumeDriver = ExampleLifecycleDriver(
-                preparation: preparation
+            let namedVolumeSource = try String(
+                contentsOf: namedVolumeURL,
+                encoding: .utf8
             )
-            let namedVolumeResult = LifecycleCommandRunner(
-                options: try lifecycleOptions(
-                    command: .up,
-                    manifestPath: namedVolume.path,
-                    dryRun: true,
-                    confirmation: nil,
-                    serviceNames: [],
-                    output: .json,
-                    parallelism: nil
-                ),
-                driver: namedVolumeDriver
-            ).run()
-
-            XCTAssertEqual(
-                namedVolumeResult.exitCode,
-                CLIExitCode.validation.rawValue
-            )
-            XCTAssertTrue(namedVolumeResult.standardError.contains("Phase 06"))
-            XCTAssertEqual(namedVolumeDriver.executionCount, 0)
+            XCTAssertThrowsError(
+                try ManifestValidator.validated(namedVolumeSource)
+            ) { error in
+                XCTAssertTrue(
+                    String(describing: error).contains(
+                        "must reference a declared top-level volume"
+                    )
+                )
+            }
 
             let secret = try example("expected-failures/unavailable-secret.yaml")
             XCTAssertTrue(

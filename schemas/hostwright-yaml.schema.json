@@ -113,6 +113,9 @@
     "imageProvenance": {
       "$ref": "#/$defs/imageProvenance"
     },
+    "volumes": {
+      "$ref": "#/$defs/volumeDeclarations"
+    },
     "services": {
       "type": "object",
       "minProperties": 1,
@@ -168,6 +171,58 @@
       "type": "string",
       "maxLength": 4096,
       "pattern": "^/(?!.*//)(?!.*(?:^|/)\\.\\.?(/|$))[^\\u0000-\\u001F\\u007F]+$"
+    },
+    "providerID": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[a-z0-9](?:[a-z0-9.-]{0,126}[a-z0-9])?$"
+    },
+    "labels": {
+      "type": "object",
+      "maxProperties": 256,
+      "propertyNames": {
+        "type": "string",
+        "maxLength": 128
+      },
+      "additionalProperties": {
+        "type": "string",
+        "maxLength": 4096
+      }
+    },
+    "volumeDeclarations": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/name"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/volumeDeclaration"
+      }
+    },
+    "volumeDeclaration": {
+      "type": "object",
+      "required": ["capacity"],
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "$ref": "#/$defs/providerID",
+          "default": "hostwright-local"
+        },
+        "capacity": {
+          "$ref": "#/$defs/size"
+        },
+        "accessMode": {
+          "enum": ["read-write-once", "read-only-many"],
+          "default": "read-write-once"
+        },
+        "reclaimPolicy": {
+          "enum": ["retain", "delete", "snapshot-before-delete", "backup-before-delete", "recycle"],
+          "default": "retain"
+        },
+        "labels": {
+          "$ref": "#/$defs/labels"
+        }
+      }
     },
     "stringArray": {
       "type": "array",
@@ -583,8 +638,15 @@
         "volumes": {
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^(?!/+(?:\\./*)*:)(?![^:]*(?:^|/)\\.\\.(?:/|:)).+:/[^:]+(:ro|:rw)?$"
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!/+(?:\\./*)*:)(?![^:]*(?:^|/)\\.\\.(?:/|:)).+:/[^:]+(:ro|:rw)?$"
+              },
+              {
+                "$ref": "#/$defs/mount"
+              }
+            ]
           }
         },
         "health": {
@@ -655,6 +717,85 @@
       "additionalProperties": {
         "type": "string",
         "maxLength": 16384
+      }
+    },
+    "mount": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/bindMount"
+        },
+        {
+          "$ref": "#/$defs/volumeMount"
+        },
+        {
+          "$ref": "#/$defs/tmpfsMount"
+        }
+      ]
+    },
+    "bindMount": {
+      "type": "object",
+      "required": ["type", "source", "target"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "bind"
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "target": {
+          "$ref": "#/$defs/normalizedAbsoluteContainerPath"
+        },
+        "readOnly": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "volumeMount": {
+      "type": "object",
+      "required": ["type", "source", "target"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "volume"
+        },
+        "source": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+        },
+        "target": {
+          "$ref": "#/$defs/normalizedAbsoluteContainerPath"
+        },
+        "readOnly": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "tmpfsMount": {
+      "type": "object",
+      "required": ["type", "target"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "tmpfs"
+        },
+        "target": {
+          "$ref": "#/$defs/normalizedAbsoluteContainerPath"
+        },
+        "readOnly": {
+          "type": "boolean",
+          "default": false
+        },
+        "mode": {
+          "type": "string",
+          "pattern": "^[0-7]{3,4}$"
+        },
+        "size": {
+          "$ref": "#/$defs/size"
+        }
       }
     },
     "health": {

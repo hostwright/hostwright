@@ -14,8 +14,9 @@ final class ContractVersionsTests: XCTestCase {
         XCTAssertEqual(HostwrightContractVersions.manifest, 2)
         XCTAssertEqual(HostwrightContractVersions.controlAPI, 2)
         XCTAssertEqual(HostwrightContractVersions.runtimeProviderAPI, 2)
+        XCTAssertEqual(HostwrightContractVersions.storageProviderAPI, 1)
         XCTAssertEqual(HostwrightContractVersions.pluginABI, 1)
-        XCTAssertEqual(HostwrightContractVersions.stateSchema, 14)
+        XCTAssertEqual(HostwrightContractVersions.stateSchema, 15)
     }
 
     func testCapabilityCatalogIsDeterministicUniqueAndCoversEveryRoadmapPhase() {
@@ -96,6 +97,23 @@ final class ContractVersionsTests: XCTestCase {
             Set([130, 131, 140])
         )
 
+        guard let persistentStorage = report.capabilities.first(where: {
+            $0.identifier == "storage.persistent"
+        }) else {
+            return XCTFail("Persistent storage capability is missing.")
+        }
+        XCTAssertEqual(persistentStorage.state, .stable)
+        XCTAssertEqual(persistentStorage.phase, 6)
+        XCTAssertEqual(persistentStorage.issue, 163)
+        XCTAssertEqual(
+            Set(persistentStorage.requiredEvidence),
+            Set([
+                .unitContract, .localIntegration, .liveRuntime,
+                .migrationUpgrade, .securityAssessment,
+                .resilienceChaos, .interopConformance
+            ])
+        )
+
         guard let keychainSecrets = report.capabilities.first(where: {
             $0.identifier == "secrets.keychain"
         }) else {
@@ -145,6 +163,7 @@ final class ContractVersionsTests: XCTestCase {
             let manifest: Int
             let controlAPI: Int
             let runtimeProviderAPI: Int
+            let storageProviderAPI: Int
             let pluginABI: Int
             let stateSchema: Int
         }
@@ -156,6 +175,10 @@ final class ContractVersionsTests: XCTestCase {
         XCTAssertEqual(golden.manifest, HostwrightContractVersions.manifest)
         XCTAssertEqual(golden.controlAPI, HostwrightContractVersions.controlAPI)
         XCTAssertEqual(golden.runtimeProviderAPI, HostwrightContractVersions.runtimeProviderAPI)
+        XCTAssertEqual(
+            golden.storageProviderAPI,
+            HostwrightContractVersions.storageProviderAPI
+        )
         XCTAssertEqual(golden.pluginABI, HostwrightContractVersions.pluginABI)
         XCTAssertEqual(golden.stateSchema, HostwrightContractVersions.stateSchema)
     }

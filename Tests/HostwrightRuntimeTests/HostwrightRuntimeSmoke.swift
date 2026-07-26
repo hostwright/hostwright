@@ -505,6 +505,104 @@ final class HostwrightRuntimeTests: XCTestCase {
         }
     }
 
+    func testCreateMissingServiceEncodesBindAndTmpfsMountsByCodec() throws {
+        let service = DesiredRuntimeService(
+            identity: identity,
+            image: desiredService.image,
+            command: desiredService.command,
+            mounts: [
+                RuntimeMountReference(
+                    source: "/tmp/hostwright-input",
+                    target: "/input",
+                    kind: .bind,
+                    access: .readOnly
+                ),
+                RuntimeMountReference(
+                    source: "tmpfs",
+                    target: "/tmp",
+                    kind: .tmpfs,
+                    access: .readWrite
+                )
+            ]
+        )
+        let executable = ResolvedRuntimeExecutable(name: "container", path: "/usr/bin/container-fixture")
+
+        let v11 = try AppleContainerCommand.spec(
+            kind: .createContainer,
+            codec: .v1_1_0,
+            executable: executable,
+            desiredService: service,
+            mutationContext: mutationContext
+        )
+        XCTAssertTrue(v11.arguments.contains("--mount"))
+        XCTAssertTrue(v11.arguments.contains("type=bind,source=/tmp/hostwright-input,target=/input,readonly"))
+        XCTAssertTrue(v11.arguments.contains("--tmpfs"))
+        XCTAssertTrue(v11.arguments.contains("/tmp"))
+
+        let v10BindOnly = try AppleContainerCommand.spec(
+            kind: .createContainer,
+            codec: .v1_0_0,
+            executable: executable,
+            desiredService: DesiredRuntimeService(
+                identity: identity,
+                image: desiredService.image,
+                command: desiredService.command,
+                mounts: [
+                    RuntimeMountReference(
+                        source: "/tmp/hostwright-input",
+                        target: "/input",
+                        kind: .bind,
+                        access: .readOnly
+                    )
+                ]
+            ),
+            mutationContext: mutationContext
+        )
+        XCTAssertTrue(v10BindOnly.arguments.contains("--volume"))
+        XCTAssertTrue(v10BindOnly.arguments.contains("/tmp/hostwright-input:/input:ro"))
+
+        XCTAssertThrowsError(
+            try AppleContainerCommand.spec(
+                kind: .createContainer,
+                codec: .v1_0_0,
+                executable: executable,
+                desiredService: service,
+                mutationContext: mutationContext
+            )
+        ) { error in
+            XCTAssertTrue(String(describing: error).contains("1.0.0 does not qualify tmpfs"))
+        }
+    }
+
+    func testCreateMissingServiceRejectsMountDelimiterInjection() {
+        let executable = ResolvedRuntimeExecutable(name: "container", path: "/usr/bin/container-fixture")
+        let service = DesiredRuntimeService(
+            identity: identity,
+            image: desiredService.image,
+            command: desiredService.command,
+            mounts: [
+                RuntimeMountReference(
+                    source: "/tmp/bad,source",
+                    target: "/input",
+                    kind: .bind,
+                    access: .readOnly
+                )
+            ]
+        )
+
+        XCTAssertThrowsError(
+            try AppleContainerCommand.spec(
+                kind: .createContainer,
+                codec: .v1_1_0,
+                executable: executable,
+                desiredService: service,
+                mutationContext: mutationContext
+            )
+        ) { error in
+            XCTAssertTrue(String(describing: error).contains("mount delimiters"))
+        }
+    }
+
     func testManagedStartAndDeletePoliciesAcceptOnlyExactHostwrightContainers() {
         let executable = ResolvedRuntimeExecutable(name: "container", path: "/usr/bin/container-fixture")
         let start = AppleContainerCommand.spec(kind: .startContainer(containerID: "hostwright-demo-api"), executable: executable)
@@ -1727,6 +1825,284 @@ final class HostwrightRuntimeTests: XCTestCase {
         }
     }
 
+    func testAppleContainerApplyAdapterRejectsUnsafeBindBeforeAnyRuntimeInvocation() async throws {
+        let runner = RoutingRuntimeProcessRunner { spec in
+            XCTFail("Unsafe bind path must fail before runtime access: \(spec.arguments)")
+            return RuntimeCommandResult(spec: spec, exitStatus: 1, standardOutput: "", standardError: "")
+        }
+        let adapter = AppleContainerApplyAdapter(
+            executableResolver: resolvedContainer,
+            processRunner: runner
+        )
+        let service = DesiredRuntimeService(
+            identity: identity,
+            image: "ghcr.io/example/api:latest",
+            mounts: [
+                RuntimeMountReference(
+                    source: "/tmp/../etc",
+                    target: "/data",
+                    kind: .bind,
+                    access: .readOnly
+                )
+            ]
+        )
+
+        do {
+            _ = try await adapter.execute(
+                PlannedRuntimeAction(
+                    kind: .create,
+                    identity: identity,
+                    resourceIdentifier: identity.managedResourceIdentifier,
+                    isDestructive: false,
+                    summary: "create",
+                    desiredService: service
+                ),
+                confirmation: mutationConfirmation()
+            )
+            XCTFail("Expected unsafe bind path rejection.")
+        } catch let error as GuardedMountSecurityError {
+            XCTAssertEqual(error, .parentTraversalForbidden)
+        } catch {
+            XCTFail("Unexpected error: \(error).")
+        }
+
+        XCTAssertTrue(runner.calls.isEmpty)
+    }
+
+    func testAppleContainerApplyAdapterVerifiesExactBindMountAfterCreate() async throws {
+        let rawTemporaryPath =
+            FileManager.default.temporaryDirectory.path
+        let canonicalTemporaryPath =
+            rawTemporaryPath.hasPrefix("/var/")
+                ? "/private\(rawTemporaryPath)"
+                : rawTemporaryPath
+        let bindSource = URL(
+            fileURLWithPath: canonicalTemporaryPath,
+            isDirectory: true
+        )
+            .appendingPathComponent("hostwright-bind-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: bindSource,
+            withIntermediateDirectories: false,
+            attributes: [.posixPermissions: NSNumber(value: 0o700)]
+        )
+        defer {
+            XCTAssertNoThrow(try FileManager.default.removeItem(at: bindSource))
+            XCTAssertFalse(FileManager.default.fileExists(atPath: bindSource.path))
+        }
+
+        let imageListFixture = try fixture("apple-container-image-list-real-json.txt")
+        let imageObservations = ObservationFixtureSequence(
+            outputs: [
+                imageListFixture,
+                try fixture(
+                    "apple-container-1.1.0-image-list.json"
+                ),
+            ]
+        )
+        let createdFixture = try containerListOutput(
+            identity: proofIdentity,
+            state: "stopped",
+            context: proofObservationMutationContext,
+            mounts: [[
+                "destination": "/data",
+                "options": ["ro"],
+                "source": bindSource.path,
+                "type": ["virtiofs": [:]]
+            ]]
+        )
+        let runner = RoutingRuntimeProcessRunner { spec in
+            switch spec.arguments {
+            case ["image", "list", "--format", "json"]:
+                return RuntimeCommandResult(
+                    spec: spec,
+                    exitStatus: 0,
+                    standardOutput: imageObservations.next(),
+                    standardError: ""
+                )
+            case ["list", "--all", "--format", "json"]:
+                return RuntimeCommandResult(
+                    spec: spec,
+                    exitStatus: 0,
+                    standardOutput: createdFixture,
+                    standardError: ""
+                )
+            default:
+                if spec.arguments.first == "create" {
+                    return RuntimeCommandResult(
+                        spec: spec,
+                        exitStatus: 0,
+                        standardOutput: "created",
+                        standardError: ""
+                    )
+                }
+                throw RuntimeAdapterError.commandRejected(
+                    classification: spec.classification,
+                    message: "unexpected command"
+                )
+            }
+        }
+        let service = DesiredRuntimeService(
+            identity: proofIdentity,
+            image: proofService.image,
+            mounts: [
+                RuntimeMountReference(
+                    source: bindSource.path,
+                    target: "/data",
+                    kind: .bind,
+                    access: .readOnly
+                )
+            ]
+        )
+        let adapter = AppleContainerApplyAdapter(
+            executableResolver: resolvedContainer,
+            processRunner: runner
+        )
+
+        let event = try await adapter.execute(
+            PlannedRuntimeAction(
+                kind: .create,
+                identity: proofIdentity,
+                resourceIdentifier: proofIdentity.managedResourceIdentifier,
+                isDestructive: false,
+                summary: "create with exact bind",
+                desiredService: service
+            ),
+            confirmation: mutationConfirmation(
+                context: proofObservationMutationContext
+            )
+        )
+
+        XCTAssertEqual(
+            event.resourceIdentifier,
+            proofIdentity.managedResourceIdentifier
+        )
+        XCTAssertEqual(
+            runner.calls.filter { $0.arguments.first == "create" }.count,
+            1
+        )
+    }
+
+    func testAppleContainerApplyAdapterRejectsObservedBindMountMismatchAfterCreate() async throws {
+        let rawTemporaryPath =
+            FileManager.default.temporaryDirectory.path
+        let canonicalTemporaryPath =
+            rawTemporaryPath.hasPrefix("/var/")
+                ? "/private\(rawTemporaryPath)"
+                : rawTemporaryPath
+        let bindSource = URL(
+            fileURLWithPath: canonicalTemporaryPath,
+            isDirectory: true
+        )
+            .appendingPathComponent("hostwright-bind-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: bindSource,
+            withIntermediateDirectories: false,
+            attributes: [.posixPermissions: NSNumber(value: 0o700)]
+        )
+        defer {
+            XCTAssertNoThrow(try FileManager.default.removeItem(at: bindSource))
+            XCTAssertFalse(FileManager.default.fileExists(atPath: bindSource.path))
+        }
+
+        let imageListFixture = try fixture("apple-container-image-list-real-json.txt")
+        let imageObservations = ObservationFixtureSequence(
+            outputs: [
+                imageListFixture,
+                try fixture(
+                    "apple-container-1.1.0-image-list.json"
+                ),
+            ]
+        )
+        let createdFixture = try containerListOutput(
+            identity: proofIdentity,
+            state: "stopped",
+            context: proofObservationMutationContext,
+            mounts: [[
+                "destination": "/data",
+                "options": [],
+                "source": bindSource.path,
+                "type": ["virtiofs": [:]]
+            ]]
+        )
+        let runner = RoutingRuntimeProcessRunner { spec in
+            switch spec.arguments {
+            case ["image", "list", "--format", "json"]:
+                return RuntimeCommandResult(
+                    spec: spec,
+                    exitStatus: 0,
+                    standardOutput: imageObservations.next(),
+                    standardError: ""
+                )
+            case ["list", "--all", "--format", "json"]:
+                return RuntimeCommandResult(
+                    spec: spec,
+                    exitStatus: 0,
+                    standardOutput: createdFixture,
+                    standardError: ""
+                )
+            default:
+                if spec.arguments.first == "create" {
+                    return RuntimeCommandResult(
+                        spec: spec,
+                        exitStatus: 0,
+                        standardOutput: "created",
+                        standardError: ""
+                    )
+                }
+                throw RuntimeAdapterError.commandRejected(
+                    classification: spec.classification,
+                    message: "unexpected command"
+                )
+            }
+        }
+        let service = DesiredRuntimeService(
+            identity: proofIdentity,
+            image: proofService.image,
+            mounts: [
+                RuntimeMountReference(
+                    source: bindSource.path,
+                    target: "/data",
+                    kind: .bind,
+                    access: .readOnly
+                )
+            ]
+        )
+        let adapter = AppleContainerApplyAdapter(
+            executableResolver: resolvedContainer,
+            processRunner: runner
+        )
+
+        do {
+            _ = try await adapter.execute(
+                PlannedRuntimeAction(
+                    kind: .create,
+                    identity: proofIdentity,
+                    resourceIdentifier: proofIdentity.managedResourceIdentifier,
+                    isDestructive: false,
+                    summary: "reject observed bind mismatch",
+                    desiredService: service
+                ),
+                confirmation: mutationConfirmation(
+                    context: proofObservationMutationContext
+                )
+            )
+            XCTFail("Expected exact observed bind-mount mismatch rejection.")
+        } catch let error as RuntimeAdapterError {
+            guard case .outputParseFailed(let message) = error else {
+                return XCTFail("Expected outputParseFailed, got \(error).")
+            }
+            XCTAssertTrue(message.contains("exact guarded bind-mount"))
+        } catch {
+            XCTFail("Unexpected error: \(error).")
+        }
+
+        XCTAssertEqual(
+            runner.calls.filter { $0.arguments.first == "create" }.count,
+            1
+        )
+    }
+
     func testAppleContainerReadOnlyAdapterMissingExecutableDegradesHonestly() async {
         let adapter = AppleContainerReadOnlyAdapter(
             executableResolver: DictionaryRuntimeExecutableResolver(executables: [:]),
@@ -2303,7 +2679,8 @@ final class HostwrightRuntimeTests: XCTestCase {
         identity: RuntimeServiceIdentity,
         state: String,
         context: RuntimeMutationContext,
-        startedDate: String? = nil
+        startedDate: String? = nil,
+        mounts: [[String: Any]] = []
     ) throws -> String {
         let resourceIdentifier = identity.managedResourceIdentifier
         var container = try structuredInventoryTemplate()[0]
@@ -2317,7 +2694,7 @@ final class HostwrightRuntimeTests: XCTestCase {
             for: identity,
             context: context
         )
-        configuration["mounts"] = []
+        configuration["mounts"] = mounts
         configuration["networks"] = []
         configuration["publishedPorts"] = []
         image["reference"] = "local/test:latest"

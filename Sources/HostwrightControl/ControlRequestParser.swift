@@ -36,6 +36,23 @@ public enum LocalControlRequestParser {
         "imageTargetBytes",
         "imageRetentionSeconds",
         "imageMaximumDeletions",
+        "volumeOperation",
+        "volumeIDs",
+        "volumeResourceID",
+        "volumeName",
+        "volumeTargetVolumeID",
+        "volumeReferenceID",
+        "volumeOwner",
+        "volumeOutputPath",
+        "volumeKeyReference",
+        "volumeRestoreTargets",
+        "volumeIdempotencyKey",
+        "volumeRemoteS3Endpoint",
+        "volumeRemoteS3Bucket",
+        "volumeRemoteS3Region",
+        "volumeRemoteS3Prefix",
+        "volumeRemoteS3AccessKeyReference",
+        "volumeRemoteS3SecretKeyReference",
         "registryReferrerOperation",
         "registryServer",
         "registryRepository",
@@ -196,15 +213,34 @@ public enum LocalControlRequestParser {
             request.registryServiceName != nil ||
             request.registryApprovalRecordPath != nil ||
             request.registryExceptionID != nil
+        let hasVolumeFields =
+            request.volumeOperation != nil ||
+            request.volumeIDs != nil ||
+            request.volumeResourceID != nil ||
+            request.volumeName != nil ||
+            request.volumeTargetVolumeID != nil ||
+            request.volumeReferenceID != nil ||
+            request.volumeOwner != nil ||
+            request.volumeOutputPath != nil ||
+            request.volumeKeyReference != nil ||
+            request.volumeRestoreTargets != nil ||
+            request.volumeIdempotencyKey != nil ||
+            request.volumeRemoteS3Endpoint != nil ||
+            request.volumeRemoteS3Bucket != nil ||
+            request.volumeRemoteS3Region != nil ||
+            request.volumeRemoteS3Prefix != nil ||
+            request.volumeRemoteS3AccessKeyReference != nil ||
+            request.volumeRemoteS3SecretKeyReference != nil
         switch request.operation {
         case .events:
             guard !hasLifecycleFields, !hasImageFields,
-                  !hasRegistryFields else {
+                  !hasRegistryFields, !hasVolumeFields else {
                 throw invalid("Local control events does not accept lifecycle fields.")
             }
         case .recovery:
             guard !hasEventOnlyFilters, !hasLifecycleFields,
-                  !hasImageFields, !hasRegistryFields else {
+                  !hasImageFields, !hasRegistryFields,
+                  !hasVolumeFields else {
                 throw invalid("Local control recovery accepts only the optional project filter.")
             }
         case .plan, .status, .doctor:
@@ -212,14 +248,16 @@ public enum LocalControlRequestParser {
                   !hasEventOnlyFilters,
                   !hasLifecycleFields,
                   !hasImageFields,
-                  !hasRegistryFields else {
+                  !hasRegistryFields,
+                  !hasVolumeFields else {
                 throw invalid("This local control operation does not accept filters.")
             }
         case .up, .down, .run, .start, .stop, .restart, .rm, .update:
             guard request.project == nil,
                   !hasEventOnlyFilters,
                   !hasImageFields,
-                  !hasRegistryFields else {
+                  !hasRegistryFields,
+                  !hasVolumeFields else {
                 throw invalid("Local control lifecycle operations accept only lifecycle fields.")
             }
             guard (request.dryRun == true) != (request.confirmPlan != nil) else {
@@ -234,7 +272,8 @@ public enum LocalControlRequestParser {
                   request.services == nil,
                   request.timeout == nil,
                   request.parallelism == nil,
-                  !hasRegistryFields else {
+                  !hasRegistryFields,
+                  !hasVolumeFields else {
                 throw invalid(
                     "Local control image operations accept only image fields and runtimeProvider."
                 )
@@ -248,13 +287,425 @@ public enum LocalControlRequestParser {
                   request.runtimeProvider == nil,
                   request.timeout == nil,
                   request.parallelism == nil,
-                  !hasImageFields else {
+                  !hasImageFields,
+                  !hasVolumeFields else {
                 throw invalid(
                     "Local control registry accepts only registry referrer fields and confirmPlan."
                 )
             }
             try validateRegistry(request)
+        case .volume:
+            guard !hasEventOnlyFilters,
+                  request.services == nil,
+                  request.runtimeProvider == nil,
+                  request.parallelism == nil,
+                  !hasImageFields,
+                  !hasRegistryFields else {
+                throw invalid(
+                    "Local control volume accepts only volume fields, project for list, timeout, and exact plan confirmation."
+                )
+            }
+            try validateVolume(request)
         }
+    }
+
+    private static func validateVolume(
+        _ request: LocalControlRequest
+    ) throws {
+        let operations: Set<String> = [
+            "list", "inspect", "capacity", "health", "recover",
+            "delete", "prune",
+            "snapshot-create", "snapshot-list",
+            "snapshot-inspect", "snapshot-retain",
+            "snapshot-export", "snapshot-restore",
+            "snapshot-delete",
+            "backup-create", "backup-list", "backup-inspect",
+            "backup-verify", "backup-retain", "backup-restore",
+            "backup-delete",
+        ]
+        guard let operation = request.volumeOperation,
+              operations.contains(operation) else {
+            throw invalid(
+                "Local control volumeOperation is missing or unsupported."
+            )
+        }
+        let ids = request.volumeIDs ?? []
+        guard ids.count <= 256,
+              Set(ids).count == ids.count,
+              ids.allSatisfy(validUUID) else {
+            throw invalid(
+                "Local control volumeIDs must contain at most 256 unique canonical UUIDs."
+            )
+        }
+        for value in [
+            request.volumeResourceID,
+            request.volumeTargetVolumeID,
+            request.volumeReferenceID,
+        ].compactMap({ $0 }) where !validUUID(value) {
+            throw invalid(
+                "Local control volume resource identities must be canonical UUIDs."
+            )
+        }
+        if let name = request.volumeName,
+           name.range(
+               of: "^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,127})$",
+               options: .regularExpression
+           ) == nil {
+            throw invalid(
+                "Local control volume name must be a bounded safe identifier."
+            )
+        }
+        if let owner = request.volumeOwner,
+           owner.range(
+               of: "^[A-Za-z0-9](?:[A-Za-z0-9._:/-]{0,255})$",
+               options: .regularExpression
+           ) == nil {
+            throw invalid(
+                "Local control volume owner must be a bounded safe identifier."
+            )
+        }
+        if let output = request.volumeOutputPath,
+           !validAbsolutePath(output) {
+            throw invalid(
+                "Local control volume output path must be normalized and absolute."
+            )
+        }
+        if let key = request.volumeKeyReference,
+           !validSecretReferenceIdentifier(key) {
+            throw invalid(
+                "Local control volume key reference must be a typed secret reference."
+            )
+        }
+        if let idempotencyKey = request.volumeIdempotencyKey,
+           (!validFilter(idempotencyKey) ||
+               idempotencyKey.utf8.count > 256) {
+            throw invalid(
+                "Local control volume idempotency key must be bounded text without controls."
+            )
+        }
+        let targets = request.volumeRestoreTargets ?? []
+        guard targets.count <= 256,
+              Set(targets).count == targets.count,
+              targets.allSatisfy(validRestoreTarget) else {
+            throw invalid(
+                "Local control volume restore targets must contain at most 256 unique source=target UUID pairs."
+            )
+        }
+        let targetSources = targets.compactMap {
+            $0.split(separator: "=").first.map(String.init)
+        }
+        let targetDestinations = targets.compactMap {
+            $0.split(separator: "=").last.map(String.init)
+        }
+        guard Set(targetSources).count == targetSources.count,
+              Set(targetDestinations).count ==
+                targetDestinations.count else {
+            throw invalid(
+                "Local control volume restore sources and targets must each be unique."
+            )
+        }
+        try validateRemoteBackupDestination(
+            request,
+            operation: operation
+        )
+
+        let destructive: Set<String> = [
+            "delete", "prune", "snapshot-restore",
+            "snapshot-delete", "backup-restore",
+            "backup-delete",
+        ]
+        if destructive.contains(operation) {
+            guard (request.dryRun == true) !=
+                    (request.confirmPlan != nil) else {
+                throw invalid(
+                    "Local control destructive volume operations require exactly one of dryRun or confirmPlan."
+                )
+            }
+        } else {
+            guard request.dryRun == nil,
+                  request.confirmPlan == nil else {
+                throw invalid(
+                    "Local control non-destructive volume operations reject plan-confirmation fields."
+                )
+            }
+        }
+
+        let resource = request.volumeResourceID != nil
+        let name = request.volumeName != nil
+        let target = request.volumeTargetVolumeID != nil
+        let reference = request.volumeReferenceID != nil
+        let owner = request.volumeOwner != nil
+        let output = request.volumeOutputPath != nil
+        let key = request.volumeKeyReference != nil
+        let restoreTargets = request.volumeRestoreTargets != nil
+        let recoveryKey = request.volumeIdempotencyKey != nil
+        let project = request.project != nil
+
+        switch operation {
+        case "list":
+            guard ids.isEmpty, !resource, !name, !target,
+                  !reference, !owner, !output, !key,
+                  !restoreTargets, !recoveryKey else {
+                throw invalid(
+                    "Local control volume list accepts only an optional project."
+                )
+            }
+        case "inspect":
+            guard ids.count == 1, !project, !resource, !name,
+                  !target, !reference, !owner, !output, !key,
+                  !restoreTargets, !recoveryKey else {
+                throw invalid(
+                    "Local control volume inspect requires exactly one volume ID."
+                )
+            }
+        case "capacity", "health", "prune":
+            guard ids.isEmpty, !project, !resource, !name,
+                  !target, !reference, !owner, !output, !key,
+                  !restoreTargets, !recoveryKey else {
+                throw invalid(
+                    "Local control volume \(operation) accepts no resource fields."
+                )
+            }
+        case "recover":
+            guard ids.count == 1, recoveryKey, !project,
+                  !resource, !name, !target, !reference,
+                  !owner, !output, !key, !restoreTargets else {
+                throw invalid(
+                    "Local control volume recover requires one volume ID and idempotency key."
+                )
+            }
+        case "delete":
+            guard ids.count == 1, !project, !resource, !name,
+                  !target, !reference, !owner, !output, !key,
+                  !restoreTargets, !recoveryKey else {
+                throw invalid(
+                    "Local control volume delete requires exactly one volume ID."
+                )
+            }
+        case "snapshot-create":
+            guard ids.count == 1, resource, name, !project,
+                  !target, !reference, !owner, !output, !key,
+                  !restoreTargets, !recoveryKey else {
+                throw invalid(
+                    "Local control snapshot create requires one volume ID, resource ID, and name."
+                )
+            }
+        case "snapshot-list":
+            guard ids.count == 1, !project, !resource, !name,
+                  !target, !reference, !owner, !output, !key,
+                  !restoreTargets, !recoveryKey else {
+                throw invalid(
+                    "Local control snapshot list requires one volume ID."
+                )
+            }
+        case "snapshot-inspect", "snapshot-delete":
+            guard ids.count == 1, resource, !project, !name,
+                  !target, !reference, !owner, !output, !key,
+                  !restoreTargets, !recoveryKey else {
+                throw invalid(
+                    "Local control \(operation) requires one volume ID and snapshot ID."
+                )
+            }
+        case "snapshot-retain":
+            guard ids.count == 1, resource, owner, !project,
+                  !name, !target, !reference, !output, !key,
+                  !restoreTargets, !recoveryKey else {
+                throw invalid(
+                    "Local control snapshot retain requires one volume ID, snapshot ID, and owner."
+                )
+            }
+        case "snapshot-export":
+            guard ids.count == 1, resource, output, !project,
+                  !name, !target, !reference, !owner, !key,
+                  !restoreTargets, !recoveryKey else {
+                throw invalid(
+                    "Local control snapshot export requires one volume ID, snapshot ID, and output."
+                )
+            }
+        case "snapshot-restore":
+            guard ids.count == 1, resource, target, reference,
+                  !project, !name, !owner, !output, !key,
+                  !restoreTargets, !recoveryKey else {
+                throw invalid(
+                    "Local control snapshot restore requires source volume, snapshot, target volume, and reference IDs."
+                )
+            }
+        case "backup-create":
+            guard !ids.isEmpty, resource, name, key, !project,
+                  !target, !reference, !owner, !output,
+                  !restoreTargets, !recoveryKey else {
+                throw invalid(
+                    "Local control backup create requires volume IDs, backup ID, name, and key reference."
+                )
+            }
+        case "backup-list":
+            guard ids.count == 1, !project, !resource, !name,
+                  !target, !reference, !owner, !output, !key,
+                  !restoreTargets, !recoveryKey else {
+                throw invalid(
+                    "Local control backup list requires one volume ID."
+                )
+            }
+        case "backup-inspect":
+            guard ids.count == 1, resource, !project, !name,
+                  !target, !reference, !owner, !output, !key,
+                  !restoreTargets, !recoveryKey else {
+                throw invalid(
+                    "Local control backup inspect requires one volume ID and backup ID."
+                )
+            }
+        case "backup-verify":
+            guard ids.count == 1, resource, key, !project,
+                  !name, !target, !reference, !owner, !output,
+                  !restoreTargets, !recoveryKey else {
+                throw invalid(
+                    "Local control backup verify requires one volume ID, backup ID, and key reference."
+                )
+            }
+        case "backup-retain":
+            guard ids.count == 1, resource, owner, !project,
+                  !name, !target, !reference, !output, !key,
+                  !restoreTargets, !recoveryKey else {
+                throw invalid(
+                    "Local control backup retain requires one volume ID, backup ID, and owner."
+                )
+            }
+        case "backup-restore":
+            guard ids.isEmpty, resource, key, restoreTargets,
+                  !targets.isEmpty, !project, !name, !target,
+                  !reference, !owner, !output, !recoveryKey else {
+                throw invalid(
+                    "Local control backup restore requires backup ID, key reference, and restore targets."
+                )
+            }
+        case "backup-delete":
+            guard ids.count == 1, resource, !project, !name,
+                  !target, !reference, !owner, !output, !key,
+                  !restoreTargets, !recoveryKey else {
+                throw invalid(
+                    "Local control backup delete requires one volume ID and backup ID."
+                )
+            }
+        default:
+            throw invalid(
+                "Local control volume operation is unsupported."
+            )
+        }
+    }
+
+    private static func validateRemoteBackupDestination(
+        _ request: LocalControlRequest,
+        operation: String
+    ) throws {
+        let values = [
+            request.volumeRemoteS3Endpoint,
+            request.volumeRemoteS3Bucket,
+            request.volumeRemoteS3Region,
+            request.volumeRemoteS3Prefix,
+            request.volumeRemoteS3AccessKeyReference,
+            request.volumeRemoteS3SecretKeyReference,
+        ]
+        guard values.contains(where: { $0 != nil }) else {
+            return
+        }
+        guard [
+            "backup-create",
+            "backup-verify",
+            "backup-retain",
+            "backup-restore",
+            "backup-delete",
+        ].contains(operation) else {
+            throw invalid(
+                "Local control remote S3 fields are supported only for backup create, verify, retain, restore, and delete."
+            )
+        }
+        guard let endpoint = request.volumeRemoteS3Endpoint,
+              let bucket = request.volumeRemoteS3Bucket,
+              let region = request.volumeRemoteS3Region,
+              let accessKey = request
+                .volumeRemoteS3AccessKeyReference,
+              let secretKey = request
+                .volumeRemoteS3SecretKeyReference else {
+            throw invalid(
+                "Local control remote S3 requires endpoint, bucket, region, access-key reference, and secret-key reference."
+            )
+        }
+        let endpointURL = URL(string: endpoint)
+        guard endpointURL?.scheme == "https",
+              endpointURL?.host?.isEmpty == false,
+              endpointURL?.user == nil,
+              endpointURL?.password == nil,
+              endpointURL?.query == nil,
+              endpointURL?.fragment == nil,
+              endpointURL?.path.isEmpty == true ||
+                endpointURL?.path == "/",
+              (3...63).contains(bucket.utf8.count),
+              bucket.first.map({
+                  $0.isLetter || $0.isNumber
+              }) == true,
+              bucket.last.map({
+                  $0.isLetter || $0.isNumber
+              }) == true,
+              bucket.allSatisfy({
+                  $0.isLowercase || $0.isNumber ||
+                    $0 == "." || $0 == "-"
+              }),
+              !bucket.contains(".."),
+              (1...64).contains(region.utf8.count),
+              region.allSatisfy({
+                  $0.isLetter || $0.isNumber || $0 == "-"
+              }) else {
+            throw invalid(
+                "Local control remote S3 endpoint, bucket, or region is invalid."
+            )
+        }
+        let prefix = request.volumeRemoteS3Prefix ?? ""
+        guard prefix.utf8.count <= 512,
+              !prefix.hasPrefix("/"),
+              !prefix.hasSuffix("/"),
+              prefix.isEmpty || prefix.split(
+                  separator: "/",
+                  omittingEmptySubsequences: false
+              ).allSatisfy({
+                  !$0.isEmpty &&
+                    $0 != "." &&
+                    $0 != ".." &&
+                    $0.allSatisfy {
+                        $0.isLetter || $0.isNumber ||
+                            $0 == "." || $0 == "_" ||
+                            $0 == "-"
+                    }
+              }) else {
+            throw invalid(
+                "Local control remote S3 prefix is invalid."
+            )
+        }
+        guard validKeychainReference(accessKey),
+              validKeychainReference(secretKey),
+              accessKey != secretKey else {
+            throw invalid(
+                "Local control remote S3 credentials require two distinct typed Keychain references."
+            )
+        }
+    }
+
+    private static func validKeychainReference(
+        _ value: String
+    ) -> Bool {
+        value.range(
+            of: #"^keychain://[A-Za-z0-9._:@-]{1,128}/[A-Za-z0-9._:@-]{1,128}$"#,
+            options: .regularExpression
+        ) != nil
+    }
+
+    private static func validRestoreTarget(_ value: String) -> Bool {
+        let parts = value.split(
+            separator: "=",
+            omittingEmptySubsequences: false
+        )
+        return parts.count == 2 &&
+            validUUID(String(parts[0])) &&
+            validUUID(String(parts[1]))
     }
 
     private static func validateRegistry(

@@ -1522,6 +1522,1015 @@ public struct MigrationRunner: Sendable {
                 "CREATE INDEX IF NOT EXISTS content_cache_leases_reference_active_idx ON content_cache_leases(provider_scope, reference, released_at, expires_at)",
                 "CREATE INDEX IF NOT EXISTS content_cache_leases_owner_active_idx ON content_cache_leases(owner_id, released_at, expires_at)"
             ]
+        ),
+        SchemaMigration(
+            version: 15,
+            description: "Fenced local storage controller and node state",
+            statements: [
+                """
+                CREATE TABLE IF NOT EXISTS storage_volumes (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    provider_id TEXT NOT NULL,
+                    provider_volume_id TEXT NOT NULL,
+                    topology_node_id TEXT NOT NULL,
+                    generation INTEGER NOT NULL CHECK (
+                        generation >= 1
+                    ),
+                    fencing_token TEXT NOT NULL,
+                    capacity_bytes INTEGER NOT NULL CHECK (
+                        capacity_bytes >= 1
+                        AND capacity_bytes <= 1125899906842624
+                    ),
+                    lifecycle_state TEXT NOT NULL CHECK (
+                        lifecycle_state IN (
+                            'creating', 'available', 'expanding',
+                            'deleting', 'deleted', 'faulted'
+                        )
+                    ),
+                    reclaim_policy TEXT NOT NULL CHECK (
+                        reclaim_policy IN (
+                            'retain', 'delete',
+                            'snapshot-before-delete',
+                            'backup-before-delete', 'recycle'
+                        )
+                    ),
+                    access_mode TEXT NOT NULL CHECK (
+                        access_mode IN (
+                            'read-write-once', 'read-only-many'
+                        )
+                    ),
+                    source_kind TEXT CHECK (
+                        source_kind IS NULL
+                        OR source_kind IN (
+                            'volume', 'snapshot', 'backup'
+                        )
+                    ),
+                    source_id TEXT,
+                    operation_group_id TEXT NOT NULL
+                        REFERENCES operation_groups(id)
+                        ON DELETE RESTRICT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(provider_id, provider_volume_id),
+                    UNIQUE(project_id, name),
+                    CHECK (
+                        length(id) = 36
+                        AND replace(id, '-', '')
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        length(project_id) BETWEEN 1 AND 256
+                        AND project_id
+                            NOT GLOB '*[^A-Za-z0-9._:/-]*'
+                    ),
+                    CHECK (
+                        length(name) BETWEEN 1 AND 128
+                        AND name NOT GLOB '*[^A-Za-z0-9._-]*'
+                    ),
+                    CHECK (
+                        length(provider_id) BETWEEN 1 AND 256
+                        AND provider_id
+                            NOT GLOB '*[^A-Za-z0-9._:/-]*'
+                    ),
+                    CHECK (
+                        length(provider_volume_id) BETWEEN 1 AND 512
+                        AND provider_volume_id NOT GLOB '*[^ -~]*'
+                    ),
+                    CHECK (
+                        length(topology_node_id) BETWEEN 1 AND 128
+                        AND topology_node_id
+                            NOT GLOB '*[^A-Za-z0-9._:/-]*'
+                    ),
+                    CHECK (
+                        length(fencing_token) = 36
+                        AND replace(fencing_token, '-', '')
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        (source_kind IS NULL AND source_id IS NULL)
+                        OR (
+                            source_kind IS NOT NULL
+                            AND length(source_id) = 36
+                            AND replace(source_id, '-', '')
+                                NOT GLOB '*[^0-9a-f]*'
+                        )
+                    ),
+                    CHECK (
+                        created_at != '' AND updated_at != ''
+                        AND julianday(created_at) IS NOT NULL
+                        AND julianday(updated_at) IS NOT NULL
+                        AND julianday(updated_at)
+                            >= julianday(created_at)
+                    )
+                )
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS storage_attachments (
+                    id TEXT PRIMARY KEY,
+                    volume_id TEXT NOT NULL
+                        REFERENCES storage_volumes(id)
+                        ON DELETE RESTRICT,
+                    node_id TEXT NOT NULL,
+                    node_uuid TEXT NOT NULL,
+                    workload_uuid TEXT NOT NULL,
+                    attachment_kind TEXT NOT NULL CHECK (
+                        attachment_kind IN ('stage', 'publish')
+                    ),
+                    path TEXT NOT NULL,
+                    staging_path TEXT,
+                    access_mode TEXT NOT NULL CHECK (
+                        access_mode IN (
+                            'read-write-once', 'read-only-many'
+                        )
+                    ),
+                    read_only INTEGER NOT NULL CHECK (
+                        read_only IN (0, 1)
+                    ),
+                    generation INTEGER NOT NULL CHECK (
+                        generation >= 1
+                    ),
+                    fencing_token TEXT NOT NULL,
+                    lifecycle_state TEXT NOT NULL CHECK (
+                        lifecycle_state IN (
+                            'attaching', 'attached', 'detaching',
+                            'detached', 'faulted',
+                            'ambiguous-hold'
+                        )
+                    ),
+                    checkpoint TEXT NOT NULL CHECK (
+                        checkpoint IN (
+                            'attach-intent-persisted',
+                            'attach-fence-acquired',
+                            'attach-provider-effect-requested',
+                            'attach-provider-observed',
+                            'attached-committed',
+                            'detach-intent-persisted',
+                            'detach-fence-acquired',
+                            'detach-provider-effect-requested',
+                            'detach-provider-absent-observed',
+                            'detached-committed'
+                        )
+                    ),
+                    lease_renewed_at TEXT NOT NULL,
+                    lease_expires_at TEXT NOT NULL,
+                    operation_id TEXT NOT NULL,
+                    idempotency_key TEXT NOT NULL,
+                    provider_observation_sha256 TEXT,
+                    force_detach_authorization_sha256 TEXT,
+                    ambiguous_hold_reason_redacted TEXT,
+                    operation_group_id TEXT NOT NULL
+                        REFERENCES operation_groups(id)
+                        ON DELETE RESTRICT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(
+                        volume_id, node_uuid, workload_uuid,
+                        attachment_kind, path
+                    ),
+                    CHECK (
+                        length(id) = 36
+                        AND replace(id, '-', '')
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        length(node_id) BETWEEN 1 AND 128
+                        AND node_id NOT GLOB '*[^A-Za-z0-9._:/-]*'
+                    ),
+                    CHECK (
+                        length(node_uuid) = 36
+                        AND substr(node_uuid, 9, 1) = '-'
+                        AND substr(node_uuid, 14, 1) = '-'
+                        AND substr(node_uuid, 19, 1) = '-'
+                        AND substr(node_uuid, 24, 1) = '-'
+                        AND replace(node_uuid, '-', '')
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        length(workload_uuid) = 36
+                        AND substr(workload_uuid, 9, 1) = '-'
+                        AND substr(workload_uuid, 14, 1) = '-'
+                        AND substr(workload_uuid, 19, 1) = '-'
+                        AND substr(workload_uuid, 24, 1) = '-'
+                        AND replace(workload_uuid, '-', '')
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        length(path) BETWEEN 1 AND 4096
+                        AND substr(path, 1, 1) = '/'
+                        AND path NOT GLOB '*[^ -~]*'
+                    ),
+                    CHECK (
+                        (attachment_kind = 'stage'
+                            AND staging_path IS NULL
+                            AND read_only = 0)
+                        OR
+                        (attachment_kind = 'publish'
+                            AND staging_path IS NOT NULL
+                            AND length(staging_path) BETWEEN 1 AND 4096
+                            AND substr(staging_path, 1, 1) = '/')
+                    ),
+                    CHECK (
+                        access_mode != 'read-only-many'
+                        OR read_only = 1
+                    ),
+                    CHECK (
+                        length(fencing_token) = 36
+                        AND replace(fencing_token, '-', '')
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        length(operation_id) = 36
+                        AND substr(operation_id, 9, 1) = '-'
+                        AND substr(operation_id, 14, 1) = '-'
+                        AND substr(operation_id, 19, 1) = '-'
+                        AND substr(operation_id, 24, 1) = '-'
+                        AND replace(operation_id, '-', '')
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        length(idempotency_key) = 64
+                        AND idempotency_key
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        provider_observation_sha256 IS NULL
+                        OR (
+                            length(provider_observation_sha256) = 64
+                            AND provider_observation_sha256
+                                NOT GLOB '*[^0-9a-f]*'
+                        )
+                    ),
+                    CHECK (
+                        force_detach_authorization_sha256 IS NULL
+                        OR (
+                            length(
+                                force_detach_authorization_sha256
+                            ) = 64
+                            AND force_detach_authorization_sha256
+                                NOT GLOB '*[^0-9a-f]*'
+                        )
+                    ),
+                    CHECK (
+                        (
+                            lifecycle_state = 'ambiguous-hold'
+                            AND ambiguous_hold_reason_redacted
+                                IS NOT NULL
+                            AND length(
+                                ambiguous_hold_reason_redacted
+                            ) BETWEEN 1 AND 512
+                            AND checkpoint IN (
+                                'attach-provider-effect-requested',
+                                'detach-provider-effect-requested'
+                            )
+                        )
+                        OR (
+                            lifecycle_state != 'ambiguous-hold'
+                            AND ambiguous_hold_reason_redacted IS NULL
+                        )
+                    ),
+                    CHECK (
+                        lifecycle_state = 'ambiguous-hold'
+                        OR (
+                            checkpoint IN (
+                                'attach-intent-persisted',
+                                'attach-fence-acquired',
+                                'attach-provider-effect-requested',
+                                'attach-provider-observed'
+                            )
+                            AND lifecycle_state IN (
+                                'attaching', 'faulted'
+                            )
+                        )
+                        OR (
+                            checkpoint = 'attached-committed'
+                            AND lifecycle_state IN (
+                                'attached', 'faulted'
+                            )
+                        )
+                        OR (
+                            checkpoint IN (
+                                'detach-intent-persisted',
+                                'detach-fence-acquired',
+                                'detach-provider-effect-requested',
+                                'detach-provider-absent-observed'
+                            )
+                            AND lifecycle_state IN (
+                                'detaching', 'faulted'
+                            )
+                        )
+                        OR (
+                            checkpoint = 'detached-committed'
+                            AND lifecycle_state = 'detached'
+                        )
+                    ),
+                    CHECK (
+                        checkpoint NOT IN (
+                            'attach-provider-observed',
+                            'attached-committed',
+                            'detach-provider-absent-observed',
+                            'detached-committed'
+                        )
+                        OR provider_observation_sha256 IS NOT NULL
+                    ),
+                    CHECK (
+                        force_detach_authorization_sha256 IS NULL
+                        OR checkpoint IN (
+                            'detach-intent-persisted',
+                            'detach-fence-acquired',
+                            'detach-provider-effect-requested',
+                            'detach-provider-absent-observed',
+                            'detached-committed'
+                        )
+                    ),
+                    CHECK (
+                        julianday(lease_renewed_at) IS NOT NULL
+                        AND julianday(lease_expires_at) IS NOT NULL
+                        AND julianday(lease_expires_at)
+                            > julianday(lease_renewed_at)
+                        AND (
+                            julianday(lease_expires_at)
+                              - julianday(lease_renewed_at)
+                        ) * 86400.0 <= 900.001
+                    ),
+                    CHECK (
+                        created_at != '' AND updated_at != ''
+                        AND julianday(created_at) IS NOT NULL
+                        AND julianday(updated_at) IS NOT NULL
+                        AND julianday(updated_at)
+                            >= julianday(created_at)
+                        AND julianday(lease_renewed_at)
+                            >= julianday(created_at)
+                        AND julianday(lease_renewed_at)
+                            <= julianday(updated_at)
+                    )
+                )
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS storage_snapshots (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL UNIQUE,
+                    source_volume_id TEXT NOT NULL
+                        REFERENCES storage_volumes(id)
+                        ON DELETE RESTRICT,
+                    provider_id TEXT NOT NULL,
+                    provider_snapshot_id TEXT NOT NULL,
+                    consistency_class TEXT NOT NULL CHECK (
+                        consistency_class IN (
+                            'crash-consistent',
+                            'application-consistent'
+                        )
+                    ),
+                    parent_content_tree_sha256 TEXT NOT NULL,
+                    content_tree_sha256 TEXT NOT NULL,
+                    lineage_json TEXT NOT NULL,
+                    generation INTEGER NOT NULL CHECK (
+                        generation >= 1
+                    ),
+                    fencing_token TEXT NOT NULL,
+                    size_bytes INTEGER NOT NULL CHECK (
+                        size_bytes >= 0
+                        AND size_bytes <= 1125899906842624
+                    ),
+                    lifecycle_state TEXT NOT NULL CHECK (
+                        lifecycle_state IN (
+                            'creating', 'ready', 'deleting',
+                            'deleted', 'faulted'
+                        )
+                    ),
+                    operation_group_id TEXT NOT NULL
+                        REFERENCES operation_groups(id)
+                        ON DELETE RESTRICT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(provider_id, provider_snapshot_id),
+                    CHECK (
+                        length(id) = 36
+                        AND replace(id, '-', '')
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        length(name) BETWEEN 1 AND 128
+                        AND name NOT GLOB '*[^A-Za-z0-9._-]*'
+                    ),
+                    CHECK (
+                        length(provider_id) BETWEEN 1 AND 256
+                        AND provider_id
+                            NOT GLOB '*[^A-Za-z0-9._:/-]*'
+                    ),
+                    CHECK (
+                        length(provider_snapshot_id) BETWEEN 1 AND 512
+                        AND provider_snapshot_id NOT GLOB '*[^ -~]*'
+                    ),
+                    CHECK (
+                        length(parent_content_tree_sha256) = 64
+                        AND parent_content_tree_sha256
+                            NOT GLOB '*[^0-9a-f]*'
+                        AND length(content_tree_sha256) = 64
+                        AND content_tree_sha256
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        length(lineage_json) BETWEEN 2 AND 16384
+                        AND lineage_json NOT GLOB '*[^ -~]*'
+                    ),
+                    CHECK (
+                        length(fencing_token) = 36
+                        AND replace(fencing_token, '-', '')
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        created_at != '' AND updated_at != ''
+                        AND julianday(created_at) IS NOT NULL
+                        AND julianday(updated_at) IS NOT NULL
+                        AND julianday(updated_at)
+                            >= julianday(created_at)
+                    )
+                )
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS storage_backups (
+                    id TEXT PRIMARY KEY,
+                    volume_id TEXT NOT NULL
+                        REFERENCES storage_volumes(id)
+                        ON DELETE RESTRICT,
+                    snapshot_id TEXT
+                        REFERENCES storage_snapshots(id)
+                        ON DELETE RESTRICT,
+                    destination_redacted TEXT NOT NULL,
+                    content_sha256 TEXT NOT NULL,
+                    size_bytes INTEGER NOT NULL CHECK (
+                        size_bytes >= 0
+                        AND size_bytes <= 1125899906842624
+                    ),
+                    generation INTEGER NOT NULL CHECK (
+                        generation >= 1
+                    ),
+                    fencing_token TEXT NOT NULL,
+                    lifecycle_state TEXT NOT NULL CHECK (
+                        lifecycle_state IN (
+                            'creating', 'ready', 'restoring',
+                            'deleting', 'deleted', 'faulted'
+                        )
+                    ),
+                    operation_group_id TEXT NOT NULL
+                        REFERENCES operation_groups(id)
+                        ON DELETE RESTRICT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    CHECK (
+                        length(id) = 36
+                        AND replace(id, '-', '')
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        length(destination_redacted)
+                            BETWEEN 1 AND 1024
+                        AND destination_redacted NOT GLOB '*[^ -~]*'
+                    ),
+                    CHECK (
+                        length(content_sha256) = 64
+                        AND content_sha256
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        length(fencing_token) = 36
+                        AND replace(fencing_token, '-', '')
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        created_at != '' AND updated_at != ''
+                        AND julianday(created_at) IS NOT NULL
+                        AND julianday(updated_at) IS NOT NULL
+                        AND julianday(updated_at)
+                            >= julianday(created_at)
+                    )
+                )
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS storage_holds (
+                    id TEXT PRIMARY KEY,
+                    resource_kind TEXT NOT NULL CHECK (
+                        resource_kind IN (
+                            'volume', 'snapshot', 'backup'
+                        )
+                    ),
+                    resource_id TEXT NOT NULL,
+                    reason_redacted TEXT NOT NULL,
+                    generation INTEGER NOT NULL CHECK (
+                        generation >= 1
+                    ),
+                    fencing_token TEXT NOT NULL,
+                    operation_group_id TEXT NOT NULL
+                        REFERENCES operation_groups(id)
+                        ON DELETE RESTRICT,
+                    created_at TEXT NOT NULL,
+                    expires_at TEXT,
+                    released_at TEXT,
+                    CHECK (
+                        length(id) = 36
+                        AND replace(id, '-', '')
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        length(resource_id) = 36
+                        AND replace(resource_id, '-', '')
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        length(reason_redacted) BETWEEN 1 AND 512
+                        AND reason_redacted NOT GLOB '*[^ -~]*'
+                    ),
+                    CHECK (
+                        length(fencing_token) = 36
+                        AND replace(fencing_token, '-', '')
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        created_at != ''
+                        AND julianday(created_at) IS NOT NULL
+                        AND (
+                            expires_at IS NULL
+                            OR (
+                                julianday(expires_at) IS NOT NULL
+                                AND julianday(expires_at)
+                                    > julianday(created_at)
+                            )
+                        )
+                        AND (
+                            released_at IS NULL
+                            OR (
+                                julianday(released_at) IS NOT NULL
+                                AND julianday(released_at)
+                                    >= julianday(created_at)
+                            )
+                        )
+                    )
+                )
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS storage_orphans (
+                    id TEXT PRIMARY KEY,
+                    provider_id TEXT NOT NULL,
+                    resource_kind TEXT NOT NULL CHECK (
+                        resource_kind IN (
+                            'volume', 'attachment',
+                            'snapshot', 'backup'
+                        )
+                    ),
+                    provider_resource_id_hash TEXT NOT NULL,
+                    ownership_proof_sha256 TEXT,
+                    generation INTEGER NOT NULL CHECK (
+                        generation >= 1
+                    ),
+                    fencing_token TEXT NOT NULL,
+                    lifecycle_state TEXT NOT NULL CHECK (
+                        lifecycle_state IN (
+                            'discovered', 'held',
+                            'reclaimed', 'ignored'
+                        )
+                    ),
+                    operation_group_id TEXT NOT NULL
+                        REFERENCES operation_groups(id)
+                        ON DELETE RESTRICT,
+                    discovered_at TEXT NOT NULL,
+                    resolved_at TEXT,
+                    UNIQUE(
+                        provider_id, resource_kind,
+                        provider_resource_id_hash
+                    ),
+                    CHECK (
+                        length(id) = 36
+                        AND replace(id, '-', '')
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        length(provider_id) BETWEEN 1 AND 256
+                        AND provider_id
+                            NOT GLOB '*[^A-Za-z0-9._:/-]*'
+                    ),
+                    CHECK (
+                        length(provider_resource_id_hash) = 64
+                        AND provider_resource_id_hash
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        ownership_proof_sha256 IS NULL
+                        OR (
+                            length(ownership_proof_sha256) = 64
+                            AND ownership_proof_sha256
+                                NOT GLOB '*[^0-9a-f]*'
+                        )
+                    ),
+                    CHECK (
+                        lifecycle_state != 'reclaimed'
+                        OR ownership_proof_sha256 IS NOT NULL
+                    ),
+                    CHECK (
+                        length(fencing_token) = 36
+                        AND replace(fencing_token, '-', '')
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        discovered_at != ''
+                        AND julianday(discovered_at) IS NOT NULL
+                        AND (
+                            resolved_at IS NULL
+                            OR (
+                                julianday(resolved_at) IS NOT NULL
+                                AND julianday(resolved_at)
+                                    >= julianday(discovered_at)
+                            )
+                        )
+                        AND (
+                            (
+                                lifecycle_state IN (
+                                    'discovered', 'held'
+                                )
+                                AND resolved_at IS NULL
+                            )
+                            OR (
+                                lifecycle_state IN (
+                                    'reclaimed', 'ignored'
+                                )
+                                AND resolved_at IS NOT NULL
+                            )
+                        )
+                    )
+                )
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS storage_capacity_samples (
+                    id TEXT PRIMARY KEY,
+                    provider_id TEXT NOT NULL,
+                    topology_node_id TEXT NOT NULL,
+                    source TEXT NOT NULL CHECK (
+                        source IN (
+                            'statfs', 'provider',
+                            'reconciled-state'
+                        )
+                    ),
+                    requested_bytes INTEGER NOT NULL,
+                    reserved_bytes INTEGER NOT NULL,
+                    used_bytes INTEGER NOT NULL,
+                    reclaimable_bytes INTEGER NOT NULL,
+                    available_bytes INTEGER NOT NULL,
+                    total_bytes INTEGER NOT NULL,
+                    requested_inodes INTEGER NOT NULL,
+                    reserved_inodes INTEGER NOT NULL,
+                    used_inodes INTEGER NOT NULL,
+                    reclaimable_inodes INTEGER NOT NULL,
+                    available_inodes INTEGER NOT NULL,
+                    total_inodes INTEGER NOT NULL,
+                    quota_enforcement_mode TEXT NOT NULL CHECK (
+                        quota_enforcement_mode IN (
+                            'hard', 'logical', 'unavailable'
+                        )
+                    ),
+                    quota_evidence_sha256 TEXT,
+                    pressure_level TEXT NOT NULL CHECK (
+                        pressure_level IN (
+                            'normal', 'warning',
+                            'critical', 'emergency'
+                        )
+                    ),
+                    sample_digest_sha256 TEXT NOT NULL,
+                    captured_at_ms INTEGER NOT NULL CHECK (
+                        captured_at_ms >= 0
+                    ),
+                    valid_until_ms INTEGER NOT NULL,
+                    fencing_token TEXT NOT NULL,
+                    operation_group_id TEXT NOT NULL
+                        REFERENCES operation_groups(id)
+                        ON DELETE RESTRICT,
+                    created_at TEXT NOT NULL,
+                    CHECK (
+                        length(id) = 36
+                        AND replace(id, '-', '')
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        length(provider_id) BETWEEN 1 AND 256
+                        AND provider_id
+                            NOT GLOB '*[^A-Za-z0-9._:/-]*'
+                    ),
+                    CHECK (
+                        length(topology_node_id) BETWEEN 1 AND 128
+                        AND topology_node_id
+                            NOT GLOB '*[^A-Za-z0-9._:/-]*'
+                    ),
+                    CHECK (
+                        requested_bytes BETWEEN 0 AND 1125899906842624
+                        AND reserved_bytes BETWEEN 0 AND 1125899906842624
+                        AND used_bytes BETWEEN 0 AND 1125899906842624
+                        AND reclaimable_bytes BETWEEN 0 AND 1125899906842624
+                        AND available_bytes BETWEEN 0 AND 1125899906842624
+                        AND total_bytes BETWEEN 1 AND 1125899906842624
+                        AND used_bytes <= total_bytes
+                        AND available_bytes <= total_bytes
+                        AND reclaimable_bytes <= used_bytes
+                        AND used_bytes <= total_bytes - available_bytes
+                    ),
+                    CHECK (
+                        requested_inodes BETWEEN 0 AND 9007199254740991
+                        AND reserved_inodes BETWEEN 0 AND 9007199254740991
+                        AND used_inodes BETWEEN 0 AND 9007199254740991
+                        AND reclaimable_inodes BETWEEN 0 AND 9007199254740991
+                        AND available_inodes BETWEEN 0 AND 9007199254740991
+                        AND total_inodes BETWEEN 1 AND 9007199254740991
+                        AND used_inodes <= total_inodes
+                        AND available_inodes <= total_inodes
+                        AND reclaimable_inodes <= used_inodes
+                        AND used_inodes <= total_inodes - available_inodes
+                    ),
+                    CHECK (
+                        (
+                            quota_enforcement_mode = 'hard'
+                            AND quota_evidence_sha256 IS NOT NULL
+                        )
+                        OR quota_enforcement_mode != 'hard'
+                    ),
+                    CHECK (
+                        quota_evidence_sha256 IS NULL
+                        OR (
+                            length(quota_evidence_sha256) = 64
+                            AND quota_evidence_sha256
+                                NOT GLOB '*[^0-9a-f]*'
+                        )
+                    ),
+                    CHECK (
+                        length(sample_digest_sha256) = 64
+                        AND sample_digest_sha256
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        valid_until_ms > captured_at_ms
+                        AND valid_until_ms - captured_at_ms
+                            <= 900000
+                    ),
+                    CHECK (
+                        length(fencing_token) = 36
+                        AND replace(fencing_token, '-', '')
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        created_at != ''
+                        AND julianday(created_at) IS NOT NULL
+                    )
+                )
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS storage_quotas (
+                    id TEXT PRIMARY KEY,
+                    resource_id TEXT NOT NULL,
+                    provider_id TEXT NOT NULL,
+                    byte_limit INTEGER,
+                    inode_limit INTEGER,
+                    enforcement_mode TEXT NOT NULL CHECK (
+                        enforcement_mode IN (
+                            'hard', 'logical', 'unavailable'
+                        )
+                    ),
+                    enforcement_evidence_sha256 TEXT,
+                    generation INTEGER NOT NULL CHECK (
+                        generation >= 1
+                    ),
+                    fencing_token TEXT NOT NULL,
+                    lifecycle_state TEXT NOT NULL CHECK (
+                        lifecycle_state IN (
+                            'active', 'releasing',
+                            'released', 'faulted'
+                        )
+                    ),
+                    retry_attempt INTEGER NOT NULL CHECK (
+                        retry_attempt BETWEEN 1 AND 3
+                    ),
+                    recovery_checkpoint TEXT NOT NULL CHECK (
+                        recovery_checkpoint IN (
+                            'admission-pending',
+                            'sample-validated', 'admitted',
+                            'throttled', 'rejected', 'cancelled',
+                            'observation-required'
+                        )
+                    ),
+                    operation_id TEXT NOT NULL,
+                    idempotency_key TEXT NOT NULL,
+                    operation_group_id TEXT NOT NULL
+                        REFERENCES operation_groups(id)
+                        ON DELETE RESTRICT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(resource_id, provider_id),
+                    CHECK (
+                        length(id) = 36
+                        AND replace(id, '-', '')
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        length(resource_id) = 36
+                        AND replace(resource_id, '-', '')
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        length(provider_id) BETWEEN 1 AND 256
+                        AND provider_id
+                            NOT GLOB '*[^A-Za-z0-9._:/-]*'
+                    ),
+                    CHECK (
+                        (byte_limit IS NOT NULL OR inode_limit IS NOT NULL)
+                        AND (
+                            byte_limit IS NULL
+                            OR byte_limit
+                                BETWEEN 0 AND 1125899906842624
+                        )
+                        AND (
+                            inode_limit IS NULL
+                            OR inode_limit
+                                BETWEEN 0 AND 9007199254740991
+                        )
+                    ),
+                    CHECK (
+                        (
+                            enforcement_mode = 'hard'
+                            AND enforcement_evidence_sha256 IS NOT NULL
+                        )
+                        OR enforcement_mode != 'hard'
+                    ),
+                    CHECK (
+                        enforcement_evidence_sha256 IS NULL
+                        OR (
+                            length(enforcement_evidence_sha256) = 64
+                            AND enforcement_evidence_sha256
+                                NOT GLOB '*[^0-9a-f]*'
+                        )
+                    ),
+                    CHECK (
+                        length(fencing_token) = 36
+                        AND replace(fencing_token, '-', '')
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        length(operation_id) = 36
+                        AND replace(operation_id, '-', '')
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        length(idempotency_key) = 64
+                        AND idempotency_key
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        created_at != '' AND updated_at != ''
+                        AND julianday(created_at) IS NOT NULL
+                        AND julianday(updated_at) IS NOT NULL
+                        AND julianday(updated_at)
+                            >= julianday(created_at)
+                    )
+                )
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS
+                    storage_capacity_admissions (
+                    id TEXT PRIMARY KEY,
+                    sample_id TEXT NOT NULL
+                        REFERENCES storage_capacity_samples(id)
+                        ON DELETE RESTRICT,
+                    sample_digest_sha256 TEXT NOT NULL,
+                    action TEXT NOT NULL CHECK (
+                        action IN (
+                            'create', 'expand', 'attach',
+                            'restore', 'snapshot', 'backup',
+                            'garbage-collect'
+                        )
+                    ),
+                    additional_bytes INTEGER NOT NULL CHECK (
+                        additional_bytes
+                            BETWEEN 0 AND 1125899906842624
+                    ),
+                    additional_inodes INTEGER NOT NULL CHECK (
+                        additional_inodes
+                            BETWEEN 0 AND 9007199254740991
+                    ),
+                    writable INTEGER NOT NULL CHECK (
+                        writable IN (0, 1)
+                    ),
+                    operation_id TEXT NOT NULL,
+                    idempotency_key TEXT NOT NULL,
+                    disposition TEXT NOT NULL CHECK (
+                        disposition IN (
+                            'admit', 'throttle', 'reject',
+                            'cancelled', 'recovery-required'
+                        )
+                    ),
+                    reason TEXT NOT NULL CHECK (
+                        reason IN (
+                            'admitted', 'warning-pressure',
+                            'critical-pressure',
+                            'emergency-pressure', 'stale-sample',
+                            'bytes-exhausted', 'inodes-exhausted',
+                            'quota-exceeded',
+                            'hard-quota-unavailable',
+                            'retry-exhausted', 'cancelled',
+                            'timed-out', 'ambiguous-effect'
+                        )
+                    ),
+                    pressure_level TEXT NOT NULL CHECK (
+                        pressure_level IN (
+                            'normal', 'warning',
+                            'critical', 'emergency'
+                        )
+                    ),
+                    retry_disposition TEXT NOT NULL CHECK (
+                        retry_disposition IN (
+                            'never', 'after-fresh-sample',
+                            'resume-from-checkpoint'
+                        )
+                    ),
+                    recovery_checkpoint TEXT NOT NULL CHECK (
+                        recovery_checkpoint IN (
+                            'admission-pending',
+                            'sample-validated', 'admitted',
+                            'throttled', 'rejected', 'cancelled',
+                            'observation-required'
+                        )
+                    ),
+                    attempt INTEGER NOT NULL,
+                    maximum_attempts INTEGER NOT NULL,
+                    effective_available_bytes INTEGER NOT NULL,
+                    effective_available_inodes INTEGER NOT NULL,
+                    fencing_token TEXT NOT NULL,
+                    operation_group_id TEXT NOT NULL
+                        REFERENCES operation_groups(id)
+                        ON DELETE RESTRICT,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(operation_id, attempt),
+                    CHECK (
+                        length(id) = 36
+                        AND replace(id, '-', '')
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        length(sample_digest_sha256) = 64
+                        AND sample_digest_sha256
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        length(operation_id) = 36
+                        AND replace(operation_id, '-', '')
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        length(idempotency_key) = 64
+                        AND idempotency_key
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        attempt BETWEEN 1 AND 3
+                        AND maximum_attempts BETWEEN 1 AND 3
+                        AND attempt <= maximum_attempts
+                    ),
+                    CHECK (
+                        effective_available_bytes
+                            BETWEEN 0 AND 1125899906842624
+                        AND effective_available_inodes
+                            BETWEEN 0 AND 9007199254740991
+                    ),
+                    CHECK (
+                        length(fencing_token) = 36
+                        AND replace(fencing_token, '-', '')
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        created_at != ''
+                        AND julianday(created_at) IS NOT NULL
+                    )
+                )
+                """,
+                "CREATE INDEX IF NOT EXISTS storage_volumes_provider_idx ON storage_volumes(provider_id, provider_volume_id, lifecycle_state)",
+                "CREATE INDEX IF NOT EXISTS storage_volumes_project_idx ON storage_volumes(project_id, lifecycle_state, name)",
+                "CREATE INDEX IF NOT EXISTS storage_volumes_topology_idx ON storage_volumes(topology_node_id, lifecycle_state, name)",
+                "CREATE INDEX IF NOT EXISTS storage_volumes_operation_idx ON storage_volumes(operation_group_id, updated_at)",
+                "CREATE INDEX IF NOT EXISTS storage_attachments_volume_idx ON storage_attachments(volume_id, node_uuid, workload_uuid, attachment_kind, lifecycle_state)",
+                "CREATE INDEX IF NOT EXISTS storage_attachments_operation_idx ON storage_attachments(operation_group_id, updated_at)",
+                "CREATE INDEX IF NOT EXISTS storage_attachments_lease_idx ON storage_attachments(lease_expires_at, lifecycle_state, volume_id)",
+                "CREATE UNIQUE INDEX IF NOT EXISTS storage_attachments_single_writer_idx ON storage_attachments(volume_id) WHERE read_only = 0 AND lifecycle_state != 'detached'",
+                "CREATE UNIQUE INDEX IF NOT EXISTS storage_attachments_holder_active_idx ON storage_attachments(volume_id, node_uuid, workload_uuid) WHERE lifecycle_state != 'detached'",
+                "CREATE INDEX IF NOT EXISTS storage_snapshots_source_idx ON storage_snapshots(source_volume_id, lifecycle_state, created_at)",
+                "CREATE INDEX IF NOT EXISTS storage_snapshots_operation_idx ON storage_snapshots(operation_group_id, updated_at)",
+                "CREATE INDEX IF NOT EXISTS storage_backups_volume_idx ON storage_backups(volume_id, snapshot_id, lifecycle_state, created_at)",
+                "CREATE INDEX IF NOT EXISTS storage_backups_operation_idx ON storage_backups(operation_group_id, updated_at)",
+                "CREATE INDEX IF NOT EXISTS storage_holds_resource_idx ON storage_holds(resource_kind, resource_id, released_at, expires_at)",
+                "CREATE UNIQUE INDEX IF NOT EXISTS storage_holds_active_idx ON storage_holds(resource_kind, resource_id) WHERE released_at IS NULL",
+                "CREATE INDEX IF NOT EXISTS storage_orphans_provider_idx ON storage_orphans(provider_id, resource_kind, lifecycle_state, discovered_at)",
+                "CREATE INDEX IF NOT EXISTS storage_orphans_operation_idx ON storage_orphans(operation_group_id, discovered_at)",
+                "CREATE INDEX IF NOT EXISTS storage_capacity_samples_latest_idx ON storage_capacity_samples(provider_id, topology_node_id, captured_at_ms DESC, id)",
+                "CREATE INDEX IF NOT EXISTS storage_capacity_samples_operation_idx ON storage_capacity_samples(operation_group_id, created_at)",
+                "CREATE INDEX IF NOT EXISTS storage_quotas_resource_idx ON storage_quotas(resource_id, provider_id, lifecycle_state)",
+                "CREATE INDEX IF NOT EXISTS storage_quotas_operation_idx ON storage_quotas(operation_group_id, updated_at)",
+                "CREATE INDEX IF NOT EXISTS storage_capacity_admissions_operation_idx ON storage_capacity_admissions(operation_id, attempt DESC)",
+                "CREATE INDEX IF NOT EXISTS storage_capacity_admissions_sample_idx ON storage_capacity_admissions(sample_id, created_at)"
+            ]
         )
     ]
 }

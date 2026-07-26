@@ -122,6 +122,7 @@ public enum ManifestCanonicalEncoder {
             lines.append("  maximumAgeSeconds: \(imageProvenance.maximumAgeSeconds)")
             lines.append("  requireReproducible: \(imageProvenance.requireReproducible)")
         }
+        appendVolumeDeclarations(manifest.volumes, to: &lines)
         lines.append("services:")
 
         for service in manifest.services.sorted(by: { $0.name < $1.name }) {
@@ -173,7 +174,7 @@ public enum ManifestCanonicalEncoder {
             )
             appendStringMap(service.labels, key: "labels", to: &lines)
             appendBlockArray(service.ports, key: "ports", to: &lines)
-            appendBlockArray(service.volumes, key: "volumes", to: &lines)
+            appendMounts(service.mounts, to: &lines)
 
             let probes = canonicalProbes(for: service)
             if probes.startup != nil || probes.readiness != nil || probes.liveness != nil {
@@ -212,6 +213,28 @@ public enum ManifestCanonicalEncoder {
             }
         }
         return lines.joined(separator: "\n") + "\n"
+    }
+
+    private static func appendVolumeDeclarations(
+        _ volumes: [String: HostwrightVolumeDeclaration],
+        to lines: inout [String]
+    ) {
+        guard !volumes.isEmpty else { return }
+        lines.append("volumes:")
+        for (name, volume) in volumes.sorted(by: { $0.key < $1.key }) {
+            lines.append("  \(quote(name)):")
+            if volume.provider != HostwrightVolumeDeclaration.defaultProvider {
+                lines.append("    provider: \(quote(volume.provider))")
+            }
+            lines.append("    capacity: \(quote(volume.capacity))")
+            if volume.accessMode != .readWriteOnce {
+                lines.append("    accessMode: \(quote(volume.accessMode.rawValue))")
+            }
+            if volume.reclaimPolicy != .retain {
+                lines.append("    reclaimPolicy: \(quote(volume.reclaimPolicy.rawValue))")
+            }
+            appendStringMap(volume.labels, key: "labels", indent: 4, to: &lines)
+        }
     }
 
     private static func canonicalProbes(for service: HostwrightService) -> HostwrightProbes {
@@ -279,12 +302,14 @@ public enum ManifestCanonicalEncoder {
     private static func appendStringMap(
         _ values: [String: String],
         key: String,
+        indent: Int = 4,
         to lines: inout [String]
     ) {
         guard !values.isEmpty else { return }
-        lines.append("    \(key):")
+        let spaces = String(repeating: " ", count: indent)
+        lines.append("\(spaces)\(key):")
         for (mapKey, value) in values.sorted(by: { $0.key < $1.key }) {
-            lines.append("      \(quote(mapKey)): \(quote(value))")
+            lines.append("\(spaces)  \(quote(mapKey)): \(quote(value))")
         }
     }
 
@@ -293,6 +318,32 @@ public enum ManifestCanonicalEncoder {
         lines.append("    \(key):")
         for value in values {
             lines.append("      - \(quote(value))")
+        }
+    }
+
+    private static func appendMounts(_ mounts: [HostwrightMountSpec], to lines: inout [String]) {
+        guard !mounts.isEmpty else { return }
+        lines.append("    volumes:")
+        for mount in mounts {
+            if let legacy = mount.legacyLiteral {
+                lines.append("      - \(quote(legacy))")
+                continue
+            }
+
+            lines.append("      - type: \(quote(mount.kind.rawValue))")
+            if let source = mount.source {
+                lines.append("        source: \(quote(source))")
+            }
+            lines.append("        target: \(quote(mount.target))")
+            if mount.readOnly {
+                lines.append("        readOnly: true")
+            }
+            if let mode = mount.mode {
+                lines.append("        mode: \(quote(mode))")
+            }
+            if let size = mount.size {
+                lines.append("        size: \(quote(size))")
+            }
         }
     }
 

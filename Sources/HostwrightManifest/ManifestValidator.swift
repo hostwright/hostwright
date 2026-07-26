@@ -21,14 +21,17 @@ public enum ManifestValidator {
         validateImageSBOM(manifest, issues: &issues)
         validateImageVulnerability(manifest, issues: &issues)
         validateImageProvenance(manifest, issues: &issues)
+        validateVolumeDeclarations(manifest.volumes, issues: &issues)
 
         let declaredNames = Set(manifest.services.map(\.name))
+        let declaredVolumes = Set(manifest.volumes.keys)
         var serviceNames = Set<String>()
         for service in manifest.services {
             validateService(
                 service,
                 imagePolicy: manifest.effectiveImagePolicy,
                 declaredNames: declaredNames,
+                declaredVolumes: declaredVolumes,
                 issues: &issues
             )
             if !serviceNames.insert(service.name).inserted {
@@ -64,6 +67,7 @@ public enum ManifestValidator {
         _ service: HostwrightService,
         imagePolicy: HostwrightImagePolicy,
         declaredNames: Set<String>,
+        declaredVolumes: Set<String>,
         issues: inout [ManifestIssue]
     ) {
         validateName(service.name, field: "service name", issues: &issues)
@@ -111,6 +115,19 @@ public enum ManifestValidator {
         for volume in service.volumes {
             validateVolume(volume, serviceName: service.name, issues: &issues)
         }
+        for mount in service.mounts {
+            validateMount(mount, serviceName: service.name, issues: &issues)
+            if mount.kind == .volume,
+               let source = mount.source,
+               !declaredVolumes.contains(source) {
+                issues.append(
+                    ManifestIssue(
+                        code: .manifestValidationFailed,
+                        message: "Service '\(service.name)' volume mount source '\(source)' must reference a declared top-level volume."
+                    )
+                )
+            }
+        }
 
         for (key, value) in service.env.sorted(by: { $0.key < $1.key }) {
             validateEnvironmentKey(key, serviceName: service.name, issues: &issues)
@@ -145,6 +162,18 @@ public enum ManifestValidator {
         }
         if service.rosetta && !service.virtualization {
             issues.append(issue(service, "rosetta requires virtualization."))
+        }
+    }
+
+    private static func validateVolumeDeclarations(
+        _ volumes: [String: HostwrightVolumeDeclaration],
+        issues: inout [ManifestIssue]
+    ) {
+        for (name, declaration) in volumes.sorted(by: { $0.key < $1.key }) {
+            validateName(name, field: "volume name", issues: &issues)
+            validateVolumeProvider(declaration.provider, volumeName: name, issues: &issues)
+            validateVolumeCapacity(declaration.capacity, volumeName: name, issues: &issues)
+            validateVolumeLabels(declaration.labels, volumeName: name, issues: &issues)
         }
     }
 
@@ -898,6 +927,107 @@ public enum ManifestValidator {
         }
     }
 
+    private static func validateMount(
+        _ mount: HostwrightMountSpec,
+        serviceName: String,
+        issues: inout [ManifestIssue]
+    ) {
+        let source = mount.source
+        guard isNormalizedAbsoluteContainerPath(mount.target) else {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "Service '\(serviceName)' mount target '\(mount.target)' must be a normalized absolute container path."
+                )
+            )
+            return
+        }
+
+        switch mount.kind {
+        case .bind:
+            guard let source, !source.isEmpty else {
+                issues.append(
+                    ManifestIssue(
+                        code: .manifestValidationFailed,
+                        message: "Service '\(serviceName)' bind mount requires source."
+                    )
+                )
+                return
+            }
+            if HostwrightPathPolicy.isHostRootMountSource(source) {
+                issues.append(
+                    ManifestIssue(
+                        code: .manifestValidationFailed,
+                        message: "Service '\(serviceName)' bind mount source '\(source)' must not mount the host root."
+                    )
+                )
+            }
+            if HostwrightPathPolicy.containsParentDirectoryTraversal(source) {
+                issues.append(
+                    ManifestIssue(
+                        code: .manifestValidationFailed,
+                        message: "Service '\(serviceName)' bind mount source '\(source)' must not contain parent-directory traversal."
+                    )
+                )
+            }
+            if mount.mode != nil || mount.size != nil {
+                issues.append(
+                    ManifestIssue(
+                        code: .manifestValidationFailed,
+                        message: "Service '\(serviceName)' bind mounts accept only source, target, and readOnly."
+                    )
+                )
+            }
+        case .volume:
+            guard let source, !source.isEmpty else {
+                issues.append(
+                    ManifestIssue(
+                        code: .manifestValidationFailed,
+                        message: "Service '\(serviceName)' volume mount requires source."
+                    )
+                )
+                return
+            }
+            if source.range(of: #"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"#, options: String.CompareOptions.regularExpression) == nil {
+                issues.append(
+                    ManifestIssue(
+                        code: .manifestValidationFailed,
+                        message: "Service '\(serviceName)' volume mount source '\(source)' must be a bounded safe name."
+                    )
+                )
+            }
+            if mount.mode != nil || mount.size != nil {
+                issues.append(
+                    ManifestIssue(
+                        code: .manifestValidationFailed,
+                        message: "Service '\(serviceName)' volume mounts accept only source, target, and readOnly."
+                    )
+                )
+            }
+        case .tmpfs:
+            if mount.source != nil {
+                issues.append(
+                    ManifestIssue(
+                        code: .manifestValidationFailed,
+                        message: "Service '\(serviceName)' tmpfs mounts must not declare source."
+                    )
+                )
+            }
+            if let size = mount.size {
+                validateSize(size, field: "mount.size", service: HostwrightService(name: serviceName, image: nil), issues: &issues)
+            }
+            if let mode = mount.mode,
+               mode.range(of: #"^[0-7]{3,4}$"#, options: .regularExpression) == nil {
+                issues.append(
+                    ManifestIssue(
+                        code: .manifestValidationFailed,
+                        message: "Service '\(serviceName)' tmpfs mount mode must be a three- or four-digit octal string."
+                    )
+                )
+            }
+        }
+    }
+
     private static func validateEnvironmentKey(_ key: String, serviceName: String, issues: inout [ManifestIssue]) {
         let pattern = #"^[A-Za-z_][A-Za-z0-9_]*$"#
         if key.range(of: pattern, options: .regularExpression) == nil {
@@ -968,6 +1098,87 @@ public enum ManifestValidator {
             }
             validateBounded(key, maximum: 128, field: "label key", service: service, issues: &issues)
             validateBounded(value, maximum: 4_096, field: "label '\(key)'", service: service, issues: &issues)
+        }
+    }
+
+    private static func validateVolumeLabels(
+        _ labels: [String: String],
+        volumeName: String,
+        issues: inout [ManifestIssue]
+    ) {
+        if labels.count > 256 {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "Volume '\(volumeName)' labels exceed the limit of 256 entries."
+                )
+            )
+        }
+        for (key, value) in labels.sorted(by: { $0.key < $1.key }) {
+            if key.hasPrefix("dev.hostwright.") {
+                issues.append(
+                    ManifestIssue(
+                        code: .manifestValidationFailed,
+                        message: "Volume '\(volumeName)' label '\(key)' uses the reserved Hostwright ownership prefix."
+                    )
+                )
+            }
+            validateVolumeBounded(key, maximum: 128, field: "label key", volumeName: volumeName, issues: &issues)
+            validateVolumeBounded(value, maximum: 4_096, field: "label '\(key)'", volumeName: volumeName, issues: &issues)
+        }
+    }
+
+    private static func validateVolumeProvider(
+        _ provider: String,
+        volumeName: String,
+        issues: inout [ManifestIssue]
+    ) {
+        validateVolumeBounded(provider, maximum: 128, field: "provider", volumeName: volumeName, issues: &issues)
+        if provider.range(
+            of: #"^[a-z0-9](?:[a-z0-9.-]{0,126}[a-z0-9])?$"#,
+            options: .regularExpression
+        ) == nil {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "Volume '\(volumeName)' provider '\(provider)' must be a bounded stable provider ID."
+                )
+            )
+        }
+    }
+
+    private static func validateVolumeCapacity(
+        _ capacity: String,
+        volumeName: String,
+        issues: inout [ManifestIssue]
+    ) {
+        let pattern = #"^[1-9][0-9]*(B|KiB|MiB|GiB|TiB)$"#
+        guard capacity.range(of: pattern, options: .regularExpression) != nil else {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "Volume '\(volumeName)' capacity must be a normalized positive size such as 512MiB."
+                )
+            )
+            return
+        }
+        let suffixes: [(String, UInt64)] = [
+            ("TiB", 1_099_511_627_776),
+            ("GiB", 1_073_741_824),
+            ("MiB", 1_048_576),
+            ("KiB", 1_024),
+            ("B", 1)
+        ]
+        guard let (suffix, multiplier) = suffixes.first(where: { capacity.hasSuffix($0.0) }),
+              let count = UInt64(capacity.dropLast(suffix.count)),
+              !count.multipliedReportingOverflow(by: multiplier).overflow else {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "Volume '\(volumeName)' capacity exceeds UInt64 byte capacity."
+                )
+            )
+            return
         }
     }
 
@@ -1108,6 +1319,23 @@ public enum ManifestValidator {
     ) {
         if value.utf8.count > maximum {
             issues.append(issue(service, "\(field) exceeds \(maximum) UTF-8 bytes."))
+        }
+    }
+
+    private static func validateVolumeBounded(
+        _ value: String,
+        maximum: Int,
+        field: String,
+        volumeName: String,
+        issues: inout [ManifestIssue]
+    ) {
+        if value.utf8.count > maximum {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "Volume '\(volumeName)' \(field) exceeds \(maximum) UTF-8 bytes."
+                )
+            )
         }
     }
 

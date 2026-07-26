@@ -17,6 +17,7 @@ public enum LocalControlOperation: String, Codable, CaseIterable, Equatable, Sen
     case update
     case image
     case registry
+    case volume
 }
 
 public struct LocalControlRequest: Codable, Equatable, Sendable {
@@ -49,6 +50,23 @@ public struct LocalControlRequest: Codable, Equatable, Sendable {
     public let imageTargetBytes: Int64?
     public let imageRetentionSeconds: Int?
     public let imageMaximumDeletions: Int?
+    public let volumeOperation: String?
+    public let volumeIDs: [String]?
+    public let volumeResourceID: String?
+    public let volumeName: String?
+    public let volumeTargetVolumeID: String?
+    public let volumeReferenceID: String?
+    public let volumeOwner: String?
+    public let volumeOutputPath: String?
+    public let volumeKeyReference: String?
+    public let volumeRestoreTargets: [String]?
+    public let volumeIdempotencyKey: String?
+    public let volumeRemoteS3Endpoint: String?
+    public let volumeRemoteS3Bucket: String?
+    public let volumeRemoteS3Region: String?
+    public let volumeRemoteS3Prefix: String?
+    public let volumeRemoteS3AccessKeyReference: String?
+    public let volumeRemoteS3SecretKeyReference: String?
     public let registryReferrerOperation: String?
     public let registryServer: String?
     public let registryRepository: String?
@@ -113,6 +131,23 @@ public struct LocalControlRequest: Codable, Equatable, Sendable {
         imageTargetBytes: Int64? = nil,
         imageRetentionSeconds: Int? = nil,
         imageMaximumDeletions: Int? = nil,
+        volumeOperation: String? = nil,
+        volumeIDs: [String]? = nil,
+        volumeResourceID: String? = nil,
+        volumeName: String? = nil,
+        volumeTargetVolumeID: String? = nil,
+        volumeReferenceID: String? = nil,
+        volumeOwner: String? = nil,
+        volumeOutputPath: String? = nil,
+        volumeKeyReference: String? = nil,
+        volumeRestoreTargets: [String]? = nil,
+        volumeIdempotencyKey: String? = nil,
+        volumeRemoteS3Endpoint: String? = nil,
+        volumeRemoteS3Bucket: String? = nil,
+        volumeRemoteS3Region: String? = nil,
+        volumeRemoteS3Prefix: String? = nil,
+        volumeRemoteS3AccessKeyReference: String? = nil,
+        volumeRemoteS3SecretKeyReference: String? = nil,
         registryReferrerOperation: String? = nil,
         registryServer: String? = nil,
         registryRepository: String? = nil,
@@ -176,6 +211,25 @@ public struct LocalControlRequest: Codable, Equatable, Sendable {
         self.imageTargetBytes = imageTargetBytes
         self.imageRetentionSeconds = imageRetentionSeconds
         self.imageMaximumDeletions = imageMaximumDeletions
+        self.volumeOperation = volumeOperation
+        self.volumeIDs = volumeIDs
+        self.volumeResourceID = volumeResourceID
+        self.volumeName = volumeName
+        self.volumeTargetVolumeID = volumeTargetVolumeID
+        self.volumeReferenceID = volumeReferenceID
+        self.volumeOwner = volumeOwner
+        self.volumeOutputPath = volumeOutputPath
+        self.volumeKeyReference = volumeKeyReference
+        self.volumeRestoreTargets = volumeRestoreTargets
+        self.volumeIdempotencyKey = volumeIdempotencyKey
+        self.volumeRemoteS3Endpoint = volumeRemoteS3Endpoint
+        self.volumeRemoteS3Bucket = volumeRemoteS3Bucket
+        self.volumeRemoteS3Region = volumeRemoteS3Region
+        self.volumeRemoteS3Prefix = volumeRemoteS3Prefix
+        self.volumeRemoteS3AccessKeyReference =
+            volumeRemoteS3AccessKeyReference
+        self.volumeRemoteS3SecretKeyReference =
+            volumeRemoteS3SecretKeyReference
         self.registryReferrerOperation = registryReferrerOperation
         self.registryServer = registryServer
         self.registryRepository = registryRepository

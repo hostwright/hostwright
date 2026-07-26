@@ -2,7 +2,8 @@
 
 These manifests are syntactically valid and must stop before runtime mutation:
 
-- `named-volume.yaml` requires named-volume support owned by Phase 06.
+- `named-volume.yaml` intentionally references an undeclared named volume.
+  Supported named volumes require a matching top-level `volumes` declaration.
 - `unavailable-secret.yaml` requires its configured secret backend to be available.
 - `unsupported-network.yaml` requests a custom network owned by Phase 07. Strict
   Manifest v2 rejects that field before runtime mutation.

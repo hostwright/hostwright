@@ -1,10 +1,12 @@
 import Foundation
 import HostwrightCore
+import HostwrightStorage
 
 public struct DistributionAssemblyRequest: Sendable {
     public let hostwrightBinary: URL
     public let hostwrightControlBinary: URL
     public let hostwrightContainerizationHelperBinary: URL
+    public let hostwrightStorageHelperBinary: URL
     public let hostwrightDistributionBinary: URL
     public let hostwrightDaemonBinary: URL
     public let containerizationAssets: DistributionContainerizationAssetBundle
@@ -25,6 +27,7 @@ public struct DistributionAssemblyRequest: Sendable {
         hostwrightBinary: URL,
         hostwrightControlBinary: URL,
         hostwrightContainerizationHelperBinary: URL,
+        hostwrightStorageHelperBinary: URL,
         hostwrightDistributionBinary: URL,
         hostwrightDaemonBinary: URL,
         containerizationAssets: DistributionContainerizationAssetBundle,
@@ -44,6 +47,7 @@ public struct DistributionAssemblyRequest: Sendable {
         self.hostwrightBinary = hostwrightBinary
         self.hostwrightControlBinary = hostwrightControlBinary
         self.hostwrightContainerizationHelperBinary = hostwrightContainerizationHelperBinary
+        self.hostwrightStorageHelperBinary = hostwrightStorageHelperBinary
         self.hostwrightDistributionBinary = hostwrightDistributionBinary
         self.hostwrightDaemonBinary = hostwrightDaemonBinary
         self.containerizationAssets = containerizationAssets
@@ -143,6 +147,14 @@ public struct DistributionAssembler: Sendable {
             commands: &commands
         )
         try validateBinary(
+            request.hostwrightStorageHelperBinary,
+            versionArguments: ["--version"],
+            expectedVersion: LocalStorageProviderContract.providerVersion,
+            label: "validate hostwright-storage-helper version",
+            cancellation: cancellation,
+            commands: &commands
+        )
+        try validateBinary(
             request.hostwrightDistributionBinary,
             versionArguments: ["--version"],
             expectedVersion: request.packageVersion,
@@ -165,6 +177,12 @@ public struct DistributionAssembler: Sendable {
         try validateArchitecture(
             request.hostwrightContainerizationHelperBinary,
             label: "validate hostwright-containerization-helper architecture",
+            cancellation: cancellation,
+            commands: &commands
+        )
+        try validateArchitecture(
+            request.hostwrightStorageHelperBinary,
+            label: "validate hostwright-storage-helper architecture",
             cancellation: cancellation,
             commands: &commands
         )
@@ -204,6 +222,7 @@ public struct DistributionAssembler: Sendable {
             ("bin/hostwright", request.hostwrightBinary),
             ("bin/hostwright-control", request.hostwrightControlBinary),
             ("bin/hostwright-containerization-helper", request.hostwrightContainerizationHelperBinary),
+            ("bin/hostwright-storage-helper", request.hostwrightStorageHelperBinary),
             ("bin/hostwright-dist", request.hostwrightDistributionBinary),
             ("bin/hostwrightd", request.hostwrightDaemonBinary),
             ("share/hostwright/examples/hostwright.yaml", request.exampleManifestFile),
@@ -896,6 +915,8 @@ public struct DistributionCleanBuilder: Sendable {
         let control = backingBinPath.appendingPathComponent("hostwright-control")
         let helper = backingBinPath
             .appendingPathComponent("hostwright-containerization-helper")
+        let storageHelper = backingBinPath
+            .appendingPathComponent("hostwright-storage-helper")
         let distribution = backingBinPath.appendingPathComponent("hostwright-dist")
         let daemon = backingBinPath.appendingPathComponent("hostwrightd")
         let containerizationAssets = try configuredContainerizationAssets ??
@@ -951,6 +972,7 @@ public struct DistributionCleanBuilder: Sendable {
                 hostwrightBinary: hostwright,
                 hostwrightControlBinary: control,
                 hostwrightContainerizationHelperBinary: helper,
+                hostwrightStorageHelperBinary: storageHelper,
                 hostwrightDistributionBinary: distribution,
                 hostwrightDaemonBinary: daemon,
                 containerizationAssets: containerizationAssets,
@@ -963,7 +985,7 @@ public struct DistributionCleanBuilder: Sendable {
                 sourceDirty: false,
                 architecture: "arm64",
                 inputStageIdentifier: "release-build",
-                inputStageDetail: "Built all five shipped SwiftPM release products from the clean exact source commit with pinned Containerization 0.35.0 dependencies and verified runtime bootstrap assets.",
+                inputStageDetail: "Built all shipped SwiftPM release products from the clean exact source commit with pinned Containerization 0.35.0 dependencies and verified runtime bootstrap assets.",
                 priorCommands: commands,
                 inputCleanupPaths: [scratch]
             ),

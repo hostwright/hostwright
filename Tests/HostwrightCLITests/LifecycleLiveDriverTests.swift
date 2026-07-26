@@ -350,6 +350,136 @@ final class LifecycleLiveDriverTests: XCTestCase {
         }
     }
 
+    func testConfirmedUpReplacesMissingOwnedRuntimeAtNextGeneration() throws {
+        try withFixture { fixture in
+            XCTAssertEqual(try runConfirmedUp(fixture).exitCode, 0)
+            let original = try XCTUnwrap(
+                fixture.store.ownership.loadAll().first
+            )
+            try fixture.wait {
+                await fixture.adapter.setStrictOwnedHintFences(true)
+                await fixture.adapter.removeRuntimeResource(
+                    resourceUUID: original.resourceUUID
+                )
+            }
+
+            let plan = try reviewedPlan(fixture, command: .up)
+            let replacementNodes = plan.nodes.filter {
+                $0.resourceUUID == original.resourceUUID
+            }
+            XCTAssertEqual(
+                Set(replacementNodes.map(\.resourceGeneration)),
+                [original.resourceGeneration + 1]
+            )
+            let confirmed = fixture.options(
+                command: .up,
+                dryRun: false,
+                confirmation: plan.planSHA256
+            )
+            let result = LifecycleCommandRunner(
+                options: confirmed,
+                driver: LifecycleLiveDriver(
+                    environment: fixture.environment,
+                    options: confirmed
+                )
+            ).run()
+
+            XCTAssertEqual(result.exitCode, 0, result.standardError)
+            let replacement = try XCTUnwrap(
+                fixture.store.ownership.loadAll().first {
+                    $0.resourceUUID == original.resourceUUID
+                }
+            )
+            XCTAssertEqual(
+                replacement.resourceGeneration,
+                original.resourceGeneration + 1
+            )
+            XCTAssertEqual(
+                try fixture.adapterSnapshot().mutations,
+                [.create, .start, .create, .start]
+            )
+        }
+    }
+
+    func testExactFailedSafeHoldResumesMissingRuntimeReplacement() throws {
+        try withFixture { fixture in
+            XCTAssertEqual(try runConfirmedUp(fixture).exitCode, 0)
+            let original = try XCTUnwrap(
+                fixture.store.ownership.loadAll().first
+            )
+            try fixture.wait {
+                await fixture.adapter.setStrictOwnedHintFences(true)
+                await fixture.adapter.removeRuntimeResource(
+                    resourceUUID: original.resourceUUID
+                )
+            }
+
+            let dryOptions = fixture.options(command: .up, dryRun: true)
+            let dryDriver = LifecycleLiveDriver(
+                environment: fixture.environment,
+                options: dryOptions
+            )
+            let preparation = try dryDriver.prepare(options: dryOptions)
+            let compiled = try LifecycleCommandPlanCompiler().compile(
+                options: dryOptions,
+                preparation: preparation
+            )
+            try fixture.wait {
+                await fixture.adapter.failNextObservation()
+            }
+            let confirmed = fixture.options(
+                command: .up,
+                dryRun: false,
+                confirmation: compiled.plan.planSHA256
+            )
+            let first = try LifecycleLiveDriver(
+                environment: fixture.environment,
+                options: confirmed
+            ).execute(
+                compiled: compiled,
+                preparation: preparation,
+                options: confirmed
+            )
+            XCTAssertEqual(first.status, .safeHold)
+            let failed = try XCTUnwrap(
+                fixture.store.operationGroups.load(id: first.groupID)
+            )
+            XCTAssertEqual(failed.status, .failed)
+            XCTAssertTrue(
+                failed.metadataJSONRedacted.contains(#""result":"safe-hold""#)
+            )
+
+            let resumed = try LifecyclePersistedRecoveryDriver(
+                environment: fixture.environment
+            ).execute(
+                LifecyclePersistedRecoveryRequest(
+                    action: .resume,
+                    groupID: failed.id,
+                    confirmationPlanSHA256: failed.planHash,
+                    stateStoreConfiguration: StateStoreConfiguration(
+                        explicitDatabasePath: fixture.databasePath
+                    ),
+                    timeoutSeconds: 60
+                )
+            )
+
+            XCTAssertEqual(resumed.status, .succeeded)
+            let replacement = try XCTUnwrap(
+                fixture.store.ownership.loadAll().first {
+                    $0.resourceUUID == original.resourceUUID
+                }
+            )
+            XCTAssertEqual(
+                replacement.resourceGeneration,
+                original.resourceGeneration + 1
+            )
+            XCTAssertEqual(
+                try fixture.adapterSnapshot().mutations,
+                [.create, .start, .create, .start]
+            )
+        }
+    }
+
     func testCompletedAutomaticCompensationRestoresHealthyDesiredState() throws {
         let secretValue = "phase04-recovery-secret-\(UUID().uuidString)"
         let secretStore = RecordingLifecycleSecretStore(value: secretValue)
@@ -2236,6 +2366,7 @@ private actor LifecycleLiveTestAdapter: RuntimeAdapter {
     private var strictOwnedHintFences = false
     private var preserveExistingOwnershipFenceOnMutation = false
     private var ignoreRemoveMutation = false
+    private var shouldFailNextObservation = false
 
     init(
         capability: RuntimeCapabilitySnapshot,
@@ -2306,13 +2437,20 @@ private actor LifecycleLiveTestAdapter: RuntimeAdapter {
     }
 
     func observe(desiredState: DesiredRuntimeState) async throws -> ObservedRuntimeState {
+        if shouldFailNextObservation {
+            shouldFailNextObservation = false
+            throw RuntimeAdapterError.outputParseFailed(
+                "Injected post-mutation observation failure."
+            )
+        }
         if strictOwnedHintFences {
             for hint in desiredState.ownedResourceHints {
-                guard let ownership = hint.ownership,
-                      resources.filter({
-                          $0.resourceIdentifier == hint.resourceIdentifier &&
-                              $0.ownership == ownership
-                      }).count == 1 else {
+                let candidates = resources.filter {
+                    $0.resourceIdentifier == hint.resourceIdentifier
+                }
+                guard candidates.isEmpty ||
+                        (candidates.count == 1 &&
+                            candidates[0].ownership == hint.ownership) else {
                     throw RuntimeAdapterError.outputParseFailed(
                         "Runtime inventory did not match exact UUID-backed state ownership."
                     )
@@ -2559,6 +2697,12 @@ private actor LifecycleLiveTestAdapter: RuntimeAdapter {
         )
     }
 
+    func removeRuntimeResource(resourceUUID: String) {
+        resources.removeAll {
+            $0.ownership?.resourceUUID == resourceUUID
+        }
+    }
+
     func cancelBeforeMutation(at index: Int?) {
         cancellationMutationIndex = index
     }
@@ -2585,6 +2729,10 @@ private actor LifecycleLiveTestAdapter: RuntimeAdapter {
 
     func setIgnoreRemoveMutation(_ enabled: Bool) {
         ignoreRemoveMutation = enabled
+    }
+
+    func failNextObservation() {
+        shouldFailNextObservation = true
     }
 
     private func updateResource(

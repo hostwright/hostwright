@@ -1783,7 +1783,7 @@ final class HostwrightManifestTests: XCTestCase {
             Set(properties.keys),
             [
                 "version", "project", "imagePolicy", "imageTrust", "imageSBOM",
-                "imageVulnerability", "imageProvenance", "services"
+                "imageVulnerability", "imageProvenance", "volumes", "services"
             ]
         )
         let required = try XCTUnwrap(schemaJSON["required"] as? [String])
@@ -1802,6 +1802,8 @@ final class HostwrightManifestTests: XCTestCase {
         XCTAssertEqual(imageVulnerability["$ref"] as? String, "#/$defs/imageVulnerability")
         let imageProvenance = try XCTUnwrap(properties["imageProvenance"] as? [String: Any])
         XCTAssertEqual(imageProvenance["$ref"] as? String, "#/$defs/imageProvenance")
+        let volumes = try XCTUnwrap(properties["volumes"] as? [String: Any])
+        XCTAssertEqual(volumes["$ref"] as? String, "#/$defs/volumeDeclarations")
         let services = try XCTUnwrap(properties["services"] as? [String: Any])
         XCTAssertEqual(services["minProperties"] as? Int, 1)
 
@@ -1813,6 +1815,14 @@ final class HostwrightManifestTests: XCTestCase {
         XCTAssertNotNil(definitions["provenanceURI"])
         XCTAssertNotNil(definitions["provenanceSignerID"])
         XCTAssertNotNil(definitions["boundedNormalizedAbsoluteHostPath"])
+        XCTAssertNotNil(definitions["mount"])
+        XCTAssertNotNil(definitions["bindMount"])
+        XCTAssertNotNil(definitions["volumeMount"])
+        XCTAssertNotNil(definitions["tmpfsMount"])
+        XCTAssertNotNil(definitions["providerID"])
+        XCTAssertNotNil(definitions["labels"])
+        XCTAssertNotNil(definitions["volumeDeclarations"])
+        XCTAssertNotNil(definitions["volumeDeclaration"])
         let imageTrustDef = try XCTUnwrap(definitions["imageTrust"] as? [String: Any])
         XCTAssertEqual(imageTrustDef["required"] as? [String], ["threshold", "authorities"])
         XCTAssertEqual(imageTrustDef["additionalProperties"] as? Bool, false)
@@ -2129,9 +2139,12 @@ final class HostwrightManifestTests: XCTestCase {
         let ports = try XCTUnwrap(serviceProperties["ports"] as? [String: Any])
         let portItems = try XCTUnwrap(ports["items"] as? [String: Any])
         XCTAssertEqual(portItems["pattern"] as? String, #"^[0-9]{1,5}:[0-9]{1,5}$"#)
-        let volumes = try XCTUnwrap(serviceProperties["volumes"] as? [String: Any])
-        let volumeItems = try XCTUnwrap(volumes["items"] as? [String: Any])
-        XCTAssertEqual(volumeItems["pattern"] as? String, #"^(?!/+(?:\./*)*:)(?![^:]*(?:^|/)\.\.(?:/|:)).+:/[^:]+(:ro|:rw)?$"#)
+        let serviceVolumes = try XCTUnwrap(serviceProperties["volumes"] as? [String: Any])
+        let volumeItems = try XCTUnwrap(serviceVolumes["items"] as? [String: Any])
+        let volumeChoices = try XCTUnwrap(volumeItems["oneOf"] as? [[String: Any]])
+        XCTAssertEqual(volumeChoices.count, 2)
+        XCTAssertEqual(volumeChoices[0]["pattern"] as? String, #"^(?!/+(?:\./*)*:)(?![^:]*(?:^|/)\.\.(?:/|:)).+:/[^:]+(:ro|:rw)?$"#)
+        XCTAssertEqual(volumeChoices[1]["$ref"] as? String, "#/$defs/mount")
         let healthRef = try XCTUnwrap(serviceProperties["health"] as? [String: Any])
         XCTAssertEqual(healthRef["$ref"] as? String, "#/$defs/health")
         let restartRef = try XCTUnwrap(serviceProperties["restart"] as? [String: Any])
@@ -2158,6 +2171,54 @@ final class HostwrightManifestTests: XCTestCase {
         let restartProperties = try XCTUnwrap(restart["properties"] as? [String: Any])
         let restartPolicy = try XCTUnwrap(restartProperties["policy"] as? [String: Any])
         XCTAssertEqual(restartPolicy["enum"] as? [String], ["no", "on-failure", "unless-stopped"])
+
+        let mount = try XCTUnwrap(definitions["mount"] as? [String: Any])
+        XCTAssertEqual((mount["oneOf"] as? [[String: Any]])?.count, 3)
+        let providerID = try XCTUnwrap(definitions["providerID"] as? [String: Any])
+        XCTAssertEqual(providerID["maxLength"] as? Int, 128)
+        let labels = try XCTUnwrap(definitions["labels"] as? [String: Any])
+        XCTAssertEqual(labels["maxProperties"] as? Int, 256)
+        let volumeDeclarations = try XCTUnwrap(definitions["volumeDeclarations"] as? [String: Any])
+        XCTAssertEqual((volumeDeclarations["propertyNames"] as? [String: Any])?["$ref"] as? String, "#/$defs/name")
+        let volumeDeclarationRef = try XCTUnwrap(volumeDeclarations["additionalProperties"] as? [String: Any])
+        XCTAssertEqual(volumeDeclarationRef["$ref"] as? String, "#/$defs/volumeDeclaration")
+        let volumeDeclaration = try XCTUnwrap(definitions["volumeDeclaration"] as? [String: Any])
+        XCTAssertEqual(volumeDeclaration["required"] as? [String], ["capacity"])
+        XCTAssertEqual(volumeDeclaration["additionalProperties"] as? Bool, false)
+        let volumeDeclarationProperties = try XCTUnwrap(volumeDeclaration["properties"] as? [String: Any])
+        XCTAssertEqual(
+            Set(volumeDeclarationProperties.keys),
+            ["provider", "capacity", "accessMode", "reclaimPolicy", "labels"]
+        )
+        XCTAssertEqual(
+            (volumeDeclarationProperties["provider"] as? [String: Any])?["$ref"] as? String,
+            "#/$defs/providerID"
+        )
+        XCTAssertEqual(
+            (volumeDeclarationProperties["capacity"] as? [String: Any])?["$ref"] as? String,
+            "#/$defs/size"
+        )
+        XCTAssertEqual(
+            (volumeDeclarationProperties["accessMode"] as? [String: Any])?["enum"] as? [String],
+            ["read-write-once", "read-only-many"]
+        )
+        XCTAssertEqual(
+            (volumeDeclarationProperties["reclaimPolicy"] as? [String: Any])?["enum"] as? [String],
+            ["retain", "delete", "snapshot-before-delete", "backup-before-delete", "recycle"]
+        )
+        XCTAssertEqual(
+            (volumeDeclarationProperties["labels"] as? [String: Any])?["$ref"] as? String,
+            "#/$defs/labels"
+        )
+        let bindMount = try XCTUnwrap(definitions["bindMount"] as? [String: Any])
+        XCTAssertEqual(bindMount["required"] as? [String], ["type", "source", "target"])
+        XCTAssertEqual(bindMount["additionalProperties"] as? Bool, false)
+        let volumeMount = try XCTUnwrap(definitions["volumeMount"] as? [String: Any])
+        XCTAssertEqual(volumeMount["required"] as? [String], ["type", "source", "target"])
+        XCTAssertEqual(volumeMount["additionalProperties"] as? Bool, false)
+        let tmpfsMount = try XCTUnwrap(definitions["tmpfsMount"] as? [String: Any])
+        XCTAssertEqual(tmpfsMount["required"] as? [String], ["type", "target"])
+        XCTAssertEqual(tmpfsMount["additionalProperties"] as? Bool, false)
 
         let probe = try XCTUnwrap(definitions["probe"] as? [String: Any])
         XCTAssertEqual(probe["additionalProperties"] as? Bool, false)

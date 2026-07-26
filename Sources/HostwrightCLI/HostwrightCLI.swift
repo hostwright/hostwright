@@ -9,6 +9,7 @@ import HostwrightReconciler
 import HostwrightRegistry
 import HostwrightRuntime
 import HostwrightState
+import HostwrightStorage
 
 public enum HostwrightCLI {
     public static let starterManifest = """
@@ -121,6 +122,11 @@ public enum HostwrightCLI {
             ).run()
         case .image(let options):
             return try ImageCommandRunner(
+                options: options,
+                environment: environment
+            ).run()
+        case .volume(let options):
+            return try StorageCommandRunner(
                 options: options,
                 environment: environment
             ).run()
@@ -313,6 +319,14 @@ public enum HostwrightCLI {
       hostwright registry provenance status <absolute-manifest-path> [--service <name>] [--state-db <path>] [--json|--output text|json]
       hostwright registry provenance resume <operation-group-uuid> --confirm-plan <sha256> [--signing-key-ref <typed-secret-reference>] [--state-db <path>] [--json|--output text|json]
       hostwright image inspect <reference>... [--runtime-provider auto|apple-cli|containerization] [--json|--output text|json]
+      hostwright volume list [--project <id>] [--state-db <path>] [--json|--output text|json]
+      hostwright volume inspect <volume-uuid> [--state-db <path>] [--json|--output text|json]
+      hostwright volume capacity|health [--state-db <path>] [--json|--output text|json]
+      hostwright volume recover <volume-uuid> --idempotency-key <key> [--state-db <path>] [--json|--output text|json]
+      hostwright volume delete <volume-uuid> (--dry-run|--confirm-plan <sha256>) [--state-db <path>] [--json|--output text|json]
+      hostwright volume prune (--dry-run|--confirm-plan <sha256>) [--state-db <path>] [--json|--output text|json]
+      hostwright volume snapshot create|list|inspect|retain|export|restore|delete ...
+      hostwright volume backup create|list|inspect|verify|retain|restore|delete ...
       hostwright image pull|push <reference> [--platform linux/arm64|linux/amd64] [--offline] [--progress none|plain] [--state-db <path>] [--runtime-provider auto|apple-cli|containerization] [--json|--output text|json]
       hostwright image tag <source> <target> [--state-db <path>] [--runtime-provider auto|apple-cli|containerization] [--json|--output text|json]
       hostwright image load --input <absolute-path> --reference <expected-reference>... [--state-db <path>] [--runtime-provider auto|apple-cli|containerization] [--json|--output text|json]
@@ -405,7 +419,7 @@ public enum HostwrightCLI {
 
     private static func renderCapabilities(_ report: HostwrightCapabilityReport) -> String {
         let header = "Hostwright \(report.productVersion) (target \(report.releaseTarget))\n"
-        let contracts = "Contracts: manifest v\(report.contracts.manifest), control API v\(report.contracts.controlAPI), runtime provider API v\(report.contracts.runtimeProviderAPI), plugin ABI v\(report.contracts.pluginABI), state schema v\(report.contracts.stateSchema)\n"
+        let contracts = "Contracts: manifest v\(report.contracts.manifest), control API v\(report.contracts.controlAPI), runtime provider API v\(report.contracts.runtimeProviderAPI), storage provider API v\(report.contracts.storageProviderAPI), plugin ABI v\(report.contracts.pluginABI), state schema v\(report.contracts.stateSchema)\n"
         let rows = report.capabilities.map {
             "\($0.identifier)\t\($0.state.rawValue)\tphase \(String(format: "%02d", $0.phase))\t#\($0.issue)\t\($0.title)"
         }.joined(separator: "\n")

@@ -939,7 +939,11 @@ final class StorageBackupEngineTests: XCTestCase {
                 .remoteTransportFailure
             )
         }
-        XCTAssertTrue(TimeoutTrackingURLProtocol.stopped)
+        XCTAssertTrue(
+            TimeoutTrackingURLProtocol.waitUntilStopped(
+                timeout: 2
+            )
+        )
     }
 
     func testRemoteBackupHydratesMissingLocalArtifactsRestoresAndDeletesExactly()
@@ -1532,6 +1536,12 @@ private final class TimeoutTrackingURLProtocol:
         state.reset()
     }
 
+    static func waitUntilStopped(
+        timeout: TimeInterval
+    ) -> Bool {
+        state.waitUntilStopped(timeout: timeout)
+    }
+
     override class func canInit(
         with request: URLRequest
     ) -> Bool {
@@ -1554,19 +1564,38 @@ private final class TimeoutTrackingURLProtocol:
 private final class TimeoutTrackingURLProtocolState:
     @unchecked Sendable
 {
-    private let lock = NSLock()
+    private let condition = NSCondition()
     private var didStop = false
 
     var stopped: Bool {
-        lock.withLock { didStop }
+        condition.withLock { didStop }
     }
 
     func reset() {
-        lock.withLock { didStop = false }
+        condition.withLock { didStop = false }
     }
 
     func markStopped() {
-        lock.withLock { didStop = true }
+        condition.withLock {
+            didStop = true
+            condition.broadcast()
+        }
+    }
+
+    func waitUntilStopped(
+        timeout: TimeInterval
+    ) -> Bool {
+        condition.lock()
+        defer { condition.unlock() }
+        guard !didStop else {
+            return true
+        }
+        let deadline = Date(
+            timeIntervalSinceNow: timeout
+        )
+        while !didStop &&
+            condition.wait(until: deadline) {}
+        return didStop
     }
 }
 

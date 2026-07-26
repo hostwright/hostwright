@@ -372,6 +372,29 @@ public struct RuntimeDesiredNetworkAttachment: Codable, Equatable, Hashable, Sen
         self.aliases = aliases.sorted()
     }
 
+    public init(
+        networkRuntimeIdentifier: String,
+        networkResourceUUID: String,
+        aliases: [String] = []
+    ) throws {
+        let sortedAliases = aliases.sorted()
+        let expectedRuntimeIdentifier =
+            "hw-\(networkResourceUUID.replacingOccurrences(of: "-", with: ""))"
+        guard RuntimeNetworkIdentity.isRuntimeIdentifier(networkRuntimeIdentifier),
+              let uuid = UUID(uuidString: networkResourceUUID),
+              uuid.uuidString.lowercased() == networkResourceUUID,
+              networkRuntimeIdentifier == expectedRuntimeIdentifier,
+              sortedAliases.count <= HostwrightServiceNetworkAttachment.maximumAliases,
+              Set(sortedAliases).count == sortedAliases.count,
+              aliases.count == sortedAliases.count,
+              aliases.allSatisfy(HostwrightNetworkIdentity.isValidManifestName) else {
+            throw RuntimeNetworkIdentityError.invalidResourceUUID
+        }
+        self.networkRuntimeIdentifier = networkRuntimeIdentifier
+        self.networkResourceUUID = networkResourceUUID
+        self.aliases = sortedAliases
+    }
+
     private enum CodingKeys: String, CodingKey {
         case networkRuntimeIdentifier
         case networkResourceUUID
@@ -380,33 +403,25 @@ public struct RuntimeDesiredNetworkAttachment: Codable, Equatable, Hashable, Sen
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
-        let runtimeIdentifier = try values.decode(
-            String.self,
-            forKey: .networkRuntimeIdentifier
-        )
-        let resourceUUID = try values.decode(
-            String.self,
-            forKey: .networkResourceUUID
-        )
-        let aliases = try values.decodeIfPresent([String].self, forKey: .aliases) ?? []
-        let expectedRuntimeIdentifier = "hw-\(resourceUUID.replacingOccurrences(of: "-", with: ""))"
-        guard RuntimeNetworkIdentity.isRuntimeIdentifier(runtimeIdentifier),
-              let uuid = UUID(uuidString: resourceUUID),
-              uuid.uuidString.lowercased() == resourceUUID,
-              runtimeIdentifier == expectedRuntimeIdentifier,
-              aliases.count <= HostwrightServiceNetworkAttachment.maximumAliases,
-              Set(aliases).count == aliases.count,
-              aliases == aliases.sorted(),
-              aliases.allSatisfy(HostwrightNetworkIdentity.isValidManifestName) else {
+        do {
+            try self.init(
+                networkRuntimeIdentifier: values.decode(
+                    String.self,
+                    forKey: .networkRuntimeIdentifier
+                ),
+                networkResourceUUID: values.decode(
+                    String.self,
+                    forKey: .networkResourceUUID
+                ),
+                aliases: values.decodeIfPresent([String].self, forKey: .aliases) ?? []
+            )
+        } catch {
             throw DecodingError.dataCorruptedError(
                 forKey: .networkRuntimeIdentifier,
                 in: values,
                 debugDescription: "Network attachment identity or aliases are invalid."
             )
         }
-        networkRuntimeIdentifier = runtimeIdentifier
-        networkResourceUUID = resourceUUID
-        self.aliases = aliases
     }
 
     public func encode(to encoder: Encoder) throws {

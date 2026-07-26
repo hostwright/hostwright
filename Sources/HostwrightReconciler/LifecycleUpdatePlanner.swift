@@ -925,16 +925,10 @@ public enum LifecycleRevisionCodec {
 
         var value: RuntimeDesiredNetworkAttachment {
             get throws {
-                return try JSONDecoder().decode(
-                    RuntimeDesiredNetworkAttachment.self,
-                    from: JSONSerialization.data(
-                        withJSONObject: [
-                            "aliases": aliases,
-                            "networkResourceUUID": networkResourceUUID,
-                            "networkRuntimeIdentifier": networkRuntimeIdentifier
-                        ],
-                        options: [.sortedKeys, .withoutEscapingSlashes]
-                    )
+                return try RuntimeDesiredNetworkAttachment(
+                    networkRuntimeIdentifier: networkRuntimeIdentifier,
+                    networkResourceUUID: networkResourceUUID,
+                    aliases: aliases
                 )
             }
         }

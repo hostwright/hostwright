@@ -170,7 +170,7 @@ public enum AppleContainerNetworkCommand {
     }
 }
 
-public struct AppleContainerNetworkAdapter: Sendable {
+public struct AppleContainerNetworkAdapter: RuntimeNetworkProvider, Sendable {
     public let executableResolver: RuntimeExecutableResolving
     public let processRunner: RuntimeProcessRunning
     public let redactionPolicy: RuntimeRedactionPolicy
@@ -188,6 +188,10 @@ public struct AppleContainerNetworkAdapter: Sendable {
     public func capabilities() async throws -> RuntimeNetworkProviderCapabilities {
         _ = try await resolvedCodec()
         return .appleContainerCLI
+    }
+
+    public func networkCapabilities() async throws -> RuntimeNetworkProviderCapabilities {
+        try await capabilities()
     }
 
     public func inspect(
@@ -213,6 +217,12 @@ public struct AppleContainerNetworkAdapter: Sendable {
             verified: true,
             observedNetwork: inventoryNetwork(evidence, ownership: ownership)
         )
+    }
+
+    public func networkInspect(
+        _ request: RuntimeNetworkInspectRequest
+    ) async throws -> RuntimeNetworkOperationResult {
+        try await inspect(request)
     }
 
     public func create(
@@ -251,6 +261,13 @@ public struct AppleContainerNetworkAdapter: Sendable {
         )
     }
 
+    public func networkCreate(
+        _ request: RuntimeNetworkCreateRequest,
+        context: RuntimeMutationContext
+    ) async throws -> RuntimeNetworkOperationResult {
+        try await create(request, context: context)
+    }
+
     public func delete(
         _ request: RuntimeNetworkDeleteRequest,
         context: RuntimeMutationContext
@@ -261,11 +278,24 @@ public struct AppleContainerNetworkAdapter: Sendable {
             codec: codec,
             executable: executable
         )
-        _ = try requireOwned(
-            evidence,
-            identity: request.identity,
-            expectedContext: context
-        )
+        if let expectedOwnership = request.expectedOwnership {
+            try validateDeleteAuthority(
+                expectedOwnership: expectedOwnership,
+                identity: request.identity,
+                context: context
+            )
+            _ = try requireOwned(
+                evidence,
+                identity: request.identity,
+                expectedOwnership: expectedOwnership
+            )
+        } else {
+            _ = try requireOwned(
+                evidence,
+                identity: request.identity,
+                expectedContext: context
+            )
+        }
 
         let spec = try AppleContainerNetworkCommand.deleteSpec(
             request: request,
@@ -301,6 +331,13 @@ public struct AppleContainerNetworkAdapter: Sendable {
         )
     }
 
+    public func networkDelete(
+        _ request: RuntimeNetworkDeleteRequest,
+        context: RuntimeMutationContext
+    ) async throws -> RuntimeNetworkOperationResult {
+        try await delete(request, context: context)
+    }
+
     public func attach(
         _ request: RuntimeNetworkAttachmentRequest,
         context: RuntimeMutationContext
@@ -312,6 +349,13 @@ public struct AppleContainerNetworkAdapter: Sendable {
         )
     }
 
+    public func networkAttach(
+        _ request: RuntimeNetworkAttachmentRequest,
+        context: RuntimeMutationContext
+    ) async throws -> RuntimeNetworkOperationResult {
+        try await attach(request, context: context)
+    }
+
     public func detach(
         _ request: RuntimeNetworkAttachmentRequest,
         context: RuntimeMutationContext
@@ -321,6 +365,13 @@ public struct AppleContainerNetworkAdapter: Sendable {
         throw RuntimeAdapterError.mutationUnavailableByPolicy(
             "Apple container CLI does not expose a qualified mutable network detach operation."
         )
+    }
+
+    public func networkDetach(
+        _ request: RuntimeNetworkAttachmentRequest,
+        context: RuntimeMutationContext
+    ) async throws -> RuntimeNetworkOperationResult {
+        try await detach(request, context: context)
     }
 
     private func resolvedCodec() async throws -> (
@@ -403,6 +454,48 @@ public struct AppleContainerNetworkAdapter: Sendable {
             }
         }
         return ownership
+    }
+
+    private func requireOwned(
+        _ evidence: AppleContainerNetworkEvidence,
+        identity: RuntimeNetworkIdentity,
+        expectedOwnership: RuntimeInventoryOwnershipEvidence
+    ) throws -> RuntimeInventoryOwnershipEvidence {
+        let ownership = try requireOwned(
+            evidence,
+            identity: identity,
+            expectedContext: nil
+        )
+        guard ownership == expectedOwnership else {
+            throw RuntimeAdapterError.mutationUnavailableByPolicy(
+                "Apple network ownership changed before the fenced delete operation."
+            )
+        }
+        return ownership
+    }
+
+    private func validateDeleteAuthority(
+        expectedOwnership: RuntimeInventoryOwnershipEvidence,
+        identity: RuntimeNetworkIdentity,
+        context: RuntimeMutationContext
+    ) throws {
+        guard context.validationIssue == nil,
+              context.providerID == .appleContainerCLI,
+              context.resourceUUID == identity.resourceUUID,
+              context.projectResourceUUID == identity.projectUUID,
+              expectedOwnership.resourceUUID == identity.resourceUUID,
+              expectedOwnership.projectUUID == identity.projectUUID,
+              expectedOwnership.providerID == context.providerID,
+              expectedOwnership.providerGeneration ==
+                context.providerGeneration,
+              expectedOwnership.projectGeneration ==
+                context.projectGeneration,
+              context.resourceGeneration ==
+                expectedOwnership.resourceGeneration + 1 else {
+            throw RuntimeAdapterError.mutationUnavailableByPolicy(
+                "Apple network delete requires exact prior ownership and new operation fencing authority."
+            )
+        }
     }
 
     private func inventoryNetwork(

@@ -216,6 +216,76 @@ final class RuntimeNetworkProviderTests: XCTestCase {
         )
     }
 
+    func testAppleAdapterDeleteAcceptsExactPriorOwnershipWithFreshOperationFenceAndRejectsMismatch()
+        async throws
+    {
+        let identity = try networkIdentity()
+        let runner = RecordingNetworkProcessRunner()
+        let adapter = AppleContainerNetworkAdapter(
+            executableResolver: FixedNetworkExecutableResolver(),
+            processRunner: runner
+        )
+        let createContext = mutationContext(identity: identity)
+        let created = try await adapter.create(
+            RuntimeNetworkCreateRequest(
+                identity: identity,
+                mode: .nat,
+                ipv4: .cidr("10.42.0.0/24"),
+                ipv6: .cidr("fd42::/64")
+            ),
+            context: createContext
+        )
+        let priorOwnership = try XCTUnwrap(
+            created.observedNetwork?.ownership
+        )
+        let deleteContext = RuntimeMutationContext(
+            providerID: .appleContainerCLI,
+            capabilitySHA256: String(repeating: "a", count: 64),
+            operationID: "network/delete",
+            resourceUUID: identity.resourceUUID,
+            resourceGeneration: priorOwnership.resourceGeneration + 1,
+            projectResourceUUID: identity.projectUUID,
+            projectGeneration: priorOwnership.projectGeneration,
+            providerGeneration: priorOwnership.providerGeneration,
+            fencingToken:
+                "88888888-8888-4888-8888-888888888888"
+        )
+        let mismatchedOwnership = RuntimeInventoryOwnershipEvidence(
+            resourceUUID: priorOwnership.resourceUUID,
+            projectUUID: priorOwnership.projectUUID,
+            resourceGeneration: priorOwnership.resourceGeneration,
+            projectGeneration: priorOwnership.projectGeneration,
+            providerID: priorOwnership.providerID,
+            providerGeneration: priorOwnership.providerGeneration,
+            fencingToken:
+                "99999999-9999-4999-8999-999999999999"
+        )
+
+        await XCTAssertThrowsErrorAsync(
+            try await adapter.delete(
+                RuntimeNetworkDeleteRequest(
+                    identity: identity,
+                    expectedOwnership: mismatchedOwnership
+                ),
+                context: deleteContext
+            )
+        )
+        let rejectedOperations = await runner.operations()
+        XCTAssertFalse(rejectedOperations.contains("delete"))
+
+        let deleted = try await adapter.delete(
+            RuntimeNetworkDeleteRequest(
+                identity: identity,
+                expectedOwnership: priorOwnership
+            ),
+            context: deleteContext
+        )
+        XCTAssertEqual(deleted.state, .missing)
+        XCTAssertTrue(deleted.verified)
+        let operations = await runner.operations()
+        XCTAssertEqual(operations.filter { $0 == "delete" }, ["delete"])
+    }
+
     func testAppleAdapterRejectsMutableAttachAndDetachWithoutExecuting() async throws {
         let network = try networkIdentity()
         let request = try RuntimeNetworkAttachmentRequest(

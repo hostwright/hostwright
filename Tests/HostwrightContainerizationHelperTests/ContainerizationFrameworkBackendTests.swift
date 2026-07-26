@@ -142,6 +142,90 @@ final class ContainerizationFrameworkBackendTests: XCTestCase {
         XCTAssertEqual(networkOperations, ["network-create", "network-delete"])
     }
 
+    func testNetworkDeleteAcceptsExactPriorOwnershipWithFreshOperationFenceAndRejectsMismatch()
+        async throws
+    {
+        let parent = try makePrivateParent()
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let store = try ContainerizationHelperStateStore(
+            rootURL: parent.appendingPathComponent(
+                "state",
+                isDirectory: true
+            )
+        )
+        let driver = RecordingContainerizationDriver()
+        let backend = try ContainerizationFrameworkBackend(
+            snapshot: snapshot(),
+            store: store,
+            driver: driver
+        )
+        let identity = try RuntimeNetworkIdentity(
+            logicalName: "backend",
+            projectUUID:
+                "22222222-2222-4222-8222-222222222222"
+        )
+        let createContext = networkMutationContext(
+            identity: identity
+        )
+        let created = try await backend.networkCreate(
+            RuntimeNetworkCreateRequest(
+                identity: identity,
+                mode: .hostOnly,
+                ipv4: .cidr("192.168.240.0/24"),
+                ipv6: .cidr("fd00:7:1::/64")
+            ),
+            context: createContext
+        )
+        let priorOwnership = try XCTUnwrap(
+            created.observedNetwork?.ownership
+        )
+        let deleteContext = networkMutationContext(
+            identity: identity,
+            operationID: "network-operation-2",
+            resourceGeneration:
+                priorOwnership.resourceGeneration + 1,
+            fencingToken:
+                "66666666-6666-4666-8666-666666666666"
+        )
+        let mismatchedOwnership = RuntimeInventoryOwnershipEvidence(
+            resourceUUID: priorOwnership.resourceUUID,
+            projectUUID: priorOwnership.projectUUID,
+            resourceGeneration: priorOwnership.resourceGeneration,
+            projectGeneration: priorOwnership.projectGeneration,
+            providerID: priorOwnership.providerID,
+            providerGeneration: priorOwnership.providerGeneration,
+            fencingToken:
+                "77777777-7777-4777-8777-777777777777"
+        )
+
+        await XCTAssertThrowsErrorAsync {
+            _ = try await backend.networkDelete(
+                RuntimeNetworkDeleteRequest(
+                    identity: identity,
+                    expectedOwnership: mismatchedOwnership
+                ),
+                context: deleteContext
+            )
+        }
+        let rejectedOperations = await driver.operations()
+        XCTAssertEqual(rejectedOperations, ["network-create"])
+
+        let deleted = try await backend.networkDelete(
+            RuntimeNetworkDeleteRequest(
+                identity: identity,
+                expectedOwnership: priorOwnership
+            ),
+            context: deleteContext
+        )
+        XCTAssertEqual(deleted.state, .missing)
+        XCTAssertTrue(deleted.verified)
+        let operations = await driver.operations()
+        XCTAssertEqual(
+            operations,
+            ["network-create", "network-delete"]
+        )
+    }
+
     func testAutomaticIPv4NetworkCreateIsRejected() async throws {
         let parent = try makePrivateParent()
         defer { try? FileManager.default.removeItem(at: parent) }
@@ -775,14 +859,16 @@ final class ContainerizationFrameworkBackendTests: XCTestCase {
 
     private func networkMutationContext(
         identity: RuntimeNetworkIdentity,
+        operationID: String = "network-operation-1",
+        resourceGeneration: Int = 1,
         fencingToken: String = "44444444-4444-4444-8444-444444444444"
     ) -> RuntimeMutationContext {
         RuntimeMutationContext(
             providerID: .appleContainerization,
             capabilitySHA256: String(repeating: "a", count: 64),
-            operationID: "network-operation-1",
+            operationID: operationID,
             resourceUUID: identity.resourceUUID,
-            resourceGeneration: 1,
+            resourceGeneration: resourceGeneration,
             projectResourceUUID: identity.projectUUID,
             projectGeneration: 1,
             providerGeneration: 1,

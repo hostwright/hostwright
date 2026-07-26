@@ -91,6 +91,127 @@ public struct NetworkStateExpectedVersion:
     }
 }
 
+public struct NetworkStateMutationAuthority:
+    Equatable,
+    Sendable
+{
+    public let providerID: String
+    public let providerGeneration: Int64
+    public let operationGroupID: String
+    public let fencingToken: String
+    public let plannedCapabilitySHA256: String
+    public let currentCapabilitySHA256: String
+
+    public init(
+        providerID: String,
+        providerGeneration: Int64,
+        operationGroupID: String,
+        fencingToken: String,
+        plannedCapabilitySHA256: String,
+        currentCapabilitySHA256: String
+    ) {
+        self.providerID = providerID
+        self.providerGeneration = providerGeneration
+        self.operationGroupID = operationGroupID
+        self.fencingToken = fencingToken
+        self.plannedCapabilitySHA256 = plannedCapabilitySHA256
+        self.currentCapabilitySHA256 = currentCapabilitySHA256
+    }
+}
+
+public enum NetworkStateRecoveryTrigger:
+    String,
+    Codable,
+    CaseIterable,
+    Sendable
+{
+    case postMutation = "post-mutation"
+    case timedOut = "timed-out"
+    case cancelled
+    case partialEffect = "partial-effect"
+    case processTerminated = "process-terminated"
+}
+
+public enum NetworkStateRecoveryObservation:
+    Equatable,
+    Sendable
+{
+    case absent
+    case exactOwned(observedSHA256: String)
+    case conflictingOwner(observedSHA256: String?)
+    case indeterminate
+}
+
+public enum NetworkStateRecoveryAction:
+    String,
+    Codable,
+    CaseIterable,
+    Sendable
+{
+    case retryMutation = "retry-mutation"
+    case verifyAndAdvance = "verify-and-advance"
+    case stable
+    case resumeDeletion = "resume-deletion"
+    case finalizeDeletion = "finalize-deletion"
+    case purgeTerminalRecord = "purge-terminal-record"
+    case quarantine
+}
+
+public struct NetworkStateRecoveryDecision:
+    Equatable,
+    Sendable
+{
+    public let trigger: NetworkStateRecoveryTrigger
+    public let action: NetworkStateRecoveryAction
+    public let requiresObservationBeforeMutation: Bool
+
+    public init(
+        trigger: NetworkStateRecoveryTrigger,
+        action: NetworkStateRecoveryAction,
+        requiresObservationBeforeMutation: Bool = true
+    ) {
+        self.trigger = trigger
+        self.action = action
+        self.requiresObservationBeforeMutation =
+            requiresObservationBeforeMutation
+    }
+}
+
+public enum NetworkStateTeardownKind:
+    String,
+    Codable,
+    CaseIterable,
+    Sendable
+{
+    case attachment
+    case network
+}
+
+public struct NetworkStateTeardownTarget:
+    Equatable,
+    Sendable
+{
+    public let kind: NetworkStateTeardownKind
+    public let id: String
+    public let networkUUID: String
+    public let generation: Int64
+    public let fencingToken: String
+
+    public init(
+        kind: NetworkStateTeardownKind,
+        id: String,
+        networkUUID: String,
+        generation: Int64,
+        fencingToken: String
+    ) {
+        self.kind = kind
+        self.id = id
+        self.networkUUID = networkUUID
+        self.generation = generation
+        self.fencingToken = fencingToken
+    }
+}
+
 public struct NetworkStateResourceRecord:
     Codable,
     Equatable,

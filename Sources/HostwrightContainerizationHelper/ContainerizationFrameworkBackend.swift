@@ -403,11 +403,29 @@ actor ContainerizationFrameworkBackend: ContainerizationHelperBackend {
         guard let observed = try await driver.inspectNetwork(request.identity) else {
             throw ContainerizationHelperBackendError.rejected("network is not managed")
         }
-        _ = try verifyNetwork(
-            observed,
-            identity: request.identity,
-            expectedContext: context
-        )
+        if let expectedOwnership = request.expectedOwnership {
+            try validateDeleteAuthority(
+                expectedOwnership: expectedOwnership,
+                identity: request.identity,
+                context: context
+            )
+            let ownership = try verifyNetwork(
+                observed,
+                identity: request.identity,
+                expectedContext: nil
+            )
+            guard ownership == expectedOwnership else {
+                throw ContainerizationHelperBackendError.conflict(
+                    "network ownership changed before fenced deletion"
+                )
+            }
+        } else {
+            _ = try verifyNetwork(
+                observed,
+                identity: request.identity,
+                expectedContext: context
+            )
+        }
         try await driver.deleteNetwork(request.identity)
         try Task.checkCancellation()
         guard try await driver.inspectNetwork(request.identity) == nil else {
@@ -712,6 +730,29 @@ actor ContainerizationFrameworkBackend: ContainerizationHelperBackend {
               context.projectResourceUUID == identity.projectUUID else {
             throw ContainerizationHelperBackendError.rejected(
                 "network mutation ownership context is invalid"
+            )
+        }
+    }
+
+    private func validateDeleteAuthority(
+        expectedOwnership: RuntimeInventoryOwnershipEvidence,
+        identity: RuntimeNetworkIdentity,
+        context: RuntimeMutationContext
+    ) throws {
+        guard expectedOwnership.resourceUUID ==
+                identity.resourceUUID,
+              expectedOwnership.projectUUID ==
+                identity.projectUUID,
+              expectedOwnership.providerID ==
+                context.providerID,
+              expectedOwnership.providerGeneration ==
+                context.providerGeneration,
+              expectedOwnership.projectGeneration ==
+                context.projectGeneration,
+              context.resourceGeneration ==
+                expectedOwnership.resourceGeneration + 1 else {
+            throw ContainerizationHelperBackendError.rejected(
+                "network delete prior ownership or new operation authority is invalid"
             )
         }
     }

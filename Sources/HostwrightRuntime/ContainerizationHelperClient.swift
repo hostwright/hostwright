@@ -778,7 +778,7 @@ enum ContainerizationHelperUnixClient {
     }
 }
 
-public actor ContainerizationHelperClient {
+public actor ContainerizationHelperClient: RuntimeNetworkProvider {
     private struct OwnedSocketIdentity: Equatable, Sendable {
         let processID: pid_t
         let device: UInt64

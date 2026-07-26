@@ -144,6 +144,39 @@ public struct NetworkStateRepository: Sendable {
         }
     }
 
+    @discardableResult
+    public func saveNetwork(
+        _ record: NetworkStateResourceRecord,
+        replacing expected: NetworkStateExpectedVersion? = nil,
+        authority: NetworkStateMutationAuthority
+    ) throws -> NetworkStateResourceRecord {
+        try Self.validateMutationAuthority(
+            authority,
+            providerID: record.providerID,
+            providerGeneration: record.providerGeneration,
+            operationGroupID: record.operationGroupID,
+            fencingToken: record.fencingToken
+        )
+        try store.withValidatedConnection(readOnly: true) {
+            connection in
+            try Self.validateProjectBinding(
+                projectUUID: record.projectUUID,
+                providerID: authority.providerID,
+                providerGeneration: authority.providerGeneration,
+                on: connection
+            )
+            try Self.validateOperationGroup(
+                id: authority.operationGroupID,
+                projectUUID: record.projectUUID,
+                fencingToken: authority.fencingToken,
+                expectedCapabilitySHA256:
+                    authority.plannedCapabilitySHA256,
+                on: connection
+            )
+        }
+        return try saveNetwork(record, replacing: expected)
+    }
+
     public func loadNetwork(
         id: String
     ) throws -> NetworkStateResourceRecord? {
@@ -175,6 +208,112 @@ public struct NetworkStateRepository: Sendable {
                 bindings: bindings
             ).map(Self.network(from:))
         }
+    }
+
+    public func evaluateNetworkRecovery(
+        id: String,
+        expected: NetworkStateExpectedVersion,
+        authority: NetworkStateMutationAuthority,
+        trigger: NetworkStateRecoveryTrigger,
+        observation: NetworkStateRecoveryObservation
+    ) throws -> NetworkStateRecoveryDecision {
+        try Self.validateUUID(id, label: "network id")
+        try Self.validate(expected)
+        try Self.validateRecoveryAuthority(authority)
+        return try store.withValidatedConnection(readOnly: true) {
+            connection in
+            guard let record = try Self.loadNetwork(
+                id: id,
+                on: connection
+            ) else {
+                throw StateStoreError.notFound(
+                    "Network state '\(id)' does not exist."
+                )
+            }
+            try Self.validateRecoveryAuthority(
+                authority,
+                recordProviderID: record.providerID,
+                recordProviderGeneration: record.providerGeneration,
+                expected: expected,
+                recordGeneration: record.generation,
+                recordFencingToken: record.fencingToken
+            )
+            try Self.validateProjectBinding(
+                projectUUID: record.projectUUID,
+                providerID: authority.providerID,
+                providerGeneration: authority.providerGeneration,
+                on: connection
+            )
+            try Self.validateOperationGroup(
+                id: authority.operationGroupID,
+                projectUUID: record.projectUUID,
+                fencingToken: authority.fencingToken,
+                expectedCapabilitySHA256:
+                    authority.plannedCapabilitySHA256,
+                on: connection
+            )
+            return try Self.recoveryDecision(
+                lifecycle: record.lifecycleState,
+                finalizer: record.finalizerState,
+                persistedObservedSHA256: record.observedSHA256,
+                trigger: trigger,
+                observation: observation
+            )
+        }
+    }
+
+    @discardableResult
+    public func quarantineNetwork(
+        id: String,
+        expected: NetworkStateExpectedVersion,
+        authority: NetworkStateMutationAuthority,
+        observedSHA256: String?,
+        updatedAt: String
+    ) throws -> NetworkStateResourceRecord {
+        try Self.validate(expected)
+        try Self.validateRecoveryAuthority(authority)
+        let existing = try loadNetwork(id: id)
+        guard let existing else {
+            throw StateStoreError.notFound(
+                "Network state '\(id)' does not exist."
+            )
+        }
+        try Self.validateRecoveryAuthority(
+            authority,
+            recordProviderID: existing.providerID,
+            recordProviderGeneration: existing.providerGeneration,
+            expected: expected,
+            recordGeneration: existing.generation,
+            recordFencingToken: existing.fencingToken
+        )
+        let quarantined = NetworkStateResourceRecord(
+            id: existing.id,
+            projectUUID: existing.projectUUID,
+            name: existing.name,
+            runtimeName: existing.runtimeName,
+            generation: existing.generation + 1,
+            providerID: authority.providerID,
+            providerGeneration: authority.providerGeneration,
+            fencingToken: authority.fencingToken,
+            driver: existing.driver,
+            requestedIPv4: existing.requestedIPv4,
+            requestedIPv6: existing.requestedIPv6,
+            observedIPv4: existing.observedIPv4,
+            observedIPv6: existing.observedIPv6,
+            desiredSHA256: existing.desiredSHA256,
+            observedSHA256: observedSHA256 ??
+                existing.observedSHA256,
+            lifecycleState: .faulted,
+            finalizerState: .quarantined,
+            operationGroupID: authority.operationGroupID,
+            createdAt: existing.createdAt,
+            updatedAt: updatedAt
+        )
+        return try saveNetwork(
+            quarantined,
+            replacing: expected,
+            authority: authority
+        )
     }
 
     @discardableResult
@@ -265,17 +404,26 @@ public struct NetworkStateRepository: Sendable {
                 ),
                 network.projectUUID == record.projectUUID,
                 network.providerID == record.providerID,
-                network.providerGeneration == record.providerGeneration,
-                network.lifecycleState == .available,
-                network.finalizerState == .active else {
+                network.providerGeneration ==
+                    record.providerGeneration else {
                     throw StateStoreError.invalidRecord(
-                        "Network attachment requires the exact available network authority."
+                        "Network attachment requires the exact network authority."
                     )
                 }
-                if let existing = try Self.loadAttachment(
+                let existing = try Self.loadAttachment(
                     id: record.id,
                     on: connection
-                ) {
+                )
+                guard Self.networkAuthorizesAttachment(
+                    network: network,
+                    incoming: record,
+                    isExisting: existing != nil
+                ) else {
+                    throw StateStoreError.invalidRecord(
+                        "Network attachment lifecycle is incompatible with the parent network lifecycle."
+                    )
+                }
+                if let existing {
                     if existing == record { return record }
                     try Self.validateAttachmentReplacement(
                         existing: existing,
@@ -363,6 +511,39 @@ public struct NetworkStateRepository: Sendable {
         }
     }
 
+    @discardableResult
+    public func saveAttachment(
+        _ record: NetworkStateAttachmentRecord,
+        replacing expected: NetworkStateExpectedVersion? = nil,
+        authority: NetworkStateMutationAuthority
+    ) throws -> NetworkStateAttachmentRecord {
+        try Self.validateMutationAuthority(
+            authority,
+            providerID: record.providerID,
+            providerGeneration: record.providerGeneration,
+            operationGroupID: record.operationGroupID,
+            fencingToken: record.fencingToken
+        )
+        try store.withValidatedConnection(readOnly: true) {
+            connection in
+            try Self.validateProjectBinding(
+                projectUUID: record.projectUUID,
+                providerID: authority.providerID,
+                providerGeneration: authority.providerGeneration,
+                on: connection
+            )
+            try Self.validateOperationGroup(
+                id: authority.operationGroupID,
+                projectUUID: record.projectUUID,
+                fencingToken: authority.fencingToken,
+                expectedCapabilitySHA256:
+                    authority.plannedCapabilitySHA256,
+                on: connection
+            )
+        }
+        return try saveAttachment(record, replacing: expected)
+    }
+
     public func loadAttachment(
         id: String
     ) throws -> NetworkStateAttachmentRecord? {
@@ -393,6 +574,153 @@ public struct NetworkStateRepository: Sendable {
                 sql,
                 bindings: bindings
             ).map(Self.attachment(from:))
+        }
+    }
+
+    public func evaluateAttachmentRecovery(
+        id: String,
+        expected: NetworkStateExpectedVersion,
+        authority: NetworkStateMutationAuthority,
+        trigger: NetworkStateRecoveryTrigger,
+        observation: NetworkStateRecoveryObservation
+    ) throws -> NetworkStateRecoveryDecision {
+        try Self.validateUUID(id, label: "network attachment id")
+        try Self.validate(expected)
+        try Self.validateRecoveryAuthority(authority)
+        return try store.withValidatedConnection(readOnly: true) {
+            connection in
+            guard let record = try Self.loadAttachment(
+                id: id,
+                on: connection
+            ) else {
+                throw StateStoreError.notFound(
+                    "Network attachment state '\(id)' does not exist."
+                )
+            }
+            try Self.validateRecoveryAuthority(
+                authority,
+                recordProviderID: record.providerID,
+                recordProviderGeneration: record.providerGeneration,
+                expected: expected,
+                recordGeneration: record.generation,
+                recordFencingToken: record.fencingToken
+            )
+            try Self.validateProjectBinding(
+                projectUUID: record.projectUUID,
+                providerID: authority.providerID,
+                providerGeneration: authority.providerGeneration,
+                on: connection
+            )
+            try Self.validateOperationGroup(
+                id: authority.operationGroupID,
+                projectUUID: record.projectUUID,
+                fencingToken: authority.fencingToken,
+                expectedCapabilitySHA256:
+                    authority.plannedCapabilitySHA256,
+                on: connection
+            )
+            return try Self.recoveryDecision(
+                lifecycle: record.lifecycleState,
+                finalizer: record.finalizerState,
+                persistedObservedSHA256: record.observedSHA256,
+                trigger: trigger,
+                observation: observation
+            )
+        }
+    }
+
+    @discardableResult
+    public func quarantineAttachment(
+        id: String,
+        expected: NetworkStateExpectedVersion,
+        authority: NetworkStateMutationAuthority,
+        observedSHA256: String?,
+        updatedAt: String
+    ) throws -> NetworkStateAttachmentRecord {
+        try Self.validate(expected)
+        try Self.validateRecoveryAuthority(authority)
+        let existing = try loadAttachment(id: id)
+        guard let existing else {
+            throw StateStoreError.notFound(
+                "Network attachment state '\(id)' does not exist."
+            )
+        }
+        try Self.validateRecoveryAuthority(
+            authority,
+            recordProviderID: existing.providerID,
+            recordProviderGeneration: existing.providerGeneration,
+            expected: expected,
+            recordGeneration: existing.generation,
+            recordFencingToken: existing.fencingToken
+        )
+        let quarantined = NetworkStateAttachmentRecord(
+            id: existing.id,
+            networkUUID: existing.networkUUID,
+            projectUUID: existing.projectUUID,
+            resourceUUID: existing.resourceUUID,
+            generation: existing.generation + 1,
+            providerID: authority.providerID,
+            providerGeneration: authority.providerGeneration,
+            fencingToken: authority.fencingToken,
+            desiredSHA256: existing.desiredSHA256,
+            observedSHA256: observedSHA256 ??
+                existing.observedSHA256,
+            lifecycleState: .faulted,
+            finalizerState: .quarantined,
+            operationGroupID: authority.operationGroupID,
+            createdAt: existing.createdAt,
+            updatedAt: updatedAt
+        )
+        return try saveAttachment(
+            quarantined,
+            replacing: expected,
+            authority: authority
+        )
+    }
+
+    public func reverseTeardownOrder(
+        projectUUID: String
+    ) throws -> [NetworkStateTeardownTarget] {
+        try Self.validateUUID(
+            projectUUID,
+            label: "network project UUID"
+        )
+        return try store.withValidatedConnection(readOnly: true) {
+            connection in
+            let attachments = try connection.query(
+                Self.attachmentSelect +
+                    """
+                     WHERE project_uuid = ?
+                     ORDER BY network_uuid DESC,
+                              resource_uuid DESC, id DESC
+                    """,
+                bindings: [.text(projectUUID)]
+            ).map(Self.attachment(from:))
+            let networks = try connection.query(
+                Self.networkSelect +
+                    """
+                     WHERE project_uuid = ?
+                     ORDER BY name DESC, id DESC
+                    """,
+                bindings: [.text(projectUUID)]
+            ).map(Self.network(from:))
+            return attachments.map {
+                NetworkStateTeardownTarget(
+                    kind: .attachment,
+                    id: $0.id,
+                    networkUUID: $0.networkUUID,
+                    generation: $0.generation,
+                    fencingToken: $0.fencingToken
+                )
+            } + networks.map {
+                NetworkStateTeardownTarget(
+                    kind: .network,
+                    id: $0.id,
+                    networkUUID: $0.id,
+                    generation: $0.generation,
+                    fencingToken: $0.fencingToken
+                )
+            }
         }
     }
 
@@ -756,6 +1084,224 @@ public struct NetworkStateRepository: Sendable {
         )
     }
 
+    private static func validateMutationAuthority(
+        _ authority: NetworkStateMutationAuthority,
+        providerID: String,
+        providerGeneration: Int64,
+        operationGroupID: String,
+        fencingToken: String
+    ) throws {
+        try validateRecoveryAuthority(authority)
+        guard authority.providerID == providerID,
+              authority.providerGeneration == providerGeneration,
+              authority.operationGroupID == operationGroupID,
+              authority.fencingToken == fencingToken else {
+            throw StateStoreError.invalidRecord(
+                "Network mutation authority does not match the exact provider, generation, operation group, and fence."
+            )
+        }
+    }
+
+    private static func validateRecoveryAuthority(
+        _ authority: NetworkStateMutationAuthority
+    ) throws {
+        try validateProvider(
+            id: authority.providerID,
+            generation: authority.providerGeneration
+        )
+        try validateUUID(
+            authority.operationGroupID,
+            label: "network authority operation group id"
+        )
+        try validateUUID(
+            authority.fencingToken,
+            label: "network authority fencing token"
+        )
+        try validateSHA256(authority.plannedCapabilitySHA256)
+        try validateSHA256(authority.currentCapabilitySHA256)
+        guard authority.plannedCapabilitySHA256 ==
+                authority.currentCapabilitySHA256 else {
+            throw StateStoreError.invalidRecord(
+                "Network mutation refused because the negotiated capability snapshot is stale."
+            )
+        }
+    }
+
+    private static func validateRecoveryAuthority(
+        _ authority: NetworkStateMutationAuthority,
+        recordProviderID: String,
+        recordProviderGeneration: Int64,
+        expected: NetworkStateExpectedVersion,
+        recordGeneration: Int64,
+        recordFencingToken: String
+    ) throws {
+        guard authority.providerID == recordProviderID,
+              authority.providerGeneration ==
+                recordProviderGeneration,
+              expected.generation == recordGeneration,
+              expected.fencingToken == recordFencingToken else {
+            throw StateStoreError.invalidRecord(
+                "Network recovery refused a stale provider generation, record generation, or fencing token."
+            )
+        }
+    }
+
+    private static func recoveryDecision(
+        lifecycle: NetworkStateResourceLifecycle,
+        finalizer: NetworkStateFinalizer,
+        persistedObservedSHA256: String?,
+        trigger: NetworkStateRecoveryTrigger,
+        observation: NetworkStateRecoveryObservation
+    ) throws -> NetworkStateRecoveryDecision {
+        let observationState = try normalizedObservation(
+            observation,
+            persistedObservedSHA256: persistedObservedSHA256
+        )
+        let action: NetworkStateRecoveryAction
+        switch observationState {
+        case .conflictingOrIndeterminate:
+            action = .quarantine
+        case .absent:
+            switch lifecycle {
+            case .creating, .available:
+                action = .retryMutation
+            case .deleting:
+                action = .finalizeDeletion
+            case .faulted:
+                switch finalizer {
+                case .active:
+                    action = .retryMutation
+                case .releasing:
+                    action = .finalizeDeletion
+                case .quarantined:
+                    action = .quarantine
+                case .pending, .released:
+                    action = .quarantine
+                }
+            case .deleted:
+                action = .purgeTerminalRecord
+            }
+        case .exactOwned:
+            switch lifecycle {
+            case .creating:
+                action = .verifyAndAdvance
+            case .available:
+                action = .stable
+            case .deleting:
+                action = .resumeDeletion
+            case .faulted:
+                switch finalizer {
+                case .active:
+                    action = .verifyAndAdvance
+                case .releasing:
+                    action = .resumeDeletion
+                case .quarantined:
+                    action = .quarantine
+                case .pending, .released:
+                    action = .quarantine
+                }
+            case .deleted:
+                action = .quarantine
+            }
+        }
+        return NetworkStateRecoveryDecision(
+            trigger: trigger,
+            action: action
+        )
+    }
+
+    private static func recoveryDecision(
+        lifecycle: NetworkStateAttachmentLifecycle,
+        finalizer: NetworkStateFinalizer,
+        persistedObservedSHA256: String?,
+        trigger: NetworkStateRecoveryTrigger,
+        observation: NetworkStateRecoveryObservation
+    ) throws -> NetworkStateRecoveryDecision {
+        let observationState = try normalizedObservation(
+            observation,
+            persistedObservedSHA256: persistedObservedSHA256
+        )
+        let action: NetworkStateRecoveryAction
+        switch observationState {
+        case .conflictingOrIndeterminate:
+            action = .quarantine
+        case .absent:
+            switch lifecycle {
+            case .attaching, .attached:
+                action = .retryMutation
+            case .detaching:
+                action = .finalizeDeletion
+            case .faulted:
+                switch finalizer {
+                case .active:
+                    action = .retryMutation
+                case .releasing:
+                    action = .finalizeDeletion
+                case .quarantined:
+                    action = .quarantine
+                case .pending, .released:
+                    action = .quarantine
+                }
+            case .detached:
+                action = .purgeTerminalRecord
+            }
+        case .exactOwned:
+            switch lifecycle {
+            case .attaching:
+                action = .verifyAndAdvance
+            case .attached:
+                action = .stable
+            case .detaching:
+                action = .resumeDeletion
+            case .faulted:
+                switch finalizer {
+                case .active:
+                    action = .verifyAndAdvance
+                case .releasing:
+                    action = .resumeDeletion
+                case .quarantined:
+                    action = .quarantine
+                case .pending, .released:
+                    action = .quarantine
+                }
+            case .detached:
+                action = .quarantine
+            }
+        }
+        return NetworkStateRecoveryDecision(
+            trigger: trigger,
+            action: action
+        )
+    }
+
+    private enum NormalizedRecoveryObservation {
+        case absent
+        case exactOwned
+        case conflictingOrIndeterminate
+    }
+
+    private static func normalizedObservation(
+        _ observation: NetworkStateRecoveryObservation,
+        persistedObservedSHA256: String?
+    ) throws -> NormalizedRecoveryObservation {
+        switch observation {
+        case .absent:
+            return .absent
+        case .indeterminate:
+            return .conflictingOrIndeterminate
+        case .conflictingOwner(let observedSHA256):
+            try observedSHA256.map(validateSHA256)
+            return .conflictingOrIndeterminate
+        case .exactOwned(let observedSHA256):
+            try validateSHA256(observedSHA256)
+            guard persistedObservedSHA256 == nil ||
+                    persistedObservedSHA256 == observedSHA256 else {
+                return .conflictingOrIndeterminate
+            }
+            return .exactOwned
+        }
+    }
+
     private static func validateNetworkReplacement(
         existing: NetworkStateResourceRecord,
         incoming: NetworkStateResourceRecord,
@@ -780,6 +1326,28 @@ public struct NetworkStateRepository: Sendable {
             throw StateStoreError.invalidRecord(
                 "Network replacement lost immutable identity, exact generation, fence, or lifecycle order."
             )
+        }
+    }
+
+    private static func networkAuthorizesAttachment(
+        network: NetworkStateResourceRecord,
+        incoming: NetworkStateAttachmentRecord,
+        isExisting: Bool
+    ) -> Bool {
+        guard isExisting else {
+            return network.lifecycleState == .available &&
+                network.finalizerState == .active
+        }
+        switch incoming.lifecycleState {
+        case .attaching, .attached:
+            return network.lifecycleState == .available &&
+                network.finalizerState == .active
+        case .detaching, .detached, .faulted:
+            return [
+                .available,
+                .deleting,
+                .faulted
+            ].contains(network.lifecycleState)
         }
     }
 
@@ -843,11 +1411,13 @@ public struct NetworkStateRepository: Sendable {
         id: String,
         projectUUID: String,
         fencingToken: String,
+        expectedCapabilitySHA256: String? = nil,
         on connection: SQLiteConnection
     ) throws {
         let rows = try connection.query(
             """
-            SELECT operation.fencing_token, project.resource_uuid
+            SELECT operation.fencing_token, project.resource_uuid,
+                   operation.intent_json_redacted
             FROM operation_groups AS operation
             JOIN projects AS project
               ON project.id = operation.project_id
@@ -862,6 +1432,19 @@ public struct NetworkStateRepository: Sendable {
               rows[0][1] == projectUUID else {
             throw StateStoreError.invalidRecord(
                 "Network state requires an active project operation group with the exact fencing token."
+            )
+        }
+        guard let expectedCapabilitySHA256 else { return }
+        guard let intentJSON = rows[0][2],
+              intentJSON.utf8.count <= 1_048_576,
+              let data = intentJSON.data(using: .utf8),
+              let object = try JSONSerialization.jsonObject(
+                with: data
+              ) as? [String: Any],
+              object["capabilitySHA256"] as? String ==
+                expectedCapabilitySHA256 else {
+            throw StateStoreError.invalidRecord(
+                "Network state requires the exact capability digest persisted in operation intent."
             )
         }
     }

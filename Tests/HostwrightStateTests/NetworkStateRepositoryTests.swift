@@ -318,6 +318,470 @@ final class NetworkStateRepositoryTests: XCTestCase {
         }
     }
 
+    func testDurableIntentRequiresFreshCapabilityAndExactFence()
+        throws
+    {
+        try withStore { store in
+            try seedProject(store)
+            let create = try operationGroup(store, suffix: "31")
+            let creating = network(
+                generation: 1,
+                fence: create.fence,
+                operationGroupID: create.id
+            )
+
+            XCTAssertThrowsError(
+                try store.networks.saveNetwork(
+                    creating,
+                    authority: authority(
+                        create,
+                        plannedCapability: digest("7"),
+                        currentCapability: digest("8")
+                    )
+                )
+            )
+            XCTAssertNil(
+                try store.networks.loadNetwork(id: networkID)
+            )
+            XCTAssertThrowsError(
+                try store.networks.saveNetwork(
+                    creating,
+                    authority: authority(
+                        create,
+                        plannedCapability: digest("8"),
+                        currentCapability: digest("8")
+                    )
+                )
+            )
+            XCTAssertNil(
+                try store.networks.loadNetwork(id: networkID)
+            )
+
+            _ = try store.networks.saveNetwork(
+                creating,
+                authority: authority(create)
+            )
+            XCTAssertEqual(
+                try store.networks.loadNetwork(id: networkID),
+                creating
+            )
+            try finish(store, create.id)
+
+            let observe = try operationGroup(store, suffix: "32")
+            let available = network(
+                generation: 2,
+                fence: observe.fence,
+                lifecycle: .available,
+                finalizer: .active,
+                observedIPv4: ["10.44.0.2"],
+                observedSHA256: digest("b"),
+                operationGroupID: observe.id
+            )
+            XCTAssertThrowsError(
+                try store.networks.saveNetwork(
+                    available,
+                    replacing: NetworkStateExpectedVersion(
+                        generation: creating.generation,
+                        fencingToken:
+                            "ffffffff-ffff-4fff-8fff-ffffffffffff"
+                    ),
+                    authority: authority(observe)
+                )
+            )
+            XCTAssertEqual(
+                try store.networks.loadNetwork(id: networkID),
+                creating
+            )
+        }
+    }
+
+    func testRecoveryClassifiesCreatingAvailableDeletingAndFaulted()
+        throws
+    {
+        try withStore { store in
+            try seedProject(store)
+            let create = try operationGroup(store, suffix: "41")
+            let creating = network(
+                generation: 1,
+                fence: create.fence,
+                operationGroupID: create.id
+            )
+            _ = try store.networks.saveNetwork(
+                creating,
+                authority: authority(create)
+            )
+            try finish(store, create.id)
+
+            let verify = try operationGroup(store, suffix: "42")
+            XCTAssertEqual(
+                try store.networks.evaluateNetworkRecovery(
+                    id: networkID,
+                    expected: version(creating),
+                    authority: authority(verify),
+                    trigger: .timedOut,
+                    observation: .absent
+                ).action,
+                .retryMutation
+            )
+            XCTAssertEqual(
+                try store.networks.evaluateNetworkRecovery(
+                    id: networkID,
+                    expected: version(creating),
+                    authority: authority(verify),
+                    trigger: .cancelled,
+                    observation: .exactOwned(
+                        observedSHA256: digest("b")
+                    )
+                ).action,
+                .verifyAndAdvance
+            )
+            XCTAssertEqual(
+                try store.networks.evaluateNetworkRecovery(
+                    id: networkID,
+                    expected: version(creating),
+                    authority: authority(verify),
+                    trigger: .partialEffect,
+                    observation: .indeterminate
+                ).action,
+                .quarantine
+            )
+
+            let available = network(
+                generation: 2,
+                fence: verify.fence,
+                lifecycle: .available,
+                finalizer: .active,
+                observedIPv4: ["10.44.0.2"],
+                observedSHA256: digest("b"),
+                operationGroupID: verify.id
+            )
+            _ = try store.networks.saveNetwork(
+                available,
+                replacing: version(creating),
+                authority: authority(verify)
+            )
+            try finish(store, verify.id)
+
+            let delete = try operationGroup(store, suffix: "43")
+            XCTAssertEqual(
+                try store.networks.evaluateNetworkRecovery(
+                    id: networkID,
+                    expected: version(available),
+                    authority: authority(delete),
+                    trigger: .processTerminated,
+                    observation: .exactOwned(
+                        observedSHA256: digest("b")
+                    )
+                ).action,
+                .stable
+            )
+            XCTAssertEqual(
+                try store.networks.evaluateNetworkRecovery(
+                    id: networkID,
+                    expected: version(available),
+                    authority: authority(delete),
+                    trigger: .timedOut,
+                    observation: .absent
+                ).action,
+                .retryMutation
+            )
+
+            let deleting = network(
+                generation: 3,
+                fence: delete.fence,
+                lifecycle: .deleting,
+                finalizer: .releasing,
+                observedIPv4: ["10.44.0.2"],
+                observedSHA256: digest("b"),
+                operationGroupID: delete.id
+            )
+            _ = try store.networks.saveNetwork(
+                deleting,
+                replacing: version(available),
+                authority: authority(delete)
+            )
+            XCTAssertEqual(
+                try store.networks.evaluateNetworkRecovery(
+                    id: networkID,
+                    expected: version(deleting),
+                    authority: authority(delete),
+                    trigger: .cancelled,
+                    observation: .exactOwned(
+                        observedSHA256: digest("b")
+                    )
+                ).action,
+                .resumeDeletion
+            )
+            XCTAssertEqual(
+                try store.networks.evaluateNetworkRecovery(
+                    id: networkID,
+                    expected: version(deleting),
+                    authority: authority(delete),
+                    trigger: .partialEffect,
+                    observation: .absent
+                ).action,
+                .finalizeDeletion
+            )
+
+            let faulted = network(
+                generation: 4,
+                fence: delete.fence,
+                lifecycle: .faulted,
+                finalizer: .releasing,
+                observedIPv4: ["10.44.0.2"],
+                observedSHA256: digest("b"),
+                operationGroupID: delete.id
+            )
+            _ = try store.networks.saveNetwork(
+                faulted,
+                replacing: version(deleting),
+                authority: authority(delete)
+            )
+            XCTAssertEqual(
+                try store.networks.evaluateNetworkRecovery(
+                    id: networkID,
+                    expected: version(faulted),
+                    authority: authority(delete),
+                    trigger: .processTerminated,
+                    observation: .exactOwned(
+                        observedSHA256: digest("b")
+                    )
+                ).action,
+                .resumeDeletion
+            )
+            XCTAssertEqual(
+                try store.networks.evaluateNetworkRecovery(
+                    id: networkID,
+                    expected: version(faulted),
+                    authority: authority(delete),
+                    trigger: .processTerminated,
+                    observation: .absent
+                ).action,
+                .finalizeDeletion
+            )
+        }
+    }
+
+    func testAmbiguousNetworkAndAttachmentOrphansAreQuarantined()
+        throws
+    {
+        try withStore { store in
+            try seedProject(store)
+            let create = try operationGroup(store, suffix: "51")
+            let creating = network(
+                generation: 1,
+                fence: create.fence,
+                operationGroupID: create.id
+            )
+            _ = try store.networks.saveNetwork(
+                creating,
+                authority: authority(create)
+            )
+            try finish(store, create.id)
+
+            let observe = try operationGroup(store, suffix: "52")
+            let available = network(
+                generation: 2,
+                fence: observe.fence,
+                lifecycle: .available,
+                finalizer: .active,
+                observedIPv4: ["10.44.0.2"],
+                observedSHA256: digest("b"),
+                operationGroupID: observe.id
+            )
+            _ = try store.networks.saveNetwork(
+                available,
+                replacing: version(creating),
+                authority: authority(observe)
+            )
+            try finish(store, observe.id)
+
+            let attach = try operationGroup(store, suffix: "53")
+            let attaching = attachment(
+                generation: 1,
+                fence: attach.fence,
+                operationGroupID: attach.id
+            )
+            _ = try store.networks.saveAttachment(
+                attaching,
+                authority: authority(attach)
+            )
+            try finish(store, attach.id)
+
+            let networkRecovery = try operationGroup(
+                store,
+                suffix: "54"
+            )
+            XCTAssertEqual(
+                try store.networks.evaluateNetworkRecovery(
+                    id: networkID,
+                    expected: version(available),
+                    authority: authority(networkRecovery),
+                    trigger: .timedOut,
+                    observation: .indeterminate
+                ).action,
+                .quarantine
+            )
+            XCTAssertThrowsError(
+                try store.networks.quarantineNetwork(
+                    id: networkID,
+                    expected: version(available),
+                    authority: authority(
+                        networkRecovery,
+                        providerGeneration: 2
+                    ),
+                    observedSHA256: digest("f"),
+                    updatedAt: "2026-07-26T12:10:00Z"
+                )
+            ) { error in
+                guard case .invalidRecord(let message) =
+                        error as? StateStoreError else {
+                    return XCTFail(
+                        "Expected stale authority refusal, got \(error)."
+                    )
+                }
+                XCTAssertTrue(message.contains("stale provider"))
+            }
+            let quarantinedNetwork =
+                try store.networks.quarantineNetwork(
+                    id: networkID,
+                    expected: version(available),
+                    authority: authority(networkRecovery),
+                    observedSHA256: digest("f"),
+                    updatedAt: "2026-07-26T12:10:00Z"
+                )
+            XCTAssertEqual(
+                quarantinedNetwork.lifecycleState,
+                .faulted
+            )
+            XCTAssertEqual(
+                quarantinedNetwork.finalizerState,
+                .quarantined
+            )
+            try finish(store, networkRecovery.id)
+
+            let attachmentRecovery = try operationGroup(
+                store,
+                suffix: "55"
+            )
+            XCTAssertEqual(
+                try store.networks.evaluateAttachmentRecovery(
+                    id: attachmentID,
+                    expected: version(attaching),
+                    authority: authority(attachmentRecovery),
+                    trigger: .partialEffect,
+                    observation: .conflictingOwner(
+                        observedSHA256: digest("e")
+                    )
+                ).action,
+                .quarantine
+            )
+            let quarantinedAttachment =
+                try store.networks.quarantineAttachment(
+                    id: attachmentID,
+                    expected: version(attaching),
+                    authority: authority(attachmentRecovery),
+                    observedSHA256: digest("e"),
+                    updatedAt: "2026-07-26T12:11:00Z"
+                )
+            XCTAssertEqual(
+                quarantinedAttachment.lifecycleState,
+                .faulted
+            )
+            XCTAssertEqual(
+                quarantinedAttachment.finalizerState,
+                .quarantined
+            )
+        }
+    }
+
+    func testReverseTeardownOrdersAttachmentsBeforeNetworks()
+        throws
+    {
+        try withStore { store in
+            try seedProject(store)
+            let backend = try persistAvailableNetwork(
+                store,
+                name: "backend",
+                createSuffix: "61",
+                availableSuffix: "62"
+            )
+            let frontend = try persistAvailableNetwork(
+                store,
+                name: "frontend",
+                createSuffix: "63",
+                availableSuffix: "64"
+            )
+
+            let firstAttachmentID =
+                "30000000-0000-4000-8000-000000000061"
+            let secondAttachmentID =
+                "30000000-0000-4000-8000-000000000062"
+            let firstAttach = try operationGroup(
+                store,
+                suffix: "65"
+            )
+            _ = try store.networks.saveAttachment(
+                attachment(
+                    id: firstAttachmentID,
+                    networkUUID: backend.id,
+                    resourceUUID:
+                        "40000000-0000-4000-8000-000000000061",
+                    generation: 1,
+                    fence: firstAttach.fence,
+                    operationGroupID: firstAttach.id
+                ),
+                authority: authority(firstAttach)
+            )
+            try finish(store, firstAttach.id)
+
+            let secondAttach = try operationGroup(
+                store,
+                suffix: "66"
+            )
+            _ = try store.networks.saveAttachment(
+                attachment(
+                    id: secondAttachmentID,
+                    networkUUID: frontend.id,
+                    resourceUUID:
+                        "40000000-0000-4000-8000-000000000062",
+                    generation: 1,
+                    fence: secondAttach.fence,
+                    operationGroupID: secondAttach.id
+                ),
+                authority: authority(secondAttach)
+            )
+            try finish(store, secondAttach.id)
+
+            let order = try store.networks.reverseTeardownOrder(
+                projectUUID: projectUUID
+            )
+            XCTAssertEqual(
+                order.map(\.kind),
+                [
+                    .attachment,
+                    .attachment,
+                    .network,
+                    .network
+                ]
+            )
+            XCTAssertEqual(
+                Set(order.prefix(2).map(\.id)),
+                Set([firstAttachmentID, secondAttachmentID])
+            )
+            XCTAssertEqual(
+                order.suffix(2).map(\.id),
+                [frontend.id, backend.id]
+            )
+            XCTAssertEqual(
+                try store.networks.reverseTeardownOrder(
+                    projectUUID: projectUUID
+                ),
+                order
+            )
+        }
+    }
+
     func testFutureSchemaRefusesNetworkReads()
         throws
     {
@@ -395,6 +859,8 @@ final class NetworkStateRepositoryTests: XCTestCase {
     }
 
     private func attachment(
+        id: String? = nil,
+        networkUUID: String? = nil,
         resourceUUID: String? = nil,
         generation: Int64,
         fence: String,
@@ -404,8 +870,8 @@ final class NetworkStateRepositoryTests: XCTestCase {
         operationGroupID: String
     ) -> NetworkStateAttachmentRecord {
         NetworkStateAttachmentRecord(
-            id: attachmentID,
-            networkUUID: networkID,
+            id: id ?? attachmentID,
+            networkUUID: networkUUID ?? networkID,
             projectUUID: projectUUID,
             resourceUUID: resourceUUID ?? workloadUUID,
             generation: generation,
@@ -421,6 +887,71 @@ final class NetworkStateRepositoryTests: XCTestCase {
             updatedAt:
                 "2026-07-26T12:\(String(format: "%02d", generation + 2)):00Z"
         )
+    }
+
+    private func authority(
+        _ group: (id: String, fence: String),
+        providerGeneration: Int64 = 1,
+        plannedCapability: String? = nil,
+        currentCapability: String? = nil
+    ) -> NetworkStateMutationAuthority {
+        NetworkStateMutationAuthority(
+            providerID: "apple-container-cli",
+            providerGeneration: providerGeneration,
+            operationGroupID: group.id,
+            fencingToken: group.fence,
+            plannedCapabilitySHA256:
+                plannedCapability ?? digest("7"),
+            currentCapabilitySHA256:
+                currentCapability ?? digest("7")
+        )
+    }
+
+    private func persistAvailableNetwork(
+        _ store: SQLiteStateStore,
+        name: String,
+        createSuffix: String,
+        availableSuffix: String
+    ) throws -> NetworkStateResourceRecord {
+        let create = try operationGroup(
+            store,
+            suffix: createSuffix
+        )
+        let creating = network(
+            id: networkResourceUUID(name: name),
+            name: name,
+            generation: 1,
+            fence: create.fence,
+            operationGroupID: create.id
+        )
+        _ = try store.networks.saveNetwork(
+            creating,
+            authority: authority(create)
+        )
+        try finish(store, create.id)
+
+        let observe = try operationGroup(
+            store,
+            suffix: availableSuffix
+        )
+        let available = network(
+            id: creating.id,
+            name: name,
+            generation: 2,
+            fence: observe.fence,
+            lifecycle: .available,
+            finalizer: .active,
+            observedIPv4: ["10.44.0.2"],
+            observedSHA256: digest("b"),
+            operationGroupID: observe.id
+        )
+        _ = try store.networks.saveNetwork(
+            available,
+            replacing: version(creating),
+            authority: authority(observe)
+        )
+        try finish(store, observe.id)
+        return available
     }
 
     private func version(
@@ -502,7 +1033,9 @@ final class NetworkStateRepositoryTests: XCTestCase {
             createdAt: "2026-07-26T12:00:00Z",
             updatedAt: "2026-07-26T12:00:00Z",
             metadataJSONRedacted: "{}",
-            fencingToken: fence
+            fencingToken: fence,
+            intentJSONRedacted:
+                "{\"capabilitySHA256\":\"\(digest("7"))\"}"
         )
         XCTAssertEqual(
             try store.operationGroups.acquire(group).acquired,

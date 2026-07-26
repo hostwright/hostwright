@@ -310,6 +310,22 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
             store: store,
             manifest: validated.manifest
         )
+        let networkReconciliation:
+            NetworkLifecycleReconciliationResult?
+        if lifecycleRequiresProjectNetworkProvisioning(
+            compiled.plan.command
+        ) {
+            networkReconciliation = try hostwrightWaitForAsync {
+                try await NetworkLifecycleCoordinator.reconcile(
+                    preparation: preparation,
+                    planSHA256: compiled.plan.planSHA256,
+                    store: store,
+                    environment: environment
+                )
+            }
+        } else {
+            networkReconciliation = nil
+        }
         let storageReconciliation:
             StorageLifecycleReconciliationResult?
         if lifecycleRequiresNamedVolumeProvisioning(
@@ -478,6 +494,19 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
                         )
                 }
             }
+            if compiled.plan.command == .remove {
+                try hostwrightWaitForAsync {
+                    try await NetworkLifecycleCoordinator
+                        .removeNetworks(
+                            networkUUIDs: nil,
+                            preparation: preparation,
+                            planSHA256:
+                                compiled.plan.planSHA256,
+                            store: store,
+                            environment: environment
+                        )
+                }
+            }
         } else if result.status == .compensated,
                   manifestDeclaresNamedVolumes,
                   let storageReconciliation,
@@ -510,7 +539,37 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
                     )
             }
         }
+        if result.status == .compensated,
+           let networkReconciliation,
+           !networkReconciliation
+            .newlyCreatedNetworkUUIDs.isEmpty {
+            try hostwrightWaitForAsync {
+                try await NetworkLifecycleCoordinator
+                    .removeNetworks(
+                        networkUUIDs: Set(
+                            networkReconciliation
+                                .newlyCreatedNetworkUUIDs
+                        ),
+                        preparation: preparation,
+                        planSHA256:
+                            compiled.plan.planSHA256,
+                        store: store,
+                        environment: environment
+                    )
+            }
+        }
         return result
+    }
+}
+
+private func lifecycleRequiresProjectNetworkProvisioning(
+    _ command: LifecycleCommand
+) -> Bool {
+    switch command {
+    case .up, .run, .start, .restart, .update, .apply:
+        true
+    case .down, .stop, .remove, .resume, .rollback:
+        false
     }
 }
 
@@ -2874,6 +2933,11 @@ struct LifecycleLiveEffects: LifecycleSagaEffects {
                 manifestHash: context.plan.manifestSHA256,
                 context: mutationContext(node: node, context: context)
             )
+            try await persistNetworkAttachmentIntent(
+                action: action,
+                node: node,
+                context: context
+            )
             let imageContentLease =
                 try await acquireImageContentLeaseIfNeeded(
                     action: action,
@@ -3277,6 +3341,11 @@ struct LifecycleLiveEffects: LifecycleSagaEffects {
                 observedService: matches.first,
                 desiredService: await state.desiredService(for: node.key)
             ) {
+                try await reconcileNetworkAttachments(
+                    node: node,
+                    context: context,
+                    inventory: inventory
+                )
                 try await persistVerifiedProjection(
                     node: node,
                     context: context,
@@ -3311,6 +3380,229 @@ struct LifecycleLiveEffects: LifecycleSagaEffects {
                 )
             )
         }
+    }
+
+    private func persistNetworkAttachmentIntent(
+        action: PlannedRuntimeAction,
+        node: LifecyclePlanNode,
+        context: LifecycleSagaContext
+    ) async throws {
+        switch action.kind {
+        case .create:
+            guard let desired = action.desiredService,
+                  !desired.networks.isEmpty else {
+                return
+            }
+            let authority = try await networkAttachmentAuthority(
+                context: context
+            )
+            let repository = store.networks
+            for attachment in desired.networks.sorted(
+                by: {
+                    if $0.networkRuntimeIdentifier !=
+                        $1.networkRuntimeIdentifier {
+                        return $0.networkRuntimeIdentifier <
+                            $1.networkRuntimeIdentifier
+                    }
+                    return $0.networkResourceUUID <
+                        $1.networkResourceUUID
+                }
+            ) {
+                guard let network = try repository.loadNetwork(
+                    id: attachment.networkResourceUUID
+                ),
+                network.runtimeName ==
+                    attachment.networkRuntimeIdentifier else {
+                    throw NetworkAttachmentLifecycleError
+                        .ownershipConflict(
+                            "Create-time attachment requires one exact available network record."
+                        )
+                }
+                let descriptor = try NetworkAttachmentCreateDescriptor(
+                    network: network,
+                    containerRuntimeIdentifier:
+                        action.resourceIdentifier,
+                    containerContext:
+                        mutationContext(
+                            node: node,
+                            context: context
+                        ),
+                    aliases: attachment.aliases
+                )
+                _ = try NetworkAttachmentLifecycle
+                    .persistCreateIntent(
+                        descriptor,
+                        authority: authority,
+                        timestamp: hostwrightTimestamp(),
+                        repository: repository
+                    )
+            }
+        case .remove:
+            let authority = try await networkAttachmentAuthority(
+                context: context
+            )
+            let repository = store.networks
+            let records = try NetworkAttachmentLifecycle
+                .reverseReleaseOrder(
+                    projectUUID:
+                        context.plan.projectResourceUUID,
+                    providerID: context.plan.providerID,
+                    providerGeneration:
+                        context.plan.providerGeneration,
+                    repository: repository
+                )
+                .filter { $0.resourceUUID == node.resourceUUID }
+            for record in records {
+                _ = try NetworkAttachmentLifecycle
+                    .persistReleaseIntent(
+                        record: record,
+                        authority: authority,
+                        timestamp: hostwrightTimestamp(),
+                        repository: repository
+                    )
+            }
+        case .start, .stop, .restart, .update, .noOp:
+            return
+        }
+    }
+
+    private func reconcileNetworkAttachments(
+        node: LifecyclePlanNode,
+        context: LifecycleSagaContext,
+        inventory: RuntimeInventory
+    ) async throws {
+        let repository = store.networks
+        let authority = try await networkAttachmentAuthority(
+            context: context
+        )
+        if node.action == .create,
+           let desired = await state.desiredService(for: node.key) {
+            let containerIdentifier =
+                node.resourceIdentifier ??
+                desired.identity.managedResourceIdentifier
+            for attachment in desired.networks.sorted(
+                by: {
+                    if $0.networkRuntimeIdentifier !=
+                        $1.networkRuntimeIdentifier {
+                        return $0.networkRuntimeIdentifier <
+                            $1.networkRuntimeIdentifier
+                    }
+                    return $0.networkResourceUUID <
+                        $1.networkResourceUUID
+                }
+            ) {
+                guard let network = try repository.loadNetwork(
+                    id: attachment.networkResourceUUID
+                ) else {
+                    throw NetworkAttachmentLifecycleError
+                        .ownershipConflict(
+                            "Attachment verification lost its exact network record."
+                        )
+                }
+                let descriptor = try NetworkAttachmentCreateDescriptor(
+                    network: network,
+                    containerRuntimeIdentifier:
+                        containerIdentifier,
+                    containerContext:
+                        mutationContext(
+                            node: node,
+                            context: context
+                        ),
+                    aliases: attachment.aliases
+                )
+                guard let record = try repository.loadAttachment(
+                    id: descriptor.attachmentUUID
+                ) else {
+                    throw NetworkAttachmentLifecycleError
+                        .ownershipConflict(
+                            "Attachment verification lost its durable pre-mutation intent."
+                        )
+                }
+                switch try NetworkAttachmentLifecycle
+                    .resolveCreateObservation(
+                        record: record,
+                        descriptor: descriptor,
+                        inventory: inventory,
+                        trigger: .postMutation,
+                        authority: authority,
+                        timestamp: hostwrightTimestamp(),
+                        repository: repository
+                    ) {
+                case .attached:
+                    break
+                case .absent:
+                    throw NetworkAttachmentLifecycleError
+                        .observationIndeterminate(
+                            "Structured observation did not prove the requested create-time network attachment."
+                        )
+                case .quarantined:
+                    throw NetworkAttachmentLifecycleError
+                        .ownershipConflict(
+                            "Structured observation found ambiguous network attachment ownership."
+                        )
+                }
+            }
+        }
+        if node.action == .delete || node.action == .retire {
+            let containerIdentifier: String
+            if let resourceIdentifier =
+                node.resourceIdentifier {
+                containerIdentifier = resourceIdentifier
+            } else {
+                containerIdentifier = await state.identity(
+                    for: node,
+                    projectName: context.plan.projectName
+                ).managedResourceIdentifier
+            }
+            let records = try NetworkAttachmentLifecycle
+                .reverseReleaseOrder(
+                    projectUUID:
+                        context.plan.projectResourceUUID,
+                    providerID: context.plan.providerID,
+                    providerGeneration:
+                        context.plan.providerGeneration,
+                    repository: repository
+                )
+                .filter { $0.resourceUUID == node.resourceUUID }
+            for record in records {
+                try NetworkAttachmentLifecycle
+                    .releaseAfterVerifiedAbsence(
+                        record: record,
+                        containerRuntimeIdentifier:
+                            containerIdentifier,
+                        inventory: inventory,
+                        authority: authority,
+                        timestamp: hostwrightTimestamp(),
+                        repository: repository
+                    )
+            }
+        }
+    }
+
+    private func networkAttachmentAuthority(
+        context: LifecycleSagaContext
+    ) async throws -> NetworkStateMutationAuthority {
+        let capability = try await adapter.capabilitySnapshot()
+        guard capability.descriptor.providerID ==
+                context.plan.providerID,
+              capability.canonicalSHA256 ==
+                context.plan.capabilitySHA256 else {
+            throw NetworkAttachmentLifecycleError
+                .ownershipConflict(
+                    "Network attachment mutation refused a stale capability snapshot."
+                )
+        }
+        return NetworkStateMutationAuthority(
+            providerID: context.plan.providerID.rawValue,
+            providerGeneration:
+                Int64(context.plan.providerGeneration),
+            operationGroupID: context.groupID,
+            fencingToken: context.fencingToken,
+            plannedCapabilitySHA256:
+                context.plan.capabilitySHA256,
+            currentCapabilitySHA256:
+                capability.canonicalSHA256
+        )
     }
 
     private func recoveredSpecialEvidence(

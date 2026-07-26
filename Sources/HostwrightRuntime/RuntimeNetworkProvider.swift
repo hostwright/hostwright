@@ -341,9 +341,14 @@ public struct RuntimeNetworkInspectRequest: Codable, Equatable, Sendable {
 
 public struct RuntimeNetworkDeleteRequest: Codable, Equatable, Sendable {
     public let identity: RuntimeNetworkIdentity
+    public let expectedOwnership: RuntimeInventoryOwnershipEvidence?
 
-    public init(identity: RuntimeNetworkIdentity) {
+    public init(
+        identity: RuntimeNetworkIdentity,
+        expectedOwnership: RuntimeInventoryOwnershipEvidence? = nil
+    ) {
         self.identity = identity
+        self.expectedOwnership = expectedOwnership
     }
 }
 
@@ -551,6 +556,29 @@ public struct RuntimeNetworkOperationResult: Codable, Equatable, Sendable {
         self.verified = verified
         self.observedNetwork = observedNetwork
     }
+}
+
+public protocol RuntimeNetworkProvider: Sendable {
+    func networkCapabilities() async throws -> RuntimeNetworkProviderCapabilities
+    func networkInspect(
+        _ request: RuntimeNetworkInspectRequest
+    ) async throws -> RuntimeNetworkOperationResult
+    func networkCreate(
+        _ request: RuntimeNetworkCreateRequest,
+        context: RuntimeMutationContext
+    ) async throws -> RuntimeNetworkOperationResult
+    func networkAttach(
+        _ request: RuntimeNetworkAttachmentRequest,
+        context: RuntimeMutationContext
+    ) async throws -> RuntimeNetworkOperationResult
+    func networkDetach(
+        _ request: RuntimeNetworkAttachmentRequest,
+        context: RuntimeMutationContext
+    ) async throws -> RuntimeNetworkOperationResult
+    func networkDelete(
+        _ request: RuntimeNetworkDeleteRequest,
+        context: RuntimeMutationContext
+    ) async throws -> RuntimeNetworkOperationResult
 }
 
 public enum RuntimeNetworkOwnership {

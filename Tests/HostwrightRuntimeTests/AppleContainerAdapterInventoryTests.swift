@@ -248,12 +248,15 @@ private actor InventoryRuntimeProcessRunner: RuntimeProcessRunning {
         let statsFixture = try Self.fixture("apple-container-\(version)-stats.json")
         statsOutput = statsFixture
         let mergedContainers = try Self.containers(from: containersOutput)
-        statsByContainerID = Dictionary(
-            uniqueKeysWithValues: mergedContainers.compactMap { container in
-                guard let id = container["id"] as? String else { return nil }
-                return (id, statsFixture)
-            }
-        )
+        var statsByContainerID: [String: String] = [:]
+        for container in mergedContainers {
+            guard let id = container["id"] as? String else { continue }
+            statsByContainerID[id] = try Self.statsPayload(
+                from: statsFixture,
+                containerID: id
+            )
+        }
+        self.statsByContainerID = statsByContainerID
         self.cancelAtCall = cancelAtCall
     }
 
@@ -330,6 +333,26 @@ private actor InventoryRuntimeProcessRunner: RuntimeProcessRunning {
             )
         }
         return containers
+    }
+
+    private static func statsPayload(
+        from text: String,
+        containerID: String
+    ) throws -> String {
+        let data = Data(text.utf8)
+        let object = try JSONSerialization.jsonObject(with: data)
+        guard var records = object as? [[String: Any]],
+              records.count == 1 else {
+            throw RuntimeAdapterError.outputParseFailed(
+                "Inventory stats fixture did not contain one record."
+            )
+        }
+        records[0]["id"] = containerID
+        let encoded = try JSONSerialization.data(
+            withJSONObject: records,
+            options: [.sortedKeys, .withoutEscapingSlashes]
+        )
+        return String(decoding: encoded, as: UTF8.self)
     }
 }
 

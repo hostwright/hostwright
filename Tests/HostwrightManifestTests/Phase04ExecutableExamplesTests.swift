@@ -125,7 +125,10 @@ final class Phase04ExecutableExamplesTests: XCTestCase {
     }
 
     func testExpectedFailureExamplesUseOnlyRepresentablePreMutationBoundaries() throws {
-        let named = try manifest("examples/expected-failures/named-volume.yaml")
+        let namedSource = try read(
+            "examples/expected-failures/named-volume.yaml"
+        )
+        let named = try ManifestParser.parse(namedSource)
         let secret = try manifest("examples/expected-failures/unavailable-secret.yaml")
         let networkSource = try read(
             "examples/expected-failures/unsupported-network.yaml"
@@ -135,6 +138,26 @@ final class Phase04ExecutableExamplesTests: XCTestCase {
 
         XCTAssertEqual(namedApp.image, image)
         XCTAssertEqual(namedApp.volumes, ["phase04-data:/data"])
+        XCTAssertThrowsError(
+            try ManifestValidator.validated(namedSource)
+        ) { error in
+            guard let parseError = error as? ManifestParseError,
+                  let issue = parseError.issues.first else {
+                return XCTFail(
+                    "Expected one structured manifest issue: \(error)"
+                )
+            }
+            XCTAssertEqual(
+                issue.code.rawValue,
+                "HW-MANIFEST-002"
+            )
+            XCTAssertTrue(
+                issue.message.contains(
+                    "must reference a declared top-level volume"
+                ),
+                issue.message
+            )
+        }
         XCTAssertEqual(
             secretApp.secretEnv["API_TOKEN"]?.rawValue,
             "keychain://hostwright.phase04/api-token"

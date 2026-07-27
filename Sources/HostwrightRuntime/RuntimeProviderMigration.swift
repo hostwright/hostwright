@@ -1608,8 +1608,19 @@ private extension RuntimeProviderMigrationEngine {
             canonical.append(label.value)
         }
         let ports = service.ports.sorted {
-            ($0.hostPort ?? -1, $0.containerPort, $0.protocolName.rawValue, $0.bindAddress ?? "") <
-                ($1.hostPort ?? -1, $1.containerPort, $1.protocolName.rawValue, $1.bindAddress ?? "")
+            (
+                $0.hostPort ?? -1,
+                $0.containerPort,
+                $0.protocolName.rawValue,
+                $0.bindAddress ?? "",
+                $0.allocation.rawValue
+            ) < (
+                $1.hostPort ?? -1,
+                $1.containerPort,
+                $1.protocolName.rawValue,
+                $1.bindAddress ?? "",
+                $1.allocation.rawValue
+            )
         }
         canonical.append(ports.count)
         for port in ports {
@@ -1617,6 +1628,7 @@ private extension RuntimeProviderMigrationEngine {
             canonical.append(port.containerPort)
             canonical.append(port.protocolName.rawValue)
             canonical.append(port.bindAddress ?? "")
+            canonical.append(port.allocation.rawValue)
         }
         let mounts = service.mounts.sorted { ($0.target, $0.source) < ($1.target, $1.source) }
         canonical.append(mounts.count)

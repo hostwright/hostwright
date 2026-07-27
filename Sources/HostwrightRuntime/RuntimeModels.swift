@@ -138,17 +138,30 @@ public enum RuntimePortProtocol: String, Equatable, Sendable {
     case udp
 }
 
+public enum RuntimeHostPortAllocation: String, Equatable, Sendable {
+    case fixed
+    case dynamic
+}
+
 public struct RuntimePortMapping: Equatable, Sendable {
     public let hostPort: Int?
     public let containerPort: Int
     public let protocolName: RuntimePortProtocol
     public let bindAddress: String?
+    public let allocation: RuntimeHostPortAllocation
 
-    public init(hostPort: Int?, containerPort: Int, protocolName: RuntimePortProtocol = .tcp, bindAddress: String? = nil) {
+    public init(
+        hostPort: Int?,
+        containerPort: Int,
+        protocolName: RuntimePortProtocol = .tcp,
+        bindAddress: String? = nil,
+        allocation: RuntimeHostPortAllocation = .fixed
+    ) {
         self.hostPort = hostPort
         self.containerPort = containerPort
         self.protocolName = protocolName
         self.bindAddress = bindAddress
+        self.allocation = allocation
     }
 }
 

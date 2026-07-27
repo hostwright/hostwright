@@ -112,10 +112,10 @@ public enum ManifestValidator {
             }
         }
 
-        for port in service.ports {
-            validatePort(port, serviceName: service.name, issues: &issues)
+        for port in service.publishedPorts {
+            validatePublishedPort(port, serviceName: service.name, issues: &issues)
         }
-        if Set(service.ports).count != service.ports.count {
+        if Set(service.publishedPorts.map(stablePublishedPortKey)).count != service.publishedPorts.count {
             issues.append(issue(service, "ports must not contain duplicates."))
         }
         validateServiceNetworks(
@@ -963,21 +963,65 @@ public enum ManifestValidator {
         }
     }
 
-    private static func validatePort(_ port: String, serviceName: String, issues: inout [ManifestIssue]) {
-        let parts = port.split(separator: ":", omittingEmptySubsequences: false)
-        guard parts.count == 2,
-              let published = Int(parts[0]),
-              let target = Int(parts[1]),
-              isValidPort(published),
-              isValidPort(target)
-        else {
+    private static func validatePublishedPort(
+        _ port: HostwrightPublishedPort,
+        serviceName: String,
+        issues: inout [ManifestIssue]
+    ) {
+        guard isValidBindAddress(port.effectiveBindAddress) else {
             issues.append(
                 ManifestIssue(
                     code: .manifestValidationFailed,
-                    message: "Service '\(serviceName)' port '\(port)' must use \"host:container\" with ports between 1 and 65535."
+                    message: "Service '\(serviceName)' bind address '\(port.effectiveBindAddress)' must be a valid IPv4 or IPv6 address."
                 )
             )
             return
+        }
+
+        validatePortSpan(port.target, label: "target", serviceName: serviceName, issues: &issues)
+        if let host = port.host {
+            validatePortSpan(host, label: "host", serviceName: serviceName, issues: &issues)
+            if host.count != port.target.count {
+                issues.append(
+                    ManifestIssue(
+                        code: .manifestValidationFailed,
+                        message: "Service '\(serviceName)' structured port ranges must have equal host and target lengths."
+                    )
+                )
+            }
+            if host.closedRange.contains(where: { $0 < 1_024 }) {
+                issues.append(
+                    ManifestIssue(
+                        code: .manifestValidationFailed,
+                        message: "Service '\(serviceName)' fixed published ports must be 1024 or higher."
+                    )
+                )
+            }
+        }
+    }
+
+    private static func validatePortSpan(
+        _ span: HostwrightPortSpan,
+        label: String,
+        serviceName: String,
+        issues: inout [ManifestIssue]
+    ) {
+        guard isValidPort(span.start), isValidPort(span.end), span.start <= span.end else {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "Service '\(serviceName)' \(label) port span '\(span.canonicalString)' must stay within 1...65535."
+                )
+            )
+            return
+        }
+        if span.count > 256 {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "Service '\(serviceName)' \(label) port ranges must not exceed 256 ports."
+                )
+            )
         }
     }
 
@@ -985,62 +1029,117 @@ public enum ManifestValidator {
         _ services: [HostwrightService],
         issues: inout [ManifestIssue]
     ) {
-        var ownersByPort: [Int: Set<String>] = [:]
+        var ownersByEndpoint: [String: Set<String>] = [:]
 
         for service in services.sorted(by: { $0.name < $1.name }) {
-            let publishedPorts = service.ports.compactMap(validPublishedPort)
-            let uniquePorts = Set(publishedPorts)
+            let publishedPorts = expandedPublishedEndpoints(service.publishedPorts)
+            let uniquePorts = Set(publishedPorts.map(\.key))
 
             if service.replicas > 1, !uniquePorts.isEmpty {
-                let ports = uniquePorts.sorted().map(String.init).joined(separator: ", ")
-                issues.append(
-                    issue(
-                        service,
-                        "replicas cannot share fixed localhost ports: \(ports)."
+                let endpoints = uniquePorts.sorted()
+                if endpoints.allSatisfy(isLegacyLocalhostEndpointKey) {
+                    let ports = endpoints.compactMap(legacyLocalhostPort).map(String.init).joined(separator: ", ")
+                    issues.append(issue(service, "replicas cannot share fixed localhost ports: \(ports)."))
+                } else {
+                    issues.append(
+                        issue(
+                            service,
+                            "replicas cannot share fixed published endpoints: \(endpoints.joined(separator: ", "))."
+                        )
                     )
-                )
+                }
             }
 
             for port in uniquePorts {
-                ownersByPort[port, default: []].insert(service.name)
+                ownersByEndpoint[port, default: []].insert(service.name)
             }
 
             let counts = Dictionary(
                 grouping: publishedPorts,
-                by: { $0 }
+                by: \.key
             ).mapValues(\.count)
             for port in counts.keys.sorted() where counts[port, default: 0] > 1 {
-                issues.append(
-                    issue(
-                        service,
-                        "publishes fixed localhost port \(port) more than once."
-                    )
-                )
+                let message = if isLegacyLocalhostEndpointKey(port), let localhostPort = legacyLocalhostPort(port) {
+                    "publishes fixed localhost port \(localhostPort) more than once."
+                } else {
+                    "publishes fixed port \(port) more than once."
+                }
+                issues.append(issue(service, message))
             }
         }
 
-        for port in ownersByPort.keys.sorted() {
-            let owners = ownersByPort[port, default: []].sorted()
+        for port in ownersByEndpoint.keys.sorted() {
+            let owners = ownersByEndpoint[port, default: []].sorted()
             guard owners.count > 1 else { continue }
+            let message = if isLegacyLocalhostEndpointKey(port), let localhostPort = legacyLocalhostPort(port) {
+                "Fixed localhost port \(localhostPort) is published by multiple services: \(owners.joined(separator: ", "))."
+            } else {
+                "Fixed port \(port) is published by multiple services: \(owners.joined(separator: ", "))."
+            }
             issues.append(
                 ManifestIssue(
                     code: .manifestValidationFailed,
-                    message: "Fixed localhost port \(port) is published by multiple services: \(owners.joined(separator: ", "))."
+                    message: message
                 )
             )
         }
     }
 
-    private static func validPublishedPort(_ value: String) -> Int? {
-        let parts = value.split(separator: ":", omittingEmptySubsequences: false)
-        guard parts.count == 2,
-              let published = Int(parts[0]),
-              let target = Int(parts[1]),
-              isValidPort(published),
-              isValidPort(target) else {
-            return nil
+    private static func stablePublishedPortKey(_ port: HostwrightPublishedPort) -> String {
+        [
+            port.effectiveBindAddress,
+            port.protocolName.rawValue,
+            port.host?.canonicalString ?? "dynamic",
+            port.target.canonicalString
+        ].joined(separator: "|")
+    }
+
+    private static func expandedPublishedEndpoints(_ ports: [HostwrightPublishedPort]) -> [(key: String, summary: String)] {
+        ports.flatMap { port in
+            guard let hostRange = port.hostPortRange else {
+                return [(key: String, summary: String)]()
+            }
+            return hostRange.map { hostPort in
+                (
+                    key: "\(port.protocolName.rawValue)://\(port.effectiveBindAddress):\(hostPort)",
+                    summary: publishedPortSummary(port, preferLegacy: false)
+                )
+            }
         }
-        return published
+    }
+
+    private static func publishedPortSummary(_ port: HostwrightPublishedPort, preferLegacy: Bool) -> String {
+        if preferLegacy, let legacy = port.canonicalLegacyLiteral {
+            return legacy.split(separator: ":").first.map(String.init) ?? legacy
+        }
+        let host = port.host?.canonicalString ?? "dynamic"
+        return "\(port.protocolName.rawValue)://\(port.effectiveBindAddress):\(host)->\(port.target.canonicalString)"
+    }
+
+    private static func isLegacyLocalhostEndpointKey(_ key: String) -> Bool {
+        key.hasPrefix("tcp://\(HostwrightPublishedPort.localhostBindAddress):")
+    }
+
+    private static func legacyLocalhostPort(_ key: String) -> Int? {
+        guard isLegacyLocalhostEndpointKey(key) else { return nil }
+        return Int(key.split(separator: ":").last ?? "")
+    }
+
+    private static func isValidBindAddress(_ value: String) -> Bool {
+        if isValidIPv4Address(value) || isValidIPv6Address(value) {
+            return true
+        }
+        return false
+    }
+
+    private static func isValidIPv4Address(_ value: String) -> Bool {
+        var storage = in_addr()
+        return value.withCString { inet_pton(AF_INET, $0, &storage) } == 1
+    }
+
+    private static func isValidIPv6Address(_ value: String) -> Bool {
+        var storage = in6_addr()
+        return value.withCString { inet_pton(AF_INET6, $0, &storage) } == 1
     }
 
     private static func validateVolume(_ volume: String, serviceName: String, issues: inout [ManifestIssue]) {
@@ -1374,10 +1473,7 @@ public enum ManifestValidator {
         service: HostwrightService,
         issues: inout [ManifestIssue]
     ) {
-        let declaredTargets = Set(service.ports.compactMap { value -> Int? in
-            let fields = value.split(separator: ":", omittingEmptySubsequences: false)
-            return fields.count == 2 ? Int(fields[1]) : nil
-        })
+        let declaredTargets = Set(service.publishedPorts.flatMap { Array($0.containerPortRange) })
         if !isValidPort(port) || !declaredTargets.contains(port) {
             issues.append(issue(service, "probes.\(name) port \(port) must reference a declared service container port."))
         }

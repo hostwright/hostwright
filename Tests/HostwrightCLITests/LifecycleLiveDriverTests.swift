@@ -85,6 +85,89 @@ final class LifecycleLiveDriverTests: XCTestCase {
         }
     }
 
+    func testConfirmedCreateReservesAndActivatesStructuredTCPAndUDPPorts()
+        throws
+    {
+        let manifest = """
+        version: 2
+        project: demo
+        imagePolicy: require-digest
+        services:
+          api:
+            image: registry.example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+            ports:
+              - target: 8080
+                protocol: tcp
+              - target: 5353
+                protocol: udp
+
+        """
+        try withFixture(manifestOverride: manifest) { fixture in
+            let result = try runConfirmedUp(fixture)
+
+            XCTAssertEqual(result.exitCode, 0, result.standardError)
+            let records = try fixture.store.networkPorts
+                .loadProject(
+                    projectUUID:
+                        fixture.store.desiredStates.loadProject(
+                            id: fixture.projectID
+                        ).resourceUUID
+                )
+            XCTAssertEqual(records.count, 2)
+            XCTAssertEqual(
+                records.map(\.lifecycleState),
+                [.active, .active]
+            )
+            XCTAssertEqual(
+                Set(records.map(\.hostPort)),
+                Set([49_152])
+            )
+            XCTAssertEqual(
+                Set(records.map(\.protocolName)),
+                Set([.tcp, .udp])
+            )
+            XCTAssertTrue(
+                records.allSatisfy {
+                    $0.observedSHA256 != nil &&
+                        $0.finalizerState == .active
+                }
+            )
+
+            let removePlan = try reviewedPlan(
+                fixture,
+                command: .rm
+            )
+            let removeOptions = fixture.options(
+                command: .rm,
+                dryRun: false,
+                confirmation: removePlan.planSHA256
+            )
+            let removeResult = LifecycleCommandRunner(
+                options: removeOptions,
+                driver: LifecycleLiveDriver(
+                    environment: fixture.environment,
+                    options: removeOptions
+                )
+            ).run()
+
+            XCTAssertEqual(
+                removeResult.exitCode,
+                0,
+                removeResult.standardError
+            )
+            XCTAssertEqual(
+                try fixture.store.networkPorts.loadProject(
+                    projectUUID:
+                        fixture.store.desiredStates.loadProject(
+                            id: fixture.projectID
+                        ).resourceUUID,
+                    includeReleased: true
+                ).map(\.lifecycleState),
+                [.released, .released]
+            )
+        }
+    }
+
     func testRevalidationRejectsChangedCapabilityAndObservationBeforeMutation() throws {
         try withFixture { fixture in
             let options = fixture.options(command: .up, dryRun: true)
@@ -742,7 +825,7 @@ final class LifecycleLiveDriverTests: XCTestCase {
         }
     }
 
-    func testUnsupportedLaterServiceFailsBeforeAnyProjectMutation() throws {
+    func testInvalidLaterServiceFailsBeforeAnyProjectMutation() throws {
         let image = "registry.example/api@sha256:\(String(repeating: "a", count: 64))"
         let manifest = """
         version: 2
@@ -758,22 +841,23 @@ final class LifecycleLiveDriverTests: XCTestCase {
 
         """
         try withFixture(manifestOverride: manifest) { fixture in
-            let plan = try reviewedPlan(fixture, command: .up)
-            let confirmedOptions = fixture.options(
+            let options = fixture.options(
                 command: .up,
-                dryRun: false,
-                confirmation: plan.planSHA256
+                dryRun: true
             )
             let result = LifecycleCommandRunner(
-                options: confirmedOptions,
+                options: options,
                 driver: LifecycleLiveDriver(
                     environment: fixture.environment,
-                    options: confirmedOptions
+                    options: options
                 )
             ).run()
 
             XCTAssertNotEqual(result.exitCode, 0)
-            XCTAssertTrue(result.standardError.contains("unprivileged host ports"))
+            XCTAssertTrue(
+                result.standardError.contains("1024"),
+                result.standardError
+            )
             XCTAssertEqual(try fixture.adapterSnapshot().mutations, [])
             XCTAssertTrue(try fixture.store.operationGroups.loadAll().isEmpty)
         }
@@ -3074,7 +3158,17 @@ private actor LifecycleLiveTestAdapter:
                 arguments: [],
                 environment: []
             ),
-            ports: [],
+            ports: resource.desired.ports.map {
+                RuntimeInventoryPort(
+                    hostAddress: $0.bindAddress,
+                    hostPort: $0.hostPort,
+                    containerPort: $0.containerPort,
+                    protocolName:
+                        $0.protocolName == .tcp
+                            ? .tcp
+                            : .udp
+                )
+            },
             mounts: [],
             networks: [],
             services: []

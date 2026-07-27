@@ -217,6 +217,10 @@ final class HostwrightStateTests: XCTestCase {
             let desiredServices = try store.desiredStates.loadDesiredServices(projectID: projectID)
             XCTAssertEqual(desiredServices.count, 1)
             XCTAssertEqual(desiredServices[0].serviceName, "api")
+            XCTAssertEqual(
+                desiredServices[0].portsJSON,
+                #"[{"allocation":"fixed","bindAddress":"127.0.0.1","host":"8080","protocol":"tcp","target":"8080"}]"#
+            )
             XCTAssertTrue(desiredServices[0].environmentJSONRedacted.contains("[REDACTED]"))
             XCTAssertFalse(desiredServices[0].environmentJSONRedacted.contains(fakeSecret))
             XCTAssertFalse(desiredServices[0].environmentJSONRedacted.contains("hostwright.api"))

@@ -323,6 +323,72 @@ final class HostwrightRuntimeTests: XCTestCase {
         XCTAssertThrowsError(try RuntimeCommandPolicy.validateCreateMissingServiceMutation(nonHostwrightCreate))
     }
 
+    func testAppleCreateRendersResolvedTCPAndUDPPublishArguments()
+        throws
+    {
+        let service = DesiredRuntimeService(
+            identity: identity,
+            image: "ghcr.io/example/api:latest",
+            ports: [
+                RuntimePortMapping(
+                    hostPort: 49_153,
+                    containerPort: 8_080,
+                    protocolName: .tcp,
+                    bindAddress: "127.0.0.1",
+                    allocation: .dynamic
+                ),
+                RuntimePortMapping(
+                    hostPort: 49_152,
+                    containerPort: 5_353,
+                    protocolName: .udp,
+                    bindAddress: "127.0.0.1",
+                    allocation: .dynamic
+                ),
+            ]
+        )
+        let arguments = try AppleContainerCommand.arguments(
+            for: .createContainer,
+            desiredService: service,
+            mutationContext: mutationContext
+        )
+        let published = arguments.indices.compactMap {
+            index -> String? in
+            guard arguments[index] == "--publish",
+                  arguments.indices.contains(index + 1) else {
+                return nil
+            }
+            return arguments[index + 1]
+        }
+
+        XCTAssertEqual(
+            published,
+            [
+                "127.0.0.1:49152:5353/udp",
+                "127.0.0.1:49153:8080",
+            ]
+        )
+
+        let unresolved = DesiredRuntimeService(
+            identity: identity,
+            image: service.image,
+            ports: [
+                RuntimePortMapping(
+                    hostPort: nil,
+                    containerPort: 8_080,
+                    protocolName: .tcp,
+                    allocation: .dynamic
+                ),
+            ]
+        )
+        XCTAssertThrowsError(
+            try AppleContainerCommand.arguments(
+                for: .createContainer,
+                desiredService: unresolved,
+                mutationContext: mutationContext
+            )
+        )
+    }
+
     func testCreateMissingServiceMutationPolicyRejectsPreImageFlagsAndAllowsLiteralWorkloadArguments() throws {
         let valid = try AppleContainerCommand.spec(
             kind: .createContainer,

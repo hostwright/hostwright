@@ -85,7 +85,14 @@ public enum ManifestRuntimeMapper {
             serviceName: service.name,
             instanceName: replicaIndex == 0 ? nil : "replica-\(replicaIndex)"
         )
-        let ports = service.ports.compactMap { parsePort($0, identity: identity, issues: &issues) }
+        appendUnsupportedLegacyPortIssues(
+            service,
+            identity: identity,
+            issues: &issues
+        )
+        let ports = service.publishedPorts.flatMap {
+            map($0, identity: identity, issues: &issues)
+        }
         let networks = service.networks.compactMap { attachment in
             map(
                 attachment,
@@ -348,12 +355,96 @@ public enum ManifestRuntimeMapper {
         }
     }
 
-    private static func parsePort(_ value: String, identity: RuntimeServiceIdentity, issues: inout [PlanIssue]) -> RuntimePortMapping? {
-        let parts = value.split(separator: ":", omittingEmptySubsequences: false)
-        guard parts.count == 2,
-              let hostPort = Int(parts[0]),
-              let containerPort = Int(parts[1])
-        else {
+    private static func map(
+        _ port: HostwrightPublishedPort,
+        identity: RuntimeServiceIdentity,
+        issues: inout [PlanIssue]
+    ) -> [RuntimePortMapping] {
+        let protocolName: RuntimePortProtocol = switch port.protocolName {
+        case .tcp:
+            .tcp
+        case .udp:
+            .udp
+        }
+
+        if !NetworkBindAddressPolicy.isLocalhost(port.effectiveBindAddress) {
+            issues.append(
+                PlanIssue(
+                    kind: .unsafeExposure,
+                    severity: .blocker,
+                    identity: identity,
+                    message: "Published port bind address '\(port.effectiveBindAddress)' is outside the localhost-only runtime boundary.",
+                    stableDetailKey: port.effectiveBindAddress
+                )
+            )
+        }
+
+        guard let host = port.host else {
+            guard port.target.start <= port.target.end else {
+                issues.append(
+                    unsupportedPortIssue(port, identity: identity)
+                )
+                return []
+            }
+            return (0..<port.target.count).map { offset in
+                RuntimePortMapping(
+                    hostPort: nil,
+                    containerPort: port.target.start + offset,
+                    protocolName: protocolName,
+                    bindAddress: port.effectiveBindAddress,
+                    allocation: .dynamic
+                )
+            }
+        }
+
+        guard host.start <= host.end,
+              port.target.start <= port.target.end,
+              host.count == port.target.count else {
+            issues.append(
+                unsupportedPortIssue(port, identity: identity)
+            )
+            return []
+        }
+
+        return (0..<host.count).map { offset in
+            RuntimePortMapping(
+                hostPort: host.start + offset,
+                containerPort: port.target.start + offset,
+                protocolName: protocolName,
+                bindAddress: port.effectiveBindAddress,
+                allocation: .fixed
+            )
+        }
+    }
+
+    private static func unsupportedPortIssue(
+        _ port: HostwrightPublishedPort,
+        identity: RuntimeServiceIdentity
+    ) -> PlanIssue {
+        let host = port.host?.canonicalString ?? "dynamic"
+        let key = "\(port.effectiveBindAddress):\(host):\(port.target.canonicalString)/\(port.protocolName.rawValue)"
+        return PlanIssue(
+            kind: .unsupportedFeature,
+            severity: .blocker,
+            identity: identity,
+            message: "Published port '\(key)' cannot be mapped to a supported runtime port.",
+            stableDetailKey: key
+        )
+    }
+
+    private static func appendUnsupportedLegacyPortIssues(
+        _ service: HostwrightService,
+        identity: RuntimeServiceIdentity,
+        issues: inout [PlanIssue]
+    ) {
+        let containsLegacyPublishedPorts = service.publishedPorts.contains {
+            $0.legacyLiteral != nil
+        }
+        guard service.publishedPorts.isEmpty || containsLegacyPublishedPorts else {
+            return
+        }
+
+        for value in service.ports where HostwrightPublishedPort.legacy(value) == nil {
             issues.append(
                 PlanIssue(
                     kind: .unsupportedFeature,
@@ -363,14 +454,7 @@ public enum ManifestRuntimeMapper {
                     stableDetailKey: value
                 )
             )
-            return nil
         }
-
-        return RuntimePortMapping(
-            hostPort: hostPort,
-            containerPort: containerPort,
-            bindAddress: NetworkBindAddressPolicy.localhostBindAddress
-        )
     }
 
     private static func parseMount(

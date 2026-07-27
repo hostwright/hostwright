@@ -785,7 +785,8 @@ enum CLIJSON {
         manifest: HostwrightManifest,
         observed: ObservedRuntimeState,
         plan: ReconciliationPlan,
-        imageDigestLocks: [ImageDigestLockRecord]
+        imageDigestLocks: [ImageDigestLockRecord],
+        portReservations: [NetworkPortReservationRecord]
     ) -> String {
         let observedByName = hostwrightObservedServicesByLogicalName(observed)
         return render([
@@ -833,6 +834,24 @@ enum CLIJSON {
                         record.operationGroupID,
                     "observationSHA256":
                         record.observationSHA256 as Any
+                ].compactNilValues()
+            },
+            "portReservations": portReservations.map { record in
+                [
+                    "id": record.id,
+                    "resourceUUID": record.resourceUUID,
+                    "service": record.serviceName,
+                    "generation": record.generation,
+                    "providerID": record.providerID,
+                    "providerGeneration": record.providerGeneration,
+                    "bindAddress": record.bindAddress,
+                    "hostPort": record.hostPort,
+                    "containerPort": record.containerPort,
+                    "protocol": record.protocolName.rawValue,
+                    "allocation": record.allocationKind.rawValue,
+                    "lifecycle": record.lifecycleState.rawValue,
+                    "desiredSHA256": record.desiredSHA256,
+                    "observedSHA256": record.observedSHA256 as Any
                 ].compactNilValues()
             },
             "services": manifest.services.sorted { $0.name < $1.name }.map { service in

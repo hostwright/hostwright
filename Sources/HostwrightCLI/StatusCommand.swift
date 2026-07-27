@@ -80,6 +80,10 @@ struct StatusCommandRunner {
                 manifest: manifest,
                 timestamp: timestamp
             )
+            let project = try store.desiredStates.loadProject(id: projectID)
+            let portReservations = try store.networkPorts.loadProject(
+                projectUUID: project.resourceUUID
+            )
             try store.observedStates.saveSnapshot(
                 snapshotID: hostwrightUniqueID(prefix: "status-snapshot"),
                 projectID: projectID,
@@ -116,7 +120,8 @@ struct StatusCommandRunner {
                         manifest: manifest,
                         observed: observedForPlanning,
                         plan: plan,
-                        imageDigestLocks: imageDigestLocks
+                        imageDigestLocks: imageDigestLocks,
+                        portReservations: portReservations
                     )
                 )
             }
@@ -126,6 +131,7 @@ struct StatusCommandRunner {
                     observed: observedForPlanning,
                     plan: plan,
                     imageDigestLocks: imageDigestLocks,
+                    portReservations: portReservations,
                     stateDatabasePath: stateDatabasePath
                 )
             )
@@ -148,6 +154,7 @@ struct StatusCommandRunner {
         observed: ObservedRuntimeState,
         plan: ReconciliationPlan,
         imageDigestLocks: [ImageDigestLockRecord],
+        portReservations: [NetworkPortReservationRecord],
         stateDatabasePath: String
     ) -> String {
         let observedByName = hostwrightObservedServicesByLogicalName(observed)
@@ -187,6 +194,16 @@ struct StatusCommandRunner {
         } else {
             lines += imageDigestLocks.map { record in
                 "- \(record.serviceName)[\(record.replicaIndex)] \(record.stateKind.rawValue): requested=\(record.lock.requestedReference) resolved=\(record.lock.resolvedReference) variant=\(record.lock.variantDigest) provider=\(record.lock.providerID.rawValue) plan=\(record.planSHA256)"
+            }
+        }
+
+        lines.append("")
+        lines.append("Port reservations:")
+        if portReservations.isEmpty {
+            lines.append("- none")
+        } else {
+            lines += portReservations.map { record in
+                "- \(record.serviceName): \(record.bindAddress):\(record.hostPort)->\(record.containerPort)/\(record.protocolName.rawValue) allocation=\(record.allocationKind.rawValue) state=\(record.lifecycleState.rawValue)"
             }
         }
 

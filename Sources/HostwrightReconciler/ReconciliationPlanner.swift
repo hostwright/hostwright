@@ -112,7 +112,14 @@ public enum ManifestDryRunPlanner {
                 ManifestDryRunService(
                     name: service.name,
                     image: service.image ?? "<missing>",
-                    ports: service.ports
+                    ports: service.publishedPorts.map {
+                        $0.legacyLiteral ?? [
+                            $0.effectiveBindAddress,
+                            $0.host?.canonicalString ?? "dynamic",
+                            $0.target.canonicalString,
+                            $0.protocolName.rawValue
+                        ].joined(separator: ":")
+                    }
                 )
             },
             runtimeObservation: unavailableRuntimeObservation

@@ -631,8 +631,52 @@
           "type": "array",
           "uniqueItems": true,
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,5}:[0-9]{1,5}$"
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,5}:[0-9]{1,5}$"
+              },
+              {
+                "type": "object",
+                "required": ["target"],
+                "additionalProperties": false,
+                "properties": {
+                  "bind": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "host": {
+                    "oneOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 65535
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^[0-9]{1,5}-[0-9]{1,5}$"
+                      }
+                    ]
+                  },
+                  "target": {
+                    "oneOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 65535
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^[0-9]{1,5}-[0-9]{1,5}$"
+                      }
+                    ]
+                  },
+                  "protocol": {
+                    "enum": ["tcp", "udp"]
+                  }
+                }
+              }
+            ]
           }
         },
         "volumes": {

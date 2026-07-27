@@ -865,7 +865,8 @@ private struct ManifestNodeDecoder {
         let env = try values["env"].map { try stringMap($0, path: "\(path).env") } ?? [:]
         let secretEnv = try values["secretEnv"].map { try secrets($0, path: "\(path).secretEnv") } ?? [:]
         let labels = try values["labels"].map { try stringMap($0, path: "\(path).labels") } ?? [:]
-        let ports = try values["ports"].map { try strings($0, path: "\(path).ports") } ?? []
+        let publishedPorts = try values["ports"].map { try decodePublishedPorts($0, path: "\(path).ports") } ?? []
+        let ports = publishedPorts.compactMap(\.canonicalLegacyLiteral)
         let networks = try values["networks"].map {
             try decodeServiceNetworks($0, path: "\(path).networks")
         } ?? []
@@ -916,6 +917,7 @@ private struct ManifestNodeDecoder {
             secretEnv: secretEnv,
             labels: labels,
             ports: ports,
+            publishedPorts: publishedPorts,
             networks: networks,
             volumes: volumes,
             mounts: mounts,
@@ -929,6 +931,134 @@ private struct ManifestNodeDecoder {
             readOnlyRootFilesystem: readOnlyRoot,
             shmSize: shmSize
         )
+    }
+
+    private func decodePublishedPorts(
+        _ node: Node,
+        path: String
+    ) throws -> [HostwrightPublishedPort] {
+        guard case .sequence(let sequence) = node else {
+            throw ManifestParser.failure("Expected a sequence.", node: node, path: path)
+        }
+
+        return try sequence.enumerated().map { index, child in
+            let itemPath = "\(path)[\(index)]"
+            switch child {
+            case .scalar:
+                let literal = try string(child, path: itemPath)
+                guard let publishedPort = HostwrightPublishedPort.legacy(literal) else {
+                    throw ManifestParser.failure(
+                        "Port must use legacy \"host:container\" or a structured mapping.",
+                        node: child,
+                        path: itemPath
+                    )
+                }
+                return publishedPort
+
+            case .mapping:
+                let values = try mapping(
+                    child,
+                    path: itemPath,
+                    allowed: ["bind", "host", "protocol", "target"]
+                )
+                let target = try decodePortSpan(
+                    values["target"],
+                    path: "\(itemPath).target",
+                    message: "Structured port mapping requires target."
+                )
+                let host = try values["host"].map { try decodePortSpanValue($0, path: "\(itemPath).host") }
+                let protocolName = try values["protocol"].map {
+                    try decodePortProtocol($0, path: "\(itemPath).protocol")
+                } ?? .tcp
+                let bindAddress = try values["bind"].map { try string($0, path: "\(itemPath).bind") }
+
+                return HostwrightPublishedPort(
+                    host: host,
+                    target: target,
+                    protocolName: protocolName,
+                    bindAddress: bindAddress ?? HostwrightPublishedPort.localhostBindAddress
+                )
+
+            default:
+                throw ManifestParser.failure(
+                    "Port must use legacy \"host:container\" or a structured mapping.",
+                    node: child,
+                    path: itemPath
+                )
+            }
+        }
+    }
+
+    private func decodePortSpan(
+        _ node: Node?,
+        path: String,
+        message: String
+    ) throws -> HostwrightPortSpan {
+        guard let node else {
+            throw ManifestParser.failure(message, code: .manifestValidationFailed, path: path)
+        }
+        return try decodePortSpanValue(node, path: path)
+    }
+
+    private func decodePortSpanValue(
+        _ node: Node,
+        path: String
+    ) throws -> HostwrightPortSpan {
+        guard case .scalar(let scalar) = node else {
+            throw ManifestParser.failure(
+                "Port must be an integer or a range string like \"8000-8003\".",
+                node: node,
+                path: path
+            )
+        }
+        if node.tag.rawValue == Tag.Name.int.rawValue {
+            guard let port = Int(scalar.string) else {
+                throw ManifestParser.failure("Port exceeds supported integer range.", node: node, path: path)
+            }
+            return HostwrightPortSpan(start: port)
+        }
+        guard node.tag.rawValue == Tag.Name.str.rawValue,
+              let span = parsePortSpan(scalar.string) else {
+            throw ManifestParser.failure(
+                "Port must be an integer or a range string like \"8000-8003\".",
+                node: node,
+                path: path
+            )
+        }
+        return span
+    }
+
+    private func decodePortProtocol(
+        _ node: Node,
+        path: String
+    ) throws -> HostwrightPortProtocol {
+        let value = try string(node, path: path)
+        guard let protocolName = HostwrightPortProtocol(rawValue: value) else {
+            throw ManifestParser.failure(
+                "protocol must be one of: tcp, udp.",
+                code: .manifestValidationFailed,
+                node: node,
+                path: path
+            )
+        }
+        return protocolName
+    }
+
+    private func parsePortSpan(_ value: String) -> HostwrightPortSpan? {
+        let fields = value.split(separator: "-", omittingEmptySubsequences: false)
+        switch fields.count {
+        case 1:
+            guard let port = Int(fields[0]) else { return nil }
+            return HostwrightPortSpan(start: port)
+        case 2:
+            guard let start = Int(fields[0]),
+                  let end = Int(fields[1]) else {
+                return nil
+            }
+            return HostwrightPortSpan(start: start, end: end)
+        default:
+            return nil
+        }
     }
 
     private func decodeServiceNetworks(

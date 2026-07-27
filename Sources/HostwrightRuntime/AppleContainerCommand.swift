@@ -262,9 +262,17 @@ public enum AppleContainerCommand {
                 arguments += ["--env", argument]
             }
             for port in desiredService.ports.sorted(by: stablePortOrdering) {
-                if let hostPort = port.hostPort {
-                    arguments += ["--publish", publishSpec(for: port, hostPort: hostPort)]
+                guard let hostPort = port.hostPort else {
+                    throw RuntimeAdapterError.commandRejected(
+                        classification: .mutating,
+                        message:
+                            "Apple container create requires dynamic host ports to be durably resolved before mutation."
+                    )
                 }
+                arguments += [
+                    "--publish",
+                    publishSpec(for: port, hostPort: hostPort)
+                ]
             }
             for network in desiredService.networks.sorted(by: {
                 $0.networkRuntimeIdentifier < $1.networkRuntimeIdentifier
@@ -399,13 +407,15 @@ public enum AppleContainerCommand {
             lhs.hostPort.map(String.init) ?? "",
             String(lhs.containerPort),
             lhs.bindAddress ?? "",
-            lhs.protocolName.rawValue
+            lhs.protocolName.rawValue,
+            lhs.allocation.rawValue
         ].joined(separator: ":") <
         [
             rhs.hostPort.map(String.init) ?? "",
             String(rhs.containerPort),
             rhs.bindAddress ?? "",
-            rhs.protocolName.rawValue
+            rhs.protocolName.rawValue,
+            rhs.allocation.rawValue
         ].joined(separator: ":")
     }
 

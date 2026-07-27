@@ -334,7 +334,11 @@ public struct DesiredStateRepository: Sendable {
             serviceName: service.name,
             image: image,
             commandJSON: try StateJSON.encodeStringArray(service.command),
-            portsJSON: try StateJSON.encodeStringArray(service.ports),
+            portsJSON: try StateJSON.encode(
+                service.publishedPorts.sorted {
+                    publishedPortKey($0) < publishedPortKey($1)
+                }.map(publishedPortJSON)
+            ),
             mountsJSON: try StateJSON.encodeStringArray(service.volumes),
             environmentJSONRedacted: try StateJSON.encode(redactedEnvironment),
             manifestHash: manifestHash,
@@ -343,6 +347,29 @@ public struct DesiredStateRepository: Sendable {
             updatedAt: timestamp,
             mutationProvider: mutationProvider
         )
+    }
+
+    private func publishedPortJSON(
+        _ port: HostwrightPublishedPort
+    ) -> [String: Any] {
+        [
+            "allocation": port.host == nil ? "dynamic" : "fixed",
+            "bindAddress": port.effectiveBindAddress,
+            "host": port.host.map { $0.canonicalString as Any } ?? NSNull(),
+            "protocol": port.protocolName.rawValue,
+            "target": port.target.canonicalString
+        ]
+    }
+
+    private func publishedPortKey(
+        _ port: HostwrightPublishedPort
+    ) -> String {
+        [
+            port.effectiveBindAddress,
+            port.host?.canonicalString ?? "dynamic",
+            port.target.canonicalString,
+            port.protocolName.rawValue
+        ].joined(separator: "\u{1f}")
     }
 
     private func upsert(_ project: StateProjectRecord, on connection: SQLiteConnection) throws {

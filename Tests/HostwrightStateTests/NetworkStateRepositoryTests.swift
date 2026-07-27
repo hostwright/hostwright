@@ -42,7 +42,8 @@ final class NetworkStateRepositoryTests: XCTestCase {
                 Set([
                     "network_resources",
                     "network_attachments",
-                    "network_dns_instances"
+                    "network_dns_instances",
+                    "network_port_reservations"
                 ])
             )
             XCTAssertEqual(

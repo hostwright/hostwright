@@ -96,6 +96,50 @@ final class AppleContainerInventoryParserTests: XCTestCase {
         XCTAssertEqual(AppleContainerInventoryParser.processDetailsAvailability, .unsupported)
     }
 
+    func testStoppedContainerAllowsEmptyStatsPayload() throws {
+        let data = Data(
+            try fixture("apple-container-1.1.0-inventory-containers.json").utf8
+        )
+        var payload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: data) as? [[String: Any]]
+        )
+        var managed = try XCTUnwrap(payload.first)
+        var managedStatus = try XCTUnwrap(
+            managed["status"] as? [String: Any]
+        )
+        managedStatus["state"] = "stopped"
+        managedStatus["networks"] = []
+        managed["status"] = managedStatus
+        payload[0] = managed
+        let stoppedContainers = try XCTUnwrap(
+            String(
+                data: try JSONSerialization.data(
+                    withJSONObject: payload,
+                    options: [.sortedKeys]
+                ),
+                encoding: .utf8
+            )
+        )
+
+        let inventory = try AppleContainerInventoryParser.parse(
+            outputs: try outputs(
+                version: "1.1.0",
+                containers: stoppedContainers,
+                statsByContainerID: [managedContainerID: "[]"]
+            )
+        )
+
+        let container = try XCTUnwrap(
+            inventory.containers.first {
+                $0.runtimeID == managedContainerID
+            }
+        )
+        XCTAssertEqual(container.lifecycle, .stopped)
+        XCTAssertNil(container.usage)
+        XCTAssertEqual(container.networks.map(\.networkID), ["default"])
+        XCTAssertEqual(container.networks[0].addresses, [])
+    }
+
     func testRejectsPartialOrConflictingOwnershipWithoutNameFallback() throws {
         let valid = try fixture("apple-container-1.1.0-inventory-containers.json")
         let mutations = [
@@ -369,7 +413,8 @@ final class AppleContainerInventoryParserTests: XCTestCase {
         containers: String? = nil,
         status: String? = nil,
         machines: String? = nil,
-        networks: String? = nil
+        networks: String? = nil,
+        statsByContainerID: [String: String]? = nil
     ) throws -> AppleContainerInventoryOutputs {
         AppleContainerInventoryOutputs(
             version: try fixture("apple-container-\(version)-version.txt"),
@@ -379,8 +424,8 @@ final class AppleContainerInventoryParserTests: XCTestCase {
             networks: try networks ?? fixture("apple-container-\(version)-network-list.json"),
             volumes: try fixture("apple-container-\(version)-volume-list.json"),
             machines: try machines ?? fixture("apple-container-\(version)-machine-list.json"),
-            statsByContainerID: [
-                managedContainerID: try fixture("apple-container-\(version)-stats.json")
+            statsByContainerID: try statsByContainerID ?? [
+                managedContainerID: fixture("apple-container-\(version)-stats.json")
             ]
         )
     }

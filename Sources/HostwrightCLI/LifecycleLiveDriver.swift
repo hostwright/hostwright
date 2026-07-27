@@ -157,10 +157,30 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
             providerID: providerID,
             bindings: resourceBindings
         )
+        let adapter = selectedProvider.adapter
+        let inventory = try hostwrightWaitForAsync {
+            try await adapter.inventory()
+        }
+        let plannedDesiredState =
+            try NetworkPortLifecycleCoordinator.resolveForPlanning(
+                desiredState: mapping.desiredState,
+                projectID: projectID,
+                projectResourceUUID: projectResourceUUID,
+                providerID: providerID,
+                providerGeneration: providerGeneration,
+                bindings: resourceBindings,
+                store: store,
+                occupiedPorts:
+                    NetworkPortLifecycleCoordinator.occupiedPorts(
+                        in: inventory
+                    ),
+                isAvailable:
+                    NetworkPortSocketAvailability.isAvailable
+            )
         let desiredState = DesiredRuntimeState(
-            projectName: mapping.desiredState.projectName,
-            networks: mapping.desiredState.networks,
-            services: mapping.desiredState.services,
+            projectName: plannedDesiredState.projectName,
+            networks: plannedDesiredState.networks,
+            services: plannedDesiredState.services,
             ownedResourceHints: resourceBindings.map {
                 RuntimeOwnedResourceHint(
                     resourceIdentifier: $0.resourceIdentifier,
@@ -170,7 +190,6 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
                 )
             }
         )
-        let adapter = selectedProvider.adapter
         let observedState = try hostwrightWaitForAsync {
             try await adapter.observe(desiredState: desiredState)
         }
@@ -183,15 +202,12 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
                 message: "Lifecycle observation returned stale or incompatible provider metadata. No mutation was attempted."
             )
         }
-        let inventory = try hostwrightWaitForAsync {
-            try await adapter.inventory()
-        }
         let projectGeneration = max(
             resourceBindings.map(\.projectGeneration).max() ?? 1,
             1
         )
         let selectedServices = options.serviceNames.isEmpty
-            ? mapping.desiredState.services.map(\.logicalServiceName).sorted()
+            ? plannedDesiredState.services.map(\.logicalServiceName).sorted()
             : options.serviceNames.sorted()
         let planFence = lifecyclePlanFence(
             command: options.command,
@@ -3079,6 +3095,11 @@ struct LifecycleLiveEffects: LifecycleSagaEffects {
                 manifestHash: context.plan.manifestSHA256,
                 context: mutationContext(node: node, context: context)
             )
+            try await persistNetworkPortIntent(
+                action: action,
+                node: node,
+                context: context
+            )
             try await persistNetworkAttachmentIntent(
                 action: action,
                 node: node,
@@ -3487,6 +3508,11 @@ struct LifecycleLiveEffects: LifecycleSagaEffects {
                 observedService: matches.first,
                 desiredService: await state.desiredService(for: node.key)
             ) {
+                try reconcileNetworkPorts(
+                    node: node,
+                    context: context,
+                    inventory: inventory
+                )
                 try await reconcileNetworkAttachments(
                     node: node,
                     context: context,
@@ -3526,6 +3552,131 @@ struct LifecycleLiveEffects: LifecycleSagaEffects {
                 )
             )
         }
+    }
+
+    private func persistNetworkPortIntent(
+        action: PlannedRuntimeAction,
+        node: LifecyclePlanNode,
+        context: LifecycleSagaContext
+    ) async throws {
+        guard node.action == .create ||
+                node.action == .delete ||
+                node.action == .retire else {
+            return
+        }
+        if node.action == .create {
+            guard let desired = action.desiredService else {
+                throw HostwrightDiagnostic(
+                    code: .runtimeUnavailable,
+                    message:
+                        "Port reservation requires the exact desired service before runtime creation."
+                )
+            }
+            guard !desired.ports.isEmpty else {
+                return
+            }
+            let group = try exactNetworkPortOperationGroup(
+                context: context
+            )
+            let inventory = try await adapter.inventory()
+            _ = try NetworkPortLifecycleCoordinator.reserve(
+                service: desired,
+                node: node,
+                plan: context.plan,
+                group: group,
+                inventory: inventory,
+                store: store,
+                isAvailable:
+                    NetworkPortSocketAvailability.isAvailable
+            )
+            return
+        }
+        let portRecords = try store.networkPorts.loadProject(
+            projectUUID: context.plan.projectResourceUUID
+        ).filter {
+            $0.resourceUUID == node.resourceUUID
+        }
+        guard !portRecords.isEmpty else {
+            return
+        }
+        let group = try exactNetworkPortOperationGroup(
+            context: context
+        )
+        let inventory = try await adapter.inventory()
+        let priorFencingToken = await state.binding(
+            resourceUUID: node.resourceUUID,
+            resourceIdentifier: node.resourceIdentifier
+        )?.currentFencingToken
+        _ = try NetworkPortLifecycleCoordinator.beginRelease(
+            node: node,
+            plan: context.plan,
+            group: group,
+            inventory: inventory,
+            priorFencingToken: priorFencingToken,
+            store: store
+        )
+    }
+
+    private func reconcileNetworkPorts(
+        node: LifecyclePlanNode,
+        context: LifecycleSagaContext,
+        inventory: RuntimeInventory
+    ) throws {
+        guard node.action == .create ||
+                node.action == .delete ||
+                node.action == .retire else {
+            return
+        }
+        let portRecords = try store.networkPorts.loadProject(
+            projectUUID: context.plan.projectResourceUUID
+        ).filter {
+            $0.resourceUUID == node.resourceUUID
+        }
+        guard !portRecords.isEmpty else {
+            return
+        }
+        let group = try exactNetworkPortOperationGroup(
+            context: context
+        )
+        if node.action == .create {
+            _ = try NetworkPortLifecycleCoordinator.confirmActive(
+                node: node,
+                plan: context.plan,
+                group: group,
+                inventory: inventory,
+                store: store
+            )
+            return
+        }
+        _ = try NetworkPortLifecycleCoordinator.confirmReleased(
+            node: node,
+            plan: context.plan,
+            group: group,
+            inventory: inventory,
+            store: store
+        )
+    }
+
+    private func exactNetworkPortOperationGroup(
+        context: LifecycleSagaContext
+    ) throws -> OperationGroupRecord {
+        guard let group = try store.operationGroups.load(
+            id: context.groupID
+        ),
+        group.status == .active,
+        group.groupKind == "lifecycle-v1",
+        group.projectID == context.plan.projectID,
+        group.planHash == context.plan.planSHA256,
+        group.groupIdempotencyKey ==
+            context.plan.planSHA256,
+        group.fencingToken == context.fencingToken else {
+            throw HostwrightDiagnostic(
+                code: .runtimeUnavailable,
+                message:
+                    "Port lifecycle lost the exact active operation-group authority."
+            )
+        }
+        return group
     }
 
     private func persistNetworkAttachmentIntent(

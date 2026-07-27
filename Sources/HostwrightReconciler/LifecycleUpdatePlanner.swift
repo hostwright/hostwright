@@ -191,15 +191,18 @@ public enum LifecycleRevisionCodec {
                 $0.hostPort ?? -1,
                 $0.containerPort,
                 $0.protocolName.rawValue,
-                $0.bindAddress ?? ""
+                $0.bindAddress ?? "",
+                $0.allocation.rawValue
             ) < (
                 $1.hostPort ?? -1,
                 $1.containerPort,
                 $1.protocolName.rawValue,
-                $1.bindAddress ?? ""
+                $1.bindAddress ?? "",
+                $1.allocation.rawValue
             )
         }.map {
             [
+                "allocation": $0.allocation.rawValue,
                 "bindAddress": $0.bindAddress.map { $0 as Any } ?? NSNull(),
                 "containerPort": $0.containerPort,
                 "hostPort": $0.hostPort.map { $0 as Any } ?? NSNull(),
@@ -833,12 +836,14 @@ public enum LifecycleRevisionCodec {
         let containerPort: Int
         let hostPort: Int?
         let protocolName: String
+        let allocation: String
 
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: RevisionCodingKey.self)
             try LifecycleRevisionCodec.validateKeys(
                 container,
                 required: ["bindAddress", "containerPort", "hostPort", "protocol"],
+                optional: ["allocation"],
                 path: "ports"
             )
             bindAddress = try container.decodeIfPresent(
@@ -848,6 +853,10 @@ public enum LifecycleRevisionCodec {
             containerPort = try container.decode(Int.self, forKey: "containerPort")
             hostPort = try container.decodeIfPresent(Int.self, forKey: "hostPort")
             protocolName = try container.decode(String.self, forKey: "protocol")
+            allocation = try container.decodeIfPresent(
+                String.self,
+                forKey: "allocation"
+            ) ?? RuntimeHostPortAllocation.fixed.rawValue
         }
 
         var value: RuntimePortMapping {
@@ -855,11 +864,18 @@ public enum LifecycleRevisionCodec {
                 guard let decoded = RuntimePortProtocol(rawValue: protocolName) else {
                     throw LifecycleRevisionCodec.invalidEnum("ports.protocol")
                 }
+                guard let decodedAllocation =
+                        RuntimeHostPortAllocation(rawValue: allocation) else {
+                    throw LifecycleRevisionCodec.invalidEnum(
+                        "ports.allocation"
+                    )
+                }
                 return RuntimePortMapping(
                     hostPort: hostPort,
                     containerPort: containerPort,
                     protocolName: decoded,
-                    bindAddress: bindAddress
+                    bindAddress: bindAddress,
+                    allocation: decodedAllocation
                 )
             }
         }

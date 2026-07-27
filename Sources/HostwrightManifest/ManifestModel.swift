@@ -489,6 +489,122 @@ public struct HostwrightMountSpec: Equatable, Sendable {
     }
 }
 
+public enum HostwrightPortProtocol: String, Equatable, Sendable {
+    case tcp
+    case udp
+}
+
+public struct HostwrightPortSpan: Equatable, Sendable {
+    public let start: Int
+    public let end: Int
+
+    public init(start: Int, end: Int? = nil) {
+        self.start = start
+        self.end = end ?? start
+    }
+
+    public var isSingle: Bool {
+        start == end
+    }
+
+    public var count: Int {
+        (end - start) + 1
+    }
+
+    public var singlePort: Int? {
+        isSingle ? start : nil
+    }
+
+    public var canonicalString: String {
+        isSingle ? String(start) : "\(start)-\(end)"
+    }
+
+    public var closedRange: ClosedRange<Int> {
+        start ... end
+    }
+}
+
+public struct HostwrightPublishedPort: Sendable {
+    public static let localhostBindAddress = "127.0.0.1"
+    public static let dynamicHostPortRange = 49_152 ... 65_535
+
+    public let host: HostwrightPortSpan?
+    public let target: HostwrightPortSpan
+    public let protocolName: HostwrightPortProtocol
+    public let bindAddress: String?
+    public let legacyLiteral: String?
+
+    public init(
+        host: HostwrightPortSpan? = nil,
+        target: HostwrightPortSpan,
+        protocolName: HostwrightPortProtocol = .tcp,
+        bindAddress: String? = nil,
+        legacyLiteral: String? = nil
+    ) {
+        self.host = host
+        self.target = target
+        self.protocolName = protocolName
+        self.bindAddress = bindAddress
+        self.legacyLiteral = legacyLiteral
+    }
+
+    public var effectiveBindAddress: String {
+        bindAddress ?? Self.localhostBindAddress
+    }
+
+    public var hostPort: Int? {
+        host?.singlePort
+    }
+
+    public var containerPort: Int {
+        target.start
+    }
+
+    public var hostPortRange: ClosedRange<Int>? {
+        host?.closedRange
+    }
+
+    public var containerPortRange: ClosedRange<Int> {
+        target.closedRange
+    }
+
+    public var canonicalLegacyLiteral: String? {
+        guard protocolName == .tcp,
+              effectiveBindAddress == Self.localhostBindAddress,
+              let hostPort,
+              let containerPort = target.singlePort else {
+            return nil
+        }
+        return "\(hostPort):\(containerPort)"
+    }
+
+    public static func legacy(_ value: String) -> HostwrightPublishedPort? {
+        let parts = value.split(separator: ":", omittingEmptySubsequences: false)
+        guard parts.count == 2,
+              let hostPort = Int(parts[0]),
+              let containerPort = Int(parts[1]) else {
+            return nil
+        }
+
+        return HostwrightPublishedPort(
+            host: HostwrightPortSpan(start: hostPort),
+            target: HostwrightPortSpan(start: containerPort),
+            protocolName: .tcp,
+            bindAddress: localhostBindAddress,
+            legacyLiteral: value
+        )
+    }
+}
+
+extension HostwrightPublishedPort: Equatable {
+    public static func == (lhs: HostwrightPublishedPort, rhs: HostwrightPublishedPort) -> Bool {
+        lhs.host == rhs.host &&
+            lhs.target == rhs.target &&
+            lhs.protocolName == rhs.protocolName &&
+            lhs.effectiveBindAddress == rhs.effectiveBindAddress
+    }
+}
+
 public struct HostwrightService: Equatable, Sendable {
     public var name: String
     public var image: String?
@@ -506,6 +622,7 @@ public struct HostwrightService: Equatable, Sendable {
     public var secretEnv: [String: HostwrightSecretReference]
     public var labels: [String: String]
     public var ports: [String]
+    public var publishedPorts: [HostwrightPublishedPort]
     public var networks: [HostwrightServiceNetworkAttachment]
     public var volumes: [String]
     public var mounts: [HostwrightMountSpec]
@@ -536,6 +653,7 @@ public struct HostwrightService: Equatable, Sendable {
         secretEnv: [String: HostwrightSecretReference] = [:],
         labels: [String: String] = [:],
         ports: [String] = [],
+        publishedPorts: [HostwrightPublishedPort] = [],
         volumes: [String] = [],
         mounts: [HostwrightMountSpec] = [],
         probes: HostwrightProbes = HostwrightProbes(),
@@ -565,6 +683,7 @@ public struct HostwrightService: Equatable, Sendable {
             secretEnv: secretEnv,
             labels: labels,
             ports: ports,
+            publishedPorts: publishedPorts,
             networks: [],
             volumes: volumes,
             mounts: mounts,
@@ -597,6 +716,7 @@ public struct HostwrightService: Equatable, Sendable {
         secretEnv: [String: HostwrightSecretReference] = [:],
         labels: [String: String] = [:],
         ports: [String] = [],
+        publishedPorts: [HostwrightPublishedPort] = [],
         networks: [HostwrightServiceNetworkAttachment],
         volumes: [String] = [],
         mounts: [HostwrightMountSpec] = [],
@@ -625,7 +745,9 @@ public struct HostwrightService: Equatable, Sendable {
         self.env = env
         self.secretEnv = secretEnv
         self.labels = labels
-        self.ports = ports
+        let normalizedPublishedPorts = publishedPorts.isEmpty ? ports.compactMap(HostwrightPublishedPort.legacy) : publishedPorts
+        self.publishedPorts = normalizedPublishedPorts
+        self.ports = ports.isEmpty ? normalizedPublishedPorts.compactMap(\.canonicalLegacyLiteral) : ports
         self.networks = networks
         self.volumes = volumes
         self.mounts = mounts.isEmpty ? volumes.compactMap(HostwrightMountSpec.legacy) : mounts

@@ -181,9 +181,15 @@ public enum AppleContainerInventoryParser {
                 maximumBytes: maximumStatsBytes
             )
             let payloads = try decoder.decode([StatsPayload].self, from: data)
-            guard payloads.count == 1,
-                  let payload = payloads.first,
-                  payload.id == containerID,
+            guard payloads.count <= 1 else {
+                throw RuntimeAdapterError.outputParseFailed(
+                    "Apple container inventory stats did not identify exactly one observed container."
+                )
+            }
+            guard let payload = payloads.first else {
+                continue
+            }
+            guard payload.id == containerID,
                   payload.numProcesses <= UInt64(Int.max) else {
                 throw RuntimeAdapterError.outputParseFailed(
                     "Apple container inventory stats did not identify exactly one observed container."

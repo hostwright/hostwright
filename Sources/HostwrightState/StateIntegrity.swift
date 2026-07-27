@@ -800,6 +800,11 @@ public struct StateIntegrityService: Sendable {
             UNION ALL SELECT project_uuid FROM network_dns_instances
             UNION ALL SELECT fencing_token FROM network_dns_instances
             UNION ALL SELECT operation_group_id FROM network_dns_instances
+            UNION ALL SELECT id FROM network_port_reservations
+            UNION ALL SELECT project_uuid FROM network_port_reservations
+            UNION ALL SELECT resource_uuid FROM network_port_reservations
+            UNION ALL SELECT fencing_token FROM network_port_reservations
+            UNION ALL SELECT operation_group_id FROM network_port_reservations
             """
         ).compactMap { $0.first ?? nil }
         return identities.filter { !HostwrightResourceUUID.isValid($0) }.count
@@ -1793,7 +1798,8 @@ public struct StateIntegrityService: Sendable {
         "storage_capacity_admissions",
         "network_resources",
         "network_attachments",
-        "network_dns_instances"
+        "network_dns_instances",
+        "network_port_reservations"
     ]
 
     private static let requiredIndexes = [
@@ -1883,6 +1889,10 @@ public struct StateIntegrityService: Sendable {
         "network_attachments_resource_idx",
         "network_attachments_operation_idx",
         "network_dns_instances_project_idx",
-        "network_dns_instances_operation_idx"
+        "network_dns_instances_operation_idx",
+        "network_port_reservations_active_idx",
+        "network_port_reservations_project_idx",
+        "network_port_reservations_resource_idx",
+        "network_port_reservations_operation_idx"
     ]
 }

@@ -819,8 +819,8 @@ public enum RuntimeInventoryBuilder {
         return RuntimeInventoryInitConfiguration(
             executable: try text(configuration.executable, redactionPolicy: redactionPolicy),
             arguments: try configuration.arguments.map {
-                let value = try boundedText($0, allowEmpty: true)
-                return try boundedText(redactionPolicy.redact(value), allowEmpty: true)
+                let value = try boundedArgumentText($0, allowEmpty: true)
+                return try boundedArgumentText(redactionPolicy.redact(value), allowEmpty: true)
             },
             environment: environment,
             workingDirectory: try optionalText(
@@ -1017,6 +1017,18 @@ public enum RuntimeInventoryBuilder {
         guard allowEmpty || !value.isEmpty,
               value.utf8.count <= RuntimeInventoryLimits.maximumStringBytes,
               value.rangeOfCharacter(from: .controlCharacters) == nil else {
+            throw RuntimeInventoryError.malformedRecord
+        }
+        return value
+    }
+
+    private static func boundedArgumentText(_ value: String, allowEmpty: Bool) throws -> String {
+        guard allowEmpty || !value.isEmpty,
+              value.utf8.count <= RuntimeInventoryLimits.maximumStringBytes,
+              value.unicodeScalars.allSatisfy({
+                  $0 == "\n" ||
+                      !CharacterSet.controlCharacters.contains($0)
+              }) else {
             throw RuntimeInventoryError.malformedRecord
         }
         return value

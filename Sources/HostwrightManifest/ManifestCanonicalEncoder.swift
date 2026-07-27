@@ -175,7 +175,7 @@ public enum ManifestCanonicalEncoder {
                 to: &lines
             )
             appendStringMap(service.labels, key: "labels", to: &lines)
-            appendBlockArray(service.ports, key: "ports", to: &lines)
+            appendPublishedPorts(service.publishedPorts, to: &lines)
             appendServiceNetworks(service.networks, to: &lines)
             appendMounts(service.mounts, to: &lines)
 
@@ -372,6 +372,26 @@ public enum ManifestCanonicalEncoder {
         for value in values {
             lines.append("      - \(quote(value))")
         }
+    }
+
+    private static func appendPublishedPorts(_ values: [HostwrightPublishedPort], to lines: inout [String]) {
+        guard !values.isEmpty else { return }
+        lines.append("    ports:")
+        for value in values {
+            lines.append("      - bind: \(quote(value.effectiveBindAddress))")
+            if let host = value.host {
+                lines.append("        host: \(canonicalPortSpan(host))")
+            }
+            lines.append("        target: \(canonicalPortSpan(value.target))")
+            lines.append("        protocol: \(quote(value.protocolName.rawValue))")
+        }
+    }
+
+    private static func canonicalPortSpan(_ value: HostwrightPortSpan) -> String {
+        if value.isSingle {
+            return String(value.start)
+        }
+        return quote(value.canonicalString)
     }
 
     private static func appendMounts(_ mounts: [HostwrightMountSpec], to lines: inout [String]) {

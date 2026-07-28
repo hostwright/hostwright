@@ -691,6 +691,77 @@ final class NetworkHelperTests: XCTestCase {
         }
     }
 
+    func testDispatcherStaleRemoveKeepsActiveHostAccessBindings() throws {
+        guard let interfaceAddress = firstActiveNonLoopbackIPv4()
+        else {
+            throw XCTSkip("No active non-loopback IPv4 interface is available.")
+        }
+        let target = try makeLoopbackTCPServer()
+        defer { Darwin.close(target.descriptor) }
+
+        try withStore { store, _ in
+            let broker = NetworkHelperHostAccessBroker()
+            let dispatcher = NetworkHelperDispatcher(
+                store: store,
+                hostAccessBroker: broker
+            )
+            let binding = ProjectDNSHostAccessBinding(
+                hostname: "host-api.internal",
+                protocolName: .tcp,
+                addressClass: .loopback,
+                listenAddress: interfaceAddress,
+                clientCIDR: "\(interfaceAddress)/32",
+                targetAddress: "127.0.0.1",
+                port: target.port
+            )
+            let first = identity()
+            let second = identity(generation: 2, fence: secondFence)
+
+            _ = try dispatcher.dispatch(
+                frame: try NetworkHelperCanonicalJSON.frame(
+                    NetworkHelperRequest(
+                        operation: .apply,
+                        identity: first,
+                        corefile: corefile(),
+                        hostAccessBindings: [binding]
+                    )
+                )
+            )
+            let applied = try NetworkHelperCanonicalJSON.decodeFrame(
+                NetworkHelperResponse.self,
+                from: dispatcher.dispatch(
+                    frame: try NetworkHelperCanonicalJSON.frame(
+                        NetworkHelperRequest(
+                            operation: .apply,
+                            identity: second,
+                            corefile: corefile(),
+                            hostAccessBindings: [binding],
+                            predecessorFencingToken: firstFence
+                        )
+                    )
+                )
+            )
+            let staleRemove = try NetworkHelperCanonicalJSON.decodeFrame(
+                NetworkHelperResponse.self,
+                from: dispatcher.dispatch(
+                    frame: try NetworkHelperCanonicalJSON.frame(
+                        NetworkHelperRequest(
+                            operation: .remove,
+                            identity: first
+                        )
+                    )
+                )
+            )
+
+            XCTAssertEqual(staleRemove.error?.code, .conflict)
+            XCTAssertEqual(
+                broker.sha256(identity: second),
+                applied.status?.hostAccessSHA256
+            )
+            XCTAssertTrue(broker.hasActiveBindings)
+        }
+    }
+
     func testRuntimeDirectorySocketModesAndSameUIDAuthentication() throws {
         let parent = try makePrivateParent()
         defer { try? FileManager.default.removeItem(at: parent) }

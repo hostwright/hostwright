@@ -208,7 +208,7 @@ public struct RuntimeNetworkProviderCapabilities: Codable, Equatable, Sendable {
         },
         modes: RuntimeNetworkMode.allCases,
         ipv4AddressModes: [.automatic, .cidr],
-        ipv6AddressModes: [.disabled],
+        ipv6AddressModes: [.automatic, .cidr],
         attachmentTiming: .containerCreateOnly,
         hostAccess: .guardedBroker
     )

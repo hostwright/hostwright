@@ -1839,7 +1839,7 @@ final class HostwrightManifestTests: XCTestCase {
             Set(properties.keys),
             [
                 "version", "project", "imagePolicy", "imageTrust", "imageSBOM",
-                "imageVulnerability", "imageProvenance", "volumes", "services"
+                "imageVulnerability", "imageProvenance", "volumes", "networks", "services"
             ]
         )
         let required = try XCTUnwrap(schemaJSON["required"] as? [String])
@@ -2229,6 +2229,13 @@ final class HostwrightManifestTests: XCTestCase {
         XCTAssertEqual(
             (hostAccess["items"] as? [String: Any])?["$ref"] as? String,
             "#/$defs/hostAccessEndpoint"
+        )
+        let hostAccessEndpoint = try XCTUnwrap(
+            definitions["hostAccessEndpoint"] as? [String: Any]
+        )
+        XCTAssertEqual(
+            hostAccessEndpoint["required"] as? [String],
+            ["hostname", "protocol", "addressClass", "port"]
         )
         let serviceNetworks = try XCTUnwrap(
             serviceProperties["networks"] as? [String: Any]

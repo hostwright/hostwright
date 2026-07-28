@@ -73,7 +73,7 @@ final class NetworkLifecycleCoordinatorTests: XCTestCase {
         XCTAssertEqual(statusNetworks.first?["name"] as? String, "backend")
         XCTAssertEqual(
             statusNetworks.first?["observedIPv6"] as? [String],
-            []
+            ["fd88:1::/64"]
         )
         XCTAssertEqual(
             try fixture.store.operationGroups.loadAll().map(\.status),
@@ -127,13 +127,13 @@ final class NetworkLifecycleCoordinatorTests: XCTestCase {
         )
     }
 
-    func testUnsupportedIPv6RefusesBeforeIntentOrMutation()
+    func testUnsupportedIPv6DisabledRefusesBeforeIntentOrMutation()
         async throws
     {
         let fixture = try makeFixture(
             networkNames: ["dual-stack"],
             ipv4: .cidr("10.77.0.0/24"),
-            ipv6: .cidr("fd77::/64")
+            ipv6: .disabled
         )
         defer { fixture.cleanup() }
 
@@ -181,18 +181,22 @@ final class NetworkLifecycleCoordinatorTests: XCTestCase {
         XCTAssertEqual(try fixture.store.operationGroups.loadAll(), [])
     }
 
-    func testMissingObservedFamilyLeavesInterruptedDurableIntent()
+    func testMissingObservedFamilyCompensatesOnlyExactCreatedNetwork()
         async throws
     {
         let fixture = try makeFixture(
             networkNames: ["backend"],
             ipv4: .cidr("192.168.88.0/24"),
-            ipv6: .disabled,
+            ipv6: .automatic,
             createdAddresses: []
         )
         defer { fixture.cleanup() }
         let desired = try XCTUnwrap(
             fixture.preparation.desiredState.networks.first
+        )
+        await fixture.runtime.seedUnmanagedNetwork(
+            name: "unmanaged",
+            addresses: ["192.168.99.0/24", "192.168.99.1"]
         )
 
         await XCTAssertThrowsErrorAsync {
@@ -205,21 +209,25 @@ final class NetworkLifecycleCoordinatorTests: XCTestCase {
         }
 
         let audit = await fixture.runtime.audit()
-        XCTAssertEqual(audit.operations, [.create("backend")])
-        let record = try XCTUnwrap(
+        XCTAssertEqual(
+            audit.operations,
+            [.create("backend"), .delete("backend")]
+        )
+        XCTAssertEqual(audit.deleteIntentChecks, [true])
+        XCTAssertNil(
             try fixture.store.networks.loadNetwork(
                 id: desired.identity.resourceUUID
             )
         )
-        XCTAssertEqual(record.lifecycleState, .creating)
-        XCTAssertEqual(record.finalizerState, .pending)
+        let networkNames = await fixture.runtime.networkNames()
+        XCTAssertEqual(networkNames, ["unmanaged"])
         let group = try XCTUnwrap(
             try fixture.store.operationGroups.loadAll().first
         )
-        XCTAssertEqual(group.status, .interrupted)
+        XCTAssertEqual(group.status, .failed)
         XCTAssertEqual(
             group.checkpoint,
-            "address-verification-failed"
+            "address-verification-compensated"
         )
     }
 
@@ -863,7 +871,7 @@ private func makeFixture(
     networkNames: [String],
     createBehavior: NetworkCoordinatorCreateBehavior = .succeed,
     ipv4: RuntimeNetworkAddressRequest = .automatic,
-    ipv6: RuntimeNetworkAddressRequest = .disabled,
+    ipv6: RuntimeNetworkAddressRequest = .automatic,
     createdAddresses: [String]? = nil
 ) throws -> NetworkCoordinatorFixture {
     let root = FileManager.default.temporaryDirectory
@@ -897,6 +905,7 @@ private func makeFixture(
             let addresses = createdAddresses ?? [
                 "192.168.\(87 + suffix).0/24",
                 "192.168.\(87 + suffix).1",
+                "fd88:\(suffix)::/64",
             ]
             return (name, addresses)
         }

@@ -309,19 +309,17 @@
     },
     "hostAccessEndpoint": {
       "type": "object",
-      "required": ["hostname", "port"],
+      "required": ["hostname", "protocol", "addressClass", "port"],
       "additionalProperties": false,
       "properties": {
         "hostname": {
           "$ref": "#/$defs/hostAccessHostname"
         },
         "protocol": {
-          "enum": ["tcp", "udp"],
-          "default": "tcp"
+          "enum": ["tcp", "udp"]
         },
         "addressClass": {
-          "enum": ["loopback", "interface"],
-          "default": "loopback"
+          "enum": ["loopback", "interface"]
         },
         "port": {
           "type": "integer",

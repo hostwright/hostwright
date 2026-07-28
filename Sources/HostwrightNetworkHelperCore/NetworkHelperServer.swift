@@ -73,8 +73,8 @@ struct NetworkHelperDispatcher: @unchecked Sendable {
                 }
                 status = persisted
             case .remove:
-                hostAccessBroker.remove(identity: request.identity)
                 status = try store.remove(identity: request.identity)
+                hostAccessBroker.remove(identity: request.identity)
             }
             return try NetworkHelperCanonicalJSON.frame(
                 NetworkHelperResponse(

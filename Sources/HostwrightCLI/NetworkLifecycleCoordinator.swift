@@ -185,6 +185,7 @@ enum NetworkLifecycleCoordinator {
                     creating: creating,
                     group: group,
                     preparation: preparation,
+                    provider: provider,
                     adapter: adapter,
                     store: store,
                     originalError: error
@@ -583,13 +584,14 @@ enum NetworkLifecycleCoordinator {
         creating: NetworkStateResourceRecord,
         group: OperationGroupRecord,
         preparation: LifecycleCommandPreparation,
+        provider: any RuntimeNetworkProvider,
         adapter: any RuntimeAdapter,
         store: SQLiteStateStore,
         originalError: Error
     ) async throws {
         do {
             let inventory = try await adapter.inventory()
-            if exactNetwork(
+            if let observed = exactNetwork(
                 desired.identity,
                 in: inventory,
                 providerID: preparation.providerID,
@@ -597,7 +599,25 @@ enum NetworkLifecycleCoordinator {
                 projectGeneration: preparation.projectGeneration,
                 resourceGeneration: Int(creating.generation + 1),
                 fencingToken: group.fencingToken
-            ) != nil {
+            ) {
+                do {
+                    _ = try verifiedAddressObservation(
+                        desired: desired,
+                        observed: observed,
+                        inventory: inventory
+                    )
+                } catch {
+                    try await compensateFailedAddressVerification(
+                        desired: desired,
+                        creating: creating,
+                        group: group,
+                        preparation: preparation,
+                        provider: provider,
+                        adapter: adapter,
+                        store: store
+                    )
+                    throw originalError
+                }
                 try commitAvailable(
                     desired: desired,
                     creating: creating,
@@ -668,6 +688,123 @@ enum NetworkLifecycleCoordinator {
             }
             throw originalError
         }
+    }
+
+    private static func compensateFailedAddressVerification(
+        desired: DesiredRuntimeNetwork,
+        creating: NetworkStateResourceRecord,
+        group: OperationGroupRecord,
+        preparation: LifecycleCommandPreparation,
+        provider: any RuntimeNetworkProvider,
+        adapter: any RuntimeAdapter,
+        store: SQLiteStateStore
+    ) async throws {
+        let authority = try await mutationAuthority(
+            group: group,
+            preparation: preparation,
+            adapter: adapter
+        )
+        let deleting = NetworkStateResourceRecord(
+            id: creating.id,
+            projectUUID: creating.projectUUID,
+            name: creating.name,
+            runtimeName: creating.runtimeName,
+            generation: creating.generation + 1,
+            providerID: creating.providerID,
+            providerGeneration: creating.providerGeneration,
+            fencingToken: group.fencingToken,
+            driver: creating.driver,
+            requestedIPv4: creating.requestedIPv4,
+            requestedIPv6: creating.requestedIPv6,
+            observedIPv4: [],
+            observedIPv6: [],
+            desiredSHA256: creating.desiredSHA256,
+            observedSHA256: nil,
+            lifecycleState: .deleting,
+            finalizerState: .releasing,
+            operationGroupID: group.id,
+            createdAt: creating.createdAt,
+            updatedAt: hostwrightTimestamp()
+        )
+        try store.networks.saveNetwork(
+            deleting,
+            replacing: version(creating),
+            authority: authority
+        )
+        _ = try await provider.networkDelete(
+            RuntimeNetworkDeleteRequest(
+                identity: desired.identity,
+                expectedOwnership: RuntimeInventoryOwnershipEvidence(
+                    resourceUUID: creating.id,
+                    projectUUID: creating.projectUUID,
+                    resourceGeneration: Int(creating.generation + 1),
+                    projectGeneration: preparation.projectGeneration,
+                    providerID: preparation.providerID,
+                    providerGeneration: preparation.providerGeneration,
+                    fencingToken: group.fencingToken
+                )
+            ),
+            context: RuntimeMutationContext(
+                providerID: preparation.providerID,
+                capabilitySHA256: preparation.capabilitySHA256,
+                operationID: group.operationID,
+                resourceUUID: creating.id,
+                resourceGeneration: Int(deleting.generation),
+                projectResourceUUID: preparation.projectResourceUUID,
+                projectGeneration: preparation.projectGeneration,
+                providerGeneration: preparation.providerGeneration,
+                fencingToken: group.fencingToken
+            )
+        )
+        let after = try await adapter.inventory()
+        guard collision(desired.identity, in: after) == nil else {
+            throw conflict(
+                "Network address-verification compensation did not produce exact absence."
+            )
+        }
+        let deleted = NetworkStateResourceRecord(
+            id: deleting.id,
+            projectUUID: deleting.projectUUID,
+            name: deleting.name,
+            runtimeName: deleting.runtimeName,
+            generation: deleting.generation + 1,
+            providerID: deleting.providerID,
+            providerGeneration: deleting.providerGeneration,
+            fencingToken: deleting.fencingToken,
+            driver: deleting.driver,
+            requestedIPv4: deleting.requestedIPv4,
+            requestedIPv6: deleting.requestedIPv6,
+            observedIPv4: [],
+            observedIPv6: [],
+            desiredSHA256: deleting.desiredSHA256,
+            observedSHA256: after.semanticSHA256,
+            lifecycleState: .deleted,
+            finalizerState: .released,
+            operationGroupID: group.id,
+            createdAt: deleting.createdAt,
+            updatedAt: hostwrightTimestamp()
+        )
+        try store.networks.saveNetwork(
+            deleted,
+            replacing: version(deleting),
+            authority: authority
+        )
+        try checkpoint(
+            group,
+            name: "compensation-observed",
+            verification: #"{"networkUUID":"\#(creating.id)","absenceSHA256":"\#(after.semanticSHA256)"}"#,
+            store: store
+        )
+        try finish(
+            group,
+            status: .failed,
+            checkpoint: "address-verification-compensated",
+            store: store
+        )
+        _ = try store.networks.removeDeletedNetwork(
+            id: deleted.id,
+            expected: version(deleted)
+        )
     }
 
     private static func removeNetwork(

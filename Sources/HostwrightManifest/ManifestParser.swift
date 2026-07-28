@@ -974,9 +974,11 @@ private struct ManifestNodeDecoder {
                 path: "\(itemPath).hostname",
                 message: "Host access endpoint hostname is required."
             )
-            let rawProtocol = try values["protocol"].map {
-                try string($0, path: "\(itemPath).protocol")
-            } ?? HostwrightHostAccessProtocol.tcp.rawValue
+            let rawProtocol = try requiredString(
+                values["protocol"],
+                path: "\(itemPath).protocol",
+                message: "Host access endpoint protocol is required."
+            )
             guard let protocolName = HostwrightHostAccessProtocol(
                 rawValue: rawProtocol
             ) else {
@@ -987,9 +989,11 @@ private struct ManifestNodeDecoder {
                     path: "\(itemPath).protocol"
                 )
             }
-            let rawAddressClass = try values["addressClass"].map {
-                try string($0, path: "\(itemPath).addressClass")
-            } ?? HostwrightHostAccessAddressClass.loopback.rawValue
+            let rawAddressClass = try requiredString(
+                values["addressClass"],
+                path: "\(itemPath).addressClass",
+                message: "Host access endpoint addressClass is required."
+            )
             guard let addressClass =
                     HostwrightHostAccessAddressClass(
                         rawValue: rawAddressClass

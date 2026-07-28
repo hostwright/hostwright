@@ -422,6 +422,8 @@ final class Phase07NetworkManifestTests: XCTestCase {
                 networks: [guarded]
                 hostAccess:
                   - hostname: database.hostwright.internal
+                    protocol: tcp
+                    addressClass: loopback
                     port: 5432
                   - hostname: cache.hostwright.internal
                     protocol: udp
@@ -442,6 +444,8 @@ final class Phase07NetworkManifestTests: XCTestCase {
                 ),
                 HostwrightHostAccessEndpoint(
                     hostname: "database.hostwright.internal",
+                    protocolName: .tcp,
+                    addressClass: .loopback,
                     port: 5432
                 )
             ]
@@ -473,6 +477,8 @@ final class Phase07NetworkManifestTests: XCTestCase {
                 hostAccessManifest(
                     """
                     - hostname: "\(hostname)"
+                      protocol: tcp
+                      addressClass: loopback
                       port: 8080
                     """
                 ),
@@ -485,6 +491,8 @@ final class Phase07NetworkManifestTests: XCTestCase {
             hostAccessManifest(
                 """
                 - hostname: api.hostwright.internal
+                  protocol: tcp
+                  addressClass: loopback
                   port: 0
                 """
             ),
@@ -496,6 +504,8 @@ final class Phase07NetworkManifestTests: XCTestCase {
             hostAccessManifest(
                 """
                 - hostname: api.hostwright.internal
+                  protocol: tcp
+                  addressClass: loopback
                   port: 8080
                 - hostname: api.hostwright.internal
                   protocol: tcp
@@ -518,6 +528,8 @@ final class Phase07NetworkManifestTests: XCTestCase {
             hostAccessManifest(
                 """
                 - hostname: api.hostwright.internal
+                  protocol: tcp
+                  addressClass: loopback
                   port: 8080
                   redirect: true
                 """
@@ -531,6 +543,8 @@ final class Phase07NetworkManifestTests: XCTestCase {
             .map {
                 """
                 - hostname: host-\($0).hostwright.internal
+                  protocol: tcp
+                  addressClass: loopback
                   port: 8080
                 """
             }
@@ -539,6 +553,31 @@ final class Phase07NetworkManifestTests: XCTestCase {
             hostAccessManifest(endpoints),
             contains: "must declare at most 64 endpoints",
             path: "$.services.api.hostAccess"
+        )
+    }
+
+    func testGuardedHostAccessRequiresEveryEndpointField() {
+        assertFailure(
+            hostAccessManifest(
+                """
+                - hostname: api.hostwright.internal
+                  addressClass: loopback
+                  port: 8080
+                """
+            ),
+            contains: "protocol is required",
+            path: "$.services.api.hostAccess[0].protocol"
+        )
+        assertFailure(
+            hostAccessManifest(
+                """
+                - hostname: api.hostwright.internal
+                  protocol: tcp
+                  port: 8080
+                """
+            ),
+            contains: "addressClass is required",
+            path: "$.services.api.hostAccess[0].addressClass"
         )
     }
 

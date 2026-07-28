@@ -6,18 +6,23 @@ import HostwrightRuntime
 struct NetworkHelperDispatcher: @unchecked Sendable {
     let store: NetworkHelperStateStore
     let hostAccessBroker: NetworkHelperHostAccessBroker
+    let ingressBroker: NetworkHelperIngressBroker
 
     init(
         store: NetworkHelperStateStore,
         hostAccessBroker: NetworkHelperHostAccessBroker =
-            NetworkHelperHostAccessBroker()
+            NetworkHelperHostAccessBroker(),
+        ingressBroker: NetworkHelperIngressBroker =
+            NetworkHelperIngressBroker()
     ) {
         self.store = store
         self.hostAccessBroker = hostAccessBroker
+        self.ingressBroker = ingressBroker
     }
 
-    var hasActiveHostAccessBindings: Bool {
-        hostAccessBroker.hasActiveBindings
+    var hasActiveBindings: Bool {
+        hostAccessBroker.hasActiveBindings ||
+            ingressBroker.hasActiveBindings
     }
 
     func dispatch(frame: Data) throws -> Data {
@@ -35,41 +40,55 @@ struct NetworkHelperDispatcher: @unchecked Sendable {
                     corefile: request.corefile!,
                     hostAccessBindings:
                         request.hostAccessBindings ?? [],
+                    ingressBindings:
+                        request.ingressBindings ?? [],
                     predecessorFencingToken:
                         request.predecessorFencingToken
                 )
                 status = try activatingStatus(
                     persisted,
                     identity: request.identity,
-                    bindings: request.hostAccessBindings ?? []
+                    hostAccessBindings:
+                        request.hostAccessBindings ?? [],
+                    ingressBindings:
+                        request.ingressBindings ?? []
                 )
             case .status:
                 let persisted = try store.status(
                     identity: request.identity
                 )
                 if persisted.disposition == .active {
-                    let bindings = try store
+                    let hostAccessBindings = try store
                         .activeHostAccessConfigurations()
+                        .first(where: {
+                            $0.identity == request.identity
+                        })?.bindings ?? []
+                    let ingressBindings = try store
+                        .activeIngressConfigurations()
                         .first(where: {
                             $0.identity == request.identity
                         })?.bindings ?? []
                     status = try activatingStatus(
                         persisted,
                         identity: request.identity,
-                        bindings: bindings
+                        hostAccessBindings: hostAccessBindings,
+                        ingressBindings: ingressBindings
                     )
                 } else {
-                    status = withHostAccessActivity(
+                    status = withActivity(
                         persisted,
-                        active: false
+                        hostAccessActive: false,
+                        ingressActive: false
                     )
                 }
             case .remove:
                 let removed = try store.remove(identity: request.identity)
                 hostAccessBroker.remove(identity: request.identity)
-                status = withHostAccessActivity(
+                ingressBroker.remove(identity: request.identity)
+                status = withActivity(
                     removed,
-                    active: false
+                    hostAccessActive: false,
+                    ingressActive: false
                 )
             }
             return try NetworkHelperCanonicalJSON.frame(
@@ -93,54 +112,72 @@ struct NetworkHelperDispatcher: @unchecked Sendable {
     private func activatingStatus(
         _ persisted: NetworkHelperStatus,
         identity: NetworkHelperDNSIdentity,
-        bindings: [ProjectDNSHostAccessBinding]
+        hostAccessBindings: [ProjectDNSHostAccessBinding],
+        ingressBindings: [ProjectIngressListenerBinding]
     ) throws -> NetworkHelperStatus {
         guard persisted.disposition == .active else {
-            return withHostAccessActivity(
+            return withActivity(
                 persisted,
-                active: false
+                hostAccessActive: false,
+                ingressActive: false
             )
         }
-        guard let expected = persisted.hostAccessSHA256 else {
+        let hostAccessActive: Bool
+        if let expected = persisted.hostAccessSHA256 {
+            if hostAccessBroker.sha256(identity: identity) == expected {
+                hostAccessActive = true
+            } else {
+                do {
+                    hostAccessActive = try hostAccessBroker.apply(
+                        identity: identity,
+                        bindings: hostAccessBindings
+                    ) == expected
+                } catch NetworkHelperError.bindingUnavailable {
+                    hostAccessActive = false
+                }
+            }
+        } else {
             hostAccessBroker.remove(identity: identity)
-            return withHostAccessActivity(
-                persisted,
-                active: true
-            )
+            hostAccessActive = true
         }
-        if hostAccessBroker.sha256(identity: identity) == expected {
-            return withHostAccessActivity(
-                persisted,
-                active: true
-            )
+        let ingressActive: Bool
+        if let expected = persisted.ingressSHA256 {
+            if ingressBroker.sha256(identity: identity) == expected {
+                ingressActive = true
+            } else {
+                do {
+                    ingressActive = try ingressBroker.apply(
+                        identity: identity,
+                        bindings: ingressBindings
+                    ) == expected
+                } catch NetworkHelperError.bindingUnavailable {
+                    ingressActive = false
+                }
+            }
+        } else {
+            ingressBroker.remove(identity: identity)
+            ingressActive = true
         }
-        do {
-            let applied = try hostAccessBroker.apply(
-                identity: identity,
-                bindings: bindings
-            )
-            return withHostAccessActivity(
-                persisted,
-                active: applied == expected
-            )
-        } catch NetworkHelperError.bindingUnavailable {
-            return withHostAccessActivity(
-                persisted,
-                active: false
-            )
-        }
+        return withActivity(
+            persisted,
+            hostAccessActive: hostAccessActive,
+            ingressActive: ingressActive
+        )
     }
 
-    private func withHostAccessActivity(
+    private func withActivity(
         _ status: NetworkHelperStatus,
-        active: Bool
+        hostAccessActive: Bool,
+        ingressActive: Bool
     ) -> NetworkHelperStatus {
         NetworkHelperStatus(
             disposition: status.disposition,
             identity: status.identity,
             corefileSHA256: status.corefileSHA256,
             hostAccessSHA256: status.hostAccessSHA256,
-            hostAccessActive: active,
+            hostAccessActive: hostAccessActive,
+            ingressSHA256: status.ingressSHA256,
+            ingressActive: ingressActive,
             reason: status.reason
         )
     }
@@ -318,7 +355,7 @@ struct NetworkHelperUnixServer: Sendable {
         defer { try? lease.closeAndRemove() }
         var lastActivity = monotonicMilliseconds()
 
-        while dispatcher.hasActiveHostAccessBindings
+        while dispatcher.hasActiveBindings
             || monotonicMilliseconds() - lastActivity
                 < idleTimeoutMilliseconds {
             var pollDescriptor = pollfd(

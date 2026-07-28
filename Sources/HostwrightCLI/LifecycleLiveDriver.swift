@@ -228,6 +228,7 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
             manifestBaseDirectory: manifestBaseDirectory(for: options.manifestPath),
             mappingIssues: mapping.issues,
             desiredState: desiredState,
+            ingress: mapping.ingress,
             previousDesiredState: previousDesiredState,
             observedState: observedState,
             observationSHA256: inventory.semanticSHA256,
@@ -374,6 +375,7 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
                 projectUUID: preparation.projectResourceUUID
             ) != nil
         if !preparation.desiredState.networks.isEmpty ||
+            !preparation.ingress.isEmpty ||
             hasPersistedProjectDNS {
             let helper = try LiveProjectDNSHelperDriver(
                 environment: environment,
@@ -508,7 +510,10 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
         if result.status == .succeeded ||
             result.status == .alreadySucceeded {
             if compiled.plan.command != .remove,
-               !preparation.desiredState.networks.isEmpty,
+               (
+                   !preparation.desiredState.networks.isEmpty ||
+                       !preparation.ingress.isEmpty
+               ),
                let projectDNSHelper,
                let projectDNSRuntime {
                 let freshObserved = try hostwrightWaitForAsync {

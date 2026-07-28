@@ -7,10 +7,16 @@ import HostwrightSecrets
 
 public struct ManifestRuntimeMappingResult: Equatable, Sendable {
     public let desiredState: DesiredRuntimeState
+    public let ingress: [String: HostwrightIngressListener]
     public let issues: [PlanIssue]
 
-    public init(desiredState: DesiredRuntimeState, issues: [PlanIssue] = []) {
+    public init(
+        desiredState: DesiredRuntimeState,
+        ingress: [String: HostwrightIngressListener] = [:],
+        issues: [PlanIssue] = []
+    ) {
         self.desiredState = desiredState
+        self.ingress = ingress
         self.issues = issues.sorted { $0.orderingKey < $1.orderingKey }
     }
 }
@@ -34,6 +40,11 @@ public enum ManifestRuntimeMapper {
             (try? HostwrightLocalPathResolver.resolve()
                 .layout.publishedSocketDirectory)
         var issues: [PlanIssue] = []
+        appendIngressAvailabilityIssues(
+            manifest.ingress,
+            projectName: projectName,
+            issues: &issues
+        )
 
         let networks = manifest.networks
             .sorted { $0.key < $1.key }
@@ -70,8 +81,35 @@ public enum ManifestRuntimeMapper {
                 networks: networks,
                 services: services
             ),
+            ingress: manifest.ingress,
             issues: issues
         )
+    }
+
+    private static func appendIngressAvailabilityIssues(
+        _ ingress: [String: HostwrightIngressListener],
+        projectName: String,
+        issues: inout [PlanIssue]
+    ) {
+        for (name, listener) in ingress.sorted(by: { $0.key < $1.key })
+        where !listener.exposure.isDefaultLocalhost {
+            issues.append(
+                PlanIssue(
+                    kind: .unsupportedFeature,
+                    severity: .blocker,
+                    identity: RuntimeServiceIdentity(
+                        projectName: projectName,
+                        serviceName:
+                            listener.routes.first?.targetService ??
+                            "ingress"
+                    ),
+                    message:
+                        "Ingress listener '\(name)' requires a qualified secure TLS/mTLS listener before non-localhost activation.",
+                    stableDetailKey:
+                        "ingress:\(name):\(listener.bindAddress):\(listener.port)"
+                )
+            )
+        }
     }
 
     private static func map(

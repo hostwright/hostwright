@@ -125,6 +125,7 @@ public enum ManifestCanonicalEncoder {
         }
         appendVolumeDeclarations(manifest.volumes, to: &lines)
         appendNetworkDefinitions(manifest.networks, to: &lines)
+        appendIngress(manifest.ingress, to: &lines)
         lines.append("services:")
 
         for service in manifest.services.sorted(by: { $0.name < $1.name }) {
@@ -273,6 +274,63 @@ public enum ManifestCanonicalEncoder {
                 lines.append(
                     "    ipv6: \(quote(canonicalNetworkAddress(network.ipv6, ipv6: true)))"
                 )
+            }
+        }
+    }
+
+    private static func appendIngress(
+        _ ingress: [String: HostwrightIngressListener],
+        to lines: inout [String]
+    ) {
+        guard !ingress.isEmpty else { return }
+        lines.append("ingress:")
+        for (name, listener) in ingress.sorted(by: { $0.key < $1.key }) {
+            lines.append("  \(quote(name)):")
+            if listener.bindAddress !=
+                NetworkBindAddressPolicy.localhostBindAddress {
+                lines.append(
+                    "    bind: \(quote(listener.bindAddress))"
+                )
+            }
+            if !listener.exposure.isDefaultLocalhost {
+                lines.append("    exposure:")
+                lines.append(
+                    "      scope: \(quote(listener.exposure.scope.rawValue))"
+                )
+                lines.append(
+                    "      interfaces: \(array(listener.exposure.interfaces))"
+                )
+                lines.append(
+                    "      networkClasses: \(array(listener.exposure.networkClasses.map(\.rawValue)))"
+                )
+                lines.append(
+                    "      allowedCIDRs: \(array(listener.exposure.allowedCIDRs))"
+                )
+                lines.append(
+                    "      authentication: \(quote(listener.exposure.authentication.rawValue))"
+                )
+            }
+            lines.append("    port: \(listener.port)")
+            lines.append("    routes:")
+            for route in listener.routes.sorted(
+                by: HostwrightIngressRoute.canonicalPrecedes
+            ) {
+                lines.append(
+                    "      - hostname: \(quote(route.hostname))"
+                )
+                lines.append(
+                    "        pathPrefix: \(quote(route.pathPrefix))"
+                )
+                lines.append(
+                    "        methods: \(array(route.methods.sorted()))"
+                )
+                lines.append(
+                    "        protocol: \(quote(route.protocolName.rawValue))"
+                )
+                lines.append(
+                    "        targetService: \(quote(route.targetService))"
+                )
+                lines.append("        targetPort: \(route.targetPort)")
             }
         }
     }

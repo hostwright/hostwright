@@ -125,6 +125,128 @@ public struct ProjectDNSHostAccessBinding:
     }
 }
 
+public struct ProjectIngressBackend:
+    Codable,
+    Equatable,
+    Hashable,
+    Sendable
+{
+    public let serviceUUID: String
+    public let address: String
+    public let port: Int
+
+    public init(
+        serviceUUID: String,
+        address: String,
+        port: Int
+    ) {
+        self.serviceUUID = serviceUUID
+        self.address = address
+        self.port = port
+    }
+
+    public static func canonicalPrecedes(
+        _ lhs: Self,
+        _ rhs: Self
+    ) -> Bool {
+        (lhs.serviceUUID, lhs.address, lhs.port) <
+            (rhs.serviceUUID, rhs.address, rhs.port)
+    }
+}
+
+public struct ProjectIngressRouteBinding:
+    Codable,
+    Equatable,
+    Sendable
+{
+    public let hostname: String
+    public let pathPrefix: String
+    public let methods: [String]
+    public let protocolName: HostwrightIngressRouteProtocol
+    public let targetServiceUUIDs: [String]
+    public let targetPort: Int
+    public let backends: [ProjectIngressBackend]
+
+    public init(
+        hostname: String,
+        pathPrefix: String,
+        methods: [String],
+        protocolName: HostwrightIngressRouteProtocol,
+        targetServiceUUIDs: [String],
+        targetPort: Int,
+        backends: [ProjectIngressBackend]
+    ) {
+        self.hostname = hostname
+        self.pathPrefix = pathPrefix
+        self.methods = methods.sorted()
+        self.protocolName = protocolName
+        self.targetServiceUUIDs = targetServiceUUIDs.sorted()
+        self.targetPort = targetPort
+        self.backends = backends.sorted(
+            by: ProjectIngressBackend.canonicalPrecedes
+        )
+    }
+
+    public static func canonicalPrecedes(
+        _ lhs: Self,
+        _ rhs: Self
+    ) -> Bool {
+        let lhsFields = [
+            lhs.hostname,
+            lhs.pathPrefix,
+            lhs.protocolName.rawValue,
+            lhs.methods.joined(separator: ","),
+            lhs.targetServiceUUIDs.joined(separator: ","),
+            String(format: "%05d", lhs.targetPort)
+        ]
+        let rhsFields = [
+            rhs.hostname,
+            rhs.pathPrefix,
+            rhs.protocolName.rawValue,
+            rhs.methods.joined(separator: ","),
+            rhs.targetServiceUUIDs.joined(separator: ","),
+            String(format: "%05d", rhs.targetPort)
+        ]
+        return lhsFields.lexicographicallyPrecedes(rhsFields)
+    }
+}
+
+public struct ProjectIngressListenerBinding:
+    Codable,
+    Equatable,
+    Sendable
+{
+    public let name: String
+    public let bindAddress: String
+    public let port: Int
+    public let exposure: HostwrightPortExposurePolicy
+    public let routes: [ProjectIngressRouteBinding]
+
+    public init(
+        name: String,
+        bindAddress: String,
+        port: Int,
+        exposure: HostwrightPortExposurePolicy,
+        routes: [ProjectIngressRouteBinding]
+    ) {
+        self.name = name
+        self.bindAddress = bindAddress
+        self.port = port
+        self.exposure = exposure
+        self.routes = routes.sorted(
+            by: ProjectIngressRouteBinding.canonicalPrecedes
+        )
+    }
+
+    public static func canonicalPrecedes(
+        _ lhs: Self,
+        _ rhs: Self
+    ) -> Bool {
+        (lhs.bindAddress, lhs.port, lhs.name) <
+            (rhs.bindAddress, rhs.port, rhs.name)
+    }
+}
+
 public struct ProjectDNSOptions: Codable, Equatable, Sendable {
     public let ttlSeconds: Int
     public let negativeTTLSeconds: Int
@@ -149,6 +271,7 @@ public struct ProjectDNSPlan: Codable, Equatable, Sendable {
     public let zone: String
     public let records: [ProjectDNSRecord]
     public let hostAccessBindings: [ProjectDNSHostAccessBinding]
+    public let ingressBindings: [ProjectIngressListenerBinding]
     public let ttlSeconds: Int
     public let negativeTTLSeconds: Int
     public let upstreams: [String]
@@ -161,6 +284,7 @@ public struct ProjectDNSPlan: Codable, Equatable, Sendable {
         zone: String,
         records: [ProjectDNSRecord],
         hostAccessBindings: [ProjectDNSHostAccessBinding] = [],
+        ingressBindings: [ProjectIngressListenerBinding] = [],
         ttlSeconds: Int,
         negativeTTLSeconds: Int,
         upstreams: [String],
@@ -173,6 +297,9 @@ public struct ProjectDNSPlan: Codable, Equatable, Sendable {
         self.records = records
         self.hostAccessBindings = hostAccessBindings.sorted(
             by: ProjectDNSHostAccessBinding.canonicalPrecedes
+        )
+        self.ingressBindings = ingressBindings.sorted(
+            by: ProjectIngressListenerBinding.canonicalPrecedes
         )
         self.ttlSeconds = ttlSeconds
         self.negativeTTLSeconds = negativeTTLSeconds
@@ -187,6 +314,7 @@ public struct ProjectDNSPlan: Codable, Equatable, Sendable {
         case zone
         case records
         case hostAccessBindings
+        case ingressBindings
         case ttlSeconds
         case negativeTTLSeconds
         case upstreams
@@ -210,6 +338,10 @@ public struct ProjectDNSPlan: Codable, Equatable, Sendable {
             hostAccessBindings: try values.decodeIfPresent(
                 [ProjectDNSHostAccessBinding].self,
                 forKey: .hostAccessBindings
+            ) ?? [],
+            ingressBindings: try values.decodeIfPresent(
+                [ProjectIngressListenerBinding].self,
+                forKey: .ingressBindings
             ) ?? [],
             ttlSeconds: try values.decode(
                 Int.self,
@@ -251,6 +383,7 @@ public enum ProjectDNSPlanningError:
     case nameConflict(name: String, firstOwner: String, secondOwner: String)
     case invalidAddress(family: String, value: String)
     case invalidHostAccess(String)
+    case invalidIngress(String)
     case invalidTTL(kind: String, value: Int, range: ClosedRange<Int>)
     case limitExceeded(kind: String, limit: Int)
 
@@ -268,6 +401,8 @@ public enum ProjectDNSPlanningError:
             return "Invalid \(family) address '\(value)'."
         case .invalidHostAccess(let message):
             return "Invalid host-access binding: \(message)."
+        case .invalidIngress(let message):
+            return "Invalid ingress binding: \(message)."
         case .invalidTTL(let kind, let value, let range):
             return "\(kind) TTL \(value) must be within \(range.lowerBound)...\(range.upperBound) seconds."
         case .limitExceeded(let kind, let limit):
@@ -290,6 +425,7 @@ public enum ProjectDNSPlanner {
         projectUUID: String,
         services: [ProjectDNSService],
         hostAccessBindings: [ProjectDNSHostAccessBinding] = [],
+        ingressBindings: [ProjectIngressListenerBinding] = [],
         options: ProjectDNSOptions = ProjectDNSOptions()
     ) throws -> ProjectDNSPlan {
         let canonicalProjectUUID = try canonicalProjectUUID(projectUUID)
@@ -328,12 +464,16 @@ public enum ProjectDNSPlanner {
         let canonicalHostAccess = try canonicalHostAccessBindings(
             hostAccessBindings
         )
+        let canonicalIngress = ingressBindings.sorted(
+            by: ProjectIngressListenerBinding.canonicalPrecedes
+        )
 
         return ProjectDNSPlan(
             projectUUID: canonicalProjectUUID,
             zone: zone,
             records: records,
             hostAccessBindings: canonicalHostAccess,
+            ingressBindings: canonicalIngress,
             ttlSeconds: options.ttlSeconds,
             negativeTTLSeconds: options.negativeTTLSeconds,
             upstreams: canonicalUpstreams,

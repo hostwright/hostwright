@@ -7,6 +7,9 @@ public enum NetworkHelperProtocolV1 {
     public static let maximumFrameBytes =
         ContainerizationHelperProtocolV1.maximumPayloadBytes
     public static let maximumCorefileBytes = 1 * 1_024 * 1_024
+    public static let maximumIngressRequestLineBytes = 8 * 1_024
+    public static let maximumIngressHeaderBytes = 64 * 1_024
+    public static let maximumIngressBodyBytes = 8 * 1_024 * 1_024
 }
 
 enum NetworkHelperOperation: String, Codable, CaseIterable, Sendable {
@@ -63,6 +66,7 @@ struct NetworkHelperRequest: Codable, Equatable, Sendable {
     let identity: NetworkHelperDNSIdentity
     let corefile: String?
     let hostAccessBindings: [ProjectDNSHostAccessBinding]?
+    let ingressBindings: [ProjectIngressListenerBinding]?
     let predecessorFencingToken: String?
 
     init(
@@ -72,6 +76,7 @@ struct NetworkHelperRequest: Codable, Equatable, Sendable {
         identity: NetworkHelperDNSIdentity,
         corefile: String? = nil,
         hostAccessBindings: [ProjectDNSHostAccessBinding] = [],
+        ingressBindings: [ProjectIngressListenerBinding] = [],
         predecessorFencingToken: String? = nil
     ) {
         self.protocolVersion = protocolVersion
@@ -81,6 +86,9 @@ struct NetworkHelperRequest: Codable, Equatable, Sendable {
         self.corefile = corefile
         self.hostAccessBindings = hostAccessBindings.sorted(
             by: ProjectDNSHostAccessBinding.canonicalPrecedes
+        )
+        self.ingressBindings = ingressBindings.sorted(
+            by: ProjectIngressListenerBinding.canonicalPrecedes
         )
         self.predecessorFencingToken = predecessorFencingToken
     }
@@ -114,10 +122,15 @@ struct NetworkHelperRequest: Codable, Equatable, Sendable {
             _ = try NetworkHelperHostAccessValidation.validated(
                 hostAccessBindings ?? []
             )
+            _ = try NetworkHelperIngressValidation.validated(
+                ingressBindings ?? []
+            )
         case .status, .remove:
             guard corefile == nil,
                   hostAccessBindings == nil ||
                     hostAccessBindings?.isEmpty == true,
+                  ingressBindings == nil ||
+                    ingressBindings?.isEmpty == true,
                   predecessorFencingToken == nil else {
                 throw NetworkHelperError.invalidRequest
             }
@@ -132,6 +145,8 @@ struct NetworkHelperStatus: Codable, Equatable, Sendable {
     let corefileSHA256: String?
     let hostAccessSHA256: String?
     let hostAccessActive: Bool?
+    let ingressSHA256: String?
+    let ingressActive: Bool?
     let reason: String?
 
     init(
@@ -140,6 +155,8 @@ struct NetworkHelperStatus: Codable, Equatable, Sendable {
         corefileSHA256: String?,
         hostAccessSHA256: String? = nil,
         hostAccessActive: Bool? = nil,
+        ingressSHA256: String? = nil,
+        ingressActive: Bool? = nil,
         reason: String?
     ) {
         self.disposition = disposition
@@ -147,6 +164,8 @@ struct NetworkHelperStatus: Codable, Equatable, Sendable {
         self.corefileSHA256 = corefileSHA256
         self.hostAccessSHA256 = hostAccessSHA256
         self.hostAccessActive = hostAccessActive
+        self.ingressSHA256 = ingressSHA256
+        self.ingressActive = ingressActive
         self.reason = reason
     }
 }

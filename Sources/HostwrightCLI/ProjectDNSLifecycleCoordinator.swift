@@ -29,19 +29,25 @@ struct ProjectDNSHelperObservation: Equatable, Sendable {
     let corefileSHA256: String?
     let hostAccessSHA256: String?
     let hostAccessActive: Bool
+    let ingressSHA256: String?
+    let ingressActive: Bool
 
     init(
         disposition: ProjectDNSHelperDisposition,
         corefilePath: String?,
         corefileSHA256: String?,
         hostAccessSHA256: String? = nil,
-        hostAccessActive: Bool = true
+        hostAccessActive: Bool = true,
+        ingressSHA256: String? = nil,
+        ingressActive: Bool = true
     ) {
         self.disposition = disposition
         self.corefilePath = corefilePath
         self.corefileSHA256 = corefileSHA256
         self.hostAccessSHA256 = hostAccessSHA256
         self.hostAccessActive = hostAccessActive
+        self.ingressSHA256 = ingressSHA256
+        self.ingressActive = ingressActive
     }
 }
 
@@ -54,6 +60,7 @@ protocol ProjectDNSHelperDriving: Sendable {
         identity: ProjectDNSHelperIdentity,
         corefile: String,
         hostAccessBindings: [ProjectDNSHostAccessBinding],
+        ingressBindings: [ProjectIngressListenerBinding],
         predecessorFencingToken: String?
     ) async throws -> ProjectDNSHelperObservation
 
@@ -107,7 +114,8 @@ enum ProjectDNSLifecycleCoordinator {
         helper: any ProjectDNSHelperDriving,
         runtime: any ProjectDNSRuntimeDriving
     ) async throws -> ProjectDNSLifecycleReconciliationResult {
-        guard !preparation.desiredState.networks.isEmpty else {
+        guard !preparation.desiredState.networks.isEmpty ||
+                !preparation.ingress.isEmpty else {
             return ProjectDNSLifecycleReconciliationResult(
                 newlyCreatedDNSUUIDs: []
             )
@@ -126,7 +134,10 @@ enum ProjectDNSLifecycleCoordinator {
             projectUUID: preparation.projectResourceUUID,
             desiredState: preparation.desiredState,
             observedState: preparation.observedState,
-            runtimeInventory: try await runtime.inventory()
+            runtimeInventory: try await runtime.inventory(),
+            ingress: preparation.ingress,
+            projectID: preparation.projectID,
+            resourceBindings: preparation.resourceBindings
         )
         let desiredSHA256 = try digest(
             ProjectDNSDesiredEvidence(
@@ -309,7 +320,10 @@ enum ProjectDNSLifecycleCoordinator {
             projectUUID: preparation.projectResourceUUID,
             desiredState: preparation.desiredState,
             observedState: observedState,
-            runtimeInventory: try await runtime.inventory()
+            runtimeInventory: try await runtime.inventory(),
+            ingress: preparation.ingress,
+            projectID: preparation.projectID,
+            resourceBindings: preparation.resourceBindings
         )
         let desiredSHA256 = try digest(
             ProjectDNSDesiredEvidence(
@@ -352,6 +366,7 @@ enum ProjectDNSLifecycleCoordinator {
                 identity: helperIdentity,
                 corefile: plan.corefile,
                 hostAccessBindings: plan.hostAccessBindings,
+                ingressBindings: plan.ingressBindings,
                 predecessorFencingToken:
                     existing.fencingToken
             )
@@ -359,7 +374,9 @@ enum ProjectDNSLifecycleCoordinator {
                 applied,
                 expectedCorefileSHA256: try digest(plan.corefile),
                 expectedHostAccessSHA256:
-                    try hostAccessDigest(plan.hostAccessBindings)
+                    try hostAccessDigest(plan.hostAccessBindings),
+                expectedIngressSHA256:
+                    try ingressDigest(plan.ingressBindings)
             )
             guard let observed = try await exactRuntimeContainer(
                 record: existing,
@@ -792,7 +809,10 @@ enum ProjectDNSLifecycleCoordinator {
                         try hostAccessDigest(
                             plan.hostAccessBindings
                         ),
-                    requireHostAccessActive: false
+                    expectedIngressSHA256:
+                        try ingressDigest(plan.ingressBindings),
+                    requireHostAccessActive: false,
+                    requireIngressActive: false
                 )
                 helperObservation = initialHelper
             case .absent:
@@ -800,6 +820,7 @@ enum ProjectDNSLifecycleCoordinator {
                     identity: helperIdentity,
                     corefile: plan.corefile,
                     hostAccessBindings: plan.hostAccessBindings,
+                    ingressBindings: plan.ingressBindings,
                     predecessorFencingToken: nil
                 )
                 helperAppliedByExecution = true
@@ -811,7 +832,10 @@ enum ProjectDNSLifecycleCoordinator {
                         try hostAccessDigest(
                             plan.hostAccessBindings
                         ),
-                    requireHostAccessActive: false
+                    expectedIngressSHA256:
+                        try ingressDigest(plan.ingressBindings),
+                    requireHostAccessActive: false,
+                    requireIngressActive: false
                 )
             case .conflicting, .quarantined:
                 try await quarantine(
@@ -1204,6 +1228,10 @@ enum ProjectDNSLifecycleCoordinator {
         )
         guard helperObservation.disposition == .active,
               helperObservation.hostAccessActive,
+              (
+                  helperObservation.ingressSHA256 == nil ||
+                      helperObservation.ingressActive
+              ),
               let container = try await exactRuntimeContainer(
                   record: record,
                   preparation: preparation,
@@ -1559,16 +1587,24 @@ enum ProjectDNSLifecycleCoordinator {
         _ observation: ProjectDNSHelperObservation,
         expectedCorefileSHA256: String,
         expectedHostAccessSHA256: String?,
-        requireHostAccessActive: Bool = true
+        expectedIngressSHA256: String?,
+        requireHostAccessActive: Bool = true,
+        requireIngressActive: Bool = true
     ) throws {
         guard observation.disposition == .active,
               observation.corefileSHA256 ==
                 expectedCorefileSHA256,
               observation.hostAccessSHA256 ==
                 expectedHostAccessSHA256,
+              observation.ingressSHA256 ==
+                expectedIngressSHA256,
               (
                   !requireHostAccessActive ||
                       observation.hostAccessActive
+              ),
+              (
+                  !requireIngressActive ||
+                      observation.ingressActive
               ),
               let path = observation.corefilePath,
               path.hasPrefix("/"),
@@ -1586,6 +1622,16 @@ enum ProjectDNSLifecycleCoordinator {
         bindings.isEmpty ? nil : try digest(
             bindings.sorted(
                 by: ProjectDNSHostAccessBinding.canonicalPrecedes
+            )
+        )
+    }
+
+    private static func ingressDigest(
+        _ bindings: [ProjectIngressListenerBinding]
+    ) throws -> String? {
+        bindings.isEmpty ? nil : try digest(
+            bindings.sorted(
+                by: ProjectIngressListenerBinding.canonicalPrecedes
             )
         )
     }

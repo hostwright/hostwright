@@ -701,6 +701,202 @@ final class Phase07NetworkManifestTests: XCTestCase {
         )
     }
 
+    func testIngressParsesDefaultsAndRoundTripsCanonically() throws {
+        let manifest = try ManifestValidator.validated(
+            """
+            version: 2
+            project: ingress-demo
+            networks:
+              backend: {}
+            ingress:
+              public:
+                port: 8080
+                routes:
+                  - hostname: api.hostwright.internal
+                    targetService: api
+                    targetPort: 8080
+                  - hostname: api.hostwright.internal
+                    pathPrefix: /socket
+                    methods: [GET]
+                    protocol: websocket
+                    targetService: api
+                    targetPort: 8080
+            services:
+              api:
+                image: local/api:latest
+                ports: ["8080:8080"]
+                networks: [backend]
+            """
+        )
+
+        let listener = try XCTUnwrap(manifest.ingress["public"])
+        XCTAssertEqual(listener.bindAddress, "127.0.0.1")
+        XCTAssertEqual(listener.exposure, .localhost)
+        XCTAssertEqual(listener.routes.map(\.pathPrefix), ["/", "/socket"])
+        XCTAssertEqual(listener.routes[0].methods, ["GET"])
+        XCTAssertEqual(listener.routes[0].protocolName, .http)
+
+        let canonical = try ManifestCanonicalEncoder.encode(manifest)
+        XCTAssertTrue(canonical.contains("ingress:"))
+        XCTAssertTrue(
+            canonical.contains(
+                "  \"public\":\n    port: 8080\n    routes:"
+            )
+        )
+        XCTAssertEqual(try ManifestValidator.validated(canonical), manifest)
+    }
+
+    func testIngressRejectsUnknownFieldsAndConflictingRoutes() {
+        assertFailure(
+            """
+            version: 2
+            project: ingress-demo
+            ingress:
+              api:
+                port: 8080
+                routes:
+                  - hostname: api.hostwright.internal
+                    targetService: api
+                    targetPort: 8080
+                redirect: true
+            services:
+              api:
+                image: local/api:latest
+                ports: ["8080:8080"]
+            """,
+            code: "HW-MANIFEST-003",
+            contains: "Unsupported ingress field 'redirect'",
+            path: "$.ingress.api.redirect"
+        )
+        assertFailure(
+            ingressManifest(
+                """
+                - hostname: api.hostwright.internal
+                  targetService: api
+                  targetPort: 8080
+                - hostname: api.hostwright.internal
+                  targetService: api
+                  targetPort: 8080
+                """
+            ),
+            contains: "contains a conflicting route",
+            path: "$.ingress.api.routes[1]"
+        )
+    }
+
+    func testIngressRejectsUnsafeRoutesAndInvalidExposure() {
+        assertFailure(
+            ingressManifest(
+                """
+                - hostname: "*.hostwright.internal"
+                  pathPrefix: /safe
+                  targetService: api
+                  targetPort: 8080
+                """
+            ),
+            contains: "must be exact lowercase DNS-like text without wildcards",
+            path: "$.ingress.api.routes[0].hostname"
+        )
+        assertFailure(
+            ingressManifest(
+                """
+                - hostname: api.hostwright.internal
+                  pathPrefix: /%2e%2e/admin
+                  targetService: api
+                  targetPort: 8080
+                """
+            ),
+            contains: "normalized absolute path",
+            path: "$.ingress.api.routes[0].pathPrefix"
+        )
+        assertFailure(
+            ingressManifest(
+                """
+                - hostname: api.hostwright.internal
+                  methods: [get]
+                  targetService: api
+                  targetPort: 8080
+                """
+            ),
+            contains: "unique canonical HTTP methods",
+            path: "$.ingress.api.routes[0].methods"
+        )
+        assertFailure(
+            ingressManifest(
+                """
+                - hostname: api.hostwright.internal
+                  targetService: api
+                  targetPort: 8080
+                """,
+                bind: "0.0.0.0",
+                exposure: """
+                scope: localhost
+                authentication: none
+                """
+            ),
+            contains: "exposure does not match",
+            path: "$.ingress.api.exposure"
+        )
+    }
+
+    func testIngressRejectsMissingServiceUndeclaredTargetPortAndMaxima() {
+        assertFailure(
+            """
+            version: 2
+            project: ingress-demo
+            ingress:
+              api:
+                port: 8080
+                routes:
+                  - hostname: api.hostwright.internal
+                    targetService: api
+                    targetPort: 8080
+            services:
+              api:
+                image: local/api:latest
+                ports: ["8080:8080"]
+            """,
+            contains: "must attach to a declared Hostwright project network",
+            path: "$.ingress.api.routes[0].targetService"
+        )
+        assertFailure(
+            ingressManifest(
+                """
+                - hostname: api.hostwright.internal
+                  targetService: missing
+                  targetPort: 8080
+                """
+            ),
+            contains: "references missing service 'missing'",
+            path: "$.ingress.api.routes[0].targetService"
+        )
+        assertFailure(
+            ingressManifest(
+                """
+                - hostname: api.hostwright.internal
+                  targetService: api
+                  targetPort: 9090
+                """
+            ),
+            contains: "must reference a declared container port",
+            path: "$.ingress.api.routes[0].targetPort"
+        )
+        let excessiveRoutes = (0...HostwrightIngressListener.maximumRoutes)
+            .map {
+                """
+                - hostname: route-\($0).hostwright.internal
+                  targetService: api
+                  targetPort: 8080
+                """
+            }
+            .joined(separator: "\n")
+        assertFailure(
+            ingressManifest(excessiveRoutes),
+            contains: "accepts at most 256 routes per listener",
+            path: "$.ingress.api.routes"
+        )
+    }
+
     private func manifest(networks: String) -> String {
         """
         version: 2
@@ -730,6 +926,37 @@ final class Phase07NetworkManifestTests: XCTestCase {
             .map { "      \($0)" }
             .joined(separator: "\n"))
         """
+    }
+
+    private func ingressManifest(
+        _ routes: String,
+        bind: String? = nil,
+        exposure: String? = nil
+    ) -> String {
+        let bindField = bind.map { "    bind: \($0)\n" } ?? ""
+        let exposureField = exposure.map {
+            "    exposure:\n" + $0.split(separator: "\n").map { "      \($0)" }.joined(separator: "\n") + "\n"
+        } ?? ""
+        let indentedRoutes = routes.split(separator: "\n", omittingEmptySubsequences: false)
+            .map { "      \($0)" }
+            .joined(separator: "\n")
+        return
+            """
+            version: 2
+            project: ingress-demo
+            networks:
+              backend: {}
+            ingress:
+              api:
+            \(bindField)\(exposureField)    port: 8080
+                routes:
+            \(indentedRoutes)
+            services:
+              api:
+                image: local/api:latest
+                ports: ["8080:8080"]
+                networks: [backend]
+            """
     }
 
     private func assertFailure(

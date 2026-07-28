@@ -27,6 +27,12 @@ public enum ManifestValidator {
         validateNetworkDefinitions(manifest.networks, issues: &issues)
 
         let declaredNames = Set(manifest.services.map(\.name))
+        validateIngress(
+            manifest.ingress,
+            services: manifest.services,
+            declaredNames: declaredNames,
+            issues: &issues
+        )
         let declaredVolumes = Set(manifest.volumes.keys)
         let declaredNetworks = Set(manifest.networks.keys)
         var serviceNames = Set<String>()
@@ -345,6 +351,219 @@ public enum ManifestValidator {
         }
         validateNetworkCIDROverlaps(networks, family: .ipv4, issues: &issues)
         validateNetworkCIDROverlaps(networks, family: .ipv6, issues: &issues)
+    }
+
+    private static func validateIngress(
+        _ ingress: [String: HostwrightIngressListener],
+        services: [HostwrightService],
+        declaredNames: Set<String>,
+        issues: inout [ManifestIssue]
+    ) {
+        guard ingress.count <= HostwrightIngressListener.maximumListeners else {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message:
+                        "Ingress accepts at most \(HostwrightIngressListener.maximumListeners) listeners.",
+                    path: "$.ingress"
+                )
+            )
+            return
+        }
+        let servicesByName = Dictionary(
+            services.map { ($0.name, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        var listenerEndpoints = Set<String>()
+        for (name, listener) in ingress.sorted(by: { $0.key < $1.key }) {
+            let path = "$.ingress.\(name)"
+            validateName(name, field: "ingress listener name", issues: &issues)
+            guard isValidBindAddress(listener.bindAddress),
+                  isValidPort(listener.port) else {
+                issues.append(
+                    ManifestIssue(
+                        code: .manifestValidationFailed,
+                        message:
+                            "Ingress listener '\(name)' requires an exact IPv4 or IPv6 bind address and a port within 1...65535.",
+                        path: path
+                    )
+                )
+                continue
+            }
+            if !NetworkExposurePolicyValidation.isSemanticallyValid(
+                listener.exposure,
+                bindAddress: listener.bindAddress
+            ) {
+                issues.append(
+                    ManifestIssue(
+                        code: .manifestValidationFailed,
+                        message:
+                            "Ingress listener '\(name)' exposure does not match its exact bind address and security policy.",
+                        path: "\(path).exposure"
+                    )
+                )
+            }
+            let endpoint =
+                "\(listener.bindAddress):\(listener.port)"
+            if !listenerEndpoints.insert(endpoint).inserted {
+                issues.append(
+                    ManifestIssue(
+                        code: .manifestValidationFailed,
+                        message:
+                            "Ingress listener endpoint '\(endpoint)' is declared more than once.",
+                        path: path
+                    )
+                )
+            }
+            guard !listener.routes.isEmpty,
+                  listener.routes.count <=
+                    HostwrightIngressListener.maximumRoutes else {
+                issues.append(
+                    ManifestIssue(
+                        code: .manifestValidationFailed,
+                        message:
+                            "Ingress listener '\(name)' requires 1...\(HostwrightIngressListener.maximumRoutes) routes.",
+                        path: "\(path).routes"
+                    )
+                )
+                continue
+            }
+
+            var routeKeys = Set<String>()
+            for (index, route) in listener.routes.enumerated() {
+                let routePath = "\(path).routes[\(index)]"
+                if !HostwrightHostAccessPolicy.isValidHostname(
+                    route.hostname
+                ) {
+                    issues.append(
+                        ManifestIssue(
+                            code: .manifestValidationFailed,
+                            message:
+                                "Ingress route hostname '\(route.hostname)' must be exact lowercase DNS-like text without wildcards.",
+                            path: "\(routePath).hostname"
+                        )
+                    )
+                }
+                if !isSafeIngressPathPrefix(route.pathPrefix) {
+                    issues.append(
+                        ManifestIssue(
+                            code: .manifestValidationFailed,
+                            message:
+                                "Ingress route pathPrefix must be a normalized absolute path of at most 1,024 UTF-8 bytes without encoded or literal traversal.",
+                            path: "\(routePath).pathPrefix"
+                        )
+                    )
+                }
+                let allowedMethods: Set<String> = [
+                    "DELETE", "GET", "HEAD", "OPTIONS",
+                    "PATCH", "POST", "PUT"
+                ]
+                if route.methods.isEmpty ||
+                    route.methods.count >
+                        HostwrightIngressRoute.maximumMethods ||
+                    Set(route.methods).count != route.methods.count ||
+                    !Set(route.methods).isSubset(of: allowedMethods) {
+                    issues.append(
+                        ManifestIssue(
+                            code: .manifestValidationFailed,
+                            message:
+                                "Ingress route methods must be unique canonical HTTP methods from DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT.",
+                            path: "\(routePath).methods"
+                        )
+                    )
+                }
+                if route.protocolName == .websocket &&
+                    route.methods != ["GET"] {
+                    issues.append(
+                        ManifestIssue(
+                            code: .manifestValidationFailed,
+                            message:
+                                "WebSocket ingress routes require exactly the GET method.",
+                            path: "\(routePath).methods"
+                        )
+                    )
+                }
+                guard declaredNames.contains(route.targetService),
+                      let target = servicesByName[route.targetService] else {
+                    issues.append(
+                        ManifestIssue(
+                            code: .manifestValidationFailed,
+                            message:
+                                "Ingress route references missing service '\(route.targetService)'.",
+                            path: "\(routePath).targetService"
+                        )
+                    )
+                    continue
+                }
+                if target.networks.isEmpty {
+                    issues.append(
+                        ManifestIssue(
+                            code: .manifestValidationFailed,
+                            message:
+                                "Ingress route target service '\(route.targetService)' must attach to a declared Hostwright project network.",
+                            path: "\(routePath).targetService"
+                        )
+                    )
+                }
+                let declaredPorts = Set(
+                    target.publishedPorts.flatMap {
+                        Array($0.containerPortRange)
+                    }
+                )
+                if !isValidPort(route.targetPort) ||
+                    !declaredPorts.contains(route.targetPort) {
+                    issues.append(
+                        ManifestIssue(
+                            code: .manifestValidationFailed,
+                            message:
+                                "Ingress route target port \(route.targetPort) must reference a declared container port on service '\(route.targetService)'.",
+                            path: "\(routePath).targetPort"
+                        )
+                    )
+                }
+                for method in route.methods {
+                    let key = [
+                        route.hostname,
+                        route.pathPrefix,
+                        route.protocolName.rawValue,
+                        method
+                    ].joined(separator: "\u{1f}")
+                    if !routeKeys.insert(key).inserted {
+                        issues.append(
+                            ManifestIssue(
+                                code: .manifestValidationFailed,
+                                message:
+                                    "Ingress listener '\(name)' contains a conflicting route for hostname '\(route.hostname)', path '\(route.pathPrefix)', method '\(method)', and protocol '\(route.protocolName.rawValue)'.",
+                                path: routePath
+                            )
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private static func isSafeIngressPathPrefix(_ value: String) -> Bool {
+        if value == "/" {
+            return true
+        }
+        guard value.hasPrefix("/"),
+              value.utf8.count <= 1_024,
+              value.rangeOfCharacter(
+                from: .controlCharacters
+              ) == nil,
+              !value.contains("%"),
+              !value.contains("?"),
+              !value.contains("#"),
+              !value.contains("//") else {
+            return false
+        }
+        return value.split(
+            separator: "/",
+            omittingEmptySubsequences: false
+        ).dropFirst().allSatisfy {
+            !$0.isEmpty && $0 != "." && $0 != ".."
+        }
     }
 
     private static func validateNetworkAddressRequest(

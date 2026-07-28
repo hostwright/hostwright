@@ -59,6 +59,68 @@ final class NetworkHelperTests: XCTestCase {
         }
     }
 
+    func testIngressConfigurationPersistsRefreshesAndQuarantinesTampering()
+        throws
+    {
+        try withStore { store, root in
+            let first = identity()
+            let ingress = ingressBinding()
+            let applied = try store.apply(
+                identity: first,
+                corefile: corefile(),
+                ingressBindings: [ingress]
+            )
+            let digest = try XCTUnwrap(applied.ingressSHA256)
+            XCTAssertEqual(
+                try store.activeIngressConfigurations(),
+                [NetworkHelperPersistedIngressConfiguration(
+                    identity: first,
+                    bindings: [ingress],
+                    sha256: digest
+                )]
+            )
+
+            let restarted = try NetworkHelperStateStore(rootURL: root)
+            XCTAssertEqual(
+                try restarted.activeIngressConfigurations().first?.bindings,
+                [ingress]
+            )
+
+            let second = identity(generation: 2, fence: secondFence)
+            _ = try restarted.apply(
+                identity: second,
+                corefile: corefile(ttl: 10),
+                predecessorFencingToken: firstFence
+            )
+            XCTAssertTrue(try restarted.activeIngressConfigurations().isEmpty)
+            XCTAssertFalse(FileManager.default.fileExists(
+                atPath: generationURL(root: root, generation: 1)
+                    .appendingPathComponent("Ingress.json").path
+            ))
+
+            let third = identity(generation: 3, fence: thirdFence)
+            _ = try restarted.apply(
+                identity: third,
+                corefile: corefile(ttl: 20),
+                ingressBindings: [ingress],
+                predecessorFencingToken: secondFence
+            )
+            let ingressURL = generationURL(root: root, generation: 3)
+                .appendingPathComponent("Ingress.json")
+            let handle = try FileHandle(forWritingTo: ingressURL)
+            try handle.truncate(atOffset: 0)
+            try handle.write(contentsOf: Data("tampered".utf8))
+            try handle.close()
+            XCTAssertEqual(
+                try restarted.status(identity: third).disposition,
+                .quarantined
+            )
+            XCTAssertThrowsError(try restarted.remove(identity: third)) {
+                XCTAssertEqual($0 as? NetworkHelperError, .quarantined)
+            }
+        }
+    }
+
     func testHostAccessBrokerForwardsOnlyTheExactTCPBinding()
         throws
     {
@@ -404,6 +466,57 @@ final class NetworkHelperTests: XCTestCase {
             predecessorFencingToken: firstFence
         )
         XCTAssertThrowsError(try statusWithPredecessor.validated()) {
+            XCTAssertEqual($0 as? NetworkHelperError, .invalidRequest)
+        }
+
+        let invalidIngress = NetworkHelperRequest(
+            operation: .apply,
+            identity: identity(),
+            corefile: corefile(),
+            ingressBindings: [ingressBinding(port: 0)]
+        )
+        XCTAssertThrowsError(try invalidIngress.validated()) {
+            XCTAssertEqual($0 as? NetworkHelperError, .invalidRequest)
+        }
+
+        let missingTargetIdentity = NetworkHelperRequest(
+            operation: .apply,
+            identity: identity(),
+            corefile: corefile(),
+            ingressBindings: [
+                ProjectIngressListenerBinding(
+                    name: "api",
+                    bindAddress: "127.0.0.1",
+                    port: 8_443,
+                    exposure: .localhost,
+                    routes: [
+                        ProjectIngressRouteBinding(
+                            hostname: "api.internal",
+                            pathPrefix: "/",
+                            methods: ["GET"],
+                            protocolName: .http,
+                            targetServiceUUIDs: [],
+                            targetPort: 8_080,
+                            backends: []
+                        ),
+                    ]
+                ),
+            ]
+        )
+        XCTAssertThrowsError(try missingTargetIdentity.validated()) {
+            XCTAssertEqual($0 as? NetworkHelperError, .invalidRequest)
+        }
+
+        let oversizedIngress = NetworkHelperRequest(
+            operation: .apply,
+            identity: identity(),
+            corefile: corefile(),
+            ingressBindings: Array(
+                repeating: ingressBinding(),
+                count: HostwrightIngressListener.maximumListeners + 1
+            )
+        )
+        XCTAssertThrowsError(try oversizedIngress.validated()) {
             XCTAssertEqual($0 as? NetworkHelperError, .invalidRequest)
         }
     }
@@ -836,6 +949,116 @@ final class NetworkHelperTests: XCTestCase {
         }
     }
 
+    func testDispatcherStagesInactiveIngressConflictAndRemovesExactState()
+        throws
+    {
+        let occupied = try makeLoopbackTCPServer()
+        defer { Darwin.close(occupied.descriptor) }
+
+        try withStore { store, root in
+            let broker = NetworkHelperIngressBroker()
+            let dispatcher = NetworkHelperDispatcher(
+                store: store,
+                ingressBroker: broker
+            )
+            let binding = ingressBinding(port: occupied.port)
+            let activeIdentity = identity()
+
+            let applied = try dispatch(
+                dispatcher,
+                NetworkHelperRequest(
+                    operation: .apply,
+                    identity: activeIdentity,
+                    corefile: corefile(),
+                    ingressBindings: [binding]
+                )
+            )
+            let digest = try XCTUnwrap(applied.status?.ingressSHA256)
+            XCTAssertEqual(applied.status?.disposition, .active)
+            XCTAssertEqual(digest.count, 64)
+            XCTAssertEqual(applied.status?.ingressActive, false)
+            XCTAssertFalse(broker.hasActiveBindings)
+
+            let status = try dispatch(
+                dispatcher,
+                NetworkHelperRequest(
+                    operation: .status,
+                    identity: activeIdentity
+                )
+            )
+            XCTAssertEqual(status.status?.ingressSHA256, digest)
+            XCTAssertEqual(status.status?.ingressActive, false)
+
+            let removed = try dispatch(
+                dispatcher,
+                NetworkHelperRequest(
+                    operation: .remove,
+                    identity: activeIdentity
+                )
+            )
+            XCTAssertEqual(removed.status?.disposition, .absent)
+            XCTAssertFalse(broker.hasActiveBindings)
+            XCTAssertTrue(try store.activeIngressConfigurations().isEmpty)
+            XCTAssertFalse(FileManager.default.fileExists(
+                atPath: root
+                    .appendingPathComponent(projectUUID)
+                    .appendingPathComponent(dnsUUID)
+                    .path
+            ))
+        }
+    }
+
+    func testDispatcherStatusReplaysPersistedIngressAfterBrokerRestart()
+        throws
+    {
+        try withStore { store, _ in
+            let activeIdentity = identity()
+            let binding = ingressBinding()
+            let firstBroker = NetworkHelperIngressBroker()
+            let firstDispatcher = NetworkHelperDispatcher(
+                store: store,
+                ingressBroker: firstBroker
+            )
+            let applied = try dispatch(
+                firstDispatcher,
+                NetworkHelperRequest(
+                    operation: .apply,
+                    identity: activeIdentity,
+                    corefile: corefile(),
+                    ingressBindings: [binding]
+                )
+            )
+            let digest = try XCTUnwrap(applied.status?.ingressSHA256)
+            XCTAssertEqual(applied.status?.ingressActive, true)
+
+            firstBroker.remove(identity: activeIdentity)
+            let restartedBroker = NetworkHelperIngressBroker()
+            let restartedDispatcher = NetworkHelperDispatcher(
+                store: store,
+                ingressBroker: restartedBroker
+            )
+            let recovered = try dispatch(
+                restartedDispatcher,
+                NetworkHelperRequest(
+                    operation: .status,
+                    identity: activeIdentity
+                )
+            )
+            XCTAssertEqual(recovered.status?.ingressSHA256, digest)
+            XCTAssertEqual(recovered.status?.ingressActive, true)
+            XCTAssertEqual(restartedBroker.sha256(identity: activeIdentity), digest)
+
+            _ = try dispatch(
+                restartedDispatcher,
+                NetworkHelperRequest(
+                    operation: .remove,
+                    identity: activeIdentity
+                )
+            )
+            XCTAssertFalse(restartedBroker.hasActiveBindings)
+        }
+    }
+
     func testRuntimeDirectorySocketModesAndSameUIDAuthentication() throws {
         let parent = try makePrivateParent()
         defer { try? FileManager.default.removeItem(at: parent) }
@@ -976,6 +1199,42 @@ final class NetworkHelperTests: XCTestCase {
             clientCIDR: "192.168.64.0/24",
             targetAddress: "127.0.0.1",
             port: 6_508
+        )
+    }
+
+    private func ingressBinding(
+        port: Int = 8_443
+    ) -> ProjectIngressListenerBinding {
+        ProjectIngressListenerBinding(
+            name: "api",
+            bindAddress: "127.0.0.1",
+            port: port,
+            exposure: .localhost,
+            routes: [ProjectIngressRouteBinding(
+                hostname: "api.internal",
+                pathPrefix: "/",
+                methods: ["GET"],
+                protocolName: .http,
+                targetServiceUUIDs: [projectUUID],
+                targetPort: 8_080,
+                backends: [ProjectIngressBackend(
+                    serviceUUID: projectUUID,
+                    address: "127.0.0.1",
+                    port: 8_080
+                )]
+            )]
+        )
+    }
+
+    private func dispatch(
+        _ dispatcher: NetworkHelperDispatcher,
+        _ request: NetworkHelperRequest
+    ) throws -> NetworkHelperResponse {
+        try NetworkHelperCanonicalJSON.decodeFrame(
+            NetworkHelperResponse.self,
+            from: dispatcher.dispatch(
+                frame: try NetworkHelperCanonicalJSON.frame(request)
+            )
         )
     }
 

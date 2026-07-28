@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import HostwrightCore
 import HostwrightNetworking
 import HostwrightRuntime
 
@@ -9,6 +10,9 @@ enum ProjectDNSPlanBuilder {
         desiredState: DesiredRuntimeState,
         observedState: ObservedRuntimeState,
         runtimeInventory: RuntimeInventory? = nil,
+        ingress: [String: HostwrightIngressListener] = [:],
+        projectID: String? = nil,
+        resourceBindings: [LifecycleResourceBinding] = [],
         options: ProjectDNSOptions = ProjectDNSOptions()
     ) throws -> ProjectDNSPlan {
         let observedByIdentity = Dictionary(
@@ -53,8 +57,122 @@ enum ProjectDNSPlanBuilder {
                 desiredState: desiredState,
                 runtimeInventory: runtimeInventory
             ),
+            ingressBindings: try ingressBindings(
+                ingress,
+                projectID: projectID,
+                desiredState: desiredState,
+                observedState: observedState,
+                resourceBindings: resourceBindings
+            ),
             options: options
         )
+    }
+
+    private static func ingressBindings(
+        _ ingress: [String: HostwrightIngressListener],
+        projectID: String?,
+        desiredState: DesiredRuntimeState,
+        observedState: ObservedRuntimeState,
+        resourceBindings: [LifecycleResourceBinding]
+    ) throws -> [ProjectIngressListenerBinding] {
+        guard !ingress.isEmpty else { return [] }
+        guard let projectID, !projectID.isEmpty else {
+            throw ProjectDNSPlanningError.invalidIngress(
+                "an exact persisted project identity is required"
+            )
+        }
+        let observedByIdentity = Dictionary(
+            uniqueKeysWithValues: observedState.services.map {
+                ($0.identity, $0)
+            }
+        )
+        let bindingsByIdentity = Dictionary(
+            resourceBindings.map { ($0.identity, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let desiredByService = Dictionary(
+            grouping: desiredState.services,
+            by: \.logicalServiceName
+        )
+
+        return try ingress.sorted(by: { $0.key < $1.key }).map {
+            name,
+            listener in
+            guard listener.exposure.isDefaultLocalhost,
+                  NetworkBindAddressPolicy.isLocalhost(
+                    listener.bindAddress
+                  ) else {
+                throw ProjectDNSPlanningError.invalidIngress(
+                    "listener '\(name)' cannot activate before its secure non-local exposure is qualified"
+                )
+            }
+            let routes = try listener.routes.map { route in
+                guard let targets = desiredByService[
+                    route.targetService
+                ], !targets.isEmpty else {
+                    throw ProjectDNSPlanningError.invalidIngress(
+                        "route target service '\(route.targetService)' is unavailable"
+                    )
+                }
+                var targetUUIDs = Set<String>()
+                var backends = Set<ProjectIngressBackend>()
+                for target in targets.sorted(by: {
+                    $0.identity.displayName <
+                        $1.identity.displayName
+                }) {
+                    let resourceUUID =
+                        bindingsByIdentity[target.identity]?.resourceUUID ??
+                        HostwrightResourceUUID.legacy(
+                            kind: "service",
+                            identifier:
+                                "\(projectID):\(target.identity.displayName)"
+                        )
+                    guard HostwrightResourceUUID.isValid(
+                        resourceUUID
+                    ) else {
+                        throw ProjectDNSPlanningError.invalidIngress(
+                            "route target service '\(target.identity.displayName)' has no exact resource UUID"
+                        )
+                    }
+                    targetUUIDs.insert(resourceUUID.lowercased())
+                    let observed = replica(
+                        desired: target,
+                        observed: observedByIdentity[target.identity]
+                    )
+                    guard observed.isReady else { continue }
+                    for address in (
+                        observed.ipv6Addresses +
+                            observed.ipv4Addresses
+                    ) {
+                        backends.insert(
+                            ProjectIngressBackend(
+                                serviceUUID:
+                                    resourceUUID.lowercased(),
+                                address: address,
+                                port: route.targetPort
+                            )
+                        )
+                    }
+                }
+                return ProjectIngressRouteBinding(
+                    hostname: route.hostname,
+                    pathPrefix: route.pathPrefix,
+                    methods: route.methods,
+                    protocolName: route.protocolName,
+                    targetServiceUUIDs:
+                        Array(targetUUIDs).sorted(),
+                    targetPort: route.targetPort,
+                    backends: Array(backends)
+                )
+            }
+            return ProjectIngressListenerBinding(
+                name: name,
+                bindAddress: listener.bindAddress,
+                port: listener.port,
+                exposure: listener.exposure,
+                routes: routes
+            )
+        }
     }
 
     private static func hostAccessBindings(
@@ -348,9 +466,11 @@ enum ProjectDNSPlanBuilder {
         let desiredNetworkNames = Set(
             desired.networks.map(\.networkRuntimeIdentifier)
         )
-        let attachments = observed.networks.filter {
-            desiredNetworkNames.contains($0.name)
-        }
+        let attachments = desiredNetworkNames.isEmpty
+            ? observed.networks
+            : observed.networks.filter {
+                desiredNetworkNames.contains($0.name)
+            }
         let ipv4 = attachments.compactMap(\.ipv4Address)
             .map(dnsHostAddress) +
             attachments.compactMap {

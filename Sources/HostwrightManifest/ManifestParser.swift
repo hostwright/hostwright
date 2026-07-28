@@ -286,7 +286,7 @@ private struct ManifestNodeDecoder {
             allowed: [
                 "version", "project", "imagePolicy", "imageTrust", "imageSBOM",
                 "imageVulnerability", "imageProvenance", "volumes", "networks",
-                "services"
+                "ingress", "services"
             ]
         )
         let version = try values["version"].map(versionInteger)
@@ -321,6 +321,9 @@ private struct ManifestNodeDecoder {
         let networks = try values["networks"].map {
             try decodeNetworkDefinitions($0, path: "$.networks")
         } ?? [:]
+        let ingress = try values["ingress"].map {
+            try decodeIngressListeners($0, path: "$.ingress")
+        } ?? [:]
         let services = try values["services"].map(decodeServices) ?? []
         return HostwrightManifest(
             version: version,
@@ -332,8 +335,142 @@ private struct ManifestNodeDecoder {
             imageProvenance: imageProvenance,
             volumes: volumes,
             networks: networks,
+            ingress: ingress,
             services: services
         )
+    }
+
+    private func decodeIngressListeners(
+        _ node: Node,
+        path: String
+    ) throws -> [String: HostwrightIngressListener] {
+        let entries = try rawMapping(node, path: path)
+        guard entries.count <= HostwrightIngressListener.maximumListeners else {
+            throw ManifestParser.failure(
+                "Ingress accepts at most \(HostwrightIngressListener.maximumListeners) listeners.",
+                code: .manifestValidationFailed,
+                node: node,
+                path: path
+            )
+        }
+        var result: [String: HostwrightIngressListener] = [:]
+        for pair in entries {
+            let name = try keyString(pair.key, path: path)
+            let listenerPath = "\(path).\(name)"
+            let values = try mapping(
+                pair.value,
+                path: listenerPath,
+                allowed: ["bind", "exposure", "port", "routes"]
+            )
+            let bindAddress = try values["bind"].map {
+                try string($0, path: "\(listenerPath).bind")
+            } ?? NetworkBindAddressPolicy.localhostBindAddress
+            let port = try requiredInteger(
+                values["port"],
+                path: "\(listenerPath).port",
+                message: "Ingress listener port is required."
+            )
+            let exposure = try values["exposure"].map {
+                try decodePortExposure(
+                    $0,
+                    path: "\(listenerPath).exposure"
+                )
+            } ?? .localhost
+            guard let routesNode = values["routes"] else {
+                throw ManifestParser.failure(
+                    "Ingress listener routes are required.",
+                    code: .manifestValidationFailed,
+                    node: pair.value,
+                    path: "\(listenerPath).routes"
+                )
+            }
+            let routes = try decodeIngressRoutes(
+                routesNode,
+                path: "\(listenerPath).routes"
+            )
+            result[name] = HostwrightIngressListener(
+                bindAddress: bindAddress,
+                port: port,
+                exposure: exposure,
+                routes: routes
+            )
+        }
+        return result
+    }
+
+    private func decodeIngressRoutes(
+        _ node: Node,
+        path: String
+    ) throws -> [HostwrightIngressRoute] {
+        guard case .sequence(let sequence) = node else {
+            throw ManifestParser.failure(
+                "Ingress routes must be a sequence.",
+                code: .manifestValidationFailed,
+                node: node,
+                path: path
+            )
+        }
+        guard sequence.count <= HostwrightIngressListener.maximumRoutes else {
+            throw ManifestParser.failure(
+                "Ingress accepts at most \(HostwrightIngressListener.maximumRoutes) routes per listener.",
+                code: .manifestValidationFailed,
+                node: node,
+                path: path
+            )
+        }
+        return try sequence.enumerated().map { index, child in
+            let routePath = "\(path)[\(index)]"
+            let values = try mapping(
+                child,
+                path: routePath,
+                allowed: [
+                    "hostname", "methods", "pathPrefix", "protocol",
+                    "targetPort", "targetService"
+                ]
+            )
+            let hostname = try requiredString(
+                values["hostname"],
+                path: "\(routePath).hostname",
+                message: "Ingress route hostname is required."
+            )
+            let pathPrefix = try values["pathPrefix"].map {
+                try string($0, path: "\(routePath).pathPrefix")
+            } ?? "/"
+            let methods = try values["methods"].map {
+                try strings($0, path: "\(routePath).methods")
+            } ?? ["GET"]
+            let protocolRaw = try values["protocol"].map {
+                try string($0, path: "\(routePath).protocol")
+            } ?? HostwrightIngressRouteProtocol.http.rawValue
+            guard let protocolName = HostwrightIngressRouteProtocol(
+                rawValue: protocolRaw
+            ) else {
+                throw ManifestParser.failure(
+                    "Ingress route protocol must be one of: http, websocket.",
+                    code: .manifestValidationFailed,
+                    node: values["protocol"],
+                    path: "\(routePath).protocol"
+                )
+            }
+            let targetService = try requiredString(
+                values["targetService"],
+                path: "\(routePath).targetService",
+                message: "Ingress route targetService is required."
+            )
+            let targetPort = try requiredInteger(
+                values["targetPort"],
+                path: "\(routePath).targetPort",
+                message: "Ingress route targetPort is required."
+            )
+            return HostwrightIngressRoute(
+                hostname: hostname,
+                pathPrefix: pathPrefix,
+                methods: methods,
+                protocolName: protocolName,
+                targetService: targetService,
+                targetPort: targetPort
+            )
+        }.sorted(by: HostwrightIngressRoute.canonicalPrecedes)
     }
 
     private func decodeNetworkDefinitions(
@@ -1635,6 +1772,8 @@ private struct ManifestNodeDecoder {
                     context = "top-level volume"
                 } else if path.contains(".networks."), !path.contains(".services.") {
                     context = "top-level network"
+                } else if path.contains(".ingress.") {
+                    context = "ingress"
                 } else if path.contains(".hostAccess[") {
                     context = "hostAccess"
                 } else if path.hasSuffix(".health") {

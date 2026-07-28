@@ -22,16 +22,21 @@ private struct NetworkHelperPersistedMetadata: Codable, Equatable {
     let identity: NetworkHelperDNSIdentity
     let corefileSHA256: String
     let hostAccessSHA256: String?
+    let ingressSHA256: String?
 
     init(
         identity: NetworkHelperDNSIdentity,
         corefileSHA256: String,
-        hostAccessSHA256: String?
+        hostAccessSHA256: String?,
+        ingressSHA256: String?
     ) {
-        schemaVersion = hostAccessSHA256 == nil ? 1 : 2
+        schemaVersion = ingressSHA256 == nil
+            ? (hostAccessSHA256 == nil ? 1 : 2)
+            : 3
         self.identity = identity
         self.corefileSHA256 = corefileSHA256
         self.hostAccessSHA256 = hostAccessSHA256
+        self.ingressSHA256 = ingressSHA256
     }
 }
 
@@ -40,12 +45,14 @@ private struct NetworkHelperCurrentPointer: Codable, Equatable {
     let identity: NetworkHelperDNSIdentity
     let corefileSHA256: String
     let hostAccessSHA256: String?
+    let ingressSHA256: String?
 
     init(metadata: NetworkHelperPersistedMetadata) {
         schemaVersion = metadata.schemaVersion
         identity = metadata.identity
         corefileSHA256 = metadata.corefileSHA256
         hostAccessSHA256 = metadata.hostAccessSHA256
+        ingressSHA256 = metadata.ingressSHA256
     }
 }
 
@@ -67,6 +74,12 @@ struct NetworkHelperPersistedHostAccessConfiguration:
 {
     let identity: NetworkHelperDNSIdentity
     let bindings: [ProjectDNSHostAccessBinding]
+    let sha256: String
+}
+
+struct NetworkHelperPersistedIngressConfiguration: Equatable, Sendable {
+    let identity: NetworkHelperDNSIdentity
+    let bindings: [ProjectIngressListenerBinding]
     let sha256: String
 }
 
@@ -102,6 +115,7 @@ final class NetworkHelperStateStore: @unchecked Sendable {
         identity: NetworkHelperDNSIdentity,
         corefile: String,
         hostAccessBindings: [ProjectDNSHostAccessBinding] = [],
+        ingressBindings: [ProjectIngressListenerBinding] = [],
         predecessorFencingToken: String? = nil
     ) throws -> NetworkHelperStatus {
         lock.lock()
@@ -121,6 +135,13 @@ final class NetworkHelperStateStore: @unchecked Sendable {
             ? nil
             : try NetworkHelperCanonicalJSON.encode(validatedBindings)
         let hostAccessSHA256 = hostAccessData.map(Self.sha256)
+        let validatedIngress = try NetworkHelperIngressValidation.validated(
+            ingressBindings
+        )
+        let ingressData = validatedIngress.isEmpty
+            ? nil
+            : try NetworkHelperCanonicalJSON.encode(validatedIngress)
+        let ingressSHA256 = ingressData.map(Self.sha256)
 
         try recoverLocked()
         let dnsRoot = try ensureDNSRoot(for: identity)
@@ -132,7 +153,8 @@ final class NetworkHelperStateStore: @unchecked Sendable {
         case .active:
             let digest = Self.sha256(Data(corefile.utf8))
             guard current.corefileSHA256 == digest,
-                  current.hostAccessSHA256 == hostAccessSHA256 else {
+                  current.hostAccessSHA256 == hostAccessSHA256,
+                  current.ingressSHA256 == ingressSHA256 else {
                 throw NetworkHelperError.conflict
             }
             return current
@@ -162,12 +184,14 @@ final class NetworkHelperStateStore: @unchecked Sendable {
         let metadata = NetworkHelperPersistedMetadata(
             identity: identity,
             corefileSHA256: Self.sha256(Data(corefile.utf8)),
-            hostAccessSHA256: hostAccessSHA256
+            hostAccessSHA256: hostAccessSHA256,
+            ingressSHA256: ingressSHA256
         )
         try stageGeneration(
             metadata: metadata,
             corefile: Data(corefile.utf8),
             hostAccess: hostAccessData,
+            ingress: ingressData,
             dnsRoot: dnsRoot
         )
         try replaceCurrentPointer(
@@ -189,6 +213,7 @@ final class NetworkHelperStateStore: @unchecked Sendable {
             identity: identity,
             corefileSHA256: metadata.corefileSHA256,
             hostAccessSHA256: metadata.hostAccessSHA256,
+            ingressSHA256: metadata.ingressSHA256,
             reason: nil
         )
     }
@@ -348,6 +373,49 @@ final class NetworkHelperStateStore: @unchecked Sendable {
         }
     }
 
+    func activeIngressConfigurations() throws
+        -> [NetworkHelperPersistedIngressConfiguration]
+    {
+        lock.lock()
+        defer { lock.unlock() }
+        try recoverLocked()
+        var result: [NetworkHelperPersistedIngressConfiguration] = []
+        for projectURL in try safeDirectoryContents(at: rootURL) {
+            for dnsRoot in try safeDirectoryContents(at: projectURL) {
+                guard Self.isCanonicalUUID(dnsRoot.lastPathComponent) else {
+                    continue
+                }
+                let pointerURL = dnsRoot.appendingPathComponent("current.json")
+                guard fileManager.fileExists(atPath: pointerURL.path) else {
+                    continue
+                }
+                let pointer: NetworkHelperCurrentPointer = try loadCanonical(
+                    NetworkHelperCurrentPointer.self, from: pointerURL
+                )
+                guard let expected = pointer.ingressSHA256 else { continue }
+                let data = try loadRegularFile(
+                    dnsRoot.appendingPathComponent("active", isDirectory: true)
+                        .appendingPathComponent("Ingress.json", isDirectory: false)
+                )
+                guard Self.sha256(data) == expected else {
+                    throw NetworkHelperError.quarantined
+                }
+                let bindings = try NetworkHelperCanonicalJSON.decode(
+                    [ProjectIngressListenerBinding].self, from: data
+                )
+                result.append(NetworkHelperPersistedIngressConfiguration(
+                    identity: pointer.identity,
+                    bindings: try NetworkHelperIngressValidation.validated(bindings),
+                    sha256: expected
+                ))
+            }
+        }
+        return result.sorted {
+            ($0.identity.projectUUID, $0.identity.dnsUUID) <
+                ($1.identity.projectUUID, $1.identity.dnsUUID)
+        }
+    }
+
     private func recoverLocked() throws {
         try Self.validatePrivateDirectory(rootURL, owner: owner)
         var rootMetadata = stat()
@@ -478,7 +546,7 @@ final class NetworkHelperStateStore: @unchecked Sendable {
             NetworkHelperCurrentPointer.self,
             from: pointerURL
         )
-        guard [1, 2].contains(pointer.schemaVersion),
+        guard [1, 2, 3].contains(pointer.schemaVersion),
               pointer.identity.projectUUID == projectUUID,
               pointer.identity.dnsUUID == dnsUUID else {
             throw NetworkHelperError.quarantined
@@ -530,7 +598,7 @@ final class NetworkHelperStateStore: @unchecked Sendable {
                 NetworkHelperCurrentPointer.self,
                 from: pointerURL
             )
-            guard [1, 2].contains(pointer.schemaVersion) else {
+            guard [1, 2, 3].contains(pointer.schemaVersion) else {
                 return quarantinedStatus("metadata schema is unsupported")
             }
             _ = try pointer.identity.validated()
@@ -552,6 +620,7 @@ final class NetworkHelperStateStore: @unchecked Sendable {
                 identity: pointer.identity,
                 corefileSHA256: pointer.corefileSHA256,
                 hostAccessSHA256: pointer.hostAccessSHA256,
+                ingressSHA256: pointer.ingressSHA256,
                 reason: pointer.identity == requestedIdentity
                     ? nil
                     : "active DNS generation has different ownership"
@@ -610,6 +679,7 @@ final class NetworkHelperStateStore: @unchecked Sendable {
         metadata: NetworkHelperPersistedMetadata,
         corefile: Data,
         hostAccess: Data?,
+        ingress: Data?,
         dnsRoot: URL
     ) throws {
         let generations = dnsRoot.appendingPathComponent(
@@ -656,6 +726,15 @@ final class NetworkHelperStateStore: @unchecked Sendable {
                 hostAccess,
                 to: staging.appendingPathComponent(
                     "HostAccess.json",
+                    isDirectory: false
+                )
+            )
+        }
+        if let ingress {
+            try writeExclusive(
+                ingress,
+                to: staging.appendingPathComponent(
+                    "Ingress.json",
                     isDirectory: false
                 )
             )
@@ -744,7 +823,22 @@ final class NetworkHelperStateStore: @unchecked Sendable {
             currentHostAccessMatches =
                 !fileManager.fileExists(atPath: activeHostAccess.path)
         }
-        if currentCorefileMatches && currentHostAccessMatches {
+        let activeIngress = active.appendingPathComponent(
+            "Ingress.json",
+            isDirectory: false
+        )
+        let currentIngressMatches: Bool
+        if let expected = pointer.ingressSHA256 {
+            if fileManager.fileExists(atPath: activeIngress.path) {
+                currentIngressMatches =
+                    Self.sha256(try loadRegularFile(activeIngress)) == expected
+            } else {
+                currentIngressMatches = false
+            }
+        } else {
+            currentIngressMatches = !fileManager.fileExists(atPath: activeIngress.path)
+        }
+        if currentCorefileMatches && currentHostAccessMatches && currentIngressMatches {
             return
         }
         let temporary = active.appendingPathComponent(
@@ -783,6 +877,27 @@ final class NetworkHelperStateStore: @unchecked Sendable {
         } else {
             try removeRegularFileIfPresent(activeHostAccess)
         }
+        if let expected = pointer.ingressSHA256 {
+            let sourceIngress = generationURL(
+                dnsRoot: dnsRoot,
+                generation: pointer.identity.generation
+            ).appendingPathComponent("Ingress.json", isDirectory: false)
+            let ingressData = try loadRegularFile(sourceIngress)
+            guard Self.sha256(ingressData) == expected else {
+                throw NetworkHelperError.quarantined
+            }
+            let temporaryIngress = active.appendingPathComponent(
+                ".Ingress-\(UUID().uuidString.lowercased())",
+                isDirectory: false
+            )
+            try writeExclusive(ingressData, to: temporaryIngress)
+            guard rename(temporaryIngress.path, activeIngress.path) == 0 else {
+                _ = unlink(temporaryIngress.path)
+                throw NetworkHelperError.ioFailure
+            }
+        } else {
+            try removeRegularFileIfPresent(activeIngress)
+        }
         try synchronizeDirectory(active)
         try validateActiveCorefile(pointer: pointer, dnsRoot: dnsRoot)
     }
@@ -800,6 +915,9 @@ final class NetworkHelperStateStore: @unchecked Sendable {
         var expectedEntries = Set(["Corefile"])
         if pointer.hostAccessSHA256 != nil {
             expectedEntries.insert("HostAccess.json")
+        }
+        if pointer.ingressSHA256 != nil {
+            expectedEntries.insert("Ingress.json")
         }
         guard Set(entries.map(\.lastPathComponent)) == expectedEntries else {
             throw NetworkHelperError.quarantined
@@ -825,16 +943,33 @@ final class NetworkHelperStateStore: @unchecked Sendable {
                 from: hostAccess
             )
         }
+        if let expected = pointer.ingressSHA256 {
+            let ingress = try loadRegularFile(
+                active.appendingPathComponent("Ingress.json", isDirectory: false)
+            )
+            guard Self.sha256(ingress) == expected else {
+                throw NetworkHelperError.quarantined
+            }
+            _ = try NetworkHelperIngressValidation.validated(
+                try NetworkHelperCanonicalJSON.decode(
+                    [ProjectIngressListenerBinding].self,
+                    from: ingress
+                )
+            )
+        }
     }
 
     private func cleanActiveTemporaryFiles(at active: URL) throws {
         try Self.validatePrivateDirectory(active, owner: owner)
         for entry in try safeDirectoryContents(at: active)
             where entry.lastPathComponent.hasPrefix(".Corefile-")
-                || entry.lastPathComponent.hasPrefix(".HostAccess-") {
+                || entry.lastPathComponent.hasPrefix(".HostAccess-")
+                || entry.lastPathComponent.hasPrefix(".Ingress-") {
             let prefix = entry.lastPathComponent.hasPrefix(".Corefile-")
                 ? ".Corefile-"
-                : ".HostAccess-"
+                : entry.lastPathComponent.hasPrefix(".HostAccess-")
+                    ? ".HostAccess-"
+                    : ".Ingress-"
             let suffix = String(
                 entry.lastPathComponent.dropFirst(prefix.count)
             )
@@ -850,13 +985,16 @@ final class NetworkHelperStateStore: @unchecked Sendable {
         expected: NetworkHelperCurrentPointer
     ) throws {
         let metadata = try loadMetadata(from: generationURL)
-        guard [1, 2].contains(metadata.schemaVersion),
+        guard [1, 2, 3].contains(metadata.schemaVersion),
               metadata.schemaVersion
-                == (metadata.hostAccessSHA256 == nil ? 1 : 2),
+                == (metadata.ingressSHA256 == nil
+                    ? (metadata.hostAccessSHA256 == nil ? 1 : 2)
+                    : 3),
               metadata.identity == expected.identity,
               metadata.corefileSHA256 == expected.corefileSHA256,
               metadata.hostAccessSHA256
-                == expected.hostAccessSHA256 else {
+                == expected.hostAccessSHA256,
+              metadata.ingressSHA256 == expected.ingressSHA256 else {
             throw NetworkHelperError.quarantined
         }
         let corefileURL = generationURL.appendingPathComponent(
@@ -883,6 +1021,20 @@ final class NetworkHelperStateStore: @unchecked Sendable {
             )
             _ = try NetworkHelperHostAccessValidation.validated(bindings)
         }
+        if let expectedIngress = metadata.ingressSHA256 {
+            let ingress = try loadRegularFile(
+                generationURL.appendingPathComponent("Ingress.json", isDirectory: false)
+            )
+            guard Self.sha256(ingress) == expectedIngress else {
+                throw NetworkHelperError.quarantined
+            }
+            _ = try NetworkHelperIngressValidation.validated(
+                try NetworkHelperCanonicalJSON.decode(
+                    [ProjectIngressListenerBinding].self,
+                    from: ingress
+                )
+            )
+        }
     }
 
     private func loadMetadata(
@@ -894,7 +1046,8 @@ final class NetworkHelperStateStore: @unchecked Sendable {
             .isSubset(of: Set([
                 "metadata.json",
                 "Corefile",
-                "HostAccess.json"
+                "HostAccess.json",
+                "Ingress.json"
             ])) else {
             throw NetworkHelperError.quarantined
         }
@@ -909,6 +1062,9 @@ final class NetworkHelperStateStore: @unchecked Sendable {
         var expectedEntries = Set(["metadata.json", "Corefile"])
         if metadata.hostAccessSHA256 != nil {
             expectedEntries.insert("HostAccess.json")
+        }
+        if metadata.ingressSHA256 != nil {
+            expectedEntries.insert("Ingress.json")
         }
         guard Set(entries.map(\.lastPathComponent)) == expectedEntries
         else {
@@ -926,7 +1082,8 @@ final class NetworkHelperStateStore: @unchecked Sendable {
             .isSubset(of: Set([
                 "metadata.json",
                 "Corefile",
-                "HostAccess.json"
+                "HostAccess.json",
+                "Ingress.json"
             ])) else {
             throw NetworkHelperError.quarantined
         }
@@ -1068,7 +1225,8 @@ final class NetworkHelperStateStore: @unchecked Sendable {
             guard Set(activeEntries.map(\.lastPathComponent))
                 .isSubset(of: Set([
                     "Corefile",
-                    "HostAccess.json"
+                    "HostAccess.json",
+                    "Ingress.json"
                 ])) else {
                 throw NetworkHelperError.quarantined
             }
@@ -1097,7 +1255,8 @@ final class NetworkHelperStateStore: @unchecked Sendable {
         let allowed = Set([
             "metadata.json",
             "Corefile",
-            "HostAccess.json"
+            "HostAccess.json",
+            "Ingress.json"
         ])
         guard Set(entries.map(\.lastPathComponent)).isSubset(of: allowed) else {
             throw NetworkHelperError.quarantined

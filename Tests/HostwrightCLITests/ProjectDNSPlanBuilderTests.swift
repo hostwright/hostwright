@@ -1,5 +1,6 @@
 import XCTest
 @testable import HostwrightCLI
+import HostwrightCore
 import HostwrightNetworking
 import HostwrightRuntime
 
@@ -381,6 +382,211 @@ final class ProjectDNSPlanBuilderTests: XCTestCase {
         XCTAssertTrue(plan.records.isEmpty)
     }
 
+    func testIngressUsesPersistedUUIDAndOnlyReadyReplicaBackends()
+        throws
+    {
+        let projectUUID = "11111111-1111-4111-8111-111111111111"
+        let network = try RuntimeNetworkIdentity(
+            logicalName: "backend",
+            projectUUID: projectUUID
+        )
+        let ready = try desired(
+            instance: "api-0",
+            index: 0,
+            network: network,
+            aliases: []
+        )
+        let unhealthy = try desired(
+            instance: "api-1",
+            index: 1,
+            network: network,
+            aliases: []
+        )
+        let persistedUUID = "22222222-2222-4222-8222-222222222222"
+        let binding = try LifecycleResourceBinding(
+            identity: ready.identity,
+            resourceIdentifier: ready.identity.managedResourceIdentifier,
+            resourceUUID: persistedUUID,
+            resourceGeneration: 1,
+            projectResourceUUID: projectUUID,
+            projectGeneration: 1,
+            providerID: .appleContainerCLI,
+            providerGeneration: 1,
+            currentFencingToken: "33333333-3333-4333-8333-333333333333"
+        )
+        let plan = try ProjectDNSPlanBuilder.build(
+            projectUUID: projectUUID,
+            desiredState: DesiredRuntimeState(
+                projectName: "demo",
+                networks: [],
+                services: [unhealthy, ready]
+            ),
+            observedState: ObservedRuntimeState(
+                projectName: "demo",
+                services: [
+                    observed(
+                        desired: unhealthy,
+                        network: network,
+                        address: "10.44.0.9",
+                        health: .unhealthy
+                    ),
+                    observed(
+                        desired: ready,
+                        network: network,
+                        address: "10.44.0.8",
+                        health: .healthy
+                    ),
+                ]
+            ),
+            ingress: ingress(),
+            projectID: "project-demo",
+            resourceBindings: [binding]
+        )
+
+        let route = try XCTUnwrap(plan.ingressBindings.first?.routes.first)
+        XCTAssertEqual(
+            route.targetServiceUUIDs,
+            [
+                persistedUUID,
+                HostwrightResourceUUID.legacy(
+                    kind: "service",
+                    identifier:
+                        "project-demo:\(unhealthy.identity.displayName)"
+                ),
+            ].sorted()
+        )
+        XCTAssertEqual(
+            route.backends,
+            [
+                ProjectIngressBackend(
+                    serviceUUID: persistedUUID,
+                    address: "10.44.0.8",
+                    port: 8_080
+                ),
+            ]
+        )
+    }
+
+    func testIngressFallsBackToLifecycleLegacyUUIDAndRetainsUnhealthyTarget()
+        throws
+    {
+        let projectUUID = "11111111-1111-4111-8111-111111111111"
+        let network = try RuntimeNetworkIdentity(
+            logicalName: "backend",
+            projectUUID: projectUUID
+        )
+        let service = try desired(
+            instance: "api-0",
+            index: 0,
+            network: network,
+            aliases: []
+        )
+        let projectID = "project-demo"
+        let plan = try ProjectDNSPlanBuilder.build(
+            projectUUID: projectUUID,
+            desiredState: DesiredRuntimeState(
+                projectName: "demo",
+                networks: [],
+                services: [service]
+            ),
+            observedState: ObservedRuntimeState(
+                projectName: "demo",
+                services: [
+                    observed(
+                        desired: service,
+                        network: network,
+                        address: "10.44.0.8",
+                        health: .unhealthy
+                    ),
+                ]
+            ),
+            ingress: ingress(),
+            projectID: projectID
+        )
+
+        let route = try XCTUnwrap(plan.ingressBindings.first?.routes.first)
+        XCTAssertEqual(
+            route.targetServiceUUIDs,
+            [
+                HostwrightResourceUUID.legacy(
+                    kind: "service",
+                    identifier: "\(projectID):\(service.identity.displayName)"
+                ),
+            ]
+        )
+        XCTAssertTrue(route.backends.isEmpty)
+    }
+
+    func testIngressPlanIsDeterministicAcrossInputOrdering()
+        throws
+    {
+        let projectUUID = "11111111-1111-4111-8111-111111111111"
+        let network = try RuntimeNetworkIdentity(
+            logicalName: "backend",
+            projectUUID: projectUUID
+        )
+        let first = try desired(
+            instance: "api-0",
+            index: 0,
+            network: network,
+            aliases: []
+        )
+        let second = try desired(
+            instance: "api-1",
+            index: 1,
+            network: network,
+            aliases: []
+        )
+        let observedFirst = observed(
+            desired: first,
+            network: network,
+            address: "10.44.0.8",
+            health: .healthy
+        )
+        let observedSecond = observed(
+            desired: second,
+            network: network,
+            address: "10.44.0.9",
+            health: .healthy
+        )
+        let desiredState = DesiredRuntimeState(
+            projectName: "demo",
+            networks: [],
+            services: [second, first]
+        )
+        let reversedState = DesiredRuntimeState(
+            projectName: "demo",
+            networks: [],
+            services: [first, second]
+        )
+        let firstPlan = try ProjectDNSPlanBuilder.build(
+            projectUUID: projectUUID,
+            desiredState: desiredState,
+            observedState: ObservedRuntimeState(
+                projectName: "demo",
+                services: [observedSecond, observedFirst]
+            ),
+            ingress: ingress(),
+            projectID: "project-demo"
+        )
+        let secondPlan = try ProjectDNSPlanBuilder.build(
+            projectUUID: projectUUID,
+            desiredState: reversedState,
+            observedState: ObservedRuntimeState(
+                projectName: "demo",
+                services: [observedFirst, observedSecond]
+            ),
+            ingress: ingress(),
+            projectID: "project-demo"
+        )
+
+        XCTAssertEqual(firstPlan.ingressBindings, secondPlan.ingressBindings)
+        XCTAssertEqual(
+            try JSONEncoder().encode(firstPlan.ingressBindings),
+            try JSONEncoder().encode(secondPlan.ingressBindings)
+        )
+    }
+
     private func desired(
         instance: String,
         index: Int,
@@ -403,6 +609,21 @@ final class ProjectDNSPlanBuilderTests: XCTestCase {
                 )
             ]
         )
+    }
+
+    private func ingress() -> [String: HostwrightIngressListener] {
+        [
+            "api": HostwrightIngressListener(
+                port: 18_080,
+                routes: [
+                    HostwrightIngressRoute(
+                        hostname: "api.local",
+                        targetService: "api",
+                        targetPort: 8_080
+                    ),
+                ]
+            ),
+        ]
     }
 
     private func observed(

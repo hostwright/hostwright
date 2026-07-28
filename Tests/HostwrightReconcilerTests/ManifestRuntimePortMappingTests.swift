@@ -202,6 +202,86 @@ final class ManifestRuntimePortMappingTests: XCTestCase {
         })
     }
 
+    func testCarriesLocalhostIngressWithoutAddingBlockers() throws {
+        let route = HostwrightIngressRoute(
+            hostname: "api.hostwright.internal",
+            targetService: "api",
+            targetPort: 8_080
+        )
+        let ingress = HostwrightIngressListener(
+            port: 18_080,
+            routes: [route]
+        )
+        let service = HostwrightService(
+            name: "api",
+            image: "example.invalid/api:local",
+            ports: ["8080:8080"]
+        )
+        let manifest = HostwrightManifest(
+            version: 2,
+            project: "demo",
+            imagePolicy: nil,
+            imageTrust: nil,
+            imageSBOM: nil,
+            networks: [:],
+            ingress: ["api": ingress],
+            services: [service]
+        )
+
+        let mapping = ManifestRuntimeMapper.map(manifest)
+
+        XCTAssertTrue(mapping.issues.isEmpty)
+        XCTAssertEqual(mapping.ingress, manifest.ingress)
+    }
+
+    func testBlocksNonlocalIngressUntilTLSAndMTLSAreQualified() {
+        let exposure = HostwrightPortExposurePolicy(
+            scope: .lan,
+            interfaces: ["en0"],
+            networkClasses: [.privateLAN],
+            allowedCIDRs: ["192.168.1.0/24"],
+            authentication: .mutualTLS
+        )
+        let ingress = HostwrightIngressListener(
+            bindAddress: "192.168.1.10",
+            port: 8_443,
+            exposure: exposure,
+            routes: [
+                HostwrightIngressRoute(
+                    hostname: "api.example.test",
+                    targetService: "api",
+                    targetPort: 8_080
+                ),
+            ]
+        )
+        let service = HostwrightService(
+            name: "api",
+            image: "example.invalid/api:local",
+            ports: ["8080:8080"]
+        )
+        let mapping = ManifestRuntimeMapper.map(
+            HostwrightManifest(
+                version: 2,
+                project: "demo",
+                imagePolicy: nil,
+                imageTrust: nil,
+                imageSBOM: nil,
+                networks: [:],
+                ingress: ["public": ingress],
+                services: [service]
+            )
+        )
+
+        XCTAssertTrue(mapping.issues.contains {
+            $0.kind == .unsupportedFeature &&
+                $0.severity == .blocker &&
+                $0.stableDetailKey ==
+                    "ingress:public:192.168.1.10:8443" &&
+                $0.message ==
+                    "Ingress listener 'public' requires a qualified secure TLS/mTLS listener before non-localhost activation."
+        })
+    }
+
     func testLegacyPortLiteralStillMapsAsFixedTCPOnLocalhost() throws {
         let service = HostwrightService(
             name: "api",

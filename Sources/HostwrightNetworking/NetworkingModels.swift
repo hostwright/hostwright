@@ -620,6 +620,99 @@ public enum HostwrightHostAccessPolicy {
     }
 }
 
+public enum HostwrightIngressRouteProtocol:
+    String,
+    Codable,
+    CaseIterable,
+    Equatable,
+    Hashable,
+    Sendable
+{
+    case http
+    case websocket
+}
+
+public struct HostwrightIngressRoute:
+    Codable,
+    Equatable,
+    Hashable,
+    Sendable
+{
+    public static let maximumMethods = 8
+
+    public var hostname: String
+    public var pathPrefix: String
+    public var methods: [String]
+    public var protocolName: HostwrightIngressRouteProtocol
+    public var targetService: String
+    public var targetPort: Int
+
+    public init(
+        hostname: String,
+        pathPrefix: String = "/",
+        methods: [String] = ["GET"],
+        protocolName: HostwrightIngressRouteProtocol = .http,
+        targetService: String,
+        targetPort: Int
+    ) {
+        self.hostname = hostname
+        self.pathPrefix = pathPrefix
+        self.methods = methods
+        self.protocolName = protocolName
+        self.targetService = targetService
+        self.targetPort = targetPort
+    }
+
+    public static func canonicalPrecedes(
+        _ lhs: Self,
+        _ rhs: Self
+    ) -> Bool {
+        let lhsFields = [
+            lhs.hostname,
+            lhs.pathPrefix,
+            lhs.protocolName.rawValue,
+            lhs.methods.sorted().joined(separator: ","),
+            lhs.targetService,
+            String(format: "%05d", lhs.targetPort)
+        ]
+        let rhsFields = [
+            rhs.hostname,
+            rhs.pathPrefix,
+            rhs.protocolName.rawValue,
+            rhs.methods.sorted().joined(separator: ","),
+            rhs.targetService,
+            String(format: "%05d", rhs.targetPort)
+        ]
+        return lhsFields.lexicographicallyPrecedes(rhsFields)
+    }
+}
+
+public struct HostwrightIngressListener:
+    Codable,
+    Equatable,
+    Sendable
+{
+    public static let maximumListeners = 64
+    public static let maximumRoutes = 256
+
+    public var bindAddress: String
+    public var port: Int
+    public var exposure: HostwrightPortExposurePolicy
+    public var routes: [HostwrightIngressRoute]
+
+    public init(
+        bindAddress: String = "127.0.0.1",
+        port: Int,
+        exposure: HostwrightPortExposurePolicy = .localhost,
+        routes: [HostwrightIngressRoute]
+    ) {
+        self.bindAddress = bindAddress
+        self.port = port
+        self.exposure = exposure
+        self.routes = routes
+    }
+}
+
 public enum HostwrightNetworkIdentity {
     public static func resourceUUID(projectUUID: String, networkName: String) -> String {
         HostwrightResourceUUID.legacy(

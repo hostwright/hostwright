@@ -15,6 +15,7 @@ public struct HostwrightManifest: Equatable, Sendable {
     public var imageProvenance: HostwrightImageProvenancePolicy?
     public var volumes: [String: HostwrightVolumeDeclaration]
     public var networks: [String: HostwrightNetworkDefinition]
+    public var ingress: [String: HostwrightIngressListener]
     public var services: [HostwrightService]
 
     public var effectiveVersion: Int {
@@ -36,6 +37,7 @@ public struct HostwrightManifest: Equatable, Sendable {
             imageProvenance: nil,
             volumes: [:],
             networks: [:],
+            ingress: [:],
             services: services
         )
     }
@@ -51,6 +53,7 @@ public struct HostwrightManifest: Equatable, Sendable {
             imageProvenance: nil,
             volumes: [:],
             networks: [:],
+            ingress: [:],
             services: services
         )
     }
@@ -76,6 +79,7 @@ public struct HostwrightManifest: Equatable, Sendable {
             imageProvenance: imageProvenance,
             volumes: volumes,
             networks: [:],
+            ingress: [:],
             services: services
         )
     }
@@ -90,6 +94,7 @@ public struct HostwrightManifest: Equatable, Sendable {
         imageProvenance: HostwrightImageProvenancePolicy? = nil,
         volumes: [String: HostwrightVolumeDeclaration] = [:],
         networks: [String: HostwrightNetworkDefinition],
+        ingress: [String: HostwrightIngressListener] = [:],
         services: [HostwrightService]
     ) {
         self.version = version
@@ -101,6 +106,7 @@ public struct HostwrightManifest: Equatable, Sendable {
         self.imageProvenance = imageProvenance
         self.volumes = volumes
         self.networks = networks
+        self.ingress = ingress
         self.services = services
     }
 
@@ -120,6 +126,7 @@ public struct HostwrightManifest: Equatable, Sendable {
             imageProvenance: nil,
             volumes: [:],
             networks: [:],
+            ingress: [:],
             services: services
         )
     }
@@ -141,6 +148,7 @@ public struct HostwrightManifest: Equatable, Sendable {
             imageProvenance: nil,
             volumes: [:],
             networks: [:],
+            ingress: [:],
             services: services
         )
     }

@@ -87,9 +87,13 @@ final class NetworkHelperClientTests: XCTestCase {
                 isDirectory: true
             )
         )
+        let ingressBroker = NetworkHelperIngressBroker()
         let server = NetworkHelperUnixServer(
             runtimeDirectory: runtime,
-            dispatcher: NetworkHelperDispatcher(store: store),
+            dispatcher: NetworkHelperDispatcher(
+                store: store,
+                ingressBroker: ingressBroker
+            ),
             authenticator: NetworkHelperPeerAuthenticator { descriptor in
                 _ = try NetworkHelperPeerSecurity.validateSameUser(
                     connectionDescriptor: descriptor
@@ -134,14 +138,34 @@ final class NetworkHelperClientTests: XCTestCase {
             generation: 1,
             fencingToken: fence
         )
+        let ingressPort = try reserveLoopbackPortForClient()
+        let ingress = ProjectIngressListenerBinding(
+            name: "api",
+            bindAddress: "127.0.0.1",
+            port: ingressPort,
+            exposure: .localhost,
+            routes: [ProjectIngressRouteBinding(
+                hostname: "api.internal",
+                pathPrefix: "/",
+                methods: ["GET"],
+                protocolName: .http,
+                targetServiceUUIDs: [projectUUID],
+                targetPort: 8_080,
+                backends: []
+            )]
+        )
         let active = try await client.apply(
             identity: identity,
-            corefile: corefile()
+            corefile: corefile(),
+            ingressBindings: [ingress]
         )
         XCTAssertEqual(active.identity, identity)
         XCTAssertTrue(active.url.path.hasSuffix("/active/Corefile"))
         XCTAssertEqual(active.sha256.count, 64)
         XCTAssertGreaterThan(active.inode, 0)
+        let persisted = try store.status(identity: identity)
+        XCTAssertEqual(persisted.ingressSHA256?.count, 64)
+        XCTAssertEqual(ingressBroker.sha256(identity: identity), persisted.ingressSHA256)
 
         let status = try await client.status(identity: identity)
         XCTAssertEqual(status.disposition, .active)
@@ -153,6 +177,8 @@ final class NetworkHelperClientTests: XCTestCase {
             removedStatus.disposition,
             .absent
         )
+        XCTAssertFalse(ingressBroker.hasActiveBindings)
+        XCTAssertTrue(try store.activeIngressConfigurations().isEmpty)
         try await client.close()
         try await serverTask.value
         XCTAssertFalse(
@@ -390,6 +416,12 @@ final class NetworkHelperClientTests: XCTestCase {
         XCTAssertEqual(lstat(url.path, &metadata), 0)
         return metadata.st_mode & mode_t(0o7777)
     }
+}
+
+private func reserveLoopbackPortForClient() throws -> Int {
+    let listener = try makeLoopbackTCPServerForClient()
+    Darwin.close(listener.descriptor)
+    return listener.port
 }
 
 private func firstActiveNonLoopbackIPv4ForClient() -> String? {

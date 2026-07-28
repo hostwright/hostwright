@@ -1,5 +1,6 @@
 import Foundation
 import HostwrightCore
+import HostwrightNetworking
 import HostwrightReconciler
 import HostwrightRuntime
 import HostwrightState
@@ -159,6 +160,7 @@ public struct LifecycleCommandPreparation: Sendable {
     public let manifestBaseDirectory: String
     public let mappingIssues: [PlanIssue]
     public let desiredState: DesiredRuntimeState
+    public let ingress: [String: HostwrightIngressListener]
     public let previousDesiredState: DesiredRuntimeState?
     public let observedState: ObservedRuntimeState
     public let observationSHA256: String
@@ -177,6 +179,7 @@ public struct LifecycleCommandPreparation: Sendable {
         manifestBaseDirectory: String,
         mappingIssues: [PlanIssue] = [],
         desiredState: DesiredRuntimeState,
+        ingress: [String: HostwrightIngressListener] = [:],
         previousDesiredState: DesiredRuntimeState? = nil,
         observedState: ObservedRuntimeState,
         observationSHA256: String,
@@ -194,6 +197,7 @@ public struct LifecycleCommandPreparation: Sendable {
         self.manifestBaseDirectory = manifestBaseDirectory
         self.mappingIssues = mappingIssues
         self.desiredState = desiredState
+        self.ingress = ingress
         self.previousDesiredState = previousDesiredState
         self.observedState = observedState
         self.observationSHA256 = observationSHA256
@@ -437,6 +441,7 @@ enum LifecycleImageLockBinder {
                 ownedResourceHints:
                     preparation.desiredState.ownedResourceHints
             ),
+            ingress: preparation.ingress,
             previousDesiredState: previousDesiredState,
             observedState: preparation.observedState,
             observationSHA256: preparation.observationSHA256,

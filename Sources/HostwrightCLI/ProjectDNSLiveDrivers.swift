@@ -54,12 +54,14 @@ struct LiveProjectDNSHelperDriver: ProjectDNSHelperDriving {
         identity: ProjectDNSHelperIdentity,
         corefile: String,
         hostAccessBindings: [ProjectDNSHostAccessBinding],
+        ingressBindings: [ProjectIngressListenerBinding],
         predecessorFencingToken: String?
     ) async throws -> ProjectDNSHelperObservation {
         let active = try await client.apply(
             identity: try helperIdentity(identity),
             corefile: corefile,
             hostAccessBindings: hostAccessBindings,
+            ingressBindings: ingressBindings,
             predecessorFencingToken:
                 predecessorFencingToken
         )
@@ -68,7 +70,9 @@ struct LiveProjectDNSHelperDriver: ProjectDNSHelperDriving {
             corefilePath: active.url.path,
             corefileSHA256: active.sha256,
             hostAccessSHA256: active.hostAccessSHA256,
-            hostAccessActive: active.hostAccessActive
+            hostAccessActive: active.hostAccessActive,
+            ingressSHA256: active.ingressSHA256,
+            ingressActive: active.ingressActive
         )
     }
 
@@ -124,7 +128,11 @@ struct LiveProjectDNSHelperDriver: ProjectDNSHelperDriving {
             hostAccessSHA256:
                 status.activeCorefile?.hostAccessSHA256,
             hostAccessActive:
-                status.activeCorefile?.hostAccessActive ?? false
+                status.activeCorefile?.hostAccessActive ?? false,
+            ingressSHA256:
+                status.activeCorefile?.ingressSHA256,
+            ingressActive:
+                status.activeCorefile?.ingressActive ?? false
         )
     }
 }

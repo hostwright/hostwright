@@ -32,6 +32,8 @@ public struct NetworkHelperActiveCorefile: Equatable, Sendable {
     public let sha256: String
     public let hostAccessSHA256: String?
     public let hostAccessActive: Bool
+    public let ingressSHA256: String?
+    public let ingressActive: Bool
     public let device: UInt64
     public let inode: UInt64
 
@@ -41,6 +43,8 @@ public struct NetworkHelperActiveCorefile: Equatable, Sendable {
         sha256: String,
         hostAccessSHA256: String? = nil,
         hostAccessActive: Bool = true,
+        ingressSHA256: String? = nil,
+        ingressActive: Bool = true,
         device: UInt64,
         inode: UInt64
     ) {
@@ -49,6 +53,8 @@ public struct NetworkHelperActiveCorefile: Equatable, Sendable {
         self.sha256 = sha256
         self.hostAccessSHA256 = hostAccessSHA256
         self.hostAccessActive = hostAccessActive
+        self.ingressSHA256 = ingressSHA256
+        self.ingressActive = ingressActive
         self.device = device
         self.inode = inode
     }
@@ -199,7 +205,7 @@ public actor NetworkHelperClient {
     private let peerAuthenticator: NetworkHelperServerPeerAuthenticator
     private let launcher: NetworkHelperProcessLauncher
     private var processLease: NetworkHelperProcessLease?
-    private var retainsActiveHostAccess = false
+    private var retainsActiveBindings = false
 
     public init(configuration: NetworkHelperClientConfiguration) {
         self.configuration = configuration
@@ -230,6 +236,7 @@ public actor NetworkHelperClient {
         identity: NetworkHelperDNSIdentity,
         corefile: String,
         hostAccessBindings: [ProjectDNSHostAccessBinding] = [],
+        ingressBindings: [ProjectIngressListenerBinding] = [],
         predecessorFencingToken: String? = nil
     ) throws -> NetworkHelperActiveCorefile {
         let request = NetworkHelperRequest(
@@ -237,13 +244,16 @@ public actor NetworkHelperClient {
             identity: identity,
             corefile: corefile,
             hostAccessBindings: hostAccessBindings,
+            ingressBindings: ingressBindings,
             predecessorFencingToken: predecessorFencingToken
         )
         let status = try exchange(request)
         guard status.disposition == .active else {
             throw map(status.disposition)
         }
-        retainsActiveHostAccess = status.hostAccessSHA256 != nil
+        retainsActiveBindings =
+            status.hostAccessSHA256 != nil ||
+            status.ingressSHA256 != nil
         return try validateActiveCorefile(status: status)
     }
 
@@ -294,13 +304,13 @@ public actor NetworkHelperClient {
         guard status.disposition == .absent else {
             throw map(status.disposition)
         }
-        retainsActiveHostAccess = false
+        retainsActiveBindings = false
     }
 
     public func close() throws {
         guard let lease = processLease else { return }
         processLease = nil
-        if retainsActiveHostAccess {
+        if retainsActiveBindings {
             return
         }
         let idleDeadline = Self.monotonicMilliseconds()
@@ -626,6 +636,10 @@ public actor NetworkHelperClient {
             hostAccessActive:
                 status.hostAccessActive ??
                 (status.hostAccessSHA256 == nil),
+            ingressSHA256: status.ingressSHA256,
+            ingressActive:
+                status.ingressActive ??
+                (status.ingressSHA256 == nil),
             device: UInt64(metadata.st_dev),
             inode: UInt64(metadata.st_ino)
         )

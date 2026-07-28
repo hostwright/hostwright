@@ -298,7 +298,7 @@ final class ProjectDNSLifecycleCoordinatorTests: XCTestCase {
             try fixture.store.projectDNS.load(id: id)
         )
         await fixture.runtime.failInventory(
-            afterSuccessfulCalls: 1
+            afterSuccessfulCalls: 2
         )
 
         await XCTAssertThrowsErrorAsync {
@@ -806,6 +806,87 @@ final class ProjectDNSLifecycleCoordinatorTests: XCTestCase {
         )
         XCTAssertEqual(group.status, .interrupted)
     }
+
+    func testGuardedHostAccessReservationPersistsBeforeHelperAndCleansExactly()
+        async throws
+    {
+        let fixture = try makeDNSFixture(hostAccess: true)
+        defer { fixture.cleanup() }
+        await fixture.helper.failNextApply()
+
+        do {
+            _ = try await ProjectDNSLifecycleCoordinator.reconcile(
+                preparation: fixture.preparation,
+                planSHA256: dnsTestDigest("d"),
+                store: fixture.store,
+                helper: fixture.helper,
+                runtime: fixture.runtime
+            )
+            XCTFail("Expected the injected helper failure.")
+        } catch let error as DNSCoordinatorInjectedError {
+            guard case .helperApply = error else {
+                XCTFail("Unexpected injected failure: \(error)")
+                return
+            }
+        } catch {
+            XCTFail("Unexpected failure: \(error)")
+            return
+        }
+        let failedApplyCount = await fixture.helper.applyCount()
+        XCTAssertEqual(failedApplyCount, 1)
+        let reserved = try fixture.store.networkPorts.loadProject(
+            projectUUID:
+                fixture.preparation.projectResourceUUID
+        )
+        XCTAssertEqual(reserved.count, 1)
+        let reservedRecord = try XCTUnwrap(reserved.first)
+        XCTAssertEqual(reservedRecord.lifecycleState, .reserved)
+        XCTAssertEqual(reservedRecord.bindAddress, "192.168.70.1")
+        XCTAssertEqual(reservedRecord.hostPort, 18_080)
+        XCTAssertEqual(reservedRecord.protocolName, .tcp)
+        let failedHelperSnapshot =
+            await fixture.helper.snapshot()
+        XCTAssertNil(failedHelperSnapshot)
+
+        _ = try await ProjectDNSLifecycleCoordinator.reconcile(
+            preparation: fixture.preparation,
+            planSHA256: dnsTestDigest("d"),
+            store: fixture.store,
+            helper: fixture.helper,
+            runtime: fixture.runtime
+        )
+        let active = try fixture.store.networkPorts.loadProject(
+            projectUUID:
+                fixture.preparation.projectResourceUUID
+        )
+        XCTAssertEqual(active.count, 1)
+        let activeRecord = try XCTUnwrap(active.first)
+        XCTAssertEqual(activeRecord.lifecycleState, .active)
+        XCTAssertNotNil(activeRecord.observedSHA256)
+
+        try await ProjectDNSLifecycleCoordinator.remove(
+            preparation: fixture.preparation,
+            planSHA256: dnsTestDigest("e"),
+            store: fixture.store,
+            helper: fixture.helper,
+            runtime: fixture.runtime
+        )
+        XCTAssertTrue(
+            try fixture.store.networkPorts.loadProject(
+                projectUUID:
+                    fixture.preparation.projectResourceUUID
+            ).isEmpty
+        )
+        let history = try fixture.store.networkPorts.loadProject(
+            projectUUID:
+                fixture.preparation.projectResourceUUID,
+            includeReleased: true
+        )
+        XCTAssertEqual(history.count, 1)
+        let releasedRecord = try XCTUnwrap(history.first)
+        XCTAssertEqual(releasedRecord.lifecycleState, .released)
+        XCTAssertEqual(releasedRecord.finalizerState, .released)
+    }
 }
 
 private enum DNSRuntimeMutationKind: Equatable, Sendable {
@@ -839,6 +920,7 @@ private enum DNSCoordinatorInjectedError: Error {
 private actor DNSRuntimeDriver: ProjectDNSRuntimeDriving {
     private let store: SQLiteStateStore
     private let capabilitySHA256: String
+    private let networks: [RuntimeInventoryNetwork]
     private var behavior: DNSRuntimeBehavior
     private var container: RuntimeInventoryContainer?
     private var kinds: [DNSRuntimeMutationKind] = []
@@ -849,11 +931,13 @@ private actor DNSRuntimeDriver: ProjectDNSRuntimeDriving {
     init(
         store: SQLiteStateStore,
         capabilitySHA256: String,
-        behavior: DNSRuntimeBehavior
+        behavior: DNSRuntimeBehavior,
+        networks: [RuntimeInventoryNetwork] = []
     ) {
         self.store = store
         self.capabilitySHA256 = capabilitySHA256
         self.behavior = behavior
+        self.networks = networks
     }
 
     func currentCapabilitySHA256() -> String {
@@ -898,7 +982,7 @@ private actor DNSRuntimeDriver: ProjectDNSRuntimeDriving {
             ),
             containers: container.map { [$0] } ?? [],
             images: [],
-            networks: [],
+            networks: networks,
             volumes: []
         )
     }
@@ -1197,6 +1281,7 @@ private actor DNSHelperDriver: ProjectDNSHelperDriving {
     func apply(
         identity: ProjectDNSHelperIdentity,
         corefile: String,
+        hostAccessBindings: [ProjectDNSHostAccessBinding],
         predecessorFencingToken: String?
     ) throws -> ProjectDNSHelperObservation {
         applications += 1
@@ -1210,7 +1295,9 @@ private actor DNSHelperDriver: ProjectDNSHelperDriving {
         if let active {
             if active.identity == identity,
                active.observation.corefileSHA256 ==
-                dnsTestSHA256(corefile) {
+                dnsTestSHA256(corefile),
+               active.observation.hostAccessSHA256 ==
+                dnsTestHostAccessSHA256(hostAccessBindings) {
                 return active.observation
             }
             guard active.identity.projectUUID ==
@@ -1237,7 +1324,9 @@ private actor DNSHelperDriver: ProjectDNSHelperDriving {
             disposition: .active,
             corefilePath:
                 "\(root)/\(identity.projectUUID)/\(identity.dnsUUID)/active/Corefile",
-            corefileSHA256: dnsTestSHA256(corefile)
+            corefileSHA256: dnsTestSHA256(corefile),
+            hostAccessSHA256:
+                dnsTestHostAccessSHA256(hostAccessBindings)
         )
         active = (identity, observation)
         return observation
@@ -1312,7 +1401,8 @@ private struct DNSCoordinatorFixture {
 
 private func makeDNSFixture(
     seedNetworks: Bool = true,
-    behavior: DNSRuntimeBehavior = .succeed
+    behavior: DNSRuntimeBehavior = .succeed,
+    hostAccess: Bool = false
 ) throws -> DNSCoordinatorFixture {
     let root = FileManager.default.temporaryDirectory
         .appendingPathComponent(
@@ -1374,6 +1464,16 @@ private func makeDNSFixture(
         ),
         logicalServiceName: "api",
         image: "example.invalid/api@sha256:\(dnsTestDigest("c"))",
+        hostAccess: hostAccess
+            ? [
+                HostwrightHostAccessEndpoint(
+                    hostname: "host-api.internal",
+                    protocolName: .tcp,
+                    addressClass: .loopback,
+                    port: 18_080
+                ),
+            ]
+            : [],
         networks: [attachment]
     )
     let observed = ObservedRuntimeState(
@@ -1432,7 +1532,47 @@ private func makeDNSFixture(
         runtime: DNSRuntimeDriver(
             store: store,
             capabilitySHA256: preparation.capabilitySHA256,
-            behavior: behavior
+            behavior: behavior,
+            networks: hostAccess
+                ? [
+                    RuntimeInventoryNetwork(
+                        runtimeID:
+                            network.identity.runtimeIdentifier,
+                        name:
+                            network.identity.runtimeIdentifier,
+                        kind: "nat",
+                        addresses: [
+                            "192.168.70.0/24",
+                            "192.168.70.1",
+                        ],
+                        labels: [
+                            RuntimeInventoryLabel(
+                                key:
+                                    RuntimeManagedResourceIdentity
+                                        .managedLabel,
+                                value: "true"
+                            ),
+                        ],
+                        ownership:
+                            RuntimeInventoryOwnershipEvidence(
+                                resourceUUID:
+                                    network.identity.resourceUUID,
+                                projectUUID: projectUUID,
+                                resourceGeneration: 2,
+                                projectGeneration: 1,
+                                providerID:
+                                    .appleContainerCLI,
+                                providerGeneration: 1,
+                                fencingToken: dnsTestUUID(
+                                    kind:
+                                        "network-runtime-fence",
+                                    network.identity
+                                        .resourceUUID
+                                )
+                            )
+                    ),
+                ]
+                : []
         )
     )
 }
@@ -1586,6 +1726,27 @@ private func dnsTestSHA256(
     _ value: String
 ) -> String {
     SHA256.hash(data: Data(value.utf8))
+        .map { String(format: "%02x", $0) }
+        .joined()
+}
+
+private func dnsTestHostAccessSHA256(
+    _ value: [ProjectDNSHostAccessBinding]
+) -> String? {
+    guard !value.isEmpty else { return nil }
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [
+        .sortedKeys,
+        .withoutEscapingSlashes,
+    ]
+    guard let data = try? encoder.encode(
+        value.sorted(
+            by: ProjectDNSHostAccessBinding.canonicalPrecedes
+        )
+    ) else {
+        return nil
+    }
+    return SHA256.hash(data: data)
         .map { String(format: "%02x", $0) }
         .joined()
 }

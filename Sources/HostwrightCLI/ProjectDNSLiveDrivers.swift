@@ -53,18 +53,21 @@ struct LiveProjectDNSHelperDriver: ProjectDNSHelperDriving {
     func apply(
         identity: ProjectDNSHelperIdentity,
         corefile: String,
+        hostAccessBindings: [ProjectDNSHostAccessBinding],
         predecessorFencingToken: String?
     ) async throws -> ProjectDNSHelperObservation {
         let active = try await client.apply(
             identity: try helperIdentity(identity),
             corefile: corefile,
+            hostAccessBindings: hostAccessBindings,
             predecessorFencingToken:
                 predecessorFencingToken
         )
         return ProjectDNSHelperObservation(
             disposition: .active,
             corefilePath: active.url.path,
-            corefileSHA256: active.sha256
+            corefileSHA256: active.sha256,
+            hostAccessSHA256: active.hostAccessSHA256
         )
     }
 
@@ -116,7 +119,9 @@ struct LiveProjectDNSHelperDriver: ProjectDNSHelperDriving {
         return ProjectDNSHelperObservation(
             disposition: disposition,
             corefilePath: status.activeCorefile?.url.path,
-            corefileSHA256: status.activeCorefile?.sha256
+            corefileSHA256: status.activeCorefile?.sha256,
+            hostAccessSHA256:
+                status.activeCorefile?.hostAccessSHA256
         )
     }
 }

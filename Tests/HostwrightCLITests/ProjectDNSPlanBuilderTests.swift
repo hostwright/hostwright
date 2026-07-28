@@ -4,6 +4,113 @@ import HostwrightNetworking
 import HostwrightRuntime
 
 final class ProjectDNSPlanBuilderTests: XCTestCase {
+    func testBuildPinsGuardedLoopbackHostAccessToOwnedGateway()
+        throws
+    {
+        let projectUUID =
+            "11111111-1111-4111-8111-111111111111"
+        let network = try RuntimeNetworkIdentity(
+            logicalName: "backend",
+            projectUUID: projectUUID
+        )
+        let attachment = try RuntimeDesiredNetworkAttachment(
+            network: network
+        )
+        let service = DesiredRuntimeService(
+            identity: RuntimeServiceIdentity(
+                projectName: "demo",
+                serviceName: "api",
+                instanceName: "api-0"
+            ),
+            image: "local/api:dev",
+            hostAccess: [
+                HostwrightHostAccessEndpoint(
+                    hostname: "host-api.internal",
+                    protocolName: .tcp,
+                    addressClass: .loopback,
+                    port: 6_508
+                ),
+            ],
+            networks: [attachment]
+        )
+        let ownership = RuntimeInventoryOwnershipEvidence(
+            resourceUUID: network.resourceUUID,
+            projectUUID: projectUUID,
+            resourceGeneration: 1,
+            projectGeneration: 1,
+            providerID: .appleContainerCLI,
+            providerGeneration: 1,
+            fencingToken:
+                "22222222-2222-4222-8222-222222222222"
+        )
+        let inventory = try RuntimeInventoryBuilder.build(
+            machine: RuntimeInventoryMachine(
+                state: .running,
+                operatingSystem: "macOS 26.0",
+                architecture: "arm64",
+                runtimeVersion: "1.1.0",
+                services: []
+            ),
+            containers: [],
+            images: [],
+            networks: [
+                RuntimeInventoryNetwork(
+                    runtimeID: network.runtimeIdentifier,
+                    name: network.runtimeIdentifier,
+                    kind: "nat",
+                    addresses: [
+                        "192.168.64.0/24",
+                        "192.168.64.1",
+                    ],
+                    labels: [
+                        RuntimeInventoryLabel(
+                            key:
+                                RuntimeManagedResourceIdentity
+                                    .managedLabel,
+                            value: "true"
+                        ),
+                    ],
+                    ownership: ownership
+                ),
+            ],
+            volumes: []
+        )
+
+        let plan = try ProjectDNSPlanBuilder.build(
+            projectUUID: projectUUID,
+            desiredState: DesiredRuntimeState(
+                projectName: "demo",
+                networks: [],
+                services: [service]
+            ),
+            observedState: ObservedRuntimeState(
+                projectName: "demo",
+                services: []
+            ),
+            runtimeInventory: inventory
+        )
+
+        XCTAssertEqual(
+            plan.hostAccessBindings,
+            [
+                ProjectDNSHostAccessBinding(
+                    hostname: "host-api.internal",
+                    protocolName: .tcp,
+                    addressClass: .loopback,
+                    listenAddress: "192.168.64.1",
+                    clientCIDR: "192.168.64.0/24",
+                    targetAddress: "127.0.0.1",
+                    port: 6_508
+                ),
+            ]
+        )
+        XCTAssertTrue(
+            plan.corefile.contains(
+                "192.168.64.1 host-api.internal"
+            )
+        )
+    }
+
     func testBuildPublishesOnlyReadyObservedAddressesAndAliases()
         throws
     {

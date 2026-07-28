@@ -180,6 +180,7 @@ public enum ManifestCanonicalEncoder {
                 sockets: service.publishedSockets,
                 to: &lines
             )
+            appendHostAccess(service.hostAccess, to: &lines)
             appendServiceNetworks(service.networks, to: &lines)
             appendMounts(service.mounts, to: &lines)
 
@@ -381,6 +382,28 @@ public enum ManifestCanonicalEncoder {
         lines.append("\(spaces)\(key):")
         for (mapKey, value) in values.sorted(by: { $0.key < $1.key }) {
             lines.append("\(spaces)  \(quote(mapKey)): \(quote(value))")
+        }
+    }
+
+    private static func appendHostAccess(
+        _ endpoints: [HostwrightHostAccessEndpoint],
+        to lines: inout [String]
+    ) {
+        guard !endpoints.isEmpty else { return }
+        lines.append("    hostAccess:")
+        for endpoint in endpoints.sorted(
+            by: HostwrightHostAccessPolicy.canonicalPrecedes
+        ) {
+            lines.append(
+                "      - hostname: \(quote(endpoint.hostname))"
+            )
+            lines.append(
+                "        protocol: \(quote(endpoint.protocolName.rawValue))"
+            )
+            lines.append(
+                "        addressClass: \(quote(endpoint.addressClass.rawValue))"
+            )
+            lines.append("        port: \(endpoint.port)")
         }
     }
 

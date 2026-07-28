@@ -1,5 +1,6 @@
 import XCTest
 @testable import HostwrightManifest
+import HostwrightNetworking
 
 final class Phase07NetworkManifestTests: XCTestCase {
     func testNetworkDeclarationsAndAttachmentsRoundTripCanonically() throws {
@@ -408,6 +409,139 @@ final class Phase07NetworkManifestTests: XCTestCase {
         })
     }
 
+    func testGuardedHostAccessRoundTripsCanonically() throws {
+        let manifest = try ManifestValidator.validated(
+            """
+            version: 2
+            project: host-access-demo
+            networks:
+              guarded: {}
+            services:
+              api:
+                image: local/api:latest
+                networks: [guarded]
+                hostAccess:
+                  - hostname: database.hostwright.internal
+                    port: 5432
+                  - hostname: cache.hostwright.internal
+                    protocol: udp
+                    addressClass: interface
+                    port: 11211
+            """
+        )
+
+        let endpoints = try XCTUnwrap(manifest.services.first).hostAccess
+        XCTAssertEqual(
+            endpoints,
+            [
+                HostwrightHostAccessEndpoint(
+                    hostname: "cache.hostwright.internal",
+                    protocolName: .udp,
+                    addressClass: .interface,
+                    port: 11211
+                ),
+                HostwrightHostAccessEndpoint(
+                    hostname: "database.hostwright.internal",
+                    port: 5432
+                )
+            ]
+        )
+
+        let canonical = try ManifestCanonicalEncoder.encode(manifest)
+        XCTAssertLessThan(
+            try XCTUnwrap(
+                canonical.range(of: #""cache.hostwright.internal""#)?.lowerBound
+            ),
+            try XCTUnwrap(
+                canonical.range(of: #""database.hostwright.internal""#)?
+                    .lowerBound
+            )
+        )
+        XCTAssertEqual(try ManifestValidator.validated(canonical), manifest)
+    }
+
+    func testGuardedHostAccessRejectsUnsafeAndDuplicateEndpoints() throws {
+        for hostname in [
+            "*",
+            "127.0.0.1",
+            "::1",
+            "localhost",
+            "metadata.google.internal",
+            "Uppercase.hostwright.internal"
+        ] {
+            assertFailure(
+                hostAccessManifest(
+                    """
+                    - hostname: "\(hostname)"
+                      port: 8080
+                    """
+                ),
+                contains: "must be a lowercase DNS hostname",
+                path: "$.services.api.hostAccess[0].hostname"
+            )
+        }
+
+        assertFailure(
+            hostAccessManifest(
+                """
+                - hostname: api.hostwright.internal
+                  port: 0
+                """
+            ),
+            contains: "port must be between 1 and 65535",
+            path: "$.services.api.hostAccess[0].port"
+        )
+
+        let duplicate = try ManifestParser.parse(
+            hostAccessManifest(
+                """
+                - hostname: api.hostwright.internal
+                  port: 8080
+                - hostname: api.hostwright.internal
+                  protocol: tcp
+                  addressClass: loopback
+                  port: 8080
+                """
+            )
+        )
+        let issues = ManifestValidator.validate(duplicate)
+        XCTAssertTrue(
+            issues.contains {
+                $0.path == "$.services.api.hostAccess[1]" &&
+                    $0.message.contains("must not contain duplicate")
+            }
+        )
+    }
+
+    func testGuardedHostAccessRejectsUnknownFieldsAndExcessiveEndpoints() {
+        assertFailure(
+            hostAccessManifest(
+                """
+                - hostname: api.hostwright.internal
+                  port: 8080
+                  redirect: true
+                """
+            ),
+            code: "HW-MANIFEST-003",
+            contains: "Unsupported hostAccess field 'redirect'",
+            path: "$.services.api.hostAccess[0].redirect"
+        )
+
+        let endpoints = (0...HostwrightHostAccessEndpoint.maximumEndpointsPerService)
+            .map {
+                """
+                - hostname: host-\($0).hostwright.internal
+                  port: 8080
+                """
+            }
+            .joined(separator: "\n")
+        assertFailure(
+            hostAccessManifest(endpoints),
+            contains: "must declare at most 64 endpoints",
+            path: "$.services.api.hostAccess"
+        )
+    }
+
     private func manifest(networks: String) -> String {
         """
         version: 2
@@ -419,6 +553,23 @@ final class Phase07NetworkManifestTests: XCTestCase {
           api:
             image: local/api:latest
             networks: [backend]
+        """
+    }
+
+    private func hostAccessManifest(_ endpoints: String) -> String {
+        """
+        version: 2
+        project: host-access-demo
+        networks:
+          guarded: {}
+        services:
+          api:
+            image: local/api:latest
+            networks: [guarded]
+            hostAccess:
+        \(endpoints.split(separator: "\n", omittingEmptySubsequences: false)
+            .map { "      \($0)" }
+            .joined(separator: "\n"))
         """
     }
 

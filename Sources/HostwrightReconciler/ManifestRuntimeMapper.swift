@@ -146,7 +146,7 @@ public enum ManifestRuntimeMapper {
                 )
             }
         var labels = service.labels
-        if !networks.isEmpty {
+        if !networks.isEmpty || !service.hostAccess.isEmpty {
             do {
                 labels.merge(
                     try RuntimeProjectDNSContract.workloadLabels(
@@ -210,6 +210,7 @@ public enum ManifestRuntimeMapper {
             labels: labels,
             ports: ports,
             publishedSockets: publishedSockets,
+            hostAccess: service.hostAccess,
             networks: networks,
             mounts: mounts,
             healthCheck: mapHealthCheck(service),

@@ -645,6 +645,7 @@ public struct HostwrightService: Equatable, Sendable {
     public var ports: [String]
     public var publishedPorts: [HostwrightPublishedPort]
     public var publishedSockets: [HostwrightPublishedSocket]
+    public var hostAccess: [HostwrightHostAccessEndpoint]
     public var networks: [HostwrightServiceNetworkAttachment]
     public var volumes: [String]
     public var mounts: [HostwrightMountSpec]
@@ -677,6 +678,7 @@ public struct HostwrightService: Equatable, Sendable {
         ports: [String] = [],
         publishedPorts: [HostwrightPublishedPort] = [],
         publishedSockets: [HostwrightPublishedSocket] = [],
+        hostAccess: [HostwrightHostAccessEndpoint] = [],
         volumes: [String] = [],
         mounts: [HostwrightMountSpec] = [],
         probes: HostwrightProbes = HostwrightProbes(),
@@ -708,6 +710,7 @@ public struct HostwrightService: Equatable, Sendable {
             ports: ports,
             publishedPorts: publishedPorts,
             publishedSockets: publishedSockets,
+            hostAccess: hostAccess,
             networks: [],
             volumes: volumes,
             mounts: mounts,
@@ -742,6 +745,7 @@ public struct HostwrightService: Equatable, Sendable {
         ports: [String] = [],
         publishedPorts: [HostwrightPublishedPort] = [],
         publishedSockets: [HostwrightPublishedSocket] = [],
+        hostAccess: [HostwrightHostAccessEndpoint] = [],
         networks: [HostwrightServiceNetworkAttachment],
         volumes: [String] = [],
         mounts: [HostwrightMountSpec] = [],
@@ -773,6 +777,7 @@ public struct HostwrightService: Equatable, Sendable {
         let normalizedPublishedPorts = publishedPorts.isEmpty ? ports.compactMap(HostwrightPublishedPort.legacy) : publishedPorts
         self.publishedPorts = normalizedPublishedPorts
         self.publishedSockets = publishedSockets
+        self.hostAccess = hostAccess
         self.ports = ports.isEmpty ? normalizedPublishedPorts.compactMap(\.canonicalLegacyLiteral) : ports
         self.networks = networks
         self.volumes = volumes

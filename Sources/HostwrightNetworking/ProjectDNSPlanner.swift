@@ -67,6 +67,64 @@ public struct ProjectDNSService: Codable, Equatable, Sendable {
     }
 }
 
+public struct ProjectDNSHostAccessBinding:
+    Codable,
+    Equatable,
+    Hashable,
+    Sendable
+{
+    public let hostname: String
+    public let protocolName: HostwrightHostAccessProtocol
+    public let addressClass: HostwrightHostAccessAddressClass
+    public let listenAddress: String
+    public let clientCIDR: String
+    public let targetAddress: String
+    public let port: Int
+
+    public init(
+        hostname: String,
+        protocolName: HostwrightHostAccessProtocol,
+        addressClass: HostwrightHostAccessAddressClass,
+        listenAddress: String,
+        clientCIDR: String,
+        targetAddress: String,
+        port: Int
+    ) {
+        self.hostname = hostname
+        self.protocolName = protocolName
+        self.addressClass = addressClass
+        self.listenAddress = listenAddress
+        self.clientCIDR = clientCIDR
+        self.targetAddress = targetAddress
+        self.port = port
+    }
+
+    public static func canonicalPrecedes(
+        _ lhs: Self,
+        _ rhs: Self
+    ) -> Bool {
+        let lhsFields = [
+            lhs.hostname,
+            lhs.protocolName.rawValue,
+            String(format: "%05d", lhs.port),
+            lhs.addressClass.rawValue,
+            lhs.listenAddress,
+            lhs.clientCIDR,
+            lhs.targetAddress
+        ]
+        let rhsFields = [
+            rhs.hostname,
+            rhs.protocolName.rawValue,
+            String(format: "%05d", rhs.port),
+            rhs.addressClass.rawValue,
+            rhs.listenAddress,
+            rhs.clientCIDR,
+            rhs.targetAddress
+        ]
+        return lhsFields.lexicographicallyPrecedes(rhsFields)
+    }
+}
+
 public struct ProjectDNSOptions: Codable, Equatable, Sendable {
     public let ttlSeconds: Int
     public let negativeTTLSeconds: Int
@@ -90,6 +148,7 @@ public struct ProjectDNSPlan: Codable, Equatable, Sendable {
     public let projectUUID: String
     public let zone: String
     public let records: [ProjectDNSRecord]
+    public let hostAccessBindings: [ProjectDNSHostAccessBinding]
     public let ttlSeconds: Int
     public let negativeTTLSeconds: Int
     public let upstreams: [String]
@@ -101,6 +160,7 @@ public struct ProjectDNSPlan: Codable, Equatable, Sendable {
         projectUUID: String,
         zone: String,
         records: [ProjectDNSRecord],
+        hostAccessBindings: [ProjectDNSHostAccessBinding] = [],
         ttlSeconds: Int,
         negativeTTLSeconds: Int,
         upstreams: [String],
@@ -111,12 +171,71 @@ public struct ProjectDNSPlan: Codable, Equatable, Sendable {
         self.projectUUID = projectUUID
         self.zone = zone
         self.records = records
+        self.hostAccessBindings = hostAccessBindings.sorted(
+            by: ProjectDNSHostAccessBinding.canonicalPrecedes
+        )
         self.ttlSeconds = ttlSeconds
         self.negativeTTLSeconds = negativeTTLSeconds
         self.upstreams = upstreams
         self.searchDomains = searchDomains
         self.corefile = corefile
         self.searchDirective = searchDirective
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case projectUUID
+        case zone
+        case records
+        case hostAccessBindings
+        case ttlSeconds
+        case negativeTTLSeconds
+        case upstreams
+        case searchDomains
+        case corefile
+        case searchDirective
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            projectUUID: try values.decode(
+                String.self,
+                forKey: .projectUUID
+            ),
+            zone: try values.decode(String.self, forKey: .zone),
+            records: try values.decode(
+                [ProjectDNSRecord].self,
+                forKey: .records
+            ),
+            hostAccessBindings: try values.decodeIfPresent(
+                [ProjectDNSHostAccessBinding].self,
+                forKey: .hostAccessBindings
+            ) ?? [],
+            ttlSeconds: try values.decode(
+                Int.self,
+                forKey: .ttlSeconds
+            ),
+            negativeTTLSeconds: try values.decode(
+                Int.self,
+                forKey: .negativeTTLSeconds
+            ),
+            upstreams: try values.decode(
+                [String].self,
+                forKey: .upstreams
+            ),
+            searchDomains: try values.decode(
+                [String].self,
+                forKey: .searchDomains
+            ),
+            corefile: try values.decode(
+                String.self,
+                forKey: .corefile
+            ),
+            searchDirective: try values.decode(
+                String.self,
+                forKey: .searchDirective
+            )
+        )
     }
 }
 
@@ -131,6 +250,7 @@ public enum ProjectDNSPlanningError:
     case duplicateName(kind: String, value: String)
     case nameConflict(name: String, firstOwner: String, secondOwner: String)
     case invalidAddress(family: String, value: String)
+    case invalidHostAccess(String)
     case invalidTTL(kind: String, value: Int, range: ClosedRange<Int>)
     case limitExceeded(kind: String, limit: Int)
 
@@ -146,6 +266,8 @@ public enum ProjectDNSPlanningError:
             return "DNS name '\(name)' is owned by both '\(firstOwner)' and '\(secondOwner)'."
         case .invalidAddress(let family, let value):
             return "Invalid \(family) address '\(value)'."
+        case .invalidHostAccess(let message):
+            return "Invalid host-access binding: \(message)."
         case .invalidTTL(let kind, let value, let range):
             return "\(kind) TTL \(value) must be within \(range.lowerBound)...\(range.upperBound) seconds."
         case .limitExceeded(let kind, let limit):
@@ -167,6 +289,7 @@ public enum ProjectDNSPlanner {
     public static func makePlan(
         projectUUID: String,
         services: [ProjectDNSService],
+        hostAccessBindings: [ProjectDNSHostAccessBinding] = [],
         options: ProjectDNSOptions = ProjectDNSOptions()
     ) throws -> ProjectDNSPlan {
         let canonicalProjectUUID = try canonicalProjectUUID(projectUUID)
@@ -202,11 +325,15 @@ public enum ProjectDNSPlanner {
             services: services,
             ttlSeconds: options.ttlSeconds
         )
+        let canonicalHostAccess = try canonicalHostAccessBindings(
+            hostAccessBindings
+        )
 
         return ProjectDNSPlan(
             projectUUID: canonicalProjectUUID,
             zone: zone,
             records: records,
+            hostAccessBindings: canonicalHostAccess,
             ttlSeconds: options.ttlSeconds,
             negativeTTLSeconds: options.negativeTTLSeconds,
             upstreams: canonicalUpstreams,
@@ -216,7 +343,8 @@ public enum ProjectDNSPlanner {
                 records: records,
                 ttlSeconds: options.ttlSeconds,
                 negativeTTLSeconds: options.negativeTTLSeconds,
-                upstreams: canonicalUpstreams
+                upstreams: canonicalUpstreams,
+                hostAccessBindings: canonicalHostAccess
             ),
             searchDirective: "search \(canonicalSearchDomains.joined(separator: " "))"
         )
@@ -402,6 +530,77 @@ public enum ProjectDNSPlanner {
         return result.sorted()
     }
 
+    private static func canonicalHostAccessBindings(
+        _ values: [ProjectDNSHostAccessBinding]
+    ) throws -> [ProjectDNSHostAccessBinding] {
+        guard values.count <= maximumRecords else {
+            throw ProjectDNSPlanningError.limitExceeded(
+                kind: "host-access binding count",
+                limit: maximumRecords
+            )
+        }
+        var identities = Set<String>()
+        var hostnameOwners: [String: ProjectDNSHostAccessBinding] = [:]
+        var socketOwners: [String: ProjectDNSHostAccessBinding] = [:]
+        for value in values {
+            guard HostwrightHostAccessPolicy.isValidHostname(
+                value.hostname
+            ),
+            let listen = canonicalIPv4(value.listenAddress),
+            listen == value.listenAddress,
+            canonicalIPv4CIDR(value.clientCIDR) ==
+                value.clientCIDR,
+            let target = canonicalIPv4(value.targetAddress),
+            target == value.targetAddress,
+            (1...65_535).contains(value.port) else {
+                throw ProjectDNSPlanningError.invalidHostAccess(
+                    "hostname, IPv4 address, or port is invalid"
+                )
+            }
+            let identity = [
+                value.hostname,
+                value.protocolName.rawValue,
+                String(value.port),
+                value.addressClass.rawValue,
+                value.listenAddress,
+                value.clientCIDR,
+                value.targetAddress
+            ].joined(separator: "\u{1f}")
+            guard identities.insert(identity).inserted else {
+                throw ProjectDNSPlanningError.invalidHostAccess(
+                    "duplicate endpoint '\(value.hostname)'"
+                )
+            }
+            if let prior = hostnameOwners[value.hostname],
+               (
+                   prior.listenAddress != value.listenAddress ||
+                       prior.clientCIDR != value.clientCIDR
+               ) {
+                throw ProjectDNSPlanningError.invalidHostAccess(
+                    "hostname '\(value.hostname)' has conflicting broker addresses"
+                )
+            }
+            hostnameOwners[value.hostname] = value
+            let socket = [
+                value.listenAddress,
+                String(value.port),
+                value.protocolName.rawValue
+            ].joined(separator: "\u{1f}")
+            if let prior = socketOwners[socket],
+               prior.targetAddress != value.targetAddress ||
+                prior.clientCIDR != value.clientCIDR ||
+                prior.addressClass != value.addressClass {
+                throw ProjectDNSPlanningError.invalidHostAccess(
+                    "listener \(value.listenAddress):\(value.port)/\(value.protocolName.rawValue) has conflicting targets"
+                )
+            }
+            socketOwners[socket] = value
+        }
+        return values.sorted(
+            by: ProjectDNSHostAccessBinding.canonicalPrecedes
+        )
+    }
+
     private static func canonicalSearchDomains(
         projectZone: String,
         additional: [String]
@@ -459,6 +658,33 @@ public enum ProjectDNSPlanner {
         return canonical == value ? canonical : nil
     }
 
+    private static func canonicalIPv4CIDR(
+        _ value: String
+    ) -> String? {
+        let components = value.split(
+            separator: "/",
+            omittingEmptySubsequences: false
+        )
+        guard components.count == 2,
+              let address = canonicalIPv4(String(components[0])),
+              let prefix = Int(components[1]),
+              (0...32).contains(prefix) else {
+            return nil
+        }
+        var raw = in_addr()
+        guard address.withCString({
+            inet_pton(AF_INET, $0, &raw)
+        }) == 1 else {
+            return nil
+        }
+        let hostOrder = UInt32(bigEndian: raw.s_addr)
+        let mask = prefix == 0
+            ? UInt32(0)
+            : UInt32.max << UInt32(32 - prefix)
+        guard hostOrder & mask == hostOrder else { return nil }
+        return "\(address)/\(prefix)"
+    }
+
     private static func canonicalIPv6(_ value: String) -> String? {
         guard value == value.trimmingCharacters(in: .whitespacesAndNewlines),
               !value.isEmpty,
@@ -492,7 +718,8 @@ public enum ProjectDNSPlanner {
         records: [ProjectDNSRecord],
         ttlSeconds: Int,
         negativeTTLSeconds: Int,
-        upstreams: [String]
+        upstreams: [String],
+        hostAccessBindings: [ProjectDNSHostAccessBinding]
     ) -> String {
         var lines = [
             "\(zone):53 {",
@@ -518,9 +745,28 @@ public enum ProjectDNSPlanner {
         let forwardTargets = upstreams.isEmpty
             ? "/etc/resolv.conf"
             : upstreams.joined(separator: " ")
+        lines.append(contentsOf: [".:53 {", "    errors"])
+        if !hostAccessBindings.isEmpty {
+            lines.append("    hosts /dev/null {")
+            var renderedHosts = Set<String>()
+            for binding in hostAccessBindings {
+                let record =
+                    "\(binding.listenAddress)\u{0}\(binding.hostname)"
+                if renderedHosts.insert(record).inserted {
+                    lines.append(
+                        "        \(binding.listenAddress) \(binding.hostname)"
+                    )
+                }
+            }
+            lines.append(contentsOf: [
+                "        ttl \(ttlSeconds)",
+                "        no_reverse",
+                "        reload 0s",
+                "        fallthrough",
+                "    }"
+            ])
+        }
         lines.append(contentsOf: [
-            ".:53 {",
-            "    errors",
             "    forward . \(forwardTargets)",
             "    cache {",
             "        success 1024 \(ttlSeconds) 0",

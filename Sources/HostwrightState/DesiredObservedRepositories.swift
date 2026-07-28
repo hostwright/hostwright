@@ -1,6 +1,7 @@
 import Foundation
 import HostwrightCore
 import HostwrightManifest
+import HostwrightNetworking
 import HostwrightRuntime
 
 public struct DesiredStateRepository: Sendable {
@@ -341,7 +342,10 @@ public struct DesiredStateRepository: Sendable {
                     service.publishedSockets.sorted {
                         publishedSocketKey($0) <
                             publishedSocketKey($1)
-                    }.map(publishedSocketJSON)
+                    }.map(publishedSocketJSON) +
+                    service.hostAccess.sorted(
+                        by: HostwrightHostAccessPolicy.canonicalPrecedes
+                    ).map(hostAccessJSON)
             ),
             mountsJSON: try StateJSON.encodeStringArray(service.volumes),
             environmentJSONRedacted: try StateJSON.encode(redactedEnvironment),
@@ -395,6 +399,18 @@ public struct DesiredStateRepository: Sendable {
             socket.containerPath,
             socket.mode.rawValue
         ].joined(separator: "\u{1f}")
+    }
+
+    private func hostAccessJSON(
+        _ endpoint: HostwrightHostAccessEndpoint
+    ) -> [String: Any] {
+        [
+            "addressClass": endpoint.addressClass.rawValue,
+            "hostname": endpoint.hostname,
+            "kind": "host-access",
+            "port": endpoint.port,
+            "protocol": endpoint.protocolName.rawValue
+        ]
     }
 
     private func upsert(_ project: StateProjectRecord, on connection: SQLiteConnection) throws {

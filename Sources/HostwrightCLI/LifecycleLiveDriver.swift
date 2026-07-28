@@ -6040,6 +6040,22 @@ private func lifecyclePreflightDesiredExecution(
             "Runtime capability changed before lifecycle preflight. No runtime mutation was attempted."
         )
     }
+    if preparation.desiredState.services.contains(where: {
+        !$0.hostAccess.isEmpty
+    }) {
+        let networkProvider =
+            try environment.networkProviderForProvider(
+                preparation.providerID
+            )
+        let networkCapabilities = try hostwrightWaitForAsync {
+            try await networkProvider.networkCapabilities()
+        }
+        try lifecyclePreflightHostAccessCapabilities(
+            services: preparation.desiredState.services,
+            providerID: preparation.providerID,
+            capabilities: networkCapabilities
+        )
+    }
     try lifecyclePreflightImageTrust(
         planSHA256: compiled.plan.planSHA256,
         projectID: preparation.projectID,
@@ -6155,6 +6171,38 @@ private func lifecyclePreflightDesiredExecution(
                 with: sanitizedEnvironment
             ),
             providerID: preparation.providerID
+        )
+    }
+}
+
+func lifecyclePreflightHostAccessCapabilities(
+    services: [DesiredRuntimeService],
+    providerID: RuntimeProviderID,
+    capabilities: RuntimeNetworkProviderCapabilities
+) throws {
+    let declared = services.filter { !$0.hostAccess.isEmpty }
+    guard !declared.isEmpty else { return }
+    guard capabilities.providerID == providerID,
+          let hostAccess = capabilities.hostAccess,
+          hostAccess.state == .available,
+          hostAccess.reason == .implemented,
+          hostAccess.requiresManagedProjectNetwork,
+          hostAccess.enforcesExactEndpointAllowlist else {
+        throw RuntimeAdapterError.mutationUnavailableByPolicy(
+            "The selected runtime provider does not qualify guarded host access with exact endpoint enforcement. No runtime mutation was attempted."
+        )
+    }
+    let protocols = Set(hostAccess.protocols)
+    let addressClasses = Set(hostAccess.addressClasses)
+    guard declared.allSatisfy({ service in
+        service.networks.count == 1 &&
+            service.hostAccess.allSatisfy {
+                protocols.contains($0.protocolName) &&
+                    addressClasses.contains($0.addressClass)
+            }
+    }) else {
+        throw RuntimeAdapterError.mutationUnavailableByPolicy(
+            "Guarded host access requires one managed project network and provider-qualified endpoint protocol and address classes. No runtime mutation was attempted."
         )
     }
 }
@@ -7449,6 +7497,8 @@ private func lifecycleReplacingEnvironment(
         labels: service.labels,
         ports: service.ports,
         publishedSockets: service.publishedSockets,
+        hostAccess: service.hostAccess,
+        networks: service.networks,
         mounts: service.mounts,
         healthCheck: service.healthCheck,
         probes: service.probes,

@@ -1,4 +1,5 @@
 import HostwrightCore
+import HostwrightNetworking
 
 public enum RuntimeAdapterError: Error, Equatable, Sendable {
     case runtimeUnavailable(String)
@@ -159,6 +160,7 @@ public enum RuntimeCreateSubsetPolicy {
         _ service: DesiredRuntimeService,
         providerID: RuntimeProviderID
     ) throws {
+        try validateHostAccess(service)
         if providerID == .appleContainerCLI {
             try validateAppleContainerCLI(service)
             return
@@ -170,6 +172,44 @@ public enum RuntimeCreateSubsetPolicy {
         throw RuntimeAdapterError.mutationUnavailableByPolicy(
             "Create-subset validation is unavailable for the selected runtime provider."
         )
+    }
+
+    private static func validateHostAccess(
+        _ service: DesiredRuntimeService
+    ) throws {
+        guard service.hostAccess.count <=
+                HostwrightHostAccessEndpoint
+                    .maximumEndpointsPerService else {
+            throw RuntimeAdapterError.commandRejected(
+                classification: .mutating,
+                message:
+                    "Guarded host access exceeds the per-service endpoint limit."
+            )
+        }
+        guard service.hostAccess.isEmpty ||
+                service.networks.count == 1 else {
+            throw RuntimeAdapterError.commandRejected(
+                classification: .mutating,
+                message:
+                    "Guarded host access requires exactly one managed project-network attachment."
+            )
+        }
+        let identities = service.hostAccess.map {
+            HostwrightHostAccessPolicy.endpointIdentity($0)
+        }
+        guard service.hostAccess.allSatisfy({
+            HostwrightHostAccessPolicy.isValidHostname(
+                $0.hostname
+            ) &&
+                (1...65_535).contains($0.port)
+        }),
+        Set(identities).count == identities.count else {
+            throw RuntimeAdapterError.commandRejected(
+                classification: .mutating,
+                message:
+                    "Guarded host access requires unique exact hostnames, protocols, address classes, and ports."
+            )
+        }
     }
 
     private static func validateAppleContainerCLI(_ service: DesiredRuntimeService) throws {

@@ -1,5 +1,6 @@
 import Foundation
 import HostwrightCore
+import HostwrightNetworking
 import HostwrightRuntime
 
 public enum LifecycleUpdatePlanningError: Error, Equatable, Sendable {
@@ -219,6 +220,16 @@ public enum LifecycleRevisionCodec {
                 "mode": $0.mode.rawValue
             ]
         }
+        let hostAccess = service.hostAccess.sorted(
+            by: HostwrightHostAccessPolicy.canonicalPrecedes
+        ).map {
+            [
+                "addressClass": $0.addressClass.rawValue,
+                "hostname": $0.hostname,
+                "port": $0.port,
+                "protocol": $0.protocolName.rawValue
+            ] as [String: Any]
+        }
         let mounts = service.mounts.sorted {
             ($0.target, $0.source, $0.access.rawValue) <
                 ($1.target, $1.source, $1.access.rawValue)
@@ -275,6 +286,7 @@ public enum LifecycleRevisionCodec {
             "environment": environment,
             "groupID": service.groupID.map { String($0) as Any } ?? NSNull(),
             "healthCheck": health,
+            "hostAccess": hostAccess,
             "hooks": [
                 "postStart": service.hooks.postStart.map { $0 as Any } ?? NSNull(),
                 "preStop": service.hooks.preStop.map { $0 as Any } ?? NSNull()
@@ -453,6 +465,7 @@ public enum LifecycleRevisionCodec {
         let groupID: String?
         let healthCheck: HealthDocument?
         let hooks: HooksDocument
+        let hostAccess: [HostAccessDocument]
         let identity: IdentityDocument
         let image: String
         let imageLock: ImageLockDocument?
@@ -489,7 +502,7 @@ public enum LifecycleRevisionCodec {
                     "rosetta", "sharedMemoryBytes", "updatePolicy", "userID",
                     "virtualization", "workingDirectory"
                 ],
-                optional: ["imageLock", "publishedSockets"],
+                optional: ["hostAccess", "imageLock", "publishedSockets"],
                 path: ""
             )
             command = try container.decode([String].self, forKey: "command")
@@ -509,6 +522,10 @@ public enum LifecycleRevisionCodec {
                 forKey: "healthCheck"
             )
             hooks = try container.decode(HooksDocument.self, forKey: "hooks")
+            hostAccess = try container.decodeIfPresent(
+                [HostAccessDocument].self,
+                forKey: "hostAccess"
+            ) ?? []
             identity = try container.decode(IdentityDocument.self, forKey: "identity")
             image = try container.decode(String.self, forKey: "image")
             imageLock = try container.decodeIfPresent(
@@ -603,6 +620,7 @@ public enum LifecycleRevisionCodec {
                 publishedSockets: try publishedSockets.map {
                     try $0.value
                 },
+                hostAccess: try hostAccess.map { try $0.value },
                 networks: try networks.map { try $0.value },
                 mounts: try mounts.map { try $0.value },
                 healthCheck: healthCheck?.value,
@@ -938,6 +956,63 @@ public enum LifecycleRevisionCodec {
                     hostPath: hostPath,
                     containerPath: containerPath,
                     mode: decoded
+                )
+            }
+        }
+    }
+
+    private struct HostAccessDocument: Decodable {
+        let addressClass: String
+        let hostname: String
+        let port: Int
+        let protocolName: String
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(
+                keyedBy: RevisionCodingKey.self
+            )
+            try LifecycleRevisionCodec.validateKeys(
+                container,
+                required: [
+                    "addressClass", "hostname", "port", "protocol"
+                ],
+                path: "hostAccess"
+            )
+            addressClass = try container.decode(
+                String.self,
+                forKey: "addressClass"
+            )
+            hostname = try container.decode(
+                String.self,
+                forKey: "hostname"
+            )
+            port = try container.decode(Int.self, forKey: "port")
+            protocolName = try container.decode(
+                String.self,
+                forKey: "protocol"
+            )
+        }
+
+        var value: HostwrightHostAccessEndpoint {
+            get throws {
+                guard HostwrightHostAccessPolicy.isValidHostname(hostname),
+                      (1...65_535).contains(port),
+                      let protocolValue = HostwrightHostAccessProtocol(
+                        rawValue: protocolName
+                      ),
+                      let addressClassValue =
+                        HostwrightHostAccessAddressClass(
+                            rawValue: addressClass
+                        ) else {
+                    throw LifecycleRevisionCodecError.invalidField(
+                        "hostAccess"
+                    )
+                }
+                return HostwrightHostAccessEndpoint(
+                    hostname: hostname,
+                    protocolName: protocolValue,
+                    addressClass: addressClassValue,
+                    port: port
                 )
             }
         }

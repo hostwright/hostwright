@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import HostwrightCore
 import HostwrightRuntime
@@ -319,7 +320,7 @@ public struct NetworkPortReservationRepository: Sendable {
               RuntimeProviderID.knownValues.contains(
                 RuntimeProviderID(rawValue: record.providerID)
               ),
-              ["127.0.0.1", "::1"].contains(record.bindAddress),
+              isCanonicalIPAddress(record.bindAddress),
               (1...65_535).contains(record.containerPort),
               (1_024...65_535).contains(record.hostPort),
               record.allocationKind != .dynamic ||
@@ -410,6 +411,8 @@ public struct NetworkPortReservationRepository: Sendable {
         }
         switch (from, to) {
         case (.active, .reserved),
+             (.reserved, .reserved),
+             (.releasing, .releasing),
              (.reserved, .releasing),
              (.active, .releasing),
              (.faulted, .releasing):
@@ -510,6 +513,59 @@ public struct NetworkPortReservationRepository: Sendable {
             of: "^[a-f0-9]{64}$",
             options: .regularExpression
         ) != nil
+    }
+
+    private static func isCanonicalIPAddress(
+        _ value: String
+    ) -> Bool {
+        if canonicalIPAddress(
+            value,
+            family: AF_INET,
+            byteCount: MemoryLayout<in_addr>.size,
+            textCapacity: Int(INET_ADDRSTRLEN)
+        ) == value {
+            return true
+        }
+        return canonicalIPAddress(
+            value,
+            family: AF_INET6,
+            byteCount: MemoryLayout<in6_addr>.size,
+            textCapacity: Int(INET6_ADDRSTRLEN)
+        ) == value
+    }
+
+    private static func canonicalIPAddress(
+        _ value: String,
+        family: Int32,
+        byteCount: Int,
+        textCapacity: Int
+    ) -> String? {
+        var bytes = [UInt8](repeating: 0, count: byteCount)
+        let parsed = value.withCString { source in
+            bytes.withUnsafeMutableBytes {
+                inet_pton(family, source, $0.baseAddress)
+            }
+        }
+        guard parsed == 1 else { return nil }
+        var output = [CChar](repeating: 0, count: textCapacity)
+        let rendered = bytes.withUnsafeBytes { source in
+            output.withUnsafeMutableBufferPointer {
+                inet_ntop(
+                    family,
+                    source.baseAddress,
+                    $0.baseAddress,
+                    socklen_t($0.count)
+                )
+            }
+        }
+        guard rendered != nil else { return nil }
+        let end = output.firstIndex(of: 0) ?? output.endIndex
+        return String(
+            decoding: output[..<end].map {
+                UInt8(bitPattern: $0)
+            },
+            as: UTF8.self
+        )
     }
 }
 

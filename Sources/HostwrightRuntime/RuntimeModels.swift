@@ -1,5 +1,6 @@
 import Foundation
 import HostwrightCore
+import HostwrightNetworking
 import HostwrightSecrets
 
 public struct RuntimeServiceIdentity: Equatable, Hashable, Sendable {
@@ -510,6 +511,7 @@ public struct DesiredRuntimeService: Equatable, Sendable {
     public let labels: [String: String]
     public let ports: [RuntimePortMapping]
     public let publishedSockets: [RuntimeUnixSocketPublication]
+    public let hostAccess: [HostwrightHostAccessEndpoint]
     public let networks: [RuntimeDesiredNetworkAttachment]
     public let mounts: [RuntimeMountReference]
     public let healthCheck: RuntimeHealthCheckSpec?
@@ -543,6 +545,7 @@ public struct DesiredRuntimeService: Equatable, Sendable {
         labels: [String: String] = [:],
         ports: [RuntimePortMapping] = [],
         publishedSockets: [RuntimeUnixSocketPublication] = [],
+        hostAccess: [HostwrightHostAccessEndpoint] = [],
         mounts: [RuntimeMountReference] = [],
         healthCheck: RuntimeHealthCheckSpec? = nil,
         probes: RuntimeProbeSet = RuntimeProbeSet(),
@@ -575,6 +578,7 @@ public struct DesiredRuntimeService: Equatable, Sendable {
             labels: labels,
             ports: ports,
             publishedSockets: publishedSockets,
+            hostAccess: hostAccess,
             networks: [],
             mounts: mounts,
             healthCheck: healthCheck,
@@ -610,6 +614,7 @@ public struct DesiredRuntimeService: Equatable, Sendable {
         labels: [String: String] = [:],
         ports: [RuntimePortMapping] = [],
         publishedSockets: [RuntimeUnixSocketPublication] = [],
+        hostAccess: [HostwrightHostAccessEndpoint] = [],
         networks: [RuntimeDesiredNetworkAttachment],
         mounts: [RuntimeMountReference] = [],
         healthCheck: RuntimeHealthCheckSpec? = nil,
@@ -642,6 +647,9 @@ public struct DesiredRuntimeService: Equatable, Sendable {
         self.labels = labels
         self.ports = ports
         self.publishedSockets = publishedSockets
+        self.hostAccess = hostAccess.sorted(
+            by: HostwrightHostAccessPolicy.canonicalPrecedes
+        )
         self.networks = networks
         self.mounts = mounts
         self.healthCheck = healthCheck

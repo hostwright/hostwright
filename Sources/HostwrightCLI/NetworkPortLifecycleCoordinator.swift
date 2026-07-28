@@ -1325,6 +1325,7 @@ enum NetworkPortLifecycleCoordinator {
             labels: service.labels,
             ports: ports,
             publishedSockets: service.publishedSockets,
+            hostAccess: service.hostAccess,
             networks: service.networks,
             mounts: service.mounts,
             healthCheck: service.healthCheck,

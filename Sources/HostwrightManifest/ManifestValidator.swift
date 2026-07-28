@@ -157,12 +157,25 @@ public enum ManifestValidator {
                 )
             )
         }
+        validateHostAccess(service.hostAccess, service: service, issues: &issues)
         validateServiceNetworks(
             service.networks,
             service: service,
             declaredNetworks: declaredNetworks,
             issues: &issues
         )
+        if !service.hostAccess.isEmpty,
+           service.networks.count != 1 {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message:
+                        "Service '\(service.name)' hostAccess requires exactly one declared project-network attachment so its guarded gateway is unambiguous.",
+                    path:
+                        "$.services.\(service.name).networks"
+                )
+            )
+        }
         for volume in service.volumes {
             validateVolume(volume, serviceName: service.name, issues: &issues)
         }
@@ -213,6 +226,62 @@ public enum ManifestValidator {
         }
         if service.rosetta && !service.virtualization {
             issues.append(issue(service, "rosetta requires virtualization."))
+        }
+    }
+
+    private static func validateHostAccess(
+        _ endpoints: [HostwrightHostAccessEndpoint],
+        service: HostwrightService,
+        issues: inout [ManifestIssue]
+    ) {
+        let path = "$.services.\(service.name).hostAccess"
+        if endpoints.count > HostwrightHostAccessEndpoint.maximumEndpointsPerService {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message:
+                        "Service '\(service.name)' hostAccess must declare at most \(HostwrightHostAccessEndpoint.maximumEndpointsPerService) endpoints.",
+                    path: path
+                )
+            )
+        }
+
+        var identities = Set<String>()
+        for (index, endpoint) in endpoints.enumerated() {
+            let endpointPath = "\(path)[\(index)]"
+            guard HostwrightHostAccessPolicy.isValidHostname(endpoint.hostname) else {
+                issues.append(
+                    ManifestIssue(
+                        code: .manifestValidationFailed,
+                        message:
+                            "Service '\(service.name)' hostAccess hostname '\(endpoint.hostname)' must be a lowercase DNS hostname and must not be a wildcard, IP literal, or reserved metadata name.",
+                        path: "\(endpointPath).hostname"
+                    )
+                )
+                continue
+            }
+            if !(1...65_535).contains(endpoint.port) {
+                issues.append(
+                    ManifestIssue(
+                        code: .manifestValidationFailed,
+                        message:
+                            "Service '\(service.name)' hostAccess port must be between 1 and 65535.",
+                        path: "\(endpointPath).port"
+                    )
+                )
+            }
+
+            let identity = HostwrightHostAccessPolicy.endpointIdentity(endpoint)
+            if !identities.insert(identity).inserted {
+                issues.append(
+                    ManifestIssue(
+                        code: .manifestValidationFailed,
+                        message:
+                            "Service '\(service.name)' hostAccess endpoints must not contain duplicate '\(identity)'.",
+                        path: endpointPath
+                    )
+                )
+            }
         }
     }
 

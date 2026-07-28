@@ -1,4 +1,5 @@
 import HostwrightCore
+import HostwrightNetworking
 import HostwrightRuntime
 import HostwrightSecrets
 import XCTest
@@ -222,6 +223,63 @@ final class RuntimeCreateSubsetPolicyTests: XCTestCase {
         )
     }
 
+    func testBothProvidersRequireCanonicalGuardedHostAccessBeforeMutation()
+        throws
+    {
+        let projectUUID =
+            "11111111-1111-4111-8111-111111111111"
+        let network = try RuntimeNetworkIdentity(
+            logicalName: "backend",
+            projectUUID: projectUUID
+        )
+        let attachment = try RuntimeDesiredNetworkAttachment(
+            network: network
+        )
+        let endpoint = HostwrightHostAccessEndpoint(
+            hostname: "host-api.internal",
+            protocolName: .tcp,
+            addressClass: .loopback,
+            port: 18_080
+        )
+        for provider in RuntimeProviderID.knownValues {
+            XCTAssertNoThrow(
+                try RuntimeCreateSubsetPolicy.validate(
+                    makeService(
+                        hostAccess: [endpoint],
+                        networks: [attachment]
+                    ),
+                    providerID: provider
+                )
+            )
+            XCTAssertThrowsError(
+                try RuntimeCreateSubsetPolicy.validate(
+                    makeService(hostAccess: [endpoint]),
+                    providerID: provider
+                )
+            )
+            var invalid = endpoint
+            invalid.hostname = "metadata"
+            XCTAssertThrowsError(
+                try RuntimeCreateSubsetPolicy.validate(
+                    makeService(
+                        hostAccess: [invalid],
+                        networks: [attachment]
+                    ),
+                    providerID: provider
+                )
+            )
+            XCTAssertThrowsError(
+                try RuntimeCreateSubsetPolicy.validate(
+                    makeService(
+                        hostAccess: [endpoint, endpoint],
+                        networks: [attachment]
+                    ),
+                    providerID: provider
+                )
+            )
+        }
+    }
+
     func testContainerizationRejectsEveryUnsupportedPhase04FieldWithStableError() throws {
         let secretReference = try HostwrightSecretReference(
             service: "hostwright-test",
@@ -367,6 +425,8 @@ final class RuntimeCreateSubsetPolicyTests: XCTestCase {
         labels: [String: String] = [:],
         ports: [RuntimePortMapping] = [],
         publishedSockets: [RuntimeUnixSocketPublication] = [],
+        hostAccess: [HostwrightHostAccessEndpoint] = [],
+        networks: [RuntimeDesiredNetworkAttachment] = [],
         mounts: [RuntimeMountReference] = [],
         healthCheck: RuntimeHealthCheckSpec? = nil,
         probes: RuntimeProbeSet = RuntimeProbeSet(),
@@ -406,6 +466,8 @@ final class RuntimeCreateSubsetPolicyTests: XCTestCase {
             labels: labels,
             ports: ports,
             publishedSockets: publishedSockets,
+            hostAccess: hostAccess,
+            networks: networks,
             mounts: mounts,
             healthCheck: healthCheck,
             probes: probes,

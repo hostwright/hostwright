@@ -1,4 +1,5 @@
 import Foundation
+import HostwrightNetworking
 import HostwrightRuntime
 
 public enum NetworkHelperProtocolV1 {
@@ -61,6 +62,7 @@ struct NetworkHelperRequest: Codable, Equatable, Sendable {
     let operation: NetworkHelperOperation
     let identity: NetworkHelperDNSIdentity
     let corefile: String?
+    let hostAccessBindings: [ProjectDNSHostAccessBinding]?
     let predecessorFencingToken: String?
 
     init(
@@ -69,6 +71,7 @@ struct NetworkHelperRequest: Codable, Equatable, Sendable {
         operation: NetworkHelperOperation,
         identity: NetworkHelperDNSIdentity,
         corefile: String? = nil,
+        hostAccessBindings: [ProjectDNSHostAccessBinding] = [],
         predecessorFencingToken: String? = nil
     ) {
         self.protocolVersion = protocolVersion
@@ -76,6 +79,9 @@ struct NetworkHelperRequest: Codable, Equatable, Sendable {
         self.operation = operation
         self.identity = identity
         self.corefile = corefile
+        self.hostAccessBindings = hostAccessBindings.sorted(
+            by: ProjectDNSHostAccessBinding.canonicalPrecedes
+        )
         self.predecessorFencingToken = predecessorFencingToken
     }
 
@@ -105,8 +111,13 @@ struct NetworkHelperRequest: Codable, Equatable, Sendable {
                     <= NetworkHelperProtocolV1.maximumCorefileBytes else {
                 throw NetworkHelperError.invalidCorefile
             }
+            _ = try NetworkHelperHostAccessValidation.validated(
+                hostAccessBindings ?? []
+            )
         case .status, .remove:
             guard corefile == nil,
+                  hostAccessBindings == nil ||
+                    hostAccessBindings?.isEmpty == true,
                   predecessorFencingToken == nil else {
                 throw NetworkHelperError.invalidRequest
             }
@@ -119,7 +130,22 @@ struct NetworkHelperStatus: Codable, Equatable, Sendable {
     let disposition: NetworkHelperDisposition
     let identity: NetworkHelperDNSIdentity?
     let corefileSHA256: String?
+    let hostAccessSHA256: String?
     let reason: String?
+
+    init(
+        disposition: NetworkHelperDisposition,
+        identity: NetworkHelperDNSIdentity?,
+        corefileSHA256: String?,
+        hostAccessSHA256: String? = nil,
+        reason: String?
+    ) {
+        self.disposition = disposition
+        self.identity = identity
+        self.corefileSHA256 = corefileSHA256
+        self.hostAccessSHA256 = hostAccessSHA256
+        self.reason = reason
+    }
 }
 
 enum NetworkHelperErrorCode: String, Codable, Sendable {
@@ -132,6 +158,8 @@ enum NetworkHelperErrorCode: String, Codable, Sendable {
     case quarantined
     case unsafePath
     case ioFailure
+    case permissionDenied
+    case bindingUnavailable
 }
 
 struct NetworkHelperFailure: Codable, Equatable, Sendable {
@@ -181,6 +209,8 @@ enum NetworkHelperError: Error, Equatable, Sendable {
     case quarantined
     case unsafePath
     case ioFailure
+    case permissionDenied
+    case bindingUnavailable
 
     var failure: NetworkHelperFailure {
         let code: NetworkHelperErrorCode
@@ -213,6 +243,14 @@ enum NetworkHelperError: Error, Equatable, Sendable {
         case .ioFailure:
             code = .ioFailure
             message = "DNS state operation failed"
+        case .permissionDenied:
+            code = .permissionDenied
+            message =
+                "host-access listener permission is unavailable"
+        case .bindingUnavailable:
+            code = .bindingUnavailable
+            message =
+                "host-access listener or target is unavailable"
         }
         return NetworkHelperFailure(code: code, message: message)
     }

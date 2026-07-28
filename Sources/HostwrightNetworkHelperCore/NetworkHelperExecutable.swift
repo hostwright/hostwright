@@ -16,9 +16,22 @@ public enum NetworkHelperExecutable {
             isDirectory: true
         )
         let store = try NetworkHelperStateStore(rootURL: stateRoot)
+        let hostAccessBroker = NetworkHelperHostAccessBroker()
+        for configuration
+            in try store.activeHostAccessConfigurations() {
+            guard try hostAccessBroker.apply(
+                identity: configuration.identity,
+                bindings: configuration.bindings
+            ) == configuration.sha256 else {
+                throw NetworkHelperError.bindingUnavailable
+            }
+        }
         let server = NetworkHelperUnixServer(
             runtimeDirectory: runtimeDirectory,
-            dispatcher: NetworkHelperDispatcher(store: store),
+            dispatcher: NetworkHelperDispatcher(
+                store: store,
+                hostAccessBroker: hostAccessBroker
+            ),
             authenticator: .productionClient(),
             idleTimeoutMilliseconds: idleTimeoutMilliseconds
         )

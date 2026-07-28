@@ -108,6 +108,125 @@ public struct HostwrightServiceNetworkAttachment: Codable, Equatable, Sendable {
     }
 }
 
+public enum HostwrightHostAccessProtocol:
+    String,
+    Codable,
+    CaseIterable,
+    Equatable,
+    Hashable,
+    Sendable
+{
+    case tcp
+    case udp
+}
+
+public enum HostwrightHostAccessAddressClass:
+    String,
+    Codable,
+    CaseIterable,
+    Equatable,
+    Hashable,
+    Sendable
+{
+    case loopback
+    case interface
+}
+
+public struct HostwrightHostAccessEndpoint:
+    Codable,
+    Equatable,
+    Sendable
+{
+    public static let maximumEndpointsPerService = 64
+
+    public var hostname: String
+    public var protocolName: HostwrightHostAccessProtocol
+    public var addressClass: HostwrightHostAccessAddressClass
+    public var port: Int
+
+    public init(
+        hostname: String,
+        protocolName: HostwrightHostAccessProtocol = .tcp,
+        addressClass: HostwrightHostAccessAddressClass = .loopback,
+        port: Int
+    ) {
+        self.hostname = hostname
+        self.protocolName = protocolName
+        self.addressClass = addressClass
+        self.port = port
+    }
+}
+
+public enum HostwrightHostAccessPolicy {
+    public static let maximumHostnameUTF8Bytes = 253
+
+    private static let reservedHostnames: Set<String> = [
+        "instance-data",
+        "localhost",
+        "localhost.localdomain",
+        "metadata",
+        "metadata.aws.internal",
+        "metadata.google.internal"
+    ]
+
+    public static func isValidHostname(_ value: String) -> Bool {
+        guard value == value.lowercased(),
+              !value.isEmpty,
+              value.utf8.count <= maximumHostnameUTF8Bytes,
+              !value.hasPrefix("."),
+              !value.hasSuffix("."),
+              !value.contains("*"),
+              !reservedHostnames.contains(value),
+              !isIPv4Literal(value),
+              !value.contains(":") else {
+            return false
+        }
+        return value.split(separator: ".", omittingEmptySubsequences: false)
+            .allSatisfy { HostwrightNetworkIdentity.isValidManifestName(String($0)) }
+    }
+
+    public static func endpointIdentity(
+        _ endpoint: HostwrightHostAccessEndpoint
+    ) -> String {
+        "\(endpoint.hostname):\(endpoint.port)/\(endpoint.protocolName.rawValue)@\(endpoint.addressClass.rawValue)"
+    }
+
+    public static func canonicalPrecedes(
+        _ lhs: HostwrightHostAccessEndpoint,
+        _ rhs: HostwrightHostAccessEndpoint
+    ) -> Bool {
+        (
+            lhs.hostname,
+            lhs.protocolName.rawValue,
+            lhs.port,
+            lhs.addressClass.rawValue
+        ) < (
+            rhs.hostname,
+            rhs.protocolName.rawValue,
+            rhs.port,
+            rhs.addressClass.rawValue
+        )
+    }
+
+    private static func isIPv4Literal(_ value: String) -> Bool {
+        let components = value.split(
+            separator: ".",
+            omittingEmptySubsequences: false
+        )
+        guard components.count == 4 else { return false }
+        return components.allSatisfy { component in
+            guard !component.isEmpty,
+                  component.count <= 3,
+                  component.allSatisfy(\.isNumber),
+                  let octet = Int(component),
+                  (0...255).contains(octet) else {
+                return false
+            }
+            return component == "0" || component.first != "0"
+        }
+    }
+}
+
 public enum HostwrightNetworkIdentity {
     public static func resourceUUID(projectUUID: String, networkName: String) -> String {
         HostwrightResourceUUID.legacy(

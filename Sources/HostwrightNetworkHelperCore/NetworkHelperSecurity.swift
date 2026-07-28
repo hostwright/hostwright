@@ -88,17 +88,19 @@ public struct NetworkHelperExecutableValidator: Sendable {
 }
 
 public struct NetworkHelperServerPeerAuthenticator: Sendable {
-    private let validation: @Sendable (Int32, pid_t) throws -> Void
+    private let validation:
+        @Sendable (Int32, pid_t?) throws -> Void
 
     public init(
-        validation: @escaping @Sendable (Int32, pid_t) throws -> Void
+        validation:
+            @escaping @Sendable (Int32, pid_t?) throws -> Void
     ) {
         self.validation = validation
     }
 
     public func validate(
         connectionDescriptor: Int32,
-        expectedProcessID: pid_t
+        expectedProcessID: pid_t?
     ) throws {
         try validation(connectionDescriptor, expectedProcessID)
     }
@@ -111,8 +113,10 @@ public struct NetworkHelperServerPeerAuthenticator: Sendable {
                 connectionDescriptor: descriptor,
                 expectedUserID: expectedUserID
             )
-            guard processID == expectedProcessID else {
-                throw NetworkHelperCodeIdentityError.processMismatch
+            if let expectedProcessID {
+                guard processID == expectedProcessID else {
+                    throw NetworkHelperCodeIdentityError.processMismatch
+                }
             }
             try NetworkHelperPeerSecurity.validateLiveProcess(
                 processID: processID,

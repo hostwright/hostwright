@@ -4,6 +4,20 @@ import HostwrightRuntime
 
 struct NetworkHelperDispatcher: @unchecked Sendable {
     let store: NetworkHelperStateStore
+    let hostAccessBroker: NetworkHelperHostAccessBroker
+
+    init(
+        store: NetworkHelperStateStore,
+        hostAccessBroker: NetworkHelperHostAccessBroker =
+            NetworkHelperHostAccessBroker()
+    ) {
+        self.store = store
+        self.hostAccessBroker = hostAccessBroker
+    }
+
+    var hasActiveHostAccessBindings: Bool {
+        hostAccessBroker.hasActiveBindings
+    }
 
     func dispatch(frame: Data) throws -> Data {
         let request = try NetworkHelperCanonicalJSON.decodeFrame(
@@ -18,12 +32,48 @@ struct NetworkHelperDispatcher: @unchecked Sendable {
                 status = try store.apply(
                     identity: request.identity,
                     corefile: request.corefile!,
+                    hostAccessBindings:
+                        request.hostAccessBindings ?? [],
                     predecessorFencingToken:
                         request.predecessorFencingToken
                 )
+                let brokerSHA256 = try hostAccessBroker.apply(
+                    identity: request.identity,
+                    bindings: request.hostAccessBindings ?? []
+                )
+                guard brokerSHA256 == status.hostAccessSHA256 else {
+                    throw NetworkHelperError.bindingUnavailable
+                }
             case .status:
-                status = try store.status(identity: request.identity)
+                let persisted = try store.status(
+                    identity: request.identity
+                )
+                if persisted.disposition == .active,
+                   let expected = persisted.hostAccessSHA256 {
+                    if hostAccessBroker.sha256(
+                        identity: request.identity
+                    ) != expected {
+                        guard let configuration =
+                            try store
+                                .activeHostAccessConfigurations()
+                                .first(where: {
+                                    $0.identity == request.identity
+                                }),
+                        try hostAccessBroker.apply(
+                            identity: configuration.identity,
+                            bindings: configuration.bindings
+                        ) == expected else {
+                            throw NetworkHelperError.bindingUnavailable
+                        }
+                    }
+                } else if persisted.disposition == .active {
+                    hostAccessBroker.remove(
+                        identity: request.identity
+                    )
+                }
+                status = persisted
             case .remove:
+                hostAccessBroker.remove(identity: request.identity)
                 status = try store.remove(identity: request.identity)
             }
             return try NetworkHelperCanonicalJSON.frame(
@@ -217,8 +267,9 @@ struct NetworkHelperUnixServer: Sendable {
         defer { try? lease.closeAndRemove() }
         var lastActivity = monotonicMilliseconds()
 
-        while monotonicMilliseconds() - lastActivity
-            < idleTimeoutMilliseconds {
+        while dispatcher.hasActiveHostAccessBindings
+            || monotonicMilliseconds() - lastActivity
+                < idleTimeoutMilliseconds {
             var pollDescriptor = pollfd(
                 fd: lease.descriptor,
                 events: Int16(POLLIN),

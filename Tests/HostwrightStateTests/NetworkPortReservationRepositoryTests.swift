@@ -226,10 +226,43 @@ final class NetworkPortReservationRepositoryTests: XCTestCase {
         }
     }
 
+    func testCanonicalManagedGatewayAddressIsAcceptedButAliasesFail()
+        throws
+    {
+        try withStore { store in
+            try seedProject(store)
+            let group = try operationGroup(store, suffix: "31")
+            let gateway = record(
+                idSuffix: "31",
+                generation: 1,
+                fence: group.fence,
+                bindAddress: "192.168.70.1",
+                operationGroupID: group.id
+            )
+            XCTAssertEqual(
+                try store.networkPorts.save(gateway),
+                gateway
+            )
+            XCTAssertThrowsError(
+                try store.networkPorts.save(
+                    record(
+                        idSuffix: "32",
+                        generation: 1,
+                        fence: group.fence,
+                        bindAddress: "192.168.070.001",
+                        hostPort: 18_081,
+                        operationGroupID: group.id
+                    )
+                )
+            )
+        }
+    }
+
     private func record(
         idSuffix: String,
         generation: Int64,
         fence: String,
+        bindAddress: String = "127.0.0.1",
         hostPort: Int = 18_080,
         containerPort: Int = 8_080,
         protocolName: NetworkPortReservationProtocol = .tcp,
@@ -249,7 +282,7 @@ final class NetworkPortReservationRepositoryTests: XCTestCase {
             providerID: RuntimeProviderID.appleContainerCLI.rawValue,
             providerGeneration: 1,
             fencingToken: fence,
-            bindAddress: "127.0.0.1",
+            bindAddress: bindAddress,
             hostPort: hostPort,
             containerPort: containerPort,
             protocolName: protocolName,

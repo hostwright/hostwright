@@ -27,6 +27,19 @@ struct ProjectDNSHelperObservation: Equatable, Sendable {
     let disposition: ProjectDNSHelperDisposition
     let corefilePath: String?
     let corefileSHA256: String?
+    let hostAccessSHA256: String?
+
+    init(
+        disposition: ProjectDNSHelperDisposition,
+        corefilePath: String?,
+        corefileSHA256: String?,
+        hostAccessSHA256: String? = nil
+    ) {
+        self.disposition = disposition
+        self.corefilePath = corefilePath
+        self.corefileSHA256 = corefileSHA256
+        self.hostAccessSHA256 = hostAccessSHA256
+    }
 }
 
 protocol ProjectDNSHelperDriving: Sendable {
@@ -37,6 +50,7 @@ protocol ProjectDNSHelperDriving: Sendable {
     func apply(
         identity: ProjectDNSHelperIdentity,
         corefile: String,
+        hostAccessBindings: [ProjectDNSHostAccessBinding],
         predecessorFencingToken: String?
     ) async throws -> ProjectDNSHelperObservation
 
@@ -108,7 +122,8 @@ enum ProjectDNSLifecycleCoordinator {
         let plan = try ProjectDNSPlanBuilder.build(
             projectUUID: preparation.projectResourceUUID,
             desiredState: preparation.desiredState,
-            observedState: preparation.observedState
+            observedState: preparation.observedState,
+            runtimeInventory: try await runtime.inventory()
         )
         let desiredSHA256 = try digest(
             ProjectDNSDesiredEvidence(
@@ -139,16 +154,27 @@ enum ProjectDNSLifecycleCoordinator {
                         runtime: runtime
                     )
                 } else {
-                    guard try await exactObservation(
+                    guard let exact = try await exactObservation(
                         record: existing,
                         preparation: preparation,
                         helper: helper,
                         runtime: runtime
-                    ) != nil else {
+                    ) else {
                         throw conflict(
                             "Available project DNS lost exact runtime or helper ownership."
                         )
                     }
+                    try ProjectDNSHostAccessReservations
+                        .requireActive(
+                            bindings:
+                                plan.hostAccessBindings,
+                            helperSHA256:
+                                exact.helper
+                                    .hostAccessSHA256,
+                            dnsUUID: existing.id,
+                            preparation: preparation,
+                            store: store
+                        )
                 }
                 return ProjectDNSLifecycleReconciliationResult(
                     newlyCreatedDNSUUIDs: []
@@ -279,7 +305,8 @@ enum ProjectDNSLifecycleCoordinator {
         let plan = try ProjectDNSPlanBuilder.build(
             projectUUID: preparation.projectResourceUUID,
             desiredState: preparation.desiredState,
-            observedState: observedState
+            observedState: observedState,
+            runtimeInventory: try await runtime.inventory()
         )
         let desiredSHA256 = try digest(
             ProjectDNSDesiredEvidence(
@@ -309,16 +336,27 @@ enum ProjectDNSLifecycleCoordinator {
             generation: existing.generation + 1,
             fencingToken: group.fencingToken
         )
+        let reservations =
+            try ProjectDNSHostAccessReservations.prepare(
+                bindings: plan.hostAccessBindings,
+                dnsUUID: existing.id,
+                group: group,
+                preparation: preparation,
+                store: store
+            )
         do {
             let applied = try await helper.apply(
                 identity: helperIdentity,
                 corefile: plan.corefile,
+                hostAccessBindings: plan.hostAccessBindings,
                 predecessorFencingToken:
                     existing.fencingToken
             )
             try validateHelper(
                 applied,
-                expectedCorefileSHA256: try digest(plan.corefile)
+                expectedCorefileSHA256: try digest(plan.corefile),
+                expectedHostAccessSHA256:
+                    try hostAccessDigest(plan.hostAccessBindings)
             )
             guard let observed = try await exactRuntimeContainer(
                 record: existing,
@@ -335,6 +373,12 @@ enum ProjectDNSLifecycleCoordinator {
                     "Project DNS runtime evidence changed during ready-record refresh."
                 )
             }
+            try ProjectDNSHostAccessReservations.commit(
+                reservations,
+                helperSHA256: applied.hostAccessSHA256,
+                group: group,
+                store: store
+            )
             let authority = try await mutationAuthority(
                 group: group,
                 preparation: preparation,
@@ -615,6 +659,12 @@ enum ProjectDNSLifecycleCoordinator {
                     "Project DNS deletion found conflicting or quarantined helper ownership."
                 )
             }
+            try ProjectDNSHostAccessReservations.releaseAll(
+                dnsUUID: deleting.id,
+                group: group,
+                preparation: preparation,
+                store: store
+            )
             let authority = try await mutationAuthority(
                 group: group,
                 preparation: preparation,
@@ -713,6 +763,14 @@ enum ProjectDNSLifecycleCoordinator {
             fencingToken: creating.fencingToken
         )
         let expectedCorefileSHA256 = try digest(plan.corefile)
+        let reservations =
+            try ProjectDNSHostAccessReservations.prepare(
+                bindings: plan.hostAccessBindings,
+                dnsUUID: creating.id,
+                group: group,
+                preparation: preparation,
+                store: store
+            )
         var helperAppliedByExecution = false
         var runtimeCreatedByExecution = false
         do {
@@ -726,20 +784,29 @@ enum ProjectDNSLifecycleCoordinator {
                 try validateHelper(
                     initialHelper,
                     expectedCorefileSHA256:
-                        expectedCorefileSHA256
+                        expectedCorefileSHA256,
+                    expectedHostAccessSHA256:
+                        try hostAccessDigest(
+                            plan.hostAccessBindings
+                        )
                 )
                 helperObservation = initialHelper
             case .absent:
                 helperObservation = try await helper.apply(
                     identity: helperIdentity,
                     corefile: plan.corefile,
+                    hostAccessBindings: plan.hostAccessBindings,
                     predecessorFencingToken: nil
                 )
                 helperAppliedByExecution = true
                 try validateHelper(
                     helperObservation,
                     expectedCorefileSHA256:
-                        expectedCorefileSHA256
+                        expectedCorefileSHA256,
+                    expectedHostAccessSHA256:
+                        try hostAccessDigest(
+                            plan.hostAccessBindings
+                        )
                 )
             case .conflicting, .quarantined:
                 try await quarantine(
@@ -847,6 +914,13 @@ enum ProjectDNSLifecycleCoordinator {
                     "Project DNS creation was not verified through exact structured runtime and helper observation."
                 )
             }
+            try ProjectDNSHostAccessReservations.commit(
+                reservations,
+                helperSHA256:
+                    observed.helper.hostAccessSHA256,
+                group: group,
+                store: store
+            )
             try await commitAvailable(
                 creating: creating,
                 group: group,
@@ -935,6 +1009,12 @@ enum ProjectDNSLifecycleCoordinator {
         guard removed.disposition == .absent else {
             return
         }
+        try ProjectDNSHostAccessReservations.releaseAll(
+            dnsUUID: creating.id,
+            group: group,
+            preparation: preparation,
+            store: store
+        )
         let authority = try await mutationAuthority(
             group: group,
             preparation: preparation,
@@ -1471,11 +1551,14 @@ enum ProjectDNSLifecycleCoordinator {
 
     private static func validateHelper(
         _ observation: ProjectDNSHelperObservation,
-        expectedCorefileSHA256: String
+        expectedCorefileSHA256: String,
+        expectedHostAccessSHA256: String?
     ) throws {
         guard observation.disposition == .active,
               observation.corefileSHA256 ==
                 expectedCorefileSHA256,
+              observation.hostAccessSHA256 ==
+                expectedHostAccessSHA256,
               let path = observation.corefilePath,
               path.hasPrefix("/"),
               URL(fileURLWithPath: path)
@@ -1484,6 +1567,16 @@ enum ProjectDNSLifecycleCoordinator {
                 "Project DNS helper did not return exact active Corefile evidence."
             )
         }
+    }
+
+    private static func hostAccessDigest(
+        _ bindings: [ProjectDNSHostAccessBinding]
+    ) throws -> String? {
+        bindings.isEmpty ? nil : try digest(
+            bindings.sorted(
+                by: ProjectDNSHostAccessBinding.canonicalPrecedes
+            )
+        )
     }
 
     private static func quarantine(

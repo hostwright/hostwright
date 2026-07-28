@@ -1,6 +1,7 @@
 import CryptoKit
 import Darwin
 import Foundation
+import HostwrightNetworking
 import HostwrightRuntime
 
 public enum NetworkHelperClientError: Error, Equatable, Sendable {
@@ -29,6 +30,7 @@ public struct NetworkHelperActiveCorefile: Equatable, Sendable {
     public let identity: NetworkHelperDNSIdentity
     public let url: URL
     public let sha256: String
+    public let hostAccessSHA256: String?
     public let device: UInt64
     public let inode: UInt64
 
@@ -36,12 +38,14 @@ public struct NetworkHelperActiveCorefile: Equatable, Sendable {
         identity: NetworkHelperDNSIdentity,
         url: URL,
         sha256: String,
+        hostAccessSHA256: String? = nil,
         device: UInt64,
         inode: UInt64
     ) {
         self.identity = identity
         self.url = url
         self.sha256 = sha256
+        self.hostAccessSHA256 = hostAccessSHA256
         self.device = device
         self.inode = inode
     }
@@ -192,6 +196,7 @@ public actor NetworkHelperClient {
     private let peerAuthenticator: NetworkHelperServerPeerAuthenticator
     private let launcher: NetworkHelperProcessLauncher
     private var processLease: NetworkHelperProcessLease?
+    private var retainsActiveHostAccess = false
 
     public init(configuration: NetworkHelperClientConfiguration) {
         self.configuration = configuration
@@ -221,18 +226,21 @@ public actor NetworkHelperClient {
     public func apply(
         identity: NetworkHelperDNSIdentity,
         corefile: String,
+        hostAccessBindings: [ProjectDNSHostAccessBinding] = [],
         predecessorFencingToken: String? = nil
     ) throws -> NetworkHelperActiveCorefile {
         let request = NetworkHelperRequest(
             operation: .apply,
             identity: identity,
             corefile: corefile,
+            hostAccessBindings: hostAccessBindings,
             predecessorFencingToken: predecessorFencingToken
         )
         let status = try exchange(request)
         guard status.disposition == .active else {
             throw map(status.disposition)
         }
+        retainsActiveHostAccess = status.hostAccessSHA256 != nil
         return try validateActiveCorefile(status: status)
     }
 
@@ -283,11 +291,15 @@ public actor NetworkHelperClient {
         guard status.disposition == .absent else {
             throw map(status.disposition)
         }
+        retainsActiveHostAccess = false
     }
 
     public func close() throws {
         guard let lease = processLease else { return }
         processLease = nil
+        if retainsActiveHostAccess {
+            return
+        }
         let idleDeadline = Self.monotonicMilliseconds()
             + configuration.helperIdleTimeoutMilliseconds + 2_000
         if !lease.waitForExit(deadlineMilliseconds: idleDeadline) {
@@ -366,7 +378,7 @@ public actor NetworkHelperClient {
         return status
     }
 
-    private func ensureProcess() throws -> NetworkHelperProcessLease {
+    private func ensureProcess() throws -> NetworkHelperProcessLease? {
         let configuration = try configuration.validated()
         if let processLease, processLease.isRunning {
             return processLease
@@ -377,6 +389,30 @@ public actor NetworkHelperClient {
             )
         } catch {
             throw NetworkHelperClientError.executableRejected
+        }
+        let socketURL = configuration.runtimeDirectoryURL
+            .appendingPathComponent(
+                "network-helper.sock",
+                isDirectory: false
+            )
+        if FileManager.default.fileExists(atPath: socketURL.path) {
+            let attachDeadline =
+                Self.monotonicMilliseconds() + 250
+            while true {
+                do {
+                    let descriptor = try connect(to: nil)
+                    Darwin.close(descriptor)
+                    processLease = nil
+                    return nil
+                } catch NetworkHelperClientError.socketUnavailable {
+                    guard Self.monotonicMilliseconds()
+                            < attachDeadline else {
+                        try removeOwnedStaleSocket(socketURL)
+                        break
+                    }
+                    usleep(10_000)
+                }
+            }
         }
         let lease = try launcher.launch(configuration)
         processLease = lease
@@ -405,9 +441,6 @@ public actor NetworkHelperClient {
         let deadline = Self.monotonicMilliseconds()
             + configuration.launchTimeoutMilliseconds
         while Self.monotonicMilliseconds() < deadline {
-            guard lease.isRunning else {
-                throw NetworkHelperClientError.launchFailed
-            }
             var metadata = stat()
             if lstat(socketURL.path, &metadata) == 0 {
                 guard (metadata.st_mode & S_IFMT) == S_IFSOCK,
@@ -420,13 +453,16 @@ public actor NetworkHelperClient {
             guard errno == ENOENT else {
                 throw NetworkHelperClientError.socketUnavailable
             }
+            guard lease.isRunning else {
+                throw NetworkHelperClientError.launchFailed
+            }
             usleep(10_000)
         }
         throw NetworkHelperClientError.launchTimedOut
     }
 
     private func connect(
-        to lease: NetworkHelperProcessLease
+        to lease: NetworkHelperProcessLease?
     ) throws -> Int32 {
         let socketURL = configuration.runtimeDirectoryURL
             .appendingPathComponent(
@@ -480,13 +516,31 @@ public actor NetworkHelperClient {
         do {
             try peerAuthenticator.validate(
                 connectionDescriptor: descriptor,
-                expectedProcessID: lease.processID
+                expectedProcessID: lease?.processID
             )
         } catch {
             throw NetworkHelperClientError.authenticationFailed
         }
         shouldClose = false
         return descriptor
+    }
+
+    private func removeOwnedStaleSocket(_ socketURL: URL) throws {
+        var before = stat()
+        guard lstat(socketURL.path, &before) == 0,
+              (before.st_mode & S_IFMT) == S_IFSOCK,
+              before.st_uid == geteuid(),
+              before.st_nlink == 1,
+              before.st_mode & mode_t(0o7777) == 0o600 else {
+            throw NetworkHelperClientError.unsafeState
+        }
+        var after = stat()
+        guard lstat(socketURL.path, &after) == 0,
+              before.st_dev == after.st_dev,
+              before.st_ino == after.st_ino,
+              unlink(socketURL.path) == 0 else {
+            throw NetworkHelperClientError.socketUnavailable
+        }
     }
 
     private func validateActiveCorefile(
@@ -565,6 +619,7 @@ public actor NetworkHelperClient {
             identity: identity,
             url: corefileURL,
             sha256: expectedSHA256,
+            hostAccessSHA256: status.hostAccessSHA256,
             device: UInt64(metadata.st_dev),
             inode: UInt64(metadata.st_ino)
         )

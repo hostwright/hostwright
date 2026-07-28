@@ -2134,7 +2134,8 @@ final class HostwrightManifestTests: XCTestCase {
             [
                 "image", "replicas", "platform", "resources", "user", "group", "workdir",
                 "entrypoint", "command", "init", "dependsOn", "env", "secretEnv", "labels",
-                "ports", "volumes", "health", "probes", "restart", "update", "hooks",
+                "ports", "hostAccess", "networks", "volumes", "health", "probes",
+                "restart", "update", "hooks",
                 "rosetta", "virtualization", "readOnlyRootFilesystem", "shmSize"
             ]
         )
@@ -2220,6 +2221,21 @@ final class HostwrightManifestTests: XCTestCase {
             (unixSocketProperties["mode"] as? [String: Any])?["enum"]
                 as? [String],
             ["0600", "0660"]
+        )
+        let hostAccess = try XCTUnwrap(
+            serviceProperties["hostAccess"] as? [String: Any]
+        )
+        XCTAssertEqual(hostAccess["maxItems"] as? Int, 64)
+        XCTAssertEqual(
+            (hostAccess["items"] as? [String: Any])?["$ref"] as? String,
+            "#/$defs/hostAccessEndpoint"
+        )
+        let serviceNetworks = try XCTUnwrap(
+            serviceProperties["networks"] as? [String: Any]
+        )
+        XCTAssertEqual(
+            (serviceNetworks["items"] as? [String: Any])?["$ref"] as? String,
+            "#/$defs/serviceNetworkAttachment"
         )
         let serviceVolumes = try XCTUnwrap(serviceProperties["volumes"] as? [String: Any])
         let volumeItems = try XCTUnwrap(serviceVolumes["items"] as? [String: Any])

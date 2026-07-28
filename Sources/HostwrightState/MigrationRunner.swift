@@ -2932,7 +2932,8 @@ public struct MigrationRunner: Sendable {
                     ),
                     fencing_token TEXT NOT NULL,
                     bind_address TEXT NOT NULL CHECK (
-                        bind_address IN ('127.0.0.1', '::1')
+                        length(bind_address) BETWEEN 2 AND 45
+                        AND bind_address NOT GLOB '*[^0-9A-Fa-f:.]*'
                     ),
                     host_port INTEGER NOT NULL CHECK (
                         host_port BETWEEN 1024 AND 65535

@@ -116,6 +116,9 @@
     "volumes": {
       "$ref": "#/$defs/volumeDeclarations"
     },
+    "networks": {
+      "$ref": "#/$defs/networkDeclarations"
+    },
     "services": {
       "type": "object",
       "minProperties": 1,
@@ -221,6 +224,109 @@
         },
         "labels": {
           "$ref": "#/$defs/labels"
+        }
+      }
+    },
+    "networkDeclarations": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/name"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/networkDeclaration"
+      }
+    },
+    "networkDeclaration": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "driver": {
+          "enum": ["nat", "hostOnly"],
+          "default": "nat"
+        },
+        "ipv4": {
+          "$ref": "#/$defs/networkAddressRequest",
+          "default": "auto"
+        },
+        "ipv6": {
+          "$ref": "#/$defs/networkAddressRequest",
+          "default": "auto"
+        }
+      }
+    },
+    "networkAddressRequest": {
+      "oneOf": [
+        {
+          "enum": ["auto", "disabled"]
+        },
+        {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[^\\s/]+/[0-9]{1,3}$"
+        }
+      ]
+    },
+    "serviceNetworkAttachment": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/name"
+        },
+        {
+          "type": "object",
+          "required": ["network"],
+          "additionalProperties": false,
+          "properties": {
+            "network": {
+              "$ref": "#/$defs/name"
+            },
+            "aliases": {
+              "type": "array",
+              "maxItems": 64,
+              "uniqueItems": true,
+              "items": {
+                "$ref": "#/$defs/name"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "hostAccessHostname": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 253,
+      "pattern": "^(?!(?:[0-9]{1,3}\\.){3}[0-9]{1,3}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$",
+      "not": {
+        "enum": [
+          "instance-data",
+          "localhost",
+          "localhost.localdomain",
+          "metadata",
+          "metadata.aws.internal",
+          "metadata.google.internal"
+        ]
+      }
+    },
+    "hostAccessEndpoint": {
+      "type": "object",
+      "required": ["hostname", "port"],
+      "additionalProperties": false,
+      "properties": {
+        "hostname": {
+          "$ref": "#/$defs/hostAccessHostname"
+        },
+        "protocol": {
+          "enum": ["tcp", "udp"],
+          "default": "tcp"
+        },
+        "addressClass": {
+          "enum": ["loopback", "interface"],
+          "default": "loopback"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
         }
       }
     },
@@ -701,6 +807,21 @@
                 }
               }
             ]
+          }
+        },
+        "hostAccess": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/hostAccessEndpoint"
+          }
+        },
+        "networks": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/serviceNetworkAttachment"
           }
         },
         "volumes": {

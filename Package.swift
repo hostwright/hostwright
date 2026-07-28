@@ -130,7 +130,10 @@ let package = Package(
         ),
         .target(
             name: "HostwrightNetworkHelperCore",
-            dependencies: ["HostwrightRuntime"],
+            dependencies: [
+                "HostwrightNetworking",
+                "HostwrightRuntime"
+            ],
             linkerSettings: [
                 .linkedFramework("Security")
             ]

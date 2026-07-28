@@ -96,6 +96,62 @@ public struct RuntimeNetworkOperationCapability: Codable, Equatable, Hashable, S
     }
 }
 
+public struct RuntimeHostAccessProviderCapabilities:
+    Codable,
+    Equatable,
+    Sendable
+{
+    public let state: RuntimeProviderCapabilityState
+    public let reason: RuntimeProviderFeatureReason
+    public let protocols: [HostwrightHostAccessProtocol]
+    public let addressClasses: [HostwrightHostAccessAddressClass]
+    public let requiresManagedProjectNetwork: Bool
+    public let enforcesExactEndpointAllowlist: Bool
+
+    public init(
+        state: RuntimeProviderCapabilityState,
+        reason: RuntimeProviderFeatureReason,
+        protocols: [HostwrightHostAccessProtocol],
+        addressClasses: [HostwrightHostAccessAddressClass],
+        requiresManagedProjectNetwork: Bool,
+        enforcesExactEndpointAllowlist: Bool
+    ) {
+        self.state = state
+        self.reason = reason
+        self.protocols = protocols.sorted {
+            $0.rawValue < $1.rawValue
+        }
+        self.addressClasses = addressClasses.sorted {
+            $0.rawValue < $1.rawValue
+        }
+        self.requiresManagedProjectNetwork =
+            requiresManagedProjectNetwork
+        self.enforcesExactEndpointAllowlist =
+            enforcesExactEndpointAllowlist
+    }
+
+    public static let guardedBroker =
+        RuntimeHostAccessProviderCapabilities(
+            state: .available,
+            reason: .implemented,
+            protocols: HostwrightHostAccessProtocol.allCases,
+            addressClasses:
+                HostwrightHostAccessAddressClass.allCases,
+            requiresManagedProjectNetwork: true,
+            enforcesExactEndpointAllowlist: true
+        )
+
+    public static let unavailable =
+        RuntimeHostAccessProviderCapabilities(
+            state: .unavailable,
+            reason: .notImplemented,
+            protocols: [],
+            addressClasses: [],
+            requiresManagedProjectNetwork: true,
+            enforcesExactEndpointAllowlist: false
+        )
+}
+
 public struct RuntimeNetworkProviderCapabilities: Codable, Equatable, Sendable {
     public static let currentSchemaVersion = 1
 
@@ -106,6 +162,7 @@ public struct RuntimeNetworkProviderCapabilities: Codable, Equatable, Sendable {
     public let ipv4AddressModes: [RuntimeNetworkAddressMode]
     public let ipv6AddressModes: [RuntimeNetworkAddressMode]
     public let attachmentTiming: RuntimeNetworkAttachmentTiming
+    public let hostAccess: RuntimeHostAccessProviderCapabilities?
 
     public init(
         schemaVersion: Int = RuntimeNetworkProviderCapabilities.currentSchemaVersion,
@@ -114,7 +171,8 @@ public struct RuntimeNetworkProviderCapabilities: Codable, Equatable, Sendable {
         modes: [RuntimeNetworkMode],
         ipv4AddressModes: [RuntimeNetworkAddressMode],
         ipv6AddressModes: [RuntimeNetworkAddressMode],
-        attachmentTiming: RuntimeNetworkAttachmentTiming
+        attachmentTiming: RuntimeNetworkAttachmentTiming,
+        hostAccess: RuntimeHostAccessProviderCapabilities? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.providerID = providerID
@@ -123,6 +181,7 @@ public struct RuntimeNetworkProviderCapabilities: Codable, Equatable, Sendable {
         self.ipv4AddressModes = ipv4AddressModes.sorted { $0.rawValue < $1.rawValue }
         self.ipv6AddressModes = ipv6AddressModes.sorted { $0.rawValue < $1.rawValue }
         self.attachmentTiming = attachmentTiming
+        self.hostAccess = hostAccess
     }
 
     public func status(
@@ -150,7 +209,8 @@ public struct RuntimeNetworkProviderCapabilities: Codable, Equatable, Sendable {
         modes: RuntimeNetworkMode.allCases,
         ipv4AddressModes: [.automatic, .cidr],
         ipv6AddressModes: [.disabled],
-        attachmentTiming: .containerCreateOnly
+        attachmentTiming: .containerCreateOnly,
+        hostAccess: .guardedBroker
     )
 
     public static let appleContainerizationUnavailable = RuntimeNetworkProviderCapabilities(
@@ -165,7 +225,8 @@ public struct RuntimeNetworkProviderCapabilities: Codable, Equatable, Sendable {
         modes: [],
         ipv4AddressModes: [],
         ipv6AddressModes: [],
-        attachmentTiming: .unavailable
+        attachmentTiming: .unavailable,
+        hostAccess: .unavailable
     )
 }
 

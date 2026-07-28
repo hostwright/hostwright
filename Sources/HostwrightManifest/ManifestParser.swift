@@ -853,7 +853,7 @@ private struct ManifestNodeDecoder {
             allowed: [
                 "image", "replicas", "platform", "resources", "user", "group", "workdir",
                 "entrypoint", "command", "init", "dependsOn", "env", "secretEnv", "labels",
-                "ports", "networks", "volumes", "health", "probes", "restart", "update", "hooks",
+                "ports", "hostAccess", "networks", "volumes", "health", "probes", "restart", "update", "hooks",
                 "rosetta", "virtualization", "readOnlyRootFilesystem", "shmSize"
             ]
         )
@@ -877,6 +877,9 @@ private struct ManifestNodeDecoder {
         } ?? (ports: [], sockets: [])
         let publishedPorts = publishedEndpoints.ports
         let publishedSockets = publishedEndpoints.sockets
+        let hostAccess = try values["hostAccess"].map {
+            try decodeHostAccess($0, path: "\(path).hostAccess")
+        } ?? []
         let ports = publishedPorts.compactMap(\.canonicalLegacyLiteral)
         let networks = try values["networks"].map {
             try decodeServiceNetworks($0, path: "\(path).networks")
@@ -930,6 +933,7 @@ private struct ManifestNodeDecoder {
             ports: ports,
             publishedPorts: publishedPorts,
             publishedSockets: publishedSockets,
+            hostAccess: hostAccess,
             networks: networks,
             volumes: volumes,
             mounts: mounts,
@@ -943,6 +947,78 @@ private struct ManifestNodeDecoder {
             readOnlyRootFilesystem: readOnlyRoot,
             shmSize: shmSize
         )
+    }
+
+    private func decodeHostAccess(
+        _ node: Node,
+        path: String
+    ) throws -> [HostwrightHostAccessEndpoint] {
+        guard case .sequence(let sequence) = node else {
+            throw ManifestParser.failure(
+                "Expected a sequence.",
+                node: node,
+                path: path
+            )
+        }
+        return try sequence.enumerated().map { index, child in
+            let itemPath = "\(path)[\(index)]"
+            let values = try mapping(
+                child,
+                path: itemPath,
+                allowed: [
+                    "hostname", "protocol", "addressClass", "port"
+                ]
+            )
+            let hostname = try requiredString(
+                values["hostname"],
+                path: "\(itemPath).hostname",
+                message: "Host access endpoint hostname is required."
+            )
+            let rawProtocol = try values["protocol"].map {
+                try string($0, path: "\(itemPath).protocol")
+            } ?? HostwrightHostAccessProtocol.tcp.rawValue
+            guard let protocolName = HostwrightHostAccessProtocol(
+                rawValue: rawProtocol
+            ) else {
+                throw ManifestParser.failure(
+                    "Host access protocol must be one of: tcp, udp.",
+                    code: .manifestValidationFailed,
+                    node: values["protocol"],
+                    path: "\(itemPath).protocol"
+                )
+            }
+            let rawAddressClass = try values["addressClass"].map {
+                try string($0, path: "\(itemPath).addressClass")
+            } ?? HostwrightHostAccessAddressClass.loopback.rawValue
+            guard let addressClass =
+                    HostwrightHostAccessAddressClass(
+                        rawValue: rawAddressClass
+                    ) else {
+                throw ManifestParser.failure(
+                    "Host access addressClass must be one of: loopback, interface.",
+                    code: .manifestValidationFailed,
+                    node: values["addressClass"],
+                    path: "\(itemPath).addressClass"
+                )
+            }
+            let port = try values["port"].map {
+                try integer($0, path: "\(itemPath).port")
+            }
+            guard let port else {
+                throw ManifestParser.failure(
+                    "Host access endpoint port is required.",
+                    code: .manifestValidationFailed,
+                    node: child,
+                    path: "\(itemPath).port"
+                )
+            }
+            return HostwrightHostAccessEndpoint(
+                hostname: hostname,
+                protocolName: protocolName,
+                addressClass: addressClass,
+                port: port
+            )
+        }.sorted(by: HostwrightHostAccessPolicy.canonicalPrecedes)
     }
 
     private func decodePublishedEndpoints(
@@ -1498,6 +1574,8 @@ private struct ManifestNodeDecoder {
                     context = "top-level volume"
                 } else if path.contains(".networks."), !path.contains(".services.") {
                     context = "top-level network"
+                } else if path.contains(".hostAccess[") {
+                    context = "hostAccess"
                 } else if path.hasSuffix(".health") {
                     context = "health"
                 } else if path.hasSuffix(".restart") {

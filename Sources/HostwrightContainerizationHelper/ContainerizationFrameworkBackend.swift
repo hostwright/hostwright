@@ -275,7 +275,8 @@ actor ContainerizationFrameworkBackend: ContainerizationHelperBackend {
             modes: RuntimeNetworkMode.allCases,
             ipv4AddressModes: [.cidr],
             ipv6AddressModes: [.disabled, .cidr],
-            attachmentTiming: .containerCreateOnly
+            attachmentTiming: .containerCreateOnly,
+            hostAccess: .guardedBroker
         )
     }
 

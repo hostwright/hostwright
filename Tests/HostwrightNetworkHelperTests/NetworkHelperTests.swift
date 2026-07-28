@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import HostwrightNetworking
 import HostwrightRuntime
 import XCTest
 @testable import HostwrightNetworkHelperCore
@@ -10,6 +11,323 @@ final class NetworkHelperTests: XCTestCase {
     private let firstFence = "33333333-3333-4333-8333-333333333333"
     private let secondFence = "44444444-4444-4444-8444-444444444444"
     private let thirdFence = "55555555-5555-4555-8555-555555555555"
+
+    func testHostAccessConfigurationPersistsAndRecoversExactly()
+        throws
+    {
+        try withStore { store, root in
+            let binding = hostAccessBinding()
+            let applied = try store.apply(
+                identity: identity(),
+                corefile: corefile(),
+                hostAccessBindings: [binding]
+            )
+            let expected = try XCTUnwrap(
+                applied.hostAccessSHA256
+            )
+            XCTAssertEqual(expected.count, 64)
+            XCTAssertEqual(
+                try store.activeHostAccessConfigurations(),
+                [
+                    NetworkHelperPersistedHostAccessConfiguration(
+                        identity: identity(),
+                        bindings: [binding],
+                        sha256: expected
+                    ),
+                ]
+            )
+
+            let restarted = try NetworkHelperStateStore(
+                rootURL: root
+            )
+            XCTAssertEqual(
+                try restarted.status(identity: identity()),
+                applied
+            )
+            XCTAssertEqual(
+                try restarted
+                    .activeHostAccessConfigurations()
+                    .first?.bindings,
+                [binding]
+            )
+            _ = try restarted.remove(identity: identity())
+            XCTAssertTrue(
+                try restarted
+                    .activeHostAccessConfigurations()
+                    .isEmpty
+            )
+        }
+    }
+
+    func testHostAccessBrokerForwardsOnlyTheExactTCPBinding()
+        throws
+    {
+        guard let interfaceAddress = firstActiveNonLoopbackIPv4()
+        else {
+            throw XCTSkip(
+                "No active non-loopback IPv4 interface is available."
+            )
+        }
+        let target = try makeLoopbackTCPServer()
+        defer { Darwin.close(target.descriptor) }
+        let binding = ProjectDNSHostAccessBinding(
+            hostname: "host-api.internal",
+            protocolName: .tcp,
+            addressClass: .loopback,
+            listenAddress: interfaceAddress,
+            clientCIDR: "\(interfaceAddress)/32",
+            targetAddress: "127.0.0.1",
+            port: target.port
+        )
+        let targetFinished = DispatchSemaphore(value: 0)
+        DispatchQueue.global(qos: .userInitiated).async {
+            defer { targetFinished.signal() }
+            guard waitReadable(
+                target.descriptor,
+                milliseconds: 5_000
+            ) else {
+                return
+            }
+            let connection = Darwin.accept(
+                target.descriptor,
+                nil,
+                nil
+            )
+            guard connection >= 0 else { return }
+            defer { Darwin.close(connection) }
+            var bytes = [UInt8](repeating: 0, count: 16)
+            let count = Darwin.read(
+                connection,
+                &bytes,
+                bytes.count
+            )
+            guard count == 4,
+                  String(decoding: bytes[0..<count], as: UTF8.self)
+                    == "ping" else {
+                return
+            }
+            _ = Darwin.write(
+                connection,
+                Array("pong".utf8),
+                4
+            )
+        }
+
+        let broker = NetworkHelperHostAccessBroker()
+        XCTAssertNotNil(
+            try broker.apply(
+                identity: identity(),
+                bindings: [binding]
+            )
+        )
+        defer { broker.remove(identity: identity()) }
+
+        let client = try connectTCP(
+            address: interfaceAddress,
+            port: target.port
+        )
+        defer { Darwin.close(client) }
+        XCTAssertEqual(
+            Darwin.write(client, Array("ping".utf8), 4),
+            4
+        )
+        XCTAssertTrue(
+            waitReadable(client, milliseconds: 5_000)
+        )
+        var response = [UInt8](repeating: 0, count: 4)
+        XCTAssertEqual(
+            Darwin.read(client, &response, response.count),
+            4
+        )
+        XCTAssertEqual(
+            String(decoding: response, as: UTF8.self),
+            "pong"
+        )
+        XCTAssertEqual(
+            targetFinished.wait(timeout: .now() + 5),
+            .success
+        )
+    }
+
+    func testHostAccessBrokerForwardsOnlyTheExactUDPBinding()
+        throws
+    {
+        guard let interfaceAddress = firstActiveNonLoopbackIPv4()
+        else {
+            throw XCTSkip(
+                "No active non-loopback IPv4 interface is available."
+            )
+        }
+        let target = try makeLoopbackUDPServer()
+        defer { Darwin.close(target.descriptor) }
+        let binding = ProjectDNSHostAccessBinding(
+            hostname: "host-dns.internal",
+            protocolName: .udp,
+            addressClass: .loopback,
+            listenAddress: interfaceAddress,
+            clientCIDR: "\(interfaceAddress)/32",
+            targetAddress: "127.0.0.1",
+            port: target.port
+        )
+        let targetFinished = DispatchSemaphore(value: 0)
+        DispatchQueue.global(qos: .userInitiated).async {
+            defer { targetFinished.signal() }
+            guard waitReadable(
+                target.descriptor,
+                milliseconds: 5_000
+            ) else {
+                return
+            }
+            var peer = sockaddr_in()
+            var peerLength = socklen_t(
+                MemoryLayout<sockaddr_in>.size
+            )
+            var bytes = [UInt8](repeating: 0, count: 16)
+            let count = withUnsafeMutablePointer(to: &peer) {
+                pointer in
+                pointer.withMemoryRebound(
+                    to: sockaddr.self,
+                    capacity: 1
+                ) {
+                    Darwin.recvfrom(
+                        target.descriptor,
+                        &bytes,
+                        bytes.count,
+                        0,
+                        $0,
+                        &peerLength
+                    )
+                }
+            }
+            guard count == 4,
+                  String(
+                    decoding: bytes[0..<count],
+                    as: UTF8.self
+                  ) == "ping" else {
+                return
+            }
+            var mutablePeer = peer
+            _ = withUnsafePointer(to: &mutablePeer) {
+                pointer in
+                pointer.withMemoryRebound(
+                    to: sockaddr.self,
+                    capacity: 1
+                ) {
+                    Darwin.sendto(
+                        target.descriptor,
+                        Array("pong".utf8),
+                        4,
+                        0,
+                        $0,
+                        peerLength
+                    )
+                }
+            }
+        }
+
+        let broker = NetworkHelperHostAccessBroker()
+        XCTAssertNotNil(
+            try broker.apply(
+                identity: identity(),
+                bindings: [binding]
+            )
+        )
+        defer { broker.remove(identity: identity()) }
+
+        XCTAssertEqual(
+            try udpRoundTrip(
+                address: interfaceAddress,
+                port: target.port,
+                payload: Data("ping".utf8)
+            ),
+            Data("pong".utf8)
+        )
+        XCTAssertEqual(
+            targetFinished.wait(timeout: .now() + 5),
+            .success
+        )
+    }
+
+    func testHostAccessValidationRejectsEscapesAndDuplicateListeners()
+        throws
+    {
+        let valid = hostAccessBinding()
+        let invalid = [
+            ProjectDNSHostAccessBinding(
+                hostname: "metadata",
+                protocolName: .tcp,
+                addressClass: .loopback,
+                listenAddress: valid.listenAddress,
+                clientCIDR: valid.clientCIDR,
+                targetAddress: valid.targetAddress,
+                port: valid.port
+            ),
+            ProjectDNSHostAccessBinding(
+                hostname: valid.hostname,
+                protocolName: .tcp,
+                addressClass: .loopback,
+                listenAddress: valid.listenAddress,
+                clientCIDR: "192.168.65.0/24",
+                targetAddress: valid.targetAddress,
+                port: valid.port
+            ),
+            ProjectDNSHostAccessBinding(
+                hostname: valid.hostname,
+                protocolName: .tcp,
+                addressClass: .loopback,
+                listenAddress: valid.listenAddress,
+                clientCIDR: valid.clientCIDR,
+                targetAddress: "192.168.64.10",
+                port: valid.port
+            ),
+        ]
+        for binding in invalid {
+            XCTAssertThrowsError(
+                try NetworkHelperHostAccessValidation
+                    .validated([binding])
+            ) {
+                XCTAssertEqual(
+                    $0 as? NetworkHelperError,
+                    .invalidRequest
+                )
+            }
+        }
+        let duplicateListener =
+            ProjectDNSHostAccessBinding(
+                hostname: "host-api-two.internal",
+                protocolName: valid.protocolName,
+                addressClass: valid.addressClass,
+                listenAddress: valid.listenAddress,
+                clientCIDR: valid.clientCIDR,
+                targetAddress: valid.targetAddress,
+                port: valid.port
+            )
+        XCTAssertThrowsError(
+            try NetworkHelperHostAccessValidation.validated(
+                [valid, duplicateListener]
+            )
+        ) {
+            XCTAssertEqual(
+                $0 as? NetworkHelperError,
+                .invalidRequest
+            )
+        }
+        let secondPort = ProjectDNSHostAccessBinding(
+            hostname: valid.hostname,
+            protocolName: valid.protocolName,
+            addressClass: valid.addressClass,
+            listenAddress: valid.listenAddress,
+            clientCIDR: valid.clientCIDR,
+            targetAddress: valid.targetAddress,
+            port: valid.port + 1
+        )
+        XCTAssertEqual(
+            try NetworkHelperHostAccessValidation.validated(
+                [secondPort, valid]
+            ),
+            [valid, secondPort]
+        )
+    }
 
     func testCanonicalFramingRoundTripsAndRejectsNonCanonicalJSON() throws {
         let request = NetworkHelperRequest(
@@ -502,6 +820,20 @@ final class NetworkHelperTests: XCTestCase {
         )
     }
 
+    private func hostAccessBinding()
+        -> ProjectDNSHostAccessBinding
+    {
+        ProjectDNSHostAccessBinding(
+            hostname: "host-api.internal",
+            protocolName: .tcp,
+            addressClass: .loopback,
+            listenAddress: "192.168.64.1",
+            clientCIDR: "192.168.64.0/24",
+            targetAddress: "127.0.0.1",
+            port: 6_508
+        )
+    }
+
     private func corefile(ttl: Int = 5) -> String {
         """
         \(projectUUID).hostwright.internal {
@@ -585,4 +917,252 @@ final class NetworkHelperTests: XCTestCase {
             result.append(contentsOf: buffer[0..<count])
         }
     }
+}
+
+private func firstActiveNonLoopbackIPv4() -> String? {
+    var pointer: UnsafeMutablePointer<ifaddrs>?
+    guard getifaddrs(&pointer) == 0 else { return nil }
+    defer { freeifaddrs(pointer) }
+    var current = pointer
+    while let item = current {
+        defer { current = item.pointee.ifa_next }
+        guard item.pointee.ifa_flags & UInt32(IFF_UP) != 0,
+              item.pointee.ifa_flags & UInt32(IFF_LOOPBACK) == 0,
+              let address = item.pointee.ifa_addr,
+              address.pointee.sa_family == UInt8(AF_INET) else {
+            continue
+        }
+        var value = UnsafeRawPointer(address)
+            .assumingMemoryBound(to: sockaddr_in.self)
+            .pointee.sin_addr
+        var buffer = [CChar](
+            repeating: 0,
+            count: Int(INET_ADDRSTRLEN)
+        )
+        guard inet_ntop(
+            AF_INET,
+            &value,
+            &buffer,
+            socklen_t(buffer.count)
+        ) != nil else {
+            continue
+        }
+        return buffer.withUnsafeBufferPointer { bytes in
+            String(
+                decoding: bytes
+                    .prefix { $0 != 0 }
+                    .map { UInt8(bitPattern: $0) },
+                as: UTF8.self
+            )
+        }
+    }
+    return nil
+}
+
+private func makeLoopbackTCPServer() throws
+    -> (descriptor: Int32, port: Int)
+{
+    let descriptor = Darwin.socket(AF_INET, SOCK_STREAM, 0)
+    guard descriptor >= 0 else {
+        throw NetworkHelperError.bindingUnavailable
+    }
+    var succeeded = false
+    defer {
+        if !succeeded { Darwin.close(descriptor) }
+    }
+    var address = sockaddr_in()
+    address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+    address.sin_family = sa_family_t(AF_INET)
+    address.sin_port = 0
+    guard "127.0.0.1".withCString({
+        inet_pton(AF_INET, $0, &address.sin_addr)
+    }) == 1 else {
+        throw NetworkHelperError.bindingUnavailable
+    }
+    let bound = withUnsafePointer(to: &address) { pointer in
+        pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+            Darwin.bind(
+                descriptor,
+                $0,
+                socklen_t(MemoryLayout<sockaddr_in>.size)
+            )
+        }
+    }
+    guard bound == 0, Darwin.listen(descriptor, 4) == 0 else {
+        throw NetworkHelperError.bindingUnavailable
+    }
+    var actual = sockaddr_in()
+    var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+    let loaded = withUnsafeMutablePointer(to: &actual) {
+        pointer in
+        pointer.withMemoryRebound(
+            to: sockaddr.self,
+            capacity: 1
+        ) {
+            getsockname(descriptor, $0, &length)
+        }
+    }
+    guard loaded == 0 else {
+        throw NetworkHelperError.bindingUnavailable
+    }
+    succeeded = true
+    return (
+        descriptor,
+        Int(in_port_t(bigEndian: actual.sin_port))
+    )
+}
+
+private func makeLoopbackUDPServer() throws
+    -> (descriptor: Int32, port: Int)
+{
+    let descriptor = Darwin.socket(AF_INET, SOCK_DGRAM, 0)
+    guard descriptor >= 0 else {
+        throw NetworkHelperError.bindingUnavailable
+    }
+    var succeeded = false
+    defer {
+        if !succeeded { Darwin.close(descriptor) }
+    }
+    var address = sockaddr_in()
+    address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+    address.sin_family = sa_family_t(AF_INET)
+    address.sin_port = 0
+    guard "127.0.0.1".withCString({
+        inet_pton(AF_INET, $0, &address.sin_addr)
+    }) == 1 else {
+        throw NetworkHelperError.bindingUnavailable
+    }
+    let bound = withUnsafePointer(to: &address) { pointer in
+        pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+            Darwin.bind(
+                descriptor,
+                $0,
+                socklen_t(MemoryLayout<sockaddr_in>.size)
+            )
+        }
+    }
+    guard bound == 0 else {
+        throw NetworkHelperError.bindingUnavailable
+    }
+    var actual = sockaddr_in()
+    var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+    let loaded = withUnsafeMutablePointer(to: &actual) {
+        pointer in
+        pointer.withMemoryRebound(
+            to: sockaddr.self,
+            capacity: 1
+        ) {
+            getsockname(descriptor, $0, &length)
+        }
+    }
+    guard loaded == 0 else {
+        throw NetworkHelperError.bindingUnavailable
+    }
+    succeeded = true
+    return (
+        descriptor,
+        Int(in_port_t(bigEndian: actual.sin_port))
+    )
+}
+
+private func connectTCP(address: String, port: Int) throws -> Int32 {
+    let descriptor = Darwin.socket(AF_INET, SOCK_STREAM, 0)
+    guard descriptor >= 0 else {
+        throw NetworkHelperError.bindingUnavailable
+    }
+    var succeeded = false
+    defer {
+        if !succeeded { Darwin.close(descriptor) }
+    }
+    var target = sockaddr_in()
+    target.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+    target.sin_family = sa_family_t(AF_INET)
+    target.sin_port = in_port_t(port).bigEndian
+    guard address.withCString({
+        inet_pton(AF_INET, $0, &target.sin_addr)
+    }) == 1 else {
+        throw NetworkHelperError.bindingUnavailable
+    }
+    let result = withUnsafePointer(to: &target) { pointer in
+        pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+            Darwin.connect(
+                descriptor,
+                $0,
+                socklen_t(MemoryLayout<sockaddr_in>.size)
+            )
+        }
+    }
+    guard result == 0 else {
+        throw NetworkHelperError.bindingUnavailable
+    }
+    succeeded = true
+    return descriptor
+}
+
+private func udpRoundTrip(
+    address: String,
+    port: Int,
+    payload: Data
+) throws -> Data {
+    let descriptor = Darwin.socket(AF_INET, SOCK_DGRAM, 0)
+    guard descriptor >= 0 else {
+        throw NetworkHelperError.bindingUnavailable
+    }
+    defer { Darwin.close(descriptor) }
+    var target = sockaddr_in()
+    target.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+    target.sin_family = sa_family_t(AF_INET)
+    target.sin_port = in_port_t(port).bigEndian
+    guard address.withCString({
+        inet_pton(AF_INET, $0, &target.sin_addr)
+    }) == 1 else {
+        throw NetworkHelperError.bindingUnavailable
+    }
+    let sent = payload.withUnsafeBytes { bytes in
+        withUnsafePointer(to: &target) { pointer in
+            pointer.withMemoryRebound(
+                to: sockaddr.self,
+                capacity: 1
+            ) {
+                Darwin.sendto(
+                    descriptor,
+                    bytes.baseAddress,
+                    bytes.count,
+                    0,
+                    $0,
+                    socklen_t(
+                        MemoryLayout<sockaddr_in>.size
+                    )
+                )
+            }
+        }
+    }
+    guard sent == payload.count,
+          waitReadable(descriptor, milliseconds: 5_000) else {
+        throw NetworkHelperError.bindingUnavailable
+    }
+    var response = [UInt8](repeating: 0, count: 64 * 1_024)
+    let count = Darwin.recv(
+        descriptor,
+        &response,
+        response.count,
+        0
+    )
+    guard count > 0 else {
+        throw NetworkHelperError.bindingUnavailable
+    }
+    return Data(response[0..<count])
+}
+
+private func waitReadable(
+    _ descriptor: Int32,
+    milliseconds: Int32
+) -> Bool {
+    var value = pollfd(
+        fd: descriptor,
+        events: Int16(POLLIN),
+        revents: 0
+    )
+    return Darwin.poll(&value, 1, milliseconds) > 0
+        && value.revents & Int16(POLLIN | POLLHUP) != 0
 }

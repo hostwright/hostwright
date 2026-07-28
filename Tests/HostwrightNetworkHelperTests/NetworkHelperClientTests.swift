@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import HostwrightNetworking
 import HostwrightRuntime
 import Security
 import XCTest
@@ -213,6 +214,152 @@ final class NetworkHelperClientTests: XCTestCase {
         )
     }
 
+    func testSecondClientAttachesToPersistentGuardedHostAccessHelper()
+        async throws
+    {
+        guard let interfaceAddress =
+                firstActiveNonLoopbackIPv4ForClient() else {
+            throw XCTSkip(
+                "No active non-loopback IPv4 interface is available."
+            )
+        }
+        let target = try makeLoopbackTCPServerForClient()
+        defer { Darwin.close(target.descriptor) }
+        let parent = try makePrivateParent()
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let runtimeURL = parent.appendingPathComponent(
+            "runtime",
+            isDirectory: true
+        )
+        let runtime =
+            try ContainerizationHelperRuntimeDirectory.prepare(
+                at: runtimeURL,
+                socketName: "network-helper.sock"
+            )
+        let store = try NetworkHelperStateStore(
+            rootURL: runtimeURL.appendingPathComponent(
+                "dns-state",
+                isDirectory: true
+            )
+        )
+        let server = NetworkHelperUnixServer(
+            runtimeDirectory: runtime,
+            dispatcher:
+                NetworkHelperDispatcher(store: store),
+            authenticator:
+                NetworkHelperPeerAuthenticator {
+                    descriptor in
+                    _ = try NetworkHelperPeerSecurity
+                        .validateSameUser(
+                            connectionDescriptor: descriptor
+                        )
+                },
+            idleTimeoutMilliseconds: 250
+        )
+        let serverTask = Task.detached {
+            try server.run()
+        }
+        let socketURL = runtimeURL.appendingPathComponent(
+            "network-helper.sock",
+            isDirectory: false
+        )
+        let startupDeadline = Date().addingTimeInterval(2)
+        while !FileManager.default.fileExists(
+            atPath: socketURL.path
+        ),
+        Date() < startupDeadline {
+            try await Task.sleep(
+                nanoseconds: 10_000_000
+            )
+        }
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: socketURL.path
+            )
+        )
+        let configuration = NetworkHelperClientConfiguration(
+            executableURL: URL(
+                fileURLWithPath: "/bin/sleep"
+            ),
+            runtimeDirectoryURL: runtimeURL,
+            launchTimeoutMilliseconds: 3_000,
+            requestTimeoutMilliseconds: 1_000,
+            helperIdleTimeoutMilliseconds: 250
+        )
+        let authenticator =
+            NetworkHelperServerPeerAuthenticator {
+                descriptor, expectedProcessID in
+                let processID =
+                    try NetworkHelperPeerSecurity
+                        .validateSameUser(
+                            connectionDescriptor: descriptor
+                        )
+                if let expectedProcessID,
+                   processID != expectedProcessID {
+                    throw NetworkHelperCodeIdentityError
+                        .processMismatch
+                }
+            }
+        let first = NetworkHelperClient(
+            configuration: configuration,
+            executableValidator:
+                NetworkHelperExecutableValidator { _ in },
+            peerAuthenticator: authenticator,
+            launcher: NetworkHelperProcessLauncher { _ in
+                throw NetworkHelperClientError.launchFailed
+            }
+        )
+        let identity = NetworkHelperDNSIdentity(
+            projectUUID: projectUUID,
+            dnsUUID: dnsUUID,
+            generation: 1,
+            fencingToken: fence
+        )
+        let binding = ProjectDNSHostAccessBinding(
+            hostname: "host-api.internal",
+            protocolName: .tcp,
+            addressClass: .loopback,
+            listenAddress: interfaceAddress,
+            clientCIDR: "\(interfaceAddress)/32",
+            targetAddress: "127.0.0.1",
+            port: target.port
+        )
+        let active = try await first.apply(
+            identity: identity,
+            corefile: corefile(),
+            hostAccessBindings: [binding]
+        )
+        XCTAssertNotNil(active.hostAccessSHA256)
+        try await first.close()
+
+        let second = NetworkHelperClient(
+            configuration: configuration,
+            executableValidator:
+                NetworkHelperExecutableValidator { _ in },
+            peerAuthenticator: authenticator,
+            launcher: NetworkHelperProcessLauncher { _ in
+                throw NetworkHelperClientError.launchFailed
+            }
+        )
+        let attached = try await second.status(
+            identity: identity
+        )
+        XCTAssertEqual(attached.disposition, .active)
+        XCTAssertEqual(
+            attached.activeCorefile?.hostAccessSHA256,
+            active.hostAccessSHA256
+        )
+        try await second.remove(identity: identity)
+        try await second.close()
+
+        try await serverTask.value
+        XCTAssertFalse(
+            FileManager.default.fileExists(
+                atPath: socketURL.path
+            )
+        )
+    }
+
     private func corefile() -> String {
         """
         \(projectUUID).hostwright.internal {
@@ -243,4 +390,99 @@ final class NetworkHelperClientTests: XCTestCase {
         XCTAssertEqual(lstat(url.path, &metadata), 0)
         return metadata.st_mode & mode_t(0o7777)
     }
+}
+
+private func firstActiveNonLoopbackIPv4ForClient() -> String? {
+    var pointer: UnsafeMutablePointer<ifaddrs>?
+    guard getifaddrs(&pointer) == 0 else { return nil }
+    defer { freeifaddrs(pointer) }
+    var current = pointer
+    while let item = current {
+        defer { current = item.pointee.ifa_next }
+        guard item.pointee.ifa_flags & UInt32(IFF_UP) != 0,
+              item.pointee.ifa_flags & UInt32(IFF_LOOPBACK) == 0,
+              let address = item.pointee.ifa_addr,
+              address.pointee.sa_family == UInt8(AF_INET) else {
+            continue
+        }
+        var value = UnsafeRawPointer(address)
+            .assumingMemoryBound(to: sockaddr_in.self)
+            .pointee.sin_addr
+        var buffer = [CChar](
+            repeating: 0,
+            count: Int(INET_ADDRSTRLEN)
+        )
+        guard inet_ntop(
+            AF_INET,
+            &value,
+            &buffer,
+            socklen_t(buffer.count)
+        ) != nil else {
+            continue
+        }
+        return String(
+            decoding: buffer
+                .prefix { $0 != 0 }
+                .map { UInt8(bitPattern: $0) },
+            as: UTF8.self
+        )
+    }
+    return nil
+}
+
+private func makeLoopbackTCPServerForClient() throws
+    -> (descriptor: Int32, port: Int)
+{
+    let descriptor = Darwin.socket(AF_INET, SOCK_STREAM, 0)
+    guard descriptor >= 0 else {
+        throw NetworkHelperClientError.socketUnavailable
+    }
+    var succeeded = false
+    defer {
+        if !succeeded { Darwin.close(descriptor) }
+    }
+    var address = sockaddr_in()
+    address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+    address.sin_family = sa_family_t(AF_INET)
+    address.sin_port = 0
+    guard "127.0.0.1".withCString({
+        inet_pton(AF_INET, $0, &address.sin_addr)
+    }) == 1 else {
+        throw NetworkHelperClientError.socketUnavailable
+    }
+    let bound = withUnsafePointer(to: &address) { pointer in
+        pointer.withMemoryRebound(
+            to: sockaddr.self,
+            capacity: 1
+        ) {
+            Darwin.bind(
+                descriptor,
+                $0,
+                socklen_t(MemoryLayout<sockaddr_in>.size)
+            )
+        }
+    }
+    guard bound == 0,
+          Darwin.listen(descriptor, 4) == 0 else {
+        throw NetworkHelperClientError.socketUnavailable
+    }
+    var actual = sockaddr_in()
+    var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+    let loaded = withUnsafeMutablePointer(to: &actual) {
+        pointer in
+        pointer.withMemoryRebound(
+            to: sockaddr.self,
+            capacity: 1
+        ) {
+            getsockname(descriptor, $0, &length)
+        }
+    }
+    guard loaded == 0 else {
+        throw NetworkHelperClientError.socketUnavailable
+    }
+    succeeded = true
+    return (
+        descriptor,
+        Int(in_port_t(bigEndian: actual.sin_port))
+    )
 }

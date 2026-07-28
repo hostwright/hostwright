@@ -320,6 +320,44 @@ final class ProjectDNSPlannerTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(ProjectDNSPlan.self, from: encoded), plan)
     }
 
+    func testHostAccessAllowsMultipleDeclaredPortsForOneBrokerHostname()
+        throws
+    {
+        let first = ProjectDNSHostAccessBinding(
+            hostname: "host-api.internal",
+            protocolName: .tcp,
+            addressClass: .loopback,
+            listenAddress: "192.168.64.1",
+            clientCIDR: "192.168.64.0/24",
+            targetAddress: "127.0.0.1",
+            port: 6_508
+        )
+        let second = ProjectDNSHostAccessBinding(
+            hostname: first.hostname,
+            protocolName: .tcp,
+            addressClass: .loopback,
+            listenAddress: first.listenAddress,
+            clientCIDR: first.clientCIDR,
+            targetAddress: first.targetAddress,
+            port: 6_509
+        )
+
+        let plan = try ProjectDNSPlanner.makePlan(
+            projectUUID: projectUUID,
+            services: [],
+            hostAccessBindings: [second, first]
+        )
+
+        XCTAssertEqual(plan.hostAccessBindings, [first, second])
+        XCTAssertEqual(
+            plan.corefile.components(
+                separatedBy:
+                    "        192.168.64.1 host-api.internal"
+            ).count - 1,
+            1
+        )
+    }
+
     private func service(
         _ name: String,
         alias: String,

@@ -470,6 +470,13 @@ final class LifecycleUpdatePlannerTests: XCTestCase {
                     bindAddress: "127.0.0.1"
                 )
             ],
+            publishedSockets: [
+                RuntimeUnixSocketPublication(
+                    hostPath: "/tmp/hostwright-test/worker.sock",
+                    containerPath: "/run/worker.sock",
+                    mode: .ownerAndGroup
+                )
+            ],
             networks: [
                 try RuntimeDesiredNetworkAttachment(
                     network: network,

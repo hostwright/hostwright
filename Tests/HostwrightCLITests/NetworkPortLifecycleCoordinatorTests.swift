@@ -8,6 +8,37 @@ import XCTest
 @testable import HostwrightState
 
 final class NetworkPortLifecycleCoordinatorTests: XCTestCase {
+    func testPlanningResolutionPreservesUnixSocketPublications() throws {
+        let socket = RuntimeUnixSocketPublication(
+            hostPath: "/tmp/hostwright/api.sock",
+            containerPath: "/run/api.sock",
+            mode: .ownerAndGroup
+        )
+        let fixture = try makeFixture(
+            ports: [],
+            publishedSockets: [socket]
+        )
+        defer { fixture.cleanup() }
+
+        let resolved = try NetworkPortLifecycleCoordinator
+            .resolveForPlanning(
+                desiredState: DesiredRuntimeState(
+                    projectName: fixture.plan.projectName,
+                    services: [fixture.service]
+                ),
+                projectID: fixture.plan.projectID,
+                projectResourceUUID:
+                    fixture.plan.projectResourceUUID,
+                providerID: fixture.plan.providerID,
+                providerGeneration:
+                    fixture.plan.providerGeneration,
+                resourceUUID: { _ in nil },
+                store: fixture.store
+            )
+
+        XCTAssertEqual(resolved.services[0].publishedSockets, [socket])
+    }
+
     func testPlanningResolutionIsReadOnlyStableAndProtocolScoped()
         throws
     {
@@ -637,7 +668,8 @@ private struct NetworkPortCoordinatorFixture {
 }
 
 private func makeFixture(
-    ports: [RuntimePortMapping]
+    ports: [RuntimePortMapping],
+    publishedSockets: [RuntimeUnixSocketPublication] = []
 ) throws -> NetworkPortCoordinatorFixture {
     let root = FileManager.default.temporaryDirectory
         .appendingPathComponent(
@@ -688,7 +720,8 @@ private func makeFixture(
     let service = DesiredRuntimeService(
         identity: identity,
         image: "example.invalid/api:latest",
-        ports: ports
+        ports: ports,
+        publishedSockets: publishedSockets
     )
     let node = try LifecyclePlanNode(
         key: "api-create",

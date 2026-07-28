@@ -1,3 +1,5 @@
+import HostwrightCore
+
 public enum RuntimeAdapterError: Error, Equatable, Sendable {
     case runtimeUnavailable(String)
     case executableNotFound(String)
@@ -193,6 +195,41 @@ public enum RuntimeCreateSubsetPolicy {
                 message: "Create-only apply accepts only localhost port publishing."
             )
         }
+        if !service.publishedSockets.isEmpty {
+            let socketRoot = try? HostwrightLocalPathResolver.resolve()
+                .layout.publishedSocketDirectory
+            guard let socketRoot,
+                  service.publishedSockets.allSatisfy({
+                      (try? HostwrightLocalPathResolver
+                          .normalizedAbsolutePath(
+                              $0.hostPath,
+                              role: "published socket host path"
+                          )) == $0.hostPath &&
+                          (try? HostwrightLocalPathResolver
+                              .normalizedAbsolutePath(
+                                  $0.containerPath,
+                                  role: "published socket container path"
+                              )) == $0.containerPath &&
+                          $0.hostPath.hasPrefix(socketRoot + "/") &&
+                          $0.hostPath.utf8.count <= 103 &&
+                          $0.containerPath.hasPrefix("/") &&
+                          $0.containerPath.utf8.count <= 107 &&
+                          AppleContainerCommand.unixSocketGuestPathFits(
+                              resourceIdentifier:
+                                  service.identity
+                                      .managedResourceIdentifier,
+                              containerPath: $0.containerPath
+                          ) &&
+                          !$0.hostPath.contains(":") &&
+                          !$0.containerPath.contains(":")
+                  }) else {
+                throw RuntimeAdapterError.commandRejected(
+                    classification: .mutating,
+                    message:
+                        "Apple container CLI Unix socket publication requires normalized paths inside Hostwright's private Application Support socket root that fit the provider's effective guest relay path limit."
+                )
+            }
+        }
         guard !service.image.hasPrefix("-") else {
             throw RuntimeAdapterError.commandRejected(classification: .mutating, message: "Create-only apply rejects image values beginning with '-'.")
         }
@@ -236,6 +273,7 @@ public enum RuntimeCreateSubsetPolicy {
         )
         guard service.mounts.isEmpty,
               service.ports.isEmpty,
+              service.publishedSockets.isEmpty,
               service.healthCheck == nil,
               service.probes.configuredKinds.isEmpty,
               service.platformOperatingSystem == "linux",

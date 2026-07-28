@@ -2195,13 +2195,32 @@ final class HostwrightManifestTests: XCTestCase {
         let ports = try XCTUnwrap(serviceProperties["ports"] as? [String: Any])
         let portItems = try XCTUnwrap(ports["items"] as? [String: Any])
         let portChoices = try XCTUnwrap(portItems["oneOf"] as? [[String: Any]])
-        XCTAssertEqual(portChoices.count, 2)
+        XCTAssertEqual(portChoices.count, 3)
         XCTAssertEqual(portChoices[0]["pattern"] as? String, #"^[0-9]{1,5}:[0-9]{1,5}$"#)
         let structuredPort = portChoices[1]
         XCTAssertEqual(structuredPort["type"] as? String, "object")
         XCTAssertEqual(structuredPort["required"] as? [String], ["target"])
         let structuredPortProperties = try XCTUnwrap(structuredPort["properties"] as? [String: Any])
         XCTAssertEqual((structuredPortProperties["protocol"] as? [String: Any])?["enum"] as? [String], ["tcp", "udp"])
+        let unixSocket = portChoices[2]
+        XCTAssertEqual(unixSocket["type"] as? String, "object")
+        XCTAssertEqual(
+            unixSocket["required"] as? [String],
+            ["target", "protocol"]
+        )
+        let unixSocketProperties = try XCTUnwrap(
+            unixSocket["properties"] as? [String: Any]
+        )
+        XCTAssertEqual(
+            (unixSocketProperties["protocol"] as? [String: Any])?["const"]
+                as? String,
+            "unix"
+        )
+        XCTAssertEqual(
+            (unixSocketProperties["mode"] as? [String: Any])?["enum"]
+                as? [String],
+            ["0600", "0660"]
+        )
         let serviceVolumes = try XCTUnwrap(serviceProperties["volumes"] as? [String: Any])
         let volumeItems = try XCTUnwrap(serviceVolumes["items"] as? [String: Any])
         let volumeChoices = try XCTUnwrap(volumeItems["oneOf"] as? [[String: Any]])

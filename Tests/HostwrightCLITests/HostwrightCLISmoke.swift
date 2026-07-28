@@ -1939,7 +1939,15 @@ final class HostwrightCLITests: XCTestCase {
                         image: "local/demo:latest",
                         lifecycleState: .running,
                         healthState: .healthy,
-                        ports: [RuntimePortMapping(hostPort: 8080, containerPort: 8080)]
+                        ports: [RuntimePortMapping(hostPort: 8080, containerPort: 8080)],
+                        publishedSockets: [
+                            RuntimeUnixSocketPublication(
+                                hostPath:
+                                    "/tmp/hostwright/api.sock",
+                                containerPath: "/run/api.sock",
+                                mode: .ownerAndGroup
+                            )
+                        ]
                     )
                 ],
                 adapterMetadata: fakeAdapterMetadata
@@ -1956,6 +1964,11 @@ final class HostwrightCLITests: XCTestCase {
             XCTAssertTrue(result.standardOutput.contains("Runtime parser: status-observation-v1"))
             XCTAssertTrue(result.standardOutput.contains("Telemetry: local-only; no upload"))
             XCTAssertTrue(result.standardOutput.contains("lifecycle=running"))
+            XCTAssertTrue(
+                result.standardOutput.contains(
+                    "sockets=/tmp/hostwright/api.sock->/run/api.sock/0660"
+                )
+            )
             XCTAssertTrue(result.standardOutput.contains("id=\(RuntimeServiceIdentity(projectName: "demo", serviceName: "api").managedResourceIdentifier)"))
             let events = try SQLiteStateStore(path: databasePath).events.loadAll()
             let statusEvent = try XCTUnwrap(events.first { $0.type == "status.observed" })
@@ -2118,6 +2131,14 @@ final class HostwrightCLITests: XCTestCase {
                         lifecycleState: .running,
                         healthState: .healthy,
                         ports: [RuntimePortMapping(hostPort: 8080, containerPort: 8080)],
+                        publishedSockets: [
+                            RuntimeUnixSocketPublication(
+                                hostPath:
+                                    "/tmp/hostwright/api.sock",
+                                containerPath: "/run/api.sock",
+                                mode: .ownerAndGroup
+                            )
+                        ],
                         networks: [
                             RuntimeNetworkAttachment(
                                 name: "default",
@@ -2155,6 +2176,19 @@ final class HostwrightCLITests: XCTestCase {
                 observedService["resourceIdentifier"] as? String,
                 RuntimeServiceIdentity(projectName: "demo", serviceName: "api").managedResourceIdentifier
             )
+            let sockets = try XCTUnwrap(
+                observedService["sockets"] as? [[String: Any]]
+            )
+            XCTAssertEqual(sockets.count, 1)
+            XCTAssertEqual(
+                sockets[0]["containerPath"] as? String,
+                "/run/api.sock"
+            )
+            XCTAssertEqual(
+                sockets[0]["hostPath"] as? String,
+                "/tmp/hostwright/api.sock"
+            )
+            XCTAssertEqual(sockets[0]["mode"] as? String, "0660")
             let networks = try XCTUnwrap(observedService["networks"] as? [[String: Any]])
             XCTAssertEqual(networks.first?["ipv4Address"] as? String, "192.168.64.8/24")
             XCTAssertEqual(networks.first?["mtu"] as? Int, 1280)

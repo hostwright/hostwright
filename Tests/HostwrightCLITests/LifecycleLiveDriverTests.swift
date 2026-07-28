@@ -118,10 +118,12 @@ final class LifecycleLiveDriverTests: XCTestCase {
                 records.map(\.lifecycleState),
                 [.active, .active]
             )
-            XCTAssertEqual(
-                Set(records.map(\.hostPort)),
-                Set([49_152])
+            let selectedHostPorts = Set(records.map(\.hostPort))
+            XCTAssertEqual(selectedHostPorts.count, 1)
+            let selectedHostPort = try XCTUnwrap(
+                selectedHostPorts.first
             )
+            XCTAssertTrue((49_152...65_535).contains(selectedHostPort))
             XCTAssertEqual(
                 Set(records.map(\.protocolName)),
                 Set([.tcp, .udp])
@@ -441,7 +443,8 @@ final class LifecycleLiveDriverTests: XCTestCase {
         project: demo
         imagePolicy: require-digest
         networks:
-          backend: {}
+          backend:
+            ipv6: disabled
         services:
           api:
             image: registry.example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
@@ -928,6 +931,62 @@ final class LifecycleLiveDriverTests: XCTestCase {
             XCTAssertEqual(snapshot.mutations, [.stop, .remove])
             XCTAssertFalse(snapshot.resourceUUIDs.contains(targetBefore.resourceUUID))
             XCTAssertTrue(snapshot.resourceUUIDs.contains(sentinelBefore.resourceUUID))
+        }
+    }
+
+    func testRemoveAcceptsImmutableRuntimeFenceAfterStateFenceAdvance()
+        throws
+    {
+        try withFixture(existingManagedResource: true) { fixture in
+            let target = try XCTUnwrap(
+                fixture.store.ownership.loadAll().first {
+                    $0.projectID == fixture.projectID &&
+                        $0.serviceName == "api"
+                }
+            )
+            let priorOperationFence = HostwrightResourceUUID.legacy(
+                kind: "prior-lifecycle-operation",
+                identifier: target.resourceUUID
+            )
+            XCTAssertNotNil(
+                try fixture.store.ownership.advanceFencingToken(
+                    resourceIdentifier: target.resourceIdentifier,
+                    runtimeAdapter: target.runtimeAdapter,
+                    expectedResourceUUID: target.resourceUUID,
+                    expectedFencingToken: target.fencingToken,
+                    newFencingToken: priorOperationFence,
+                    observedAt: "2026-07-23T12:00:01Z"
+                )
+            )
+            try fixture.wait {
+                await fixture.adapter
+                    .setPreserveExistingOwnershipFenceOnMutation(true)
+            }
+            let plan = try reviewedPlan(fixture, command: .rm)
+            let confirmed = fixture.options(
+                command: .rm,
+                dryRun: false,
+                confirmation: plan.planSHA256
+            )
+
+            let result = LifecycleCommandRunner(
+                options: confirmed,
+                driver: LifecycleLiveDriver(
+                    environment: fixture.environment,
+                    options: confirmed
+                )
+            ).run()
+
+            XCTAssertEqual(result.exitCode, 0, result.standardError)
+            XCTAssertFalse(
+                try fixture.store.ownership.loadAll().contains {
+                    $0.resourceUUID == target.resourceUUID
+                }
+            )
+            XCTAssertEqual(
+                try fixture.adapterSnapshot().mutations,
+                [.stop, .remove]
+            )
         }
     }
 

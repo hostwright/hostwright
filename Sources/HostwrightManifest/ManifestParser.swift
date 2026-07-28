@@ -872,7 +872,11 @@ private struct ManifestNodeDecoder {
         let env = try values["env"].map { try stringMap($0, path: "\(path).env") } ?? [:]
         let secretEnv = try values["secretEnv"].map { try secrets($0, path: "\(path).secretEnv") } ?? [:]
         let labels = try values["labels"].map { try stringMap($0, path: "\(path).labels") } ?? [:]
-        let publishedPorts = try values["ports"].map { try decodePublishedPorts($0, path: "\(path).ports") } ?? []
+        let publishedEndpoints = try values["ports"].map {
+            try decodePublishedEndpoints($0, path: "\(path).ports")
+        } ?? (ports: [], sockets: [])
+        let publishedPorts = publishedEndpoints.ports
+        let publishedSockets = publishedEndpoints.sockets
         let ports = publishedPorts.compactMap(\.canonicalLegacyLiteral)
         let networks = try values["networks"].map {
             try decodeServiceNetworks($0, path: "\(path).networks")
@@ -925,6 +929,7 @@ private struct ManifestNodeDecoder {
             labels: labels,
             ports: ports,
             publishedPorts: publishedPorts,
+            publishedSockets: publishedSockets,
             networks: networks,
             volumes: volumes,
             mounts: mounts,
@@ -940,15 +945,20 @@ private struct ManifestNodeDecoder {
         )
     }
 
-    private func decodePublishedPorts(
+    private func decodePublishedEndpoints(
         _ node: Node,
         path: String
-    ) throws -> [HostwrightPublishedPort] {
+    ) throws -> (
+        ports: [HostwrightPublishedPort],
+        sockets: [HostwrightPublishedSocket]
+    ) {
         guard case .sequence(let sequence) = node else {
             throw ManifestParser.failure("Expected a sequence.", node: node, path: path)
         }
 
-        return try sequence.enumerated().map { index, child in
+        var ports: [HostwrightPublishedPort] = []
+        var sockets: [HostwrightPublishedSocket] = []
+        for (index, child) in sequence.enumerated() {
             let itemPath = "\(path)[\(index)]"
             switch child {
             case .scalar:
@@ -960,30 +970,89 @@ private struct ManifestNodeDecoder {
                         path: itemPath
                     )
                 }
-                return publishedPort
+                ports.append(publishedPort)
 
             case .mapping:
                 let values = try mapping(
                     child,
                     path: itemPath,
-                    allowed: ["bind", "host", "protocol", "target"]
+                    allowed: ["bind", "host", "mode", "protocol", "target"]
                 )
+                let rawProtocol = try values["protocol"].map {
+                    try string($0, path: "\(itemPath).protocol")
+                } ?? HostwrightPortProtocol.tcp.rawValue
+                if rawProtocol == "unix" {
+                    guard values["bind"] == nil else {
+                        throw ManifestParser.failure(
+                            "Unix socket publication does not accept bind.",
+                            code: .manifestValidationFailed,
+                            node: values["bind"],
+                            path: "\(itemPath).bind"
+                        )
+                    }
+                    let target = try requiredString(
+                        values["target"],
+                        path: "\(itemPath).target",
+                        message: "Unix socket publication requires an absolute container target."
+                    )
+                    let hostName = try values["host"].map {
+                        try string($0, path: "\(itemPath).host")
+                    }
+                    let rawMode = try values["mode"].map {
+                        try string($0, path: "\(itemPath).mode")
+                    } ?? HostwrightPublishedSocketMode.ownerOnly.rawValue
+                    guard let mode = HostwrightPublishedSocketMode(
+                        rawValue: rawMode
+                    ) else {
+                        throw ManifestParser.failure(
+                            "Unix socket mode must be one of: 0600, 0660.",
+                            code: .manifestValidationFailed,
+                            node: values["mode"],
+                            path: "\(itemPath).mode"
+                        )
+                    }
+                    sockets.append(
+                        HostwrightPublishedSocket(
+                            hostName: hostName,
+                            containerPath: target,
+                            mode: mode
+                        )
+                    )
+                    continue
+                }
+                guard let protocolName = HostwrightPortProtocol(
+                    rawValue: rawProtocol
+                ) else {
+                    throw ManifestParser.failure(
+                        "protocol must be one of: tcp, udp, unix.",
+                        code: .manifestValidationFailed,
+                        node: values["protocol"],
+                        path: "\(itemPath).protocol"
+                    )
+                }
+                guard values["mode"] == nil else {
+                    throw ManifestParser.failure(
+                        "TCP and UDP port publication does not accept mode.",
+                        code: .manifestValidationFailed,
+                        node: values["mode"],
+                        path: "\(itemPath).mode"
+                    )
+                }
                 let target = try decodePortSpan(
                     values["target"],
                     path: "\(itemPath).target",
                     message: "Structured port mapping requires target."
                 )
                 let host = try values["host"].map { try decodePortSpanValue($0, path: "\(itemPath).host") }
-                let protocolName = try values["protocol"].map {
-                    try decodePortProtocol($0, path: "\(itemPath).protocol")
-                } ?? .tcp
                 let bindAddress = try values["bind"].map { try string($0, path: "\(itemPath).bind") }
 
-                return HostwrightPublishedPort(
-                    host: host,
-                    target: target,
-                    protocolName: protocolName,
-                    bindAddress: bindAddress ?? HostwrightPublishedPort.localhostBindAddress
+                ports.append(
+                    HostwrightPublishedPort(
+                        host: host,
+                        target: target,
+                        protocolName: protocolName,
+                        bindAddress: bindAddress ?? HostwrightPublishedPort.localhostBindAddress
+                    )
                 )
 
             default:
@@ -994,6 +1063,7 @@ private struct ManifestNodeDecoder {
                 )
             }
         }
+        return (ports, sockets)
     }
 
     private func decodePortSpan(

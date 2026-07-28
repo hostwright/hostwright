@@ -1832,6 +1832,7 @@ public struct AppleContainerizationRuntimeAdapter: RuntimeAdapter {
                         bindAddress: $0.hostAddress
                     )
                 },
+                publishedSockets: container.publishedSockets,
                 networks: container.networks.map { attachment in
                     let network = networks[attachment.networkID]
                     return RuntimeNetworkAttachment(

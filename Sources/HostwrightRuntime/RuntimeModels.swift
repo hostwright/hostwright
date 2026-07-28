@@ -165,6 +165,47 @@ public struct RuntimePortMapping: Equatable, Sendable {
     }
 }
 
+public enum RuntimeUnixSocketMode:
+    String,
+    Codable,
+    Equatable,
+    Hashable,
+    Sendable
+{
+    case ownerOnly = "0600"
+    case ownerAndGroup = "0660"
+
+    public var fileMode: UInt16 {
+        switch self {
+        case .ownerOnly:
+            return 0o600
+        case .ownerAndGroup:
+            return 0o660
+        }
+    }
+}
+
+public struct RuntimeUnixSocketPublication:
+    Codable,
+    Equatable,
+    Hashable,
+    Sendable
+{
+    public let hostPath: String
+    public let containerPath: String
+    public let mode: RuntimeUnixSocketMode
+
+    public init(
+        hostPath: String,
+        containerPath: String,
+        mode: RuntimeUnixSocketMode = .ownerOnly
+    ) {
+        self.hostPath = hostPath
+        self.containerPath = containerPath
+        self.mode = mode
+    }
+}
+
 public struct RuntimeNetworkAttachment: Equatable, Sendable {
     public let name: String
     public let kind: String?
@@ -468,6 +509,7 @@ public struct DesiredRuntimeService: Equatable, Sendable {
     public let environment: [RuntimeEnvironmentValue]
     public let labels: [String: String]
     public let ports: [RuntimePortMapping]
+    public let publishedSockets: [RuntimeUnixSocketPublication]
     public let networks: [RuntimeDesiredNetworkAttachment]
     public let mounts: [RuntimeMountReference]
     public let healthCheck: RuntimeHealthCheckSpec?
@@ -500,6 +542,7 @@ public struct DesiredRuntimeService: Equatable, Sendable {
         environment: [RuntimeEnvironmentValue] = [],
         labels: [String: String] = [:],
         ports: [RuntimePortMapping] = [],
+        publishedSockets: [RuntimeUnixSocketPublication] = [],
         mounts: [RuntimeMountReference] = [],
         healthCheck: RuntimeHealthCheckSpec? = nil,
         probes: RuntimeProbeSet = RuntimeProbeSet(),
@@ -531,6 +574,7 @@ public struct DesiredRuntimeService: Equatable, Sendable {
             environment: environment,
             labels: labels,
             ports: ports,
+            publishedSockets: publishedSockets,
             networks: [],
             mounts: mounts,
             healthCheck: healthCheck,
@@ -565,6 +609,7 @@ public struct DesiredRuntimeService: Equatable, Sendable {
         environment: [RuntimeEnvironmentValue] = [],
         labels: [String: String] = [:],
         ports: [RuntimePortMapping] = [],
+        publishedSockets: [RuntimeUnixSocketPublication] = [],
         networks: [RuntimeDesiredNetworkAttachment],
         mounts: [RuntimeMountReference] = [],
         healthCheck: RuntimeHealthCheckSpec? = nil,
@@ -596,6 +641,7 @@ public struct DesiredRuntimeService: Equatable, Sendable {
         self.environment = environment
         self.labels = labels
         self.ports = ports
+        self.publishedSockets = publishedSockets
         self.networks = networks
         self.mounts = mounts
         self.healthCheck = healthCheck
@@ -853,6 +899,7 @@ public struct ObservedRuntimeService: Equatable, Sendable {
     public let lifecycleState: RuntimeLifecycleState
     public let healthState: RuntimeHealthState
     public let ports: [RuntimePortMapping]
+    public let publishedSockets: [RuntimeUnixSocketPublication]
     public let networks: [RuntimeNetworkAttachment]
     public let mounts: [RuntimeMountReference]
     public let observedAt: String?
@@ -864,6 +911,7 @@ public struct ObservedRuntimeService: Equatable, Sendable {
         lifecycleState: RuntimeLifecycleState = .unknown,
         healthState: RuntimeHealthState = .unknown,
         ports: [RuntimePortMapping] = [],
+        publishedSockets: [RuntimeUnixSocketPublication] = [],
         networks: [RuntimeNetworkAttachment] = [],
         mounts: [RuntimeMountReference] = [],
         observedAt: String? = nil
@@ -874,6 +922,7 @@ public struct ObservedRuntimeService: Equatable, Sendable {
         self.lifecycleState = lifecycleState
         self.healthState = healthState
         self.ports = ports
+        self.publishedSockets = publishedSockets
         self.networks = networks
         self.mounts = mounts
         self.observedAt = observedAt

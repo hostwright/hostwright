@@ -438,7 +438,7 @@ final class HostwrightRuntimeTests: XCTestCase {
         )
 
         var preImageArguments = valid.arguments
-        preImageArguments.insert("--dns", at: imageIndex)
+        preImageArguments.insert("--future-flag", at: imageIndex)
         let unsupportedCreateOption = RuntimeCommandSpec(
             executablePath: "/usr/bin/container-fixture",
             arguments: preImageArguments,
@@ -452,7 +452,11 @@ final class HostwrightRuntimeTests: XCTestCase {
                 unsupportedCreateOption
             )
         ) { error in
-            XCTAssertTrue(String(describing: error).contains("unsupported create option"))
+            XCTAssertTrue(
+                String(describing: error).contains(
+                    "unsupported option before its image"
+                )
+            )
         }
     }
 
@@ -1588,12 +1592,25 @@ final class HostwrightRuntimeTests: XCTestCase {
 
     func testAppleContainerApplyAdapterDeletesOnlyExplicitDestructiveManagedContainer() async throws {
         let resourceIdentifier = identity.managedResourceIdentifier
+        let observations = ObservationFixtureSequence(outputs: [
+            try containerListOutput(
+                identity: identity,
+                state: "running",
+                context: mutationContext
+            ),
+            "[]"
+        ])
         let runner = RoutingRuntimeProcessRunner { spec in
             if spec.arguments == ["delete", resourceIdentifier] {
                 return RuntimeCommandResult(spec: spec, exitStatus: 0, standardOutput: "deleted", standardError: "")
             }
             if spec.arguments == ["list", "--all", "--format", "json"] {
-                return RuntimeCommandResult(spec: spec, exitStatus: 0, standardOutput: "[]", standardError: "")
+                return RuntimeCommandResult(
+                    spec: spec,
+                    exitStatus: 0,
+                    standardOutput: observations.next(),
+                    standardError: ""
+                )
             }
             throw RuntimeAdapterError.commandRejected(classification: spec.classification, message: "unexpected command")
         }
@@ -1605,6 +1622,14 @@ final class HostwrightRuntimeTests: XCTestCase {
         )
 
         XCTAssertEqual(event.resourceIdentifier, resourceIdentifier)
+        XCTAssertEqual(
+            runner.calls.map(\.arguments),
+            [
+                ["list", "--all", "--format", "json"],
+                ["delete", resourceIdentifier],
+                ["list", "--all", "--format", "json"]
+            ]
+        )
 
         do {
             _ = try await adapter.execute(
@@ -2260,6 +2285,90 @@ final class HostwrightRuntimeTests: XCTestCase {
         assertCompleteObservationMatrix(runner, expectedStatsContainerID: nil)
     }
 
+    func testAppleContainerParserObservesExactPublishedUnixSocket()
+        throws {
+        let publications = [
+            RuntimeUnixSocketPublication(
+                hostPath: "/tmp/hostwright-a.sock",
+                containerPath: "/run/a.sock",
+                mode: .ownerOnly
+            ),
+            RuntimeUnixSocketPublication(
+                hostPath: "/tmp/hostwright-z.sock",
+                containerPath: "/run/z.sock",
+                mode: .ownerAndGroup
+            )
+        ]
+        let service = DesiredRuntimeService(
+            identity: proofIdentity,
+            image: "hostwright-proof-web:create-only",
+            ports: [
+                RuntimePortMapping(
+                    hostPort: 18080,
+                    containerPort: 80
+                )
+            ],
+            publishedSockets: Array(publications.reversed())
+        )
+        let state = DesiredRuntimeState(
+            projectName: "proof",
+            services: [service],
+            ownedResourceHints: [
+                RuntimeOwnedResourceHint(
+                    resourceIdentifier:
+                        proofIdentity.managedResourceIdentifier,
+                    identity: proofIdentity,
+                    identityVersion:
+                        RuntimeManagedResourceIdentity.currentVersion,
+                    ownership: ownershipEvidence(
+                        for: proofObservationMutationContext
+                    )
+                )
+            ]
+        )
+
+        let observed = try AppleContainerObservationParser.parse(
+            structuredProofContainerOutput(
+                publishedSockets: publications.reversed().map {
+                    [
+                        "containerPath": $0.containerPath,
+                        "hostPath": $0.hostPath,
+                        "permissions":
+                            $0.mode == .ownerOnly ? 0o600 : 0o660
+                    ]
+                }
+            ),
+            desiredState: state,
+            metadata: ScriptedRuntimeAdapter.defaultMetadata
+        )
+
+        XCTAssertEqual(
+            observed.services.first?.publishedSockets,
+            publications
+        )
+
+        XCTAssertThrowsError(
+            try AppleContainerObservationParser.parse(
+                structuredProofContainerOutput(
+                    publishedSockets: [
+                        [
+                            "containerPath": "/run/a.sock",
+                            "hostPath": "/tmp/hostwright-duplicate.sock",
+                            "permissions": 0o600
+                        ],
+                        [
+                            "containerPath": "/run/b.sock",
+                            "hostPath": "/tmp/hostwright-duplicate.sock",
+                            "permissions": 0o600
+                        ]
+                    ]
+                ),
+                desiredState: state,
+                metadata: ScriptedRuntimeAdapter.defaultMetadata
+            )
+        )
+    }
+
     func testAppleContainerParserIncludesOwnedOrphanAndIgnoresUnrelatedProject() throws {
         let orphan = RuntimeServiceIdentity(projectName: "demo", serviceName: "orphan")
         let unrelated = RuntimeServiceIdentity(projectName: "other", serviceName: "api")
@@ -2834,7 +2943,9 @@ final class HostwrightRuntimeTests: XCTestCase {
         )
     }
 
-    private func structuredProofContainerOutput() throws -> String {
+    private func structuredProofContainerOutput(
+        publishedSockets: [[String: Any]] = []
+    ) throws -> String {
         var payload = try structuredInventoryTemplate()
         var container = payload[0]
         var configuration = try XCTUnwrap(container["configuration"] as? [String: Any])
@@ -2856,6 +2967,7 @@ final class HostwrightRuntimeTests: XCTestCase {
             "hostPort": 18080,
             "proto": "tcp"
         ]]
+        configuration["publishedSockets"] = publishedSockets
         image["reference"] = "hostwright-proof-web:create-only"
         configuration["image"] = image
         status["networks"] = []

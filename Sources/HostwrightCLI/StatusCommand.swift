@@ -185,8 +185,14 @@ struct StatusCommandRunner {
                     let ports = observed.ports.map { port in
                         "\((port.bindAddress ?? "localhost")):\(port.hostPort.map(String.init) ?? "?")->\(port.containerPort)/\(port.protocolName.rawValue)"
                     }.joined(separator: ", ")
+                    let sockets = observed.publishedSockets.sorted {
+                        ($0.hostPath, $0.containerPath, $0.mode.rawValue) <
+                            ($1.hostPath, $1.containerPath, $1.mode.rawValue)
+                    }.map {
+                        "\($0.hostPath)->\($0.containerPath)/\($0.mode.rawValue)"
+                    }.joined(separator: ", ")
                     let instance = observed.identity.instanceName.map { "[\($0)]" } ?? ""
-                    lines.append("- \(service.name)\(instance): id=\(observed.resourceIdentifier) desired image=\(service.image ?? "<missing>") observed image=\(observed.image ?? "<unknown>") lifecycle=\(observed.lifecycleState.rawValue) health=\(observed.healthState.rawValue) ports=\(ports.isEmpty ? "none" : ports)")
+                    lines.append("- \(service.name)\(instance): id=\(observed.resourceIdentifier) desired image=\(service.image ?? "<missing>") observed image=\(observed.image ?? "<unknown>") lifecycle=\(observed.lifecycleState.rawValue) health=\(observed.healthState.rawValue) ports=\(ports.isEmpty ? "none" : ports) sockets=\(sockets.isEmpty ? "none" : sockets)")
                 }
             } else {
                 lines.append("- \(service.name): desired image=\(service.image ?? "<missing>") observed=missing")

@@ -374,6 +374,7 @@ private extension ObservedRuntimeService {
             lifecycleState: lifecycleState,
             healthState: healthState,
             ports: ports,
+            publishedSockets: publishedSockets,
             networks: networks,
             mounts: mounts,
             observedAt: observedAt
@@ -944,6 +945,16 @@ enum CLIJSON {
                     "containerPort": port.containerPort,
                     "protocol": port.protocolName.rawValue
                 ].compactNilValues()
+            },
+            "sockets": observed.publishedSockets.sorted {
+                ($0.hostPath, $0.containerPath, $0.mode.rawValue) <
+                    ($1.hostPath, $1.containerPath, $1.mode.rawValue)
+            }.map { socket in
+                [
+                    "containerPath": socket.containerPath,
+                    "hostPath": socket.hostPath,
+                    "mode": socket.mode.rawValue
+                ]
             },
             "networks": observed.networks.map { network in
                 [

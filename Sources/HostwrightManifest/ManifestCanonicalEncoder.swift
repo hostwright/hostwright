@@ -175,7 +175,11 @@ public enum ManifestCanonicalEncoder {
                 to: &lines
             )
             appendStringMap(service.labels, key: "labels", to: &lines)
-            appendPublishedPorts(service.publishedPorts, to: &lines)
+            appendPublishedEndpoints(
+                ports: service.publishedPorts,
+                sockets: service.publishedSockets,
+                to: &lines
+            )
             appendServiceNetworks(service.networks, to: &lines)
             appendMounts(service.mounts, to: &lines)
 
@@ -388,16 +392,30 @@ public enum ManifestCanonicalEncoder {
         }
     }
 
-    private static func appendPublishedPorts(_ values: [HostwrightPublishedPort], to lines: inout [String]) {
-        guard !values.isEmpty else { return }
+    private static func appendPublishedEndpoints(
+        ports: [HostwrightPublishedPort],
+        sockets: [HostwrightPublishedSocket],
+        to lines: inout [String]
+    ) {
+        guard !ports.isEmpty || !sockets.isEmpty else { return }
         lines.append("    ports:")
-        for value in values {
+        for value in ports {
             lines.append("      - bind: \(quote(value.effectiveBindAddress))")
             if let host = value.host {
                 lines.append("        host: \(canonicalPortSpan(host))")
             }
             lines.append("        target: \(canonicalPortSpan(value.target))")
             lines.append("        protocol: \(quote(value.protocolName.rawValue))")
+        }
+        for value in sockets {
+            if let hostName = value.hostName {
+                lines.append("      - host: \(quote(hostName))")
+                lines.append("        target: \(quote(value.containerPath))")
+            } else {
+                lines.append("      - target: \(quote(value.containerPath))")
+            }
+            lines.append("        protocol: \"unix\"")
+            lines.append("        mode: \(quote(value.mode.rawValue))")
         }
     }
 

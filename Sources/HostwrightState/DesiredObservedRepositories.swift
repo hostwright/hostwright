@@ -337,7 +337,11 @@ public struct DesiredStateRepository: Sendable {
             portsJSON: try StateJSON.encode(
                 service.publishedPorts.sorted {
                     publishedPortKey($0) < publishedPortKey($1)
-                }.map(publishedPortJSON)
+                }.map(publishedPortJSON) +
+                    service.publishedSockets.sorted {
+                        publishedSocketKey($0) <
+                            publishedSocketKey($1)
+                    }.map(publishedSocketJSON)
             ),
             mountsJSON: try StateJSON.encodeStringArray(service.volumes),
             environmentJSONRedacted: try StateJSON.encode(redactedEnvironment),
@@ -369,6 +373,27 @@ public struct DesiredStateRepository: Sendable {
             port.host?.canonicalString ?? "dynamic",
             port.target.canonicalString,
             port.protocolName.rawValue
+        ].joined(separator: "\u{1f}")
+    }
+
+    private func publishedSocketJSON(
+        _ socket: HostwrightPublishedSocket
+    ) -> [String: Any] {
+        [
+            "host": socket.hostName.map { $0 as Any } ?? NSNull(),
+            "mode": socket.mode.rawValue,
+            "protocol": "unix",
+            "target": socket.containerPath
+        ]
+    }
+
+    private func publishedSocketKey(
+        _ socket: HostwrightPublishedSocket
+    ) -> String {
+        [
+            socket.hostName ?? "automatic",
+            socket.containerPath,
+            socket.mode.rawValue
         ].joined(separator: "\u{1f}")
     }
 
@@ -612,7 +637,13 @@ public struct ObservedStateRepository: Sendable {
             image: service.image,
             lifecycleState: service.lifecycleState,
             healthState: service.healthState,
-            portsJSON: try StateJSON.encode(service.ports.map(portJSON)),
+            portsJSON: try StateJSON.encode(
+                service.ports.map(portJSON) +
+                    service.publishedSockets.sorted {
+                        ($0.hostPath, $0.containerPath, $0.mode.rawValue) <
+                            ($1.hostPath, $1.containerPath, $1.mode.rawValue)
+                    }.map(socketJSON)
+            ),
             networksJSON: try StateJSON.encode(service.networks.map(networkJSON)),
             mountsJSON: try StateJSON.encode(service.mounts.map(mountJSON)),
             runtimeIdentifiersJSON: try StateJSON.encode([

@@ -675,6 +675,30 @@
                     "enum": ["tcp", "udp"]
                   }
                 }
+              },
+              {
+                "type": "object",
+                "required": ["target", "protocol"],
+                "additionalProperties": false,
+                "properties": {
+                  "host": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 255,
+                    "pattern": "^(?!\\.{1,2}$)[A-Za-z0-9._-]+$"
+                  },
+                  "target": {
+                    "type": "string",
+                    "maxLength": 107,
+                    "pattern": "^/(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*//)[^:\\u0000]+$"
+                  },
+                  "protocol": {
+                    "const": "unix"
+                  },
+                  "mode": {
+                    "enum": ["0600", "0660"]
+                  }
+                }
               }
             ]
           }

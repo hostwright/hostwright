@@ -21,6 +21,7 @@ public enum ManifestRuntimeMapper {
         policy: PlanningPolicy = .default,
         projectResourceUUID: String? = nil,
         bindMountBaseDirectory: String? = nil,
+        unixSocketRootDirectory: String? = nil,
         namedVolumeSources: [String: String] = [:]
     ) -> ManifestRuntimeMappingResult {
         let projectName = manifest.project ?? ""
@@ -29,6 +30,9 @@ public enum ManifestRuntimeMapper {
                 kind: "project",
                 identifier: "project-\(projectName)"
             )
+        let resolvedSocketRoot = unixSocketRootDirectory ??
+            (try? HostwrightLocalPathResolver.resolve()
+                .layout.publishedSocketDirectory)
         var issues: [PlanIssue] = []
 
         let networks = manifest.networks
@@ -53,6 +57,7 @@ public enum ManifestRuntimeMapper {
                         networkDefinitions: manifest.networks,
                         policy: policy,
                         bindMountBaseDirectory: bindMountBaseDirectory,
+                        unixSocketRootDirectory: resolvedSocketRoot,
                         namedVolumeSources: namedVolumeSources,
                         issues: &issues
                     )
@@ -77,6 +82,7 @@ public enum ManifestRuntimeMapper {
         networkDefinitions: [String: HostwrightNetworkDefinition],
         policy: PlanningPolicy,
         bindMountBaseDirectory: String?,
+        unixSocketRootDirectory: String?,
         namedVolumeSources: [String: String],
         issues: inout [PlanIssue]
     ) -> DesiredRuntimeService {
@@ -92,6 +98,15 @@ public enum ManifestRuntimeMapper {
         )
         let ports = service.publishedPorts.flatMap {
             map($0, identity: identity, issues: &issues)
+        }
+        let publishedSockets = service.publishedSockets.compactMap {
+            map(
+                $0,
+                identity: identity,
+                projectResourceUUID: projectResourceUUID,
+                rootDirectory: unixSocketRootDirectory,
+                issues: &issues
+            )
         }
         let networks = service.networks.compactMap { attachment in
             map(
@@ -194,6 +209,7 @@ public enum ManifestRuntimeMapper {
             environment: (literalEnvironment + secretEnvironment).sorted { $0.name < $1.name },
             labels: labels,
             ports: ports,
+            publishedSockets: publishedSockets,
             networks: networks,
             mounts: mounts,
             healthCheck: mapHealthCheck(service),
@@ -430,6 +446,83 @@ public enum ManifestRuntimeMapper {
             message: "Published port '\(key)' cannot be mapped to a supported runtime port.",
             stableDetailKey: key
         )
+    }
+
+    private static func map(
+        _ socket: HostwrightPublishedSocket,
+        identity: RuntimeServiceIdentity,
+        projectResourceUUID: String,
+        rootDirectory: String?,
+        issues: inout [PlanIssue]
+    ) -> RuntimeUnixSocketPublication? {
+        guard let rootDirectory else {
+            issues.append(
+                PlanIssue(
+                    kind: .unsupportedFeature,
+                    severity: .blocker,
+                    identity: identity,
+                    message:
+                        "Unix socket publication requires a valid private Hostwright Application Support socket root.",
+                    stableDetailKey: socket.containerPath
+                )
+            )
+            return nil
+        }
+        let defaultName = HostwrightResourceUUID.legacy(
+            kind: "published-socket",
+            identifier: [
+                projectResourceUUID,
+                identity.displayName,
+                socket.containerPath
+            ].joined(separator: "|")
+        ).replacingOccurrences(of: "-", with: "") + ".sock"
+        let fileName = socket.hostName ?? defaultName
+        do {
+            let normalizedRoot = try HostwrightLocalPathResolver
+                .normalizedAbsolutePath(
+                    rootDirectory,
+                    role: "published socket root"
+                )
+            let hostPath = try HostwrightLocalPathResolver
+                .normalizedAbsolutePath(
+                    URL(
+                        fileURLWithPath: normalizedRoot,
+                        isDirectory: true
+                    ).appendingPathComponent(fileName).path,
+                    role: "published socket host path"
+            )
+            guard hostPath.hasPrefix(normalizedRoot + "/"),
+                  !hostPath.contains(":"),
+                  hostPath.utf8.count <= 103 else {
+                throw HostwrightLocalPathError.invalidPath(
+                    role: "published socket host path",
+                    path: hostPath,
+                    reason:
+                        "the path must remain inside Hostwright's private socket root and fit the macOS Unix-domain socket limit"
+                )
+            }
+            let mode: RuntimeUnixSocketMode =
+                socket.mode == .ownerAndGroup
+                ? .ownerAndGroup
+                : .ownerOnly
+            return RuntimeUnixSocketPublication(
+                hostPath: hostPath,
+                containerPath: socket.containerPath,
+                mode: mode
+            )
+        } catch {
+            issues.append(
+                PlanIssue(
+                    kind: .unsupportedFeature,
+                    severity: .blocker,
+                    identity: identity,
+                    message:
+                        "Unix socket publication path '\(fileName)' is unsafe or exceeds the platform path limit.",
+                    stableDetailKey: fileName
+                )
+            )
+            return nil
+        }
     }
 
     private static func appendUnsupportedLegacyPortIssues(

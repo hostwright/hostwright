@@ -384,7 +384,10 @@ public struct AppleContainerReadOnlyAdapter: RuntimeAdapter {
             guard hint.identityVersion == RuntimeManagedResourceIdentity.currentVersion,
                   let expectedOwnership = hint.ownership,
                   let observedOwnership = container.ownership,
-                  expectedOwnership == observedOwnership,
+                  stableOwnershipMatches(
+                      expected: expectedOwnership,
+                      observed: observedOwnership
+                  ),
                   expectedOwnership.providerID == .appleContainerCLI,
                   RuntimeManagedResourceIdentity.identity(from: labels) == hint.identity,
                   RuntimeManagedResourceIdentity.labelsMatch(
@@ -404,6 +407,7 @@ public struct AppleContainerReadOnlyAdapter: RuntimeAdapter {
                     lifecycleState: lifecycleState(container.lifecycle),
                     healthState: healthState(container.health),
                     ports: container.ports.map(runtimePort),
+                    publishedSockets: container.publishedSockets,
                     networks: container.networks.map {
                         runtimeNetwork($0, inventory: networksByID[$0.networkID])
                     },
@@ -416,6 +420,18 @@ public struct AppleContainerReadOnlyAdapter: RuntimeAdapter {
             ($0.identity.displayName, $0.resourceIdentifier) <
                 ($1.identity.displayName, $1.resourceIdentifier)
         }
+    }
+
+    private func stableOwnershipMatches(
+        expected: RuntimeInventoryOwnershipEvidence,
+        observed: RuntimeInventoryOwnershipEvidence
+    ) -> Bool {
+        expected.resourceUUID == observed.resourceUUID &&
+            expected.projectUUID == observed.projectUUID &&
+            expected.resourceGeneration == observed.resourceGeneration &&
+            expected.projectGeneration == observed.projectGeneration &&
+            expected.providerID == observed.providerID &&
+            expected.providerGeneration == observed.providerGeneration
     }
 
     private func lifecycleState(

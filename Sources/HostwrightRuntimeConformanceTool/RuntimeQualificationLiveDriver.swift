@@ -777,6 +777,7 @@ actor RuntimeQualificationLiveDriver: RuntimeProviderLiveQualificationDriver {
                     ownership: container.ownership,
                     initConfiguration: container.initConfiguration,
                     ports: container.ports,
+                    publishedSockets: container.publishedSockets,
                     mounts: container.mounts,
                     networks: container.networks,
                     allocation: container.allocation,

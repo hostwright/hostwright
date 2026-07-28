@@ -1019,6 +1019,11 @@ public struct MultiServiceReconciliationPlanner: Sendable {
                 drifted.insert(service.identity.displayName)
                 continue
             }
+            if Set(current.publishedSockets.map(stableSocketKey)) !=
+                Set(service.publishedSockets.map(stableSocketKey)) {
+                drifted.insert(service.identity.displayName)
+                continue
+            }
             if Set(current.mounts.map(stableMountKey)) !=
                 Set(service.mounts.map(stableMountKey)) {
                 drifted.insert(service.identity.displayName)
@@ -1038,6 +1043,16 @@ public struct MultiServiceReconciliationPlanner: Sendable {
             port.hostPort.map(String.init) ?? "",
             String(port.containerPort),
             port.protocolName.rawValue
+        ].joined(separator: ":")
+    }
+
+    private static func stableSocketKey(
+        _ socket: RuntimeUnixSocketPublication
+    ) -> String {
+        [
+            socket.hostPath,
+            socket.containerPath,
+            socket.mode.rawValue
         ].joined(separator: ":")
     }
 

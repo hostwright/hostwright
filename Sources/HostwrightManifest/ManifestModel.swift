@@ -605,6 +605,27 @@ extension HostwrightPublishedPort: Equatable {
     }
 }
 
+public enum HostwrightPublishedSocketMode: String, Equatable, Sendable {
+    case ownerOnly = "0600"
+    case ownerAndGroup = "0660"
+}
+
+public struct HostwrightPublishedSocket: Equatable, Sendable {
+    public let hostName: String?
+    public let containerPath: String
+    public let mode: HostwrightPublishedSocketMode
+
+    public init(
+        hostName: String? = nil,
+        containerPath: String,
+        mode: HostwrightPublishedSocketMode = .ownerOnly
+    ) {
+        self.hostName = hostName
+        self.containerPath = containerPath
+        self.mode = mode
+    }
+}
+
 public struct HostwrightService: Equatable, Sendable {
     public var name: String
     public var image: String?
@@ -623,6 +644,7 @@ public struct HostwrightService: Equatable, Sendable {
     public var labels: [String: String]
     public var ports: [String]
     public var publishedPorts: [HostwrightPublishedPort]
+    public var publishedSockets: [HostwrightPublishedSocket]
     public var networks: [HostwrightServiceNetworkAttachment]
     public var volumes: [String]
     public var mounts: [HostwrightMountSpec]
@@ -654,6 +676,7 @@ public struct HostwrightService: Equatable, Sendable {
         labels: [String: String] = [:],
         ports: [String] = [],
         publishedPorts: [HostwrightPublishedPort] = [],
+        publishedSockets: [HostwrightPublishedSocket] = [],
         volumes: [String] = [],
         mounts: [HostwrightMountSpec] = [],
         probes: HostwrightProbes = HostwrightProbes(),
@@ -684,6 +707,7 @@ public struct HostwrightService: Equatable, Sendable {
             labels: labels,
             ports: ports,
             publishedPorts: publishedPorts,
+            publishedSockets: publishedSockets,
             networks: [],
             volumes: volumes,
             mounts: mounts,
@@ -717,6 +741,7 @@ public struct HostwrightService: Equatable, Sendable {
         labels: [String: String] = [:],
         ports: [String] = [],
         publishedPorts: [HostwrightPublishedPort] = [],
+        publishedSockets: [HostwrightPublishedSocket] = [],
         networks: [HostwrightServiceNetworkAttachment],
         volumes: [String] = [],
         mounts: [HostwrightMountSpec] = [],
@@ -747,6 +772,7 @@ public struct HostwrightService: Equatable, Sendable {
         self.labels = labels
         let normalizedPublishedPorts = publishedPorts.isEmpty ? ports.compactMap(HostwrightPublishedPort.legacy) : publishedPorts
         self.publishedPorts = normalizedPublishedPorts
+        self.publishedSockets = publishedSockets
         self.ports = ports.isEmpty ? normalizedPublishedPorts.compactMap(\.canonicalLegacyLiteral) : ports
         self.networks = networks
         self.volumes = volumes

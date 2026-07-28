@@ -44,6 +44,10 @@ public enum ManifestValidator {
             }
         }
         validatePublishedPortCollisions(manifest.services, issues: &issues)
+        validatePublishedSocketCollisions(
+            manifest.services,
+            issues: &issues
+        )
         return issues
     }
 
@@ -121,6 +125,37 @@ public enum ManifestValidator {
         }
         if Set(service.publishedPorts.map(stablePublishedPortKey)).count != service.publishedPorts.count {
             issues.append(issue(service, "ports must not contain duplicates."))
+        }
+        for socket in service.publishedSockets {
+            validatePublishedSocket(
+                socket,
+                serviceName: service.name,
+                issues: &issues
+            )
+        }
+        if Set(service.publishedSockets.map(stablePublishedSocketKey)).count !=
+            service.publishedSockets.count {
+            issues.append(
+                issue(service, "Unix socket publications must not contain duplicates.")
+            )
+        }
+        if Set(service.publishedSockets.map(publishedSocketHostKey)).count !=
+            service.publishedSockets.count {
+            issues.append(
+                issue(
+                    service,
+                    "Unix socket publications must not resolve to the same host path."
+                )
+            )
+        }
+        if Set(service.publishedSockets.map(\.containerPath)).count !=
+            service.publishedSockets.count {
+            issues.append(
+                issue(
+                    service,
+                    "Unix socket publications must not share a container target."
+                )
+            )
         }
         validateServiceNetworks(
             service.networks,
@@ -1140,6 +1175,77 @@ public enum ManifestValidator {
         }
     }
 
+    private static func validatePublishedSocket(
+        _ socket: HostwrightPublishedSocket,
+        serviceName: String,
+        issues: inout [ManifestIssue]
+    ) {
+        if !isNormalizedAbsoluteContainerPath(socket.containerPath) ||
+            socket.containerPath.contains(":") ||
+            socket.containerPath.utf8.count > 107 {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message:
+                        "Service '\(serviceName)' Unix socket target must be a normalized absolute container path of at most 107 UTF-8 bytes without ':'."
+                )
+            )
+        }
+        guard let hostName = socket.hostName else {
+            return
+        }
+        let allowed = hostName.unicodeScalars.allSatisfy {
+            CharacterSet(
+                charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-"
+            ).contains($0)
+        }
+        if hostName.isEmpty ||
+            hostName == "." ||
+            hostName == ".." ||
+            hostName.utf8.count > Int(NAME_MAX) ||
+            !allowed {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message:
+                        "Service '\(serviceName)' Unix socket host name must be one safe filename using letters, digits, '.', '_', or '-'."
+                )
+            )
+        }
+    }
+
+    private static func validatePublishedSocketCollisions(
+        _ services: [HostwrightService],
+        issues: inout [ManifestIssue]
+    ) {
+        var ownersByHostName: [String: Set<String>] = [:]
+        for service in services.sorted(by: { $0.name < $1.name }) {
+            let hostNames = service.publishedSockets.compactMap(\.hostName)
+            if service.replicas > 1, let hostName = hostNames.sorted().first {
+                issues.append(
+                    issue(
+                        service,
+                        "replicas cannot share fixed Unix socket host name '\(hostName)'."
+                    )
+                )
+            }
+            for hostName in hostNames {
+                ownersByHostName[hostName, default: []].insert(service.name)
+            }
+        }
+        for hostName in ownersByHostName.keys.sorted() {
+            let owners = ownersByHostName[hostName, default: []].sorted()
+            guard owners.count > 1 else { continue }
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message:
+                        "Unix socket host name '\(hostName)' is published by multiple services: \(owners.joined(separator: ", "))."
+                )
+            )
+        }
+    }
+
     private static func stablePublishedPortKey(_ port: HostwrightPublishedPort) -> String {
         [
             port.effectiveBindAddress,
@@ -1147,6 +1253,22 @@ public enum ManifestValidator {
             port.host?.canonicalString ?? "dynamic",
             port.target.canonicalString
         ].joined(separator: "|")
+    }
+
+    private static func stablePublishedSocketKey(
+        _ socket: HostwrightPublishedSocket
+    ) -> String {
+        [
+            socket.hostName ?? "automatic",
+            socket.containerPath,
+            socket.mode.rawValue
+        ].joined(separator: "|")
+    }
+
+    private static func publishedSocketHostKey(
+        _ socket: HostwrightPublishedSocket
+    ) -> String {
+        socket.hostName ?? "automatic:\(socket.containerPath)"
     }
 
     private static func expandedPublishedEndpoints(_ ports: [HostwrightPublishedPort]) -> [(key: String, summary: String)] {

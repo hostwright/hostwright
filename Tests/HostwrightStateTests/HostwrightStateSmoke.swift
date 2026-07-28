@@ -228,6 +228,85 @@ final class HostwrightStateTests: XCTestCase {
         }
     }
 
+    func testPublishedUnixSocketsPersistInDesiredAndObservedState()
+        throws {
+        try withTemporaryStore { store, _ in
+            try store.migrate()
+            let socketManifest = HostwrightManifest(
+                project: "api-local",
+                services: [
+                    HostwrightService(
+                        name: "api",
+                        image: "local/api:latest",
+                        publishedSockets: [
+                            HostwrightPublishedSocket(
+                                hostName: "api.sock",
+                                containerPath: "/run/api.sock",
+                                mode: .ownerAndGroup
+                            )
+                        ]
+                    )
+                ]
+            )
+            try store.desiredStates.saveManifestSnapshot(
+                projectID: projectID,
+                manifestPath: "/tmp/hostwright.yaml",
+                manifestHash: "socket-manifest-hash",
+                desiredGeneration: 1,
+                manifest: socketManifest,
+                timestamp: timestamp
+            )
+            let desired = try store.desiredStates
+                .loadDesiredServices(projectID: projectID)
+            XCTAssertEqual(
+                desired.first?.portsJSON,
+                #"[{"host":"api.sock","mode":"0660","protocol":"unix","target":"\/run\/api.sock"}]"#
+            )
+
+            let identity = RuntimeServiceIdentity(
+                projectName: "api-local",
+                serviceName: "api"
+            )
+            try store.observedStates.saveSnapshot(
+                snapshotID: snapshotID,
+                projectID: projectID,
+                observedState: ObservedRuntimeState(
+                    projectName: "api-local",
+                    services: [
+                        ObservedRuntimeService(
+                            identity: identity,
+                            resourceIdentifier:
+                                identity.managedResourceIdentifier,
+                            image: "local/api:latest",
+                            lifecycleState: .running,
+                            healthState: .unknown,
+                            publishedSockets: [
+                                RuntimeUnixSocketPublication(
+                                    hostPath:
+                                        "/tmp/hostwright/api.sock",
+                                    containerPath: "/run/api.sock",
+                                    mode: .ownerAndGroup
+                                )
+                            ]
+                        )
+                    ]
+                ),
+                runtimeAdapter: "apple-container-cli",
+                parserVersion:
+                    AppleContainerObservationParser.supportedSchema,
+                rawOutputHash: "socket-output-hash",
+                redactedSummary: "socket observation",
+                observedAt: timestamp
+            )
+            let observed = try store.observedStates
+                .loadObservedServices(snapshotID: snapshotID)
+            XCTAssertEqual(
+                observed.first?.portsJSON,
+                #"[{"containerPath":"\/run\/api.sock","hostPath":"\/tmp\/hostwright\/api.sock","mode":"0660","protocol":"unix"}]"#
+            )
+        }
+    }
+
     func testObservedSnapshotsPersistReloadAndRedactSummary() throws {
         try withTemporaryStore { store, _ in
             try saveDesiredState(in: store)

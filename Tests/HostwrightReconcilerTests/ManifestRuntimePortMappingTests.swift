@@ -205,4 +205,85 @@ final class ManifestRuntimePortMappingTests: XCTestCase {
                 $0.message == "Port 'not-a-port' cannot be mapped to a supported runtime port."
         })
     }
+
+    func testMapsUnixSocketsIntoPrivateDeterministicRuntimePaths() throws {
+        let service = HostwrightService(
+            name: "api",
+            image: "example.invalid/api:local",
+            publishedSockets: [
+                HostwrightPublishedSocket(
+                    containerPath: "/run/api.sock"
+                ),
+                HostwrightPublishedSocket(
+                    hostName: "shared.sock",
+                    containerPath: "/run/shared.sock",
+                    mode: .ownerAndGroup
+                )
+            ]
+        )
+        let root = "/tmp/hostwright-gate06-sockets"
+        let first = ManifestRuntimeMapper.map(
+            HostwrightManifest(
+                version: 2,
+                project: "demo",
+                services: [service]
+            ),
+            projectResourceUUID:
+                "11111111-1111-4111-8111-111111111111",
+            unixSocketRootDirectory: root
+        )
+        let second = ManifestRuntimeMapper.map(
+            HostwrightManifest(
+                version: 2,
+                project: "demo",
+                services: [service]
+            ),
+            projectResourceUUID:
+                "11111111-1111-4111-8111-111111111111",
+            unixSocketRootDirectory: root
+        )
+
+        XCTAssertTrue(first.issues.isEmpty)
+        XCTAssertEqual(first, second)
+        let sockets = try XCTUnwrap(
+            first.desiredState.services.first
+        ).publishedSockets
+        XCTAssertEqual(sockets.count, 2)
+        XCTAssertEqual(sockets[1].hostPath, "\(root)/shared.sock")
+        XCTAssertEqual(sockets[1].containerPath, "/run/shared.sock")
+        XCTAssertEqual(sockets[1].mode, .ownerAndGroup)
+        XCTAssertTrue(sockets[0].hostPath.hasPrefix(root + "/"))
+        XCTAssertTrue(sockets[0].hostPath.hasSuffix(".sock"))
+    }
+
+    func testBlocksUnixSocketPathThatExceedsDarwinLimit() {
+        let service = HostwrightService(
+            name: "api",
+            image: "example.invalid/api:local",
+            publishedSockets: [
+                HostwrightPublishedSocket(
+                    hostName: "api.sock",
+                    containerPath: "/run/api.sock"
+                )
+            ]
+        )
+        let mapping = ManifestRuntimeMapper.map(
+            HostwrightManifest(
+                version: 2,
+                project: "demo",
+                services: [service]
+            ),
+            unixSocketRootDirectory:
+                "/tmp/\(String(repeating: "a", count: 96))"
+        )
+
+        XCTAssertTrue(mapping.issues.contains {
+            $0.kind == .unsupportedFeature &&
+                $0.severity == .blocker &&
+                $0.message.contains("exceeds the platform path limit")
+        })
+        XCTAssertTrue(
+            mapping.desiredState.services[0].publishedSockets.isEmpty
+        )
+    }
 }

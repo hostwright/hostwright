@@ -1,4 +1,5 @@
 import XCTest
+@testable import HostwrightCore
 @testable import HostwrightRuntime
 
 final class RuntimeCommandPolicyDNSTests: XCTestCase {
@@ -131,6 +132,76 @@ final class RuntimeCommandPolicyDNSTests: XCTestCase {
             try RuntimeCommandPolicy
                 .validateCreateMissingServiceMutation(spec)
         )
+    }
+
+    func testPolicyAcceptsSortedPrivateUnixSocketArguments() throws {
+        let root = try HostwrightLocalPathResolver.resolve()
+            .layout.publishedSocketDirectory
+        let service = DesiredRuntimeService(
+            identity: identity,
+            image: "ghcr.io/example/api:1.1.0",
+            publishedSockets: [
+                RuntimeUnixSocketPublication(
+                    hostPath: "\(root)/api.sock",
+                    containerPath: "/run/api.sock",
+                    mode: .ownerAndGroup
+                )
+            ]
+        )
+        let spec = try AppleContainerCommand.spec(
+            kind: .createContainer,
+            executable: executable,
+            desiredService: service,
+            mutationContext: context
+        )
+
+        XCTAssertNoThrow(
+            try RuntimeCommandPolicy
+                .validateCreateMissingServiceMutation(spec)
+        )
+        let index = try XCTUnwrap(
+            spec.arguments.firstIndex(of: "--publish-socket")
+        )
+        XCTAssertEqual(
+            spec.arguments[index + 1],
+            "\(root)/api.sock:/run/api.sock"
+        )
+    }
+
+    func testPolicyRejectsUnixSocketOutsidePrivateRoot() throws {
+        let root = try HostwrightLocalPathResolver.resolve()
+            .layout.publishedSocketDirectory
+        for publication in [
+            RuntimeUnixSocketPublication(
+                hostPath: "/tmp/unmanaged.sock",
+                containerPath: "/run/api.sock"
+            ),
+            RuntimeUnixSocketPublication(
+                hostPath: "\(root)/../escaped.sock",
+                containerPath: "/run/api.sock"
+            ),
+            RuntimeUnixSocketPublication(
+                hostPath: "\(root)/api.sock",
+                containerPath: "/run/../escaped.sock"
+            )
+        ] {
+            let service = DesiredRuntimeService(
+                identity: identity,
+                image: "ghcr.io/example/api:1.1.0",
+                publishedSockets: [publication]
+            )
+            let spec = try AppleContainerCommand.spec(
+                kind: .createContainer,
+                executable: executable,
+                desiredService: service,
+                mutationContext: context
+            )
+
+            XCTAssertThrowsError(
+                try RuntimeCommandPolicy
+                    .validateCreateMissingServiceMutation(spec)
+            )
+        }
     }
 
     private var zone: String {

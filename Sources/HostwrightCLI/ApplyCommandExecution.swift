@@ -71,6 +71,7 @@ extension ApplyCommandRunner {
             environment: resolvedEnvironment,
             labels: service.labels,
             ports: service.ports,
+            publishedSockets: service.publishedSockets,
             mounts: service.mounts,
             healthCheck: service.healthCheck,
             probes: service.probes,

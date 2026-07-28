@@ -301,20 +301,70 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
         )
         try RuntimeCommandPolicy.validateCreateMissingServiceMutation(createSpec)
         try revalidateBindMountLeases(bindMountLeases)
-        let result = try await runRedacted(createSpec)
-        try codec.discardMutationOutput(result.standardOutput)
-        let resourceIdentifier = AppleContainerCommand.containerName(for: desiredService.identity)
-        let observedService = try await verifyMutation(
-            action,
-            expected: .present,
-            context: context,
-            codec: codec,
-            executable: executable
-        )
-        try revalidateBindMountLeases(bindMountLeases)
-        try verifyBindMountPostcondition(
-            desired: desiredService.mounts,
-            observed: observedService?.mounts ?? []
+        if !desiredService.publishedSockets.isEmpty {
+            guard try await exactOwnedService(
+                action,
+                context: context
+            ) == nil else {
+                throw RuntimeAdapterError.commandRejected(
+                    classification: .mutating,
+                    message:
+                        "Unix socket create requires structured proof that the exact managed container is absent."
+                )
+            }
+        }
+        let socketLeases = try RuntimeUnixSocketPublicationSecurity
+            .prepareForCreate(
+                desiredService.publishedSockets,
+                context: context,
+                resourceIdentifier: action.resourceIdentifier
+            )
+        let observedService: ObservedRuntimeService?
+        do {
+            let result = try await runRedacted(createSpec)
+            try codec.discardMutationOutput(result.standardOutput)
+            observedService = try await verifyMutation(
+                action,
+                expected: .present,
+                context: context,
+                codec: codec,
+                executable: executable
+            )
+            try revalidateBindMountLeases(bindMountLeases)
+            try verifyBindMountPostcondition(
+                desired: desiredService.mounts,
+                observed: observedService?.mounts ?? []
+            )
+            try RuntimeUnixSocketPublicationSecurity.verifyCreated(
+                socketLeases,
+                requireSocket: false
+            )
+            try verifyUnixSocketPostcondition(
+                desired: desiredService.publishedSockets,
+                observed: observedService?.publishedSockets ?? []
+            )
+        } catch let operationError {
+            guard !socketLeases.isEmpty else {
+                throw operationError
+            }
+            let createIsProvenAbsent: Bool
+            do {
+                createIsProvenAbsent = try await exactOwnedService(
+                    action,
+                    context: context
+                ) == nil
+            } catch {
+                createIsProvenAbsent = false
+            }
+            if createIsProvenAbsent {
+                try RuntimeUnixSocketPublicationSecurity.cleanupNoEffect(
+                    socketLeases
+                )
+            }
+            throw operationError
+        }
+        let resourceIdentifier = AppleContainerCommand.containerName(
+            for: desiredService.identity
         )
 
         return RuntimeEvent(
@@ -448,15 +498,45 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
             executable: executable
         )
         try RuntimeCommandPolicy.validateStartManagedServiceMutation(spec)
+        let publishedSockets =
+            action.desiredService?.publishedSockets ?? []
+        if !publishedSockets.isEmpty {
+            guard let service = try await exactOwnedService(
+                action,
+                context: context
+            ), [.created, .stopped, .exited].contains(
+                service.lifecycleState
+            ) else {
+                throw RuntimeAdapterError.commandRejected(
+                    classification: .mutating,
+                    message:
+                        "Unix socket activation requires structured proof that the exact managed container is stopped."
+                )
+            }
+            try RuntimeUnixSocketPublicationSecurity
+                .prepareForActivation(
+                    publishedSockets,
+                    context: context,
+                    resourceIdentifier: containerID
+                )
+        }
         let result = try await runRedacted(spec)
         try codec.discardMutationOutput(result.standardOutput)
-        try await verifyMutation(
+        let observedService = try await verifyMutation(
             action,
             expected: action.requiresProcessCompletion ? .exited : .running,
             context: context,
             codec: codec,
             executable: executable
         )
+        if let observedService {
+            try RuntimeUnixSocketPublicationSecurity.verifyExisting(
+                action.desiredService?.publishedSockets ??
+                    observedService.publishedSockets,
+                context: context,
+                resourceIdentifier: containerID
+            )
+        }
         return RuntimeEvent(
             identity: action.identity,
             severity: .info,
@@ -525,15 +605,29 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
         let startResult: RuntimeCommandResult
         do {
             try RuntimeCommandPolicy.validateRestartManagedServiceMutation(startSpec)
+            try RuntimeUnixSocketPublicationSecurity
+                .prepareForActivation(
+                    action.desiredService?.publishedSockets ?? [],
+                    context: context,
+                    resourceIdentifier: containerID
+                )
             startResult = try await runRedacted(startSpec)
             try codec.discardMutationOutput(startResult.standardOutput)
-            try await verifyMutation(
+            let observedService = try await verifyMutation(
                 action,
                 expected: .running,
                 context: context,
                 codec: codec,
                 executable: executable
             )
+            if let observedService {
+                try RuntimeUnixSocketPublicationSecurity.verifyExisting(
+                    action.desiredService?.publishedSockets ??
+                        observedService.publishedSockets,
+                    context: context,
+                    resourceIdentifier: containerID
+                )
+            }
         } catch {
             if stoppedByRestart {
                 throw managedRestartStartFailedAfterStop(error)
@@ -610,6 +704,19 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
         }
     }
 
+    private func verifyUnixSocketPostcondition(
+        desired: [RuntimeUnixSocketPublication],
+        observed: [RuntimeUnixSocketPublication]
+    ) throws {
+        let desiredSet = Set(desired)
+        let observedSet = Set(observed)
+        guard desiredSet == observedSet else {
+            throw RuntimeAdapterError.outputParseFailed(
+                "Structured post-create observation did not preserve the exact guarded Unix socket host path, container path, and mode."
+            )
+        }
+    }
+
     private func stableMountOrdering(
         _ lhs: RuntimeMountReference,
         _ rhs: RuntimeMountReference
@@ -638,6 +745,21 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
         guard RuntimeManagedResourceIdentity.isSupportedIdentifier(containerID) else {
             throw RuntimeAdapterError.mutationUnavailableByPolicy("Delete-managed-container requires an exact supported Hostwright resource identifier.")
         }
+        let ownedService = try await exactOwnedService(
+            action,
+            context: context
+        )
+        guard let ownedService else {
+            throw RuntimeAdapterError.outputParseFailed(
+                "Structured pre-delete observation did not find the exact owned resource."
+            )
+        }
+        let socketLeases = try RuntimeUnixSocketPublicationSecurity
+            .prepareForDelete(
+                ownedService.publishedSockets,
+                context: context,
+                resourceIdentifier: containerID
+            )
         let spec = AppleContainerCommand.spec(
             kind: .deleteContainer(containerID: containerID),
             codec: codec,
@@ -652,6 +774,9 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
             context: context,
             codec: codec,
             executable: executable
+        )
+        try RuntimeUnixSocketPublicationSecurity.finalizeDelete(
+            socketLeases
         )
         return RuntimeEvent(
             identity: action.identity,

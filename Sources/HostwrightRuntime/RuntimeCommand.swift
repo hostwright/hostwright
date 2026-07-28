@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import HostwrightCore
 
 public enum RuntimeCommandClassification: String, Equatable, Sendable {
     case readOnly
@@ -336,6 +337,51 @@ public enum RuntimeCommandPolicy {
                     classification: spec.classification,
                     message:
                         "Create-missing-service DNS options require an exact non-infrastructure project DNS binding."
+                )
+            }
+        }
+
+        let socketValues = values(
+            for: "--publish-socket",
+            in: spec.arguments,
+            before: imageIndex
+        )
+        if !socketValues.isEmpty {
+            let socketRoot = try? HostwrightLocalPathResolver.resolve()
+                .layout.publishedSocketDirectory
+            guard let socketRoot,
+                  socketValues == socketValues.sorted(),
+                  Set(socketValues).count == socketValues.count,
+                  socketValues.allSatisfy({ value in
+                      let fields = value.split(
+                          separator: ":",
+                          omittingEmptySubsequences: false
+                      )
+                      guard fields.count == 2 else { return false }
+                      let hostPath = String(fields[0])
+                      let containerPath = String(fields[1])
+                      return
+                          (try? HostwrightLocalPathResolver
+                              .normalizedAbsolutePath(
+                                  hostPath,
+                                  role:
+                                      "published socket host path"
+                              )) == hostPath &&
+                          (try? HostwrightLocalPathResolver
+                              .normalizedAbsolutePath(
+                                  containerPath,
+                                  role:
+                                      "published socket container path"
+                              )) == containerPath &&
+                          hostPath.hasPrefix(socketRoot + "/") &&
+                          hostPath.utf8.count <= 103 &&
+                          containerPath.hasPrefix("/") &&
+                          containerPath.utf8.count <= 107
+                  }) else {
+                throw RuntimeAdapterError.commandRejected(
+                    classification: spec.classification,
+                    message:
+                        "Create-missing-service Unix socket arguments require unique sorted Hostwright-private host paths and normalized container paths."
                 )
             }
         }
@@ -917,6 +963,7 @@ public enum RuntimeCommandPolicy {
         "--label",
         "--env",
         "--publish",
+        "--publish-socket",
         "--network",
         "--dns",
         "--dns-search",

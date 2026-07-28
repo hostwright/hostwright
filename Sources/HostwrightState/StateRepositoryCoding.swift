@@ -465,6 +465,17 @@ func portJSON(_ port: RuntimePortMapping) -> [String: Any] {
     ]
 }
 
+func socketJSON(
+    _ socket: RuntimeUnixSocketPublication
+) -> [String: Any] {
+    [
+        "containerPath": socket.containerPath,
+        "hostPath": socket.hostPath,
+        "mode": socket.mode.rawValue,
+        "protocol": "unix"
+    ]
+}
+
 func networkJSON(_ network: RuntimeNetworkAttachment) -> [String: Any] {
     [
         "name": network.name,

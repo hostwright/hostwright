@@ -3,6 +3,23 @@ import XCTest
 @testable import HostwrightRuntime
 
 final class RuntimeInventoryTests: XCTestCase {
+    func testContainerDecodesOlderInventoryWithoutPublishedSockets() throws {
+        let encoded = try JSONEncoder().encode(
+            makeContainer(runtimeID: "container-a", name: "api")
+        )
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        object.removeValue(forKey: "publishedSockets")
+
+        let decoded = try JSONDecoder().decode(
+            RuntimeInventoryContainer.self,
+            from: JSONSerialization.data(withJSONObject: object)
+        )
+
+        XCTAssertEqual(decoded.publishedSockets, [])
+    }
+
     func testCompleteInventoryIsTypedSortedAndSemanticallyRepeatable() throws {
         let containerB = makeContainer(
             runtimeID: "container-b",

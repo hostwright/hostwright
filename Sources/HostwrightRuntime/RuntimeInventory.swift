@@ -321,11 +321,31 @@ public struct RuntimeInventoryContainer: Codable, Equatable, Hashable, Sendable 
     public let ownership: RuntimeInventoryOwnershipEvidence?
     public let initConfiguration: RuntimeInventoryInitConfiguration
     public let ports: [RuntimeInventoryPort]
+    public let publishedSockets: [RuntimeUnixSocketPublication]
     public let mounts: [RuntimeInventoryMount]
     public let networks: [RuntimeInventoryNetworkAttachment]
     public let allocation: RuntimeInventoryAllocation?
     public let usage: RuntimeInventoryUsage?
     public let services: [RuntimeInventoryService]
+
+    private enum CodingKeys: String, CodingKey {
+        case runtimeID
+        case name
+        case imageID
+        case imageReference
+        case lifecycle
+        case health
+        case labels
+        case ownership
+        case initConfiguration
+        case ports
+        case publishedSockets
+        case mounts
+        case networks
+        case allocation
+        case usage
+        case services
+    }
 
     public init(
         runtimeID: String,
@@ -338,6 +358,7 @@ public struct RuntimeInventoryContainer: Codable, Equatable, Hashable, Sendable 
         ownership: RuntimeInventoryOwnershipEvidence? = nil,
         initConfiguration: RuntimeInventoryInitConfiguration,
         ports: [RuntimeInventoryPort],
+        publishedSockets: [RuntimeUnixSocketPublication] = [],
         mounts: [RuntimeInventoryMount],
         networks: [RuntimeInventoryNetworkAttachment],
         allocation: RuntimeInventoryAllocation? = nil,
@@ -354,11 +375,41 @@ public struct RuntimeInventoryContainer: Codable, Equatable, Hashable, Sendable 
         self.ownership = ownership
         self.initConfiguration = initConfiguration
         self.ports = ports
+        self.publishedSockets = publishedSockets
         self.mounts = mounts
         self.networks = networks
         self.allocation = allocation
         self.usage = usage
         self.services = services
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        runtimeID = try values.decode(String.self, forKey: .runtimeID)
+        name = try values.decode(String.self, forKey: .name)
+        imageID = try values.decodeIfPresent(String.self, forKey: .imageID)
+        imageReference = try values.decode(String.self, forKey: .imageReference)
+        lifecycle = try values.decode(RuntimeInventoryLifecycleState.self, forKey: .lifecycle)
+        health = try values.decode(RuntimeInventoryHealth.self, forKey: .health)
+        labels = try values.decode([RuntimeInventoryLabel].self, forKey: .labels)
+        ownership = try values.decodeIfPresent(
+            RuntimeInventoryOwnershipEvidence.self,
+            forKey: .ownership
+        )
+        initConfiguration = try values.decode(
+            RuntimeInventoryInitConfiguration.self,
+            forKey: .initConfiguration
+        )
+        ports = try values.decode([RuntimeInventoryPort].self, forKey: .ports)
+        publishedSockets = try values.decodeIfPresent(
+            [RuntimeUnixSocketPublication].self,
+            forKey: .publishedSockets
+        ) ?? []
+        mounts = try values.decode([RuntimeInventoryMount].self, forKey: .mounts)
+        networks = try values.decode([RuntimeInventoryNetworkAttachment].self, forKey: .networks)
+        allocation = try values.decodeIfPresent(RuntimeInventoryAllocation.self, forKey: .allocation)
+        usage = try values.decodeIfPresent(RuntimeInventoryUsage.self, forKey: .usage)
+        services = try values.decode([RuntimeInventoryService].self, forKey: .services)
     }
 }
 
@@ -563,6 +614,7 @@ public enum RuntimeInventoryBuilder {
             ownership: container.ownership,
             initConfiguration: container.initConfiguration,
             ports: container.ports,
+            publishedSockets: container.publishedSockets,
             mounts: container.mounts,
             networks: container.networks,
             allocation: container.allocation,
@@ -649,6 +701,7 @@ public enum RuntimeInventoryBuilder {
     ) throws -> RuntimeInventoryContainer {
         guard container.labels.count <= RuntimeInventoryLimits.maximumLabelsPerResource,
               container.ports.count <= RuntimeInventoryLimits.maximumPortsPerContainer,
+              container.publishedSockets.count <= RuntimeInventoryLimits.maximumPortsPerContainer,
               container.mounts.count <= RuntimeInventoryLimits.maximumMountsPerContainer,
               container.networks.count <= RuntimeInventoryLimits.maximumNetworksPerContainer,
               container.services.count <= RuntimeInventoryLimits.maximumServicesPerRecord else {
@@ -663,6 +716,14 @@ public enum RuntimeInventoryBuilder {
         let ports = try container.ports.map { try normalize($0, redactionPolicy: redactionPolicy) }
             .sorted(by: portOrder)
         try requireUnique(ports)
+        let publishedSockets = try container.publishedSockets.map {
+            try normalize($0, redactionPolicy: redactionPolicy)
+        }.sorted {
+            ($0.hostPath, $0.containerPath, $0.mode.rawValue) <
+                ($1.hostPath, $1.containerPath, $1.mode.rawValue)
+        }
+        try requireUnique(publishedSockets.map(\.hostPath))
+        try requireUnique(publishedSockets.map(\.containerPath))
         let mounts = try container.mounts.map { try normalize($0, redactionPolicy: redactionPolicy) }
             .sorted { $0.target < $1.target }
         try requireUnique(mounts.map(\.target))
@@ -687,11 +748,37 @@ public enum RuntimeInventoryBuilder {
                 redactionPolicy: redactionPolicy
             ),
             ports: ports,
+            publishedSockets: publishedSockets,
             mounts: mounts,
             networks: attachments,
             allocation: allocation,
             usage: usage,
             services: try normalizeServices(container.services, redactionPolicy: redactionPolicy)
+        )
+    }
+
+    private static func normalize(
+        _ socket: RuntimeUnixSocketPublication,
+        redactionPolicy: RuntimeRedactionPolicy
+    ) throws -> RuntimeUnixSocketPublication {
+        let hostPath = try text(
+            socket.hostPath,
+            redactionPolicy: redactionPolicy
+        )
+        let containerPath = try text(
+            socket.containerPath,
+            redactionPolicy: redactionPolicy
+        )
+        guard hostPath.hasPrefix("/"),
+              containerPath.hasPrefix("/"),
+              !hostPath.contains("\0"),
+              !containerPath.contains("\0") else {
+            throw RuntimeInventoryError.malformedRecord
+        }
+        return RuntimeUnixSocketPublication(
+            hostPath: hostPath,
+            containerPath: containerPath,
+            mode: socket.mode
         )
     }
 

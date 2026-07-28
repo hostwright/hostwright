@@ -2875,9 +2875,7 @@ struct LifecycleLiveValidator: LifecycleSagaContextValidating {
                     $0.projectUUID == plan.projectResourceUUID &&
                     $0.projectGeneration == plan.projectGeneration &&
                     $0.providerID == plan.providerID &&
-                    $0.providerGeneration == plan.providerGeneration &&
-                    ($0.fencingToken == expectedFencingToken ||
-                        $0.fencingToken == binding?.currentFencingToken)
+                    $0.providerGeneration == plan.providerGeneration
             } == true
         return LifecycleSagaValidation(
             providerID: capability.descriptor.providerID,
@@ -5244,16 +5242,20 @@ struct LifecycleLiveEffects: LifecycleSagaEffects {
             )
         }
         let desiredService: DesiredRuntimeService?
-        if kind == .create, let service = await state.desiredService(for: node.key) {
-            desiredService = try resolveSecretReferences(
-                service,
-                workload: try lifecycleSecretWorkloadScope(
-                    projectResourceUUID: plan.projectResourceUUID,
-                    resourceUUID: node.resourceUUID,
-                    generation: node.resourceGeneration,
-                    serviceName: service.logicalServiceName
+        if let service = await state.desiredService(for: node.key) {
+            if kind == .create {
+                desiredService = try resolveSecretReferences(
+                    service,
+                    workload: try lifecycleSecretWorkloadScope(
+                        projectResourceUUID: plan.projectResourceUUID,
+                        resourceUUID: node.resourceUUID,
+                        generation: node.resourceGeneration,
+                        serviceName: service.logicalServiceName
+                    )
                 )
-            )
+            } else {
+                desiredService = service
+            }
         } else {
             desiredService = nil
         }
@@ -5301,9 +5303,7 @@ struct LifecycleLiveEffects: LifecycleSagaEffects {
             ownership.projectUUID == plan.projectResourceUUID &&
             ownership.projectGeneration == plan.projectGeneration &&
             ownership.providerID == plan.providerID &&
-            ownership.providerGeneration == plan.providerGeneration &&
-            (ownership.fencingToken == node.fencingToken ||
-                ownership.fencingToken == binding?.currentFencingToken)
+            ownership.providerGeneration == plan.providerGeneration
     }
 
     private func postconditionSatisfied(
@@ -7448,6 +7448,7 @@ private func lifecycleReplacingEnvironment(
         environment: environment,
         labels: service.labels,
         ports: service.ports,
+        publishedSockets: service.publishedSockets,
         mounts: service.mounts,
         healthCheck: service.healthCheck,
         probes: service.probes,

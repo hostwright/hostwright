@@ -209,6 +209,16 @@ public enum LifecycleRevisionCodec {
                 "protocol": $0.protocolName.rawValue
             ]
         }
+        let publishedSockets = service.publishedSockets.sorted {
+            ($0.hostPath, $0.containerPath, $0.mode.rawValue) <
+                ($1.hostPath, $1.containerPath, $1.mode.rawValue)
+        }.map {
+            [
+                "containerPath": $0.containerPath,
+                "hostPath": $0.hostPath,
+                "mode": $0.mode.rawValue
+            ]
+        }
         let mounts = service.mounts.sorted {
             ($0.target, $0.source, $0.access.rawValue) <
                 ($1.target, $1.source, $1.access.rawValue)
@@ -286,6 +296,7 @@ public enum LifecycleRevisionCodec {
                 "operatingSystem": service.platformOperatingSystem
             ],
             "ports": ports,
+            "publishedSockets": publishedSockets,
             "probes": probeObject,
             "readOnlyRootFilesystem": service.readOnlyRootFilesystem,
             "replicaIndex": service.replicaIndex,
@@ -453,6 +464,7 @@ public enum LifecycleRevisionCodec {
         let networks: [NetworkDocument]
         let platform: PlatformDocument
         let ports: [PortDocument]
+        let publishedSockets: [SocketDocument]
         let probes: ProbesDocument
         let readOnlyRootFilesystem: Bool
         let replicaIndex: Int
@@ -477,7 +489,7 @@ public enum LifecycleRevisionCodec {
                     "rosetta", "sharedMemoryBytes", "updatePolicy", "userID",
                     "virtualization", "workingDirectory"
                 ],
-                optional: ["imageLock"],
+                optional: ["imageLock", "publishedSockets"],
                 path: ""
             )
             command = try container.decode([String].self, forKey: "command")
@@ -520,6 +532,10 @@ public enum LifecycleRevisionCodec {
             )
             platform = try container.decode(PlatformDocument.self, forKey: "platform")
             ports = try container.decode([PortDocument].self, forKey: "ports")
+            publishedSockets = try container.decodeIfPresent(
+                [SocketDocument].self,
+                forKey: "publishedSockets"
+            ) ?? []
             probes = try container.decode(ProbesDocument.self, forKey: "probes")
             readOnlyRootFilesystem = try container.decode(
                 Bool.self,
@@ -584,6 +600,9 @@ public enum LifecycleRevisionCodec {
                 environment: try environment.map { try $0.value },
                 labels: labels,
                 ports: try ports.map { try $0.value },
+                publishedSockets: try publishedSockets.map {
+                    try $0.value
+                },
                 networks: try networks.map { try $0.value },
                 mounts: try mounts.map { try $0.value },
                 healthCheck: healthCheck?.value,
@@ -876,6 +895,49 @@ public enum LifecycleRevisionCodec {
                     protocolName: decoded,
                     bindAddress: bindAddress,
                     allocation: decodedAllocation
+                )
+            }
+        }
+    }
+
+    private struct SocketDocument: Decodable {
+        let containerPath: String
+        let hostPath: String
+        let mode: String
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(
+                keyedBy: RevisionCodingKey.self
+            )
+            try LifecycleRevisionCodec.validateKeys(
+                container,
+                required: ["containerPath", "hostPath", "mode"],
+                path: "publishedSockets"
+            )
+            containerPath = try container.decode(
+                String.self,
+                forKey: "containerPath"
+            )
+            hostPath = try container.decode(
+                String.self,
+                forKey: "hostPath"
+            )
+            mode = try container.decode(String.self, forKey: "mode")
+        }
+
+        var value: RuntimeUnixSocketPublication {
+            get throws {
+                guard let decoded = RuntimeUnixSocketMode(
+                    rawValue: mode
+                ) else {
+                    throw LifecycleRevisionCodec.invalidEnum(
+                        "publishedSockets.mode"
+                    )
+                }
+                return RuntimeUnixSocketPublication(
+                    hostPath: hostPath,
+                    containerPath: containerPath,
+                    mode: decoded
                 )
             }
         }

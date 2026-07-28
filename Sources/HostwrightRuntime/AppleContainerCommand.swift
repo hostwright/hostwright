@@ -274,6 +274,25 @@ public enum AppleContainerCommand {
                     publishSpec(for: port, hostPort: hostPort)
                 ]
             }
+            for socket in desiredService.publishedSockets.sorted(by: {
+                ($0.hostPath, $0.containerPath, $0.mode.rawValue) <
+                    ($1.hostPath, $1.containerPath, $1.mode.rawValue)
+            }) {
+                guard unixSocketGuestPathFits(
+                    resourceIdentifier: resourceIdentifier,
+                    containerPath: socket.containerPath
+                ) else {
+                    throw RuntimeAdapterError.commandRejected(
+                        classification: .mutating,
+                        message:
+                            "Apple container Unix socket publication exceeds the guest relay path limit after applying the runtime resource prefix."
+                    )
+                }
+                arguments += [
+                    "--publish-socket",
+                    "\(socket.hostPath):\(socket.containerPath)"
+                ]
+            }
             for network in desiredService.networks.sorted(by: {
                 $0.networkRuntimeIdentifier < $1.networkRuntimeIdentifier
             }) {
@@ -400,6 +419,15 @@ public enum AppleContainerCommand {
 
     public static func containerName(for identity: RuntimeServiceIdentity) -> String {
         identity.managedResourceIdentifier
+    }
+
+    static func unixSocketGuestPathFits(
+        resourceIdentifier: String,
+        containerPath: String
+    ) -> Bool {
+        let guestPath =
+            "/run/container/\(resourceIdentifier)/rootfs\(containerPath)"
+        return guestPath.utf8.count <= 107
     }
 
     private static func stablePortOrdering(_ lhs: RuntimePortMapping, _ rhs: RuntimePortMapping) -> Bool {

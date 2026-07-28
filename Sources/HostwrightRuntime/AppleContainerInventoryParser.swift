@@ -239,6 +239,9 @@ public enum AppleContainerInventoryParser {
             ),
             initConfiguration: try initConfiguration(payload.configuration.initProcess),
             ports: try ports(payload.configuration.publishedPorts),
+            publishedSockets: try sockets(
+                payload.configuration.publishedSockets ?? []
+            ),
             mounts: try mounts(payload.configuration.mounts),
             networks: try networkAttachments(
                 configured: payload.configuration.networks,
@@ -485,6 +488,29 @@ public enum AppleContainerInventoryParser {
         return result
     }
 
+    private static func sockets(
+        _ payloads: [SocketPayload]
+    ) throws -> [RuntimeUnixSocketPublication] {
+        try payloads.map { payload in
+            let mode: RuntimeUnixSocketMode
+            switch payload.permissions ?? 0o600 {
+            case 0o600:
+                mode = .ownerOnly
+            case 0o660:
+                mode = .ownerAndGroup
+            default:
+                throw RuntimeAdapterError.outputParseFailed(
+                    "Apple container inventory contained unsupported Unix socket permissions."
+                )
+            }
+            return RuntimeUnixSocketPublication(
+                hostPath: payload.hostPath,
+                containerPath: payload.containerPath,
+                mode: mode
+            )
+        }
+    }
+
     private static func mounts(_ payloads: [MountPayload]) throws -> [RuntimeInventoryMount] {
         try payloads.map { payload in
             let hasReadOnly = payload.options.contains("ro")
@@ -706,11 +732,18 @@ private struct ContainerConfigurationPayload: Decodable {
     let image: ImageDescriptionPayload
     let mounts: [MountPayload]
     let publishedPorts: [PortPayload]
+    let publishedSockets: [SocketPayload]?
     let labels: [String: String]
     let networks: [ConfiguredNetworkPayload]
     let initProcess: ProcessPayload
     let platform: PlatformPayload
     let resources: ResourcesPayload
+}
+
+private struct SocketPayload: Decodable {
+    let containerPath: String
+    let hostPath: String
+    let permissions: UInt16?
 }
 
 private struct ImageDescriptionPayload: Decodable {

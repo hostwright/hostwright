@@ -286,6 +286,128 @@ final class Phase07NetworkManifestTests: XCTestCase {
         )
     }
 
+    func testUnixSocketPublicationsRoundTripCanonically() throws {
+        let manifest = try ManifestValidator.validated(
+            """
+            version: 2
+            project: socket-demo
+            services:
+              api:
+                image: local/api:latest
+                ports:
+                  - target: /run/api.sock
+                    protocol: unix
+                  - host: shared-api.sock
+                    target: /run/shared.sock
+                    protocol: unix
+                    mode: "0660"
+            """
+        )
+
+        let sockets = try XCTUnwrap(
+            manifest.services.first
+        ).publishedSockets
+        XCTAssertEqual(
+            sockets,
+            [
+                HostwrightPublishedSocket(
+                    containerPath: "/run/api.sock"
+                ),
+                HostwrightPublishedSocket(
+                    hostName: "shared-api.sock",
+                    containerPath: "/run/shared.sock",
+                    mode: .ownerAndGroup
+                )
+            ]
+        )
+        let canonical = try ManifestCanonicalEncoder.encode(manifest)
+        XCTAssertTrue(canonical.contains(#"protocol: "unix""#))
+        XCTAssertTrue(canonical.contains(#"mode: "0600""#))
+        XCTAssertTrue(canonical.contains(#"mode: "0660""#))
+        XCTAssertEqual(
+            try ManifestValidator.validated(canonical),
+            manifest
+        )
+    }
+
+    func testUnixSocketPublicationRejectsUnsafeShapeBeforeMutation() {
+        assertFailure(
+            """
+            version: 2
+            project: socket-demo
+            services:
+              api:
+                image: local/api:latest
+                ports:
+                  - bind: 127.0.0.1
+                    target: /run/api.sock
+                    protocol: unix
+            """,
+            contains: "does not accept bind",
+            path: "$.services.api.ports[0].bind"
+        )
+        assertFailure(
+            """
+            version: 2
+            project: socket-demo
+            services:
+              api:
+                image: local/api:latest
+                ports:
+                  - target: /run/api.sock
+                    protocol: unix
+                    mode: "0777"
+            """,
+            contains: "mode must be one of",
+            path: "$.services.api.ports[0].mode"
+        )
+    }
+
+    func testUnixSocketPublicationRejectsUnsafePathsAndCollisions() throws {
+        let manifest = try ManifestParser.parse(
+            """
+            version: 2
+            project: socket-demo
+            services:
+              api:
+                image: local/api:latest
+                replicas: 2
+                ports:
+                  - host: shared.sock
+                    target: /run/api:unsafe.sock
+                    protocol: unix
+                  - host: shared.sock
+                    target: /run/second.sock
+                    protocol: unix
+              worker:
+                image: local/worker:latest
+                ports:
+                  - host: shared.sock
+                    target: /run/worker.sock
+                    protocol: unix
+                  - target: /run/worker.sock
+                    protocol: unix
+                    mode: "0660"
+            """
+        )
+        let messages = ManifestValidator.validate(manifest).map(\.message)
+        XCTAssertTrue(messages.contains {
+            $0.contains("without ':'")
+        })
+        XCTAssertTrue(messages.contains {
+            $0.contains("replicas cannot share fixed Unix socket")
+        })
+        XCTAssertTrue(messages.contains {
+            $0.contains("published by multiple services")
+        })
+        XCTAssertTrue(messages.contains {
+            $0.contains("same host path")
+        })
+        XCTAssertTrue(messages.contains {
+            $0.contains("share a container target")
+        })
+    }
+
     private func manifest(networks: String) -> String {
         """
         version: 2

@@ -67,6 +67,12 @@ public struct HostwrightLocalPathLayout: Codable, Equatable, Sendable {
             logDirectory
         ]
     }
+
+    public var publishedSocketDirectory: String {
+        URL(fileURLWithPath: runtimeDirectory, isDirectory: true)
+            .appendingPathComponent("s", isDirectory: true)
+            .path
+    }
 }
 
 public struct HostwrightLocalPathResolution: Codable, Equatable, Sendable {

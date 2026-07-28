@@ -1373,6 +1373,7 @@ private extension RuntimeProviderMigrationEngine {
                 ownership: $0.ownership,
                 initConfiguration: $0.initConfiguration,
                 ports: $0.ports,
+                publishedSockets: $0.publishedSockets,
                 mounts: $0.mounts,
                 networks: $0.networks,
                 allocation: $0.allocation,

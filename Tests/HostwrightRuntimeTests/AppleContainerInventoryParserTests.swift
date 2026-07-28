@@ -174,6 +174,79 @@ final class AppleContainerInventoryParserTests: XCTestCase {
         }
     }
 
+    func testObservesPublishedUnixSocketsAndRejectsUnsupportedMode()
+        throws {
+        var payload = try XCTUnwrap(
+            JSONSerialization.jsonObject(
+                with: Data(
+                    try fixture(
+                        "apple-container-1.1.0-inventory-containers.json"
+                    ).utf8
+                )
+            ) as? [[String: Any]]
+        )
+        var managed = payload[0]
+        var configuration = try XCTUnwrap(
+            managed["configuration"] as? [String: Any]
+        )
+        configuration["publishedSockets"] = [[
+            "containerPath": "/run/api.sock",
+            "hostPath": "/tmp/hostwright-api.sock",
+            "permissions": 0o660
+        ]]
+        managed["configuration"] = configuration
+        payload[0] = managed
+
+        let encoded = String(
+            decoding: try JSONSerialization.data(
+                withJSONObject: payload,
+                options: [.sortedKeys]
+            ),
+            as: UTF8.self
+        )
+        let inventory = try AppleContainerInventoryParser.parse(
+            outputs: try outputs(
+                version: "1.1.0",
+                containers: encoded
+            )
+        )
+        XCTAssertEqual(
+            inventory.containers.first {
+                $0.runtimeID == managedContainerID
+            }?.publishedSockets,
+            [
+                RuntimeUnixSocketPublication(
+                    hostPath: "/tmp/hostwright-api.sock",
+                    containerPath: "/run/api.sock",
+                    mode: .ownerAndGroup
+                )
+            ]
+        )
+
+        configuration["publishedSockets"] = [[
+            "containerPath": "/run/api.sock",
+            "hostPath": "/tmp/hostwright-api.sock",
+            "permissions": 0o666
+        ]]
+        managed["configuration"] = configuration
+        payload[0] = managed
+        let invalid = String(
+            decoding: try JSONSerialization.data(
+                withJSONObject: payload,
+                options: [.sortedKeys]
+            ),
+            as: UTF8.self
+        )
+        XCTAssertThrowsError(
+            try AppleContainerInventoryParser.parse(
+                outputs: try outputs(
+                    version: "1.1.0",
+                    containers: invalid
+                )
+            )
+        )
+    }
+
     func testManagedNetworkOwnershipUsesExactUUIDDerivedIdentity() throws {
         let identity = try RuntimeNetworkIdentity(
             logicalName: "backend",

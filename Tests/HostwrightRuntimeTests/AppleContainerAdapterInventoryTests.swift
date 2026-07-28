@@ -113,6 +113,62 @@ final class AppleContainerAdapterInventoryTests: XCTestCase {
         XCTAssertTrue(calls.allSatisfy { $0.classification == .readOnly })
     }
 
+    func testProductionObservationAcceptsAdvancedStateFenceForStableRuntimeOwnership() async throws {
+        let runner = try InventoryRuntimeProcessRunner(version: "1.1.0")
+        let adapter = AppleContainerReadOnlyAdapter(
+            executableResolver: DictionaryRuntimeExecutableResolver(
+                executables: [
+                    AppleContainerCommand.executableName:
+                        "/usr/local/bin/container",
+                    "sw_vers": "/usr/bin/sw_vers",
+                    "uname": "/usr/bin/uname",
+                ]
+            ),
+            processRunner: runner
+        )
+        let identity = RuntimeServiceIdentity(
+            projectName: "demo",
+            serviceName: "api"
+        )
+        let state = DesiredRuntimeState(
+            projectName: "demo",
+            services: [
+                DesiredRuntimeService(
+                    identity: identity,
+                    image: "ghcr.io/example/api:1.1.0"
+                ),
+            ],
+            ownedResourceHints: [
+                RuntimeOwnedResourceHint(
+                    resourceIdentifier:
+                        identity.managedResourceIdentifier,
+                    identity: identity,
+                    identityVersion:
+                        RuntimeManagedResourceIdentity.currentVersion,
+                    ownership: RuntimeInventoryOwnershipEvidence(
+                        resourceUUID:
+                            "22222222-2222-4222-8222-222222222222",
+                        projectUUID:
+                            "11111111-1111-4111-8111-111111111111",
+                        resourceGeneration: 2,
+                        projectGeneration: 3,
+                        providerID: .appleContainerCLI,
+                        providerGeneration: 4,
+                        fencingToken:
+                            "44444444-4444-4444-8444-444444444444"
+                    )
+                ),
+            ]
+        )
+
+        let observed = try await adapter.observe(desiredState: state)
+
+        XCTAssertEqual(
+            observed.services.map(\.resourceIdentifier),
+            [identity.managedResourceIdentifier]
+        )
+    }
+
     func testProductionObservationPropagatesCancellationWithoutPartialObservationOrFurtherCommands() async throws {
         let runner = try InventoryRuntimeProcessRunner(version: "1.1.0", cancelAtCall: 8)
         let adapter = AppleContainerReadOnlyAdapter(

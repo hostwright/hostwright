@@ -193,6 +193,45 @@ final class HostwrightReconcilerTests: XCTestCase {
         XCTAssertEqual(plan.drift.map(\.kind), [.portMismatch])
     }
 
+    func testUnixSocketMismatchCreatesPortDriftAction() {
+        let desiredSocket = RuntimeUnixSocketPublication(
+            hostPath: "/tmp/hostwright/api.sock",
+            containerPath: "/run/api.sock"
+        )
+        let observedSocket = RuntimeUnixSocketPublication(
+            hostPath: "/tmp/hostwright/api.sock",
+            containerPath: "/run/other.sock"
+        )
+        let desired = desiredState(
+            services: [
+                desiredService(
+                    publishedSockets: [desiredSocket]
+                )
+            ]
+        )
+        let observedService = observed(
+            publishedSockets: [observedSocket]
+        )
+
+        let plan = ReconciliationPlanner().reconcile(
+            PlanningInput(
+                desiredState: desired,
+                observedState: observedState([observedService])
+            )
+        )
+
+        XCTAssertEqual(
+            plan.actions.map(\.kind),
+            [.reconcilePortDrift]
+        )
+        XCTAssertEqual(plan.drift.map(\.kind), [.portMismatch])
+        XCTAssertTrue(
+            plan.drift[0].stableDetailKey.contains(
+                "desiredSockets="
+            )
+        )
+    }
+
     func testMountMismatchCreatesMountDriftAction() {
         let desired = desiredState(services: [desiredService(mounts: [RuntimeMountReference(source: "./data", target: "/data", access: .readWrite)])])
         let observedService = observed(mounts: [RuntimeMountReference(source: "./other", target: "/data", access: .readWrite)])
@@ -671,6 +710,7 @@ final class HostwrightReconcilerTests: XCTestCase {
         image: String? = nil,
         environment: [RuntimeEnvironmentValue] = [],
         ports: [RuntimePortMapping] = [],
+        publishedSockets: [RuntimeUnixSocketPublication] = [],
         mounts: [RuntimeMountReference] = [],
         restartPolicy: RuntimeRestartPolicy = .no
     ) -> DesiredRuntimeService {
@@ -679,6 +719,7 @@ final class HostwrightReconcilerTests: XCTestCase {
             image: image ?? "ghcr.io/example/\(name):latest",
             environment: environment,
             ports: ports,
+            publishedSockets: publishedSockets,
             mounts: mounts,
             restartPolicy: restartPolicy
         )
@@ -694,6 +735,7 @@ final class HostwrightReconcilerTests: XCTestCase {
         lifecycleState: RuntimeLifecycleState = .running,
         healthState: RuntimeHealthState = .healthy,
         ports: [RuntimePortMapping] = [],
+        publishedSockets: [RuntimeUnixSocketPublication] = [],
         mounts: [RuntimeMountReference] = []
     ) -> ObservedRuntimeService {
         let identity = identity(serviceName: serviceName)
@@ -704,6 +746,7 @@ final class HostwrightReconcilerTests: XCTestCase {
             lifecycleState: lifecycleState,
             healthState: healthState,
             ports: ports,
+            publishedSockets: publishedSockets,
             mounts: mounts
         )
     }

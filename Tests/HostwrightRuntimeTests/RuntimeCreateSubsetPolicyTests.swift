@@ -1,3 +1,4 @@
+import HostwrightCore
 import HostwrightRuntime
 import HostwrightSecrets
 import XCTest
@@ -6,7 +7,10 @@ final class RuntimeCreateSubsetPolicyTests: XCTestCase {
     private static let containerizationUnsupportedMessage =
         "Containerization 0.35.0 create does not qualify the requested Phase 04 service options; select the Apple CLI provider or remove unsupported fields before mutation."
 
-    func testAppleContainerCLIAcceptsCompleteExecutablePhase04Subset() {
+    func testAppleContainerCLIAcceptsCompleteExecutablePhase04Subset()
+        throws {
+        let socketRoot = try HostwrightLocalPathResolver.resolve()
+            .layout.publishedSocketDirectory
         let service = makeService(
             platformArchitecture: "amd64",
             cpuCount: 2,
@@ -30,6 +34,13 @@ final class RuntimeCreateSubsetPolicyTests: XCTestCase {
                     hostPort: 18_080,
                     containerPort: 8_080,
                     bindAddress: "127.0.0.1"
+                )
+            ],
+            publishedSockets: [
+                RuntimeUnixSocketPublication(
+                    hostPath: "\(socketRoot)/api.sock",
+                    containerPath: "/run/api.sock",
+                    mode: .ownerAndGroup
                 )
             ],
             mounts: [
@@ -85,6 +96,36 @@ final class RuntimeCreateSubsetPolicyTests: XCTestCase {
                 providerID: .appleContainerCLI
             )
         )
+    }
+
+    func testAppleContainerCLIRejectsSocketPathThatExceedsEffectiveGuestRelayLimit()
+        throws
+    {
+        let socketRoot = try HostwrightLocalPathResolver.resolve()
+            .layout.publishedSocketDirectory
+        let service = makeService(
+            publishedSockets: [
+                RuntimeUnixSocketPublication(
+                    hostPath: "\(socketRoot)/api.sock",
+                    containerPath: "/\(String(repeating: "s", count: 70))"
+                )
+            ]
+        )
+
+        XCTAssertThrowsError(
+            try RuntimeCreateSubsetPolicy.validate(
+                service,
+                providerID: .appleContainerCLI
+            )
+        ) { error in
+            guard case RuntimeAdapterError.commandRejected(
+                classification: .mutating,
+                message: let message
+            ) = error else {
+                return XCTFail("Expected path-limit rejection, got \(error)")
+            }
+            XCTAssertTrue(message.contains("effective guest relay path limit"))
+        }
     }
 
     func testAppleContainerCLIRejectsInvalidPlatformAndPortCombinations() {
@@ -216,6 +257,17 @@ final class RuntimeCreateSubsetPolicyTests: XCTestCase {
                 )
             ),
             (
+                "published-sockets",
+                makeService(
+                    publishedSockets: [
+                        RuntimeUnixSocketPublication(
+                            hostPath: "/tmp/hostwright-api.sock",
+                            containerPath: "/run/api.sock"
+                        )
+                    ]
+                )
+            ),
+            (
                 "mounts",
                 makeService(
                     mounts: [
@@ -314,6 +366,7 @@ final class RuntimeCreateSubsetPolicyTests: XCTestCase {
         ],
         labels: [String: String] = [:],
         ports: [RuntimePortMapping] = [],
+        publishedSockets: [RuntimeUnixSocketPublication] = [],
         mounts: [RuntimeMountReference] = [],
         healthCheck: RuntimeHealthCheckSpec? = nil,
         probes: RuntimeProbeSet = RuntimeProbeSet(),
@@ -352,6 +405,7 @@ final class RuntimeCreateSubsetPolicyTests: XCTestCase {
             environment: environment,
             labels: labels,
             ports: ports,
+            publishedSockets: publishedSockets,
             mounts: mounts,
             healthCheck: healthCheck,
             probes: probes,

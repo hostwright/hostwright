@@ -563,7 +563,7 @@ final class ManifestV2StrictTests: XCTestCase {
                     target: "8080-8081"
                     protocol: sctp
             """,
-            contains: "protocol must be one of: tcp, udp",
+            contains: "protocol must be one of: tcp, udp, unix",
             requireSource: false
         )
 

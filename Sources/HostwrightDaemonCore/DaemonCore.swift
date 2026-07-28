@@ -556,6 +556,7 @@ public struct DaemonLoopRunner {
                 lifecycleState: service.lifecycleState,
                 healthState: healthState,
                 ports: service.ports,
+                publishedSockets: service.publishedSockets,
                 networks: service.networks,
                 mounts: service.mounts,
                 observedAt: service.observedAt

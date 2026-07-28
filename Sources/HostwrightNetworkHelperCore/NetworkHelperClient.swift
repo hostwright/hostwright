@@ -12,9 +12,17 @@ public enum NetworkHelperClientError: Error, Equatable, Sendable {
     case socketUnavailable
     case authenticationFailed
     case protocolFailure
+    case invalidRequest
+    case unsupportedProtocolVersion
+    case invalidIdentity
+    case invalidCorefile
+    case invalidFrame
     case conflict
     case quarantined
     case unsafeState
+    case ioFailure
+    case permissionDenied
+    case bindingUnavailable
     case helperFailure
     case cleanupFailed
 }
@@ -34,6 +42,7 @@ public struct NetworkHelperActiveCorefile: Equatable, Sendable {
     public let hostAccessActive: Bool
     public let ingressSHA256: String?
     public let ingressActive: Bool
+    public let ingressAccessLog: [NetworkHelperIngressAccessLogEntry]
     public let device: UInt64
     public let inode: UInt64
 
@@ -45,6 +54,7 @@ public struct NetworkHelperActiveCorefile: Equatable, Sendable {
         hostAccessActive: Bool = true,
         ingressSHA256: String? = nil,
         ingressActive: Bool = true,
+        ingressAccessLog: [NetworkHelperIngressAccessLogEntry] = [],
         device: UInt64,
         inode: UInt64
     ) {
@@ -55,6 +65,7 @@ public struct NetworkHelperActiveCorefile: Equatable, Sendable {
         self.hostAccessActive = hostAccessActive
         self.ingressSHA256 = ingressSHA256
         self.ingressActive = ingressActive
+        self.ingressAccessLog = ingressAccessLog
         self.device = device
         self.inode = inode
     }
@@ -374,21 +385,41 @@ public actor NetworkHelperClient {
             throw NetworkHelperClientError.protocolFailure
         }
         if let error = response.error {
-            switch error.code {
-            case .conflict:
-                throw NetworkHelperClientError.conflict
-            case .quarantined:
-                throw NetworkHelperClientError.quarantined
-            case .unsafePath:
-                throw NetworkHelperClientError.unsafeState
-            default:
-                throw NetworkHelperClientError.helperFailure
-            }
+            throw Self.map(error.code)
         }
         guard let status = response.status else {
             throw NetworkHelperClientError.protocolFailure
         }
         return status
+    }
+
+    static func map(
+        _ code: NetworkHelperErrorCode
+    ) -> NetworkHelperClientError {
+        switch code {
+        case .invalidRequest:
+            return .invalidRequest
+        case .unsupportedProtocolVersion:
+            return .unsupportedProtocolVersion
+        case .invalidIdentity:
+            return .invalidIdentity
+        case .invalidCorefile:
+            return .invalidCorefile
+        case .invalidFrame:
+            return .invalidFrame
+        case .conflict:
+            return .conflict
+        case .quarantined:
+            return .quarantined
+        case .unsafePath:
+            return .unsafeState
+        case .ioFailure:
+            return .ioFailure
+        case .permissionDenied:
+            return .permissionDenied
+        case .bindingUnavailable:
+            return .bindingUnavailable
+        }
     }
 
     private func ensureProcess() throws -> NetworkHelperProcessLease? {
@@ -640,6 +671,7 @@ public actor NetworkHelperClient {
             ingressActive:
                 status.ingressActive ??
                 (status.ingressSHA256 == nil),
+            ingressAccessLog: status.ingressAccessLog ?? [],
             device: UInt64(metadata.st_dev),
             inode: UInt64(metadata.st_ino)
         )

@@ -1,6 +1,7 @@
 import Foundation
 import HostwrightCore
 import HostwrightManifest
+import HostwrightNetworking
 import HostwrightReconciler
 import HostwrightRuntime
 import HostwrightState
@@ -8,6 +9,137 @@ import XCTest
 @testable import HostwrightCLI
 
 final class NetworkLifecycleCoordinatorTests: XCTestCase {
+    func testStatusJSONReportsIngressRouteHealthAndDurableState()
+        throws
+    {
+        let manifest = HostwrightManifest(
+            version: 2,
+            project: "status-ingress",
+            imagePolicy: nil,
+            imageTrust: nil,
+            imageSBOM: nil,
+            networks: [:],
+            ingress: [
+                "api": HostwrightIngressListener(
+                    port: 8_080,
+                    routes: [
+                        HostwrightIngressRoute(
+                            hostname: "api.internal",
+                            pathPrefix: "/v1",
+                            methods: ["POST", "GET"],
+                            targetService: "backend",
+                            targetPort: 8_080
+                        ),
+                    ]
+                ),
+            ],
+            services: [
+                HostwrightService(
+                    name: "backend",
+                    image: "example.invalid/backend@sha256:test"
+                ),
+            ]
+        )
+        let projectDNS = ProjectDNSStateRecord(
+            id: "11111111-1111-4111-8111-111111111111",
+            projectUUID: "22222222-2222-4222-8222-222222222222",
+            generation: 2,
+            providerID: "apple-container-cli",
+            providerGeneration: 1,
+            fencingToken: "33333333-3333-4333-8333-333333333333",
+            desiredSHA256: String(repeating: "a", count: 64),
+            observedSHA256: String(repeating: "b", count: 64),
+            lifecycleState: .available,
+            finalizerState: .active,
+            lastReadyRecordSHA256: String(repeating: "c", count: 64),
+            operationGroupID: "operation-ingress"
+        )
+        let output = CLIJSON.statusObserved(
+            manifestPath: "hostwright.yaml",
+            stateDatabasePath: "state.sqlite",
+            manifest: manifest,
+            observed: ObservedRuntimeState(
+                projectName: "status-ingress",
+                services: [
+                    ObservedRuntimeService(
+                        identity: RuntimeServiceIdentity(
+                            projectName: "status-ingress",
+                            serviceName: "backend"
+                        ),
+                        resourceIdentifier: "backend-1",
+                        lifecycleState: .running,
+                        healthState: .healthy
+                    ),
+                ]
+            ),
+            plan: ReconciliationPlan(
+                projectName: "status-ingress",
+                observationConnected: true,
+                issues: [],
+                drift: [],
+                actions: []
+            ),
+            imageDigestLocks: [],
+            portReservations: [],
+            networks: [],
+            projectDNS: projectDNS
+        )
+        let object = try XCTUnwrap(
+            try JSONSerialization.jsonObject(
+                with: Data(output.utf8)
+            ) as? [String: Any]
+        )
+        let ingress = try XCTUnwrap(
+            object["ingress"] as? [[String: Any]]
+        )
+        XCTAssertEqual(ingress.first?["name"] as? String, "api")
+        let routes = try XCTUnwrap(
+            ingress.first?["routes"] as? [[String: Any]]
+        )
+        XCTAssertEqual(routes.first?["readyBackends"] as? Int, 1)
+        XCTAssertEqual(
+            routes.first?["methods"] as? [String],
+            ["GET", "POST"]
+        )
+        let state = try XCTUnwrap(
+            object["ingressState"] as? [String: Any]
+        )
+        XCTAssertEqual(state["generation"] as? Int, 2)
+        XCTAssertEqual(state["lifecycle"] as? String, "available")
+        XCTAssertNil(state["fencingToken"])
+
+        let noIngressOutput = CLIJSON.statusObserved(
+            manifestPath: "hostwright.yaml",
+            stateDatabasePath: "state.sqlite",
+            manifest: HostwrightManifest(
+                version: 2,
+                project: "status-ingress",
+                services: []
+            ),
+            observed: ObservedRuntimeState(
+                projectName: "status-ingress",
+                services: []
+            ),
+            plan: ReconciliationPlan(
+                projectName: "status-ingress",
+                observationConnected: true,
+                issues: [],
+                drift: [],
+                actions: []
+            ),
+            imageDigestLocks: [],
+            portReservations: [],
+            networks: [],
+            projectDNS: projectDNS
+        )
+        let noIngressObject = try XCTUnwrap(
+            try JSONSerialization.jsonObject(
+                with: Data(noIngressOutput.utf8)
+            ) as? [String: Any]
+        )
+        XCTAssertNil(noIngressObject["ingressState"])
+    }
+
     func testCreatePersistsIntentBeforeMutationAndCommitsExactObservation()
         async throws
     {

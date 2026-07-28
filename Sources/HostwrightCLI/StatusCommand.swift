@@ -1,5 +1,6 @@
 import HostwrightCore
 import HostwrightManifest
+import HostwrightNetworking
 import HostwrightReconciler
 import HostwrightRuntime
 import HostwrightState
@@ -87,6 +88,12 @@ struct StatusCommandRunner {
             let networks = try store.networks.listNetworks(
                 projectUUID: project.resourceUUID
             )
+            let projectDNS = try store.projectDNS.load(
+                id: HostwrightResourceUUID.legacy(
+                    kind: "project-dns",
+                    identifier: project.resourceUUID
+                )
+            )
             try store.observedStates.saveSnapshot(
                 snapshotID: hostwrightUniqueID(prefix: "status-snapshot"),
                 projectID: projectID,
@@ -125,7 +132,8 @@ struct StatusCommandRunner {
                         plan: plan,
                         imageDigestLocks: imageDigestLocks,
                         portReservations: portReservations,
-                        networks: networks
+                        networks: networks,
+                        projectDNS: projectDNS
                     )
                 )
             }
@@ -137,6 +145,7 @@ struct StatusCommandRunner {
                     imageDigestLocks: imageDigestLocks,
                     portReservations: portReservations,
                     networks: networks,
+                    projectDNS: projectDNS,
                     stateDatabasePath: stateDatabasePath
                 )
             )
@@ -161,6 +170,7 @@ struct StatusCommandRunner {
         imageDigestLocks: [ImageDigestLockRecord],
         portReservations: [NetworkPortReservationRecord],
         networks: [NetworkStateResourceRecord],
+        projectDNS: ProjectDNSStateRecord?,
         stateDatabasePath: String
     ) -> String {
         let observedByName = hostwrightObservedServicesByLogicalName(observed)
@@ -232,6 +242,37 @@ struct StatusCommandRunner {
         }
 
         lines.append("")
+        lines.append("Ingress:")
+        if manifest.ingress.isEmpty {
+            lines.append("- none")
+        } else {
+            for (name, listener) in manifest.ingress.sorted(
+                by: { $0.key < $1.key }
+            ) {
+                lines.append(
+                    "- \(name): \(listener.bindAddress):\(listener.port) exposure=\(listener.exposure.scope.rawValue)"
+                )
+                for route in listener.routes.sorted(
+                    by: HostwrightIngressRoute.canonicalPrecedes
+                ) {
+                    let ready = readyBackendCount(
+                        serviceName: route.targetService,
+                        manifest: manifest,
+                        observedByName: observedByName
+                    )
+                    lines.append(
+                        "  - \(route.protocolName.rawValue) \(route.hostname)\(route.pathPrefix) methods=\(route.methods.sorted().joined(separator: ",")) target=\(route.targetService):\(route.targetPort) readyBackends=\(ready)"
+                    )
+                }
+            }
+        }
+        if !manifest.ingress.isEmpty, let projectDNS {
+            lines.append(
+                "- state: generation=\(projectDNS.generation) lifecycle=\(projectDNS.lifecycleState.rawValue) finalizer=\(projectDNS.finalizerState.rawValue) desired=\(projectDNS.desiredSHA256) observed=\(projectDNS.observedSHA256 ?? "missing")"
+            )
+        }
+
+        lines.append("")
         lines.append("Drift:")
         if plan.drift.isEmpty {
             lines.append("- none")
@@ -242,6 +283,27 @@ struct StatusCommandRunner {
         }
         lines.append("")
         return lines.joined(separator: "\n")
+    }
+
+    private func readyBackendCount(
+        serviceName: String,
+        manifest: HostwrightManifest,
+        observedByName: [String: [ObservedRuntimeService]]
+    ) -> Int {
+        let readinessConfigured = manifest.services.first {
+            $0.name == serviceName
+        }?.probes.readiness != nil
+        return (observedByName[serviceName] ?? []).filter {
+            $0.healthState == .healthy ||
+                (
+                    !readinessConfigured &&
+                        $0.lifecycleState == .running &&
+                        (
+                            $0.healthState == .notConfigured ||
+                                $0.healthState == .unknown
+                        )
+                )
+        }.count
     }
 
     private func render(

@@ -244,6 +244,223 @@ final class NetworkHelperIngressBrokerTests: XCTestCase {
         XCTAssertEqual(secondFinished.wait(timeout: .now() + 2), .success)
     }
 
+    func testMultiListenerReloadPublishesOneImmutableGeneration() throws {
+        let oldFirst = try makeServer()
+        let oldSecond = try makeServer()
+        let newFirst = try makeServer()
+        let newSecond = try makeServer()
+        defer {
+            Darwin.close(oldFirst.descriptor)
+            Darwin.close(oldSecond.descriptor)
+            Darwin.close(newFirst.descriptor)
+            Darwin.close(newSecond.descriptor)
+        }
+        let oldFirstFinished = DispatchSemaphore(value: 0)
+        let oldSecondFinished = DispatchSemaphore(value: 0)
+        let newFirstFinished = DispatchSemaphore(value: 0)
+        let newSecondFinished = DispatchSemaphore(value: 0)
+        serveOnce(
+            oldFirst.descriptor,
+            response: response(body: "old-first"),
+            finished: oldFirstFinished
+        )
+        serveOnce(
+            oldSecond.descriptor,
+            response: response(body: "old-second"),
+            finished: oldSecondFinished
+        )
+        serveOnce(
+            newFirst.descriptor,
+            response: response(body: "new-first"),
+            finished: newFirstFinished
+        )
+        serveOnce(
+            newSecond.descriptor,
+            response: response(body: "new-second"),
+            finished: newSecondFinished
+        )
+
+        let firstPort = try availablePort()
+        let secondPort = try availablePort()
+        let broker = NetworkHelperIngressBroker()
+        _ = try broker.apply(
+            identity: identity(),
+            bindings: [
+                binding(
+                    name: "first",
+                    port: firstPort,
+                    backendPort: oldFirst.port
+                ),
+                binding(
+                    name: "second",
+                    port: secondPort,
+                    backendPort: oldSecond.port
+                ),
+            ]
+        )
+        defer { broker.remove(identity: identity()) }
+        XCTAssertTrue(
+            try request(
+                port: firstPort,
+                request:
+                    "GET /v1 HTTP/1.1\r\n" +
+                    "Host: api.internal\r\n\r\n"
+            ).hasSuffix("\r\n\r\nold-first")
+        )
+        XCTAssertTrue(
+            try request(
+                port: secondPort,
+                request:
+                    "GET /v1 HTTP/1.1\r\n" +
+                    "Host: api.internal\r\n\r\n"
+            ).hasSuffix("\r\n\r\nold-second")
+        )
+
+        _ = try broker.apply(
+            identity: identity(),
+            bindings: [
+                binding(
+                    name: "first",
+                    port: firstPort,
+                    backendPort: newFirst.port
+                ),
+                binding(
+                    name: "second",
+                    port: secondPort,
+                    backendPort: newSecond.port
+                ),
+            ]
+        )
+        XCTAssertTrue(
+            try request(
+                port: firstPort,
+                request:
+                    "GET /v1 HTTP/1.1\r\n" +
+                    "Host: api.internal\r\n\r\n"
+            ).hasSuffix("\r\n\r\nnew-first")
+        )
+        XCTAssertTrue(
+            try request(
+                port: secondPort,
+                request:
+                    "GET /v1 HTTP/1.1\r\n" +
+                    "Host: api.internal\r\n\r\n"
+            ).hasSuffix("\r\n\r\nnew-second")
+        )
+        for finished in [
+            oldFirstFinished,
+            oldSecondFinished,
+            newFirstFinished,
+            newSecondFinished,
+        ] {
+            XCTAssertEqual(
+                finished.wait(timeout: .now() + 2),
+                .success
+            )
+        }
+    }
+
+    func testRemovalDrainsActiveWebSocketBeforeReturning() throws {
+        let backend = try makeServer()
+        defer { Darwin.close(backend.descriptor) }
+        let backendReady = DispatchSemaphore(value: 0)
+        let backendClosed = DispatchSemaphore(value: 0)
+        serveWebSocketUntilClosed(
+            backend.descriptor,
+            ready: backendReady,
+            closed: backendClosed
+        )
+
+        let ingressPort = try availablePort()
+        let activeIdentity = identity()
+        let broker = NetworkHelperIngressBroker()
+        _ = try broker.apply(
+            identity: activeIdentity,
+            bindings: [
+                binding(
+                    port: ingressPort,
+                    backendPort: backend.port,
+                    protocolName: .websocket
+                ),
+            ]
+        )
+
+        let client = try openWebSocket(port: ingressPort)
+        XCTAssertEqual(
+            backendReady.wait(timeout: .now() + 2),
+            .success
+        )
+        let removed = DispatchSemaphore(value: 0)
+        DispatchQueue.global(qos: .userInitiated).async {
+            broker.remove(identity: activeIdentity)
+            removed.signal()
+        }
+        XCTAssertEqual(
+            removed.wait(timeout: .now() + 0.2),
+            .timedOut
+        )
+
+        Darwin.close(client)
+        XCTAssertEqual(
+            removed.wait(timeout: .now() + 2),
+            .success
+        )
+        XCTAssertEqual(
+            backendClosed.wait(timeout: .now() + 2),
+            .success
+        )
+        XCTAssertFalse(broker.hasActiveBindings)
+    }
+
+    func testRemovalForcesBoundedCleanupOfStuckWebSocket() throws {
+        let backend = try makeServer()
+        defer { Darwin.close(backend.descriptor) }
+        let backendReady = DispatchSemaphore(value: 0)
+        let backendClosed = DispatchSemaphore(value: 0)
+        serveWebSocketUntilClosed(
+            backend.descriptor,
+            ready: backendReady,
+            closed: backendClosed
+        )
+
+        let ingressPort = try availablePort()
+        let activeIdentity = identity()
+        let broker = NetworkHelperIngressBroker()
+        _ = try broker.apply(
+            identity: activeIdentity,
+            bindings: [
+                binding(
+                    port: ingressPort,
+                    backendPort: backend.port,
+                    protocolName: .websocket
+                ),
+            ]
+        )
+
+        let client = try openWebSocket(port: ingressPort)
+        defer { Darwin.close(client) }
+        XCTAssertEqual(
+            backendReady.wait(timeout: .now() + 2),
+            .success
+        )
+        let started = Date()
+        broker.remove(identity: activeIdentity)
+        let duration = Date().timeIntervalSince(started)
+
+        XCTAssertGreaterThanOrEqual(duration, 1.5)
+        XCTAssertLessThan(duration, 3.5)
+        XCTAssertTrue(
+            waitForReadable(client, milliseconds: 1_000)
+        )
+        var byte: UInt8 = 0
+        XCTAssertEqual(Darwin.recv(client, &byte, 1, 0), 0)
+        XCTAssertEqual(
+            backendClosed.wait(timeout: .now() + 2),
+            .success
+        )
+        XCTAssertFalse(broker.hasActiveBindings)
+    }
+
     func testRejectsSmugglingTraversalAndOversizedHeaders() throws {
         let smuggling = Data("GET / HTTP/1.1\r\nHost: api.internal\r\nTransfer-Encoding: chunked\r\n\r\n".utf8)
         XCTAssertThrowsError(try NetworkHelperIngressHTTPParser.parse(headerData: smuggling, body: Data()))
@@ -270,6 +487,63 @@ final class NetworkHelperIngressBrokerTests: XCTestCase {
         usleep(100_000)
         XCTAssertThrowsError(try connect(port: port))
         XCTAssertFalse(broker.hasActiveBindings)
+    }
+
+    func testAccessLogIsBoundedAndOmitsRequestSecrets() throws {
+        let broker = NetworkHelperIngressBroker()
+        let port = try availablePort()
+        let activeIdentity = identity()
+        _ = try broker.apply(
+            identity: activeIdentity,
+            bindings: [
+                binding(
+                    port: port,
+                    backendPort: 8_080,
+                    backends: []
+                ),
+            ]
+        )
+        defer { broker.remove(identity: activeIdentity) }
+
+        let secret = "do-not-record-this-token"
+        for _ in 0...NetworkHelperProtocolV1
+            .maximumIngressAccessLogEntries {
+            let response = try request(
+                port: port,
+                request:
+                    "GET /v1?token=\(secret) HTTP/1.1\r\n" +
+                    "Host: api.internal\r\n" +
+                    "Authorization: Bearer \(secret)\r\n\r\n"
+            )
+            XCTAssertTrue(
+                response.hasPrefix(
+                    "HTTP/1.1 503 Service Unavailable"
+                )
+            )
+        }
+
+        let entries = broker.accessLog(identity: activeIdentity)
+        XCTAssertEqual(
+            entries.count,
+            NetworkHelperProtocolV1.maximumIngressAccessLogEntries
+        )
+        XCTAssertTrue(entries.allSatisfy {
+            $0.listenerName == "api" &&
+                $0.method == "GET" &&
+                $0.routeHostname == "api.internal" &&
+                $0.routePathPrefix == "/v1" &&
+                $0.protocolName == .http &&
+                $0.targetServiceUUID == nil &&
+                $0.outcome == .unavailable &&
+                $0.durationMilliseconds >= 0
+        })
+        let encoded = try JSONEncoder().encode(entries)
+        let text = try XCTUnwrap(String(data: encoded, encoding: .utf8))
+        XCTAssertFalse(text.contains(secret))
+        XCTAssertFalse(text.contains("authorization"))
+
+        broker.remove(identity: activeIdentity)
+        XCTAssertTrue(broker.accessLog(identity: activeIdentity).isEmpty)
     }
 
     private func identity(project: String? = nil) -> NetworkHelperDNSIdentity {
@@ -308,6 +582,81 @@ final class NetworkHelperIngressBrokerTests: XCTestCase {
                 backends: resolvedBackends
             )]
         )
+    }
+}
+
+private func response(body: String) -> String {
+    "HTTP/1.1 200 OK\r\n" +
+        "content-length: \(body.utf8.count)\r\n" +
+        "connection: close\r\n\r\n" +
+        body
+}
+
+private func openWebSocket(port: Int) throws -> Int32 {
+    let descriptor = try connect(port: port)
+    let request =
+        "GET /v1 HTTP/1.1\r\n" +
+        "Host: api.internal\r\n" +
+        "Connection: Upgrade\r\n" +
+        "Upgrade: websocket\r\n" +
+        "Sec-WebSocket-Version: 13\r\n" +
+        "Sec-WebSocket-Key: MDEyMzQ1Njc4OWFiY2RlZg==\r\n\r\n"
+    let sent = request.withCString { pointer in
+        Darwin.send(descriptor, pointer, strlen(pointer), 0)
+    }
+    guard sent == request.utf8.count,
+          waitForReadable(descriptor, milliseconds: 5_000),
+          String(
+              data: receiveUntilHeaders(descriptor),
+              encoding: .utf8
+          )?.hasPrefix(
+              "HTTP/1.1 101 Switching Protocols"
+          ) == true else {
+        Darwin.close(descriptor)
+        throw NetworkHelperError.ioFailure
+    }
+    return descriptor
+}
+
+private func serveWebSocketUntilClosed(
+    _ listener: Int32,
+    ready: DispatchSemaphore,
+    closed: DispatchSemaphore
+) {
+    DispatchQueue.global(qos: .userInitiated).async {
+        defer { closed.signal() }
+        guard waitForReadable(listener, milliseconds: 5_000)
+        else {
+            return
+        }
+        let connection = Darwin.accept(listener, nil, nil)
+        guard connection >= 0 else { return }
+        defer { Darwin.close(connection) }
+        _ = receiveUntilHeaders(connection)
+        let response =
+            "HTTP/1.1 101 Switching Protocols\r\n" +
+            "upgrade: websocket\r\n" +
+            "connection: upgrade\r\n\r\n"
+        let sent = response.withCString { pointer in
+            Darwin.send(connection, pointer, strlen(pointer), 0)
+        }
+        guard sent == response.utf8.count else { return }
+        ready.signal()
+        var buffer = [UInt8](repeating: 0, count: 4_096)
+        while true {
+            let count = Darwin.recv(
+                connection,
+                &buffer,
+                buffer.count,
+                0
+            )
+            if count == 0 { return }
+            if count < 0, errno == EINTR { continue }
+            if count < 0, errno == EAGAIN || errno == EWOULDBLOCK {
+                continue
+            }
+            guard count > 0 else { return }
+        }
     }
 }
 

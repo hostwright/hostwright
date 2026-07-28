@@ -4,6 +4,7 @@ import HostwrightExtensions
 import HostwrightHealth
 import HostwrightImport
 import HostwrightManifest
+import HostwrightNetworking
 import HostwrightPolicy
 import HostwrightReconciler
 import HostwrightRuntime
@@ -788,9 +789,26 @@ enum CLIJSON {
         plan: ReconciliationPlan,
         imageDigestLocks: [ImageDigestLockRecord],
         portReservations: [NetworkPortReservationRecord],
-        networks: [NetworkStateResourceRecord]
+        networks: [NetworkStateResourceRecord],
+        projectDNS: ProjectDNSStateRecord? = nil
     ) -> String {
         let observedByName = hostwrightObservedServicesByLogicalName(observed)
+        let ingressState: [String: Any]? =
+            manifest.ingress.isEmpty
+            ? nil
+            : projectDNS.map { record in
+                [
+                    "id": record.id,
+                    "generation": record.generation,
+                    "providerID": record.providerID,
+                    "providerGeneration": record.providerGeneration,
+                    "desiredSHA256": record.desiredSHA256,
+                    "observedSHA256": record.observedSHA256 as Any,
+                    "lifecycle": record.lifecycleState.rawValue,
+                    "finalizer": record.finalizerState.rawValue,
+                    "operationGroupID": record.operationGroupID
+                ].compactNilValues()
+            }
         return render([
             "kind": "status",
             "manifest": [
@@ -881,6 +899,46 @@ enum CLIJSON {
                         record.observedSHA256 as Any
                 ].compactNilValues()
             },
+            "ingress": manifest.ingress.sorted {
+                $0.key < $1.key
+            }.map { name, listener in
+                [
+                    "name": name,
+                    "bindAddress": listener.bindAddress,
+                    "port": listener.port,
+                    "exposure": listener.exposure.scope.rawValue,
+                    "routes": listener.routes.sorted(
+                        by: HostwrightIngressRoute.canonicalPrecedes
+                    ).map { route in
+                        let service = manifest.services.first {
+                            $0.name == route.targetService
+                        }
+                        let ready = (
+                            observedByName[route.targetService] ?? []
+                        ).filter {
+                            $0.healthState == .healthy ||
+                                (
+                                    service?.probes.readiness == nil &&
+                                        $0.lifecycleState == .running &&
+                                        (
+                                            $0.healthState == .notConfigured ||
+                                                $0.healthState == .unknown
+                                        )
+                                )
+                        }.count
+                        return [
+                            "hostname": route.hostname,
+                            "pathPrefix": route.pathPrefix,
+                            "methods": route.methods.sorted(),
+                            "protocol": route.protocolName.rawValue,
+                            "targetService": route.targetService,
+                            "targetPort": route.targetPort,
+                            "readyBackends": ready
+                        ] as [String: Any]
+                    }
+                ] as [String: Any]
+            },
+            "ingressState": ingressState as Any,
             "services": manifest.services.sorted { $0.name < $1.name }.map { service in
                 let observedServices = observedByName[service.name] ?? []
                 var payload: [String: Any] = [

@@ -178,6 +178,9 @@ struct NetworkHelperDispatcher: @unchecked Sendable {
             hostAccessActive: hostAccessActive,
             ingressSHA256: status.ingressSHA256,
             ingressActive: ingressActive,
+            ingressAccessLog: status.identity.map {
+                ingressBroker.accessLog(identity: $0)
+            },
             reason: status.reason
         )
     }

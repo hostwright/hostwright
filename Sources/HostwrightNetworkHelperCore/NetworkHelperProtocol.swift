@@ -10,6 +10,61 @@ public enum NetworkHelperProtocolV1 {
     public static let maximumIngressRequestLineBytes = 8 * 1_024
     public static let maximumIngressHeaderBytes = 64 * 1_024
     public static let maximumIngressBodyBytes = 8 * 1_024 * 1_024
+    public static let maximumIngressAccessLogEntries = 256
+}
+
+public enum NetworkHelperIngressAccessOutcome:
+    String,
+    Codable,
+    Equatable,
+    Sendable
+{
+    case rejected
+    case noRoute
+    case unavailable
+    case upstreamFailed
+    case forwarded
+}
+
+public struct NetworkHelperIngressAccessLogEntry:
+    Codable,
+    Equatable,
+    Sendable
+{
+    public let eventID: String
+    public let timestampUnixMilliseconds: Int64
+    public let listenerName: String
+    public let method: String?
+    public let routeHostname: String?
+    public let routePathPrefix: String?
+    public let protocolName: HostwrightIngressRouteProtocol?
+    public let targetServiceUUID: String?
+    public let outcome: NetworkHelperIngressAccessOutcome
+    public let durationMilliseconds: Int64
+
+    init(
+        eventID: UUID = UUID(),
+        timestampUnixMilliseconds: Int64,
+        listenerName: String,
+        method: String?,
+        routeHostname: String?,
+        routePathPrefix: String?,
+        protocolName: HostwrightIngressRouteProtocol?,
+        targetServiceUUID: String?,
+        outcome: NetworkHelperIngressAccessOutcome,
+        durationMilliseconds: Int64
+    ) {
+        self.eventID = eventID.uuidString.lowercased()
+        self.timestampUnixMilliseconds = timestampUnixMilliseconds
+        self.listenerName = listenerName
+        self.method = method.map { String($0.prefix(32)) }
+        self.routeHostname = routeHostname
+        self.routePathPrefix = routePathPrefix
+        self.protocolName = protocolName
+        self.targetServiceUUID = targetServiceUUID
+        self.outcome = outcome
+        self.durationMilliseconds = max(0, durationMilliseconds)
+    }
 }
 
 enum NetworkHelperOperation: String, Codable, CaseIterable, Sendable {
@@ -147,6 +202,7 @@ struct NetworkHelperStatus: Codable, Equatable, Sendable {
     let hostAccessActive: Bool?
     let ingressSHA256: String?
     let ingressActive: Bool?
+    let ingressAccessLog: [NetworkHelperIngressAccessLogEntry]?
     let reason: String?
 
     init(
@@ -157,6 +213,7 @@ struct NetworkHelperStatus: Codable, Equatable, Sendable {
         hostAccessActive: Bool? = nil,
         ingressSHA256: String? = nil,
         ingressActive: Bool? = nil,
+        ingressAccessLog: [NetworkHelperIngressAccessLogEntry]? = nil,
         reason: String?
     ) {
         self.disposition = disposition
@@ -166,6 +223,7 @@ struct NetworkHelperStatus: Codable, Equatable, Sendable {
         self.hostAccessActive = hostAccessActive
         self.ingressSHA256 = ingressSHA256
         self.ingressActive = ingressActive
+        self.ingressAccessLog = ingressAccessLog
         self.reason = reason
     }
 }

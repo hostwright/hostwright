@@ -423,6 +423,40 @@ final class NetworkHelperTests: XCTestCase {
         }
     }
 
+    func testIngressAccessLogRoundTripsAsBoundedMachineStatus() throws {
+        let entry = NetworkHelperIngressAccessLogEntry(
+            timestampUnixMilliseconds: 1_234,
+            listenerName: "api",
+            method: "GET",
+            routeHostname: "api.internal",
+            routePathPrefix: "/v1",
+            protocolName: .http,
+            targetServiceUUID: projectUUID,
+            outcome: .forwarded,
+            durationMilliseconds: 5
+        )
+        let response = NetworkHelperResponse(
+            requestID: UUID().uuidString.lowercased(),
+            operation: .status,
+            status: NetworkHelperStatus(
+                disposition: .active,
+                identity: identity(),
+                corefileSHA256: String(repeating: "a", count: 64),
+                ingressSHA256: String(repeating: "b", count: 64),
+                ingressActive: true,
+                ingressAccessLog: [entry],
+                reason: nil
+            )
+        )
+
+        let decoded = try NetworkHelperCanonicalJSON.decodeFrame(
+            NetworkHelperResponse.self,
+            from: NetworkHelperCanonicalJSON.frame(response)
+        )
+        XCTAssertEqual(decoded, response)
+        XCTAssertEqual(decoded.status?.ingressAccessLog, [entry])
+    }
+
     func testRequestValidationRejectsInvalidIdentityAndOversizedCorefile() {
         let invalidIdentity = NetworkHelperRequest(
             operation: .apply,

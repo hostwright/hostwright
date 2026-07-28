@@ -98,6 +98,17 @@ final class ContractVersionsTests: XCTestCase {
             Set([130, 131, 140])
         )
 
+        guard let ingress = report.capabilities.first(where: {
+            $0.identifier == "networking.ingress"
+        }) else {
+            return XCTFail("Ingress capability is missing.")
+        }
+        XCTAssertEqual(ingress.state, .experimental)
+        XCTAssertEqual(ingress.phase, 7)
+        XCTAssertEqual(ingress.issue, 172)
+        XCTAssertTrue(ingress.reason.contains("HTTP/1.1"))
+        XCTAssertTrue(ingress.reason.contains("WebSocket"))
+
         guard let persistentStorage = report.capabilities.first(where: {
             $0.identifier == "storage.persistent"
         }) else {

@@ -7,6 +7,28 @@ import XCTest
 @testable import HostwrightNetworkHelperCore
 
 final class NetworkHelperClientTests: XCTestCase {
+    func testClientPreservesStructuredHelperErrorCategories() {
+        let expected: [
+            (NetworkHelperErrorCode, NetworkHelperClientError)
+        ] = [
+            (.invalidRequest, .invalidRequest),
+            (.unsupportedProtocolVersion, .unsupportedProtocolVersion),
+            (.invalidIdentity, .invalidIdentity),
+            (.invalidCorefile, .invalidCorefile),
+            (.invalidFrame, .invalidFrame),
+            (.conflict, .conflict),
+            (.quarantined, .quarantined),
+            (.unsafePath, .unsafeState),
+            (.ioFailure, .ioFailure),
+            (.permissionDenied, .permissionDenied),
+            (.bindingUnavailable, .bindingUnavailable),
+        ]
+
+        for (code, clientError) in expected {
+            XCTAssertEqual(NetworkHelperClient.map(code), clientError)
+        }
+    }
+
     private let projectUUID = "11111111-1111-4111-8111-111111111111"
     private let dnsUUID = "22222222-2222-4222-8222-222222222222"
     private let fence = "33333333-3333-4333-8333-333333333333"

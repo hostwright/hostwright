@@ -8,22 +8,28 @@ final class NetworkHelperIngressBroker: @unchecked Sendable {
         let identity: NetworkHelperDNSIdentity
         let bindings: [ProjectIngressListenerBinding]
         let sha256: String
+        let configuration: NetworkHelperIngressConfiguration
         let listeners: [String: NetworkHelperIngressListener]
     }
 
+    private let mutationLock = NSLock()
     private let lock = NSLock()
     private var groups: [String: Group] = [:]
+    private var accessLogs:
+        [String: [NetworkHelperIngressAccessLogEntry]] = [:]
 
     func apply(
         identity: NetworkHelperDNSIdentity,
         bindings: [ProjectIngressListenerBinding]
     ) throws -> String? {
+        mutationLock.lock()
+        defer { mutationLock.unlock() }
         let identity = try identity.validated()
         let bindings = try NetworkHelperIngressValidation.validated(
             bindings
         )
         guard !bindings.isEmpty else {
-            remove(identity: identity)
+            removeLocked(identity: identity)
             return nil
         }
         let data = try NetworkHelperCanonicalJSON.encode(bindings)
@@ -51,6 +57,11 @@ final class NetworkHelperIngressBroker: @unchecked Sendable {
         lock.unlock()
 
         let previousByEndpoint = previous?.listeners ?? [:]
+        let configuration = previous?.configuration ??
+            NetworkHelperIngressConfiguration(
+                sha256: digest,
+                bindings: bindings
+            )
         var created: [NetworkHelperIngressListener] = []
         var next: [String: NetworkHelperIngressListener] = [:]
         do {
@@ -60,13 +71,20 @@ final class NetworkHelperIngressBroker: @unchecked Sendable {
                     next[endpoint] = reusable
                 } else {
                     let listener = try NetworkHelperIngressListener(
-                        binding: binding
+                        binding: binding,
+                        endpoint: endpoint,
+                        configuration: configuration,
+                        accessLogger: { [weak self] entry in
+                            self?.record(
+                                entry,
+                                identity: identity
+                            )
+                        }
                     )
                     created.append(listener)
                     next[endpoint] = listener
                 }
             }
-            created.forEach { $0.start() }
         } catch {
             created.forEach { $0.stop() }
             throw NetworkHelperError.bindingUnavailable
@@ -80,17 +98,23 @@ final class NetworkHelperIngressBroker: @unchecked Sendable {
             created.forEach { $0.stop() }
             throw NetworkHelperError.conflict
         }
-        for binding in bindings {
-            next[Self.listenerKey(binding)]?.update(binding)
+        configuration.replace(
+            sha256: digest,
+            bindings: bindings
+        )
+        if previous?.identity != identity {
+            accessLogs[groupKey] = []
         }
         groups[groupKey] = Group(
             identity: identity,
             bindings: bindings,
             sha256: digest,
+            configuration: configuration,
             listeners: next
         )
         lock.unlock()
 
+        created.forEach { $0.start() }
         let retained = Set(next.keys)
         previousByEndpoint
             .filter { !retained.contains($0.key) }
@@ -99,9 +123,18 @@ final class NetworkHelperIngressBroker: @unchecked Sendable {
     }
 
     func remove(identity: NetworkHelperDNSIdentity) {
+        mutationLock.lock()
+        defer { mutationLock.unlock() }
+        removeLocked(identity: identity)
+    }
+
+    private func removeLocked(
+        identity: NetworkHelperDNSIdentity
+    ) {
         let key = Self.groupKey(identity)
         lock.lock()
         let group = groups.removeValue(forKey: key)
+        accessLogs.removeValue(forKey: key)
         lock.unlock()
         group?.listeners.values.forEach { $0.stop() }
     }
@@ -120,6 +153,37 @@ final class NetworkHelperIngressBroker: @unchecked Sendable {
         return !groups.isEmpty
     }
 
+    func accessLog(
+        identity: NetworkHelperDNSIdentity
+    ) -> [NetworkHelperIngressAccessLogEntry] {
+        lock.lock()
+        defer { lock.unlock() }
+        let key = Self.groupKey(identity)
+        guard groups[key]?.identity == identity else { return [] }
+        return accessLogs[key] ?? []
+    }
+
+    private func record(
+        _ entry: NetworkHelperIngressAccessLogEntry,
+        identity: NetworkHelperDNSIdentity
+    ) {
+        lock.lock()
+        defer { lock.unlock() }
+        let key = Self.groupKey(identity)
+        guard groups[key]?.identity == identity else { return }
+        var entries = accessLogs[key] ?? []
+        entries.append(entry)
+        if entries.count >
+            NetworkHelperProtocolV1.maximumIngressAccessLogEntries {
+            entries.removeFirst(
+                entries.count -
+                    NetworkHelperProtocolV1
+                        .maximumIngressAccessLogEntries
+            )
+        }
+        accessLogs[key] = entries
+    }
+
     private static func groupKey(
         _ identity: NetworkHelperDNSIdentity
     ) -> String {
@@ -136,6 +200,57 @@ final class NetworkHelperIngressBroker: @unchecked Sendable {
         SHA256.hash(data: data)
             .map { String(format: "%02x", $0) }
             .joined()
+    }
+}
+
+private final class NetworkHelperIngressConfiguration:
+    @unchecked Sendable
+{
+    private struct Generation {
+        let sha256: String
+        let bindings: [String: ProjectIngressListenerBinding]
+    }
+
+    private let lock = NSLock()
+    private var generation: Generation
+
+    init(
+        sha256: String,
+        bindings: [ProjectIngressListenerBinding]
+    ) {
+        generation = Generation(
+            sha256: sha256,
+            bindings: Self.index(bindings)
+        )
+    }
+
+    func replace(
+        sha256: String,
+        bindings: [ProjectIngressListenerBinding]
+    ) {
+        let next = Generation(
+            sha256: sha256,
+            bindings: Self.index(bindings)
+        )
+        lock.lock()
+        generation = next
+        lock.unlock()
+    }
+
+    func binding(
+        for endpoint: String
+    ) -> ProjectIngressListenerBinding? {
+        lock.lock()
+        defer { lock.unlock() }
+        return generation.bindings[endpoint]
+    }
+
+    private static func index(
+        _ bindings: [ProjectIngressListenerBinding]
+    ) -> [String: ProjectIngressListenerBinding] {
+        Dictionary(uniqueKeysWithValues: bindings.map {
+            ("\($0.bindAddress):\($0.port)", $0)
+        })
     }
 }
 
@@ -379,19 +494,36 @@ private final class NetworkHelperIngressListener:
     private static let maximumChunkBytes = 64 * 1_024
     private static let connectTimeoutMilliseconds: Int64 = 5_000
     private static let idleTimeoutMilliseconds: Int64 = 30_000
+    private static let drainTimeoutSeconds = 2
+    private static let forcedCleanupTimeoutSeconds = 1
 
     private let descriptor: Int32
+    private let endpoint: String
+    private let configuration: NetworkHelperIngressConfiguration
     private let queue: DispatchQueue
     private let lock = NSLock()
     private let stopped = DispatchSemaphore(value: 0)
-    private var binding: ProjectIngressListenerBinding
+    private let connections = DispatchGroup()
     private var running = false
     private var closed = false
+    private var forceClosing = false
     private var activeConnections = 0
+    private var activeDescriptors: [Int32: Set<Int32>] = [:]
     private var nextBackend = 0
+    private let accessLogger:
+        @Sendable (NetworkHelperIngressAccessLogEntry) -> Void
 
-    init(binding: ProjectIngressListenerBinding) throws {
-        self.binding = binding
+    init(
+        binding: ProjectIngressListenerBinding,
+        endpoint: String,
+        configuration: NetworkHelperIngressConfiguration,
+        accessLogger: @escaping @Sendable (
+            NetworkHelperIngressAccessLogEntry
+        ) -> Void
+    ) throws {
+        self.endpoint = endpoint
+        self.configuration = configuration
+        self.accessLogger = accessLogger
         queue = DispatchQueue(
             label:
                 "dev.hostwright.ingress.\(binding.name).\(binding.port)",
@@ -454,12 +586,6 @@ private final class NetworkHelperIngressListener:
         succeeded = true
     }
 
-    func update(_ binding: ProjectIngressListenerBinding) {
-        lock.lock()
-        self.binding = binding
-        lock.unlock()
-    }
-
     func start() {
         lock.lock()
         guard !running, !closed else {
@@ -488,6 +614,23 @@ private final class NetworkHelperIngressListener:
         if wasRunning {
             _ = stopped.wait(timeout: .now() + 2)
         }
+        if connections.wait(
+            timeout: .now() +
+                .seconds(Self.drainTimeoutSeconds)
+        ) == .timedOut {
+            lock.lock()
+            forceClosing = true
+            for active in activeDescriptors.values {
+                for descriptor in active {
+                    _ = Darwin.shutdown(descriptor, SHUT_RDWR)
+                }
+            }
+            lock.unlock()
+            _ = connections.wait(
+                timeout: .now() +
+                    .seconds(Self.forcedCleanupTimeoutSeconds)
+            )
+        }
         Darwin.close(descriptor)
     }
 
@@ -505,29 +648,54 @@ private final class NetworkHelperIngressListener:
                 errno == EINTR {
                 continue
             }
-            guard client >= 0, reserveConnection() else {
+            guard client >= 0,
+                  let binding = configuration.binding(
+                      for: endpoint
+                  ),
+                  reserveConnection(client) else {
                 if client >= 0 { Darwin.close(client) }
                 continue
             }
             DispatchQueue.global(qos: .userInitiated).async {
                 [self] in
-                defer {
-                    Darwin.close(client)
-                    releaseConnection()
-                }
-                handle(client)
+                defer { finishConnection(client) }
+                handle(client, binding: binding)
             }
         }
     }
 
-    private func handle(_ client: Int32) {
+    private func handle(
+        _ client: Int32,
+        binding: ProjectIngressListenerBinding
+    ) {
+        let started = Self.monotonicMilliseconds()
+        let listenerName = binding.name
         guard Self.configure(client),
               let request = try? Self.readRequest(client) else {
             Self.writeError(client, status: 400, reason: "Bad Request")
+            record(
+                listenerName: listenerName,
+                request: nil,
+                route: nil,
+                backend: nil,
+                outcome: .rejected,
+                started: started
+            )
             return
         }
-        guard let route = matchingRoute(request) else {
+        guard let route = matchingRoute(
+            request,
+            routes: binding.routes
+        ) else {
             Self.writeError(client, status: 404, reason: "Not Found")
+            record(
+                listenerName: listenerName,
+                request: request,
+                route: nil,
+                backend: nil,
+                outcome: .noRoute,
+                started: started
+            )
             return
         }
         guard !route.backends.isEmpty else {
@@ -536,13 +704,26 @@ private final class NetworkHelperIngressListener:
                 status: 503,
                 reason: "Service Unavailable"
             )
+            record(
+                listenerName: listenerName,
+                request: request,
+                route: route,
+                backend: nil,
+                outcome: .unavailable,
+                started: started
+            )
             return
         }
         let ordered = orderedBackends(route.backends)
         var upstream: Int32 = -1
+        var selectedBackend: ProjectIngressBackend?
         for backend in ordered.prefix(2) {
-            if let connected = try? Self.connect(backend) {
+            if let connected = try? connect(
+                backend,
+                client: client
+            ) {
                 upstream = connected
+                selectedBackend = backend
                 break
             }
         }
@@ -552,9 +733,22 @@ private final class NetworkHelperIngressListener:
                 status: 502,
                 reason: "Bad Gateway"
             )
+            record(
+                listenerName: listenerName,
+                request: request,
+                route: route,
+                backend: nil,
+                outcome: .upstreamFailed,
+                started: started
+            )
             return
         }
-        defer { Darwin.close(upstream) }
+        defer {
+            closeTrackedDescriptor(
+                upstream,
+                client: client
+            )
+        }
         guard Self.writeRequest(
             request,
             descriptor: upstream
@@ -564,17 +758,55 @@ private final class NetworkHelperIngressListener:
                 status: 502,
                 reason: "Bad Gateway"
             )
+            record(
+                listenerName: listenerName,
+                request: request,
+                route: route,
+                backend: selectedBackend,
+                outcome: .upstreamFailed,
+                started: started
+            )
             return
         }
         Self.bridge(client, upstream)
+        record(
+            listenerName: listenerName,
+            request: request,
+            route: route,
+            backend: selectedBackend,
+            outcome: .forwarded,
+            started: started
+        )
+    }
+
+    private func record(
+        listenerName: String,
+        request: NetworkHelperIngressHTTPRequest?,
+        route: ProjectIngressRouteBinding?,
+        backend: ProjectIngressBackend?,
+        outcome: NetworkHelperIngressAccessOutcome,
+        started: Int64
+    ) {
+        accessLogger(NetworkHelperIngressAccessLogEntry(
+            timestampUnixMilliseconds: Int64(
+                Date().timeIntervalSince1970 * 1_000
+            ),
+            listenerName: listenerName,
+            method: request?.method,
+            routeHostname: route?.hostname,
+            routePathPrefix: route?.pathPrefix,
+            protocolName: route?.protocolName,
+            targetServiceUUID: backend?.serviceUUID,
+            outcome: outcome,
+            durationMilliseconds:
+                Self.monotonicMilliseconds() - started
+        ))
     }
 
     private func matchingRoute(
-        _ request: NetworkHelperIngressHTTPRequest
+        _ request: NetworkHelperIngressHTTPRequest,
+        routes: [ProjectIngressRouteBinding]
     ) -> ProjectIngressRouteBinding? {
-        lock.lock()
-        let routes = binding.routes
-        lock.unlock()
         return routes.filter {
             $0.hostname == request.hostname &&
                 $0.methods.contains(request.method) &&
@@ -615,19 +847,50 @@ private final class NetworkHelperIngressListener:
         return running
     }
 
-    private func reserveConnection() -> Bool {
+    private func reserveConnection(_ client: Int32) -> Bool {
         lock.lock()
         defer { lock.unlock() }
-        guard activeConnections < Self.maximumConnections else {
+        guard running,
+              !closed,
+              activeConnections < Self.maximumConnections else {
             return false
         }
         activeConnections += 1
+        activeDescriptors[client] = [client]
+        connections.enter()
         return true
     }
 
-    private func releaseConnection() {
+    private func finishConnection(_ client: Int32) {
         lock.lock()
+        activeDescriptors.removeValue(forKey: client)
+        Darwin.close(client)
         activeConnections = max(0, activeConnections - 1)
+        lock.unlock()
+        connections.leave()
+    }
+
+    private func trackUpstream(
+        _ upstream: Int32,
+        client: Int32
+    ) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !forceClosing,
+              activeDescriptors[client] != nil else {
+            return false
+        }
+        activeDescriptors[client]?.insert(upstream)
+        return true
+    }
+
+    private func closeTrackedDescriptor(
+        _ descriptor: Int32,
+        client: Int32
+    ) {
+        lock.lock()
+        activeDescriptors[client]?.remove(descriptor)
+        Darwin.close(descriptor)
         lock.unlock()
     }
 
@@ -763,8 +1026,9 @@ private final class NetworkHelperIngressListener:
         return writeAll(descriptor, data: data)
     }
 
-    private static func connect(
-        _ backend: ProjectIngressBackend
+    private func connect(
+        _ backend: ProjectIngressBackend,
+        client: Int32
     ) throws -> Int32 {
         let family = backend.address.contains(":")
             ? AF_INET6
@@ -773,8 +1037,23 @@ private final class NetworkHelperIngressListener:
         guard descriptor >= 0 else {
             throw NetworkHelperError.bindingUnavailable
         }
-        guard configure(descriptor) else {
+        guard trackUpstream(
+            descriptor,
+            client: client
+        ) else {
             Darwin.close(descriptor)
+            throw NetworkHelperError.bindingUnavailable
+        }
+        var succeeded = false
+        defer {
+            if !succeeded {
+                closeTrackedDescriptor(
+                    descriptor,
+                    client: client
+                )
+            }
+        }
+        guard Self.configure(descriptor) else {
             throw NetworkHelperError.bindingUnavailable
         }
         let flags = fcntl(descriptor, F_GETFL)
@@ -784,17 +1063,15 @@ private final class NetworkHelperIngressListener:
                   F_SETFL,
                   flags | O_NONBLOCK
               ) == 0 else {
-            Darwin.close(descriptor)
             throw NetworkHelperError.bindingUnavailable
         }
-        let result = withSocketAddress(
+        let result = Self.withSocketAddress(
             backend.address,
             port: backend.port
         ) {
             Darwin.connect(descriptor, $0.address, $0.length)
         }
         if result != 0, errno != EINPROGRESS {
-            Darwin.close(descriptor)
             throw NetworkHelperError.bindingUnavailable
         }
         var pollDescriptor = pollfd(
@@ -805,9 +1082,8 @@ private final class NetworkHelperIngressListener:
         guard Darwin.poll(
             &pollDescriptor,
             1,
-            Int32(connectTimeoutMilliseconds)
+            Int32(Self.connectTimeoutMilliseconds)
         ) > 0 else {
-            Darwin.close(descriptor)
             throw NetworkHelperError.bindingUnavailable
         }
         var socketError: Int32 = 0
@@ -820,9 +1096,9 @@ private final class NetworkHelperIngressListener:
             &length
         ) == 0,
         socketError == 0 else {
-            Darwin.close(descriptor)
             throw NetworkHelperError.bindingUnavailable
         }
+        succeeded = true
         return descriptor
     }
 

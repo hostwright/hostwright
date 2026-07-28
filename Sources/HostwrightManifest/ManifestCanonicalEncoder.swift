@@ -429,6 +429,14 @@ public enum ManifestCanonicalEncoder {
             }
             lines.append("        target: \(canonicalPortSpan(value.target))")
             lines.append("        protocol: \(quote(value.protocolName.rawValue))")
+            if let exposure = value.exposure, !exposure.isDefaultLocalhost {
+                lines.append("        exposure:")
+                lines.append("          scope: \(quote(exposure.scope.rawValue))")
+                lines.append("          interfaces: \(array(exposure.interfaces))")
+                lines.append("          networkClasses: \(array(exposure.networkClasses.map(\.rawValue)))")
+                lines.append("          allowedCIDRs: \(array(exposure.allowedCIDRs))")
+                lines.append("          authentication: \(quote(exposure.authentication.rawValue))")
+            }
         }
         for value in sockets {
             if let hostName = value.hostName {

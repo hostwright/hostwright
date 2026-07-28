@@ -2,6 +2,7 @@ import Foundation
 import XCTest
 @testable import HostwrightCore
 @testable import HostwrightManifest
+@testable import HostwrightNetworking
 @testable import HostwrightRuntime
 @testable import HostwrightSecrets
 @testable import HostwrightState
@@ -219,12 +220,77 @@ final class HostwrightStateTests: XCTestCase {
             XCTAssertEqual(desiredServices[0].serviceName, "api")
             XCTAssertEqual(
                 desiredServices[0].portsJSON,
-                #"[{"allocation":"fixed","bindAddress":"127.0.0.1","host":"8080","protocol":"tcp","target":"8080"}]"#
+                #"[{"allocation":"fixed","bindAddress":"127.0.0.1","exposure":{"accessMode":"none","allowedCIDRs":[],"interfaces":[],"networkClasses":[],"scope":"localhost"},"host":"8080","protocol":"tcp","target":"8080"}]"#
             )
             XCTAssertTrue(desiredServices[0].environmentJSONRedacted.contains("[REDACTED]"))
             XCTAssertFalse(desiredServices[0].environmentJSONRedacted.contains(fakeSecret))
             XCTAssertFalse(desiredServices[0].environmentJSONRedacted.contains("hostwright.api"))
             XCTAssertFalse(desiredServices[0].environmentJSONRedacted.contains("api-token"))
+        }
+    }
+
+    func testDeclaredPortExposurePersistsInDesiredState() throws {
+        try withTemporaryStore { store, _ in
+            try store.migrate()
+            let exposure = HostwrightPortExposurePolicy(
+                scope: .lan,
+                interfaces: ["en0"],
+                networkClasses: [.privateLAN],
+                allowedCIDRs: ["192.168.1.0/24"],
+                authentication: .tls
+            )
+            let manifest = HostwrightManifest(
+                project: "api-local",
+                services: [
+                    HostwrightService(
+                        name: "api",
+                        image: "local/api:latest",
+                        publishedPorts: [
+                            HostwrightPublishedPort(
+                                host: HostwrightPortSpan(start: 8_443),
+                                target: HostwrightPortSpan(start: 9_443),
+                                protocolName: .tcp,
+                                bindAddress: "192.168.1.10",
+                                exposure: exposure
+                            )
+                        ]
+                    )
+                ]
+            )
+            try store.desiredStates.saveManifestSnapshot(
+                projectID: projectID,
+                manifestPath: "/tmp/hostwright.yaml",
+                manifestHash: "exposure-manifest-hash",
+                desiredGeneration: 1,
+                manifest: manifest,
+                timestamp: timestamp
+            )
+
+            let record = try XCTUnwrap(
+                try store.desiredStates
+                    .loadDesiredServices(projectID: projectID)
+                    .first
+            )
+            let data = try XCTUnwrap(record.portsJSON.data(using: .utf8))
+            let ports = try XCTUnwrap(
+                JSONSerialization.jsonObject(with: data)
+                    as? [[String: Any]]
+            )
+            let persisted = try XCTUnwrap(
+                ports.first?["exposure"] as? [String: Any]
+            )
+
+            XCTAssertEqual(persisted["scope"] as? String, "lan")
+            XCTAssertEqual(persisted["accessMode"] as? String, "tls")
+            XCTAssertEqual(persisted["interfaces"] as? [String], ["en0"])
+            XCTAssertEqual(
+                persisted["networkClasses"] as? [String],
+                ["private"]
+            )
+            XCTAssertEqual(
+                persisted["allowedCIDRs"] as? [String],
+                ["192.168.1.0/24"]
+            )
         }
     }
 

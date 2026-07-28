@@ -384,7 +384,9 @@ public enum ManifestRuntimeMapper {
             .udp
         }
 
-        if !NetworkBindAddressPolicy.isLocalhost(port.effectiveBindAddress) {
+        let exposure = port.effectiveExposure
+        if exposure.scope == .localhost &&
+            !NetworkBindAddressPolicy.isLocalhost(port.effectiveBindAddress) {
             issues.append(
                 PlanIssue(
                     kind: .unsafeExposure,
@@ -392,6 +394,16 @@ public enum ManifestRuntimeMapper {
                     identity: identity,
                     message: "Published port bind address '\(port.effectiveBindAddress)' is outside the localhost-only runtime boundary.",
                     stableDetailKey: port.effectiveBindAddress
+                )
+            )
+        } else if exposure.scope != .localhost {
+            issues.append(
+                PlanIssue(
+                    kind: .unsupportedFeature,
+                    severity: .blocker,
+                    identity: identity,
+                    message: "Published port exposure scope '\(exposure.scope.rawValue)' requires a qualified secure listener provider before mutation.",
+                    stableDetailKey: exposureStableKey(exposure)
                 )
             )
         }
@@ -409,7 +421,8 @@ public enum ManifestRuntimeMapper {
                     containerPort: port.target.start + offset,
                     protocolName: protocolName,
                     bindAddress: port.effectiveBindAddress,
-                    allocation: .dynamic
+                    allocation: .dynamic,
+                    exposurePolicy: exposure
                 )
             }
         }
@@ -429,9 +442,22 @@ public enum ManifestRuntimeMapper {
                 containerPort: port.target.start + offset,
                 protocolName: protocolName,
                 bindAddress: port.effectiveBindAddress,
-                allocation: .fixed
+                allocation: .fixed,
+                exposurePolicy: exposure
             )
         }
+    }
+
+    private static func exposureStableKey(
+        _ exposure: HostwrightPortExposurePolicy
+    ) -> String {
+        [
+            exposure.scope.rawValue,
+            exposure.authentication.rawValue,
+            exposure.interfaces.joined(separator: ","),
+            exposure.networkClasses.map(\.rawValue).joined(separator: ","),
+            exposure.allowedCIDRs.joined(separator: ",")
+        ].joined(separator: "|")
     }
 
     private static func unsupportedPortIssue(

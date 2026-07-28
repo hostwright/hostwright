@@ -1,5 +1,6 @@
 import XCTest
 @testable import HostwrightManifest
+@testable import HostwrightNetworking
 @testable import HostwrightReconciler
 @testable import HostwrightRuntime
 
@@ -159,6 +160,45 @@ final class ManifestRuntimePortMappingTests: XCTestCase {
                 $0.severity == .blocker &&
                 $0.stableDetailKey == "192.168.1.10" &&
                 $0.message == "Published port bind address '192.168.1.10' is outside the localhost-only runtime boundary."
+        })
+    }
+
+    func testMapsDeclaredLANExposureAndBlocksUntilSecureListenerIsQualified() throws {
+        let exposure = HostwrightPortExposurePolicy(
+            scope: .lan,
+            interfaces: ["en0"],
+            networkClasses: [.privateLAN],
+            allowedCIDRs: ["192.168.1.0/24"],
+            authentication: .tls
+        )
+        let service = HostwrightService(
+            name: "api",
+            image: "example.invalid/api:local",
+            publishedPorts: [
+                HostwrightPublishedPort(
+                    host: HostwrightPortSpan(start: 18_080),
+                    target: HostwrightPortSpan(start: 8_080),
+                    protocolName: .tcp,
+                    bindAddress: "192.168.1.10",
+                    exposure: exposure
+                )
+            ]
+        )
+
+        let mapping = ManifestRuntimeMapper.map(
+            HostwrightManifest(version: 2, project: "demo", services: [service])
+        )
+
+        XCTAssertEqual(
+            try XCTUnwrap(mapping.desiredState.services.first)
+                .ports.first?.exposurePolicy,
+            exposure
+        )
+        XCTAssertTrue(mapping.issues.contains {
+            $0.kind == .unsupportedFeature &&
+                $0.severity == .blocker &&
+                $0.message ==
+                    "Published port exposure scope 'lan' requires a qualified secure listener provider before mutation."
         })
     }
 

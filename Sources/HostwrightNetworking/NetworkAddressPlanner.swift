@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import SystemConfiguration
 
 public enum NetworkAddressFamily: String, Codable, CaseIterable, Equatable, Hashable, Sendable {
     case ipv4
@@ -127,8 +128,40 @@ public enum NetworkHostInterfaceInventoryError: Error, Equatable, Sendable {
     case addressRenderingFailed
 }
 
+public struct NetworkHostInterfaceAddress:
+    Codable,
+    Equatable,
+    Hashable,
+    Sendable
+{
+    public let interfaceName: String
+    public let address: String
+    public let cidr: String
+    public let family: NetworkAddressFamily
+    public let networkClass: HostwrightNetworkClass
+    public let isLoopback: Bool
+
+    public init(
+        interfaceName: String,
+        address: String,
+        cidr: String,
+        family: NetworkAddressFamily,
+        networkClass: HostwrightNetworkClass,
+        isLoopback: Bool
+    ) {
+        self.interfaceName = interfaceName
+        self.address = address
+        self.cidr = cidr
+        self.family = family
+        self.networkClass = networkClass
+        self.isLoopback = isLoopback
+    }
+}
+
 public enum NetworkHostInterfaceInventory {
-    public static func currentCIDRs() throws -> [String] {
+    public static func currentAddresses() throws
+        -> [NetworkHostInterfaceAddress]
+    {
         var first: UnsafeMutablePointer<ifaddrs>?
         let status = getifaddrs(&first)
         guard status == 0 else {
@@ -137,11 +170,12 @@ public enum NetworkHostInterfaceInventory {
         guard let first else { return [] }
         defer { freeifaddrs(first) }
 
-        var result = Set<String>()
+        var result = Set<NetworkHostInterfaceAddress>()
         var current: UnsafeMutablePointer<ifaddrs>? = first
         while let interface = current {
             defer { current = interface.pointee.ifa_next }
-            guard interface.pointee.ifa_flags & UInt32(IFF_UP) != 0,
+            let flags = interface.pointee.ifa_flags
+            guard flags & UInt32(IFF_UP) != 0,
                   let address = interface.pointee.ifa_addr,
                   let netmask = interface.pointee.ifa_netmask else {
                 continue
@@ -155,25 +189,91 @@ public enum NetworkHostInterfaceInventory {
             default:
                 continue
             }
-            let addressBytes = bytes(
-                address,
-                family: family
-            )
-            let netmaskBytes = bytes(
-                netmask,
-                family: family
-            )
+            let addressBytes = bytes(address, family: family)
+            let netmaskBytes = bytes(netmask, family: family)
             guard let prefix = contiguousPrefixLength(netmaskBytes) else {
                 throw NetworkHostInterfaceInventoryError.invalidNetmask
             }
             let networkBytes = zip(addressBytes, netmaskBytes).map {
                 $0 & $1
             }
+            let renderedAddress = try render(
+                addressBytes,
+                family: family
+            )
+            let renderedNetwork = try render(
+                networkBytes,
+                family: family
+            )
+            let name = String(cString: interface.pointee.ifa_name)
+            let isLoopback =
+                flags & UInt32(IFF_LOOPBACK) != 0
             result.insert(
-                "\(try render(networkBytes, family: family))/\(prefix)"
+                NetworkHostInterfaceAddress(
+                    interfaceName: name,
+                    address: renderedAddress,
+                    cidr: "\(renderedNetwork)/\(prefix)",
+                    family: family,
+                    networkClass: networkClass(
+                        interfaceName: name,
+                        addressBytes: addressBytes,
+                        family: family,
+                        isLoopback: isLoopback
+                    ),
+                    isLoopback: isLoopback
+                )
             )
         }
-        return result.sorted()
+        return result.sorted {
+            (
+                $0.interfaceName,
+                $0.family.rawValue,
+                $0.address
+            ) < (
+                $1.interfaceName,
+                $1.family.rawValue,
+                $1.address
+            )
+        }
+    }
+
+    public static func currentCIDRs() throws -> [String] {
+        Array(Set(try currentAddresses().map(\.cidr))).sorted()
+    }
+
+    private static func networkClass(
+        interfaceName: String,
+        addressBytes: [UInt8],
+        family: NetworkAddressFamily,
+        isLoopback: Bool
+    ) -> HostwrightNetworkClass {
+        if interfaceName.hasPrefix("utun") ||
+            interfaceName.hasPrefix("ipsec") ||
+            interfaceName.hasPrefix("ppp") {
+            return .vpn
+        }
+        if isLoopback {
+            return .privateLAN
+        }
+        switch family {
+        case .ipv4:
+            if addressBytes[0] == 10 ||
+                (addressBytes[0] == 172 &&
+                    (16...31).contains(addressBytes[1])) ||
+                (addressBytes[0] == 192 &&
+                    addressBytes[1] == 168) ||
+                (addressBytes[0] == 169 &&
+                    addressBytes[1] == 254) {
+                return .privateLAN
+            }
+        case .ipv6:
+            if addressBytes[0] & 0xfe == 0xfc ||
+                (addressBytes[0] == 0xfe &&
+                    addressBytes[1] & 0xc0 == 0x80) {
+                return .privateLAN
+            }
+        }
+        return .publicInternet
     }
 
     private static func bytes(
@@ -236,6 +336,123 @@ public enum NetworkHostInterfaceInventory {
                 .addressRenderingFailed
         }
         return ParsedIPAddress.decodedCString(output)
+    }
+}
+
+public enum NetworkLocalPermissionState:
+    String,
+    Codable,
+    Equatable,
+    Sendable
+{
+    case notProbed
+    case granted
+    case denied
+}
+
+public enum NetworkVPNState: String, Codable, Equatable, Sendable {
+    case inactive
+    case active
+}
+
+public enum NetworkPrivateRelayState:
+    String,
+    Codable,
+    Equatable,
+    Sendable
+{
+    case inactive
+    case active
+    case notObservable
+}
+
+public struct NetworkHostEnvironmentSnapshot:
+    Codable,
+    Equatable,
+    Sendable
+{
+    public let addresses: [NetworkHostInterfaceAddress]
+    public let primaryInterface: String?
+    public let defaultRouter: String?
+    public let vpnState: NetworkVPNState
+    public let privateRelayState: NetworkPrivateRelayState
+    public let localNetworkPermission: NetworkLocalPermissionState
+
+    public init(
+        addresses: [NetworkHostInterfaceAddress],
+        primaryInterface: String?,
+        defaultRouter: String?,
+        vpnState: NetworkVPNState,
+        privateRelayState: NetworkPrivateRelayState,
+        localNetworkPermission: NetworkLocalPermissionState
+    ) {
+        self.addresses = addresses.sorted {
+            (
+                $0.interfaceName,
+                $0.family.rawValue,
+                $0.address
+            ) < (
+                $1.interfaceName,
+                $1.family.rawValue,
+                $1.address
+            )
+        }
+        self.primaryInterface = primaryInterface
+        self.defaultRouter = defaultRouter
+        self.vpnState = vpnState
+        self.privateRelayState = privateRelayState
+        self.localNetworkPermission = localNetworkPermission
+    }
+
+    public var stableFingerprint: String {
+        let addressFingerprint = addresses.map {
+            [
+                $0.interfaceName,
+                $0.address,
+                $0.cidr,
+                $0.family.rawValue,
+                $0.networkClass.rawValue
+            ].joined(separator: "|")
+        }.joined(separator: ",")
+        return [
+            primaryInterface ?? "",
+            defaultRouter ?? "",
+            vpnState.rawValue,
+            privateRelayState.rawValue,
+            localNetworkPermission.rawValue,
+            addressFingerprint
+        ].joined(separator: "\u{1f}")
+    }
+}
+
+public enum NetworkHostEnvironmentProbe {
+    public static func current(
+        localNetworkPermission: NetworkLocalPermissionState = .notProbed,
+        privateRelayState: NetworkPrivateRelayState = .notObservable
+    ) throws -> NetworkHostEnvironmentSnapshot {
+        let addresses = try NetworkHostInterfaceInventory.currentAddresses()
+        let globalIPv4 = SCDynamicStoreCopyValue(
+            nil,
+            "State:/Network/Global/IPv4" as CFString
+        ) as? [String: Any]
+        let primaryInterface = globalIPv4?[
+            kSCDynamicStorePropNetPrimaryInterface as String
+        ] as? String
+        let defaultRouter = globalIPv4?[
+            kSCPropNetIPv4Router as String
+        ] as? String
+        let vpnState: NetworkVPNState = addresses.contains {
+            !$0.isLoopback && $0.networkClass == .vpn
+        } ? .active : .inactive
+
+        return NetworkHostEnvironmentSnapshot(
+            addresses: addresses,
+            primaryInterface: primaryInterface,
+            defaultRouter: defaultRouter,
+            vpnState: vpnState,
+            privateRelayState: privateRelayState,
+            localNetworkPermission: localNetworkPermission
+        )
     }
 }
 

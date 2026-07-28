@@ -129,6 +129,45 @@ final class RuntimeCreateSubsetPolicyTests: XCTestCase {
         }
     }
 
+    func testAppleContainerCLIRejectsDeclaredLANExposureBeforeMutation() {
+        let service = makeService(
+            ports: [
+                RuntimePortMapping(
+                    hostPort: 8_443,
+                    containerPort: 9_443,
+                    protocolName: .tcp,
+                    bindAddress: "192.168.1.10",
+                    allocation: .fixed,
+                    exposurePolicy: HostwrightPortExposurePolicy(
+                        scope: .lan,
+                        interfaces: ["en0"],
+                        networkClasses: [.privateLAN],
+                        allowedCIDRs: ["192.168.1.0/24"],
+                        authentication: .tls
+                    )
+                )
+            ]
+        )
+
+        XCTAssertThrowsError(
+            try RuntimeCreateSubsetPolicy.validate(
+                service,
+                providerID: .appleContainerCLI
+            )
+        ) { error in
+            guard case RuntimeAdapterError.commandRejected(
+                classification: .mutating,
+                message: let message
+            ) = error else {
+                return XCTFail("Expected secure-listener rejection, got \(error)")
+            }
+            XCTAssertEqual(
+                message,
+                "Create-only apply requires a qualified secure listener provider for non-localhost exposure."
+            )
+        }
+    }
+
     func testAppleContainerCLIRejectsInvalidPlatformAndPortCombinations() {
         let cases: [(String, DesiredRuntimeService)] = [
             (

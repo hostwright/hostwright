@@ -363,6 +363,7 @@ public struct DesiredStateRepository: Sendable {
         [
             "allocation": port.host == nil ? "dynamic" : "fixed",
             "bindAddress": port.effectiveBindAddress,
+            "exposure": exposureJSON(port.effectiveExposure),
             "host": port.host.map { $0.canonicalString as Any } ?? NSNull(),
             "protocol": port.protocolName.rawValue,
             "target": port.target.canonicalString
@@ -376,8 +377,33 @@ public struct DesiredStateRepository: Sendable {
             port.effectiveBindAddress,
             port.host?.canonicalString ?? "dynamic",
             port.target.canonicalString,
-            port.protocolName.rawValue
+            port.protocolName.rawValue,
+            exposureKey(port.effectiveExposure)
         ].joined(separator: "\u{1f}")
+    }
+
+    private func exposureJSON(
+        _ exposure: HostwrightPortExposurePolicy
+    ) -> [String: Any] {
+        [
+            "allowedCIDRs": exposure.allowedCIDRs,
+            "accessMode": exposure.authentication.rawValue,
+            "interfaces": exposure.interfaces,
+            "networkClasses": exposure.networkClasses.map(\.rawValue),
+            "scope": exposure.scope.rawValue
+        ]
+    }
+
+    private func exposureKey(
+        _ exposure: HostwrightPortExposurePolicy
+    ) -> String {
+        [
+            exposure.scope.rawValue,
+            exposure.authentication.rawValue,
+            exposure.interfaces.joined(separator: ","),
+            exposure.networkClasses.map(\.rawValue).joined(separator: ","),
+            exposure.allowedCIDRs.joined(separator: ",")
+        ].joined(separator: "|")
     }
 
     private func publishedSocketJSON(

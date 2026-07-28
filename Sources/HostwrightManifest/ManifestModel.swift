@@ -532,6 +532,7 @@ public struct HostwrightPublishedPort: Sendable {
     public let target: HostwrightPortSpan
     public let protocolName: HostwrightPortProtocol
     public let bindAddress: String?
+    public let exposure: HostwrightPortExposurePolicy?
     public let legacyLiteral: String?
 
     public init(
@@ -541,15 +542,43 @@ public struct HostwrightPublishedPort: Sendable {
         bindAddress: String? = nil,
         legacyLiteral: String? = nil
     ) {
+        self.init(
+            host: host,
+            target: target,
+            protocolName: protocolName,
+            bindAddress: bindAddress,
+            exposure: nil,
+            legacyLiteral: legacyLiteral
+        )
+    }
+
+    public init(
+        host: HostwrightPortSpan?,
+        target: HostwrightPortSpan,
+        protocolName: HostwrightPortProtocol,
+        bindAddress: String?,
+        exposure: HostwrightPortExposurePolicy?,
+        legacyLiteral: String? = nil
+    ) {
         self.host = host
         self.target = target
         self.protocolName = protocolName
         self.bindAddress = bindAddress
+        self.exposure = exposure
         self.legacyLiteral = legacyLiteral
     }
 
     public var effectiveBindAddress: String {
-        bindAddress ?? Self.localhostBindAddress
+        let normalized = NetworkBindAddressPolicy.normalizedBindAddress(
+            bindAddress
+        )
+        return normalized == "localhost"
+            ? Self.localhostBindAddress
+            : normalized
+    }
+
+    public var effectiveExposure: HostwrightPortExposurePolicy {
+        exposure ?? .localhost
     }
 
     public var hostPort: Int? {
@@ -601,7 +630,8 @@ extension HostwrightPublishedPort: Equatable {
         lhs.host == rhs.host &&
             lhs.target == rhs.target &&
             lhs.protocolName == rhs.protocolName &&
-            lhs.effectiveBindAddress == rhs.effectiveBindAddress
+            lhs.effectiveBindAddress == rhs.effectiveBindAddress &&
+            lhs.effectiveExposure == rhs.effectiveExposure
     }
 }
 

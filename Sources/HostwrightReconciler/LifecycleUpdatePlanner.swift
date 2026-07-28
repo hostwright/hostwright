@@ -193,21 +193,24 @@ public enum LifecycleRevisionCodec {
                 $0.containerPort,
                 $0.protocolName.rawValue,
                 $0.bindAddress ?? "",
-                $0.allocation.rawValue
+                $0.allocation.rawValue,
+                exposureSortKey($0.exposurePolicy)
             ) < (
                 $1.hostPort ?? -1,
                 $1.containerPort,
                 $1.protocolName.rawValue,
                 $1.bindAddress ?? "",
-                $1.allocation.rawValue
+                $1.allocation.rawValue,
+                exposureSortKey($1.exposurePolicy)
             )
-        }.map {
+        }.map { port -> [String: Any] in
             [
-                "allocation": $0.allocation.rawValue,
-                "bindAddress": $0.bindAddress.map { $0 as Any } ?? NSNull(),
-                "containerPort": $0.containerPort,
-                "hostPort": $0.hostPort.map { $0 as Any } ?? NSNull(),
-                "protocol": $0.protocolName.rawValue
+                "allocation": port.allocation.rawValue,
+                "bindAddress": port.bindAddress.map { $0 as Any } ?? NSNull(),
+                "containerPort": port.containerPort,
+                "exposure": exposureDocument(port.exposurePolicy),
+                "hostPort": port.hostPort.map { $0 as Any } ?? NSNull(),
+                "protocol": port.protocolName.rawValue
             ]
         }
         let publishedSockets = service.publishedSockets.sorted {
@@ -349,6 +352,30 @@ public enum LifecycleRevisionCodec {
             throw LifecyclePlanError.encodingFailed
         }
         return try LifecycleCanonicalJSON.canonicalObjectJSON(json)
+    }
+
+    private static func exposureSortKey(
+        _ exposure: HostwrightPortExposurePolicy
+    ) -> String {
+        [
+            exposure.scope.rawValue,
+            exposure.authentication.rawValue,
+            exposure.interfaces.joined(separator: ","),
+            exposure.networkClasses.map(\.rawValue).joined(separator: ","),
+            exposure.allowedCIDRs.joined(separator: ",")
+        ].joined(separator: "|")
+    }
+
+    private static func exposureDocument(
+        _ exposure: HostwrightPortExposurePolicy
+    ) -> [String: Any] {
+        [
+            "allowedCIDRs": exposure.allowedCIDRs,
+            "accessMode": exposure.authentication.rawValue,
+            "interfaces": exposure.interfaces,
+            "networkClasses": exposure.networkClasses.map(\.rawValue),
+            "scope": exposure.scope.rawValue
+        ]
     }
 
     public static func revisionSHA256(
@@ -874,13 +901,14 @@ public enum LifecycleRevisionCodec {
         let hostPort: Int?
         let protocolName: String
         let allocation: String
+        let exposure: ExposureDocument?
 
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: RevisionCodingKey.self)
             try LifecycleRevisionCodec.validateKeys(
                 container,
                 required: ["bindAddress", "containerPort", "hostPort", "protocol"],
-                optional: ["allocation"],
+                optional: ["allocation", "exposure"],
                 path: "ports"
             )
             bindAddress = try container.decodeIfPresent(
@@ -894,6 +922,10 @@ public enum LifecycleRevisionCodec {
                 String.self,
                 forKey: "allocation"
             ) ?? RuntimeHostPortAllocation.fixed.rawValue
+            exposure = try container.decodeIfPresent(
+                ExposureDocument.self,
+                forKey: "exposure"
+            )
         }
 
         var value: RuntimePortMapping {
@@ -912,8 +944,101 @@ public enum LifecycleRevisionCodec {
                     containerPort: containerPort,
                     protocolName: decoded,
                     bindAddress: bindAddress,
-                    allocation: decodedAllocation
+                    allocation: decodedAllocation,
+                    exposurePolicy: try exposure?.value ?? .localhost
                 )
+            }
+        }
+    }
+
+    private struct ExposureDocument: Decodable {
+        let allowedCIDRs: [String]
+        let accessMode: String
+        let interfaces: [String]
+        let networkClasses: [String]
+        let scope: String
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(
+                keyedBy: RevisionCodingKey.self
+            )
+            try LifecycleRevisionCodec.validateKeys(
+                container,
+                required: [
+                    "allowedCIDRs",
+                    "accessMode",
+                    "interfaces",
+                    "networkClasses",
+                    "scope"
+                ],
+                optional: [],
+                path: "ports.exposure"
+            )
+            allowedCIDRs = try container.decode(
+                [String].self,
+                forKey: "allowedCIDRs"
+            )
+            accessMode = try container.decode(
+                String.self,
+                forKey: "accessMode"
+            )
+            interfaces = try container.decode(
+                [String].self,
+                forKey: "interfaces"
+            )
+            networkClasses = try container.decode(
+                [String].self,
+                forKey: "networkClasses"
+            )
+            scope = try container.decode(String.self, forKey: "scope")
+        }
+
+        var value: HostwrightPortExposurePolicy {
+            get throws {
+                guard let decodedScope = NetworkExposureScope(rawValue: scope),
+                      let decodedAuthentication =
+                        NetworkExposureAuthentication(rawValue: accessMode)
+                else {
+                    throw LifecycleRevisionCodec.invalidEnum(
+                        "ports.exposure"
+                    )
+                }
+                let decodedClasses = try networkClasses.map { value in
+                    guard let decoded = HostwrightNetworkClass(rawValue: value)
+                    else {
+                        throw LifecycleRevisionCodec.invalidEnum(
+                            "ports.exposure.networkClasses"
+                        )
+                    }
+                    return decoded
+                }
+                let decoded = HostwrightPortExposurePolicy(
+                    scope: decodedScope,
+                    interfaces: interfaces,
+                    networkClasses: decodedClasses,
+                    allowedCIDRs: allowedCIDRs,
+                    authentication: decodedAuthentication
+                )
+                guard decoded.interfaces == interfaces,
+                      decoded.networkClasses.map(\.rawValue) == networkClasses,
+                      decoded.allowedCIDRs == allowedCIDRs,
+                      interfaces.count <=
+                        HostwrightPortExposurePolicy.maximumInterfaceSelectors,
+                      allowedCIDRs.count <=
+                        HostwrightPortExposurePolicy.maximumAllowedCIDRs,
+                      interfaces.allSatisfy(
+                        NetworkExposurePolicyValidation
+                            .isValidInterfaceSelector
+                      ),
+                      allowedCIDRs.allSatisfy({
+                        NetworkExposurePolicyValidation.canonicalCIDR($0) == $0
+                      })
+                else {
+                    throw LifecycleRevisionCodecError.invalidField(
+                        "ports.exposure"
+                    )
+                }
+                return decoded
             }
         }
     }

@@ -492,7 +492,24 @@ public struct LocalPolicyEvaluator: Equatable, Sendable {
                     )
                 }
 
-                if configuration.blockedBindAddresses.contains(NetworkBindAddressPolicy.normalizedBindAddress(port.bindAddress)) {
+                if !port.exposurePolicy.isDefaultLocalhost {
+                    decisions.append(
+                        PolicyDecision(
+                            category: .exposure,
+                            reasonCode: .secureExposureUnsupported,
+                            severity: .blocker,
+                            identity: service.identity,
+                            subject: key,
+                            message:
+                                "Desired \(port.exposurePolicy.scope.rawValue) exposure requires a qualified secure listener provider.",
+                            remediation:
+                                "Keep the service localhost-scoped until its secure listener capability is available.",
+                            stableDetailKey: key
+                        )
+                    )
+                } else if !NetworkBindAddressPolicy.isLocalhost(
+                    port.bindAddress
+                ) {
                     decisions.append(
                         PolicyDecision(
                             category: .exposure,
@@ -500,7 +517,8 @@ public struct LocalPolicyEvaluator: Equatable, Sendable {
                             severity: .blocker,
                             identity: service.identity,
                             subject: key,
-                            message: "Desired bind address is broader than the first-release policy allows.",
+                            message:
+                                "Desired bind address is broader than the first-release policy allows.",
                             remediation: "Bind the service to localhost.",
                             stableDetailKey: key
                         )

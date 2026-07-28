@@ -1,24 +1,81 @@
 import Darwin
 import Foundation
 import HostwrightCore
+import HostwrightNetworking
 import HostwrightRuntime
 
 enum NetworkPortSocketAvailability {
     static func isAvailable(
         _ endpoint: NetworkPortEndpoint
     ) throws -> Bool {
+        try isAvailable(
+            endpoint,
+            allowedInterfaceAddress: nil
+        )
+    }
+
+    static func isAvailable(
+        _ endpoint: NetworkPortEndpoint,
+        exposurePolicy: HostwrightPortExposurePolicy,
+        environment: NetworkHostEnvironmentSnapshot
+    ) throws -> Bool {
+        let evaluation = NetworkExposureEnvironmentEvaluator.evaluate(
+            policy: exposurePolicy,
+            bindAddress: endpoint.bindAddress,
+            environment: environment
+        )
+        guard evaluation.isAllowed else {
+            throw HostwrightDiagnostic(
+                code: .unsafeExposure,
+                message:
+                    "Port availability was denied because the exact host-network exposure policy is not currently satisfied."
+            )
+        }
+        return try isAvailable(
+            endpoint,
+            allowedInterfaceAddress: evaluation.selectedAddress
+        )
+    }
+
+    private static func isAvailable(
+        _ endpoint: NetworkPortEndpoint,
+        allowedInterfaceAddress: NetworkHostInterfaceAddress?
+    ) throws -> Bool {
         let family: Int32
+        let interfaceIndex: UInt32
         switch endpoint.bindAddress {
         case "127.0.0.1":
             family = AF_INET
+            interfaceIndex = 0
         case "::1":
             family = AF_INET6
+            interfaceIndex = 0
         default:
-            throw HostwrightDiagnostic(
-                code: .runtimeUnavailable,
-                message:
-                    "Port availability checks require an explicit localhost bind address."
-            )
+            guard let allowedInterfaceAddress,
+                  !allowedInterfaceAddress.isLoopback,
+                  allowedInterfaceAddress.address ==
+                    endpoint.bindAddress else {
+                throw HostwrightDiagnostic(
+                    code: .runtimeUnavailable,
+                    message:
+                        "Port availability checks require an approved exact active local-interface address."
+                )
+            }
+            family = allowedInterfaceAddress.family == .ipv4
+                ? AF_INET
+                : AF_INET6
+            interfaceIndex = family == AF_INET6
+                ? if_nametoindex(
+                    allowedInterfaceAddress.interfaceName
+                )
+                : 0
+            guard family != AF_INET6 || interfaceIndex != 0 else {
+                throw HostwrightDiagnostic(
+                    code: .runtimeUnavailable,
+                    message:
+                        "Could not resolve the approved IPv6 interface scope."
+                )
+            }
         }
 
         let socketType: Int32 = endpoint.protocolName == .tcp
@@ -50,6 +107,7 @@ enum NetworkPortSocketAvailability {
             address.sin6_family = sa_family_t(AF_INET6)
             address.sin6_port =
                 in_port_t(endpoint.hostPort).bigEndian
+            address.sin6_scope_id = interfaceIndex
             guard inet_pton(
                 AF_INET6,
                 endpoint.bindAddress,
@@ -58,7 +116,7 @@ enum NetworkPortSocketAvailability {
                 throw HostwrightDiagnostic(
                     code: .runtimeUnavailable,
                     message:
-                        "Could not normalize the IPv6 localhost bind address."
+                        "Could not normalize the exact IPv6 bind address."
                 )
             }
             result = withUnsafePointer(to: &address) {
@@ -90,7 +148,7 @@ enum NetworkPortSocketAvailability {
                 throw HostwrightDiagnostic(
                     code: .runtimeUnavailable,
                     message:
-                        "Could not normalize the IPv4 localhost bind address."
+                        "Could not normalize the exact IPv4 bind address."
                 )
             }
             result = withUnsafePointer(to: &address) {

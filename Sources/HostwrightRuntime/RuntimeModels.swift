@@ -150,6 +150,7 @@ public struct RuntimePortMapping: Equatable, Sendable {
     public let protocolName: RuntimePortProtocol
     public let bindAddress: String?
     public let allocation: RuntimeHostPortAllocation
+    public let exposurePolicy: HostwrightPortExposurePolicy
 
     public init(
         hostPort: Int?,
@@ -158,11 +159,30 @@ public struct RuntimePortMapping: Equatable, Sendable {
         bindAddress: String? = nil,
         allocation: RuntimeHostPortAllocation = .fixed
     ) {
+        self.init(
+            hostPort: hostPort,
+            containerPort: containerPort,
+            protocolName: protocolName,
+            bindAddress: bindAddress,
+            allocation: allocation,
+            exposurePolicy: .localhost
+        )
+    }
+
+    public init(
+        hostPort: Int?,
+        containerPort: Int,
+        protocolName: RuntimePortProtocol,
+        bindAddress: String?,
+        allocation: RuntimeHostPortAllocation,
+        exposurePolicy: HostwrightPortExposurePolicy
+    ) {
         self.hostPort = hostPort
         self.containerPort = containerPort
         self.protocolName = protocolName
         self.bindAddress = bindAddress
         self.allocation = allocation
+        self.exposurePolicy = exposurePolicy
     }
 }
 

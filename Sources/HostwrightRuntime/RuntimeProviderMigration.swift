@@ -1,6 +1,7 @@
 import CryptoKit
 import Foundation
 import HostwrightCore
+import HostwrightNetworking
 
 public enum RuntimeProviderMigrationCheckpoint: Int, Codable, CaseIterable, Comparable, Sendable {
     case intentPersisted
@@ -1566,6 +1567,18 @@ private extension RuntimeProviderMigrationEngine {
         return RuntimeProviderMigrationPlan.confirmationPrefix + digest
     }
 
+    private static func exposureSortKey(
+        _ exposure: HostwrightPortExposurePolicy
+    ) -> String {
+        [
+            exposure.scope.rawValue,
+            exposure.authentication.rawValue,
+            exposure.interfaces.joined(separator: ","),
+            exposure.networkClasses.map(\.rawValue).joined(separator: ","),
+            exposure.allowedCIDRs.joined(separator: ",")
+        ].joined(separator: "|")
+    }
+
     static func desiredSpecificationSHA256(_ service: DesiredRuntimeService) -> String {
         var canonical = MigrationCanonicalEncoder()
         canonical.append(service.identity.projectName)
@@ -1614,13 +1627,15 @@ private extension RuntimeProviderMigrationEngine {
                 $0.containerPort,
                 $0.protocolName.rawValue,
                 $0.bindAddress ?? "",
-                $0.allocation.rawValue
+                $0.allocation.rawValue,
+                exposureSortKey($0.exposurePolicy)
             ) < (
                 $1.hostPort ?? -1,
                 $1.containerPort,
                 $1.protocolName.rawValue,
                 $1.bindAddress ?? "",
-                $1.allocation.rawValue
+                $1.allocation.rawValue,
+                exposureSortKey($1.exposurePolicy)
             )
         }
         canonical.append(ports.count)
@@ -1630,6 +1645,20 @@ private extension RuntimeProviderMigrationEngine {
             canonical.append(port.protocolName.rawValue)
             canonical.append(port.bindAddress ?? "")
             canonical.append(port.allocation.rawValue)
+            canonical.append(port.exposurePolicy.scope.rawValue)
+            canonical.append(port.exposurePolicy.authentication.rawValue)
+            canonical.append(port.exposurePolicy.interfaces.count)
+            for value in port.exposurePolicy.interfaces {
+                canonical.append(value)
+            }
+            canonical.append(port.exposurePolicy.networkClasses.count)
+            for value in port.exposurePolicy.networkClasses {
+                canonical.append(value.rawValue)
+            }
+            canonical.append(port.exposurePolicy.allowedCIDRs.count)
+            for value in port.exposurePolicy.allowedCIDRs {
+                canonical.append(value)
+            }
         }
         let mounts = service.mounts.sorted { ($0.target, $0.source) < ($1.target, $1.source) }
         canonical.append(mounts.count)

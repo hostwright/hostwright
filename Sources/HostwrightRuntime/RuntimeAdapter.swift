@@ -228,6 +228,15 @@ public enum RuntimeCreateSubsetPolicy {
             )
         }
         guard service.ports.allSatisfy({
+            $0.exposurePolicy.isDefaultLocalhost
+        }) else {
+            throw RuntimeAdapterError.commandRejected(
+                classification: .mutating,
+                message:
+                    "Create-only apply requires a qualified secure listener provider for non-localhost exposure."
+            )
+        }
+        guard service.ports.allSatisfy({
             $0.bindAddress == nil || $0.bindAddress == "127.0.0.1"
         }) else {
             throw RuntimeAdapterError.commandRejected(

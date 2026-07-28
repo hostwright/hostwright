@@ -581,6 +581,126 @@ final class Phase07NetworkManifestTests: XCTestCase {
         )
     }
 
+    func testPublishedPortExposureParsesAndCanonicalizes() throws {
+        let manifest = try ManifestValidator.validated(
+            """
+            version: 2
+            project: exposure-demo
+            services:
+              api:
+                image: local/api:latest
+                ports:
+                  - bind: 192.168.1.10
+                    host: 8443
+                    target: 8443
+                    protocol: tcp
+                    exposure:
+                      scope: lan
+                      interfaces: [en1]
+                      networkClasses: [vpn, private]
+                      allowedCIDRs: [10.0.0.0/8]
+                      authentication: tls
+                  - "8080:8080"
+            """
+        )
+        let ports = try XCTUnwrap(manifest.services.first?.publishedPorts)
+        XCTAssertEqual(ports[0].exposure?.scope, .lan)
+        XCTAssertEqual(ports[0].exposure?.networkClasses, [.privateLAN, .vpn])
+        XCTAssertEqual(ports[1].effectiveExposure, .localhost)
+
+        let canonical = try ManifestCanonicalEncoder.encode(manifest)
+        XCTAssertTrue(canonical.contains("exposure:"))
+        XCTAssertFalse(canonical.contains("scope: \"localhost\""))
+        XCTAssertEqual(try ManifestValidator.validated(canonical), manifest)
+    }
+
+    func testLocalhostBindAliasCanonicalizesWithoutChangingExposure() throws {
+        let manifest = try ManifestValidator.validated(
+            """
+            version: 2
+            project: exposure-demo
+            services:
+              api:
+                image: local/api:latest
+                ports:
+                  - bind: localhost
+                    host: 8080
+                    target: 8080
+                    protocol: tcp
+            """
+        )
+        let port = try XCTUnwrap(
+            manifest.services.first?.publishedPorts.first
+        )
+
+        XCTAssertEqual(port.effectiveBindAddress, "127.0.0.1")
+        XCTAssertEqual(port.effectiveExposure, .localhost)
+        XCTAssertTrue(
+            try ManifestCanonicalEncoder.encode(manifest)
+                .contains("bind: \"127.0.0.1\"")
+        )
+    }
+
+    func testRejectsInvalidPublishedPortExposure() {
+        assertFailure(
+            """
+            version: 2
+            project: exposure-demo
+            services:
+              api:
+                image: local/api:latest
+                ports:
+                  - bind: 0.0.0.0
+                    target: 8443
+                    exposure:
+                      scope: lan
+                      interfaces: [en0]
+                      networkClasses: [private]
+                      allowedCIDRs: [10.0.0.1/8]
+                      authentication: tls
+            """,
+            contains: "canonical IPv4 or IPv6 CIDRs",
+            path: "$.services.api.ports[0].exposure.allowedCIDRs[0]"
+        )
+        assertFailure(
+            """
+            version: 2
+            project: exposure-demo
+            services:
+              api:
+                image: local/api:latest
+                ports:
+                  - target: 8443
+                    exposure:
+                      scope: localhost
+                      authentication: tls
+            """,
+            contains: "localhost exposure requires",
+            path: "$.services.api"
+        )
+        let interfaces = (0...8).map { "en\($0)" }.joined(separator: ", ")
+        assertFailure(
+            """
+            version: 2
+            project: exposure-demo
+            services:
+              api:
+                image: local/api:latest
+                ports:
+                  - bind: 192.168.1.10
+                    target: 8443
+                    exposure:
+                      scope: lan
+                      interfaces: [\(interfaces)]
+                      networkClasses: [private]
+                      allowedCIDRs: [10.0.0.0/8]
+                      authentication: tls
+            """,
+            contains: "at most 8 interfaces",
+            path: "$.services.api.ports[0].exposure"
+        )
+    }
+
     private func manifest(networks: String) -> String {
         """
         version: 2

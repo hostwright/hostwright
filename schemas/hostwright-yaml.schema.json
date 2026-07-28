@@ -777,6 +777,32 @@
                   },
                   "protocol": {
                     "enum": ["tcp", "udp"]
+                  },
+                  "exposure": {
+                    "type": "object",
+                    "required": ["scope", "authentication"],
+                    "additionalProperties": false,
+                    "properties": {
+                      "scope": { "enum": ["localhost", "lan", "tunnel", "public"] },
+                      "interfaces": {
+                        "type": "array",
+                        "maxItems": 8,
+                        "uniqueItems": true,
+                        "items": { "type": "string", "minLength": 1, "maxLength": 15, "pattern": "^(?!\\.{1,2}$)[A-Za-z0-9._-]+$" }
+                      },
+                      "networkClasses": {
+                        "type": "array",
+                        "uniqueItems": true,
+                        "items": { "enum": ["private", "vpn", "public"] }
+                      },
+                      "allowedCIDRs": {
+                        "type": "array",
+                        "maxItems": 32,
+                        "uniqueItems": true,
+                        "items": { "type": "string", "minLength": 3, "maxLength": 43 }
+                      },
+                      "authentication": { "enum": ["none", "tls", "mtls", "authenticated-tunnel"] }
+                    }
                   }
                 }
               },

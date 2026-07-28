@@ -2,6 +2,176 @@ import XCTest
 @testable import HostwrightNetworking
 
 final class NetworkAddressPlannerTests: XCTestCase {
+    func testHostEnvironmentProbeIsReadOnlyAndDoesNotClaimPermission() throws {
+        let snapshot = try NetworkHostEnvironmentProbe.current()
+
+        XCTAssertTrue(snapshot.addresses.contains(where: \.isLoopback))
+        XCTAssertEqual(snapshot.localNetworkPermission, .notProbed)
+        XCTAssertEqual(snapshot.privateRelayState, .notObservable)
+        if let primaryInterface = snapshot.primaryInterface {
+            XCTAssertTrue(
+                snapshot.addresses.contains {
+                    $0.interfaceName == primaryInterface
+                }
+            )
+        }
+    }
+
+    func testHostEnvironmentSnapshotHasCanonicalStableFingerprint() {
+        let ethernet = interfaceAddress(
+            interfaceName: "en0",
+            address: "192.168.1.10"
+        )
+        let wifi = interfaceAddress(
+            interfaceName: "en1",
+            address: "10.0.0.10"
+        )
+
+        let first = environment(addresses: [wifi, ethernet])
+        let second = environment(addresses: [ethernet, wifi])
+
+        XCTAssertEqual(first.addresses, [ethernet, wifi])
+        XCTAssertEqual(first.stableFingerprint, second.stableFingerprint)
+    }
+
+    func testLocalhostEvaluationRemainsAllowedWithoutEnvironmentApproval() {
+        let evaluation = NetworkExposureEnvironmentEvaluator.evaluate(
+            policy: .localhost,
+            bindAddress: "127.0.0.1",
+            environment: environment(
+                addresses: [],
+                permission: .denied
+            )
+        )
+
+        XCTAssertTrue(evaluation.isAllowed)
+        XCTAssertNil(evaluation.selectedAddress)
+        XCTAssertEqual(evaluation.issues, [])
+    }
+
+    func testLANEvaluationRequiresPermissionAndExactApprovedInterface() {
+        let selected = interfaceAddress(
+            interfaceName: "en0",
+            address: "192.168.1.10"
+        )
+        let policy = HostwrightPortExposurePolicy(
+            scope: .lan,
+            interfaces: ["en0"],
+            networkClasses: [.privateLAN],
+            allowedCIDRs: ["192.168.1.0/24"],
+            authentication: .tls
+        )
+
+        let denied = NetworkExposureEnvironmentEvaluator.evaluate(
+            policy: policy,
+            bindAddress: selected.address,
+            environment: environment(
+                addresses: [selected],
+                permission: .denied
+            )
+        )
+        let granted = NetworkExposureEnvironmentEvaluator.evaluate(
+            policy: policy,
+            bindAddress: selected.address,
+            environment: environment(addresses: [selected])
+        )
+
+        XCTAssertEqual(
+            denied.issues,
+            [.localNetworkPermissionNotGranted]
+        )
+        XCTAssertFalse(denied.isAllowed)
+        XCTAssertTrue(granted.isAllowed)
+        XCTAssertEqual(granted.selectedAddress, selected)
+    }
+
+    func testLANEvaluationDeniesInterfaceAndNetworkClassMismatches() {
+        let selected = interfaceAddress(
+            interfaceName: "en1",
+            address: "192.168.1.10",
+            networkClass: .vpn
+        )
+        let evaluation = NetworkExposureEnvironmentEvaluator.evaluate(
+            policy: HostwrightPortExposurePolicy(
+                scope: .lan,
+                interfaces: ["en0"],
+                networkClasses: [.privateLAN],
+                allowedCIDRs: ["192.168.1.0/24"],
+                authentication: .tls
+            ),
+            bindAddress: selected.address,
+            environment: environment(addresses: [selected])
+        )
+
+        XCTAssertFalse(evaluation.isAllowed)
+        XCTAssertEqual(
+            evaluation.issues,
+            [.interfaceNotAllowed, .networkClassNotAllowed]
+        )
+    }
+
+    func testExposureEnvironmentTransitionKeepsRebindsAndDrains() {
+        let policy = HostwrightPortExposurePolicy(
+            scope: .lan,
+            interfaces: ["en0"],
+            networkClasses: [.privateLAN],
+            allowedCIDRs: ["192.168.1.0/24"],
+            authentication: .tls
+        )
+        let address = interfaceAddress(
+            interfaceName: "en0",
+            address: "192.168.1.10"
+        )
+        let previous = NetworkExposureEnvironmentEvaluator.evaluate(
+            policy: policy,
+            bindAddress: address.address,
+            environment: environment(addresses: [address])
+        )
+        let unchanged = NetworkExposureEnvironmentEvaluator.evaluate(
+            policy: policy,
+            bindAddress: address.address,
+            environment: environment(addresses: [address])
+        )
+        let changedRoute = NetworkExposureEnvironmentEvaluator.evaluate(
+            policy: policy,
+            bindAddress: address.address,
+            environment: environment(
+                addresses: [address],
+                defaultRouter: "192.168.1.1"
+            )
+        )
+        let denied = NetworkExposureEnvironmentEvaluator.evaluate(
+            policy: policy,
+            bindAddress: address.address,
+            environment: environment(
+                addresses: [address],
+                permission: .denied
+            )
+        )
+
+        XCTAssertEqual(
+            NetworkExposureEnvironmentEvaluator.transition(
+                previous: previous,
+                current: unchanged
+            ),
+            .keep
+        )
+        XCTAssertEqual(
+            NetworkExposureEnvironmentEvaluator.transition(
+                previous: previous,
+                current: changedRoute
+            ),
+            .rebindAtomically
+        )
+        XCTAssertEqual(
+            NetworkExposureEnvironmentEvaluator.transition(
+                previous: previous,
+                current: denied
+            ),
+            .drainAndStop
+        )
+    }
+
     func testPlansIPv4OnlyIPv6OnlyAndDualStackInCanonicalOrder() throws {
         let plans = try NetworkAddressPlanner.makePlans(
             definitions: [
@@ -576,6 +746,36 @@ final class NetworkAddressPlannerTests: XCTestCase {
             driver: driver,
             ipv4: ipv4,
             ipv6: ipv6
+        )
+    }
+
+    private func environment(
+        addresses: [NetworkHostInterfaceAddress],
+        defaultRouter: String? = nil,
+        permission: NetworkLocalPermissionState = .granted
+    ) -> NetworkHostEnvironmentSnapshot {
+        NetworkHostEnvironmentSnapshot(
+            addresses: addresses,
+            primaryInterface: "en0",
+            defaultRouter: defaultRouter,
+            vpnState: .inactive,
+            privateRelayState: .inactive,
+            localNetworkPermission: permission
+        )
+    }
+
+    private func interfaceAddress(
+        interfaceName: String,
+        address: String,
+        networkClass: HostwrightNetworkClass = .privateLAN
+    ) -> NetworkHostInterfaceAddress {
+        NetworkHostInterfaceAddress(
+            interfaceName: interfaceName,
+            address: address,
+            cidr: "192.168.1.0/24",
+            family: .ipv4,
+            networkClass: networkClass,
+            isLoopback: false
         )
     }
 

@@ -1,7 +1,14 @@
 import Foundation
 import HostwrightCore
 
-public enum NetworkExposureScope: String, Equatable, Sendable {
+public enum NetworkExposureScope:
+    String,
+    Codable,
+    CaseIterable,
+    Equatable,
+    Hashable,
+    Sendable
+{
     case project
     case localhost
     case lan
@@ -15,6 +22,392 @@ public enum NetworkExposureScope: String, Equatable, Sendable {
         case .lan, .tunnel, .public:
             return false
         }
+    }
+}
+
+public enum NetworkExposureAuthentication:
+    String,
+    Codable,
+    CaseIterable,
+    Equatable,
+    Hashable,
+    Sendable
+{
+    case none
+    case tls
+    case mutualTLS = "mtls"
+    case authenticatedTunnel = "authenticated-tunnel"
+}
+
+public enum HostwrightNetworkClass:
+    String,
+    Codable,
+    CaseIterable,
+    Equatable,
+    Hashable,
+    Sendable
+{
+    case privateLAN = "private"
+    case vpn
+    case publicInternet = "public"
+}
+
+public struct HostwrightPortExposurePolicy:
+    Codable,
+    Equatable,
+    Hashable,
+    Sendable
+{
+    public static let maximumInterfaceSelectors = 8
+    public static let maximumAllowedCIDRs = 32
+
+    public let scope: NetworkExposureScope
+    public let interfaces: [String]
+    public let networkClasses: [HostwrightNetworkClass]
+    public let allowedCIDRs: [String]
+    public let authentication: NetworkExposureAuthentication
+
+    public init(
+        scope: NetworkExposureScope = .localhost,
+        interfaces: [String] = [],
+        networkClasses: [HostwrightNetworkClass] = [],
+        allowedCIDRs: [String] = [],
+        authentication: NetworkExposureAuthentication = .none
+    ) {
+        self.scope = scope
+        self.interfaces = interfaces.sorted()
+        self.networkClasses = networkClasses.sorted {
+            $0.rawValue < $1.rawValue
+        }
+        self.allowedCIDRs = allowedCIDRs.sorted()
+        self.authentication = authentication
+    }
+
+    public static let localhost = Self()
+
+    public var isDefaultLocalhost: Bool {
+        self == .localhost
+    }
+}
+
+public enum NetworkExposurePolicyValidation {
+    public static func isValidInterfaceSelector(
+        _ value: String
+    ) -> Bool {
+        guard !value.isEmpty,
+              value.utf8.count <= Int(IFNAMSIZ - 1),
+              value != ".",
+              value != "..",
+              !value.contains("*") else {
+            return false
+        }
+        return value.unicodeScalars.allSatisfy {
+            CharacterSet(
+                charactersIn:
+                    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-"
+            ).contains($0)
+        }
+    }
+
+    public static func canonicalCIDR(_ value: String) -> String? {
+        let components = value.split(
+            separator: "/",
+            maxSplits: 1,
+            omittingEmptySubsequences: false
+        )
+        guard components.count == 2,
+              let prefix = Int(components[1]),
+              String(prefix) == components[1] else {
+            return nil
+        }
+        let address = String(components[0])
+        if let bytes = addressBytes(address, family: AF_INET),
+           (0...32).contains(prefix),
+           hasZeroHostBits(bytes, prefix: prefix) {
+            return "\(render(bytes, family: AF_INET))/\(prefix)"
+        }
+        if let bytes = addressBytes(address, family: AF_INET6),
+           (0...128).contains(prefix),
+           hasZeroHostBits(bytes, prefix: prefix) {
+            return "\(render(bytes, family: AF_INET6))/\(prefix)"
+        }
+        return nil
+    }
+
+    public static func isSemanticallyValid(
+        _ policy: HostwrightPortExposurePolicy,
+        bindAddress: String
+    ) -> Bool {
+        guard policy.interfaces.count <=
+                HostwrightPortExposurePolicy.maximumInterfaceSelectors,
+              policy.allowedCIDRs.count <=
+                HostwrightPortExposurePolicy.maximumAllowedCIDRs,
+              Set(policy.interfaces).count == policy.interfaces.count,
+              Set(policy.networkClasses).count ==
+                policy.networkClasses.count,
+              Set(policy.allowedCIDRs).count ==
+                policy.allowedCIDRs.count,
+              policy.interfaces.allSatisfy(isValidInterfaceSelector),
+              policy.allowedCIDRs.allSatisfy({
+                canonicalCIDR($0) == $0
+              }) else {
+            return false
+        }
+        let loopback = NetworkBindAddressPolicy.isLocalhost(bindAddress)
+        let exactNonLoopback = !loopback &&
+            !NetworkBindAddressPolicy.isBroadBindAddress(bindAddress)
+        switch policy.scope {
+        case .project:
+            return false
+        case .localhost:
+            return loopback &&
+                policy.interfaces.isEmpty &&
+                policy.networkClasses.isEmpty &&
+                policy.allowedCIDRs.isEmpty &&
+                policy.authentication == .none
+        case .lan:
+            return exactNonLoopback &&
+                !policy.interfaces.isEmpty &&
+                !policy.networkClasses.isEmpty &&
+                Set(policy.networkClasses)
+                    .isSubset(of: [.privateLAN, .vpn]) &&
+                !policy.allowedCIDRs.isEmpty &&
+                policy.authentication == .tls
+        case .tunnel:
+            return loopback &&
+                policy.interfaces.isEmpty &&
+                policy.networkClasses.isEmpty &&
+                policy.authentication == .authenticatedTunnel
+        case .public:
+            return exactNonLoopback &&
+                !policy.interfaces.isEmpty &&
+                policy.networkClasses.contains(.publicInternet) &&
+                !policy.allowedCIDRs.isEmpty &&
+                (
+                    policy.authentication == .mutualTLS ||
+                        policy.authentication ==
+                            .authenticatedTunnel
+                )
+        }
+    }
+
+    private static func addressBytes(
+        _ value: String,
+        family: Int32
+    ) -> [UInt8]? {
+        let count = family == AF_INET ? 4 : 16
+        var bytes = [UInt8](repeating: 0, count: count)
+        let parsed = value.withCString { source in
+            bytes.withUnsafeMutableBytes {
+                inet_pton(family, source, $0.baseAddress)
+            }
+        }
+        return parsed == 1 ? bytes : nil
+    }
+
+    private static func hasZeroHostBits(
+        _ bytes: [UInt8],
+        prefix: Int
+    ) -> Bool {
+        for bit in prefix..<(bytes.count * 8) {
+            let byte = bit / 8
+            let shift = 7 - (bit % 8)
+            if bytes[byte] & UInt8(1 << shift) != 0 {
+                return false
+            }
+        }
+        return true
+    }
+
+    private static func render(
+        _ bytes: [UInt8],
+        family: Int32
+    ) -> String {
+        var output = [CChar](
+            repeating: 0,
+            count: family == AF_INET
+                ? Int(INET_ADDRSTRLEN)
+                : Int(INET6_ADDRSTRLEN)
+        )
+        _ = bytes.withUnsafeBytes {
+            inet_ntop(
+                family,
+                $0.baseAddress,
+                &output,
+                socklen_t(output.count)
+            )
+        }
+        return String(
+            decoding: output.prefix { $0 != 0 }.map {
+                UInt8(bitPattern: $0)
+            },
+            as: UTF8.self
+        )
+    }
+}
+
+public enum NetworkExposureEnvironmentIssue:
+    String,
+    Codable,
+    Equatable,
+    Hashable,
+    Sendable
+{
+    case policyInvalid
+    case localNetworkPermissionNotGranted
+    case bindAddressUnavailable
+    case interfaceNotAllowed
+    case networkClassNotAllowed
+}
+
+public enum NetworkExposureEnvironmentWarning:
+    String,
+    Codable,
+    Equatable,
+    Hashable,
+    Sendable
+{
+    case privateRelayActive
+    case privateRelayNotObservable
+    case vpnRouteActive
+}
+
+public struct NetworkExposureEnvironmentEvaluation:
+    Codable,
+    Equatable,
+    Sendable
+{
+    public let selectedAddress: NetworkHostInterfaceAddress?
+    public let issues: [NetworkExposureEnvironmentIssue]
+    public let warnings: [NetworkExposureEnvironmentWarning]
+    public let environmentFingerprint: String
+
+    public init(
+        selectedAddress: NetworkHostInterfaceAddress?,
+        issues: [NetworkExposureEnvironmentIssue],
+        warnings: [NetworkExposureEnvironmentWarning],
+        environmentFingerprint: String
+    ) {
+        self.selectedAddress = selectedAddress
+        self.issues = Array(Set(issues)).sorted {
+            $0.rawValue < $1.rawValue
+        }
+        self.warnings = Array(Set(warnings)).sorted {
+            $0.rawValue < $1.rawValue
+        }
+        self.environmentFingerprint = environmentFingerprint
+    }
+
+    public var isAllowed: Bool {
+        issues.isEmpty
+    }
+}
+
+public enum NetworkExposureTransitionAction:
+    String,
+    Codable,
+    Equatable,
+    Sendable
+{
+    case activate
+    case keep
+    case rebindAtomically
+    case drainAndStop
+}
+
+public enum NetworkExposureEnvironmentEvaluator {
+    public static func evaluate(
+        policy: HostwrightPortExposurePolicy,
+        bindAddress: String,
+        environment: NetworkHostEnvironmentSnapshot
+    ) -> NetworkExposureEnvironmentEvaluation {
+        var issues: [NetworkExposureEnvironmentIssue] = []
+        var warnings: [NetworkExposureEnvironmentWarning] = []
+        let selected: NetworkHostInterfaceAddress?
+
+        guard NetworkExposurePolicyValidation.isSemanticallyValid(
+            policy,
+            bindAddress: bindAddress
+        ) else {
+            return NetworkExposureEnvironmentEvaluation(
+                selectedAddress: nil,
+                issues: [.policyInvalid],
+                warnings: [],
+                environmentFingerprint: environment.stableFingerprint
+            )
+        }
+
+        switch policy.scope {
+        case .project:
+            selected = nil
+            issues.append(.bindAddressUnavailable)
+        case .localhost, .tunnel:
+            selected = nil
+            if !NetworkBindAddressPolicy.isLocalhost(bindAddress) {
+                issues.append(.bindAddressUnavailable)
+            }
+        case .lan, .public:
+            if environment.localNetworkPermission != .granted {
+                issues.append(.localNetworkPermissionNotGranted)
+            }
+            let exactAddress = environment.addresses.first {
+                !$0.isLoopback && $0.address == bindAddress
+            }
+            selected = exactAddress
+            if exactAddress == nil {
+                issues.append(.bindAddressUnavailable)
+            } else if let exactAddress {
+                if !policy.interfaces.contains(
+                    exactAddress.interfaceName
+                ) {
+                    issues.append(.interfaceNotAllowed)
+                }
+                if !policy.networkClasses.contains(
+                    exactAddress.networkClass
+                ) {
+                    issues.append(.networkClassNotAllowed)
+                }
+            }
+            switch environment.privateRelayState {
+            case .active:
+                warnings.append(.privateRelayActive)
+            case .notObservable:
+                warnings.append(.privateRelayNotObservable)
+            case .inactive:
+                break
+            }
+            if environment.vpnState == .active {
+                warnings.append(.vpnRouteActive)
+            }
+        }
+
+        return NetworkExposureEnvironmentEvaluation(
+            selectedAddress: selected,
+            issues: issues,
+            warnings: warnings,
+            environmentFingerprint: environment.stableFingerprint
+        )
+    }
+
+    public static func transition(
+        previous: NetworkExposureEnvironmentEvaluation?,
+        current: NetworkExposureEnvironmentEvaluation
+    ) -> NetworkExposureTransitionAction {
+        guard current.isAllowed else {
+            return .drainAndStop
+        }
+        guard let previous else {
+            return .activate
+        }
+        guard previous.isAllowed else {
+            return .activate
+        }
+        if previous.selectedAddress != current.selectedAddress ||
+            previous.environmentFingerprint !=
+                current.environmentFingerprint {
+            return .rebindAtomically
+        }
+        return .keep
     }
 }
 

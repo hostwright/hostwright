@@ -461,7 +461,15 @@ func portJSON(_ port: RuntimePortMapping) -> [String: Any] {
         "containerPort": port.containerPort,
         "protocol": port.protocolName.rawValue,
         "bindAddress": port.bindAddress ?? NSNull(),
-        "allocation": port.allocation.rawValue
+        "allocation": port.allocation.rawValue,
+        "exposure": [
+            "allowedCIDRs": port.exposurePolicy.allowedCIDRs,
+            "accessMode": port.exposurePolicy.authentication.rawValue,
+            "interfaces": port.exposurePolicy.interfaces,
+            "networkClasses":
+                port.exposurePolicy.networkClasses.map(\.rawValue),
+            "scope": port.exposurePolicy.scope.rawValue
+        ]
     ]
 }
 

@@ -1056,7 +1056,7 @@ private struct ManifestNodeDecoder {
                 let values = try mapping(
                     child,
                     path: itemPath,
-                    allowed: ["bind", "host", "mode", "protocol", "target"]
+                    allowed: ["bind", "exposure", "host", "mode", "protocol", "target"]
                 )
                 let rawProtocol = try values["protocol"].map {
                     try string($0, path: "\(itemPath).protocol")
@@ -1068,6 +1068,14 @@ private struct ManifestNodeDecoder {
                             code: .manifestValidationFailed,
                             node: values["bind"],
                             path: "\(itemPath).bind"
+                        )
+                    }
+                    guard values["exposure"] == nil else {
+                        throw ManifestParser.failure(
+                            "Unix socket publication does not accept exposure.",
+                            code: .manifestValidationFailed,
+                            node: values["exposure"],
+                            path: "\(itemPath).exposure"
                         )
                     }
                     let target = try requiredString(
@@ -1125,13 +1133,15 @@ private struct ManifestNodeDecoder {
                 )
                 let host = try values["host"].map { try decodePortSpanValue($0, path: "\(itemPath).host") }
                 let bindAddress = try values["bind"].map { try string($0, path: "\(itemPath).bind") }
+                let exposure = try values["exposure"].map { try decodePortExposure($0, path: "\(itemPath).exposure") }
 
                 ports.append(
                     HostwrightPublishedPort(
                         host: host,
                         target: target,
                         protocolName: protocolName,
-                        bindAddress: bindAddress ?? HostwrightPublishedPort.localhostBindAddress
+                        bindAddress: bindAddress ?? HostwrightPublishedPort.localhostBindAddress,
+                        exposure: exposure
                     )
                 )
 
@@ -1144,6 +1154,53 @@ private struct ManifestNodeDecoder {
             }
         }
         return (ports, sockets)
+    }
+
+    private func decodePortExposure(_ node: Node, path: String) throws -> HostwrightPortExposurePolicy {
+        let values = try mapping(
+            node,
+            path: path,
+            allowed: ["allowedCIDRs", "authentication", "interfaces", "networkClasses", "scope"]
+        )
+        let scopeRaw = try requiredString(values["scope"], path: "\(path).scope", message: "Port exposure requires scope.")
+        guard let scope = NetworkExposureScope(rawValue: scopeRaw), scope != .project else {
+            throw ManifestParser.failure("Port exposure scope must be one of: localhost, lan, tunnel, public.", code: .manifestValidationFailed, node: values["scope"], path: "\(path).scope")
+        }
+        let authenticationRaw = try requiredString(values["authentication"], path: "\(path).authentication", message: "Port exposure requires authentication.")
+        guard let authentication = NetworkExposureAuthentication(rawValue: authenticationRaw) else {
+            throw ManifestParser.failure("Port exposure authentication must be one of: none, tls, mtls, authenticated-tunnel.", code: .manifestValidationFailed, node: values["authentication"], path: "\(path).authentication")
+        }
+        let interfaces = try values["interfaces"].map { try strings($0, path: "\(path).interfaces") } ?? []
+        let classValues = try values["networkClasses"].map { try strings($0, path: "\(path).networkClasses") } ?? []
+        let networkClasses = try classValues.enumerated().map { index, raw -> HostwrightNetworkClass in
+            guard let value = HostwrightNetworkClass(rawValue: raw) else {
+                throw ManifestParser.failure("Port exposure networkClasses must contain: private, vpn, public.", code: .manifestValidationFailed, node: values["networkClasses"], path: "\(path).networkClasses[\(index)]")
+            }
+            return value
+        }
+        let cidrs = try values["allowedCIDRs"].map { try strings($0, path: "\(path).allowedCIDRs") } ?? []
+        for (index, cidr) in cidrs.enumerated() {
+            guard NetworkExposurePolicyValidation.canonicalCIDR(cidr) == cidr else {
+                throw ManifestParser.failure("Port exposure allowedCIDRs must contain canonical IPv4 or IPv6 CIDRs.", code: .manifestValidationFailed, node: values["allowedCIDRs"], path: "\(path).allowedCIDRs[\(index)]")
+            }
+        }
+        guard Set(interfaces).count == interfaces.count,
+              Set(networkClasses).count == networkClasses.count,
+              Set(cidrs).count == cidrs.count else {
+            throw ManifestParser.failure("Port exposure arrays must not contain duplicates.", code: .manifestValidationFailed, node: node, path: path)
+        }
+        guard interfaces.count <=
+                HostwrightPortExposurePolicy.maximumInterfaceSelectors,
+              cidrs.count <=
+                HostwrightPortExposurePolicy.maximumAllowedCIDRs else {
+            throw ManifestParser.failure(
+                "Port exposure accepts at most 8 interfaces and 32 allowed CIDRs.",
+                code: .manifestValidationFailed,
+                node: node,
+                path: path
+            )
+        }
+        return HostwrightPortExposurePolicy(scope: scope, interfaces: interfaces, networkClasses: networkClasses, allowedCIDRs: cidrs, authentication: authentication)
     }
 
     private func decodePortSpan(

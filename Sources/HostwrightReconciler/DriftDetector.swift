@@ -483,7 +483,13 @@ public enum DriftDetector {
             port.bindAddress ?? "localhost",
             port.hostPort.map(String.init) ?? "",
             String(port.containerPort),
-            port.protocolName.rawValue
+            port.protocolName.rawValue,
+            port.exposurePolicy.scope.rawValue,
+            port.exposurePolicy.authentication.rawValue,
+            port.exposurePolicy.interfaces.joined(separator: ","),
+            port.exposurePolicy.networkClasses.map(\.rawValue)
+                .joined(separator: ","),
+            port.exposurePolicy.allowedCIDRs.joined(separator: ",")
         ].joined(separator: ":")
     }
 

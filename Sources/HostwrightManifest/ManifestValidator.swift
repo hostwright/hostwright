@@ -1137,6 +1137,8 @@ public enum ManifestValidator {
             return
         }
 
+        validatePortExposure(port.effectiveExposure, bindAddress: port.effectiveBindAddress, serviceName: serviceName, issues: &issues)
+
         validatePortSpan(port.target, label: "target", serviceName: serviceName, issues: &issues)
         if let host = port.host {
             validatePortSpan(host, label: "host", serviceName: serviceName, issues: &issues)
@@ -1156,6 +1158,52 @@ public enum ManifestValidator {
                     )
                 )
             }
+        }
+    }
+
+    private static func validatePortExposure(
+        _ exposure: HostwrightPortExposurePolicy,
+        bindAddress: String,
+        serviceName: String,
+        issues: inout [ManifestIssue]
+    ) {
+        let loopback = isLoopbackBindAddress(bindAddress)
+        let exactNonLoopback = !loopback && bindAddress != "0.0.0.0" && bindAddress != "::"
+        let interfacesValid = exposure.interfaces.allSatisfy(NetworkExposurePolicyValidation.isValidInterfaceSelector)
+        let cidrsValid = exposure.allowedCIDRs.allSatisfy { NetworkExposurePolicyValidation.canonicalCIDR($0) == $0 }
+        let path = "$.services.\(serviceName)"
+        if !interfacesValid ||
+            exposure.interfaces.count >
+                HostwrightPortExposurePolicy.maximumInterfaceSelectors ||
+            exposure.allowedCIDRs.count >
+                HostwrightPortExposurePolicy.maximumAllowedCIDRs ||
+            Set(exposure.interfaces).count != exposure.interfaces.count ||
+            Set(exposure.networkClasses).count !=
+                exposure.networkClasses.count ||
+            Set(exposure.allowedCIDRs).count !=
+                exposure.allowedCIDRs.count ||
+            !cidrsValid {
+            issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Service '\(serviceName)' exposure selectors and CIDRs must be valid, canonical, and unique.", path: path))
+        }
+        switch exposure.scope {
+        case .localhost:
+            if !loopback || !exposure.interfaces.isEmpty || !exposure.networkClasses.isEmpty || !exposure.allowedCIDRs.isEmpty || exposure.authentication != .none {
+                issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Service '\(serviceName)' localhost exposure requires a loopback bind, empty selectors, and authentication none.", path: path))
+            }
+        case .lan:
+            if !exactNonLoopback || !(1...HostwrightPortExposurePolicy.maximumInterfaceSelectors).contains(exposure.interfaces.count) || exposure.networkClasses.isEmpty || !Set(exposure.networkClasses).isSubset(of: [.privateLAN, .vpn]) || !(1...HostwrightPortExposurePolicy.maximumAllowedCIDRs).contains(exposure.allowedCIDRs.count) || exposure.authentication != .tls {
+                issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Service '\(serviceName)' lan exposure requires an exact non-loopback bind, 1-8 interfaces, private or vpn classes, 1-32 CIDRs, and TLS.", path: path))
+            }
+        case .tunnel:
+            if !loopback || !exposure.interfaces.isEmpty || !exposure.networkClasses.isEmpty || exposure.authentication != .authenticatedTunnel {
+                issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Service '\(serviceName)' tunnel exposure requires a loopback bind, empty interface and network-class selectors, and authenticated-tunnel authentication.", path: path))
+            }
+        case .public:
+            if !exactNonLoopback || exposure.interfaces.isEmpty || exposure.interfaces.count > HostwrightPortExposurePolicy.maximumInterfaceSelectors || !exposure.networkClasses.contains(.publicInternet) || exposure.allowedCIDRs.isEmpty || exposure.allowedCIDRs.count > HostwrightPortExposurePolicy.maximumAllowedCIDRs || !(exposure.authentication == .mutualTLS || exposure.authentication == .authenticatedTunnel) {
+                issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Service '\(serviceName)' public exposure requires an exact non-loopback bind, interfaces, public network class, CIDRs, and mTLS or authenticated-tunnel authentication.", path: path))
+            }
+        case .project:
+            issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Service '\(serviceName)' exposure scope project is not supported for published ports.", path: path))
         }
     }
 
@@ -1376,6 +1424,10 @@ public enum ManifestValidator {
             return true
         }
         return false
+    }
+
+    private static func isLoopbackBindAddress(_ value: String) -> Bool {
+        value == "::1" || value.hasPrefix("127.")
     }
 
     private static func isValidIPv4Address(_ value: String) -> Bool {

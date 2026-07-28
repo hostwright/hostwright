@@ -1,5 +1,6 @@
 import XCTest
 @testable import HostwrightCore
+@testable import HostwrightNetworking
 @testable import HostwrightReconciler
 @testable import HostwrightRuntime
 @testable import HostwrightSecrets
@@ -407,6 +408,50 @@ final class LifecycleUpdatePlannerTests: XCTestCase {
         XCTAssertNil(decodedEntry.secretReference)
         XCTAssertFalse(decoded.environment.description.contains("resolved-secret"))
         XCTAssertFalse(decoded.environment.description.contains(reference.rawValue))
+    }
+
+    func testRevisionCodecPersistsExposurePolicyAndChangesDigest() throws {
+        let localhost = service(
+            "web",
+            image: "local/web@sha256:new",
+            ports: [
+                RuntimePortMapping(
+                    hostPort: 8_443,
+                    containerPort: 9_443
+                )
+            ]
+        )
+        let lanExposure = HostwrightPortExposurePolicy(
+            scope: .lan,
+            interfaces: ["en0"],
+            networkClasses: [.privateLAN],
+            allowedCIDRs: ["192.168.1.0/24"],
+            authentication: .tls
+        )
+        let lan = service(
+            "web",
+            image: "local/web@sha256:new",
+            ports: [
+                RuntimePortMapping(
+                    hostPort: 8_443,
+                    containerPort: 9_443,
+                    protocolName: .tcp,
+                    bindAddress: "192.168.1.10",
+                    allocation: .fixed,
+                    exposurePolicy: lanExposure
+                )
+            ]
+        )
+
+        let encoded = try LifecycleRevisionCodec.redactedDesiredJSON(for: lan)
+        let decoded = try LifecycleRevisionCodec.decodeRedactedDesiredJSON(encoded)
+
+        XCTAssertEqual(decoded, lan)
+        XCTAssertEqual(decoded.ports.first?.exposurePolicy, lanExposure)
+        XCTAssertNotEqual(
+            try LifecycleRevisionCodec.revisionSHA256(for: localhost),
+            try LifecycleRevisionCodec.revisionSHA256(for: lan)
+        )
     }
 
     func testRevisionCodecRoundTripPreservesEveryNonSecretExecutableField() throws {

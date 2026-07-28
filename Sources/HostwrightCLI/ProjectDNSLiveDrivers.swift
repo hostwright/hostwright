@@ -67,7 +67,8 @@ struct LiveProjectDNSHelperDriver: ProjectDNSHelperDriving {
             disposition: .active,
             corefilePath: active.url.path,
             corefileSHA256: active.sha256,
-            hostAccessSHA256: active.hostAccessSHA256
+            hostAccessSHA256: active.hostAccessSHA256,
+            hostAccessActive: active.hostAccessActive
         )
     }
 
@@ -121,7 +122,9 @@ struct LiveProjectDNSHelperDriver: ProjectDNSHelperDriving {
             corefilePath: status.activeCorefile?.url.path,
             corefileSHA256: status.activeCorefile?.sha256,
             hostAccessSHA256:
-                status.activeCorefile?.hostAccessSHA256
+                status.activeCorefile?.hostAccessSHA256,
+            hostAccessActive:
+                status.activeCorefile?.hostAccessActive ?? false
         )
     }
 }

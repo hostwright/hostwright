@@ -28,17 +28,20 @@ struct ProjectDNSHelperObservation: Equatable, Sendable {
     let corefilePath: String?
     let corefileSHA256: String?
     let hostAccessSHA256: String?
+    let hostAccessActive: Bool
 
     init(
         disposition: ProjectDNSHelperDisposition,
         corefilePath: String?,
         corefileSHA256: String?,
-        hostAccessSHA256: String? = nil
+        hostAccessSHA256: String? = nil,
+        hostAccessActive: Bool = true
     ) {
         self.disposition = disposition
         self.corefilePath = corefilePath
         self.corefileSHA256 = corefileSHA256
         self.hostAccessSHA256 = hostAccessSHA256
+        self.hostAccessActive = hostAccessActive
     }
 }
 
@@ -788,7 +791,8 @@ enum ProjectDNSLifecycleCoordinator {
                     expectedHostAccessSHA256:
                         try hostAccessDigest(
                             plan.hostAccessBindings
-                        )
+                        ),
+                    requireHostAccessActive: false
                 )
                 helperObservation = initialHelper
             case .absent:
@@ -806,7 +810,8 @@ enum ProjectDNSLifecycleCoordinator {
                     expectedHostAccessSHA256:
                         try hostAccessDigest(
                             plan.hostAccessBindings
-                        )
+                        ),
+                    requireHostAccessActive: false
                 )
             case .conflicting, .quarantined:
                 try await quarantine(
@@ -1198,6 +1203,7 @@ enum ProjectDNSLifecycleCoordinator {
             )
         )
         guard helperObservation.disposition == .active,
+              helperObservation.hostAccessActive,
               let container = try await exactRuntimeContainer(
                   record: record,
                   preparation: preparation,
@@ -1552,13 +1558,18 @@ enum ProjectDNSLifecycleCoordinator {
     private static func validateHelper(
         _ observation: ProjectDNSHelperObservation,
         expectedCorefileSHA256: String,
-        expectedHostAccessSHA256: String?
+        expectedHostAccessSHA256: String?,
+        requireHostAccessActive: Bool = true
     ) throws {
         guard observation.disposition == .active,
               observation.corefileSHA256 ==
                 expectedCorefileSHA256,
               observation.hostAccessSHA256 ==
                 expectedHostAccessSHA256,
+              (
+                  !requireHostAccessActive ||
+                      observation.hostAccessActive
+              ),
               let path = observation.corefilePath,
               path.hasPrefix("/"),
               URL(fileURLWithPath: path)

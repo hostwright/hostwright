@@ -31,6 +31,7 @@ public struct NetworkHelperActiveCorefile: Equatable, Sendable {
     public let url: URL
     public let sha256: String
     public let hostAccessSHA256: String?
+    public let hostAccessActive: Bool
     public let device: UInt64
     public let inode: UInt64
 
@@ -39,6 +40,7 @@ public struct NetworkHelperActiveCorefile: Equatable, Sendable {
         url: URL,
         sha256: String,
         hostAccessSHA256: String? = nil,
+        hostAccessActive: Bool = true,
         device: UInt64,
         inode: UInt64
     ) {
@@ -46,6 +48,7 @@ public struct NetworkHelperActiveCorefile: Equatable, Sendable {
         self.url = url
         self.sha256 = sha256
         self.hostAccessSHA256 = hostAccessSHA256
+        self.hostAccessActive = hostAccessActive
         self.device = device
         self.inode = inode
     }
@@ -620,6 +623,9 @@ public actor NetworkHelperClient {
             url: corefileURL,
             sha256: expectedSHA256,
             hostAccessSHA256: status.hostAccessSHA256,
+            hostAccessActive:
+                status.hostAccessActive ??
+                (status.hostAccessSHA256 == nil),
             device: UInt64(metadata.st_dev),
             inode: UInt64(metadata.st_ino)
         )

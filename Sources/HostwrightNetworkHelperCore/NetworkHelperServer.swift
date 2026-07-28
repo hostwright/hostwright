@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import HostwrightNetworking
 import HostwrightRuntime
 
 struct NetworkHelperDispatcher: @unchecked Sendable {
@@ -29,7 +30,7 @@ struct NetworkHelperDispatcher: @unchecked Sendable {
             let status: NetworkHelperStatus
             switch request.operation {
             case .apply:
-                status = try store.apply(
+                let persisted = try store.apply(
                     identity: request.identity,
                     corefile: request.corefile!,
                     hostAccessBindings:
@@ -37,44 +38,39 @@ struct NetworkHelperDispatcher: @unchecked Sendable {
                     predecessorFencingToken:
                         request.predecessorFencingToken
                 )
-                let brokerSHA256 = try hostAccessBroker.apply(
+                status = try activatingStatus(
+                    persisted,
                     identity: request.identity,
                     bindings: request.hostAccessBindings ?? []
                 )
-                guard brokerSHA256 == status.hostAccessSHA256 else {
-                    throw NetworkHelperError.bindingUnavailable
-                }
             case .status:
                 let persisted = try store.status(
                     identity: request.identity
                 )
-                if persisted.disposition == .active,
-                   let expected = persisted.hostAccessSHA256 {
-                    if hostAccessBroker.sha256(
-                        identity: request.identity
-                    ) != expected {
-                        guard let configuration =
-                            try store
-                                .activeHostAccessConfigurations()
-                                .first(where: {
-                                    $0.identity == request.identity
-                                }),
-                        try hostAccessBroker.apply(
-                            identity: configuration.identity,
-                            bindings: configuration.bindings
-                        ) == expected else {
-                            throw NetworkHelperError.bindingUnavailable
-                        }
-                    }
-                } else if persisted.disposition == .active {
-                    hostAccessBroker.remove(
-                        identity: request.identity
+                if persisted.disposition == .active {
+                    let bindings = try store
+                        .activeHostAccessConfigurations()
+                        .first(where: {
+                            $0.identity == request.identity
+                        })?.bindings ?? []
+                    status = try activatingStatus(
+                        persisted,
+                        identity: request.identity,
+                        bindings: bindings
+                    )
+                } else {
+                    status = withHostAccessActivity(
+                        persisted,
+                        active: false
                     )
                 }
-                status = persisted
             case .remove:
-                status = try store.remove(identity: request.identity)
+                let removed = try store.remove(identity: request.identity)
                 hostAccessBroker.remove(identity: request.identity)
+                status = withHostAccessActivity(
+                    removed,
+                    active: false
+                )
             }
             return try NetworkHelperCanonicalJSON.frame(
                 NetworkHelperResponse(
@@ -92,6 +88,61 @@ struct NetworkHelperDispatcher: @unchecked Sendable {
                 )
             )
         }
+    }
+
+    private func activatingStatus(
+        _ persisted: NetworkHelperStatus,
+        identity: NetworkHelperDNSIdentity,
+        bindings: [ProjectDNSHostAccessBinding]
+    ) throws -> NetworkHelperStatus {
+        guard persisted.disposition == .active else {
+            return withHostAccessActivity(
+                persisted,
+                active: false
+            )
+        }
+        guard let expected = persisted.hostAccessSHA256 else {
+            hostAccessBroker.remove(identity: identity)
+            return withHostAccessActivity(
+                persisted,
+                active: true
+            )
+        }
+        if hostAccessBroker.sha256(identity: identity) == expected {
+            return withHostAccessActivity(
+                persisted,
+                active: true
+            )
+        }
+        do {
+            let applied = try hostAccessBroker.apply(
+                identity: identity,
+                bindings: bindings
+            )
+            return withHostAccessActivity(
+                persisted,
+                active: applied == expected
+            )
+        } catch NetworkHelperError.bindingUnavailable {
+            return withHostAccessActivity(
+                persisted,
+                active: false
+            )
+        }
+    }
+
+    private func withHostAccessActivity(
+        _ status: NetworkHelperStatus,
+        active: Bool
+    ) -> NetworkHelperStatus {
+        NetworkHelperStatus(
+            disposition: status.disposition,
+            identity: status.identity,
+            corefileSHA256: status.corefileSHA256,
+            hostAccessSHA256: status.hostAccessSHA256,
+            hostAccessActive: active,
+            reason: status.reason
+        )
     }
 }
 

@@ -131,6 +131,7 @@ struct NetworkHelperStatus: Codable, Equatable, Sendable {
     let identity: NetworkHelperDNSIdentity?
     let corefileSHA256: String?
     let hostAccessSHA256: String?
+    let hostAccessActive: Bool?
     let reason: String?
 
     init(
@@ -138,12 +139,14 @@ struct NetworkHelperStatus: Codable, Equatable, Sendable {
         identity: NetworkHelperDNSIdentity?,
         corefileSHA256: String?,
         hostAccessSHA256: String? = nil,
+        hostAccessActive: Bool? = nil,
         reason: String?
     ) {
         self.disposition = disposition
         self.identity = identity
         self.corefileSHA256 = corefileSHA256
         self.hostAccessSHA256 = hostAccessSHA256
+        self.hostAccessActive = hostAccessActive
         self.reason = reason
     }
 }

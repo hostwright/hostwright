@@ -19,11 +19,17 @@ public enum NetworkHelperExecutable {
         let hostAccessBroker = NetworkHelperHostAccessBroker()
         for configuration
             in try store.activeHostAccessConfigurations() {
-            guard try hostAccessBroker.apply(
-                identity: configuration.identity,
-                bindings: configuration.bindings
-            ) == configuration.sha256 else {
-                throw NetworkHelperError.bindingUnavailable
+            do {
+                guard try hostAccessBroker.apply(
+                    identity: configuration.identity,
+                    bindings: configuration.bindings
+                ) == configuration.sha256 else {
+                    throw NetworkHelperError.bindingUnavailable
+                }
+            } catch NetworkHelperError.bindingUnavailable {
+                // The project bridge may not exist until its first attached
+                // container starts. The server must remain available so the
+                // same persisted generation can be re-observed and activated.
             }
         }
         let server = NetworkHelperUnixServer(

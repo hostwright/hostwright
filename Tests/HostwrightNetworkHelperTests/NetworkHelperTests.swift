@@ -762,6 +762,80 @@ final class NetworkHelperTests: XCTestCase {
         }
     }
 
+    func testDispatcherStagesInactiveExactHostAccessBindingForRetryAndRemoval()
+        throws
+    {
+        try withStore { store, _ in
+            let broker = NetworkHelperHostAccessBroker()
+            let dispatcher = NetworkHelperDispatcher(
+                store: store,
+                hostAccessBroker: broker
+            )
+            let binding = ProjectDNSHostAccessBinding(
+                hostname: "host-api.internal",
+                protocolName: .tcp,
+                addressClass: .loopback,
+                listenAddress: "192.0.2.1",
+                clientCIDR: "192.0.2.0/24",
+                targetAddress: "127.0.0.1",
+                port: 6_508
+            )
+            let identity = identity()
+
+            let applied = try NetworkHelperCanonicalJSON.decodeFrame(
+                NetworkHelperResponse.self,
+                from: dispatcher.dispatch(
+                    frame: try NetworkHelperCanonicalJSON.frame(
+                        NetworkHelperRequest(
+                            operation: .apply,
+                            identity: identity,
+                            corefile: corefile(),
+                            hostAccessBindings: [binding]
+                        )
+                    )
+                )
+            )
+            let digest = try XCTUnwrap(applied.status?.hostAccessSHA256)
+            XCTAssertEqual(applied.status?.disposition, .active)
+            XCTAssertEqual(digest.count, 64)
+            XCTAssertEqual(applied.status?.hostAccessActive, false)
+            XCTAssertFalse(broker.hasActiveBindings)
+
+            let staged = try NetworkHelperCanonicalJSON.decodeFrame(
+                NetworkHelperResponse.self,
+                from: dispatcher.dispatch(
+                    frame: try NetworkHelperCanonicalJSON.frame(
+                        NetworkHelperRequest(
+                            operation: .status,
+                            identity: identity
+                        )
+                    )
+                )
+            )
+            XCTAssertEqual(staged.status?.disposition, .active)
+            XCTAssertEqual(staged.status?.hostAccessSHA256, digest)
+            XCTAssertEqual(staged.status?.hostAccessActive, false)
+            XCTAssertFalse(broker.hasActiveBindings)
+
+            let removed = try NetworkHelperCanonicalJSON.decodeFrame(
+                NetworkHelperResponse.self,
+                from: dispatcher.dispatch(
+                    frame: try NetworkHelperCanonicalJSON.frame(
+                        NetworkHelperRequest(
+                            operation: .remove,
+                            identity: identity
+                        )
+                    )
+                )
+            )
+            XCTAssertEqual(removed.status?.disposition, .absent)
+            XCTAssertFalse(broker.hasActiveBindings)
+            XCTAssertTrue(
+                try store.activeHostAccessConfigurations().isEmpty
+            )
+        }
+    }
+
     func testRuntimeDirectorySocketModesAndSameUIDAuthentication() throws {
         let parent = try makePrivateParent()
         defer { try? FileManager.default.removeItem(at: parent) }

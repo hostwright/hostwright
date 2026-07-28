@@ -1,6 +1,7 @@
 import Foundation
 import HostwrightCore
 import HostwrightManifest
+import HostwrightReconciler
 import HostwrightRuntime
 import HostwrightState
 import XCTest
@@ -38,6 +39,42 @@ final class NetworkLifecycleCoordinatorTests: XCTestCase {
         XCTAssertEqual(persisted.lifecycleState, .available)
         XCTAssertEqual(persisted.finalizerState, .active)
         XCTAssertNotNil(persisted.observedSHA256)
+        let status = CLIJSON.statusObserved(
+            manifestPath: "hostwright.yaml",
+            stateDatabasePath: fixture.store.path,
+            manifest: HostwrightManifest(
+                version: 2,
+                project: "network-coordinator",
+                services: []
+            ),
+            observed: ObservedRuntimeState(
+                projectName: "network-coordinator",
+                services: []
+            ),
+            plan: ReconciliationPlan(
+                projectName: "network-coordinator",
+                observationConnected: true,
+                issues: [],
+                drift: [],
+                actions: []
+            ),
+            imageDigestLocks: [],
+            portReservations: [],
+            networks: [persisted]
+        )
+        let statusObject = try XCTUnwrap(
+            try JSONSerialization.jsonObject(
+                with: Data(status.utf8)
+            ) as? [String: Any]
+        )
+        let statusNetworks = try XCTUnwrap(
+            statusObject["networks"] as? [[String: Any]]
+        )
+        XCTAssertEqual(statusNetworks.first?["name"] as? String, "backend")
+        XCTAssertEqual(
+            statusNetworks.first?["observedIPv6"] as? [String],
+            []
+        )
         XCTAssertEqual(
             try fixture.store.operationGroups.loadAll().map(\.status),
             [.succeeded]
@@ -87,6 +124,102 @@ final class NetworkLifecycleCoordinatorTests: XCTestCase {
         XCTAssertEqual(
             try fixture.store.operationGroups.loadAll(),
             []
+        )
+    }
+
+    func testUnsupportedIPv6RefusesBeforeIntentOrMutation()
+        async throws
+    {
+        let fixture = try makeFixture(
+            networkNames: ["dual-stack"],
+            ipv4: .cidr("10.77.0.0/24"),
+            ipv6: .cidr("fd77::/64")
+        )
+        defer { fixture.cleanup() }
+
+        await XCTAssertThrowsErrorAsync {
+            _ = try await NetworkLifecycleCoordinator.reconcile(
+                preparation: fixture.preparation,
+                planSHA256: digest("d"),
+                store: fixture.store,
+                environment: fixture.environment
+            )
+        }
+
+        let audit = await fixture.runtime.audit()
+        XCTAssertEqual(audit.operations, [])
+        XCTAssertEqual(try fixture.store.networks.listNetworks(), [])
+        XCTAssertEqual(try fixture.store.operationGroups.loadAll(), [])
+    }
+
+    func testOccupiedCIDRRefusesBeforeIntentOrProviderMutation()
+        async throws
+    {
+        let fixture = try makeFixture(
+            networkNames: ["backend"],
+            ipv4: .cidr("10.78.0.0/24"),
+            ipv6: .disabled
+        )
+        defer { fixture.cleanup() }
+        await fixture.runtime.seedUnmanagedNetwork(
+            name: "unmanaged",
+            addresses: ["10.78.0.0/24", "10.78.0.1"]
+        )
+
+        await XCTAssertThrowsErrorAsync {
+            _ = try await NetworkLifecycleCoordinator.reconcile(
+                preparation: fixture.preparation,
+                planSHA256: digest("d"),
+                store: fixture.store,
+                environment: fixture.environment
+            )
+        }
+
+        let audit = await fixture.runtime.audit()
+        XCTAssertEqual(audit.operations, [])
+        XCTAssertEqual(try fixture.store.networks.listNetworks(), [])
+        XCTAssertEqual(try fixture.store.operationGroups.loadAll(), [])
+    }
+
+    func testMissingObservedFamilyLeavesInterruptedDurableIntent()
+        async throws
+    {
+        let fixture = try makeFixture(
+            networkNames: ["backend"],
+            ipv4: .cidr("192.168.88.0/24"),
+            ipv6: .disabled,
+            createdAddresses: []
+        )
+        defer { fixture.cleanup() }
+        let desired = try XCTUnwrap(
+            fixture.preparation.desiredState.networks.first
+        )
+
+        await XCTAssertThrowsErrorAsync {
+            _ = try await NetworkLifecycleCoordinator.reconcile(
+                preparation: fixture.preparation,
+                planSHA256: digest("d"),
+                store: fixture.store,
+                environment: fixture.environment
+            )
+        }
+
+        let audit = await fixture.runtime.audit()
+        XCTAssertEqual(audit.operations, [.create("backend")])
+        let record = try XCTUnwrap(
+            try fixture.store.networks.loadNetwork(
+                id: desired.identity.resourceUUID
+            )
+        )
+        XCTAssertEqual(record.lifecycleState, .creating)
+        XCTAssertEqual(record.finalizerState, .pending)
+        let group = try XCTUnwrap(
+            try fixture.store.operationGroups.loadAll().first
+        )
+        XCTAssertEqual(group.status, .interrupted)
+        XCTAssertEqual(
+            group.checkpoint,
+            "address-verification-failed"
         )
     }
 
@@ -369,6 +502,7 @@ private actor NetworkCoordinatorRuntime:
     private let store: SQLiteStateStore
     private var capability: RuntimeCapabilitySnapshot
     private let createBehavior: NetworkCoordinatorCreateBehavior
+    private let createdAddresses: [String: [String]]
     private var networks: [String: RuntimeInventoryNetwork] = [:]
     private var operations: [NetworkCoordinatorOperation] = []
     private var createIntentChecks: [Bool] = []
@@ -377,11 +511,13 @@ private actor NetworkCoordinatorRuntime:
     init(
         store: SQLiteStateStore,
         capability: RuntimeCapabilitySnapshot,
-        createBehavior: NetworkCoordinatorCreateBehavior
+        createBehavior: NetworkCoordinatorCreateBehavior,
+        createdAddresses: [String: [String]]
     ) {
         self.store = store
         self.capability = capability
         self.createBehavior = createBehavior
+        self.createdAddresses = createdAddresses
     }
 
     func setCapability(_ value: RuntimeCapabilitySnapshot) {
@@ -400,6 +536,20 @@ private actor NetworkCoordinatorRuntime:
                 labels: [],
                 ownership: nil
             )
+    }
+
+    func seedUnmanagedNetwork(
+        name: String,
+        addresses: [String]
+    ) {
+        networks[name] = RuntimeInventoryNetwork(
+            runtimeID: name,
+            name: name,
+            kind: "nat",
+            addresses: addresses,
+            labels: [],
+            ownership: nil
+        )
     }
 
     func clearAudit() {
@@ -659,10 +809,10 @@ private actor NetworkCoordinatorRuntime:
             runtimeID: request.identity.runtimeIdentifier,
             name: request.identity.runtimeIdentifier,
             kind: request.mode.rawValue,
-            addresses: [
-                "192.168.88.2",
-                "fd00::2",
-            ],
+            addresses:
+                createdAddresses[
+                    request.identity.logicalName
+                ] ?? [],
             labels: labels.map {
                 RuntimeInventoryLabel(key: $0.key, value: $0.value)
             },
@@ -711,7 +861,10 @@ private struct NetworkCoordinatorFixture {
 
 private func makeFixture(
     networkNames: [String],
-    createBehavior: NetworkCoordinatorCreateBehavior = .succeed
+    createBehavior: NetworkCoordinatorCreateBehavior = .succeed,
+    ipv4: RuntimeNetworkAddressRequest = .automatic,
+    ipv6: RuntimeNetworkAddressRequest = .disabled,
+    createdAddresses: [String]? = nil
 ) throws -> NetworkCoordinatorFixture {
     let root = FileManager.default.temporaryDirectory
         .appendingPathComponent(
@@ -736,6 +889,18 @@ private func makeFixture(
         .loadProject(id: projectID)
         .resourceUUID
     let capability = capabilitySnapshot(build: "current")
+    let createdAddressesByNetwork = Dictionary(
+        uniqueKeysWithValues: networkNames.enumerated().map {
+            index,
+            name in
+            let suffix = index + 1
+            let addresses = createdAddresses ?? [
+                "192.168.\(87 + suffix).0/24",
+                "192.168.\(87 + suffix).1",
+            ]
+            return (name, addresses)
+        }
+    )
     let networks = try networkNames.map {
         DesiredRuntimeNetwork(
             identity: try RuntimeNetworkIdentity(
@@ -743,8 +908,8 @@ private func makeFixture(
                 projectUUID: projectUUID
             ),
             mode: .nat,
-            ipv4: .automatic,
-            ipv6: .automatic
+            ipv4: ipv4,
+            ipv6: ipv6
         )
     }
     let preparation = LifecycleCommandPreparation(
@@ -774,7 +939,8 @@ private func makeFixture(
     let runtime = NetworkCoordinatorRuntime(
         store: store,
         capability: capability,
-        createBehavior: createBehavior
+        createBehavior: createBehavior,
+        createdAddresses: createdAddressesByNetwork
     )
     let environment = CLIEnvironment(
         fileExists: {
@@ -884,4 +1050,19 @@ private func capabilitySnapshot(
 
 private func digest(_ character: Character) -> String {
     String(repeating: String(character), count: 64)
+}
+
+private func XCTAssertThrowsErrorAsync(
+    _ expression: () async throws -> Void,
+    file: StaticString = #filePath,
+    line: UInt = #line
+) async {
+    do {
+        try await expression()
+        XCTFail(
+            "Expected async expression to throw.",
+            file: file,
+            line: line
+        )
+    } catch {}
 }

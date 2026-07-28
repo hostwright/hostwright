@@ -149,7 +149,7 @@ public struct RuntimeNetworkProviderCapabilities: Codable, Equatable, Sendable {
         },
         modes: RuntimeNetworkMode.allCases,
         ipv4AddressModes: [.automatic, .cidr],
-        ipv6AddressModes: [.automatic, .cidr],
+        ipv6AddressModes: [.disabled],
         attachmentTiming: .containerCreateOnly
     )
 

@@ -597,11 +597,20 @@ final class ContainerizationHelperClientTests: XCTestCase {
         let negotiated = try await adapter.capabilitySnapshot()
         let identity = RuntimeServiceIdentity(projectName: "demo", serviceName: "api")
         let context = mutationContext(digest: negotiated.canonicalSHA256)
+        let network = try RuntimeNetworkIdentity(
+            logicalName: "backend",
+            projectUUID: projectUUID
+        )
+        let attachment = try RuntimeDesiredNetworkAttachment(
+            network: network,
+            aliases: ["api"]
+        )
         let service = DesiredRuntimeService(
             identity: identity,
             image: "example.local/demo:latest",
             command: ["/bin/demo"],
-            environment: [RuntimeEnvironmentValue(name: "MODE", value: "test")]
+            environment: [RuntimeEnvironmentValue(name: "MODE", value: "test")],
+            networks: [attachment]
         )
         let createAction = PlannedRuntimeAction(
             kind: .create,
@@ -625,6 +634,7 @@ final class ContainerizationHelperClientTests: XCTestCase {
         XCTAssertEqual(createPayload.resourceUUID, resourceUUID)
         XCTAssertEqual(createPayload.projectUUID, projectUUID)
         XCTAssertEqual(createPayload.environment, [RuntimeInventoryEnvironmentEntry(name: "MODE", value: "test")])
+        XCTAssertEqual(createPayload.networks, [attachment])
         let labels = Dictionary(uniqueKeysWithValues: createPayload.labels.map { ($0.key, $0.value) })
         XCTAssertEqual(labels[RuntimeManagedResourceIdentity.providerIDLabel], RuntimeProviderID.appleContainerization.rawValue)
         XCTAssertEqual(labels[RuntimeManagedResourceIdentity.fencingTokenLabel], fencingToken)

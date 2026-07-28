@@ -84,6 +84,9 @@ struct StatusCommandRunner {
             let portReservations = try store.networkPorts.loadProject(
                 projectUUID: project.resourceUUID
             )
+            let networks = try store.networks.listNetworks(
+                projectUUID: project.resourceUUID
+            )
             try store.observedStates.saveSnapshot(
                 snapshotID: hostwrightUniqueID(prefix: "status-snapshot"),
                 projectID: projectID,
@@ -121,7 +124,8 @@ struct StatusCommandRunner {
                         observed: observedForPlanning,
                         plan: plan,
                         imageDigestLocks: imageDigestLocks,
-                        portReservations: portReservations
+                        portReservations: portReservations,
+                        networks: networks
                     )
                 )
             }
@@ -132,6 +136,7 @@ struct StatusCommandRunner {
                     plan: plan,
                     imageDigestLocks: imageDigestLocks,
                     portReservations: portReservations,
+                    networks: networks,
                     stateDatabasePath: stateDatabasePath
                 )
             )
@@ -155,6 +160,7 @@ struct StatusCommandRunner {
         plan: ReconciliationPlan,
         imageDigestLocks: [ImageDigestLockRecord],
         portReservations: [NetworkPortReservationRecord],
+        networks: [NetworkStateResourceRecord],
         stateDatabasePath: String
     ) -> String {
         let observedByName = hostwrightObservedServicesByLogicalName(observed)
@@ -208,6 +214,18 @@ struct StatusCommandRunner {
         }
 
         lines.append("")
+        lines.append("Networks:")
+        if networks.isEmpty {
+            lines.append("- none")
+        } else {
+            lines += networks.sorted {
+                ($0.name, $0.id) < ($1.name, $1.id)
+            }.map { record in
+                "- \(record.name): driver=\(record.driver.rawValue) ipv4=\(render(record.requestedIPv4)) observedIPv4=\(record.observedIPv4.joined(separator: ",")) ipv6=\(render(record.requestedIPv6)) observedIPv6=\(record.observedIPv6.joined(separator: ",")) state=\(record.lifecycleState.rawValue)"
+            }
+        }
+
+        lines.append("")
         lines.append("Drift:")
         if plan.drift.isEmpty {
             lines.append("- none")
@@ -218,6 +236,19 @@ struct StatusCommandRunner {
         }
         lines.append("")
         return lines.joined(separator: "\n")
+    }
+
+    private func render(
+        _ request: NetworkStateAddressRequest
+    ) -> String {
+        switch request {
+        case .auto:
+            return "auto"
+        case .disabled:
+            return "disabled"
+        case .cidr(let value):
+            return value
+        }
     }
 
     private func failure(code: HostwrightErrorCode, message: String) -> CLIRunResult {

@@ -1,6 +1,7 @@
 import CryptoKit
 import Foundation
 import HostwrightCore
+import HostwrightNetworking
 import HostwrightRuntime
 import HostwrightState
 
@@ -409,6 +410,11 @@ enum NetworkLifecycleCoordinator {
                 "Network mutation was not verified through exact structured ownership observation."
             )
         }
+        let addressReport = try verifiedAddressObservation(
+            desired: desired,
+            observed: observed,
+            inventory: inventory
+        )
         let observedSHA256 = try digest(observed)
         let authority = NetworkStateMutationAuthority(
             providerID: preparation.providerID.rawValue,
@@ -421,7 +427,6 @@ enum NetworkLifecycleCoordinator {
             currentCapabilitySHA256:
                 preparation.capabilitySHA256
         )
-        let addresses = observed.addresses.sorted()
         let available = NetworkStateResourceRecord(
             id: creating.id,
             projectUUID: creating.projectUUID,
@@ -434,8 +439,12 @@ enum NetworkLifecycleCoordinator {
             driver: creating.driver,
             requestedIPv4: creating.requestedIPv4,
             requestedIPv6: creating.requestedIPv6,
-            observedIPv4: addresses.filter { !$0.contains(":") },
-            observedIPv6: addresses.filter { $0.contains(":") },
+            observedIPv4: observedAddressValues(
+                addressReport.family(.ipv4)
+            ),
+            observedIPv6: observedAddressValues(
+                addressReport.family(.ipv6)
+            ),
             desiredSHA256: creating.desiredSHA256,
             observedSHA256: observedSHA256,
             lifecycleState: .available,
@@ -463,6 +472,110 @@ enum NetworkLifecycleCoordinator {
             store: store
         )
         _ = adapter
+    }
+
+    private static func verifiedAddressObservation(
+        desired: DesiredRuntimeNetwork,
+        observed: RuntimeInventoryNetwork,
+        inventory: RuntimeInventory
+    ) throws -> NetworkAddressObservationReport {
+        let constraints = try addressConstraints(
+            inventory: inventory,
+            excludingResourceUUIDs: [
+                desired.identity.resourceUUID,
+            ]
+        )
+        let plan = try NetworkAddressPlanner.makePlans(
+            definitions: [addressDefinition(desired)],
+            capabilities: .dualStack,
+            constraints: constraints
+        ).first
+        guard let plan else {
+            throw conflict(
+                "Network address verification could not recover the confirmed desired plan."
+            )
+        }
+        let report: NetworkAddressObservationReport
+        do {
+            report = try NetworkAddressObserver.verify(
+                plan: plan,
+                observed: try addressObservations(observed),
+                constraints: constraints
+            )
+        } catch {
+            throw conflict(
+                "Network address observation failed verification: \(String(describing: error))"
+            )
+        }
+        for family in plan.activeFamilies {
+            guard report.family(family)?.state == .available else {
+                throw conflict(
+                    "Network '\(desired.identity.logicalName)' did not receive its requested \(family.rawValue) address family."
+                )
+            }
+        }
+        return report
+    }
+
+    private static func addressObservations(
+        _ network: RuntimeInventoryNetwork
+    ) throws -> [NetworkAddressFamilyObservation] {
+        let topology: NetworkAddressTopology
+        let kind = network.kind.lowercased()
+        if kind.contains("host-only") ||
+            kind.contains("hostonly") {
+            topology = .hostOnly
+        } else if kind.contains("routed") {
+            topology = .routed
+        } else if kind.contains("nat") ||
+            kind.contains("vmnet") {
+            topology = .nat
+        } else {
+            throw conflict(
+                "Network observation reported unsupported topology '\(network.kind)'."
+            )
+        }
+
+        var result: [NetworkAddressFamilyObservation] = []
+        for family in NetworkAddressFamily.canonicalOrder {
+            let familyValues = network.addresses.filter {
+                ($0.contains(":") ? NetworkAddressFamily.ipv6 : .ipv4)
+                    == family
+            }
+            let cidrs = familyValues.filter { $0.contains("/") }
+            let gateways = familyValues.filter { !$0.contains("/") }
+            guard cidrs.count <= 1,
+                  gateways.count <= 1 else {
+                throw conflict(
+                    "Network observation reported ambiguous \(family.rawValue) subnet or gateway data."
+                )
+            }
+            if let cidr = cidrs.first {
+                result.append(
+                    NetworkAddressFamilyObservation(
+                        family: family,
+                        topology: topology,
+                        cidr: cidr,
+                        gateway: gateways.first
+                    )
+                )
+            } else if !gateways.isEmpty {
+                throw conflict(
+                    "Network observation reported a \(family.rawValue) gateway without a subnet."
+                )
+            }
+        }
+        return result
+    }
+
+    private static func observedAddressValues(
+        _ report: NetworkAddressFamilyReport?
+    ) -> [String] {
+        guard let report, report.state == .available else {
+            return []
+        }
+        return [report.cidr, report.gateway]
+            .compactMap { $0 }
     }
 
     private static func recoverCreateFailure(
@@ -533,6 +646,15 @@ enum NetworkLifecycleCoordinator {
             )
             throw originalError
         } catch let recovery as HostwrightDiagnostic {
+            if (try? store.operationGroups.load(id: group.id)?.status)
+                == .active {
+                try? finish(
+                    group,
+                    status: .interrupted,
+                    checkpoint: "address-verification-failed",
+                    store: store
+                )
+            }
             throw recovery
         } catch {
             if (try? store.operationGroups.load(id: group.id)?.status)
@@ -797,21 +919,168 @@ enum NetworkLifecycleCoordinator {
                     "Network mutation refused a stale provider, capability snapshot, or unavailable operation."
             )
         }
+        guard requiredOperation == .create else { return }
         for desired in preparation.desiredState.networks {
-            guard capabilities.modes.contains(desired.mode),
-                  capabilities.ipv4AddressModes.contains(
-                    desired.ipv4.mode
-                  ),
-                  capabilities.ipv6AddressModes.contains(
-                    desired.ipv6.mode
-                  ) else {
+            guard capabilities.modes.contains(desired.mode) else {
                 throw HostwrightDiagnostic(
                     code: .runtimeUnavailable,
                     message:
-                        "The selected runtime provider cannot execute the confirmed network address or driver mode."
+                        "Network '\(desired.identity.logicalName)' requests driver '\(desired.mode.rawValue)', which provider '\(preparation.providerID.rawValue)' does not advertise."
                 )
             }
+            try validateAddressMode(
+                desired.ipv4,
+                family: .ipv4,
+                networkName: desired.identity.logicalName,
+                supported: capabilities.ipv4AddressModes,
+                providerID: preparation.providerID
+            )
+            try validateAddressMode(
+                desired.ipv6,
+                family: .ipv6,
+                networkName: desired.identity.logicalName,
+                supported: capabilities.ipv6AddressModes,
+                providerID: preparation.providerID
+            )
         }
+
+        let inventory = try await adapter.inventory()
+        let desiredIDs = Set(
+            preparation.desiredState.networks.map {
+                $0.identity.resourceUUID
+            }
+        )
+        do {
+            let result = try NetworkAddressPlanner.evaluate(
+                definitions:
+                    preparation.desiredState.networks.map(
+                        addressDefinition
+                    ),
+                capabilities: addressCapabilities(
+                    capabilities,
+                    providerID: preparation.providerID
+                ),
+                constraints: try addressConstraints(
+                    inventory: inventory,
+                    excludingResourceUUIDs: desiredIDs
+                )
+            )
+            if case .unavailable(let unavailable) = result {
+                throw HostwrightDiagnostic(
+                    code: .runtimeUnavailable,
+                    message:
+                        "Network '\(unavailable.networkName)' \(unavailable.family.rawValue) \(unavailable.requestedMode.rawValue) is unavailable: \(unavailable.reason)"
+                )
+            }
+        } catch let diagnostic as HostwrightDiagnostic {
+            throw diagnostic
+        } catch {
+            throw HostwrightDiagnostic(
+                code: .runtimeUnavailable,
+                message:
+                    "Network address planning refused mutation: \(String(describing: error))"
+            )
+        }
+    }
+
+    private static func validateAddressMode(
+        _ request: RuntimeNetworkAddressRequest,
+        family: NetworkAddressFamily,
+        networkName: String,
+        supported: [RuntimeNetworkAddressMode],
+        providerID: RuntimeProviderID
+    ) throws {
+        guard supported.contains(request.mode) else {
+            throw HostwrightDiagnostic(
+                code: .runtimeUnavailable,
+                message:
+                    "Network '\(networkName)' requests \(family.rawValue) mode '\(request.mode.rawValue)', which provider '\(providerID.rawValue)' cannot enforce."
+            )
+        }
+    }
+
+    private static func addressCapabilities(
+        _ capabilities: RuntimeNetworkProviderCapabilities,
+        providerID: RuntimeProviderID
+    ) -> NetworkAddressCapabilities {
+        func family(
+            _ modes: [RuntimeNetworkAddressMode],
+            name: String
+        ) -> NetworkAddressFamilyCapability {
+            NetworkAddressFamilyCapability(
+                automatic: modes.contains(.automatic),
+                explicitCIDR: modes.contains(.cidr),
+                disabled: modes.contains(.disabled),
+                unavailableReason:
+                    "Provider '\(providerID.rawValue)' does not advertise the requested \(name) address mode."
+            )
+        }
+        return NetworkAddressCapabilities(
+            ipv4: family(
+                capabilities.ipv4AddressModes,
+                name: "IPv4"
+            ),
+            ipv6: family(
+                capabilities.ipv6AddressModes,
+                name: "IPv6"
+            )
+        )
+    }
+
+    private static func addressDefinition(
+        _ desired: DesiredRuntimeNetwork
+    ) -> HostwrightNetworkDefinition {
+        HostwrightNetworkDefinition(
+            name: desired.identity.logicalName,
+            driver: desired.mode == .nat ? .nat : .hostOnly,
+            ipv4: manifestAddress(desired.ipv4),
+            ipv6: manifestAddress(desired.ipv6)
+        )
+    }
+
+    private static func manifestAddress(
+        _ request: RuntimeNetworkAddressRequest
+    ) -> HostwrightNetworkAddressRequest {
+        switch request {
+        case .automatic:
+            return .auto
+        case .disabled:
+            return .disabled
+        case .cidr(let value):
+            return .cidr(value)
+        }
+    }
+
+    private static func addressConstraints(
+        inventory: RuntimeInventory,
+        excludingResourceUUIDs: Set<String>
+    ) throws -> NetworkAddressPlanningConstraints {
+        let excludedCIDRs = Set(
+            inventory.networks
+                .filter {
+                    guard let resourceUUID = $0.ownership?.resourceUUID else {
+                        return false
+                    }
+                    return excludingResourceUUIDs.contains(resourceUUID)
+                }
+                .flatMap(\.addresses)
+                .filter { $0.contains("/") }
+        )
+        let hostCIDRs = try NetworkHostInterfaceInventory.currentCIDRs()
+            .filter { !excludedCIDRs.contains($0) }
+        let occupiedCIDRs = inventory.networks
+            .filter {
+                guard let resourceUUID = $0.ownership?.resourceUUID else {
+                    return true
+                }
+                return !excludingResourceUUIDs.contains(resourceUUID)
+            }
+            .flatMap(\.addresses)
+            .filter { $0.contains("/") }
+        return NetworkAddressPlanningConstraints(
+            hostCIDRs: hostCIDRs,
+            occupiedCIDRs: occupiedCIDRs
+        )
     }
 
     private static func mutationAuthority(

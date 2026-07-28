@@ -57,7 +57,7 @@ final class ContainerizationFrameworkBackendTests: XCTestCase {
         XCTAssertEqual(capabilities.providerID, .appleContainerization)
         XCTAssertEqual(capabilities.modes, [.hostOnly, .nat])
         XCTAssertEqual(capabilities.ipv4AddressModes, [.cidr])
-        XCTAssertEqual(capabilities.ipv6AddressModes, [.cidr])
+        XCTAssertEqual(capabilities.ipv6AddressModes, [.cidr, .disabled])
         XCTAssertEqual(capabilities.attachmentTiming, .containerCreateOnly)
         XCTAssertEqual(capabilities.status(for: .create)?.state, .available)
         XCTAssertEqual(capabilities.status(for: .inspect)?.state, .available)
@@ -264,7 +264,7 @@ final class ContainerizationFrameworkBackendTests: XCTestCase {
         }
     }
 
-    func testDisabledIPv6NetworkCreateIsRejectedBeforeDriverMutation() async throws {
+    func testDisabledIPv6NetworkCreateProducesVerifiedIPv4OnlyNetwork() async throws {
         let parent = try makePrivateParent()
         defer { try? FileManager.default.removeItem(at: parent) }
         let store = try ContainerizationHelperStateStore(
@@ -282,24 +282,52 @@ final class ContainerizationFrameworkBackendTests: XCTestCase {
         )
         let context = networkMutationContext(identity: identity)
 
-        do {
+        let created = try await backend.networkCreate(
+            RuntimeNetworkCreateRequest(
+                identity: identity,
+                mode: .nat,
+                ipv4: .cidr("192.168.240.0/24"),
+                ipv6: .disabled
+            ),
+            context: context
+        )
+        XCTAssertTrue(created.verified)
+        XCTAssertFalse(
+            try XCTUnwrap(created.observedNetwork).addresses.contains {
+                $0.contains(":")
+            }
+        )
+        let operations = await driver.operations()
+        XCTAssertEqual(operations, ["network-create"])
+    }
+
+    func testIPv6OnlyNetworkCreateIsRejectedBeforeDriverMutation() async throws {
+        let parent = try makePrivateParent()
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let store = try ContainerizationHelperStateStore(
+            rootURL: parent.appendingPathComponent("state", isDirectory: true)
+        )
+        let driver = RecordingContainerizationDriver()
+        let backend = try ContainerizationFrameworkBackend(
+            snapshot: snapshot(),
+            store: store,
+            driver: driver
+        )
+        let identity = try RuntimeNetworkIdentity(
+            logicalName: "ipv6-only",
+            projectUUID: "22222222-2222-4222-8222-222222222222"
+        )
+
+        await XCTAssertThrowsErrorAsync {
             _ = try await backend.networkCreate(
                 RuntimeNetworkCreateRequest(
                     identity: identity,
                     mode: .nat,
-                    ipv4: .cidr("192.168.240.0/24"),
-                    ipv6: .disabled
+                    ipv4: .disabled,
+                    ipv6: .cidr("fd00:7:4::/64")
                 ),
-                context: context
+                context: networkMutationContext(identity: identity)
             )
-            XCTFail("Expected disabled IPv6 network creation to be unavailable.")
-        } catch let ContainerizationHelperBackendError.unavailable(message) {
-            XCTAssertEqual(
-                message,
-                "Containerization 0.35.0 VmnetNetwork always assigns an IPv6 prefix."
-            )
-        } catch {
-            XCTFail("Expected unavailable, got \(error)")
         }
         let operations = await driver.operations()
         XCTAssertEqual(operations, [])

@@ -786,7 +786,8 @@ enum CLIJSON {
         observed: ObservedRuntimeState,
         plan: ReconciliationPlan,
         imageDigestLocks: [ImageDigestLockRecord],
-        portReservations: [NetworkPortReservationRecord]
+        portReservations: [NetworkPortReservationRecord],
+        networks: [NetworkStateResourceRecord]
     ) -> String {
         let observedByName = hostwrightObservedServicesByLogicalName(observed)
         return render([
@@ -854,6 +855,31 @@ enum CLIJSON {
                     "observedSHA256": record.observedSHA256 as Any
                 ].compactNilValues()
             },
+            "networks": networks.sorted {
+                ($0.name, $0.id) < ($1.name, $1.id)
+            }.map { record in
+                [
+                    "id": record.id,
+                    "name": record.name,
+                    "runtimeName": record.runtimeName,
+                    "generation": record.generation,
+                    "providerID": record.providerID,
+                    "providerGeneration":
+                        record.providerGeneration,
+                    "driver": record.driver.rawValue,
+                    "requestedIPv4":
+                        statusNetworkAddress(record.requestedIPv4),
+                    "requestedIPv6":
+                        statusNetworkAddress(record.requestedIPv6),
+                    "observedIPv4": record.observedIPv4,
+                    "observedIPv6": record.observedIPv6,
+                    "lifecycle": record.lifecycleState.rawValue,
+                    "finalizer": record.finalizerState.rawValue,
+                    "desiredSHA256": record.desiredSHA256,
+                    "observedSHA256":
+                        record.observedSHA256 as Any
+                ].compactNilValues()
+            },
             "services": manifest.services.sorted { $0.name < $1.name }.map { service in
                 let observedServices = observedByName[service.name] ?? []
                 var payload: [String: Any] = [
@@ -886,6 +912,19 @@ enum CLIJSON {
                 ]
             }
         ].compactNilValues())
+    }
+
+    private static func statusNetworkAddress(
+        _ request: NetworkStateAddressRequest
+    ) -> String {
+        switch request {
+        case .auto:
+            return "auto"
+        case .disabled:
+            return "disabled"
+        case .cidr(let value):
+            return value
+        }
     }
 
     private static func statusObservedService(

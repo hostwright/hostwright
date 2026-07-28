@@ -68,13 +68,14 @@ final class RuntimeNetworkProviderTests: XCTestCase {
         XCTAssertEqual(Set(cli.modes), [.nat, .hostOnly])
         XCTAssertEqual(Set(cli.ipv4AddressModes), [.automatic, .cidr])
         XCTAssertFalse(cli.ipv4AddressModes.contains(.disabled))
+        XCTAssertEqual(cli.ipv6AddressModes, [.disabled])
 
         let helper = RuntimeNetworkProviderCapabilities.appleContainerizationUnavailable
         XCTAssertTrue(helper.operations.allSatisfy { $0.state == .unavailable })
         XCTAssertEqual(helper.attachmentTiming, .unavailable)
     }
 
-    func testAppleCommandBuildsOwnedDualStackHostOnlyNetworkAndRejectsDisabledFamily() throws {
+    func testAppleCommandBuildsOwnedIPv4OnlyHostOnlyNetworkAndRejectsIPv6() throws {
         let identity = try networkIdentity()
         let context = mutationContext(identity: identity)
         let executable = ResolvedRuntimeExecutable(
@@ -85,7 +86,7 @@ final class RuntimeNetworkProviderTests: XCTestCase {
             identity: identity,
             mode: .hostOnly,
             ipv4: .cidr("10.42.0.0/24"),
-            ipv6: .cidr("fd42::/64"),
+            ipv6: .disabled,
             labels: ["team": "runtime"]
         )
         let spec = try AppleContainerNetworkCommand.createSpec(
@@ -98,8 +99,7 @@ final class RuntimeNetworkProviderTests: XCTestCase {
         XCTAssertEqual(spec.arguments.suffix(1), [identity.runtimeIdentifier])
         XCTAssertTrue(spec.arguments.contains("--subnet"))
         XCTAssertTrue(spec.arguments.contains("10.42.0.0/24"))
-        XCTAssertTrue(spec.arguments.contains("--subnet-v6"))
-        XCTAssertTrue(spec.arguments.contains("fd42::/64"))
+        XCTAssertFalse(spec.arguments.contains("--subnet-v6"))
         XCTAssertTrue(
             spec.arguments.contains(
                 "\(RuntimeManagedResourceIdentity.resourceUUIDLabel)=\(identity.resourceUUID)"
@@ -113,7 +113,7 @@ final class RuntimeNetworkProviderTests: XCTestCase {
                     identity: identity,
                     mode: .nat,
                     ipv4: .automatic,
-                    ipv6: .disabled
+                    ipv6: .cidr("fd42::/64")
                 ),
                 context: context,
                 codec: .v1_1_0,
@@ -121,7 +121,7 @@ final class RuntimeNetworkProviderTests: XCTestCase {
             )
         ) { error in
             guard case RuntimeAdapterError.mutationUnavailableByPolicy = error else {
-                return XCTFail("Expected fail-closed address-family policy, got \(error)")
+                return XCTFail("Expected fail-closed IPv6 policy, got \(error)")
             }
         }
     }
@@ -188,7 +188,7 @@ final class RuntimeNetworkProviderTests: XCTestCase {
             identity: identity,
             mode: .nat,
             ipv4: .cidr("10.42.0.0/24"),
-            ipv6: .cidr("fd42::/64")
+            ipv6: .disabled
         )
         let context = mutationContext(identity: identity)
 
@@ -199,7 +199,7 @@ final class RuntimeNetworkProviderTests: XCTestCase {
 
         let inspected = try await adapter.inspect(.init(identity: identity))
         XCTAssertEqual(inspected.observedNetwork?.addresses, [
-            "10.42.0.0/24", "10.42.0.1", "fd42::/64"
+            "10.42.0.0/24", "10.42.0.1"
         ])
 
         let deleted = try await adapter.delete(
@@ -231,7 +231,7 @@ final class RuntimeNetworkProviderTests: XCTestCase {
                 identity: identity,
                 mode: .nat,
                 ipv4: .cidr("10.42.0.0/24"),
-                ipv6: .cidr("fd42::/64")
+                ipv6: .disabled
             ),
             context: createContext
         )
@@ -416,7 +416,7 @@ private actor RecordingNetworkProcessRunner: RuntimeProcessRunning {
     private static func networkJSON(_ arguments: [String]) throws -> String {
         var labels: [String: String] = [:]
         var ipv4 = "192.168.64.0/24"
-        var ipv6 = "fd00::/64"
+        var ipv6: String?
         var index = 2
         while index < arguments.count - 1 {
             switch arguments[index] {
@@ -441,6 +441,13 @@ private actor RecordingNetworkProcessRunner: RuntimeProcessRunning {
             }
         }
         let identifier = arguments.last!
+        var status: [String: Any] = [
+            "ipv4Gateway": Self.ipv4Gateway(ipv4),
+            "ipv4Subnet": ipv4
+        ]
+        if let ipv6 {
+            status["ipv6Subnet"] = ipv6
+        }
         let object: [[String: Any]] = [[
             "id": identifier,
             "configuration": [
@@ -451,11 +458,7 @@ private actor RecordingNetworkProcessRunner: RuntimeProcessRunning {
                 "options": [:],
                 "plugin": "container-network-vmnet"
             ],
-            "status": [
-                "ipv4Gateway": Self.ipv4Gateway(ipv4),
-                "ipv4Subnet": ipv4,
-                "ipv6Subnet": ipv6
-            ]
+            "status": status
         ]]
         return String(
             data: try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),

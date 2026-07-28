@@ -68,6 +68,10 @@ public enum ManifestValidator {
         return manifest
     }
 
+    static func normalizedNetworkCIDR(_ rawValue: String, ipv6: Bool) -> String? {
+        NetworkCIDR(rawValue, family: ipv6 ? .ipv6 : .ipv4)?.canonicalValue
+    }
+
     private static func validateService(
         _ service: HostwrightService,
         imagePolicy: HostwrightImagePolicy,
@@ -235,6 +239,8 @@ public enum ManifestValidator {
                 issues: &issues
             )
         }
+        validateNetworkCIDROverlaps(networks, family: .ipv4, issues: &issues)
+        validateNetworkCIDROverlaps(networks, family: .ipv6, issues: &issues)
     }
 
     private static func validateNetworkAddressRequest(
@@ -254,6 +260,55 @@ public enum ManifestValidator {
                 )
             )
             return
+        }
+        guard let cidr = NetworkCIDR(rawValue, family: family) else {
+            return
+        }
+        guard cidr.isNetworkAddress else {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message:
+                        "Network '\(networkName)' \(family.field) must use the canonical network address \(cidr.canonicalNetworkValue).",
+                    path: path
+                )
+            )
+            return
+        }
+    }
+
+    private static func validateNetworkCIDROverlaps(
+        _ networks: [String: HostwrightNetworkDefinition],
+        family: NetworkAddressFamily,
+        issues: inout [ManifestIssue]
+    ) {
+        let explicit = networks.sorted(by: { $0.key < $1.key }).compactMap {
+            name,
+            definition -> (String, NetworkCIDR)? in
+            let request = family == .ipv4 ? definition.ipv4 : definition.ipv6
+            guard case .cidr(let rawValue) = request,
+                  let cidr = NetworkCIDR(rawValue, family: family),
+                  cidr.isNetworkAddress else {
+                return nil
+            }
+            return (name, cidr)
+        }
+
+        for laterIndex in explicit.indices {
+            guard laterIndex > explicit.startIndex else { continue }
+            for earlierIndex in explicit.indices where earlierIndex < laterIndex {
+                let earlier = explicit[earlierIndex]
+                let later = explicit[laterIndex]
+                guard earlier.1.overlaps(later.1) else { continue }
+                issues.append(
+                    ManifestIssue(
+                        code: .manifestValidationFailed,
+                        message:
+                            "Network '\(later.0)' \(family.field) CIDR \(later.1.canonicalValue) overlaps network '\(earlier.0)' \(family.label) CIDR \(earlier.1.canonicalValue).",
+                        path: "$.networks.\(later.0).\(family.field)"
+                    )
+                )
+            }
         }
     }
 
@@ -1721,29 +1776,111 @@ public enum ManifestValidator {
         }
     }
 
+    private struct NetworkCIDR {
+        let family: NetworkAddressFamily
+        let prefixLength: Int
+        let addressBytes: [UInt8]
+        let canonicalAddress: String
+
+        init?(_ rawValue: String, family: NetworkAddressFamily) {
+            guard rawValue == rawValue.trimmingCharacters(in: .whitespacesAndNewlines),
+                  rawValue.utf8.count <= 128 else {
+                return nil
+            }
+            let parts = rawValue.split(separator: "/", omittingEmptySubsequences: false)
+            guard parts.count == 2,
+                  !parts[0].isEmpty,
+                  let prefixLength = Int(parts[1]),
+                  String(prefixLength) == String(parts[1]),
+                  (0...(family.byteCount * 8)).contains(prefixLength) else {
+                return nil
+            }
+
+            var addressBytes = [UInt8](repeating: 0, count: family.byteCount)
+            let parsed = String(parts[0]).withCString { address in
+                addressBytes.withUnsafeMutableBytes { storage in
+                    inet_pton(family.addressFamily, address, storage.baseAddress)
+                }
+            }
+            guard parsed == 1,
+                  let canonicalAddress = Self.render(addressBytes, family: family) else {
+                return nil
+            }
+            self.family = family
+            self.prefixLength = prefixLength
+            self.addressBytes = addressBytes
+            self.canonicalAddress = canonicalAddress
+        }
+
+        var canonicalValue: String {
+            "\(canonicalAddress)/\(prefixLength)"
+        }
+
+        var networkBytes: [UInt8] {
+            Self.mask(addressBytes, prefixLength: prefixLength)
+        }
+
+        var canonicalNetworkValue: String {
+            let address = Self.render(networkBytes, family: family) ?? canonicalAddress
+            return "\(address)/\(prefixLength)"
+        }
+
+        var isNetworkAddress: Bool {
+            addressBytes == networkBytes
+        }
+
+        func overlaps(_ other: NetworkCIDR) -> Bool {
+            guard family == other.family else { return false }
+            let sharedPrefixLength = min(prefixLength, other.prefixLength)
+            return Self.mask(addressBytes, prefixLength: sharedPrefixLength) ==
+                Self.mask(other.addressBytes, prefixLength: sharedPrefixLength)
+        }
+
+        private static func mask(_ bytes: [UInt8], prefixLength: Int) -> [UInt8] {
+            var result = bytes
+            let completeBytes = prefixLength / 8
+            let remainingBits = prefixLength % 8
+            for index in result.indices {
+                if index < completeBytes {
+                    continue
+                }
+                if index == completeBytes, remainingBits > 0 {
+                    result[index] &= UInt8.max << UInt8(8 - remainingBits)
+                } else {
+                    result[index] = 0
+                }
+            }
+            return result
+        }
+
+        private static func render(
+            _ bytes: [UInt8],
+            family: NetworkAddressFamily
+        ) -> String? {
+            var buffer = [CChar](
+                repeating: 0,
+                count: family == .ipv4 ? Int(INET_ADDRSTRLEN) : Int(INET6_ADDRSTRLEN)
+            )
+            let rendered = bytes.withUnsafeBytes { source in
+                buffer.withUnsafeMutableBufferPointer { destination in
+                    inet_ntop(
+                        family.addressFamily,
+                        source.baseAddress,
+                        destination.baseAddress,
+                        socklen_t(destination.count)
+                    )
+                }
+            }
+            guard rendered != nil else { return nil }
+            return String(cString: buffer)
+        }
+    }
+
     private static func isValidCIDR(
         _ rawValue: String,
         family: NetworkAddressFamily
     ) -> Bool {
-        guard rawValue == rawValue.trimmingCharacters(in: .whitespacesAndNewlines),
-              rawValue.utf8.count <= 128 else {
-            return false
-        }
-        let parts = rawValue.split(separator: "/", omittingEmptySubsequences: false)
-        guard parts.count == 2,
-              !parts[0].isEmpty,
-              let prefixLength = Int(parts[1]),
-              String(prefixLength) == String(parts[1]),
-              (0...(family.byteCount * 8)).contains(prefixLength) else {
-            return false
-        }
-
-        var addressBytes = [UInt8](repeating: 0, count: family.byteCount)
-        return String(parts[0]).withCString { address in
-            addressBytes.withUnsafeMutableBytes { storage in
-                inet_pton(family.addressFamily, address, storage.baseAddress)
-            }
-        } == 1
+        NetworkCIDR(rawValue, family: family) != nil
     }
 
     private static func issue(_ service: HostwrightService, _ message: String) -> ManifestIssue {

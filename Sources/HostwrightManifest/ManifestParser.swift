@@ -363,11 +363,13 @@ private struct ManifestNodeDecoder {
             let ipv4 = try decodeNetworkAddressRequest(
                 values["ipv4"],
                 default: .auto,
+                ipv6: false,
                 path: "\(definitionPath).ipv4"
             )
             let ipv6 = try decodeNetworkAddressRequest(
                 values["ipv6"],
                 default: .auto,
+                ipv6: true,
                 path: "\(definitionPath).ipv6"
             )
             result[name] = HostwrightNetworkDefinition(
@@ -383,6 +385,7 @@ private struct ManifestNodeDecoder {
     private func decodeNetworkAddressRequest(
         _ node: Node?,
         default defaultValue: HostwrightNetworkAddressRequest,
+        ipv6: Bool,
         path: String
     ) throws -> HostwrightNetworkAddressRequest {
         guard let node else { return defaultValue }
@@ -394,6 +397,10 @@ private struct ManifestNodeDecoder {
                 node: node,
                 path: path
             )
+        }
+        if case .cidr(let cidr) = value,
+           let normalized = ManifestValidator.normalizedNetworkCIDR(cidr, ipv6: ipv6) {
+            return .cidr(normalized)
         }
         return value
     }

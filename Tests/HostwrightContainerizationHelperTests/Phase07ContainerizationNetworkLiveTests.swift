@@ -239,7 +239,7 @@ final class Phase07ContainerizationNetworkLiveTests: XCTestCase {
             )
             try await create(server, using: client)
             createdContainers.append(server)
-            let serverAddress = try serverIPv4Address(
+            let serverAddresses = try serverAddresses(
                 in: try await client.observe(),
                 server: server,
                 network: networkA
@@ -262,7 +262,8 @@ final class Phase07ContainerizationNetworkLiveTests: XCTestCase {
                 command: Self.pythonCommand(
                     Self.dualClientProgram,
                     arguments: [
-                    serverAddress,
+                    serverAddresses.ipv4,
+                    serverAddresses.ipv6,
                     String(Self.serverPort)
                     ]
                 )
@@ -287,7 +288,8 @@ final class Phase07ContainerizationNetworkLiveTests: XCTestCase {
                 command: Self.pythonCommand(
                     Self.isolatedClientProgram,
                     arguments: [
-                    serverAddress,
+                    serverAddresses.ipv4,
+                    serverAddresses.ipv6,
                     String(Self.serverPort)
                     ]
                 )
@@ -405,23 +407,27 @@ final class Phase07ContainerizationNetworkLiveTests: XCTestCase {
         )
     }
 
-    private func serverIPv4Address(
+    private func serverAddresses(
         in inventory: RuntimeInventory,
         server: LiveContainer,
         network: RuntimeNetworkIdentity
-    ) throws -> String {
+    ) throws -> (ipv4: String, ipv6: String) {
         guard let container = inventory.containers.first(where: {
                   $0.name == server.resourceIdentifier
               }),
               container.ownership == server.ownership,
-              let address = container.networks.first(where: {
+              let addresses = container.networks.first(where: {
                   $0.networkID == network.runtimeIdentifier
-              })?.addresses.first(where: {
+              })?.addresses,
+              let ipv4 = addresses.first(where: {
                   $0.contains(".")
+              })?.split(separator: "/", maxSplits: 1).first,
+              let ipv6 = addresses.first(where: {
+                  $0.contains(":")
               })?.split(separator: "/", maxSplits: 1).first else {
             throw LiveFailure.missingServerAddress
         }
-        return String(address)
+        return (String(ipv4), String(ipv6))
     }
 
     private func verifyTopology(
@@ -672,46 +678,60 @@ final class Phase07ContainerizationNetworkLiveTests: XCTestCase {
     }
 
     private static let serverProgram = """
+    import select
     import socket
-    listener = socket.socket()
-    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    listener.bind(("0.0.0.0", 18080))
-    listener.listen()
+    listeners = []
+    for family, address in ((socket.AF_INET, "0.0.0.0"), (socket.AF_INET6, "::")):
+        listener = socket.socket(family, socket.SOCK_STREAM)
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        if family == socket.AF_INET6:
+            listener.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+        listener.bind((address, 18080))
+        listener.listen()
+        listeners.append(listener)
     print("server-ready", flush=True)
     while True:
-        connection, _ = listener.accept()
-        connection.sendall(b"phase07-network-ok")
-        connection.close()
+        ready, _, _ = select.select(listeners, [], [])
+        for listener in ready:
+            connection, _ = listener.accept()
+            connection.sendall(b"phase07-network-ok")
+            connection.close()
     """
 
     private static let dualClientProgram = """
     import socket
     import sys
     import time
-    for _ in range(20):
-        try:
-            connection = socket.create_connection((sys.argv[1], int(sys.argv[2])), timeout=1)
-            payload = connection.recv(64)
-            connection.close()
-            if payload == b"phase07-network-ok":
-                print("dual-ok", flush=True)
-                raise SystemExit(0)
-        except OSError:
-            time.sleep(0.25)
-    print("dual-failed", flush=True)
-    raise SystemExit(7)
+    for address in (sys.argv[1], sys.argv[2]):
+        connected = False
+        for _ in range(20):
+            try:
+                connection = socket.create_connection((address, int(sys.argv[3])), timeout=1)
+                payload = connection.recv(64)
+                connection.close()
+                if payload == b"phase07-network-ok":
+                    connected = True
+                    break
+            except OSError:
+                time.sleep(0.25)
+        if not connected:
+            print("dual-failed", flush=True)
+            raise SystemExit(7)
+    print("dual-ok", flush=True)
     """
 
     private static let isolatedClientProgram = """
     import socket
     import sys
-    try:
-        connection = socket.create_connection((sys.argv[1], int(sys.argv[2])), timeout=2)
-        connection.close()
-        print("isolation-failed", flush=True)
-        raise SystemExit(8)
-    except OSError:
-        print("isolation-ok", flush=True)
+    for address in (sys.argv[1], sys.argv[2]):
+        try:
+            connection = socket.create_connection((address, int(sys.argv[3])), timeout=2)
+            connection.close()
+            print("isolation-failed", flush=True)
+            raise SystemExit(8)
+        except OSError:
+            pass
+    print("isolation-ok", flush=True)
     """
 }
 

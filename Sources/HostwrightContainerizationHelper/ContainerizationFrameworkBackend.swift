@@ -274,7 +274,7 @@ actor ContainerizationFrameworkBackend: ContainerizationHelperBackend {
             },
             modes: RuntimeNetworkMode.allCases,
             ipv4AddressModes: [.cidr],
-            ipv6AddressModes: [.cidr],
+            ipv6AddressModes: [.disabled, .cidr],
             attachmentTiming: .containerCreateOnly
         )
     }
@@ -321,11 +321,6 @@ actor ContainerizationFrameworkBackend: ContainerizationHelperBackend {
         guard request.ipv6.mode != .automatic else {
             throw ContainerizationHelperBackendError.unavailable(
                 "Containerization 0.35.0 VmnetNetwork does not allocate an automatic IPv6 prefix."
-            )
-        }
-        guard request.ipv6.mode != .disabled else {
-            throw ContainerizationHelperBackendError.unavailable(
-                "Containerization 0.35.0 VmnetNetwork always assigns an IPv6 prefix."
             )
         }
         guard try await driver.inspectNetwork(request.identity) == nil else {
@@ -794,9 +789,12 @@ actor ContainerizationFrameworkBackend: ContainerizationHelperBackend {
                 "Containerization 0.35.0 VmnetNetwork does not allocate an automatic IPv6 prefix."
             )
         case .disabled:
-            throw ContainerizationHelperBackendError.unavailable(
-                "Containerization 0.35.0 VmnetNetwork always assigns an IPv6 prefix."
-            )
+            guard record.ipv6Prefix == nil,
+                  record.ipv6Gateway == nil else {
+                throw ContainerizationHelperBackendError.executionFailed(
+                    "observed IPv6 state exists although IPv6 was disabled"
+                )
+            }
         case .cidr(let expected):
             guard record.ipv6Prefix == expected else {
                 throw ContainerizationHelperBackendError.executionFailed(
@@ -1084,9 +1082,7 @@ private actor AppleContainerizationRuntimeDriver: ContainerizationHelperRuntimeD
         let prefixV6: CIDRv6?
         switch request.ipv6 {
         case .disabled:
-            throw ContainerizationHelperBackendError.unavailable(
-                "Containerization 0.35.0 VmnetNetwork always assigns an IPv6 prefix."
-            )
+            prefixV6 = nil
         case .cidr(let value):
             prefixV6 = try CIDRv6(value)
         case .automatic:

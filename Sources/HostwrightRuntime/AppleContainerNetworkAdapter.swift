@@ -50,10 +50,14 @@ public enum AppleContainerNetworkCommand {
         }
         _ = codec
         try validateAddressRequest(request.ipv4, family: .ipv4)
-        try validateAddressRequest(request.ipv6, family: .ipv6)
-        guard request.ipv4.mode != .disabled, request.ipv6.mode != .disabled else {
+        guard request.ipv4.mode != .disabled else {
             throw RuntimeAdapterError.mutationUnavailableByPolicy(
-                "Apple container CLI 1.0.0 and 1.1.0 do not expose a supported way to disable one network address family."
+                "Apple container CLI 1.0.0 and 1.1.0 network creation requires IPv4 addressing."
+            )
+        }
+        guard request.ipv6.mode == .disabled else {
+            throw RuntimeAdapterError.mutationUnavailableByPolicy(
+                "Apple container CLI 1.0.0 and 1.1.0 do not prove guest IPv6 assignment; request IPv6 disabled or select the Containerization provider."
             )
         }
 
@@ -71,9 +75,6 @@ public enum AppleContainerNetworkCommand {
         }
         if case .cidr(let subnet) = request.ipv4 {
             arguments += ["--subnet", subnet]
-        }
-        if case .cidr(let subnet) = request.ipv6 {
-            arguments += ["--subnet-v6", subnet]
         }
         arguments.append(request.identity.runtimeIdentifier)
         return RuntimeCommandSpec(

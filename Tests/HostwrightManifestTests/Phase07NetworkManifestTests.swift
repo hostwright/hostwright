@@ -131,6 +131,91 @@ final class Phase07NetworkManifestTests: XCTestCase {
         )
     }
 
+    func testIPv4OnlyIPv6OnlyAndDualStackRoundTripCanonically() throws {
+        let manifest = try ManifestValidator.validated(
+            """
+            version: 2
+            project: address-families
+            networks:
+              dual-stack:
+                ipv4: 10.42.0.0/24
+                ipv6: FD42:0000:0000:0000::/64
+              ipv4-only:
+                ipv4: 10.43.0.0/24
+                ipv6: disabled
+              ipv6-only:
+                ipv4: disabled
+                ipv6: fd43:0:0:0::/64
+            services:
+              api:
+                image: local/api:latest
+                networks: [dual-stack, ipv4-only, ipv6-only]
+            """
+        )
+
+        XCTAssertEqual(manifest.networks["dual-stack"]?.ipv4.manifestValue, "10.42.0.0/24")
+        XCTAssertEqual(manifest.networks["dual-stack"]?.ipv6.manifestValue, "fd42::/64")
+        XCTAssertEqual(manifest.networks["ipv4-only"]?.ipv6, .disabled)
+        XCTAssertEqual(manifest.networks["ipv6-only"]?.ipv4, .disabled)
+
+        let canonical = try ManifestCanonicalEncoder.encode(manifest)
+        XCTAssertTrue(canonical.contains(#"ipv6: "fd42::/64""#))
+        XCTAssertTrue(canonical.contains(#"ipv6: "disabled""#))
+        XCTAssertTrue(canonical.contains(#"ipv4: "disabled""#))
+        XCTAssertEqual(try ManifestValidator.validated(canonical), manifest)
+    }
+
+    func testRejectsNonNetworkCIDRsAndOverlappingExplicitSubnets() {
+        assertFailure(
+            manifest(networks: "ipv4: 10.42.0.7/24\n    ipv6: disabled"),
+            contains: "must use the canonical network address 10.42.0.0/24",
+            path: "$.networks.backend.ipv4"
+        )
+        assertFailure(
+            manifest(networks: "ipv4: disabled\n    ipv6: fd42::7/64"),
+            contains: "must use the canonical network address fd42::/64",
+            path: "$.networks.backend.ipv6"
+        )
+        assertFailure(
+            """
+            version: 2
+            project: network-demo
+            networks:
+              backend:
+                ipv4: 10.42.0.0/24
+                ipv6: fd42::/64
+              frontend:
+                ipv4: 10.42.0.128/25
+                ipv6: fd43::/64
+            services:
+              api:
+                image: local/api:latest
+                networks: [backend]
+            """,
+            contains: "overlaps network 'backend' IPv4 CIDR 10.42.0.0/24",
+            path: "$.networks.frontend.ipv4"
+        )
+        assertFailure(
+            """
+            version: 2
+            project: network-demo
+            networks:
+              backend:
+                ipv4: disabled
+                ipv6: fd42::/64
+              frontend:
+                ipv4: disabled
+                ipv6: fd42::/80
+            services:
+              api:
+                image: local/api:latest
+                networks: [backend]
+            """,
+            contains: "overlaps network 'backend' IPv6 CIDR fd42::/64",
+            path: "$.networks.frontend.ipv6"
+        )
+    }
+
     func testRejectsInvalidMissingAndDuplicateServiceAttachments() {
         assertFailure(
             """

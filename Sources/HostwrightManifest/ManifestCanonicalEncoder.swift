@@ -260,12 +260,26 @@ public enum ManifestCanonicalEncoder {
                 lines.append("    driver: \(quote(network.driver.rawValue))")
             }
             if network.ipv4 != .auto {
-                lines.append("    ipv4: \(quote(network.ipv4.manifestValue))")
+                lines.append(
+                    "    ipv4: \(quote(canonicalNetworkAddress(network.ipv4, ipv6: false)))"
+                )
             }
             if network.ipv6 != .auto {
-                lines.append("    ipv6: \(quote(network.ipv6.manifestValue))")
+                lines.append(
+                    "    ipv6: \(quote(canonicalNetworkAddress(network.ipv6, ipv6: true)))"
+                )
             }
         }
+    }
+
+    private static func canonicalNetworkAddress(
+        _ request: HostwrightNetworkAddressRequest,
+        ipv6: Bool
+    ) -> String {
+        guard case .cidr(let rawValue) = request else {
+            return request.manifestValue
+        }
+        return ManifestValidator.normalizedNetworkCIDR(rawValue, ipv6: ipv6) ?? rawValue
     }
 
     private static func appendServiceNetworks(

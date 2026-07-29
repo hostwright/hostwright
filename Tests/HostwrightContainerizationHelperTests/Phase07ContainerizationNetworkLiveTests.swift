@@ -3,6 +3,7 @@ import CryptoKit
 import Darwin
 import Foundation
 import HostwrightCore
+import HostwrightNetworking
 import XCTest
 
 @testable import HostwrightContainerizationHelper
@@ -10,6 +11,8 @@ import XCTest
 
 final class Phase07ContainerizationNetworkLiveTests: XCTestCase {
     private static let liveFlag = "HOSTWRIGHT_PHASE07_GATE01_CONTAINERIZATION_LIVE"
+    private static let policyLiveFlag =
+        "HOSTWRIGHT_PHASE07_GATE12_CONTAINERIZATION_LIVE"
     private static let assetRootVariable =
         "HOSTWRIGHT_PHASE07_GATE01_CONTAINERIZATION_WORK_ROOT"
     private static let kernelVariable =
@@ -20,23 +23,50 @@ final class Phase07ContainerizationNetworkLiveTests: XCTestCase {
         "HOSTWRIGHT_PHASE07_GATE01_CONTAINERIZATION_WORKLOAD_LAYOUT_PATH"
     private static let helperVariable =
         "HOSTWRIGHT_PHASE07_GATE01_CONTAINERIZATION_HELPER_PATH"
+    private static let policyWorkRootVariable =
+        "HOSTWRIGHT_PHASE07_GATE12_CONTAINERIZATION_WORK_ROOT"
+    private static let policyHelperVariable =
+        "HOSTWRIGHT_PHASE07_GATE12_CONTAINERIZATION_HELPER_PATH"
+    private static let policyLoaderVariable =
+        "HOSTWRIGHT_PHASE07_GATE12_CONTAINERIZATION_POLICY_LOADER_PATH"
     private static let serverPort = 18_080
+    private static let deniedServerPort = 18_081
     func testRealContainerizationNetworksIsolateAndDualAttachmentConnects() async throws {
         let environment = ProcessInfo.processInfo.environment
-        guard environment[Self.liveFlag] == "1" else {
+        let gate01 = environment[Self.liveFlag] == "1"
+        let gate12 = environment[Self.policyLiveFlag] == "1"
+        guard gate01 || gate12 else {
             throw XCTSkip(
-                "Set \(Self.liveFlag)=1 only on the explicit Phase 07 Gate 1 Containerization cell."
+                "Enable only the explicit Phase 07 Gate 1 or Gate 12 Containerization cell."
             )
         }
-        try await runSignedWorkerBody()
+        guard gate01 != gate12 else {
+            throw LiveFailure.ambiguousQualificationGate
+        }
+        try await runSignedWorkerBody(policyLive: gate12)
     }
 
-    private func runSignedWorkerBody() async throws {
+    private func runSignedWorkerBody(policyLive: Bool) async throws {
         let environment = ProcessInfo.processInfo.environment
 
+        let policyLoaderURL: URL?
+        if policyLive {
+            policyLoaderURL = try requiredT9RegularFile(
+                Self.policyLoaderVariable,
+                environment: environment
+            )
+        } else {
+            policyLoaderURL = nil
+        }
+        let qualificationGate = policyLive
+            ? "phase07-gate12"
+            : "phase07-gate01"
         let workParent = try requiredPrivateWorkDirectory(
-            Self.assetRootVariable,
-            environment: environment
+            policyLoaderURL == nil
+                ? Self.assetRootVariable
+                : Self.policyWorkRootVariable,
+            environment: environment,
+            qualificationGate: qualificationGate
         )
         let kernelURL = try requiredT9RegularFile(
             Self.kernelVariable,
@@ -51,8 +81,11 @@ final class Phase07ContainerizationNetworkLiveTests: XCTestCase {
             environment: environment
         )
         let helperURL = try requiredQualificationExecutable(
-            Self.helperVariable,
-            environment: environment
+            policyLoaderURL == nil
+                ? Self.helperVariable
+                : Self.policyHelperVariable,
+            environment: environment,
+            qualificationGate: qualificationGate
         )
         let workRoot = workParent.appendingPathComponent(
             "p07-\(Self.uuid().prefix(8))",
@@ -110,7 +143,10 @@ final class Phase07ContainerizationNetworkLiveTests: XCTestCase {
                 ContainerizationRuntimeAssetContract.initImageDescriptorDigest,
             initImageVariantDigest:
                 "sha256:\(ContainerizationRuntimeAssetContract.initImageVariantDigest)",
-            rootfsSizeBytes: 512 * 1_024 * 1_024
+            rootfsSizeBytes: 512 * 1_024 * 1_024,
+            guestNetworkPolicyLoaderPath: policyLoaderURL?.path,
+            guestNetworkPolicyLoaderSHA256:
+                try policyLoaderURL.map(sha256)
         )
         let configurationURL = workRoot
             .appendingPathComponent("containerization-helper.json", isDirectory: false)
@@ -135,6 +171,25 @@ final class Phase07ContainerizationNetworkLiveTests: XCTestCase {
         let before: RuntimeInventory
         do {
             snapshot = try await client.negotiate()
+            if policyLoaderURL != nil {
+                let capabilities = try await client.networkCapabilities()
+                XCTAssertEqual(
+                    capabilities.networkPolicy?.state,
+                    .available
+                )
+                XCTAssertEqual(
+                    Set(capabilities.networkPolicy?.directions ?? []),
+                    Set(HostwrightNetworkPolicyDirection.allCases)
+                )
+                XCTAssertEqual(
+                    capabilities.networkPolicy?.appliesAtomicGenerations,
+                    true
+                )
+                XCTAssertEqual(
+                    capabilities.networkPolicy?.observesRuleDigest,
+                    true
+                )
+            }
             workloadImage = ContainerizationHelperImageEvidence(
                 try await client.localImageEvidence(workloadReference)
             )
@@ -235,7 +290,10 @@ final class Phase07ContainerizationNetworkLiveTests: XCTestCase {
                 snapshot: snapshot,
                 image: workloadImage,
                 networks: [networkA],
-                command: Self.pythonCommand(Self.serverProgram)
+                command: Self.pythonCommand(Self.serverProgram),
+                networkPolicy: policyLoaderURL.map { _ in
+                    Self.serverNetworkPolicy()
+                }
             )
             try await create(server, using: client)
             createdContainers.append(server)
@@ -264,9 +322,14 @@ final class Phase07ContainerizationNetworkLiveTests: XCTestCase {
                     arguments: [
                     serverAddresses.ipv4,
                     serverAddresses.ipv6,
-                    String(Self.serverPort)
+                    String(Self.serverPort),
+                    String(Self.deniedServerPort),
+                    policyLoaderURL == nil ? "0" : "1"
                     ]
-                )
+                ),
+                networkPolicy: policyLoaderURL.map { _ in
+                    Self.clientNetworkPolicy()
+                }
             )
             try await create(dualClient, using: client)
             createdContainers.append(dualClient)
@@ -274,9 +337,29 @@ final class Phase07ContainerizationNetworkLiveTests: XCTestCase {
             _ = try await waitForLog(
                 client: client,
                 resourceIdentifier: dualClient.resourceIdentifier,
-                success: "dual-ok",
+                success: policyLoaderURL == nil
+                    ? "dual-ok"
+                    : "dual-ok-1",
                 failure: "dual-failed"
             )
+            if policyLoaderURL != nil {
+                _ = try await client.restart(
+                    ContainerizationHelperMutationPayload(
+                        resourceIdentifier:
+                            dualClient.resourceIdentifier,
+                        resourceUUID:
+                            dualClient.context.resourceUUID
+                    ),
+                    context: dualClient.context
+                )
+                _ = try await waitForLog(
+                    client: client,
+                    resourceIdentifier:
+                        dualClient.resourceIdentifier,
+                    success: "dual-ok-2",
+                    failure: "dual-failed"
+                )
+            }
 
             let isolatedClient = try liveContainer(
                 projectName: "gate07-b",
@@ -349,7 +432,8 @@ final class Phase07ContainerizationNetworkLiveTests: XCTestCase {
         snapshot: RuntimeCapabilitySnapshot,
         image: ContainerizationHelperImageEvidence,
         networks: [RuntimeNetworkIdentity],
-        command: [String]
+        command: [String],
+        networkPolicy: HostwrightServiceNetworkPolicy? = nil
     ) throws -> LiveContainer {
         let identity = RuntimeServiceIdentity(
             projectName: projectName,
@@ -382,9 +466,40 @@ final class Phase07ContainerizationNetworkLiveTests: XCTestCase {
                 labels: labels,
                 networks: try networks.map {
                     try RuntimeDesiredNetworkAttachment(network: $0)
-                }
+                },
+                networkPolicy: networkPolicy
             )
         )
+    }
+
+    private static func serverNetworkPolicy()
+        -> HostwrightServiceNetworkPolicy {
+        HostwrightServiceNetworkPolicy(
+            ingress: allowedServerRules()
+        )
+    }
+
+    private static func clientNetworkPolicy()
+        -> HostwrightServiceNetworkPolicy {
+        HostwrightServiceNetworkPolicy(
+            egress: allowedServerRules()
+        )
+    }
+
+    private static func allowedServerRules()
+        -> [HostwrightNetworkPolicyRule] {
+        [
+            HostwrightNetworkPolicyRule(
+                protocolName: .tcp,
+                address: "192.168.240.0/24",
+                port: serverPort
+            ),
+            HostwrightNetworkPolicyRule(
+                protocolName: .tcp,
+                address: "fd00:7:1::/64",
+                port: serverPort
+            )
+        ]
     }
 
     private func create(
@@ -541,7 +656,8 @@ final class Phase07ContainerizationNetworkLiveTests: XCTestCase {
 
     private func requiredPrivateWorkDirectory(
         _ variable: String,
-        environment: [String: String]
+        environment: [String: String],
+        qualificationGate: String
     ) throws -> URL {
         guard let value = environment[variable],
               !value.isEmpty else {
@@ -550,7 +666,8 @@ final class Phase07ContainerizationNetworkLiveTests: XCTestCase {
         let url = URL(fileURLWithPath: value, isDirectory: true).standardizedFileURL
         var metadata = stat()
         guard url.path == value,
-              value == "/Volumes/T9/hostwright/qualification/phase07-gate01",
+              value ==
+                "/Volumes/T9/hostwright/qualification/\(qualificationGate)",
               lstat(url.path, &metadata) == 0,
               (metadata.st_mode & S_IFMT) == S_IFDIR,
               metadata.st_uid == geteuid(),
@@ -590,7 +707,8 @@ final class Phase07ContainerizationNetworkLiveTests: XCTestCase {
 
     private func requiredQualificationExecutable(
         _ variable: String,
-        environment: [String: String]
+        environment: [String: String],
+        qualificationGate: String
     ) throws -> URL {
         guard let value = environment[variable],
               !value.isEmpty else {
@@ -599,7 +717,7 @@ final class Phase07ContainerizationNetworkLiveTests: XCTestCase {
         let url = URL(fileURLWithPath: value).standardizedFileURL
         let expected = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(
-                "Library/Application Support/Hostwright/qualification/phase07-gate01",
+                "Library/Application Support/Hostwright/qualification/\(qualificationGate)",
                 isDirectory: true
             )
             .appendingPathComponent(
@@ -682,13 +800,14 @@ final class Phase07ContainerizationNetworkLiveTests: XCTestCase {
     import socket
     listeners = []
     for family, address in ((socket.AF_INET, "0.0.0.0"), (socket.AF_INET6, "::")):
-        listener = socket.socket(family, socket.SOCK_STREAM)
-        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        if family == socket.AF_INET6:
-            listener.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
-        listener.bind((address, 18080))
-        listener.listen()
-        listeners.append(listener)
+        for port in (18080, 18081):
+            listener = socket.socket(family, socket.SOCK_STREAM)
+            listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            if family == socket.AF_INET6:
+                listener.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+            listener.bind((address, port))
+            listener.listen()
+            listeners.append(listener)
     print("server-ready", flush=True)
     while True:
         ready, _, _ = select.select(listeners, [], [])
@@ -702,6 +821,7 @@ final class Phase07ContainerizationNetworkLiveTests: XCTestCase {
     import socket
     import sys
     import time
+    from pathlib import Path
     for address in (sys.argv[1], sys.argv[2]):
         connected = False
         for _ in range(20):
@@ -717,7 +837,19 @@ final class Phase07ContainerizationNetworkLiveTests: XCTestCase {
         if not connected:
             print("dual-failed", flush=True)
             raise SystemExit(7)
-    print("dual-ok", flush=True)
+    if sys.argv[5] == "1":
+        for address in (sys.argv[1], sys.argv[2]):
+            try:
+                connection = socket.create_connection((address, int(sys.argv[4])), timeout=1)
+                connection.close()
+                print("dual-failed-denied-port", flush=True)
+                raise SystemExit(9)
+            except OSError:
+                pass
+    marker = Path("/tmp/phase07-dual-run")
+    run = int(marker.read_text()) + 1 if marker.exists() else 1
+    marker.write_text(str(run))
+    print(f"dual-ok-{run}", flush=True)
     """
 
     private static let isolatedClientProgram = """
@@ -759,6 +891,7 @@ private struct LiveNetwork: Sendable {
 }
 
 private enum LiveFailure: Error {
+    case ambiguousQualificationGate
     case cleanupFailed([String])
     case invalidEnvironmentPath(String)
     case kernelDigestMismatch

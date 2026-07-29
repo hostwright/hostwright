@@ -9,6 +9,10 @@ func makeDistributionTestContainerizationAssetRoot(
         isDirectory: true
     )
     try FileManager.default.createDirectory(at: assetRoot, withIntermediateDirectories: false)
+    try FileManager.default.setAttributes(
+        [.posixPermissions: 0o700],
+        ofItemAtPath: assetRoot.path
+    )
     for payloadPath in DistributionContainerizationAssets.payloadModes.keys.sorted() {
         guard let relativePath =
             DistributionContainerizationAssets
@@ -21,10 +25,20 @@ func makeDistributionTestContainerizationAssetRoot(
             relativePath,
             isDirectory: false
         )
-        try FileManager.default.createDirectory(
-            at: file.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
+        var current = assetRoot
+        for component in file.pathComponents.dropFirst(assetRoot.pathComponents.count).dropLast() {
+            current.appendPathComponent(component, isDirectory: true)
+            if !FileManager.default.fileExists(atPath: current.path) {
+                try FileManager.default.createDirectory(
+                    at: current,
+                    withIntermediateDirectories: false
+                )
+            }
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o700],
+                ofItemAtPath: current.path
+            )
+        }
         let data: Data
         if payloadPath ==
             DistributionContainerizationAssets

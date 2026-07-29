@@ -7,15 +7,20 @@ import HostwrightSecrets
 
 public struct ManifestRuntimeMappingResult: Equatable, Sendable {
     public let desiredState: DesiredRuntimeState
+    public let certificates:
+        [String: HostwrightCertificateDeclaration]
     public let ingress: [String: HostwrightIngressListener]
     public let issues: [PlanIssue]
 
     public init(
         desiredState: DesiredRuntimeState,
+        certificates:
+            [String: HostwrightCertificateDeclaration] = [:],
         ingress: [String: HostwrightIngressListener] = [:],
         issues: [PlanIssue] = []
     ) {
         self.desiredState = desiredState
+        self.certificates = certificates
         self.ingress = ingress
         self.issues = issues.sorted { $0.orderingKey < $1.orderingKey }
     }
@@ -81,6 +86,7 @@ public enum ManifestRuntimeMapper {
                 networks: networks,
                 services: services
             ),
+            certificates: manifest.certificates,
             ingress: manifest.ingress,
             issues: issues
         )
@@ -249,6 +255,7 @@ public enum ManifestRuntimeMapper {
             ports: ports,
             publishedSockets: publishedSockets,
             hostAccess: service.hostAccess,
+            networkPolicy: service.networkPolicy,
             networks: networks,
             mounts: mounts,
             healthCheck: mapHealthCheck(service),

@@ -1,5 +1,6 @@
 import XCTest
 @testable import HostwrightManifest
+@testable import HostwrightNetworking
 @testable import HostwrightReconciler
 @testable import HostwrightRuntime
 
@@ -67,6 +68,15 @@ final class ManifestRuntimeV2MappingTests: XCTestCase {
             env: ["MODE": "test"],
             labels: ["example.role": "api"],
             ports: ["18080:8080"],
+            networkPolicy: HostwrightServiceNetworkPolicy(
+                ingress: [
+                    HostwrightNetworkPolicyRule(
+                        service: "gateway",
+                        protocolName: .tcp,
+                        port: 8_080
+                    )
+                ]
+            ),
             volumes: ["/tmp/hostwright-api:/data:ro"],
             probes: HostwrightProbes(
                 startup: HostwrightProbe(
@@ -138,6 +148,7 @@ final class ManifestRuntimeV2MappingTests: XCTestCase {
         )
         XCTAssertEqual(primary.environment.map(\.name), ["MODE"])
         XCTAssertEqual(primary.labels, ["example.role": "api"])
+        XCTAssertEqual(primary.networkPolicy, service.networkPolicy)
         XCTAssertEqual(primary.ports.first?.bindAddress, "127.0.0.1")
         XCTAssertEqual(primary.mounts.first?.access, .readOnly)
         XCTAssertEqual(primary.probes.startup?.action, .exec(RuntimeProbeExecAction(command: ["/usr/bin/check-startup"])))

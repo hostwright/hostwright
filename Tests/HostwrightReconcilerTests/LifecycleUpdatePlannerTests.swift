@@ -522,6 +522,24 @@ final class LifecycleUpdatePlannerTests: XCTestCase {
                     mode: .ownerAndGroup
                 )
             ],
+            networkPolicy: HostwrightServiceNetworkPolicy(
+                ingress: [
+                    HostwrightNetworkPolicyRule(
+                        project: "demo",
+                        service: "gateway",
+                        protocolName: .tcp,
+                        port: 9_000
+                    )
+                ],
+                egress: [
+                    HostwrightNetworkPolicyRule(
+                        protocolName: .tcp,
+                        address: "10.42.0.0/24",
+                        port: 443,
+                        dns: "registry.example.test"
+                    )
+                ]
+            ),
             networks: [
                 try RuntimeDesiredNetworkAttachment(
                     network: network,

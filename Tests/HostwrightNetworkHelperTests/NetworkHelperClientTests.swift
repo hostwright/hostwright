@@ -171,19 +171,39 @@ final class NetworkHelperClientTests: XCTestCase {
                 pathPrefix: "/",
                 methods: ["GET"],
                 protocolName: .http,
+                targetServiceName: "api",
                 targetServiceUUIDs: [projectUUID],
                 targetPort: 8_080,
                 backends: []
             )]
         )
+        let policy = try NetworkPolicyCompiler.compile(
+            projectName: "client-test",
+            projectUUID: projectUUID,
+            generation: 1,
+            services: [(
+                name: "api",
+                resourceUUID: dnsUUID,
+                policy: HostwrightServiceNetworkPolicy(egress: [
+                    HostwrightNetworkPolicyRule(
+                        protocolName: .tcp,
+                        port: 443,
+                        dns: "updates.example.test"
+                    ),
+                ])
+            )]
+        )
         let active = try await client.apply(
             identity: identity,
             corefile: corefile(),
-            ingressBindings: [ingress]
+            ingressBindings: [ingress],
+            policyPlan: policy
         )
         XCTAssertEqual(active.identity, identity)
         XCTAssertTrue(active.url.path.hasSuffix("/active/Corefile"))
         XCTAssertEqual(active.sha256.count, 64)
+        XCTAssertEqual(active.policySHA256, policy.sha256)
+        XCTAssertTrue(active.policyActive)
         XCTAssertGreaterThan(active.inode, 0)
         let persisted = try store.status(identity: identity)
         XCTAssertEqual(persisted.ingressSHA256?.count, 64)
@@ -192,6 +212,10 @@ final class NetworkHelperClientTests: XCTestCase {
         let status = try await client.status(identity: identity)
         XCTAssertEqual(status.disposition, .active)
         XCTAssertEqual(status.activeCorefile, active)
+        XCTAssertEqual(
+            status.activeCorefile?.policySHA256,
+            policy.sha256
+        )
 
         try await client.remove(identity: identity)
         let removedStatus = try await client.status(identity: identity)

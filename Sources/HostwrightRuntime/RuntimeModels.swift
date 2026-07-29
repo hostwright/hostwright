@@ -532,6 +532,7 @@ public struct DesiredRuntimeService: Equatable, Sendable {
     public let ports: [RuntimePortMapping]
     public let publishedSockets: [RuntimeUnixSocketPublication]
     public let hostAccess: [HostwrightHostAccessEndpoint]
+    public let networkPolicy: HostwrightServiceNetworkPolicy?
     public let networks: [RuntimeDesiredNetworkAttachment]
     public let mounts: [RuntimeMountReference]
     public let healthCheck: RuntimeHealthCheckSpec?
@@ -566,6 +567,7 @@ public struct DesiredRuntimeService: Equatable, Sendable {
         ports: [RuntimePortMapping] = [],
         publishedSockets: [RuntimeUnixSocketPublication] = [],
         hostAccess: [HostwrightHostAccessEndpoint] = [],
+        networkPolicy: HostwrightServiceNetworkPolicy? = nil,
         mounts: [RuntimeMountReference] = [],
         healthCheck: RuntimeHealthCheckSpec? = nil,
         probes: RuntimeProbeSet = RuntimeProbeSet(),
@@ -599,6 +601,7 @@ public struct DesiredRuntimeService: Equatable, Sendable {
             ports: ports,
             publishedSockets: publishedSockets,
             hostAccess: hostAccess,
+            networkPolicy: networkPolicy,
             networks: [],
             mounts: mounts,
             healthCheck: healthCheck,
@@ -635,6 +638,7 @@ public struct DesiredRuntimeService: Equatable, Sendable {
         ports: [RuntimePortMapping] = [],
         publishedSockets: [RuntimeUnixSocketPublication] = [],
         hostAccess: [HostwrightHostAccessEndpoint] = [],
+        networkPolicy: HostwrightServiceNetworkPolicy? = nil,
         networks: [RuntimeDesiredNetworkAttachment],
         mounts: [RuntimeMountReference] = [],
         healthCheck: RuntimeHealthCheckSpec? = nil,
@@ -670,6 +674,7 @@ public struct DesiredRuntimeService: Equatable, Sendable {
         self.hostAccess = hostAccess.sorted(
             by: HostwrightHostAccessPolicy.canonicalPrecedes
         )
+        self.networkPolicy = networkPolicy
         self.networks = networks
         self.mounts = mounts
         self.healthCheck = healthCheck

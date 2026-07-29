@@ -928,6 +928,232 @@ final class Phase07NetworkManifestTests: XCTestCase {
         """
     }
 
+    func testCertificateDeclarationsRoundTripAndApplyDefaults() throws {
+        let manifest = try ManifestValidator.validated(
+            """
+            version: 2
+            project: certificate-demo
+            networks: { backend: {} }
+            certificates:
+              imported: { source: imported, identitySHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
+              local: { source: localCA }
+              provider: { source: provider, issuer: acme-prod, statusPolicy: required }
+            ingress:
+              api:
+                certificate: local
+                bind: 192.168.1.10
+                port: 8443
+                exposure: { scope: lan, interfaces: [en0], networkClasses: [private], allowedCIDRs: [10.0.0.0/8], authentication: tls }
+                routes: [{ hostname: api.example.test, targetService: api, targetPort: 8080 }]
+              imported-api:
+                certificate: imported
+                port: 8444
+                routes: [{ hostname: imported.example.test, targetService: api, targetPort: 8080 }]
+              provider-api:
+                certificate: provider
+                port: 8445
+                routes: [{ hostname: provider.example.test, targetService: api, targetPort: 8080 }]
+            services:
+              api: { image: local/api:latest, ports: ["8080:8080"], networks: [backend] }
+            """
+        )
+        XCTAssertEqual(manifest.certificates["local"]?.renewBeforeSeconds, 604_800)
+        XCTAssertEqual(manifest.certificates["local"]?.validitySeconds, 2_592_000)
+        XCTAssertEqual(manifest.certificates["local"]?.statusPolicy, .ifAvailable)
+        let canonical = try ManifestCanonicalEncoder.encode(manifest)
+        XCTAssertTrue(canonical.contains("certificates:"))
+        XCTAssertEqual(try ManifestValidator.validated(canonical), manifest)
+    }
+
+    func testCertificatesRejectInvalidCombinationsAndMissingIngressReference() {
+        assertFailure("""
+        version: 2
+        project: certificate-demo
+        certificates: { imported: { source: imported } }
+        services: { api: { image: local/api:latest } }
+        """, contains: "requires a lowercase 64-hex", path: "$.certificates.imported.identitySHA256")
+        assertFailure("""
+        version: 2
+        project: certificate-demo
+        networks: { backend: {} }
+        ingress: { api: { certificate: absent, port: 8080, routes: [{ hostname: api.example.test, targetService: api, targetPort: 8080 }] } }
+        services: { api: { image: local/api:latest, ports: ["8080:8080"], networks: [backend] } }
+        """, contains: "references missing certificate", path: "$.ingress.api.certificate")
+        assertFailure("""
+        version: 2
+        project: certificate-demo
+        certificates: { local: { source: localCA } }
+        services: { api: { image: local/api:latest } }
+        """, contains: "must be referenced", path: "$.certificates.local")
+    }
+
+    func testIngressTLSAndLANRequireCertificate() {
+        assertFailure(ingressManifest("""
+        - hostname: api.example.test
+          targetService: api
+          targetPort: 8080
+        """, bind: "192.168.1.10", exposure: """
+        scope: lan
+        interfaces: [en0]
+        networkClasses: [private]
+        allowedCIDRs: [10.0.0.0/8]
+        authentication: tls
+        """), contains: "requires a certificate", path: "$.ingress.api.certificate")
+    }
+
+    func testIngressMTLSPeersRequireCertificateAndCanonicalize() throws {
+        let manifest = try ManifestValidator.validated(
+            """
+            version: 2
+            project: ingress-mtls
+            networks: { backend: {} }
+            certificates: { local: { source: localCA } }
+            ingress:
+              api:
+                certificate: local
+                port: 8443
+                exposure: { scope: localhost, authentication: mtls }
+                peers: [{ service: worker, role: workload }]
+                routes: [{ hostname: api.example.test, targetService: api, targetPort: 8080 }]
+            services:
+              api: { image: local/api:latest, ports: ["8080:8080"], networks: [backend] }
+              worker: { image: local/worker:latest, networks: [backend] }
+            """
+        )
+        XCTAssertEqual(manifest.ingress["api"]?.peers, [HostwrightIngressPeerSelector(service: "worker", role: .workload)])
+        XCTAssertTrue(try ManifestCanonicalEncoder.encode(manifest).contains("peers:"))
+
+        assertFailure(
+            """
+            version: 2
+            project: ingress-mtls
+            networks: { backend: {} }
+            certificates: { local: { source: localCA } }
+            ingress: { api: { certificate: local, port: 8443, exposure: { scope: localhost, authentication: mtls }, routes: [{ hostname: api.example.test, targetService: api, targetPort: 8080 }] } }
+            services: { api: { image: local/api:latest, ports: ["8080:8080"], networks: [backend] } }
+            """,
+            contains: "mTLS requires at least one peer",
+            path: "$.ingress.api.peers"
+        )
+    }
+
+    func testServiceNetworkPolicyRoundTripsCanonicalAndKeepsAbsentPolicyCompatible() throws {
+        let manifest = try ManifestValidator.validated(
+            """
+            version: 2
+            project: policy-demo
+            services:
+              api:
+                image: local/api:latest
+                networkPolicy:
+                  ingress:
+                    - service: worker
+                      project: policy-demo
+                      identity: spiffe://hostwright.internal/workers/worker
+                      protocol: tcp
+                      address: 10.42.0.0/24
+                      port: 8080
+                      dns: worker.policy.test
+                  egress:
+                    - protocol: udp
+                      address: fd42::/64
+                      port: 53
+                      dns: resolver.policy.test
+            """
+        )
+
+        let policy = try XCTUnwrap(manifest.services.first?.networkPolicy)
+        XCTAssertEqual(policy.ingress.count, 1)
+        XCTAssertEqual(policy.egress.count, 1)
+        XCTAssertEqual(policy.ingress[0].protocolName, .tcp)
+        XCTAssertEqual(policy.egress[0].protocolName, .udp)
+        let canonical = try ManifestCanonicalEncoder.encode(manifest)
+        XCTAssertTrue(canonical.contains("networkPolicy:"))
+        XCTAssertEqual(try ManifestValidator.validated(canonical), manifest)
+
+        let legacy = try ManifestValidator.validated(
+            """
+            version: 2
+            project: no-policy
+            services:
+              api: { image: local/api:latest }
+            """
+        )
+        XCTAssertNil(legacy.services[0].networkPolicy)
+
+        let defaultDeny = try ManifestValidator.validated(
+            """
+            version: 2
+            project: default-deny
+            services:
+              api: { image: local/api:latest, networkPolicy: {} }
+            """
+        )
+        XCTAssertEqual(
+            defaultDeny.services[0].networkPolicy,
+            HostwrightServiceNetworkPolicy()
+        )
+    }
+
+    func testServiceNetworkPolicyRejectsBroadMalformedAndDuplicateRules() {
+        assertFailure(
+            """
+            version: 2
+            project: policy-demo
+            services:
+              api:
+                image: local/api:latest
+                networkPolicy: { ingress: [{}] }
+            """,
+            contains: "must contain at least one exact selector",
+            path: "$.services.api.networkPolicy.ingress[0]"
+        )
+        assertFailure(
+            """
+            version: 2
+            project: policy-demo
+            services:
+              api:
+                image: local/api:latest
+                networkPolicy:
+                  egress:
+                    - address: 10.42.0.7/24
+            """,
+            contains: "must be canonical IPv4 CIDR 10.42.0.0/24",
+            path: "$.services.api.networkPolicy.egress[0].address"
+        )
+        assertFailure(
+            """
+            version: 2
+            project: policy-demo
+            services:
+              api:
+                image: local/api:latest
+                networkPolicy:
+                  ingress:
+                    - service: worker
+                    - service: worker
+            """,
+            contains: "must not contain duplicate rules",
+            path: "$.services.api.networkPolicy.ingress[1]"
+        )
+        assertFailure(
+            """
+            version: 2
+            project: policy-demo
+            services:
+              api:
+                image: local/api:latest
+                networkPolicy:
+                  ingress:
+                    - service: worker
+                      protocol: icmp
+            """,
+            contains: "protocol must be one of: tcp, udp",
+            path: "$.services.api.networkPolicy.ingress[0].protocol"
+        )
+    }
+
     private func ingressManifest(
         _ routes: String,
         bind: String? = nil,

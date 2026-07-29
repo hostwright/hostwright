@@ -2,6 +2,7 @@ import Containerization
 import CryptoKit
 import Darwin
 import Foundation
+import HostwrightNetworking
 import HostwrightRuntime
 
 struct ContainerizationHelperLogSlice: Equatable, Sendable {
@@ -37,12 +38,17 @@ struct ContainerizationHelperPersistedRecord: Codable, Sendable {
     let resourceIdentifier: String
     let resourceUUID: String
     let projectUUID: String
+    let logicalServiceName: String?
     let image: ContainerizationHelperImageEvidence
     var command: [String]
     var environment: [RuntimeInventoryEnvironmentEntry]
     var labels: [RuntimeInventoryLabel]
     var workingDirectory: String?
     var user: String?
+    var networkPolicy: HostwrightServiceNetworkPolicy?
+    var networkPolicyGeneration: Int?
+    var networkPolicySHA256: String?
+    var networkPolicyVerified: Bool?
     let mutationContext: RuntimeMutationContext
     var runtimeInstanceID: String?
     var phase: ContainerizationHelperPersistedPhase
@@ -55,12 +61,17 @@ struct ContainerizationHelperPersistedRecord: Codable, Sendable {
         resourceIdentifier = request.resourceIdentifier
         resourceUUID = request.resourceUUID.lowercased()
         projectUUID = request.projectUUID.lowercased()
+        logicalServiceName = request.logicalServiceName
         image = request.image
         command = request.command
         environment = request.environment
         labels = request.labels
         workingDirectory = nil
         user = nil
+        networkPolicy = request.networkPolicy
+        networkPolicyGeneration = nil
+        networkPolicySHA256 = nil
+        networkPolicyVerified = nil
         mutationContext = context
         runtimeInstanceID = UUID().uuidString.lowercased()
         phase = .preparedCreate

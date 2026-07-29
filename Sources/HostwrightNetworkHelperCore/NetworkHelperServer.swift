@@ -7,22 +7,31 @@ struct NetworkHelperDispatcher: @unchecked Sendable {
     let store: NetworkHelperStateStore
     let hostAccessBroker: NetworkHelperHostAccessBroker
     let ingressBroker: NetworkHelperIngressBroker
+    let certificateCoordinator: NetworkHelperCertificateCoordinator
+    let policyBroker: NetworkHelperPolicyBroker
 
     init(
         store: NetworkHelperStateStore,
         hostAccessBroker: NetworkHelperHostAccessBroker =
             NetworkHelperHostAccessBroker(),
         ingressBroker: NetworkHelperIngressBroker =
-            NetworkHelperIngressBroker()
+            NetworkHelperIngressBroker(),
+        certificateCoordinator: NetworkHelperCertificateCoordinator =
+            NetworkHelperCertificateCoordinator(),
+        policyBroker: NetworkHelperPolicyBroker = NetworkHelperPolicyBroker()
     ) {
         self.store = store
         self.hostAccessBroker = hostAccessBroker
         self.ingressBroker = ingressBroker
+        self.certificateCoordinator = certificateCoordinator
+        self.policyBroker = policyBroker
     }
 
     var hasActiveBindings: Bool {
         hostAccessBroker.hasActiveBindings ||
-            ingressBroker.hasActiveBindings
+            ingressBroker.hasActiveBindings ||
+            certificateCoordinator.hasActiveCertificates ||
+            policyBroker.hasActivePolicies
     }
 
     func dispatch(frame: Data) throws -> Data {
@@ -42,6 +51,9 @@ struct NetworkHelperDispatcher: @unchecked Sendable {
                         request.hostAccessBindings ?? [],
                     ingressBindings:
                         request.ingressBindings ?? [],
+                    certificateBindings:
+                        request.certificateBindings ?? [],
+                    policyPlan: request.policyPlan,
                     predecessorFencingToken:
                         request.predecessorFencingToken
                 )
@@ -51,7 +63,10 @@ struct NetworkHelperDispatcher: @unchecked Sendable {
                     hostAccessBindings:
                         request.hostAccessBindings ?? [],
                     ingressBindings:
-                        request.ingressBindings ?? []
+                        request.ingressBindings ?? [],
+                    certificateBindings:
+                        request.certificateBindings ?? [],
+                    policyPlan: request.policyPlan
                 )
             case .status:
                 let persisted = try store.status(
@@ -68,27 +83,88 @@ struct NetworkHelperDispatcher: @unchecked Sendable {
                         .first(where: {
                             $0.identity == request.identity
                         })?.bindings ?? []
+                    let certificateBindings = try store
+                        .activeCertificateConfigurations()
+                        .first(where: {
+                            $0.identity == request.identity
+                        })?.bindings ?? []
+                    let policyPlan = try store
+                        .activePolicyConfigurations()
+                        .first(where: {
+                            $0.identity == request.identity
+                        })?.plan
                     status = try activatingStatus(
                         persisted,
                         identity: request.identity,
                         hostAccessBindings: hostAccessBindings,
-                        ingressBindings: ingressBindings
+                        ingressBindings: ingressBindings,
+                        certificateBindings: certificateBindings,
+                        policyPlan: policyPlan
                     )
                 } else {
                     status = withActivity(
                         persisted,
                         hostAccessActive: false,
-                        ingressActive: false
+                        ingressActive: false,
+                        certificateActive: false,
+                        policyActive: false
                     )
                 }
             case .remove:
-                let removed = try store.remove(identity: request.identity)
-                hostAccessBroker.remove(identity: request.identity)
+                let persisted = try store.status(
+                    identity: request.identity
+                )
+                guard persisted.disposition == .active else {
+                    if persisted.disposition == .quarantined {
+                        throw NetworkHelperError.quarantined
+                    }
+                    throw NetworkHelperError.conflict
+                }
+                let evidence = try store.certificateEvidence(
+                    identity: request.identity
+                )
+                let retired = try store.retiredCertificateEvidence(
+                    identity: request.identity
+                )
+                let certificateBindings = try store
+                    .activeCertificateConfigurations()
+                    .first(where: {
+                        $0.identity == request.identity
+                    })?.bindings ?? []
                 ingressBroker.remove(identity: request.identity)
+                policyBroker.remove(identity: request.identity)
+                if let evidence {
+                    try certificateCoordinator.cleanup(
+                        identity: request.identity,
+                        evidence: evidence
+                    )
+                } else {
+                    try certificateCoordinator
+                        .cleanupUnrecordedManagedIdentities(
+                            identity: request.identity,
+                            bindings: certificateBindings
+                        )
+                }
+                if let retired {
+                    try certificateCoordinator.cleanup(
+                        identity: retired.identity,
+                        evidence: retired
+                    )
+                    try store.clearRetiredCertificateEvidence(
+                        identity: request.identity,
+                        expected: retired
+                    )
+                }
+                let removed = try store.remove(
+                    identity: request.identity
+                )
+                hostAccessBroker.remove(identity: request.identity)
                 status = withActivity(
                     removed,
                     hostAccessActive: false,
-                    ingressActive: false
+                    ingressActive: false,
+                    certificateActive: false,
+                    policyActive: false
                 )
             }
             return try NetworkHelperCanonicalJSON.frame(
@@ -113,13 +189,17 @@ struct NetworkHelperDispatcher: @unchecked Sendable {
         _ persisted: NetworkHelperStatus,
         identity: NetworkHelperDNSIdentity,
         hostAccessBindings: [ProjectDNSHostAccessBinding],
-        ingressBindings: [ProjectIngressListenerBinding]
+        ingressBindings: [ProjectIngressListenerBinding],
+        certificateBindings: [ProjectCertificateRequestBinding],
+        policyPlan: NetworkPolicyPlan?
     ) throws -> NetworkHelperStatus {
         guard persisted.disposition == .active else {
             return withActivity(
                 persisted,
                 hostAccessActive: false,
-                ingressActive: false
+                ingressActive: false,
+                certificateActive: false,
+                policyActive: false
             )
         }
         let hostAccessActive: Bool
@@ -140,15 +220,107 @@ struct NetworkHelperDispatcher: @unchecked Sendable {
             hostAccessBroker.remove(identity: identity)
             hostAccessActive = true
         }
+        let certificateActive: Bool
+        let activation: NetworkHelperCertificateActivation
+        if let expected = persisted.certificateSHA256 {
+            let priorEvidence = try store.certificateEvidence(
+                identity: identity
+            )
+            activation = try certificateCoordinator.apply(
+                identity: identity,
+                bindings: certificateBindings,
+                persistedEvidence: priorEvidence,
+                overlapEvidence:
+                    try store.retiredCertificateEvidence(
+                        identity: identity
+                    )
+            )
+            let recorded = try store.recordCertificateEvidence(
+                identity: identity,
+                certificates: activation.evidence
+            )
+            certificateActive =
+                recorded?.requestSHA256 == expected &&
+                activation.identities.count ==
+                    certificateBindings.count
+        } else {
+            certificateCoordinator.deactivate(identity: identity)
+            _ = try store.recordCertificateEvidence(
+                identity: identity,
+                certificates: []
+            )
+            activation = NetworkHelperCertificateActivation(
+                identities: [:],
+                peerIdentities: [:],
+                mutualTLSPolicies: [:],
+                currentMutualTLSPolicies: [:],
+                evidence: [],
+                evidenceSHA256: nil
+            )
+            certificateActive = true
+        }
+        let policyActive: Bool
+        if let expected = persisted.policySHA256 {
+            guard let policyPlan else {
+                policyBroker.remove(identity: identity)
+                ingressBroker.remove(identity: identity)
+                return withActivity(
+                    persisted,
+                    hostAccessActive: hostAccessActive,
+                    ingressActive: false,
+                    certificateActive: certificateActive,
+                    policyActive: false,
+                    certificateActivation: activation,
+                    certificateBindings: certificateBindings
+                )
+            }
+            do {
+                policyActive = try policyBroker.apply(
+                    identity: identity,
+                    plan: policyPlan
+                ) == expected
+            } catch {
+                policyBroker.remove(identity: identity)
+                ingressBroker.remove(identity: identity)
+                return withActivity(
+                    persisted,
+                    hostAccessActive: hostAccessActive,
+                    ingressActive: false,
+                    certificateActive: certificateActive,
+                    policyActive: false,
+                    certificateActivation: activation,
+                    certificateBindings: certificateBindings
+                )
+            }
+        } else {
+            policyBroker.remove(identity: identity)
+            policyActive = true
+        }
+        let policyDigest = policyActive ? persisted.policySHA256 : nil
+        let policyAuthorizer =
+            policyDigest.map {
+                makePolicyAuthorizer(
+                    identity: identity,
+                    expectedSHA256: $0
+                )
+            }
         let ingressActive: Bool
         if let expected = persisted.ingressSHA256 {
-            if ingressBroker.sha256(identity: identity) == expected {
+            if ingressBroker.sha256(identity: identity) == expected,
+               certificateBindings.isEmpty,
+               policyDigest == nil {
                 ingressActive = true
             } else {
                 do {
                     ingressActive = try ingressBroker.apply(
                         identity: identity,
-                        bindings: ingressBindings
+                        bindings: ingressBindings,
+                        certificateIdentities:
+                            activation.identities,
+                        policySHA256: policyDigest,
+                        policyAuthorizer: policyAuthorizer,
+                        mutualTLSPolicies:
+                            activation.mutualTLSPolicies
                     ) == expected
                 } catch NetworkHelperError.bindingUnavailable {
                     ingressActive = false
@@ -158,17 +330,67 @@ struct NetworkHelperDispatcher: @unchecked Sendable {
             ingressBroker.remove(identity: identity)
             ingressActive = true
         }
+        if ingressActive,
+           let retired = try store.retiredCertificateEvidence(
+                identity: identity
+            ) {
+            if !ingressBindings.isEmpty {
+                guard try ingressBroker.apply(
+                    identity: identity,
+                    bindings: ingressBindings,
+                    certificateIdentities:
+                        activation.identities,
+                    policySHA256: policyDigest,
+                    policyAuthorizer: policyAuthorizer,
+                    mutualTLSPolicies:
+                        activation.currentMutualTLSPolicies
+                ) == persisted.ingressSHA256 else {
+                    throw NetworkHelperError.bindingUnavailable
+                }
+            }
+            try certificateCoordinator.cleanup(
+                identity: retired.identity,
+                evidence: retired
+            )
+            try store.clearRetiredCertificateEvidence(
+                identity: identity,
+                expected: retired
+            )
+        }
         return withActivity(
             persisted,
             hostAccessActive: hostAccessActive,
-            ingressActive: ingressActive
+            ingressActive: ingressActive,
+            certificateActive: certificateActive,
+            policyActive: policyActive,
+            certificateActivation: activation,
+            certificateBindings: certificateBindings
         )
+    }
+
+    private func makePolicyAuthorizer(
+        identity: NetworkHelperDNSIdentity,
+        expectedSHA256: String
+    ) -> @Sendable (NetworkPolicyFlow) -> Bool {
+        { [policyBroker] flow in
+            policyBroker.allows(
+                identity: identity,
+                expectedSHA256: expectedSHA256,
+                flow: flow
+            )
+        }
     }
 
     private func withActivity(
         _ status: NetworkHelperStatus,
         hostAccessActive: Bool,
-        ingressActive: Bool
+        ingressActive: Bool,
+        certificateActive: Bool,
+        policyActive: Bool,
+        certificateActivation:
+            NetworkHelperCertificateActivation? = nil,
+        certificateBindings:
+            [ProjectCertificateRequestBinding] = []
     ) -> NetworkHelperStatus {
         NetworkHelperStatus(
             disposition: status.disposition,
@@ -181,8 +403,53 @@ struct NetworkHelperDispatcher: @unchecked Sendable {
             ingressAccessLog: status.identity.map {
                 ingressBroker.accessLog(identity: $0)
             },
+            mutualTLSAudit: status.identity.map {
+                ingressBroker.mutualTLSAudit(identity: $0)
+            },
+            certificateSHA256: status.certificateSHA256,
+            certificateActive: certificateActive,
+            certificateEvidenceSHA256:
+                certificateActivation?.evidenceSHA256,
+            certificateSummaries: certificateSummaries(
+                activation: certificateActivation,
+                bindings: certificateBindings
+            ),
+            policySHA256: status.policySHA256,
+            policyActive: policyActive,
             reason: status.reason
         )
+    }
+
+    private func certificateSummaries(
+        activation: NetworkHelperCertificateActivation?,
+        bindings: [ProjectCertificateRequestBinding]
+    ) -> [NetworkHelperCertificateSummary]? {
+        guard let activation, !activation.evidence.isEmpty else {
+            return nil
+        }
+        let bindingsByName = Dictionary(
+            uniqueKeysWithValues: bindings.map { ($0.name, $0) }
+        )
+        let currentTime = Date()
+        return activation.evidence.map { evidence in
+            let renewalNeeded = bindingsByName[evidence.name].map {
+                evidence.notValidAfter.timeIntervalSince(currentTime)
+                    <= TimeInterval($0.renewBeforeSeconds)
+            } ?? true
+            return NetworkHelperCertificateSummary(
+                name: evidence.name,
+                certificateUUID: evidence.certificateUUID,
+                source: evidence.source,
+                certificateSHA256: evidence.certificateSHA256,
+                issuerCertificateSHA256:
+                    evidence.issuerCertificateSHA256,
+                dnsNames: evidence.dnsNames,
+                notValidBefore: evidence.notValidBefore,
+                notValidAfter: evidence.notValidAfter,
+                revocationStatus: evidence.revocationStatus,
+                renewalNeeded: renewalNeeded
+            )
+        }
     }
 }
 

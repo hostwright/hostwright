@@ -23,6 +23,23 @@ enum ProjectDNSHelperDisposition: Equatable, Sendable {
     case quarantined
 }
 
+struct ProjectDNSCertificateSummary:
+    Codable,
+    Equatable,
+    Sendable
+{
+    let name: String
+    let certificateUUID: String
+    let source: HostwrightCertificateSourceKind
+    let certificateSHA256: String
+    let issuerCertificateSHA256: String?
+    let dnsNames: [String]
+    let notValidBefore: Date
+    let notValidAfter: Date
+    let revocationStatus: String
+    let renewalNeeded: Bool
+}
+
 struct ProjectDNSHelperObservation: Equatable, Sendable {
     let disposition: ProjectDNSHelperDisposition
     let corefilePath: String?
@@ -31,6 +48,12 @@ struct ProjectDNSHelperObservation: Equatable, Sendable {
     let hostAccessActive: Bool
     let ingressSHA256: String?
     let ingressActive: Bool
+    let certificateSHA256: String?
+    let certificateActive: Bool
+    let certificateEvidenceSHA256: String?
+    let certificateSummaries: [ProjectDNSCertificateSummary]
+    let policySHA256: String?
+    let policyActive: Bool
 
     init(
         disposition: ProjectDNSHelperDisposition,
@@ -39,7 +62,13 @@ struct ProjectDNSHelperObservation: Equatable, Sendable {
         hostAccessSHA256: String? = nil,
         hostAccessActive: Bool = true,
         ingressSHA256: String? = nil,
-        ingressActive: Bool = true
+        ingressActive: Bool = true,
+        certificateSHA256: String? = nil,
+        certificateActive: Bool = true,
+        certificateEvidenceSHA256: String? = nil,
+        certificateSummaries: [ProjectDNSCertificateSummary] = [],
+        policySHA256: String? = nil,
+        policyActive: Bool = true
     ) {
         self.disposition = disposition
         self.corefilePath = corefilePath
@@ -48,6 +77,12 @@ struct ProjectDNSHelperObservation: Equatable, Sendable {
         self.hostAccessActive = hostAccessActive
         self.ingressSHA256 = ingressSHA256
         self.ingressActive = ingressActive
+        self.certificateSHA256 = certificateSHA256
+        self.certificateActive = certificateActive
+        self.certificateEvidenceSHA256 = certificateEvidenceSHA256
+        self.certificateSummaries = certificateSummaries
+        self.policySHA256 = policySHA256
+        self.policyActive = policyActive
     }
 }
 
@@ -61,6 +96,8 @@ protocol ProjectDNSHelperDriving: Sendable {
         corefile: String,
         hostAccessBindings: [ProjectDNSHostAccessBinding],
         ingressBindings: [ProjectIngressListenerBinding],
+        certificateBindings: [ProjectCertificateRequestBinding],
+        policyPlan: NetworkPolicyPlan?,
         predecessorFencingToken: String?
     ) async throws -> ProjectDNSHelperObservation
 
@@ -115,7 +152,10 @@ enum ProjectDNSLifecycleCoordinator {
         runtime: any ProjectDNSRuntimeDriving
     ) async throws -> ProjectDNSLifecycleReconciliationResult {
         guard !preparation.desiredState.networks.isEmpty ||
-                !preparation.ingress.isEmpty else {
+                !preparation.ingress.isEmpty ||
+                preparation.desiredState.services.contains(where: {
+                    $0.networkPolicy != nil
+                }) else {
             return ProjectDNSLifecycleReconciliationResult(
                 newlyCreatedDNSUUIDs: []
             )
@@ -135,6 +175,7 @@ enum ProjectDNSLifecycleCoordinator {
             desiredState: preparation.desiredState,
             observedState: preparation.observedState,
             runtimeInventory: try await runtime.inventory(),
+            certificates: preparation.certificates,
             ingress: preparation.ingress,
             projectID: preparation.projectID,
             resourceBindings: preparation.resourceBindings
@@ -321,6 +362,7 @@ enum ProjectDNSLifecycleCoordinator {
             desiredState: preparation.desiredState,
             observedState: observedState,
             runtimeInventory: try await runtime.inventory(),
+            certificates: preparation.certificates,
             ingress: preparation.ingress,
             projectID: preparation.projectID,
             resourceBindings: preparation.resourceBindings
@@ -353,6 +395,10 @@ enum ProjectDNSLifecycleCoordinator {
             generation: existing.generation + 1,
             fencingToken: group.fencingToken
         )
+        let networkPolicyPlan = try policyPlan(
+            preparation: preparation,
+            generation: helperIdentity.generation
+        )
         let reservations =
             try ProjectDNSHostAccessReservations.prepare(
                 bindings: plan.hostAccessBindings,
@@ -367,6 +413,8 @@ enum ProjectDNSLifecycleCoordinator {
                 corefile: plan.corefile,
                 hostAccessBindings: plan.hostAccessBindings,
                 ingressBindings: plan.ingressBindings,
+                certificateBindings: plan.certificateBindings,
+                policyPlan: networkPolicyPlan,
                 predecessorFencingToken:
                     existing.fencingToken
             )
@@ -376,7 +424,10 @@ enum ProjectDNSLifecycleCoordinator {
                 expectedHostAccessSHA256:
                     try hostAccessDigest(plan.hostAccessBindings),
                 expectedIngressSHA256:
-                    try ingressDigest(plan.ingressBindings)
+                    try ingressDigest(plan.ingressBindings),
+                expectedCertificateSHA256:
+                    try certificateDigest(plan.certificateBindings),
+                expectedPolicySHA256: networkPolicyPlan?.sha256
             )
             guard let observed = try await exactRuntimeContainer(
                 record: existing,
@@ -403,6 +454,14 @@ enum ProjectDNSLifecycleCoordinator {
                 group: group,
                 preparation: preparation,
                 runtime: runtime
+            )
+            try commitCertificates(
+                bindings: plan.certificateBindings,
+                observation: applied,
+                group: group,
+                authority: authority,
+                preparation: preparation,
+                store: store
             )
             let refreshed = ProjectDNSStateRecord(
                 id: existing.id,
@@ -690,6 +749,12 @@ enum ProjectDNSLifecycleCoordinator {
                 preparation: preparation,
                 runtime: runtime
             )
+            try releaseCertificates(
+                projectUUID: deleting.projectUUID,
+                group: group,
+                authority: authority,
+                store: store
+            )
             let deleted = ProjectDNSStateRecord(
                 id: deleting.id,
                 projectUUID: deleting.projectUUID,
@@ -782,6 +847,10 @@ enum ProjectDNSLifecycleCoordinator {
             generation: nextStateGeneration,
             fencingToken: creating.fencingToken
         )
+        let networkPolicyPlan = try policyPlan(
+            preparation: preparation,
+            generation: helperIdentity.generation
+        )
         let expectedCorefileSHA256 = try digest(plan.corefile)
         let reservations =
             try ProjectDNSHostAccessReservations.prepare(
@@ -811,8 +880,16 @@ enum ProjectDNSLifecycleCoordinator {
                         ),
                     expectedIngressSHA256:
                         try ingressDigest(plan.ingressBindings),
+                    expectedCertificateSHA256:
+                        try certificateDigest(
+                            plan.certificateBindings
+                        ),
+                    expectedPolicySHA256:
+                        networkPolicyPlan?.sha256,
                     requireHostAccessActive: false,
-                    requireIngressActive: false
+                    requireIngressActive: false,
+                    requireCertificateActive: false,
+                    requirePolicyActive: false
                 )
                 helperObservation = initialHelper
             case .absent:
@@ -821,6 +898,9 @@ enum ProjectDNSLifecycleCoordinator {
                     corefile: plan.corefile,
                     hostAccessBindings: plan.hostAccessBindings,
                     ingressBindings: plan.ingressBindings,
+                    certificateBindings:
+                        plan.certificateBindings,
+                    policyPlan: networkPolicyPlan,
                     predecessorFencingToken: nil
                 )
                 helperAppliedByExecution = true
@@ -834,8 +914,16 @@ enum ProjectDNSLifecycleCoordinator {
                         ),
                     expectedIngressSHA256:
                         try ingressDigest(plan.ingressBindings),
+                    expectedCertificateSHA256:
+                        try certificateDigest(
+                            plan.certificateBindings
+                        ),
+                    expectedPolicySHA256:
+                        networkPolicyPlan?.sha256,
                     requireHostAccessActive: false,
-                    requireIngressActive: false
+                    requireIngressActive: false,
+                    requireCertificateActive: false,
+                    requirePolicyActive: false
                 )
             case .conflicting, .quarantined:
                 try await quarantine(
@@ -955,6 +1043,8 @@ enum ProjectDNSLifecycleCoordinator {
                 group: group,
                 readySHA256: readySHA256,
                 observed: observed.container,
+                certificateBindings: plan.certificateBindings,
+                helperObservation: observed.helper,
                 preparation: preparation,
                 runtime: runtime,
                 store: store
@@ -1048,6 +1138,12 @@ enum ProjectDNSLifecycleCoordinator {
             group: group,
             preparation: preparation,
             runtime: runtime
+        )
+        try releaseCertificates(
+            projectUUID: creating.projectUUID,
+            group: group,
+            authority: authority,
+            store: store
         )
         let deleting = ProjectDNSStateRecord(
             id: creating.id,
@@ -1161,6 +1257,8 @@ enum ProjectDNSLifecycleCoordinator {
         group: OperationGroupRecord,
         readySHA256: String,
         observed: RuntimeInventoryContainer,
+        certificateBindings: [ProjectCertificateRequestBinding],
+        helperObservation: ProjectDNSHelperObservation,
         preparation: LifecycleCommandPreparation,
         runtime: any ProjectDNSRuntimeDriving,
         store: SQLiteStateStore
@@ -1171,6 +1269,14 @@ enum ProjectDNSLifecycleCoordinator {
             runtime: runtime
         )
         let observedSHA256 = try runtimeDigest(observed)
+        try commitCertificates(
+            bindings: certificateBindings,
+            observation: helperObservation,
+            group: group,
+            authority: authority,
+            preparation: preparation,
+            store: store
+        )
         let available = ProjectDNSStateRecord(
             id: creating.id,
             projectUUID: creating.projectUUID,
@@ -1215,14 +1321,19 @@ enum ProjectDNSLifecycleCoordinator {
         container: RuntimeInventoryContainer,
         helper: ProjectDNSHelperObservation
     )? {
+        let helperGeneration =
+            record.lifecycleState == .creating
+                ? record.generation + 1
+                : record.generation
+        let expectedPolicyPlan = try policyPlan(
+            preparation: preparation,
+            generation: helperGeneration
+        )
         let helperObservation = try await helper.status(
             identity: ProjectDNSHelperIdentity(
                 projectUUID: record.projectUUID,
                 dnsUUID: record.id,
-                generation:
-                    record.lifecycleState == .creating
-                        ? record.generation + 1
-                        : record.generation,
+                generation: helperGeneration,
                 fencingToken: record.fencingToken
             )
         )
@@ -1231,6 +1342,16 @@ enum ProjectDNSLifecycleCoordinator {
               (
                   helperObservation.ingressSHA256 == nil ||
                       helperObservation.ingressActive
+              ),
+              (
+                  helperObservation.certificateSHA256 == nil ||
+                      helperObservation.certificateActive
+              ),
+              helperObservation.policySHA256 ==
+                expectedPolicyPlan?.sha256,
+              (
+                  helperObservation.policySHA256 == nil ||
+                      helperObservation.policyActive
               ),
               let container = try await exactRuntimeContainer(
                   record: record,
@@ -1588,8 +1709,12 @@ enum ProjectDNSLifecycleCoordinator {
         expectedCorefileSHA256: String,
         expectedHostAccessSHA256: String?,
         expectedIngressSHA256: String?,
+        expectedCertificateSHA256: String?,
+        expectedPolicySHA256: String?,
         requireHostAccessActive: Bool = true,
-        requireIngressActive: Bool = true
+        requireIngressActive: Bool = true,
+        requireCertificateActive: Bool = true,
+        requirePolicyActive: Bool = true
     ) throws {
         guard observation.disposition == .active,
               observation.corefileSHA256 ==
@@ -1598,6 +1723,10 @@ enum ProjectDNSLifecycleCoordinator {
                 expectedHostAccessSHA256,
               observation.ingressSHA256 ==
                 expectedIngressSHA256,
+              observation.certificateSHA256 ==
+                expectedCertificateSHA256,
+              observation.policySHA256 ==
+                expectedPolicySHA256,
               (
                   !requireHostAccessActive ||
                       observation.hostAccessActive
@@ -1605,6 +1734,14 @@ enum ProjectDNSLifecycleCoordinator {
               (
                   !requireIngressActive ||
                       observation.ingressActive
+              ),
+              (
+                  !requireCertificateActive ||
+                      observation.certificateActive
+              ),
+              (
+                  !requirePolicyActive ||
+                      observation.policyActive
               ),
               let path = observation.corefilePath,
               path.hasPrefix("/"),
@@ -1626,6 +1763,22 @@ enum ProjectDNSLifecycleCoordinator {
         )
     }
 
+    private static func policyPlan(
+        preparation: LifecycleCommandPreparation,
+        generation: Int64
+    ) throws -> NetworkPolicyPlan? {
+        guard let exactGeneration = Int(exactly: generation) else {
+            throw conflict(
+                "Project network-policy generation exceeds the supported platform integer range."
+            )
+        }
+        return try ProjectDNSPlanBuilder.networkPolicyPlan(
+            projectUUID: preparation.projectResourceUUID,
+            desiredState: preparation.desiredState,
+            generation: exactGeneration
+        )
+    }
+
     private static func ingressDigest(
         _ bindings: [ProjectIngressListenerBinding]
     ) throws -> String? {
@@ -1634,6 +1787,415 @@ enum ProjectDNSLifecycleCoordinator {
                 by: ProjectIngressListenerBinding.canonicalPrecedes
             )
         )
+    }
+
+    private static func certificateDigest(
+        _ bindings: [ProjectCertificateRequestBinding]
+    ) throws -> String? {
+        bindings.isEmpty ? nil : try digest(
+            bindings.sorted(
+                by: ProjectCertificateRequestBinding.canonicalPrecedes
+            )
+        )
+    }
+
+    private static func commitCertificates(
+        bindings: [ProjectCertificateRequestBinding],
+        observation: ProjectDNSHelperObservation,
+        group: OperationGroupRecord,
+        authority: NetworkStateMutationAuthority,
+        preparation: LifecycleCommandPreparation,
+        store: SQLiteStateStore
+    ) throws {
+        guard !bindings.isEmpty else {
+            guard observation.certificateSHA256 == nil,
+                  observation.certificateSummaries.isEmpty else {
+                throw conflict(
+                    "Project DNS helper returned unexpected certificate evidence."
+                )
+            }
+            return
+        }
+        guard observation.certificateActive,
+              observation.certificateEvidenceSHA256 != nil,
+              observation.certificateSummaries.count ==
+                bindings.count else {
+            throw conflict(
+                "Project DNS helper omitted complete active certificate evidence."
+            )
+        }
+        var summaries: [String: ProjectDNSCertificateSummary] = [:]
+        for summary in observation.certificateSummaries {
+            guard summaries.updateValue(
+                summary,
+                forKey: summary.name
+            ) == nil else {
+                throw conflict(
+                    "Project DNS helper returned duplicate certificate evidence."
+                )
+            }
+        }
+
+        for binding in bindings.sorted(
+            by: ProjectCertificateRequestBinding.canonicalPrecedes
+        ) {
+            guard let summary = summaries[binding.name],
+                  summary.certificateUUID ==
+                    binding.certificateUUID,
+                  summary.source == binding.source,
+                  summary.dnsNames == binding.dnsNames.sorted(),
+                  validSHA256(summary.certificateSHA256),
+                  summary.issuerCertificateSHA256.map(
+                      validSHA256
+                  ) ?? true,
+                  summary.notValidBefore < summary.notValidAfter,
+                  !summary.renewalNeeded else {
+                throw conflict(
+                    "Project DNS helper certificate evidence does not match the confirmed request."
+                )
+            }
+            let desiredSHA256 = try digest(binding)
+            let observedSHA256 = try digest(summary)
+            let source = stateSource(binding.source)
+            let ownership: CertificateOwnershipKind =
+                source == .imported ? .external : .managed
+            let revocation = stateRevocation(
+                summary.revocationStatus,
+                policy: binding.statusPolicy
+            )
+            let sanJSON = try canonicalStringArray(
+                summary.dnsNames
+            )
+            let ekuJSON = try canonicalStringArray(
+                ["serverAuth"]
+            )
+            let notBefore = iso8601(summary.notValidBefore)
+            let notAfter = iso8601(summary.notValidAfter)
+            let now = hostwrightTimestamp()
+            let existing = try store.certificates.load(
+                id: binding.certificateUUID
+            )
+            if let existing,
+               existing.lifecycleState == .available,
+               existing.finalizerState == .active,
+               existing.desiredSHA256 == desiredSHA256,
+               existing.observedSHA256 == observedSHA256,
+               existing.leafSHA256 ==
+                summary.certificateSHA256,
+               existing.issuerSHA256 ==
+                summary.issuerCertificateSHA256 {
+                continue
+            }
+            if let existing {
+                guard existing.projectUUID ==
+                        preparation.projectResourceUUID,
+                      existing.manifestName == binding.name,
+                      existing.sourceKind == source,
+                      existing.ownershipKind == ownership,
+                      existing.lifecycleState != .deleting,
+                      existing.lifecycleState != .deleted else {
+                    throw conflict(
+                        "Persisted certificate identity conflicts with the confirmed certificate request."
+                    )
+                }
+                let available = CertificateStateRecord(
+                    id: existing.id,
+                    projectUUID: existing.projectUUID,
+                    manifestName: existing.manifestName,
+                    generation: existing.generation + 1,
+                    providerID: preparation.providerID.rawValue,
+                    providerGeneration:
+                        Int64(preparation.providerGeneration),
+                    fencingToken: group.fencingToken,
+                    sourceKind: source,
+                    ownershipKind: ownership,
+                    leafSHA256:
+                        summary.certificateSHA256,
+                    issuerSHA256:
+                        summary.issuerCertificateSHA256,
+                    sanJSON: sanJSON,
+                    ekuJSON: ekuJSON,
+                    notBefore: notBefore,
+                    notAfter: notAfter,
+                    status: .available,
+                    revocationStatus: revocation,
+                    statusCheckedAt:
+                        revocation == .unknown ? nil : now,
+                    desiredSHA256: desiredSHA256,
+                    observedSHA256: observedSHA256,
+                    lifecycleState: .available,
+                    finalizerState: .active,
+                    priorLeafSHA256:
+                        existing.leafSHA256 ==
+                            summary.certificateSHA256
+                            ? existing.priorLeafSHA256
+                            : existing.leafSHA256,
+                    operationGroupID: group.id,
+                    createdAt: existing.createdAt,
+                    updatedAt: now
+                )
+                try store.certificates.save(
+                    available,
+                    replacing: NetworkStateExpectedVersion(
+                        generation: existing.generation,
+                        fencingToken: existing.fencingToken
+                    ),
+                    authority: authority
+                )
+                continue
+            }
+
+            let creating = CertificateStateRecord(
+                id: binding.certificateUUID,
+                projectUUID: preparation.projectResourceUUID,
+                manifestName: binding.name,
+                generation: 1,
+                providerID: preparation.providerID.rawValue,
+                providerGeneration:
+                    Int64(preparation.providerGeneration),
+                fencingToken: group.fencingToken,
+                sourceKind: source,
+                ownershipKind: ownership,
+                leafSHA256: summary.certificateSHA256,
+                issuerSHA256:
+                    summary.issuerCertificateSHA256,
+                sanJSON: sanJSON,
+                ekuJSON: ekuJSON,
+                notBefore: notBefore,
+                notAfter: notAfter,
+                status: .creating,
+                revocationStatus: revocation,
+                statusCheckedAt:
+                    revocation == .unknown ? nil : now,
+                desiredSHA256: desiredSHA256,
+                observedSHA256: nil,
+                lifecycleState: .creating,
+                finalizerState: .pending,
+                operationGroupID: group.id,
+                createdAt: now,
+                updatedAt: now
+            )
+            try store.certificates.save(
+                creating,
+                authority: authority
+            )
+            let available = CertificateStateRecord(
+                id: creating.id,
+                projectUUID: creating.projectUUID,
+                manifestName: creating.manifestName,
+                generation: 2,
+                providerID: creating.providerID,
+                providerGeneration:
+                    creating.providerGeneration,
+                fencingToken: creating.fencingToken,
+                sourceKind: creating.sourceKind,
+                ownershipKind: creating.ownershipKind,
+                leafSHA256: creating.leafSHA256,
+                issuerSHA256: creating.issuerSHA256,
+                sanJSON: creating.sanJSON,
+                ekuJSON: creating.ekuJSON,
+                notBefore: creating.notBefore,
+                notAfter: creating.notAfter,
+                status: .available,
+                revocationStatus:
+                    creating.revocationStatus,
+                statusCheckedAt:
+                    creating.statusCheckedAt,
+                desiredSHA256: creating.desiredSHA256,
+                observedSHA256: observedSHA256,
+                lifecycleState: .available,
+                finalizerState: .active,
+                operationGroupID: creating.operationGroupID,
+                createdAt: creating.createdAt,
+                updatedAt: now
+            )
+            try store.certificates.save(
+                available,
+                replacing: NetworkStateExpectedVersion(
+                    generation: creating.generation,
+                    fencingToken: creating.fencingToken
+                ),
+                authority: authority
+            )
+        }
+    }
+
+    private static func stateSource(
+        _ source: HostwrightCertificateSourceKind
+    ) -> CertificateSourceKind {
+        switch source {
+        case .imported:
+            return .imported
+        case .localCA:
+            return .localCA
+        case .provider:
+            return .provider
+        }
+    }
+
+    private static func releaseCertificates(
+        projectUUID: String,
+        group: OperationGroupRecord,
+        authority: NetworkStateMutationAuthority,
+        store: SQLiteStateStore
+    ) throws {
+        for existing in try store.certificates.list(
+            projectUUID: projectUUID
+        ) {
+            guard existing.lifecycleState != .deleted else {
+                continue
+            }
+            let now = hostwrightTimestamp()
+            let deleting: CertificateStateRecord
+            if existing.lifecycleState == .deleting {
+                deleting = existing
+            } else {
+                deleting = CertificateStateRecord(
+                    id: existing.id,
+                    projectUUID: existing.projectUUID,
+                    manifestName: existing.manifestName,
+                    generation: existing.generation + 1,
+                    providerID: authority.providerID,
+                    providerGeneration:
+                        Int64(authority.providerGeneration),
+                    fencingToken: group.fencingToken,
+                    sourceKind: existing.sourceKind,
+                    ownershipKind: existing.ownershipKind,
+                    leafSHA256: existing.leafSHA256,
+                    issuerSHA256: existing.issuerSHA256,
+                    sanJSON: existing.sanJSON,
+                    ekuJSON: existing.ekuJSON,
+                    notBefore: existing.notBefore,
+                    notAfter: existing.notAfter,
+                    status: existing.ownershipKind == .external
+                        ? .available
+                        : .revoking,
+                    revocationStatus:
+                        existing.revocationStatus,
+                    statusCheckedAt:
+                        existing.statusCheckedAt,
+                    desiredSHA256:
+                        existing.desiredSHA256,
+                    observedSHA256:
+                        existing.observedSHA256,
+                    lifecycleState: .deleting,
+                    finalizerState: .releasing,
+                    priorLeafSHA256:
+                        existing.priorLeafSHA256,
+                    operationGroupID: group.id,
+                    createdAt: existing.createdAt,
+                    updatedAt: now
+                )
+                try store.certificates.save(
+                    deleting,
+                    replacing: NetworkStateExpectedVersion(
+                        generation: existing.generation,
+                        fencingToken: existing.fencingToken
+                    ),
+                    authority: authority
+                )
+            }
+            let releasedObservedSHA256 =
+                if let observed = deleting.observedSHA256 {
+                    observed
+                } else {
+                    try digest("released:\(deleting.id)")
+                }
+            let deleted = CertificateStateRecord(
+                id: deleting.id,
+                projectUUID: deleting.projectUUID,
+                manifestName: deleting.manifestName,
+                generation: deleting.generation + 1,
+                providerID: authority.providerID,
+                providerGeneration:
+                    Int64(authority.providerGeneration),
+                fencingToken: group.fencingToken,
+                sourceKind: deleting.sourceKind,
+                ownershipKind: deleting.ownershipKind,
+                leafSHA256: deleting.leafSHA256,
+                issuerSHA256: deleting.issuerSHA256,
+                sanJSON: deleting.sanJSON,
+                ekuJSON: deleting.ekuJSON,
+                notBefore: deleting.notBefore,
+                notAfter: deleting.notAfter,
+                status: deleting.ownershipKind == .external
+                    ? .released
+                    : .revoked,
+                revocationStatus:
+                    deleting.revocationStatus,
+                statusCheckedAt:
+                    deleting.statusCheckedAt,
+                desiredSHA256: deleting.desiredSHA256,
+                observedSHA256: releasedObservedSHA256,
+                lifecycleState: .deleted,
+                finalizerState: .released,
+                priorLeafSHA256:
+                    deleting.priorLeafSHA256,
+                operationGroupID: group.id,
+                createdAt: deleting.createdAt,
+                updatedAt: now
+            )
+            try store.certificates.save(
+                deleted,
+                replacing: NetworkStateExpectedVersion(
+                    generation: deleting.generation,
+                    fencingToken: deleting.fencingToken
+                ),
+                authority: authority
+            )
+            try store.certificates.purge(
+                id: deleted.id,
+                expected: NetworkStateExpectedVersion(
+                    generation: deleted.generation,
+                    fencingToken: deleted.fencingToken
+                ),
+                authority: authority
+            )
+        }
+    }
+
+    private static func stateRevocation(
+        _ value: String,
+        policy: HostwrightCertificateStatusPolicy
+    ) -> HostwrightState.CertificateRevocationStatus {
+        if policy == .disabled {
+            return .notApplicable
+        }
+        switch value {
+        case "suppliedGood":
+            return .good
+        case "suppliedRevoked":
+            return .revoked
+        default:
+            return .unknown
+        }
+    }
+
+    private static func validSHA256(_ value: String) -> Bool {
+        value.range(
+            of: "^[a-f0-9]{64}$",
+            options: .regularExpression
+        ) != nil
+    }
+
+    private static func canonicalStringArray(
+        _ values: [String]
+    ) throws -> String {
+        let data = try JSONSerialization.data(
+            withJSONObject: values.sorted(),
+            options: [.sortedKeys, .withoutEscapingSlashes]
+        )
+        guard let value = String(data: data, encoding: .utf8)
+        else {
+            throw conflict(
+                "Certificate metadata could not be canonicalized."
+            )
+        }
+        return value
+    }
+
+    private static func iso8601(_ date: Date) -> String {
+        ISO8601DateFormatter().string(from: date)
     }
 
     private static func quarantine(

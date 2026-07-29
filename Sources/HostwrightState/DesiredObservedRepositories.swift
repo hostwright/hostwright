@@ -345,7 +345,10 @@ public struct DesiredStateRepository: Sendable {
                     }.map(publishedSocketJSON) +
                     service.hostAccess.sorted(
                         by: HostwrightHostAccessPolicy.canonicalPrecedes
-                    ).map(hostAccessJSON)
+                    ).map(hostAccessJSON) +
+                    (service.networkPolicy.map {
+                        [networkPolicyJSON($0)]
+                    } ?? [])
             ),
             mountsJSON: try StateJSON.encodeStringArray(service.volumes),
             environmentJSONRedacted: try StateJSON.encode(redactedEnvironment),
@@ -436,6 +439,31 @@ public struct DesiredStateRepository: Sendable {
             "kind": "host-access",
             "port": endpoint.port,
             "protocol": endpoint.protocolName.rawValue
+        ]
+    }
+
+    private func networkPolicyJSON(
+        _ policy: HostwrightServiceNetworkPolicy
+    ) -> [String: Any] {
+        [
+            "egress": policy.egress.map(networkPolicyRuleJSON),
+            "ingress": policy.ingress.map(networkPolicyRuleJSON),
+            "kind": "network-policy"
+        ]
+    }
+
+    private func networkPolicyRuleJSON(
+        _ rule: HostwrightNetworkPolicyRule
+    ) -> [String: Any] {
+        [
+            "address": rule.address.map { $0 as Any } ?? NSNull(),
+            "dns": rule.dns.map { $0 as Any } ?? NSNull(),
+            "identity": rule.identity.map { $0 as Any } ?? NSNull(),
+            "port": rule.port.map { $0 as Any } ?? NSNull(),
+            "project": rule.project.map { $0 as Any } ?? NSNull(),
+            "protocol":
+                rule.protocolName.map { $0.rawValue as Any } ?? NSNull(),
+            "service": rule.service.map { $0 as Any } ?? NSNull()
         ]
     }
 

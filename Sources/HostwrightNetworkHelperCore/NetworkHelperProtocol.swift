@@ -80,7 +80,7 @@ enum NetworkHelperDisposition: String, Codable, Sendable {
     case quarantined
 }
 
-public struct NetworkHelperDNSIdentity: Codable, Equatable, Sendable {
+public struct NetworkHelperDNSIdentity: Codable, Equatable, Hashable, Sendable {
     public let projectUUID: String
     public let dnsUUID: String
     public let generation: Int
@@ -122,6 +122,8 @@ struct NetworkHelperRequest: Codable, Equatable, Sendable {
     let corefile: String?
     let hostAccessBindings: [ProjectDNSHostAccessBinding]?
     let ingressBindings: [ProjectIngressListenerBinding]?
+    let certificateBindings: [ProjectCertificateRequestBinding]?
+    let policyPlan: NetworkPolicyPlan?
     let predecessorFencingToken: String?
 
     init(
@@ -132,6 +134,8 @@ struct NetworkHelperRequest: Codable, Equatable, Sendable {
         corefile: String? = nil,
         hostAccessBindings: [ProjectDNSHostAccessBinding] = [],
         ingressBindings: [ProjectIngressListenerBinding] = [],
+        certificateBindings: [ProjectCertificateRequestBinding] = [],
+        policyPlan: NetworkPolicyPlan? = nil,
         predecessorFencingToken: String? = nil
     ) {
         self.protocolVersion = protocolVersion
@@ -145,6 +149,10 @@ struct NetworkHelperRequest: Codable, Equatable, Sendable {
         self.ingressBindings = ingressBindings.sorted(
             by: ProjectIngressListenerBinding.canonicalPrecedes
         )
+        self.certificateBindings = certificateBindings.sorted(
+            by: ProjectCertificateRequestBinding.canonicalPrecedes
+        )
+        self.policyPlan = policyPlan
         self.predecessorFencingToken = predecessorFencingToken
     }
 
@@ -180,17 +188,70 @@ struct NetworkHelperRequest: Codable, Equatable, Sendable {
             _ = try NetworkHelperIngressValidation.validated(
                 ingressBindings ?? []
             )
+            _ = try NetworkHelperCertificateValidation.validated(
+                certificateBindings ?? []
+            )
+            if let policyPlan {
+                try NetworkHelperPolicyBroker.validated(
+                    plan: policyPlan,
+                    identity: identity
+                )
+            }
         case .status, .remove:
             guard corefile == nil,
                   hostAccessBindings == nil ||
                     hostAccessBindings?.isEmpty == true,
                   ingressBindings == nil ||
                     ingressBindings?.isEmpty == true,
+                  certificateBindings == nil ||
+                    certificateBindings?.isEmpty == true,
+                  policyPlan == nil,
                   predecessorFencingToken == nil else {
                 throw NetworkHelperError.invalidRequest
             }
         }
         return self
+    }
+}
+
+public struct NetworkHelperCertificateSummary:
+    Codable,
+    Equatable,
+    Sendable
+{
+    public let name: String
+    public let certificateUUID: String
+    public let source: HostwrightCertificateSourceKind
+    public let certificateSHA256: String
+    public let issuerCertificateSHA256: String?
+    public let dnsNames: [String]
+    public let notValidBefore: Date
+    public let notValidAfter: Date
+    public let revocationStatus: String
+    public let renewalNeeded: Bool
+
+    public init(
+        name: String,
+        certificateUUID: String,
+        source: HostwrightCertificateSourceKind,
+        certificateSHA256: String,
+        issuerCertificateSHA256: String?,
+        dnsNames: [String],
+        notValidBefore: Date,
+        notValidAfter: Date,
+        revocationStatus: String,
+        renewalNeeded: Bool
+    ) {
+        self.name = name
+        self.certificateUUID = certificateUUID
+        self.source = source
+        self.certificateSHA256 = certificateSHA256
+        self.issuerCertificateSHA256 = issuerCertificateSHA256
+        self.dnsNames = dnsNames.sorted()
+        self.notValidBefore = notValidBefore
+        self.notValidAfter = notValidAfter
+        self.revocationStatus = revocationStatus
+        self.renewalNeeded = renewalNeeded
     }
 }
 
@@ -203,6 +264,13 @@ struct NetworkHelperStatus: Codable, Equatable, Sendable {
     let ingressSHA256: String?
     let ingressActive: Bool?
     let ingressAccessLog: [NetworkHelperIngressAccessLogEntry]?
+    let mutualTLSAudit: [NetworkHelperMutualTLSAuditEntry]?
+    let certificateSHA256: String?
+    let certificateActive: Bool?
+    let certificateEvidenceSHA256: String?
+    let certificateSummaries: [NetworkHelperCertificateSummary]?
+    let policySHA256: String?
+    let policyActive: Bool?
     let reason: String?
 
     init(
@@ -214,6 +282,14 @@ struct NetworkHelperStatus: Codable, Equatable, Sendable {
         ingressSHA256: String? = nil,
         ingressActive: Bool? = nil,
         ingressAccessLog: [NetworkHelperIngressAccessLogEntry]? = nil,
+        mutualTLSAudit:
+            [NetworkHelperMutualTLSAuditEntry]? = nil,
+        certificateSHA256: String? = nil,
+        certificateActive: Bool? = nil,
+        certificateEvidenceSHA256: String? = nil,
+        certificateSummaries: [NetworkHelperCertificateSummary]? = nil,
+        policySHA256: String? = nil,
+        policyActive: Bool? = nil,
         reason: String?
     ) {
         self.disposition = disposition
@@ -224,6 +300,13 @@ struct NetworkHelperStatus: Codable, Equatable, Sendable {
         self.ingressSHA256 = ingressSHA256
         self.ingressActive = ingressActive
         self.ingressAccessLog = ingressAccessLog
+        self.mutualTLSAudit = mutualTLSAudit
+        self.certificateSHA256 = certificateSHA256
+        self.certificateActive = certificateActive
+        self.certificateEvidenceSHA256 = certificateEvidenceSHA256
+        self.certificateSummaries = certificateSummaries
+        self.policySHA256 = policySHA256
+        self.policyActive = policyActive
         self.reason = reason
     }
 }
@@ -240,6 +323,8 @@ enum NetworkHelperErrorCode: String, Codable, Sendable {
     case ioFailure
     case permissionDenied
     case bindingUnavailable
+    case certificateUnavailable
+    case invalidCertificate
 }
 
 struct NetworkHelperFailure: Codable, Equatable, Sendable {
@@ -291,6 +376,8 @@ enum NetworkHelperError: Error, Equatable, Sendable {
     case ioFailure
     case permissionDenied
     case bindingUnavailable
+    case certificateUnavailable
+    case invalidCertificate
 
     var failure: NetworkHelperFailure {
         let code: NetworkHelperErrorCode
@@ -331,6 +418,12 @@ enum NetworkHelperError: Error, Equatable, Sendable {
             code = .bindingUnavailable
             message =
                 "host-access listener or target is unavailable"
+        case .certificateUnavailable:
+            code = .certificateUnavailable
+            message = "certificate is unavailable"
+        case .invalidCertificate:
+            code = .invalidCertificate
+            message = "certificate request is invalid"
         }
         return NetworkHelperFailure(code: code, message: message)
     }

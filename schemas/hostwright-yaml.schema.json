@@ -119,6 +119,9 @@
     "networks": {
       "$ref": "#/$defs/networkDeclarations"
     },
+    "certificates": {
+      "$ref": "#/$defs/certificateDeclarations"
+    },
     "ingress": {
       "$ref": "#/$defs/ingressListeners"
     },
@@ -294,6 +297,25 @@
         }
       ]
     },
+    "networkPolicyRules": {
+      "type": "array",
+      "maxItems": 256,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "minProperties": 1,
+        "additionalProperties": false,
+        "properties": {
+          "project": { "$ref": "#/$defs/name" },
+          "service": { "$ref": "#/$defs/name" },
+          "identity": { "type": "string", "minLength": 1, "maxLength": 512 },
+          "protocol": { "enum": ["tcp", "udp"] },
+          "address": { "type": "string", "minLength": 3, "maxLength": 128 },
+          "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+          "dns": { "$ref": "#/$defs/hostAccessHostname" }
+        }
+      }
+    },
     "hostAccessHostname": {
       "type": "string",
       "minLength": 1,
@@ -341,6 +363,30 @@
         "$ref": "#/$defs/ingressListener"
       }
     },
+    "certificateDeclarations": {
+      "type": "object",
+      "maxProperties": 64,
+      "propertyNames": { "$ref": "#/$defs/name" },
+      "additionalProperties": { "$ref": "#/$defs/certificateDeclaration" }
+    },
+    "certificateDeclaration": {
+      "type": "object",
+      "required": ["source"],
+      "additionalProperties": false,
+      "properties": {
+        "source": { "enum": ["imported", "localCA", "provider"] },
+        "identitySHA256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "issuer": { "$ref": "#/$defs/name" },
+        "renewBeforeSeconds": { "type": "integer", "minimum": 3600, "maximum": 2592000, "default": 604800 },
+        "validitySeconds": { "type": "integer", "minimum": 86400, "maximum": 31536000, "default": 2592000 },
+        "statusPolicy": { "enum": ["disabled", "ifAvailable", "required"], "default": "ifAvailable" }
+      },
+      "allOf": [
+        { "if": { "properties": { "source": { "const": "imported" } } }, "then": { "required": ["identitySHA256"], "not": { "required": ["issuer"] } } },
+        { "if": { "properties": { "source": { "const": "localCA" } } }, "then": { "not": { "anyOf": [{ "required": ["identitySHA256"] }, { "required": ["issuer"] }] } } },
+        { "if": { "properties": { "source": { "const": "provider" } } }, "then": { "required": ["issuer"], "not": { "required": ["identitySHA256"] } } }
+      ]
+    },
     "ingressListener": {
       "type": "object",
       "required": ["port", "routes"],
@@ -350,6 +396,21 @@
           "type": "string",
           "maxLength": 64,
           "default": "127.0.0.1"
+        },
+        "certificate": { "$ref": "#/$defs/name" },
+        "peers": {
+          "type": "array",
+          "maxItems": 256,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "required": ["service", "role"],
+            "additionalProperties": false,
+            "properties": {
+              "service": { "$ref": "#/$defs/name" },
+              "role": { "enum": ["workload", "ingress", "tunnel", "node"] }
+            }
+          }
         },
         "exposure": {
           "$ref": "#/$defs/ingressExposure"
@@ -960,6 +1021,14 @@
           "uniqueItems": true,
           "items": {
             "$ref": "#/$defs/serviceNetworkAttachment"
+          }
+        },
+        "networkPolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "ingress": { "$ref": "#/$defs/networkPolicyRules" },
+            "egress": { "$ref": "#/$defs/networkPolicyRules" }
           }
         },
         "volumes": {

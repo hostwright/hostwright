@@ -70,10 +70,26 @@ final class RuntimeNetworkProviderTests: XCTestCase {
         XCTAssertFalse(cli.ipv4AddressModes.contains(.disabled))
         XCTAssertEqual(Set(cli.ipv6AddressModes), [.automatic, .cidr])
         XCTAssertFalse(cli.ipv6AddressModes.contains(.disabled))
+        XCTAssertEqual(cli.networkPolicy?.state, .unavailable)
+        XCTAssertEqual(cli.networkPolicy?.reason, .notImplemented)
+        XCTAssertEqual(cli.networkPolicy?.directions, [])
+        XCTAssertFalse(cli.networkPolicy?.enforcesExactIdentity ?? true)
+        XCTAssertFalse(cli.networkPolicy?.enforcesCIDR ?? true)
+        XCTAssertFalse(cli.networkPolicy?.enforcesDNS ?? true)
+        XCTAssertFalse(cli.networkPolicy?.appliesAtomicGenerations ?? true)
+        XCTAssertFalse(cli.networkPolicy?.observesRuleDigest ?? true)
 
         let helper = RuntimeNetworkProviderCapabilities.appleContainerizationUnavailable
         XCTAssertTrue(helper.operations.allSatisfy { $0.state == .unavailable })
         XCTAssertEqual(helper.attachmentTiming, .unavailable)
+        XCTAssertEqual(helper.networkPolicy?.state, .unavailable)
+        XCTAssertEqual(helper.networkPolicy?.reason, .notImplemented)
+        XCTAssertEqual(helper.networkPolicy?.directions, [])
+        XCTAssertFalse(helper.networkPolicy?.enforcesExactIdentity ?? true)
+        XCTAssertFalse(helper.networkPolicy?.enforcesCIDR ?? true)
+        XCTAssertFalse(helper.networkPolicy?.enforcesDNS ?? true)
+        XCTAssertFalse(helper.networkPolicy?.appliesAtomicGenerations ?? true)
+        XCTAssertFalse(helper.networkPolicy?.observesRuleDigest ?? true)
     }
 
     func testAppleCommandBuildsOwnedDualStackNetworkAndRejectsDisabledIPv6() throws {

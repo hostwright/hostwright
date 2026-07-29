@@ -163,6 +163,7 @@ public struct ProjectIngressRouteBinding:
     public let pathPrefix: String
     public let methods: [String]
     public let protocolName: HostwrightIngressRouteProtocol
+    public let targetServiceName: String
     public let targetServiceUUIDs: [String]
     public let targetPort: Int
     public let backends: [ProjectIngressBackend]
@@ -172,6 +173,7 @@ public struct ProjectIngressRouteBinding:
         pathPrefix: String,
         methods: [String],
         protocolName: HostwrightIngressRouteProtocol,
+        targetServiceName: String,
         targetServiceUUIDs: [String],
         targetPort: Int,
         backends: [ProjectIngressBackend]
@@ -180,6 +182,7 @@ public struct ProjectIngressRouteBinding:
         self.pathPrefix = pathPrefix
         self.methods = methods.sorted()
         self.protocolName = protocolName
+        self.targetServiceName = targetServiceName
         self.targetServiceUUIDs = targetServiceUUIDs.sorted()
         self.targetPort = targetPort
         self.backends = backends.sorted(
@@ -196,6 +199,7 @@ public struct ProjectIngressRouteBinding:
             lhs.pathPrefix,
             lhs.protocolName.rawValue,
             lhs.methods.joined(separator: ","),
+            lhs.targetServiceName,
             lhs.targetServiceUUIDs.joined(separator: ","),
             String(format: "%05d", lhs.targetPort)
         ]
@@ -204,6 +208,7 @@ public struct ProjectIngressRouteBinding:
             rhs.pathPrefix,
             rhs.protocolName.rawValue,
             rhs.methods.joined(separator: ","),
+            rhs.targetServiceName,
             rhs.targetServiceUUIDs.joined(separator: ","),
             String(format: "%05d", rhs.targetPort)
         ]
@@ -220,6 +225,8 @@ public struct ProjectIngressListenerBinding:
     public let bindAddress: String
     public let port: Int
     public let exposure: HostwrightPortExposurePolicy
+    public let certificate: String?
+    public let peerIdentities: [HostwrightMutualTLSIdentity]
     public let routes: [ProjectIngressRouteBinding]
 
     public init(
@@ -227,12 +234,16 @@ public struct ProjectIngressListenerBinding:
         bindAddress: String,
         port: Int,
         exposure: HostwrightPortExposurePolicy,
+        certificate: String? = nil,
+        peerIdentities: [HostwrightMutualTLSIdentity] = [],
         routes: [ProjectIngressRouteBinding]
     ) {
         self.name = name
         self.bindAddress = bindAddress
         self.port = port
         self.exposure = exposure
+        self.certificate = certificate
+        self.peerIdentities = peerIdentities.sorted { $0.uriSAN < $1.uriSAN }
         self.routes = routes.sorted(
             by: ProjectIngressRouteBinding.canonicalPrecedes
         )
@@ -244,6 +255,89 @@ public struct ProjectIngressListenerBinding:
     ) -> Bool {
         (lhs.bindAddress, lhs.port, lhs.name) <
             (rhs.bindAddress, rhs.port, rhs.name)
+    }
+
+    private enum CodingKeys: String, CodingKey { case name, bindAddress, port, exposure, certificate, peerIdentities, routes }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            name: try values.decode(String.self, forKey: .name),
+            bindAddress: try values.decode(String.self, forKey: .bindAddress),
+            port: try values.decode(Int.self, forKey: .port),
+            exposure: try values.decode(HostwrightPortExposurePolicy.self, forKey: .exposure),
+            certificate: try values.decodeIfPresent(String.self, forKey: .certificate),
+            peerIdentities: try values.decodeIfPresent([HostwrightMutualTLSIdentity].self, forKey: .peerIdentities) ?? [],
+            routes: try values.decode([ProjectIngressRouteBinding].self, forKey: .routes)
+        )
+    }
+}
+
+/// A fully materialized certificate request.  This deliberately contains only
+/// certificate selection metadata; private material stays outside DNS state.
+public struct ProjectCertificateRequestBinding: Codable, Equatable, Sendable {
+    public let name: String
+    public let certificateUUID: String
+    public let source: HostwrightCertificateSourceKind
+    public let identitySHA256: String?
+    public let issuer: String?
+    public let renewBeforeSeconds: Int
+    public let validitySeconds: Int
+    public let statusPolicy: HostwrightCertificateStatusPolicy
+    public let dnsNames: [String]
+    public let identityRole: HostwrightIdentityRole
+    public let peerIdentities: [HostwrightMutualTLSIdentity]
+
+    public init(name: String, certificateUUID: String, source: HostwrightCertificateSourceKind, identitySHA256: String? = nil, issuer: String? = nil, renewBeforeSeconds: Int, validitySeconds: Int, statusPolicy: HostwrightCertificateStatusPolicy, dnsNames: [String], identityRole: HostwrightIdentityRole = .ingress, peerIdentities: [HostwrightMutualTLSIdentity] = []) {
+        self.name = name
+        self.certificateUUID = certificateUUID
+        self.source = source
+        self.identitySHA256 = identitySHA256
+        self.issuer = issuer
+        self.renewBeforeSeconds = renewBeforeSeconds
+        self.validitySeconds = validitySeconds
+        self.statusPolicy = statusPolicy
+        self.dnsNames = dnsNames
+        self.identityRole = identityRole
+        self.peerIdentities = Array(Set(peerIdentities)).sorted {
+            $0.uriSAN < $1.uriSAN
+        }
+    }
+
+    public static func canonicalPrecedes(_ lhs: Self, _ rhs: Self) -> Bool {
+        [lhs.name, lhs.certificateUUID, lhs.source.rawValue,
+         lhs.identitySHA256 ?? "", lhs.issuer ?? "",
+         String(format: "%010d", lhs.renewBeforeSeconds),
+         String(format: "%010d", lhs.validitySeconds), lhs.statusPolicy.rawValue,
+         lhs.dnsNames.joined(separator: ","), lhs.identityRole.rawValue,
+         lhs.peerIdentities.map(\.uriSAN).joined(separator: ",")]
+        .lexicographicallyPrecedes(
+            [rhs.name, rhs.certificateUUID, rhs.source.rawValue,
+             rhs.identitySHA256 ?? "", rhs.issuer ?? "",
+             String(format: "%010d", rhs.renewBeforeSeconds),
+             String(format: "%010d", rhs.validitySeconds), rhs.statusPolicy.rawValue,
+             rhs.dnsNames.joined(separator: ","), rhs.identityRole.rawValue,
+             rhs.peerIdentities.map(\.uriSAN).joined(separator: ",")]
+        )
+    }
+
+    private enum CodingKeys: String, CodingKey { case name, certificateUUID, source, identitySHA256, issuer, renewBeforeSeconds, validitySeconds, statusPolicy, dnsNames, identityRole, peerIdentities }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            name: try values.decode(String.self, forKey: .name),
+            certificateUUID: try values.decode(String.self, forKey: .certificateUUID),
+            source: try values.decode(HostwrightCertificateSourceKind.self, forKey: .source),
+            identitySHA256: try values.decodeIfPresent(String.self, forKey: .identitySHA256),
+            issuer: try values.decodeIfPresent(String.self, forKey: .issuer),
+            renewBeforeSeconds: try values.decode(Int.self, forKey: .renewBeforeSeconds),
+            validitySeconds: try values.decode(Int.self, forKey: .validitySeconds),
+            statusPolicy: try values.decode(HostwrightCertificateStatusPolicy.self, forKey: .statusPolicy),
+            dnsNames: try values.decode([String].self, forKey: .dnsNames),
+            identityRole: try values.decodeIfPresent(HostwrightIdentityRole.self, forKey: .identityRole) ?? .ingress,
+            peerIdentities: try values.decodeIfPresent([HostwrightMutualTLSIdentity].self, forKey: .peerIdentities) ?? []
+        )
     }
 }
 
@@ -272,6 +366,9 @@ public struct ProjectDNSPlan: Codable, Equatable, Sendable {
     public let records: [ProjectDNSRecord]
     public let hostAccessBindings: [ProjectDNSHostAccessBinding]
     public let ingressBindings: [ProjectIngressListenerBinding]
+    public let certificateBindings:
+        [ProjectCertificateRequestBinding]
+    public let networkPolicyDesiredSHA256: String?
     public let ttlSeconds: Int
     public let negativeTTLSeconds: Int
     public let upstreams: [String]
@@ -285,6 +382,9 @@ public struct ProjectDNSPlan: Codable, Equatable, Sendable {
         records: [ProjectDNSRecord],
         hostAccessBindings: [ProjectDNSHostAccessBinding] = [],
         ingressBindings: [ProjectIngressListenerBinding] = [],
+        certificateBindings:
+            [ProjectCertificateRequestBinding] = [],
+        networkPolicyDesiredSHA256: String? = nil,
         ttlSeconds: Int,
         negativeTTLSeconds: Int,
         upstreams: [String],
@@ -301,6 +401,11 @@ public struct ProjectDNSPlan: Codable, Equatable, Sendable {
         self.ingressBindings = ingressBindings.sorted(
             by: ProjectIngressListenerBinding.canonicalPrecedes
         )
+        self.certificateBindings = certificateBindings.sorted(
+            by: ProjectCertificateRequestBinding.canonicalPrecedes
+        )
+        self.networkPolicyDesiredSHA256 =
+            networkPolicyDesiredSHA256
         self.ttlSeconds = ttlSeconds
         self.negativeTTLSeconds = negativeTTLSeconds
         self.upstreams = upstreams
@@ -315,6 +420,8 @@ public struct ProjectDNSPlan: Codable, Equatable, Sendable {
         case records
         case hostAccessBindings
         case ingressBindings
+        case certificateBindings
+        case networkPolicyDesiredSHA256
         case ttlSeconds
         case negativeTTLSeconds
         case upstreams
@@ -343,6 +450,14 @@ public struct ProjectDNSPlan: Codable, Equatable, Sendable {
                 [ProjectIngressListenerBinding].self,
                 forKey: .ingressBindings
             ) ?? [],
+            certificateBindings: try values.decodeIfPresent(
+                [ProjectCertificateRequestBinding].self,
+                forKey: .certificateBindings
+            ) ?? [],
+            networkPolicyDesiredSHA256: try values.decodeIfPresent(
+                String.self,
+                forKey: .networkPolicyDesiredSHA256
+            ),
             ttlSeconds: try values.decode(
                 Int.self,
                 forKey: .ttlSeconds
@@ -426,6 +541,9 @@ public enum ProjectDNSPlanner {
         services: [ProjectDNSService],
         hostAccessBindings: [ProjectDNSHostAccessBinding] = [],
         ingressBindings: [ProjectIngressListenerBinding] = [],
+        certificateBindings:
+            [ProjectCertificateRequestBinding] = [],
+        networkPolicyDesiredSHA256: String? = nil,
         options: ProjectDNSOptions = ProjectDNSOptions()
     ) throws -> ProjectDNSPlan {
         let canonicalProjectUUID = try canonicalProjectUUID(projectUUID)
@@ -467,6 +585,9 @@ public enum ProjectDNSPlanner {
         let canonicalIngress = ingressBindings.sorted(
             by: ProjectIngressListenerBinding.canonicalPrecedes
         )
+        let canonicalCertificates = certificateBindings.sorted(
+            by: ProjectCertificateRequestBinding.canonicalPrecedes
+        )
 
         return ProjectDNSPlan(
             projectUUID: canonicalProjectUUID,
@@ -474,6 +595,9 @@ public enum ProjectDNSPlanner {
             records: records,
             hostAccessBindings: canonicalHostAccess,
             ingressBindings: canonicalIngress,
+            certificateBindings: canonicalCertificates,
+            networkPolicyDesiredSHA256:
+                networkPolicyDesiredSHA256,
             ttlSeconds: options.ttlSeconds,
             negativeTTLSeconds: options.negativeTTLSeconds,
             upstreams: canonicalUpstreams,

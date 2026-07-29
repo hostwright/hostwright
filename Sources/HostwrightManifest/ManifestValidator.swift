@@ -25,14 +25,30 @@ public enum ManifestValidator {
         validateImageProvenance(manifest, issues: &issues)
         validateVolumeDeclarations(manifest.volumes, issues: &issues)
         validateNetworkDefinitions(manifest.networks, issues: &issues)
+        validateCertificateDeclarations(manifest.certificates, issues: &issues)
 
         let declaredNames = Set(manifest.services.map(\.name))
         validateIngress(
             manifest.ingress,
+            certificates: manifest.certificates,
             services: manifest.services,
             declaredNames: declaredNames,
             issues: &issues
         )
+        let referencedCertificates = Set(
+            manifest.ingress.values.compactMap(\.certificate)
+        )
+        for name in manifest.certificates.keys.sorted()
+        where !referencedCertificates.contains(name) {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message:
+                        "Certificate '\(name)' must be referenced by at least one ingress listener.",
+                    path: "$.certificates.\(name)"
+                )
+            )
+        }
         let declaredVolumes = Set(manifest.volumes.keys)
         let declaredNetworks = Set(manifest.networks.keys)
         var serviceNames = Set<String>()
@@ -55,6 +71,41 @@ public enum ManifestValidator {
             issues: &issues
         )
         return issues
+    }
+
+    private static func validateCertificateDeclarations(
+        _ certificates: [String: HostwrightCertificateDeclaration],
+        issues: inout [ManifestIssue]
+    ) {
+        guard certificates.count <= HostwrightCertificateDeclaration.maximumCertificates else {
+            issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Certificates accepts at most \(HostwrightCertificateDeclaration.maximumCertificates) declarations.", path: "$.certificates"))
+            return
+        }
+        for (name, certificate) in certificates.sorted(by: { $0.key < $1.key }) {
+            let path = "$.certificates.\(name)"
+            validateName(name, field: "certificate name", issues: &issues)
+            if !(3_600...2_592_000).contains(certificate.renewBeforeSeconds) {
+                issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Certificate renewBeforeSeconds must be between 3600 and 2592000.", path: "\(path).renewBeforeSeconds"))
+            }
+            if !(86_400...31_536_000).contains(certificate.validitySeconds) {
+                issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Certificate validitySeconds must be between 86400 and 31536000.", path: "\(path).validitySeconds"))
+            }
+            if certificate.renewBeforeSeconds >= certificate.validitySeconds {
+                issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Certificate renewBeforeSeconds must be less than validitySeconds.", path: path))
+            }
+            switch certificate.source {
+            case .imported:
+                if certificate.identitySHA256?.range(of: "^[a-f0-9]{64}$", options: .regularExpression) == nil {
+                    issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Imported certificate requires a lowercase 64-hex identitySHA256.", path: "\(path).identitySHA256"))
+                }
+                if certificate.issuer != nil { issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Imported certificate must not declare issuer.", path: "\(path).issuer")) }
+            case .localCA:
+                if certificate.identitySHA256 != nil || certificate.issuer != nil { issues.append(ManifestIssue(code: .manifestValidationFailed, message: "localCA certificate must not declare identitySHA256 or issuer.", path: path)) }
+            case .provider:
+                if certificate.identitySHA256 != nil { issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Provider certificate must not declare identitySHA256.", path: "\(path).identitySHA256")) }
+                if let issuer = certificate.issuer, HostwrightNetworkIdentity.isValidManifestName(issuer) {} else { issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Provider certificate requires a valid exact issuer ID.", path: "\(path).issuer")) }
+            }
+        }
     }
 
     public static func validated(_ text: String) throws -> HostwrightManifest {
@@ -164,6 +215,7 @@ public enum ManifestValidator {
             )
         }
         validateHostAccess(service.hostAccess, service: service, issues: &issues)
+        validateNetworkPolicy(service.networkPolicy, service: service, issues: &issues)
         validateServiceNetworks(
             service.networks,
             service: service,
@@ -291,6 +343,90 @@ public enum ManifestValidator {
         }
     }
 
+    private static func validateNetworkPolicy(
+        _ policy: HostwrightServiceNetworkPolicy?,
+        service: HostwrightService,
+        issues: inout [ManifestIssue]
+    ) {
+        guard let policy else { return }
+        let path = "$.services.\(service.name).networkPolicy"
+        validateNetworkPolicyRules(policy.ingress, direction: "ingress", service: service, path: path, issues: &issues)
+        validateNetworkPolicyRules(policy.egress, direction: "egress", service: service, path: path, issues: &issues)
+    }
+
+    private static func validateNetworkPolicyRules(
+        _ rules: [HostwrightNetworkPolicyRule],
+        direction: String,
+        service: HostwrightService,
+        path: String,
+        issues: inout [ManifestIssue]
+    ) {
+        let directionPath = "\(path).\(direction)"
+        if rules.count > HostwrightNetworkPolicyRule.maximumRulesPerDirection {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "Service '\(service.name)' networkPolicy \(direction) accepts at most \(HostwrightNetworkPolicyRule.maximumRulesPerDirection) rules.",
+                    path: directionPath
+                )
+            )
+        }
+        var uniqueRules = Set<String>()
+        for (index, rule) in rules.enumerated() {
+            let rulePath = "\(directionPath)[\(index)]"
+            if rule.project == nil && rule.service == nil && rule.identity == nil &&
+                rule.protocolName == nil && rule.address == nil && rule.port == nil && rule.dns == nil {
+                issues.append(
+                    ManifestIssue(
+                        code: .manifestValidationFailed,
+                        message: "Service '\(service.name)' networkPolicy \(direction) rules must contain at least one exact selector.",
+                        path: rulePath
+                    )
+                )
+            }
+            if let project = rule.project {
+                validateName(project, field: "networkPolicy project", issues: &issues)
+            }
+            if let peerService = rule.service {
+                validateName(peerService, field: "networkPolicy service", issues: &issues)
+            }
+            if let identity = rule.identity, !isBoundedPolicyText(identity, maximum: 512) {
+                issues.append(
+                    ManifestIssue(
+                        code: .manifestValidationFailed,
+                        message: "Service '\(service.name)' networkPolicy identity must be bounded non-empty text.",
+                        path: "\(rulePath).identity"
+                    )
+                )
+            }
+            if let address = rule.address {
+                let ipv4 = NetworkCIDR(address, family: .ipv4)
+                let ipv6 = NetworkCIDR(address, family: .ipv6)
+                if let ipv4,
+                   ipv4.canonicalValue != address || !ipv4.isNetworkAddress {
+                    issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Service '\(service.name)' networkPolicy address must be canonical IPv4 CIDR \(ipv4.canonicalNetworkValue).", path: "\(rulePath).address"))
+                } else if let ipv6,
+                          ipv6.canonicalValue != address || !ipv6.isNetworkAddress {
+                    issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Service '\(service.name)' networkPolicy address must be canonical IPv6 CIDR \(ipv6.canonicalNetworkValue).", path: "\(rulePath).address"))
+                } else if ipv4 == nil && ipv6 == nil {
+                    issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Service '\(service.name)' networkPolicy address must be an exact canonical IPv4 or IPv6 CIDR.", path: "\(rulePath).address"))
+                }
+            }
+            if let port = rule.port, !(1...65_535).contains(port) {
+                issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Service '\(service.name)' networkPolicy port must be between 1 and 65535.", path: "\(rulePath).port"))
+            }
+            if rule.port != nil && rule.protocolName == nil {
+                issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Service '\(service.name)' networkPolicy port requires an exact protocol.", path: "\(rulePath).protocol"))
+            }
+            if let dns = rule.dns, !HostwrightHostAccessPolicy.isValidHostname(dns) {
+                issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Service '\(service.name)' networkPolicy dns must be a lowercase exact DNS hostname.", path: "\(rulePath).dns"))
+            }
+            if !uniqueRules.insert(rule.canonicalKey).inserted {
+                issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Service '\(service.name)' networkPolicy \(direction) must not contain duplicate rules.", path: rulePath))
+            }
+        }
+    }
+
     private static func validateVolumeDeclarations(
         _ volumes: [String: HostwrightVolumeDeclaration],
         issues: inout [ManifestIssue]
@@ -355,6 +491,7 @@ public enum ManifestValidator {
 
     private static func validateIngress(
         _ ingress: [String: HostwrightIngressListener],
+        certificates: [String: HostwrightCertificateDeclaration],
         services: [HostwrightService],
         declaredNames: Set<String>,
         issues: inout [ManifestIssue]
@@ -378,6 +515,31 @@ public enum ManifestValidator {
         for (name, listener) in ingress.sorted(by: { $0.key < $1.key }) {
             let path = "$.ingress.\(name)"
             validateName(name, field: "ingress listener name", issues: &issues)
+            if let certificate = listener.certificate {
+                validateName(certificate, field: "ingress certificate name", issues: &issues)
+                if certificates[certificate] == nil { issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Ingress listener '\(name)' references missing certificate '\(certificate)'.", path: "\(path).certificate")) }
+            }
+            if listener.exposure.scope == .lan || listener.exposure.authentication == .tls || listener.exposure.authentication == .mutualTLS {
+                if listener.certificate == nil { issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Ingress listener '\(name)' requires a certificate for LAN or TLS/mTLS exposure.", path: "\(path).certificate")) }
+            }
+            if listener.peers.count > HostwrightIngressListener.maximumPeers || Set(listener.peers).count != listener.peers.count {
+                issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Ingress listener '\(name)' peers must be unique and contain at most \(HostwrightIngressListener.maximumPeers) entries.", path: "\(path).peers"))
+            }
+            for (index, peer) in listener.peers.enumerated() {
+                if servicesByName[peer.service] == nil {
+                    issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Ingress listener '\(name)' peer references missing service '\(peer.service)'.", path: "\(path).peers[\(index)].service"))
+                }
+            }
+            if listener.exposure.authentication == .mutualTLS {
+                if listener.peers.isEmpty {
+                    issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Ingress listener '\(name)' mTLS requires at least one peer.", path: "\(path).peers"))
+                }
+                if listener.certificate == nil {
+                    issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Ingress listener '\(name)' mTLS requires a certificate.", path: "\(path).certificate"))
+                }
+            } else if !listener.peers.isEmpty {
+                issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Ingress listener '\(name)' peers are permitted only with mTLS authentication.", path: "\(path).peers"))
+            }
             guard isValidBindAddress(listener.bindAddress),
                   isValidPort(listener.port) else {
                 issues.append(

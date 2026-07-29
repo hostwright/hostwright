@@ -39,6 +39,74 @@ public enum NetworkExposureAuthentication:
     case authenticatedTunnel = "authenticated-tunnel"
 }
 
+public enum HostwrightIdentityRole: String, Codable, CaseIterable, Equatable, Hashable, Sendable {
+    case workload
+    case ingress
+    case tunnel
+    case node
+}
+
+/// The exact localhost mTLS identity carried in a certificate URI SAN.
+public struct HostwrightMutualTLSIdentity: Codable, Equatable, Hashable, Sendable {
+    public static let trustDomain = "hostwright.internal"
+
+    public let projectUUID: String
+    public let resourceUUID: String
+    public let role: HostwrightIdentityRole
+    public let generation: Int
+    public let uriSAN: String
+
+    public init(projectUUID: String, resourceUUID: String, role: HostwrightIdentityRole, generation: Int) throws {
+        guard Self.isCanonicalUUID(projectUUID), Self.isCanonicalUUID(resourceUUID), generation > 0 else {
+            throw HostwrightMutualTLSIdentityError.invalidIdentity
+        }
+        self.projectUUID = projectUUID
+        self.resourceUUID = resourceUUID
+        self.role = role
+        self.generation = generation
+        self.uriSAN = Self.uriSAN(projectUUID: projectUUID, resourceUUID: resourceUUID, role: role, generation: generation)
+    }
+
+    public static func uriSAN(projectUUID: String, resourceUUID: String, role: HostwrightIdentityRole, generation: Int) -> String {
+        "spiffe://\(trustDomain)/projects/\(projectUUID)/resources/\(resourceUUID)/roles/\(role.rawValue)/generations/\(generation)"
+    }
+
+    public func isExactCanonicalValue() -> Bool {
+        Self.isCanonicalUUID(projectUUID) && Self.isCanonicalUUID(resourceUUID) && generation > 0 && uriSAN == Self.uriSAN(projectUUID: projectUUID, resourceUUID: resourceUUID, role: role, generation: generation)
+    }
+
+    private enum CodingKeys: String, CodingKey { case projectUUID, resourceUUID, role, generation, uriSAN }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        let projectUUID = try values.decode(String.self, forKey: .projectUUID)
+        let resourceUUID = try values.decode(String.self, forKey: .resourceUUID)
+        let role = try values.decode(HostwrightIdentityRole.self, forKey: .role)
+        let generation = try values.decode(Int.self, forKey: .generation)
+        let identity = try Self(projectUUID: projectUUID, resourceUUID: resourceUUID, role: role, generation: generation)
+        guard try values.decode(String.self, forKey: .uriSAN) == identity.uriSAN else {
+            throw HostwrightMutualTLSIdentityError.invalidIdentity
+        }
+        self = identity
+    }
+
+    private static func isCanonicalUUID(_ value: String) -> Bool {
+        UUID(uuidString: value)?.uuidString.lowercased() == value
+    }
+}
+
+public enum HostwrightMutualTLSIdentityError: Error, Equatable, Sendable { case invalidIdentity }
+
+public struct HostwrightIngressPeerSelector: Codable, Equatable, Hashable, Sendable {
+    public let service: String
+    public let role: HostwrightIdentityRole
+
+    public init(service: String, role: HostwrightIdentityRole) {
+        self.service = service
+        self.role = role
+    }
+}
+
 public enum HostwrightNetworkClass:
     String,
     Codable,
@@ -164,7 +232,11 @@ public enum NetworkExposurePolicyValidation {
                 policy.interfaces.isEmpty &&
                 policy.networkClasses.isEmpty &&
                 policy.allowedCIDRs.isEmpty &&
-                policy.authentication == .none
+                (
+                    policy.authentication == .none ||
+                        policy.authentication == .tls ||
+                        policy.authentication == .mutualTLS
+                )
         case .lan:
             return exactNonLoopback &&
                 !policy.interfaces.isEmpty &&
@@ -694,22 +766,111 @@ public struct HostwrightIngressListener:
 {
     public static let maximumListeners = 64
     public static let maximumRoutes = 256
+    public static let maximumPeers = 256
 
     public var bindAddress: String
     public var port: Int
     public var exposure: HostwrightPortExposurePolicy
+    public var certificate: String?
+    public var peers: [HostwrightIngressPeerSelector]
     public var routes: [HostwrightIngressRoute]
 
     public init(
         bindAddress: String = "127.0.0.1",
         port: Int,
         exposure: HostwrightPortExposurePolicy = .localhost,
+        certificate: String? = nil,
+        peers: [HostwrightIngressPeerSelector] = [],
         routes: [HostwrightIngressRoute]
     ) {
         self.bindAddress = bindAddress
         self.port = port
         self.exposure = exposure
+        self.certificate = certificate
+        self.peers = peers.sorted { ($0.service, $0.role.rawValue) < ($1.service, $1.role.rawValue) }
         self.routes = routes
+    }
+
+    /// Compatibility overload for callers built against the pre-peer ingress contract.
+    public init(
+        bindAddress: String = "127.0.0.1",
+        port: Int,
+        exposure: HostwrightPortExposurePolicy = .localhost,
+        certificate: String?,
+        routes: [HostwrightIngressRoute]
+    ) {
+        self.init(
+            bindAddress: bindAddress,
+            port: port,
+            exposure: exposure,
+            certificate: certificate,
+            peers: [],
+            routes: routes
+        )
+    }
+
+    public var certificateDNSNames: [String] {
+        Array(Set(routes.map(\.hostname))).sorted()
+    }
+}
+
+public enum HostwrightCertificateSourceKind:
+    String,
+    Codable,
+    CaseIterable,
+    Equatable,
+    Hashable,
+    Sendable
+{
+    case imported
+    case localCA
+    case provider
+}
+
+public enum HostwrightCertificateStatusPolicy:
+    String,
+    Codable,
+    CaseIterable,
+    Equatable,
+    Hashable,
+    Sendable
+{
+    case disabled
+    case ifAvailable
+    case required
+}
+
+public struct HostwrightCertificateDeclaration:
+    Codable,
+    Equatable,
+    Hashable,
+    Sendable
+{
+    public static let maximumCertificates = 64
+    public static let defaultRenewBeforeSeconds = 604_800
+    public static let defaultValiditySeconds = 2_592_000
+
+    public var source: HostwrightCertificateSourceKind
+    public var identitySHA256: String?
+    public var issuer: String?
+    public var renewBeforeSeconds: Int
+    public var validitySeconds: Int
+    public var statusPolicy: HostwrightCertificateStatusPolicy
+
+    public init(
+        source: HostwrightCertificateSourceKind,
+        identitySHA256: String? = nil,
+        issuer: String? = nil,
+        renewBeforeSeconds: Int = Self.defaultRenewBeforeSeconds,
+        validitySeconds: Int = Self.defaultValiditySeconds,
+        statusPolicy: HostwrightCertificateStatusPolicy = .ifAvailable
+    ) {
+        self.source = source
+        self.identitySHA256 = identitySHA256
+        self.issuer = issuer
+        self.renewBeforeSeconds = renewBeforeSeconds
+        self.validitySeconds = validitySeconds
+        self.statusPolicy = statusPolicy
     }
 }
 

@@ -160,6 +160,8 @@ public struct LifecycleCommandPreparation: Sendable {
     public let manifestBaseDirectory: String
     public let mappingIssues: [PlanIssue]
     public let desiredState: DesiredRuntimeState
+    public let certificates:
+        [String: HostwrightCertificateDeclaration]
     public let ingress: [String: HostwrightIngressListener]
     public let previousDesiredState: DesiredRuntimeState?
     public let observedState: ObservedRuntimeState
@@ -179,6 +181,8 @@ public struct LifecycleCommandPreparation: Sendable {
         manifestBaseDirectory: String,
         mappingIssues: [PlanIssue] = [],
         desiredState: DesiredRuntimeState,
+        certificates:
+            [String: HostwrightCertificateDeclaration] = [:],
         ingress: [String: HostwrightIngressListener] = [:],
         previousDesiredState: DesiredRuntimeState? = nil,
         observedState: ObservedRuntimeState,
@@ -197,6 +201,7 @@ public struct LifecycleCommandPreparation: Sendable {
         self.manifestBaseDirectory = manifestBaseDirectory
         self.mappingIssues = mappingIssues
         self.desiredState = desiredState
+        self.certificates = certificates
         self.ingress = ingress
         self.previousDesiredState = previousDesiredState
         self.observedState = observedState
@@ -484,6 +489,7 @@ enum LifecycleImageLockBinder {
             ports: service.ports,
             publishedSockets: service.publishedSockets,
             hostAccess: service.hostAccess,
+            networkPolicy: service.networkPolicy,
             networks: service.networks,
             mounts: service.mounts,
             healthCheck: service.healthCheck,
@@ -1658,6 +1664,7 @@ public struct LifecycleCommandPlanCompiler: Sendable {
             ports: service.ports,
             publishedSockets: service.publishedSockets,
             hostAccess: service.hostAccess,
+            networkPolicy: service.networkPolicy,
             networks: service.networks,
             mounts: mounts,
             healthCheck: service.healthCheck,

@@ -444,6 +444,7 @@ final class ProjectDNSPlanBuilderTests: XCTestCase {
         )
 
         let route = try XCTUnwrap(plan.ingressBindings.first?.routes.first)
+        XCTAssertEqual(route.targetServiceName, "api")
         XCTAssertEqual(
             route.targetServiceUUIDs,
             [
@@ -505,6 +506,7 @@ final class ProjectDNSPlanBuilderTests: XCTestCase {
         )
 
         let route = try XCTUnwrap(plan.ingressBindings.first?.routes.first)
+        XCTAssertEqual(route.targetServiceName, "api")
         XCTAssertEqual(
             route.targetServiceUUIDs,
             [
@@ -584,6 +586,124 @@ final class ProjectDNSPlanBuilderTests: XCTestCase {
         XCTAssertEqual(
             try JSONEncoder().encode(firstPlan.ingressBindings),
             try JSONEncoder().encode(secondPlan.ingressBindings)
+        )
+    }
+
+    func testNetworkPolicyPlanIsDeterministicAcrossReplicasAndGenerations()
+        throws
+    {
+        let projectUUID =
+            "11111111-1111-4111-8111-111111111111"
+        let policy = HostwrightServiceNetworkPolicy(
+            ingress: [
+                HostwrightNetworkPolicyRule(
+                    service: "gateway",
+                    protocolName: .tcp,
+                    port: 8_080
+                )
+            ],
+            egress: [
+                HostwrightNetworkPolicyRule(
+                    protocolName: .tcp,
+                    address: "10.42.0.0/24",
+                    port: 443,
+                    dns: "registry.example.test"
+                )
+            ]
+        )
+        let first = DesiredRuntimeService(
+            identity: RuntimeServiceIdentity(
+                projectName: "demo",
+                serviceName: "api",
+                instanceName: "api-0"
+            ),
+            logicalServiceName: "api",
+            replicaIndex: 0,
+            image: "local/api:dev",
+            networkPolicy: policy
+        )
+        let second = DesiredRuntimeService(
+            identity: RuntimeServiceIdentity(
+                projectName: "demo",
+                serviceName: "api",
+                instanceName: "api-1"
+            ),
+            logicalServiceName: "api",
+            replicaIndex: 1,
+            image: "local/api:dev",
+            networkPolicy: policy
+        )
+        let firstPlan = try XCTUnwrap(
+            ProjectDNSPlanBuilder.networkPolicyPlan(
+                projectUUID: projectUUID,
+                desiredState: DesiredRuntimeState(
+                    projectName: "demo",
+                    services: [second, first]
+                ),
+                generation: 4
+            )
+        )
+        let secondPlan = try XCTUnwrap(
+            ProjectDNSPlanBuilder.networkPolicyPlan(
+                projectUUID: projectUUID,
+                desiredState: DesiredRuntimeState(
+                    projectName: "demo",
+                    services: [first, second]
+                ),
+                generation: 4
+            )
+        )
+
+        XCTAssertEqual(firstPlan, secondPlan)
+        XCTAssertEqual(firstPlan.services.count, 1)
+        XCTAssertEqual(firstPlan.services[0].serviceName, "api")
+        XCTAssertEqual(firstPlan.services[0].ingressDefault, .deny)
+        XCTAssertEqual(firstPlan.services[0].egressDefault, .deny)
+        XCTAssertEqual(firstPlan.generation, 4)
+    }
+
+    func testNetworkPolicyPlanRejectsReplicaPolicyDriftAndOmitsAbsentPolicy()
+        throws
+    {
+        let projectUUID =
+            "11111111-1111-4111-8111-111111111111"
+        let absent = DesiredRuntimeService(
+            identity: RuntimeServiceIdentity(
+                projectName: "demo",
+                serviceName: "api"
+            ),
+            image: "local/api:dev"
+        )
+        XCTAssertNil(
+            try ProjectDNSPlanBuilder.networkPolicyPlan(
+                projectUUID: projectUUID,
+                desiredState: DesiredRuntimeState(
+                    projectName: "demo",
+                    services: [absent]
+                ),
+                generation: 1
+            )
+        )
+        let explicit = DesiredRuntimeService(
+            identity: RuntimeServiceIdentity(
+                projectName: "demo",
+                serviceName: "api",
+                instanceName: "api-1"
+            ),
+            logicalServiceName: "api",
+            replicaIndex: 1,
+            image: "local/api:dev",
+            networkPolicy: HostwrightServiceNetworkPolicy()
+        )
+        XCTAssertThrowsError(
+            try ProjectDNSPlanBuilder.networkPolicyPlan(
+                projectUUID: projectUUID,
+                desiredState: DesiredRuntimeState(
+                    projectName: "demo",
+                    services: [absent, explicit]
+                ),
+                generation: 1
+            )
         )
     }
 

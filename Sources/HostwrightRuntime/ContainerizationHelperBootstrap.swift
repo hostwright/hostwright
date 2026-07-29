@@ -66,7 +66,8 @@ enum ContainerizationHelperBootstrap {
             configuration: configuration,
             homeDirectoryURL: homeDirectoryURL
         )
-        try validateInstalledExecutableAndAssets(
+        let guestNetworkPolicyLoaderSHA256 =
+            try validateInstalledExecutableAndAssets(
             paths: paths,
             expectedUserID: expectedUserID,
             assetLock: assetLock
@@ -83,7 +84,11 @@ enum ContainerizationHelperBootstrap {
             initImageReference: assetLock.initImageReference,
             initImageDescriptorDigest: assetLock.initImageDescriptorDigest,
             initImageVariantDigest: assetLock.initImageVariantDigest,
-            rootfsSizeBytes: rootfsSizeBytes
+            rootfsSizeBytes: rootfsSizeBytes,
+            guestNetworkPolicyLoaderPath:
+                paths.guestNetworkPolicyLoaderURL.path,
+            guestNetworkPolicyLoaderSHA256:
+                guestNetworkPolicyLoaderSHA256
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
@@ -105,6 +110,7 @@ enum ContainerizationHelperBootstrap {
         let dataRootURL: URL
         let kernelURL: URL
         let initImageLayoutURL: URL
+        let guestNetworkPolicyLoaderURL: URL
     }
 
     private static func installedPaths(
@@ -153,7 +159,14 @@ enum ContainerizationHelperBootstrap {
                     isDirectory: false
                 ),
             initImageLayoutURL: assetRootURL
-                .appendingPathComponent("vminit", isDirectory: true)
+                .appendingPathComponent("vminit", isDirectory: true),
+            guestNetworkPolicyLoaderURL: assetRootURL
+                .appendingPathComponent("guest", isDirectory: true)
+                .appendingPathComponent(
+                    ContainerizationRuntimeAssetContract
+                        .guestNetworkPolicyLoaderFileName,
+                    isDirectory: false
+                )
         )
     }
 
@@ -161,7 +174,7 @@ enum ContainerizationHelperBootstrap {
         paths: InstalledPaths,
         expectedUserID: uid_t,
         assetLock: ContainerizationHelperBootstrapAssetLock
-    ) throws {
+    ) throws -> String {
         do {
             let prefix = try BootstrapDirectory.openRoot(
                 paths.prefixURL,
@@ -209,6 +222,17 @@ enum ContainerizationHelperBootstrap {
                 trustedRootOwner: true
             )
             try validateOCILayout(initImage, assetLock: assetLock, expectedUserID: expectedUserID)
+            let guest = try assets.openDirectory(
+                "guest",
+                expectedUserID: expectedUserID,
+                trustedRootOwner: true
+            )
+            return try guest.requireLinuxARM64Executable(
+                ContainerizationRuntimeAssetContract
+                    .guestNetworkPolicyLoaderFileName,
+                maximumBytes: 64 * 1_024 * 1_024,
+                expectedUserID: expectedUserID
+            )
         } catch let error as ContainerizationHelperClientError {
             throw error
         } catch {
@@ -356,6 +380,8 @@ private struct ContainerizationHelperBootstrapDocument: Codable, Equatable {
     let initImageDescriptorDigest: String
     let initImageVariantDigest: String
     let rootfsSizeBytes: UInt64
+    let guestNetworkPolicyLoaderPath: String
+    let guestNetworkPolicyLoaderSHA256: String
 }
 
 private final class BootstrapDirectory {
@@ -478,6 +504,43 @@ private final class BootstrapDirectory {
         guard metadata.st_mode & S_IXUSR != 0 else {
             throw ContainerizationHelperClientError.unsafeExecutable
         }
+    }
+
+    func requireLinuxARM64Executable(
+        _ name: String,
+        maximumBytes: Int64,
+        expectedUserID: uid_t
+    ) throws -> String {
+        let (file, metadata) = try openRegularFile(
+            name,
+            expectedUserID: expectedUserID
+        )
+        defer { Darwin.close(file) }
+        guard metadata.st_mode & S_IXUSR != 0,
+              metadata.st_size >= 20,
+              metadata.st_size <= maximumBytes else {
+            throw ContainerizationHelperClientError.unsafeExecutable
+        }
+        var header = [UInt8](repeating: 0, count: 20)
+        let count = header.withUnsafeMutableBytes {
+            Darwin.pread(file, $0.baseAddress, $0.count, 0)
+        }
+        let fileType =
+            UInt16(header[16]) |
+            (UInt16(header[17]) << 8)
+        let machine =
+            UInt16(header[18]) |
+            (UInt16(header[19]) << 8)
+        guard count == header.count,
+              Array(header[0...3]) == [0x7f, 0x45, 0x4c, 0x46],
+              header[4] == 2,
+              header[5] == 1,
+              header[6] == 1,
+              fileType == 2 || fileType == 3,
+              machine == 183 else {
+            throw ContainerizationHelperClientError.unsafeExecutable
+        }
+        return try sha256(file)
     }
 
     func requireFile(

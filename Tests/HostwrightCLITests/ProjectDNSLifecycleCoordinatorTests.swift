@@ -89,6 +89,78 @@ final class ProjectDNSLifecycleCoordinatorTests: XCTestCase {
         )
     }
 
+    func testNetworkPolicyIsAppliedObservedAndRemovedWithExactGeneration()
+        async throws
+    {
+        let policy = HostwrightServiceNetworkPolicy(
+            ingress: [
+                HostwrightNetworkPolicyRule(
+                    project: "dns-coordinator",
+                    service: "api",
+                    protocolName: .tcp,
+                    port: 8_080
+                ),
+            ],
+            egress: [
+                HostwrightNetworkPolicyRule(
+                    protocolName: .tcp,
+                    port: 443,
+                    dns: "updates.example.test"
+                ),
+            ]
+        )
+        let fixture = try makeDNSFixture(networkPolicy: policy)
+        defer { fixture.cleanup() }
+
+        _ = try await ProjectDNSLifecycleCoordinator.reconcile(
+            preparation: fixture.preparation,
+            planSHA256: dnsTestDigest("d"),
+            store: fixture.store,
+            helper: fixture.helper,
+            runtime: fixture.runtime
+        )
+
+        let state = try XCTUnwrap(
+            try fixture.store.projectDNS.list().first
+        )
+        let currentPlan = await fixture.helper.currentPolicyPlan()
+        let currentObservation = await fixture.helper.snapshot()
+        let plan = try XCTUnwrap(currentPlan)
+        let observation = try XCTUnwrap(currentObservation)
+        XCTAssertEqual(plan.generation, Int(state.generation))
+        XCTAssertEqual(observation.policySHA256, plan.sha256)
+        XCTAssertTrue(observation.policyActive)
+        XCTAssertEqual(plan.services.map(\.serviceName), ["api"])
+        XCTAssertEqual(
+            plan.services.first?.ingressDefault,
+            .deny
+        )
+        XCTAssertEqual(
+            plan.services.first?.egressDefault,
+            .deny
+        )
+
+        _ = try await ProjectDNSLifecycleCoordinator.reconcile(
+            preparation: fixture.preparation,
+            planSHA256: dnsTestDigest("d"),
+            store: fixture.store,
+            helper: fixture.helper,
+            runtime: fixture.runtime
+        )
+        let applyCount = await fixture.helper.applyCount()
+        XCTAssertEqual(applyCount, 1)
+
+        try await ProjectDNSLifecycleCoordinator.remove(
+            preparation: fixture.preparation,
+            planSHA256: dnsTestDigest("e"),
+            store: fixture.store,
+            helper: fixture.helper,
+            runtime: fixture.runtime
+        )
+        let removedPlan = await fixture.helper.currentPolicyPlan()
+        XCTAssertNil(removedPlan)
+    }
+
     func testPreMutationPrerequisitesRejectBeforeIntentOrEffects()
         async throws
     {
@@ -945,6 +1017,48 @@ final class ProjectDNSLifecycleCoordinatorTests: XCTestCase {
             [.create, .start, .stop, .remove]
         )
     }
+
+    func testCertificateEvidencePersistsAndReleasesExactState()
+        async throws
+    {
+        let fixture = try makeDNSFixture(
+            ingress: true,
+            certificate: true
+        )
+        defer { fixture.cleanup() }
+
+        _ = try await ProjectDNSLifecycleCoordinator.reconcile(
+            preparation: fixture.preparation,
+            planSHA256: dnsTestDigest("d"),
+            store: fixture.store,
+            helper: fixture.helper,
+            runtime: fixture.runtime
+        )
+
+        let available = try fixture.store.certificates.list(
+            projectUUID:
+                fixture.preparation.projectResourceUUID
+        )
+        XCTAssertEqual(available.count, 1)
+        XCTAssertEqual(available.first?.manifestName, "api-tls")
+        XCTAssertEqual(available.first?.sourceKind, .localCA)
+        XCTAssertEqual(available.first?.lifecycleState, .available)
+        XCTAssertEqual(available.first?.status, .available)
+
+        try await ProjectDNSLifecycleCoordinator.remove(
+            preparation: fixture.preparation,
+            planSHA256: dnsTestDigest("e"),
+            store: fixture.store,
+            helper: fixture.helper,
+            runtime: fixture.runtime
+        )
+        XCTAssertTrue(
+            try fixture.store.certificates.list(
+                projectUUID:
+                    fixture.preparation.projectResourceUUID
+            ).isEmpty
+        )
+    }
 }
 
 private enum DNSRuntimeMutationKind: Equatable, Sendable {
@@ -1312,6 +1426,7 @@ private actor DNSHelperDriver: ProjectDNSHelperDriving {
     private var ingressEvidenceMismatch: IngressEvidenceMismatch?
     private var applications = 0
     private var predecessorFencingTokens: [String?] = []
+    private var policyPlan: NetworkPolicyPlan?
 
     init(root: String) {
         self.root = root
@@ -1342,6 +1457,8 @@ private actor DNSHelperDriver: ProjectDNSHelperDriving {
         corefile: String,
         hostAccessBindings: [ProjectDNSHostAccessBinding],
         ingressBindings: [ProjectIngressListenerBinding],
+        certificateBindings: [ProjectCertificateRequestBinding],
+        policyPlan: NetworkPolicyPlan?,
         predecessorFencingToken: String?
     ) throws -> ProjectDNSHelperObservation {
         applications += 1
@@ -1359,7 +1476,11 @@ private actor DNSHelperDriver: ProjectDNSHelperDriving {
                active.observation.hostAccessSHA256 ==
                 dnsTestHostAccessSHA256(hostAccessBindings),
                active.observation.ingressSHA256 ==
-                dnsTestIngressSHA256(ingressBindings) {
+                dnsTestIngressSHA256(ingressBindings),
+               active.observation.certificateSHA256 ==
+                dnsTestCertificateSHA256(certificateBindings),
+               active.observation.policySHA256 ==
+                policyPlan?.sha256 {
                 return active.observation
             }
             guard active.identity.projectUUID ==
@@ -1394,8 +1515,43 @@ private actor DNSHelperDriver: ProjectDNSHelperDriving {
             ingressSHA256: mismatch == .digest
                 ? dnsTestSHA256("wrong-ingress")
                 : dnsTestIngressSHA256(ingressBindings),
-            ingressActive: mismatch != .inactive
+            ingressActive: mismatch != .inactive,
+            certificateSHA256:
+                dnsTestCertificateSHA256(certificateBindings),
+            certificateActive: true,
+            certificateEvidenceSHA256:
+                certificateBindings.isEmpty
+                    ? nil
+                    : dnsTestDigest("8"),
+            certificateSummaries:
+                certificateBindings.map {
+                    ProjectDNSCertificateSummary(
+                        name: $0.name,
+                        certificateUUID: $0.certificateUUID,
+                        source: $0.source,
+                        certificateSHA256:
+                            dnsTestDigest("1"),
+                        issuerCertificateSHA256:
+                            $0.source == .imported
+                                ? nil
+                                : dnsTestDigest("2"),
+                        dnsNames: $0.dnsNames,
+                        notValidBefore: Date(
+                            timeIntervalSince1970:
+                                1_774_000_000
+                        ),
+                        notValidAfter: Date(
+                            timeIntervalSince1970:
+                                1_805_536_000
+                        ),
+                        revocationStatus: "unavailable",
+                        renewalNeeded: false
+                    )
+                },
+            policySHA256: policyPlan?.sha256,
+            policyActive: true
         )
+        self.policyPlan = policyPlan
         active = (identity, observation)
         return observation
     }
@@ -1422,6 +1578,7 @@ private actor DNSHelperDriver: ProjectDNSHelperDriving {
             )
         }
         self.active = nil
+        policyPlan = nil
         return ProjectDNSHelperObservation(
             disposition: .absent,
             corefilePath: nil,
@@ -1451,6 +1608,10 @@ private actor DNSHelperDriver: ProjectDNSHelperDriving {
 
     func activeIdentity() -> ProjectDNSHelperIdentity? {
         active?.identity
+    }
+
+    func currentPolicyPlan() -> NetworkPolicyPlan? {
+        policyPlan
     }
 
     func applyCount() -> Int {
@@ -1484,7 +1645,9 @@ private func makeDNSFixture(
     seedNetworks: Bool = true,
     behavior: DNSRuntimeBehavior = .succeed,
     hostAccess: Bool = false,
-    ingress: Bool = false
+    ingress: Bool = false,
+    certificate: Bool = false,
+    networkPolicy: HostwrightServiceNetworkPolicy? = nil
 ) throws -> DNSCoordinatorFixture {
     let root = FileManager.default.temporaryDirectory
         .appendingPathComponent(
@@ -1556,6 +1719,7 @@ private func makeDNSFixture(
                 ),
             ]
             : [],
+        networkPolicy: networkPolicy,
         networks: [attachment]
     )
     let observed = ObservedRuntimeState(
@@ -1589,10 +1753,20 @@ private func makeDNSFixture(
             networks: [network],
             services: [service]
         ),
-        ingress: ingress
+        certificates: certificate
+            ? [
+                "api-tls": HostwrightCertificateDeclaration(
+                    source: .localCA
+                ),
+            ]
+            : [:],
+        ingress: ingress || certificate
             ? [
                 "api": HostwrightIngressListener(
                     port: 18_080,
+                    certificate: certificate
+                        ? "api-tls"
+                        : nil,
                     routes: [
                         HostwrightIngressRoute(
                             hostname: "api.local",
@@ -1860,6 +2034,27 @@ private func dnsTestIngressSHA256(
     guard let data = try? encoder.encode(
         value.sorted(
             by: ProjectIngressListenerBinding.canonicalPrecedes
+        )
+    ) else {
+        return nil
+    }
+    return SHA256.hash(data: data)
+        .map { String(format: "%02x", $0) }
+        .joined()
+}
+
+private func dnsTestCertificateSHA256(
+    _ value: [ProjectCertificateRequestBinding]
+) -> String? {
+    guard !value.isEmpty else { return nil }
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [
+        .sortedKeys,
+        .withoutEscapingSlashes,
+    ]
+    guard let data = try? encoder.encode(
+        value.sorted(
+            by: ProjectCertificateRequestBinding.canonicalPrecedes
         )
     ) else {
         return nil

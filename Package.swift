@@ -57,6 +57,10 @@ let package = Package(
         .package(
             url: "https://github.com/jpsim/Yams.git",
             exact: "6.2.2"
+        ),
+        .package(
+            url: "https://github.com/apple/swift-certificates.git",
+            exact: "1.19.3"
         )
     ],
     targets: [
@@ -91,6 +95,7 @@ let package = Package(
             name: "HostwrightContainerizationHelper",
             dependencies: [
                 "HostwrightCore",
+                "HostwrightNetworking",
                 "HostwrightRuntime",
                 .product(name: "Containerization", package: "containerization"),
                 .product(name: "ContainerizationOCI", package: "containerization")
@@ -132,7 +137,8 @@ let package = Package(
             name: "HostwrightNetworkHelperCore",
             dependencies: [
                 "HostwrightNetworking",
-                "HostwrightRuntime"
+                "HostwrightRuntime",
+                .product(name: "X509", package: "swift-certificates")
             ],
             linkerSettings: [
                 .linkedFramework("Security")

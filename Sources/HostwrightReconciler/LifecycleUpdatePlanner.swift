@@ -305,6 +305,10 @@ public enum LifecycleRevisionCodec {
             "logicalServiceName": service.logicalServiceName,
             "memoryBytes": service.memoryBytes.map { String($0) as Any } ?? NSNull(),
             "mounts": mounts,
+            "networkPolicy":
+                service.networkPolicy.map {
+                    networkPolicyDocument($0) as Any
+                } ?? NSNull(),
             "networks": networks,
             "platform": [
                 "architecture": service.platformArchitecture,
@@ -375,6 +379,30 @@ public enum LifecycleRevisionCodec {
             "interfaces": exposure.interfaces,
             "networkClasses": exposure.networkClasses.map(\.rawValue),
             "scope": exposure.scope.rawValue
+        ]
+    }
+
+    private static func networkPolicyDocument(
+        _ policy: HostwrightServiceNetworkPolicy
+    ) -> [String: Any] {
+        [
+            "egress": policy.egress.map(networkPolicyRuleDocument),
+            "ingress": policy.ingress.map(networkPolicyRuleDocument)
+        ]
+    }
+
+    private static func networkPolicyRuleDocument(
+        _ rule: HostwrightNetworkPolicyRule
+    ) -> [String: Any] {
+        [
+            "address": rule.address.map { $0 as Any } ?? NSNull(),
+            "dns": rule.dns.map { $0 as Any } ?? NSNull(),
+            "identity": rule.identity.map { $0 as Any } ?? NSNull(),
+            "port": rule.port.map { $0 as Any } ?? NSNull(),
+            "project": rule.project.map { $0 as Any } ?? NSNull(),
+            "protocol":
+                rule.protocolName.map { $0.rawValue as Any } ?? NSNull(),
+            "service": rule.service.map { $0 as Any } ?? NSNull()
         ]
     }
 
@@ -501,6 +529,7 @@ public enum LifecycleRevisionCodec {
         let logicalServiceName: String
         let memoryBytes: String?
         let mounts: [MountDocument]
+        let networkPolicy: NetworkPolicyDocument?
         let networks: [NetworkDocument]
         let platform: PlatformDocument
         let ports: [PortDocument]
@@ -529,7 +558,10 @@ public enum LifecycleRevisionCodec {
                     "rosetta", "sharedMemoryBytes", "updatePolicy", "userID",
                     "virtualization", "workingDirectory"
                 ],
-                optional: ["hostAccess", "imageLock", "publishedSockets"],
+                optional: [
+                    "hostAccess", "imageLock", "networkPolicy",
+                    "publishedSockets"
+                ],
                 path: ""
             )
             command = try container.decode([String].self, forKey: "command")
@@ -570,6 +602,10 @@ public enum LifecycleRevisionCodec {
                 forKey: "memoryBytes"
             )
             mounts = try container.decode([MountDocument].self, forKey: "mounts")
+            networkPolicy = try container.decodeIfPresent(
+                NetworkPolicyDocument.self,
+                forKey: "networkPolicy"
+            )
             networks = try container.decode(
                 [NetworkDocument].self,
                 forKey: "networks"
@@ -648,6 +684,7 @@ public enum LifecycleRevisionCodec {
                     try $0.value
                 },
                 hostAccess: try hostAccess.map { try $0.value },
+                networkPolicy: try networkPolicy?.value,
                 networks: try networks.map { try $0.value },
                 mounts: try mounts.map { try $0.value },
                 healthCheck: healthCheck?.value,
@@ -1139,6 +1176,128 @@ public enum LifecycleRevisionCodec {
                     addressClass: addressClassValue,
                     port: port
                 )
+            }
+        }
+    }
+
+    private struct NetworkPolicyDocument: Decodable {
+        let ingress: [NetworkPolicyRuleDocument]
+        let egress: [NetworkPolicyRuleDocument]
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(
+                keyedBy: RevisionCodingKey.self
+            )
+            try LifecycleRevisionCodec.validateKeys(
+                container,
+                required: ["egress", "ingress"],
+                path: "networkPolicy"
+            )
+            ingress = try container.decode(
+                [NetworkPolicyRuleDocument].self,
+                forKey: "ingress"
+            )
+            egress = try container.decode(
+                [NetworkPolicyRuleDocument].self,
+                forKey: "egress"
+            )
+        }
+
+        var value: HostwrightServiceNetworkPolicy {
+            get throws {
+                let policy = HostwrightServiceNetworkPolicy(
+                    ingress: try ingress.map { try $0.value },
+                    egress: try egress.map { try $0.value }
+                )
+                if let issue = HostwrightNetworkPolicyValidation.issue(
+                    in: policy
+                ) {
+                    throw LifecycleRevisionCodecError.invalidField(
+                        "networkPolicy: \(issue)"
+                    )
+                }
+                return policy
+            }
+        }
+    }
+
+    private struct NetworkPolicyRuleDocument: Decodable {
+        let project: String?
+        let service: String?
+        let identity: String?
+        let protocolName: String?
+        let address: String?
+        let port: Int?
+        let dns: String?
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(
+                keyedBy: RevisionCodingKey.self
+            )
+            try LifecycleRevisionCodec.validateKeys(
+                container,
+                required: [
+                    "address", "dns", "identity", "port", "project",
+                    "protocol", "service"
+                ],
+                path: "networkPolicy.rule"
+            )
+            project = try container.decodeIfPresent(
+                String.self,
+                forKey: "project"
+            )
+            service = try container.decodeIfPresent(
+                String.self,
+                forKey: "service"
+            )
+            identity = try container.decodeIfPresent(
+                String.self,
+                forKey: "identity"
+            )
+            protocolName = try container.decodeIfPresent(
+                String.self,
+                forKey: "protocol"
+            )
+            address = try container.decodeIfPresent(
+                String.self,
+                forKey: "address"
+            )
+            port = try container.decodeIfPresent(Int.self, forKey: "port")
+            dns = try container.decodeIfPresent(String.self, forKey: "dns")
+        }
+
+        var value: HostwrightNetworkPolicyRule {
+            get throws {
+                let decodedProtocol: HostwrightNetworkPolicyProtocol?
+                if let protocolName {
+                    guard let value = HostwrightNetworkPolicyProtocol(
+                        rawValue: protocolName
+                    ) else {
+                        throw LifecycleRevisionCodec.invalidEnum(
+                            "networkPolicy.protocol"
+                        )
+                    }
+                    decodedProtocol = value
+                } else {
+                    decodedProtocol = nil
+                }
+                let rule = HostwrightNetworkPolicyRule(
+                    project: project,
+                    service: service,
+                    identity: identity,
+                    protocolName: decodedProtocol,
+                    address: address,
+                    port: port,
+                    dns: dns
+                )
+                if let issue = HostwrightNetworkPolicyValidation.issue(
+                    in: rule
+                ) {
+                    throw LifecycleRevisionCodecError.invalidField(
+                        "networkPolicy.rule: \(issue)"
+                    )
+                }
+                return rule
             }
         }
     }

@@ -55,6 +55,8 @@ struct LiveProjectDNSHelperDriver: ProjectDNSHelperDriving {
         corefile: String,
         hostAccessBindings: [ProjectDNSHostAccessBinding],
         ingressBindings: [ProjectIngressListenerBinding],
+        certificateBindings: [ProjectCertificateRequestBinding],
+        policyPlan: NetworkPolicyPlan?,
         predecessorFencingToken: String?
     ) async throws -> ProjectDNSHelperObservation {
         let active = try await client.apply(
@@ -62,6 +64,8 @@ struct LiveProjectDNSHelperDriver: ProjectDNSHelperDriving {
             corefile: corefile,
             hostAccessBindings: hostAccessBindings,
             ingressBindings: ingressBindings,
+            certificateBindings: certificateBindings,
+            policyPlan: policyPlan,
             predecessorFencingToken:
                 predecessorFencingToken
         )
@@ -72,7 +76,32 @@ struct LiveProjectDNSHelperDriver: ProjectDNSHelperDriving {
             hostAccessSHA256: active.hostAccessSHA256,
             hostAccessActive: active.hostAccessActive,
             ingressSHA256: active.ingressSHA256,
-            ingressActive: active.ingressActive
+            ingressActive: active.ingressActive,
+            certificateSHA256:
+                active.certificateSHA256,
+            certificateActive:
+                active.certificateActive,
+            certificateEvidenceSHA256:
+                active.certificateEvidenceSHA256,
+            certificateSummaries:
+                active.certificateSummaries.map {
+                    ProjectDNSCertificateSummary(
+                        name: $0.name,
+                        certificateUUID: $0.certificateUUID,
+                        source: $0.source,
+                        certificateSHA256:
+                            $0.certificateSHA256,
+                        issuerCertificateSHA256:
+                            $0.issuerCertificateSHA256,
+                        dnsNames: $0.dnsNames,
+                        notValidBefore: $0.notValidBefore,
+                        notValidAfter: $0.notValidAfter,
+                        revocationStatus: $0.revocationStatus,
+                        renewalNeeded: $0.renewalNeeded
+                    )
+                },
+            policySHA256: active.policySHA256,
+            policyActive: active.policyActive
         )
     }
 
@@ -132,7 +161,34 @@ struct LiveProjectDNSHelperDriver: ProjectDNSHelperDriving {
             ingressSHA256:
                 status.activeCorefile?.ingressSHA256,
             ingressActive:
-                status.activeCorefile?.ingressActive ?? false
+                status.activeCorefile?.ingressActive ?? false,
+            certificateSHA256:
+                status.activeCorefile?.certificateSHA256,
+            certificateActive:
+                status.activeCorefile?.certificateActive ?? false,
+            certificateEvidenceSHA256:
+                status.activeCorefile?.certificateEvidenceSHA256,
+            certificateSummaries:
+                status.activeCorefile?.certificateSummaries.map {
+                    ProjectDNSCertificateSummary(
+                        name: $0.name,
+                        certificateUUID: $0.certificateUUID,
+                        source: $0.source,
+                        certificateSHA256:
+                            $0.certificateSHA256,
+                        issuerCertificateSHA256:
+                            $0.issuerCertificateSHA256,
+                        dnsNames: $0.dnsNames,
+                        notValidBefore: $0.notValidBefore,
+                        notValidAfter: $0.notValidAfter,
+                        revocationStatus: $0.revocationStatus,
+                        renewalNeeded: $0.renewalNeeded
+                    )
+                } ?? [],
+            policySHA256:
+                status.activeCorefile?.policySHA256,
+            policyActive:
+                status.activeCorefile?.policyActive ?? false
         )
     }
 }

@@ -15,6 +15,7 @@ public struct HostwrightManifest: Equatable, Sendable {
     public var imageProvenance: HostwrightImageProvenancePolicy?
     public var volumes: [String: HostwrightVolumeDeclaration]
     public var networks: [String: HostwrightNetworkDefinition]
+    public var certificates: [String: HostwrightCertificateDeclaration]
     public var ingress: [String: HostwrightIngressListener]
     public var services: [HostwrightService]
 
@@ -37,6 +38,7 @@ public struct HostwrightManifest: Equatable, Sendable {
             imageProvenance: nil,
             volumes: [:],
             networks: [:],
+            certificates: [:],
             ingress: [:],
             services: services
         )
@@ -53,6 +55,7 @@ public struct HostwrightManifest: Equatable, Sendable {
             imageProvenance: nil,
             volumes: [:],
             networks: [:],
+            certificates: [:],
             ingress: [:],
             services: services
         )
@@ -79,6 +82,7 @@ public struct HostwrightManifest: Equatable, Sendable {
             imageProvenance: imageProvenance,
             volumes: volumes,
             networks: [:],
+            certificates: [:],
             ingress: [:],
             services: services
         )
@@ -94,6 +98,7 @@ public struct HostwrightManifest: Equatable, Sendable {
         imageProvenance: HostwrightImageProvenancePolicy? = nil,
         volumes: [String: HostwrightVolumeDeclaration] = [:],
         networks: [String: HostwrightNetworkDefinition],
+        certificates: [String: HostwrightCertificateDeclaration],
         ingress: [String: HostwrightIngressListener] = [:],
         services: [HostwrightService]
     ) {
@@ -106,8 +111,38 @@ public struct HostwrightManifest: Equatable, Sendable {
         self.imageProvenance = imageProvenance
         self.volumes = volumes
         self.networks = networks
+        self.certificates = certificates
         self.ingress = ingress
         self.services = services
+    }
+
+    public init(
+        version: Int?,
+        project: String?,
+        imagePolicy: HostwrightImagePolicy?,
+        imageTrust: HostwrightImageTrustPolicy?,
+        imageSBOM: HostwrightImageSBOMPolicy?,
+        imageVulnerability: HostwrightImageVulnerabilityPolicy? = nil,
+        imageProvenance: HostwrightImageProvenancePolicy? = nil,
+        volumes: [String: HostwrightVolumeDeclaration] = [:],
+        networks: [String: HostwrightNetworkDefinition],
+        ingress: [String: HostwrightIngressListener] = [:],
+        services: [HostwrightService]
+    ) {
+        self.init(
+            version: version,
+            project: project,
+            imagePolicy: imagePolicy,
+            imageTrust: imageTrust,
+            imageSBOM: imageSBOM,
+            imageVulnerability: imageVulnerability,
+            imageProvenance: imageProvenance,
+            volumes: volumes,
+            networks: networks,
+            certificates: [:],
+            ingress: ingress,
+            services: services
+        )
     }
 
     public init(
@@ -126,6 +161,7 @@ public struct HostwrightManifest: Equatable, Sendable {
             imageProvenance: nil,
             volumes: [:],
             networks: [:],
+            certificates: [:],
             ingress: [:],
             services: services
         )
@@ -148,6 +184,7 @@ public struct HostwrightManifest: Equatable, Sendable {
             imageProvenance: nil,
             volumes: [:],
             networks: [:],
+            certificates: [:],
             ingress: [:],
             services: services
         )
@@ -685,6 +722,7 @@ public struct HostwrightService: Equatable, Sendable {
     public var publishedSockets: [HostwrightPublishedSocket]
     public var hostAccess: [HostwrightHostAccessEndpoint]
     public var networks: [HostwrightServiceNetworkAttachment]
+    public var networkPolicy: HostwrightServiceNetworkPolicy?
     public var volumes: [String]
     public var mounts: [HostwrightMountSpec]
     public var probes: HostwrightProbes
@@ -717,6 +755,7 @@ public struct HostwrightService: Equatable, Sendable {
         publishedPorts: [HostwrightPublishedPort] = [],
         publishedSockets: [HostwrightPublishedSocket] = [],
         hostAccess: [HostwrightHostAccessEndpoint] = [],
+        networkPolicy: HostwrightServiceNetworkPolicy? = nil,
         volumes: [String] = [],
         mounts: [HostwrightMountSpec] = [],
         probes: HostwrightProbes = HostwrightProbes(),
@@ -750,6 +789,7 @@ public struct HostwrightService: Equatable, Sendable {
             publishedSockets: publishedSockets,
             hostAccess: hostAccess,
             networks: [],
+            networkPolicy: networkPolicy,
             volumes: volumes,
             mounts: mounts,
             probes: probes,
@@ -785,6 +825,7 @@ public struct HostwrightService: Equatable, Sendable {
         publishedSockets: [HostwrightPublishedSocket] = [],
         hostAccess: [HostwrightHostAccessEndpoint] = [],
         networks: [HostwrightServiceNetworkAttachment],
+        networkPolicy: HostwrightServiceNetworkPolicy? = nil,
         volumes: [String] = [],
         mounts: [HostwrightMountSpec] = [],
         probes: HostwrightProbes = HostwrightProbes(),
@@ -818,6 +859,7 @@ public struct HostwrightService: Equatable, Sendable {
         self.hostAccess = hostAccess
         self.ports = ports.isEmpty ? normalizedPublishedPorts.compactMap(\.canonicalLegacyLiteral) : ports
         self.networks = networks
+        self.networkPolicy = networkPolicy
         self.volumes = volumes
         self.mounts = mounts.isEmpty ? volumes.compactMap(HostwrightMountSpec.legacy) : mounts
         self.probes = probes

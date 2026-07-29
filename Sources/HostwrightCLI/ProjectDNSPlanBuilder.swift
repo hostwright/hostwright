@@ -10,6 +10,8 @@ enum ProjectDNSPlanBuilder {
         desiredState: DesiredRuntimeState,
         observedState: ObservedRuntimeState,
         runtimeInventory: RuntimeInventory? = nil,
+        certificates:
+            [String: HostwrightCertificateDeclaration] = [:],
         ingress: [String: HostwrightIngressListener] = [:],
         projectID: String? = nil,
         resourceBindings: [LifecycleResourceBinding] = [],
@@ -49,6 +51,19 @@ enum ProjectDNSPlanBuilder {
                 }
             )
         }
+        let materializedIngress = try ingressBindings(
+            ingress,
+            projectUUID: projectUUID,
+            projectID: projectID,
+            desiredState: desiredState,
+            observedState: observedState,
+            resourceBindings: resourceBindings
+        )
+        let policyPlan = try networkPolicyPlan(
+            projectUUID: projectUUID,
+            desiredState: desiredState,
+            generation: 1
+        )
         return try ProjectDNSPlanner.makePlan(
             projectUUID: projectUUID,
             services: services,
@@ -57,19 +72,110 @@ enum ProjectDNSPlanBuilder {
                 desiredState: desiredState,
                 runtimeInventory: runtimeInventory
             ),
-            ingressBindings: try ingressBindings(
-                ingress,
-                projectID: projectID,
-                desiredState: desiredState,
-                observedState: observedState,
-                resourceBindings: resourceBindings
+            ingressBindings: materializedIngress,
+            certificateBindings: try certificateBindings(
+                certificates,
+                ingressBindings: materializedIngress,
+                projectUUID: projectUUID
             ),
+            networkPolicyDesiredSHA256: policyPlan?.sha256,
             options: options
         )
     }
 
+    static func networkPolicyPlan(
+        projectUUID: String,
+        desiredState: DesiredRuntimeState,
+        generation: Int
+    ) throws -> NetworkPolicyPlan? {
+        guard desiredState.services.contains(where: {
+            $0.networkPolicy != nil
+        }) else {
+            return nil
+        }
+        let grouped = Dictionary(
+            grouping: desiredState.services,
+            by: \.logicalServiceName
+        )
+        let services = try grouped.keys.sorted().map { serviceName in
+            let replicas = grouped[serviceName]!.sorted {
+                $0.identity.displayName < $1.identity.displayName
+            }
+            let policy = replicas[0].networkPolicy
+            guard replicas.allSatisfy({
+                $0.networkPolicy == policy
+            }) else {
+                throw NetworkPolicyCompilerError.invalidServiceIdentity(
+                    serviceName
+                )
+            }
+            return (
+                name: serviceName,
+                resourceUUID: HostwrightResourceUUID.legacy(
+                    kind: "service-network-policy",
+                    identifier: "\(projectUUID):\(serviceName)"
+                ),
+                policy: policy
+            )
+        }
+        return try NetworkPolicyCompiler.compile(
+            projectName: desiredState.projectName,
+            projectUUID: projectUUID,
+            generation: generation,
+            services: services
+        )
+    }
+
+    private static func certificateBindings(
+        _ certificates:
+            [String: HostwrightCertificateDeclaration],
+        ingressBindings: [ProjectIngressListenerBinding],
+        projectUUID: String
+    ) throws -> [ProjectCertificateRequestBinding] {
+        let references = Dictionary(
+            grouping: ingressBindings.compactMap { listener in
+                listener.certificate.map {
+                    (
+                        certificate: $0,
+                        dnsNames: listener.routes.map(\.hostname),
+                        peerIdentities: listener.peerIdentities
+                    )
+                }
+            },
+            by: { $0.certificate }
+        )
+        return try references.sorted { $0.key < $1.key }.map {
+            name,
+            listeners in
+            guard let declaration = certificates[name] else {
+                throw ProjectDNSPlanningError.invalidIngress(
+                    "certificate '\(name)' is not declared"
+                )
+            }
+            return ProjectCertificateRequestBinding(
+                name: name,
+                certificateUUID: HostwrightResourceUUID.legacy(
+                    kind: "certificate",
+                    identifier: "\(projectUUID):\(name)"
+                ),
+                source: declaration.source,
+                identitySHA256: declaration.identitySHA256,
+                issuer: declaration.issuer,
+                renewBeforeSeconds:
+                    declaration.renewBeforeSeconds,
+                validitySeconds: declaration.validitySeconds,
+                statusPolicy: declaration.statusPolicy,
+                dnsNames: listeners.flatMap { $0.dnsNames },
+                identityRole: .ingress,
+                peerIdentities:
+                    listeners.flatMap { $0.peerIdentities }
+            )
+        }
+    }
+
     private static func ingressBindings(
         _ ingress: [String: HostwrightIngressListener],
+        projectUUID: String,
         projectID: String?,
         desiredState: DesiredRuntimeState,
         observedState: ObservedRuntimeState,
@@ -98,13 +204,37 @@ enum ProjectDNSPlanBuilder {
         return try ingress.sorted(by: { $0.key < $1.key }).map {
             name,
             listener in
-            guard listener.exposure.isDefaultLocalhost,
+            guard listener.exposure.scope == .localhost,
                   NetworkBindAddressPolicy.isLocalhost(
                     listener.bindAddress
                   ) else {
                 throw ProjectDNSPlanningError.invalidIngress(
                     "listener '\(name)' cannot activate before its secure non-local exposure is qualified"
                 )
+            }
+            var peerIdentities = Set<HostwrightMutualTLSIdentity>()
+            if !listener.peers.isEmpty {
+                for selector in listener.peers {
+                    guard let targets = desiredByService[selector.service], !targets.isEmpty else {
+                        throw ProjectDNSPlanningError.invalidIngress("peer target service '\(selector.service)' is unavailable")
+                    }
+                    for target in targets {
+                        guard let binding = bindingsByIdentity[target.identity],
+                              binding.resourceGeneration > 0 else {
+                            throw ProjectDNSPlanningError.invalidIngress("peer target service '\(target.identity.displayName)' has no exact persisted resource binding")
+                        }
+                        do {
+                            peerIdentities.insert(try HostwrightMutualTLSIdentity(
+                                projectUUID: projectUUID,
+                                resourceUUID: binding.resourceUUID,
+                                role: selector.role,
+                                generation: binding.resourceGeneration
+                            ))
+                        } catch {
+                            throw ProjectDNSPlanningError.invalidIngress("peer target service '\(target.identity.displayName)' has an invalid exact identity binding")
+                        }
+                    }
+                }
             }
             let routes = try listener.routes.map { route in
                 guard let targets = desiredByService[
@@ -159,6 +289,7 @@ enum ProjectDNSPlanBuilder {
                     pathPrefix: route.pathPrefix,
                     methods: route.methods,
                     protocolName: route.protocolName,
+                    targetServiceName: route.targetService,
                     targetServiceUUIDs:
                         Array(targetUUIDs).sorted(),
                     targetPort: route.targetPort,
@@ -170,6 +301,8 @@ enum ProjectDNSPlanBuilder {
                 bindAddress: listener.bindAddress,
                 port: listener.port,
                 exposure: listener.exposure,
+                certificate: listener.certificate,
+                peerIdentities: Array(peerIdentities),
                 routes: routes
             )
         }

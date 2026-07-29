@@ -2,6 +2,7 @@ import CryptoKit
 import Foundation
 import HostwrightCore
 import HostwrightManifest
+import HostwrightNetworking
 import HostwrightReconciler
 import HostwrightRegistry
 import HostwrightRuntime
@@ -228,6 +229,7 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
             manifestBaseDirectory: manifestBaseDirectory(for: options.manifestPath),
             mappingIssues: mapping.issues,
             desiredState: desiredState,
+            certificates: mapping.certificates,
             ingress: mapping.ingress,
             previousDesiredState: previousDesiredState,
             observedState: observedState,
@@ -6061,6 +6063,22 @@ private func lifecyclePreflightDesiredExecution(
             capabilities: networkCapabilities
         )
     }
+    if preparation.desiredState.services.contains(where: {
+        $0.networkPolicy != nil
+    }) {
+        let networkProvider =
+            try environment.networkProviderForProvider(
+                preparation.providerID
+            )
+        let networkCapabilities = try hostwrightWaitForAsync {
+            try await networkProvider.networkCapabilities()
+        }
+        try lifecyclePreflightNetworkPolicyCapabilities(
+            services: preparation.desiredState.services,
+            providerID: preparation.providerID,
+            capabilities: networkCapabilities
+        )
+    }
     try lifecyclePreflightImageTrust(
         planSHA256: compiled.plan.planSHA256,
         projectID: preparation.projectID,
@@ -6176,6 +6194,41 @@ private func lifecyclePreflightDesiredExecution(
                 with: sanitizedEnvironment
             ),
             providerID: preparation.providerID
+        )
+    }
+}
+
+func lifecyclePreflightNetworkPolicyCapabilities(
+    services: [DesiredRuntimeService],
+    providerID: RuntimeProviderID,
+    capabilities: RuntimeNetworkProviderCapabilities
+) throws {
+    let declared = services.compactMap(\.networkPolicy)
+    guard !declared.isEmpty else { return }
+    guard capabilities.providerID == providerID,
+          let policy = capabilities.networkPolicy,
+          policy.state == .available,
+          policy.reason == .implemented,
+          Set(policy.directions) ==
+            Set(HostwrightNetworkPolicyDirection.allCases),
+          policy.enforcesExactIdentity,
+          policy.appliesAtomicGenerations,
+          policy.observesRuleDigest else {
+        throw RuntimeAdapterError.mutationUnavailableByPolicy(
+            "The selected runtime provider does not qualify exact ingress and egress network-policy enforcement with atomic observable generations. No runtime mutation was attempted."
+        )
+    }
+    let rules = declared.flatMap { $0.ingress + $0.egress }
+    if rules.contains(where: { $0.address != nil }),
+       !policy.enforcesCIDR {
+        throw RuntimeAdapterError.mutationUnavailableByPolicy(
+            "The selected runtime provider does not qualify exact CIDR network-policy enforcement. No runtime mutation was attempted."
+        )
+    }
+    if rules.contains(where: { $0.dns != nil }),
+       !policy.enforcesDNS {
+        throw RuntimeAdapterError.mutationUnavailableByPolicy(
+            "The selected runtime provider does not qualify DNS-aware network-policy enforcement. No runtime mutation was attempted."
         )
     }
 }
@@ -7503,6 +7556,7 @@ private func lifecycleReplacingEnvironment(
         ports: service.ports,
         publishedSockets: service.publishedSockets,
         hostAccess: service.hostAccess,
+        networkPolicy: service.networkPolicy,
         networks: service.networks,
         mounts: service.mounts,
         healthCheck: service.healthCheck,

@@ -12,6 +12,439 @@ final class NetworkHelperTests: XCTestCase {
     private let secondFence = "44444444-4444-4444-8444-444444444444"
     private let thirdFence = "55555555-5555-4555-8555-555555555555"
 
+    func testCertificateConfigurationPersistsRecoversAndQuarantinesTampering() throws {
+        try withStore { store, root in
+            let binding = certificateBinding()
+            let applied = try store.apply(identity: identity(), corefile: corefile(), certificateBindings: [binding])
+            let digest = try XCTUnwrap(applied.certificateSHA256)
+            XCTAssertEqual(try store.activeCertificateConfigurations(), [NetworkHelperPersistedCertificateConfiguration(identity: identity(), bindings: [binding], sha256: digest)])
+            let restarted = try NetworkHelperStateStore(rootURL: root)
+            XCTAssertEqual(try restarted.activeCertificateConfigurations().first?.bindings, [binding])
+            let file = generationURL(root: root, generation: 1).appendingPathComponent("Certificate.json")
+            try Data("tampered".utf8).write(to: file)
+            XCTAssertEqual(try restarted.status(identity: identity()).disposition, .quarantined)
+        }
+    }
+
+    func testUniqueUnsortedCertificateSANsCanonicalizeBeforeRecovery()
+        throws
+    {
+        try withStore { store, root in
+            var encoded = try XCTUnwrap(
+                JSONSerialization.jsonObject(
+                    with: JSONEncoder().encode(certificateBinding())
+                ) as? [String: Any]
+            )
+            encoded["dnsNames"] = [
+                "z.example.test",
+                "api.example.test",
+            ]
+            let binding = try JSONDecoder().decode(
+                ProjectCertificateRequestBinding.self,
+                from: JSONSerialization.data(
+                    withJSONObject: encoded,
+                    options: [.sortedKeys]
+                )
+            )
+            XCTAssertEqual(
+                binding.dnsNames,
+                ["z.example.test", "api.example.test"]
+            )
+
+            _ = try store.apply(
+                identity: identity(),
+                corefile: corefile(),
+                certificateBindings: [binding]
+            )
+            let canonicalDNSNames = [
+                "api.example.test",
+                "z.example.test",
+            ]
+            XCTAssertEqual(
+                try store.activeCertificateConfigurations()
+                    .first?.bindings.first?.dnsNames,
+                canonicalDNSNames
+            )
+
+            let restarted = try NetworkHelperStateStore(rootURL: root)
+            XCTAssertEqual(
+                try restarted.status(identity: identity()).disposition,
+                .active
+            )
+            XCTAssertEqual(
+                try restarted.activeCertificateConfigurations()
+                    .first?.bindings.first?.dnsNames,
+                canonicalDNSNames
+            )
+        }
+    }
+
+    func testCertificateRequestRejectsInvalidSourceAndNonLowercaseSAN() {
+        let invalid = ProjectCertificateRequestBinding(name: "cert", certificateUUID: dnsUUID, source: .imported, issuer: "issuer", renewBeforeSeconds: 3_600, validitySeconds: 86_400, statusPolicy: .ifAvailable, dnsNames: ["API.example.test"])
+        XCTAssertThrowsError(try NetworkHelperCertificateValidation.validated([invalid])) {
+            XCTAssertEqual($0 as? NetworkHelperError, .invalidCertificate)
+        }
+    }
+
+    func testCertificateEvidencePersistsRecoversAndQuarantinesTampering()
+        throws
+    {
+        try withStore { store, root in
+            let binding = certificateBinding()
+            _ = try store.apply(
+                identity: identity(),
+                corefile: corefile(),
+                certificateBindings: [binding]
+            )
+            let recorded = try XCTUnwrap(
+                store.recordCertificateEvidence(
+                    identity: identity(),
+                    certificates: [
+                        certificateEvidence(binding: binding),
+                    ]
+                )
+            )
+            XCTAssertEqual(recorded.identity, identity())
+            XCTAssertEqual(recorded.certificates.count, 1)
+
+            let restarted = try NetworkHelperStateStore(rootURL: root)
+            XCTAssertEqual(
+                try restarted.certificateEvidence(
+                    identity: identity()
+                ),
+                recorded
+            )
+
+            let evidenceURL = root
+                .appendingPathComponent(projectUUID)
+                .appendingPathComponent(dnsUUID)
+                .appendingPathComponent(
+                    "certificate-evidence.json"
+                )
+            try Data("tampered".utf8).write(to: evidenceURL)
+            XCTAssertEqual(
+                try restarted.status(identity: identity()).disposition,
+                .quarantined
+            )
+        }
+    }
+
+    func testCertificateEvidenceSurvivesGenerationReplacementUntilCleared()
+        throws
+    {
+        try withStore { store, _ in
+            let binding = certificateBinding()
+            let first = identity()
+            _ = try store.apply(
+                identity: first,
+                corefile: corefile(),
+                certificateBindings: [binding]
+            )
+            let firstEvidence = try XCTUnwrap(
+                store.recordCertificateEvidence(
+                    identity: first,
+                    certificates: [
+                        certificateEvidence(binding: binding),
+                    ]
+                )
+            )
+
+            let second = identity(
+                generation: 2,
+                fence: secondFence
+            )
+            _ = try store.apply(
+                identity: second,
+                corefile: corefile(ttl: 10),
+                certificateBindings: [binding],
+                predecessorFencingToken: firstFence
+            )
+            XCTAssertNil(
+                try store.certificateEvidence(identity: second)
+            )
+            XCTAssertEqual(
+                try store.retiredCertificateEvidence(
+                    identity: second
+                ),
+                firstEvidence
+            )
+
+            _ = try store.recordCertificateEvidence(
+                identity: second,
+                certificates: [
+                    certificateEvidence(
+                        binding: binding,
+                        leaf: String(repeating: "c", count: 64),
+                        issuer: String(repeating: "d", count: 64)
+                    ),
+                ]
+            )
+            try store.clearRetiredCertificateEvidence(
+                identity: second,
+                expected: firstEvidence
+            )
+            XCTAssertNil(
+                try store.retiredCertificateEvidence(
+                    identity: second
+                )
+            )
+            XCTAssertEqual(
+                try store.certificateEvidence(
+                    identity: second
+                )?.identity,
+                second
+            )
+        }
+    }
+
+    func testCertificateEvidenceRetirementRollsBackBeforePointerAdvance()
+        throws
+    {
+        try withStore { store, root in
+            let binding = certificateBinding()
+            _ = try store.apply(
+                identity: identity(),
+                corefile: corefile(),
+                certificateBindings: [binding]
+            )
+            let evidence = try XCTUnwrap(
+                store.recordCertificateEvidence(
+                    identity: identity(),
+                    certificates: [
+                        certificateEvidence(binding: binding),
+                    ]
+                )
+            )
+            let dnsRoot = root
+                .appendingPathComponent(projectUUID)
+                .appendingPathComponent(dnsUUID)
+            XCTAssertEqual(
+                rename(
+                    dnsRoot
+                        .appendingPathComponent(
+                            "certificate-evidence.json"
+                        ).path,
+                    dnsRoot
+                        .appendingPathComponent(
+                            "certificate-retired.json"
+                        ).path
+                ),
+                0
+            )
+
+            let restarted = try NetworkHelperStateStore(rootURL: root)
+            XCTAssertEqual(
+                try restarted.certificateEvidence(
+                    identity: identity()
+                ),
+                evidence
+            )
+            XCTAssertNil(
+                try restarted.retiredCertificateEvidence(
+                    identity: identity()
+                )
+            )
+        }
+    }
+
+    func testProviderCertificateReturnsTypedUnavailableAndRemainsRemovable()
+        throws
+    {
+        try withStore { store, _ in
+            let provider = ProjectCertificateRequestBinding(
+                name: "provider",
+                certificateUUID: dnsUUID,
+                source: .provider,
+                issuer: "external",
+                renewBeforeSeconds: 3_600,
+                validitySeconds: 86_400,
+                statusPolicy: .ifAvailable,
+                dnsNames: ["api.example.test"]
+            )
+            let dispatcher = NetworkHelperDispatcher(store: store)
+            let applied = try dispatch(
+                dispatcher,
+                NetworkHelperRequest(
+                    operation: .apply,
+                    identity: identity(),
+                    corefile: corefile(),
+                    certificateBindings: [provider]
+                )
+            )
+            XCTAssertEqual(
+                applied.error?.code,
+                .certificateUnavailable
+            )
+            XCTAssertEqual(
+                try store.status(identity: identity()).disposition,
+                .active
+            )
+
+            let removed = try dispatch(
+                dispatcher,
+                NetworkHelperRequest(
+                    operation: .remove,
+                    identity: identity()
+                )
+            )
+            XCTAssertEqual(removed.status?.disposition, .absent)
+        }
+    }
+
+    func testCertificateCoordinatorMapsLockedAndTamperedIdentityFailures() {
+        XCTAssertEqual(
+            NetworkHelperCertificateCoordinator
+                .mappedIdentityStoreError(
+                    CertificateIdentityStoreError.keychainLocked
+                ),
+            .certificateUnavailable
+        )
+        XCTAssertEqual(
+            NetworkHelperCertificateCoordinator
+                .mappedIdentityStoreError(
+                    CertificateIdentityStoreError.tampered
+                ),
+            .invalidCertificate
+        )
+    }
+
+    func testCertificateCoordinatorNeverDeletesImportedIdentity() throws {
+        let coordinator = NetworkHelperCertificateCoordinator()
+        let imported = NetworkHelperPersistedCertificateEvidence(
+            identity: identity(),
+            requestSHA256: String(repeating: "e", count: 64),
+            certificates: [
+                NetworkHelperCertificateEvidence(
+                    name: "imported",
+                    certificateUUID: dnsUUID,
+                    source: .imported,
+                    certificateSHA256:
+                        String(repeating: "f", count: 64),
+                    issuerCertificateSHA256: nil,
+                    dnsNames: ["api.example.test"],
+                    notValidBefore:
+                        Date(timeIntervalSince1970: 1_000),
+                    notValidAfter:
+                        Date(timeIntervalSince1970: 100_000),
+                    revocationStatus:
+                        CertificateRevocationStatus.unavailable.rawValue
+                ),
+            ]
+        )
+        XCTAssertNoThrow(
+            try coordinator.cleanup(
+                identity: identity(),
+                evidence: imported
+            )
+        )
+        XCTAssertFalse(coordinator.hasActiveCertificates)
+    }
+
+    func testDispatcherActivatesRecoversAndRemovesLocalCertificate()
+        throws
+    {
+        try withStore { store, root in
+            let project = UUID().uuidString.lowercased()
+            let dns = UUID().uuidString.lowercased()
+            let certificate = UUID().uuidString.lowercased()
+            let activeIdentity = NetworkHelperDNSIdentity(
+                projectUUID: project,
+                dnsUUID: dns,
+                generation: 1,
+                fencingToken: UUID().uuidString.lowercased()
+            )
+            let binding = ProjectCertificateRequestBinding(
+                name: "local",
+                certificateUUID: certificate,
+                source: .localCA,
+                renewBeforeSeconds: 3_600,
+                validitySeconds: 86_400,
+                statusPolicy: .ifAvailable,
+                dnsNames: ["api.example.test"]
+            )
+            let scope = try CertificateIdentityScope(
+                projectUUID: project,
+                certificateUUID: certificate,
+                generation: 1
+            )
+            let identityStore = CertificateIdentityStore()
+            var cleanupEvidence:
+                NetworkHelperPersistedCertificateEvidence?
+            defer {
+                if let certificate =
+                    cleanupEvidence?.certificates.first,
+                   let issuer =
+                    certificate.issuerCertificateSHA256 {
+                    try? identityStore.cleanupManagedIdentity(
+                        scope: scope,
+                        expectedLeafSHA256:
+                            certificate.certificateSHA256,
+                        expectedIssuerSHA256: issuer
+                    )
+                }
+            }
+
+            let applied = try dispatch(
+                NetworkHelperDispatcher(store: store),
+                NetworkHelperRequest(
+                    operation: .apply,
+                    identity: activeIdentity,
+                    corefile: corefile(),
+                    certificateBindings: [binding]
+                )
+            )
+            XCTAssertNil(applied.error)
+            XCTAssertEqual(applied.status?.certificateActive, true)
+            XCTAssertEqual(
+                applied.status?.certificateSummaries?.map(\.name),
+                ["local"]
+            )
+            cleanupEvidence = try XCTUnwrap(
+                store.certificateEvidence(identity: activeIdentity)
+            )
+
+            let restartedStore = try NetworkHelperStateStore(
+                rootURL: root
+            )
+            let restarted = NetworkHelperDispatcher(
+                store: restartedStore
+            )
+            let recovered = try dispatch(
+                restarted,
+                NetworkHelperRequest(
+                    operation: .status,
+                    identity: activeIdentity
+                )
+            )
+            XCTAssertNil(recovered.error)
+            XCTAssertEqual(recovered.status?.certificateActive, true)
+            XCTAssertEqual(
+                recovered.status?.certificateEvidenceSHA256,
+                applied.status?.certificateEvidenceSHA256
+            )
+
+            let removed = try dispatch(
+                restarted,
+                NetworkHelperRequest(
+                    operation: .remove,
+                    identity: activeIdentity
+                )
+            )
+            XCTAssertEqual(removed.status?.disposition, .absent)
+            XCTAssertThrowsError(
+                try identityStore.managedIdentityEvidence(
+                    scope: scope
+                )
+            ) {
+                XCTAssertEqual(
+                    $0 as? CertificateIdentityStoreError,
+                    .notFound
+                )
+            }
+            cleanupEvidence = nil
+        }
+    }
+
     func testHostAccessConfigurationPersistsAndRecoversExactly()
         throws
     {
@@ -118,6 +551,99 @@ final class NetworkHelperTests: XCTestCase {
             XCTAssertThrowsError(try restarted.remove(identity: third)) {
                 XCTAssertEqual($0 as? NetworkHelperError, .quarantined)
             }
+        }
+    }
+
+    func testPolicyConfigurationPersistsRecoversAndQuarantinesTampering()
+        throws
+    {
+        try withStore { store, root in
+            let plan = try policyPlan()
+            let applied = try store.apply(
+                identity: identity(),
+                corefile: corefile(),
+                policyPlan: plan
+            )
+            XCTAssertEqual(applied.policySHA256, plan.sha256)
+            XCTAssertEqual(
+                try store.activePolicyConfigurations(),
+                [NetworkHelperPersistedPolicyConfiguration(
+                    identity: identity(), plan: plan, sha256: plan.sha256
+                )]
+            )
+
+            let restarted = try NetworkHelperStateStore(rootURL: root)
+            XCTAssertEqual(
+                try restarted.activePolicyConfigurations().first?.plan,
+                plan
+            )
+            let policyURL = generationURL(root: root, generation: 1)
+                .appendingPathComponent("Policy.json")
+            try Data("tampered".utf8).write(to: policyURL)
+            XCTAssertEqual(
+                try restarted.status(identity: identity()).disposition,
+                .quarantined
+            )
+        }
+    }
+
+    func testPolicyBrokerRestoresExactGenerationAndReplacesOldPolicy()
+        throws
+    {
+        try withStore { store, _ in
+            let first = identity()
+            let firstPlan = try policyPlan(generation: 1, dns: "old.example.test")
+            let firstBroker = NetworkHelperPolicyBroker()
+            let firstDispatcher = NetworkHelperDispatcher(
+                store: store,
+                policyBroker: firstBroker
+            )
+            let applied = try dispatch(
+                firstDispatcher,
+                NetworkHelperRequest(
+                    operation: .apply,
+                    identity: first,
+                    corefile: corefile(),
+                    policyPlan: firstPlan
+                )
+            )
+            XCTAssertEqual(applied.status?.policySHA256, firstPlan.sha256)
+            XCTAssertEqual(applied.status?.policyActive, true)
+
+            let restartedBroker = NetworkHelperPolicyBroker()
+            let restartedDispatcher = NetworkHelperDispatcher(
+                store: store,
+                policyBroker: restartedBroker
+            )
+            let restored = try dispatch(
+                restartedDispatcher,
+                NetworkHelperRequest(operation: .status, identity: first)
+            )
+            XCTAssertEqual(restored.status?.policyActive, true)
+            XCTAssertTrue(
+                restartedBroker.allows(identity: first, flow: policyFlow(dns: "old.example.test"))
+            )
+
+            let second = identity(generation: 2, fence: secondFence)
+            let secondPlan = try policyPlan(generation: 2, dns: "new.example.test")
+            let replacement = try dispatch(
+                restartedDispatcher,
+                NetworkHelperRequest(
+                    operation: .apply,
+                    identity: second,
+                    corefile: corefile(ttl: 10),
+                    policyPlan: secondPlan,
+                    predecessorFencingToken: firstFence
+                )
+            )
+            XCTAssertEqual(replacement.status?.policyActive, true)
+            XCTAssertNil(restartedBroker.sha256(identity: first))
+            XCTAssertFalse(
+                restartedBroker.allows(identity: second, flow: policyFlow(dns: "old.example.test"))
+            )
+            XCTAssertTrue(
+                restartedBroker.allows(identity: second, flow: policyFlow(dns: "new.example.test"))
+            )
         }
     }
 
@@ -435,6 +961,17 @@ final class NetworkHelperTests: XCTestCase {
             outcome: .forwarded,
             durationMilliseconds: 5
         )
+        let mutualTLSAudit = NetworkHelperMutualTLSAuditEntry(
+            timestamp: Date(timeIntervalSince1970: 2),
+            listenerName: "api",
+            allowed: false,
+            reason: .identityRejected,
+            identityURI: nil,
+            certificateSHA256: String(
+                repeating: "c",
+                count: 64
+            )
+        )
         let response = NetworkHelperResponse(
             requestID: UUID().uuidString.lowercased(),
             operation: .status,
@@ -445,6 +982,7 @@ final class NetworkHelperTests: XCTestCase {
                 ingressSHA256: String(repeating: "b", count: 64),
                 ingressActive: true,
                 ingressAccessLog: [entry],
+                mutualTLSAudit: [mutualTLSAudit],
                 reason: nil
             )
         )
@@ -455,6 +993,10 @@ final class NetworkHelperTests: XCTestCase {
         )
         XCTAssertEqual(decoded, response)
         XCTAssertEqual(decoded.status?.ingressAccessLog, [entry])
+        XCTAssertEqual(
+            decoded.status?.mutualTLSAudit,
+            [mutualTLSAudit]
+        )
     }
 
     func testRequestValidationRejectsInvalidIdentityAndOversizedCorefile() {
@@ -529,6 +1071,7 @@ final class NetworkHelperTests: XCTestCase {
                             pathPrefix: "/",
                             methods: ["GET"],
                             protocolName: .http,
+                            targetServiceName: "api",
                             targetServiceUUIDs: [],
                             targetPort: 8_080,
                             backends: []
@@ -1222,6 +1765,41 @@ final class NetworkHelperTests: XCTestCase {
         )
     }
 
+    private func policyPlan(
+        generation: Int = 1,
+        dns: String = "old.example.test"
+    ) throws -> NetworkPolicyPlan {
+        try NetworkPolicyCompiler.compile(
+            projectName: "demo",
+            projectUUID: projectUUID,
+            generation: generation,
+            services: [(
+                name: "api",
+                resourceUUID: dnsUUID,
+                policy: HostwrightServiceNetworkPolicy(egress: [
+                    HostwrightNetworkPolicyRule(
+                        protocolName: .tcp,
+                        port: 443,
+                        dns: dns
+                    ),
+                ])
+            )]
+        )
+    }
+
+    private func policyFlow(dns: String) -> NetworkPolicyFlow {
+        NetworkPolicyFlow(
+            direction: .egress,
+            sourceProject: "demo",
+            sourceService: "api",
+            destinationProject: "external",
+            destinationService: "https",
+            protocolName: .tcp,
+            port: 443,
+            dns: dns
+        )
+    }
+
     private func hostAccessBinding()
         -> ProjectDNSHostAccessBinding
     {
@@ -1249,6 +1827,7 @@ final class NetworkHelperTests: XCTestCase {
                 pathPrefix: "/",
                 methods: ["GET"],
                 protocolName: .http,
+                targetServiceName: "api",
                 targetServiceUUIDs: [projectUUID],
                 targetPort: 8_080,
                 backends: [ProjectIngressBackend(
@@ -1257,6 +1836,37 @@ final class NetworkHelperTests: XCTestCase {
                     port: 8_080
                 )]
             )]
+        )
+    }
+
+    private func certificateBinding() -> ProjectCertificateRequestBinding {
+        ProjectCertificateRequestBinding(
+            name: "local",
+            certificateUUID: dnsUUID,
+            source: .localCA,
+            renewBeforeSeconds: 3_600,
+            validitySeconds: 86_400,
+            statusPolicy: .ifAvailable,
+            dnsNames: ["api.example.test"]
+        )
+    }
+
+    private func certificateEvidence(
+        binding: ProjectCertificateRequestBinding,
+        leaf: String = String(repeating: "a", count: 64),
+        issuer: String = String(repeating: "b", count: 64)
+    ) -> NetworkHelperCertificateEvidence {
+        NetworkHelperCertificateEvidence(
+            name: binding.name,
+            certificateUUID: binding.certificateUUID,
+            source: binding.source,
+            certificateSHA256: leaf,
+            issuerCertificateSHA256: issuer,
+            dnsNames: binding.dnsNames,
+            notValidBefore: Date(timeIntervalSince1970: 1_000),
+            notValidAfter: Date(timeIntervalSince1970: 100_000),
+            revocationStatus:
+                CertificateRevocationStatus.unavailable.rawValue
         )
     }
 

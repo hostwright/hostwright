@@ -1700,13 +1700,15 @@ public struct AppleContainerizationRuntimeAdapter: RuntimeAdapter {
                         resourceIdentifier: action.resourceIdentifier,
                         resourceUUID: context.resourceUUID,
                         projectUUID: context.projectResourceUUID,
+                        logicalServiceName: service.logicalServiceName,
                         image: ContainerizationHelperImageEvidence(image),
                         command: service.command,
                         environment: service.environment.map {
                             RuntimeInventoryEnvironmentEntry(name: $0.name, value: $0.value)
                         },
                         labels: labels,
-                        networks: service.networks
+                        networks: service.networks,
+                        networkPolicy: service.networkPolicy
                     ),
                     context: context
                 )

@@ -23,6 +23,8 @@ public enum NetworkHelperClientError: Error, Equatable, Sendable {
     case ioFailure
     case permissionDenied
     case bindingUnavailable
+    case certificateUnavailable
+    case invalidCertificate
     case helperFailure
     case cleanupFailed
 }
@@ -43,6 +45,13 @@ public struct NetworkHelperActiveCorefile: Equatable, Sendable {
     public let ingressSHA256: String?
     public let ingressActive: Bool
     public let ingressAccessLog: [NetworkHelperIngressAccessLogEntry]
+    public let mutualTLSAudit: [NetworkHelperMutualTLSAuditEntry]
+    public let certificateSHA256: String?
+    public let certificateActive: Bool
+    public let certificateEvidenceSHA256: String?
+    public let certificateSummaries: [NetworkHelperCertificateSummary]
+    public let policySHA256: String?
+    public let policyActive: Bool
     public let device: UInt64
     public let inode: UInt64
 
@@ -55,6 +64,13 @@ public struct NetworkHelperActiveCorefile: Equatable, Sendable {
         ingressSHA256: String? = nil,
         ingressActive: Bool = true,
         ingressAccessLog: [NetworkHelperIngressAccessLogEntry] = [],
+        mutualTLSAudit: [NetworkHelperMutualTLSAuditEntry] = [],
+        certificateSHA256: String? = nil,
+        certificateActive: Bool = true,
+        certificateEvidenceSHA256: String? = nil,
+        certificateSummaries: [NetworkHelperCertificateSummary] = [],
+        policySHA256: String? = nil,
+        policyActive: Bool = true,
         device: UInt64,
         inode: UInt64
     ) {
@@ -66,6 +82,13 @@ public struct NetworkHelperActiveCorefile: Equatable, Sendable {
         self.ingressSHA256 = ingressSHA256
         self.ingressActive = ingressActive
         self.ingressAccessLog = ingressAccessLog
+        self.mutualTLSAudit = mutualTLSAudit
+        self.certificateSHA256 = certificateSHA256
+        self.certificateActive = certificateActive
+        self.certificateEvidenceSHA256 = certificateEvidenceSHA256
+        self.certificateSummaries = certificateSummaries
+        self.policySHA256 = policySHA256
+        self.policyActive = policyActive
         self.device = device
         self.inode = inode
     }
@@ -248,6 +271,8 @@ public actor NetworkHelperClient {
         corefile: String,
         hostAccessBindings: [ProjectDNSHostAccessBinding] = [],
         ingressBindings: [ProjectIngressListenerBinding] = [],
+        certificateBindings: [ProjectCertificateRequestBinding] = [],
+        policyPlan: NetworkPolicyPlan? = nil,
         predecessorFencingToken: String? = nil
     ) throws -> NetworkHelperActiveCorefile {
         let request = NetworkHelperRequest(
@@ -256,6 +281,8 @@ public actor NetworkHelperClient {
             corefile: corefile,
             hostAccessBindings: hostAccessBindings,
             ingressBindings: ingressBindings,
+            certificateBindings: certificateBindings,
+            policyPlan: policyPlan,
             predecessorFencingToken: predecessorFencingToken
         )
         let status = try exchange(request)
@@ -265,6 +292,8 @@ public actor NetworkHelperClient {
         retainsActiveBindings =
             status.hostAccessSHA256 != nil ||
             status.ingressSHA256 != nil
+            || status.certificateSHA256 != nil ||
+            status.policySHA256 != nil
         return try validateActiveCorefile(status: status)
     }
 
@@ -419,6 +448,10 @@ public actor NetworkHelperClient {
             return .permissionDenied
         case .bindingUnavailable:
             return .bindingUnavailable
+        case .certificateUnavailable:
+            return .certificateUnavailable
+        case .invalidCertificate:
+            return .invalidCertificate
         }
     }
 
@@ -672,6 +705,19 @@ public actor NetworkHelperClient {
                 status.ingressActive ??
                 (status.ingressSHA256 == nil),
             ingressAccessLog: status.ingressAccessLog ?? [],
+            mutualTLSAudit: status.mutualTLSAudit ?? [],
+            certificateSHA256: status.certificateSHA256,
+            certificateActive:
+                status.certificateActive ??
+                (status.certificateSHA256 == nil),
+            certificateEvidenceSHA256:
+                status.certificateEvidenceSHA256,
+            certificateSummaries:
+                status.certificateSummaries ?? [],
+            policySHA256: status.policySHA256,
+            policyActive:
+                status.policyActive ??
+                (status.policySHA256 == nil),
             device: UInt64(metadata.st_dev),
             inode: UInt64(metadata.st_ino)
         )

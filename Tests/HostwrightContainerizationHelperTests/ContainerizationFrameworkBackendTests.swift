@@ -3,6 +3,7 @@ import CryptoKit
 import Darwin
 import Foundation
 import HostwrightCore
+import HostwrightNetworking
 import HostwrightRuntime
 import XCTest
 
@@ -466,6 +467,198 @@ final class ContainerizationFrameworkBackendTests: XCTestCase {
         )
     }
 
+    func testExplicitNetworkPolicyIsRejectedBeforeRuntimeMutationWhenDriverCannotEnforce()
+        async throws
+    {
+        let parent = try makePrivateParent()
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let store = try ContainerizationHelperStateStore(
+            rootURL: parent.appendingPathComponent("state", isDirectory: true)
+        )
+        let driver = RecordingContainerizationDriver()
+        let backend = try ContainerizationFrameworkBackend(
+            snapshot: snapshot(),
+            store: store,
+            driver: driver
+        )
+        let context = mutationContext()
+        let request = try createRequest(
+            context: context,
+            networkPolicy: HostwrightServiceNetworkPolicy()
+        )
+
+        do {
+            _ = try await backend.create(request, context: context)
+            XCTFail("Expected unavailable guest policy enforcement.")
+        } catch let ContainerizationHelperBackendError.unavailable(message) {
+            XCTAssertEqual(
+                message,
+                "Containerization guest network-policy enforcement is unavailable"
+            )
+        } catch {
+            XCTFail("Expected unavailable, got \(error)")
+        }
+
+        XCTAssertTrue(try store.loadRecords().isEmpty)
+        let operations = await driver.operations()
+        XCTAssertEqual(operations, [])
+    }
+
+    func testAvailableNetworkPolicyPersistsEvidenceAndRepairsRuleLoss()
+        async throws
+    {
+        let parent = try makePrivateParent()
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let store = try ContainerizationHelperStateStore(
+            rootURL: parent.appendingPathComponent("state", isDirectory: true)
+        )
+        let driver = RecordingContainerizationDriver(
+            networkPolicyAvailable: true
+        )
+        let backend = try ContainerizationFrameworkBackend(
+            snapshot: snapshot(),
+            store: store,
+            driver: driver
+        )
+        let context = mutationContext()
+        let request = try createRequest(
+            context: context,
+            networkPolicy: HostwrightServiceNetworkPolicy()
+        )
+        let mutation = ContainerizationHelperMutationPayload(
+            resourceIdentifier: request.resourceIdentifier,
+            resourceUUID: request.resourceUUID
+        )
+
+        _ = try await backend.create(request, context: context)
+        var record = try XCTUnwrap(store.loadRecords().first)
+        XCTAssertEqual(record.networkPolicyGeneration, 1)
+        XCTAssertEqual(
+            record.networkPolicySHA256,
+            String(repeating: "e", count: 64)
+        )
+        XCTAssertEqual(record.networkPolicyVerified, false)
+
+        _ = try await backend.start(mutation, context: context)
+        record = try XCTUnwrap(store.loadRecords().first)
+        XCTAssertEqual(record.networkPolicyGeneration, 1)
+        XCTAssertEqual(record.networkPolicyVerified, true)
+        let firstApplyCount = await driver.policyApplyCount(
+            resourceIdentifier: request.resourceIdentifier
+        )
+        XCTAssertGreaterThan(firstApplyCount, 0)
+
+        await driver.simulatePolicyRuleLoss(
+            resourceIdentifier: request.resourceIdentifier
+        )
+        _ = try await backend.restart(mutation, context: context)
+        record = try XCTUnwrap(store.loadRecords().first)
+        XCTAssertEqual(record.networkPolicyVerified, true)
+        let repairedApplyCount = await driver.policyApplyCount(
+            resourceIdentifier: request.resourceIdentifier
+        )
+        XCTAssertGreaterThan(
+            repairedApplyCount,
+            firstApplyCount
+        )
+
+        _ = try await backend.delete(mutation, context: context)
+        XCTAssertTrue(try store.loadRecords().isEmpty)
+        let hasAppliedPolicy = await driver.hasAppliedPolicy(
+            resourceIdentifier: request.resourceIdentifier
+        )
+        XCTAssertFalse(hasAppliedPolicy)
+    }
+
+    func testPolicyReconcileFailureAfterStartStopsResourceWithoutFalseSuccess()
+        async throws
+    {
+        let parent = try makePrivateParent()
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let store = try ContainerizationHelperStateStore(
+            rootURL: parent.appendingPathComponent("state", isDirectory: true)
+        )
+        let driver = RecordingContainerizationDriver(
+            networkPolicyAvailable: true,
+            policyFailureCalls: [4]
+        )
+        let backend = try ContainerizationFrameworkBackend(
+            snapshot: snapshot(),
+            store: store,
+            driver: driver
+        )
+        let context = mutationContext()
+        let request = try createRequest(
+            context: context,
+            networkPolicy: HostwrightServiceNetworkPolicy()
+        )
+        let mutation = ContainerizationHelperMutationPayload(
+            resourceIdentifier: request.resourceIdentifier,
+            resourceUUID: request.resourceUUID
+        )
+
+        _ = try await backend.create(request, context: context)
+        await XCTAssertThrowsErrorAsync {
+            _ = try await backend.start(mutation, context: context)
+        }
+
+        let record = try XCTUnwrap(store.loadRecords().first)
+        XCTAssertEqual(record.phase, .stopped)
+        XCTAssertEqual(record.failureCategory, "start-failed")
+        let operations = await driver.operations()
+        XCTAssertEqual(
+            Array(operations.suffix(2)),
+            ["policy-reconcile", "stop"]
+        )
+        let hasAppliedPolicy = await driver.hasAppliedPolicy(
+            resourceIdentifier: request.resourceIdentifier
+        )
+        XCTAssertFalse(hasAppliedPolicy)
+    }
+
+    func testPolicyReconcileCancellationAfterStartStopsResourceWithoutFalseSuccess()
+        async throws
+    {
+        let parent = try makePrivateParent()
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let store = try ContainerizationHelperStateStore(
+            rootURL: parent.appendingPathComponent("state", isDirectory: true)
+        )
+        let driver = RecordingContainerizationDriver(
+            networkPolicyAvailable: true,
+            policyCancellationCalls: [4]
+        )
+        let backend = try ContainerizationFrameworkBackend(
+            snapshot: snapshot(),
+            store: store,
+            driver: driver
+        )
+        let context = mutationContext()
+        let request = try createRequest(
+            context: context,
+            networkPolicy: HostwrightServiceNetworkPolicy()
+        )
+        let mutation = ContainerizationHelperMutationPayload(
+            resourceIdentifier: request.resourceIdentifier,
+            resourceUUID: request.resourceUUID
+        )
+
+        _ = try await backend.create(request, context: context)
+        await XCTAssertThrowsErrorAsync {
+            _ = try await backend.start(mutation, context: context)
+        }
+
+        let record = try XCTUnwrap(store.loadRecords().first)
+        XCTAssertEqual(record.phase, .stopped)
+        XCTAssertEqual(record.failureCategory, "cancelled")
+        let operations = await driver.operations()
+        XCTAssertEqual(Array(operations.suffix(2)), ["policy-reconcile", "stop"])
+        let hasAppliedPolicy = await driver.hasAppliedPolicy(
+            resourceIdentifier: request.resourceIdentifier
+        )
+        XCTAssertFalse(hasAppliedPolicy)
+    }
+
     func testLogSnapshotsAndCursorsPreserveCompleteAndEmptyLines() async throws {
         let parent = try makePrivateParent()
         defer { try? FileManager.default.removeItem(at: parent) }
@@ -712,6 +905,7 @@ final class ContainerizationFrameworkBackendTests: XCTestCase {
             resourceIdentifier: valid.resourceIdentifier,
             resourceUUID: valid.resourceUUID,
             projectUUID: valid.projectUUID,
+            logicalServiceName: valid.logicalServiceName,
             image: valid.image,
             command: valid.command,
             environment: valid.environment,
@@ -853,19 +1047,22 @@ final class ContainerizationFrameworkBackendTests: XCTestCase {
 
     private func createRequest(
         context: RuntimeMutationContext,
-        networks: [RuntimeDesiredNetworkAttachment] = []
+        networks: [RuntimeDesiredNetworkAttachment] = [],
+        networkPolicy: HostwrightServiceNetworkPolicy? = nil
     ) throws -> ContainerizationHelperCreatePayload {
         let identity = RuntimeServiceIdentity(projectName: "demo", serviceName: "api")
         return ContainerizationHelperCreatePayload(
             resourceIdentifier: RuntimeManagedResourceIdentity.resourceIdentifier(for: identity),
             resourceUUID: context.resourceUUID,
             projectUUID: context.projectResourceUUID,
+            logicalServiceName: identity.serviceName,
             image: RecordingContainerizationDriver.image,
             command: ["/bin/sleep", "30"],
             environment: [RuntimeInventoryEnvironmentEntry(name: "MODE", value: "test")],
             labels: try RuntimeManagedResourceIdentity.labels(for: identity, context: context)
                 .map { RuntimeInventoryLabel(key: $0.key, value: $0.value) },
-            networks: networks
+            networks: networks,
+            networkPolicy: networkPolicy
         )
     }
 
@@ -994,9 +1191,24 @@ private actor RecordingContainerizationDriver: ContainerizationHelperRuntimeDriv
     private var networks: [String: ContainerizationHelperRuntimeNetworkRecord] = [:]
     private var desiredContainerNetworks: [String: [RuntimeDesiredNetworkAttachment]] = [:]
     private var containerNetworks: [String: [RuntimeInventoryNetworkAttachment]] = [:]
+    private let networkPolicyAvailable: Bool
+    private let policyFailureCalls: Set<Int>
+    private let policyCancellationCalls: Set<Int>
+    private var policyReconcileCalls = 0
+    private var runningResources = Set<String>()
+    private var appliedPolicies = Set<String>()
+    private var policyApplyCounts: [String: Int] = [:]
 
-    init(localImageError: ContainerizationError? = nil) {
+    init(
+        localImageError: ContainerizationError? = nil,
+        networkPolicyAvailable: Bool = false,
+        policyFailureCalls: Set<Int> = [],
+        policyCancellationCalls: Set<Int> = []
+    ) {
         self.localImageError = localImageError
+        self.networkPolicyAvailable = networkPolicyAvailable
+        self.policyFailureCalls = policyFailureCalls
+        self.policyCancellationCalls = policyCancellationCalls
     }
 
     func resolveProcess(
@@ -1099,6 +1311,67 @@ private actor RecordingContainerizationDriver: ContainerizationHelperRuntimeDriv
         containerNetworks[resourceIdentifier] ?? []
     }
 
+    func networkPolicyCapabilities()
+        async -> RuntimeNetworkPolicyProviderCapabilities {
+        guard networkPolicyAvailable else {
+            return .unavailable
+        }
+        return RuntimeNetworkPolicyProviderCapabilities(
+            state: .available,
+            reason: .implemented,
+            directions: HostwrightNetworkPolicyDirection.allCases,
+            enforcesExactIdentity: true,
+            enforcesCIDR: true,
+            enforcesDNS: true,
+            appliesAtomicGenerations: true,
+            observesRuleDigest: true
+        )
+    }
+
+    func reconcileNetworkPolicies(
+        records: [ContainerizationHelperPersistedRecord]
+    ) async throws -> [String: ContainerizationGuestNetworkPolicyEvidence] {
+        guard networkPolicyAvailable ||
+                records.contains(where: { $0.networkPolicy != nil }) ||
+                !appliedPolicies.isEmpty else {
+            return [:]
+        }
+        policyReconcileCalls += 1
+        events.append("policy-reconcile")
+        if policyFailureCalls.contains(policyReconcileCalls) {
+            throw ContainerizationHelperBackendError.executionFailed(
+                "injected guest policy reconcile failure"
+            )
+        }
+        if policyCancellationCalls.contains(policyReconcileCalls) {
+            throw CancellationError()
+        }
+        let protected = records.filter { $0.networkPolicy != nil }
+        let protectedIdentifiers = Set(protected.map(\.resourceIdentifier))
+        appliedPolicies.formIntersection(protectedIdentifiers)
+
+        var evidence:
+            [String: ContainerizationGuestNetworkPolicyEvidence] = [:]
+        for record in protected {
+            let isRunning = runningResources.contains(
+                record.resourceIdentifier
+            )
+            if isRunning {
+                appliedPolicies.insert(record.resourceIdentifier)
+                policyApplyCounts[record.resourceIdentifier, default: 0] += 1
+            }
+            evidence[record.resourceIdentifier] =
+                ContainerizationGuestNetworkPolicyEvidence(
+                    generation: record.networkPolicyGeneration ?? 1,
+                    sha256: String(repeating: "e", count: 64),
+                    verified:
+                        isRunning &&
+                        appliedPolicies.contains(record.resourceIdentifier)
+                )
+        }
+        return evidence
+    }
+
     func create(
         _ record: ContainerizationHelperPersistedRecord,
         networks attachments: [RuntimeDesiredNetworkAttachment]
@@ -1113,6 +1386,7 @@ private actor RecordingContainerizationDriver: ContainerizationHelperRuntimeDriv
             record: record,
             attachments: desiredContainerNetworks[record.resourceIdentifier] ?? []
         )
+        runningResources.insert(record.resourceIdentifier)
         events.append("start")
     }
 
@@ -1121,17 +1395,22 @@ private actor RecordingContainerizationDriver: ContainerizationHelperRuntimeDriv
             record: record,
             attachments: desiredContainerNetworks[record.resourceIdentifier] ?? []
         )
+        runningResources.insert(record.resourceIdentifier)
         events.append("restart")
     }
 
     func stop(_ record: ContainerizationHelperPersistedRecord) async throws {
         containerNetworks.removeValue(forKey: record.resourceIdentifier)
+        runningResources.remove(record.resourceIdentifier)
+        appliedPolicies.remove(record.resourceIdentifier)
         events.append("stop")
     }
 
     func delete(_ record: ContainerizationHelperPersistedRecord) async throws {
         desiredContainerNetworks.removeValue(forKey: record.resourceIdentifier)
         containerNetworks.removeValue(forKey: record.resourceIdentifier)
+        runningResources.remove(record.resourceIdentifier)
+        appliedPolicies.remove(record.resourceIdentifier)
         events.append("delete")
     }
 
@@ -1175,6 +1454,15 @@ private actor RecordingContainerizationDriver: ContainerizationHelperRuntimeDriv
 
     func shutdown() async {}
     func operations() -> [String] { events }
+    func simulatePolicyRuleLoss(resourceIdentifier: String) {
+        appliedPolicies.remove(resourceIdentifier)
+    }
+    func policyApplyCount(resourceIdentifier: String) -> Int {
+        policyApplyCounts[resourceIdentifier, default: 0]
+    }
+    func hasAppliedPolicy(resourceIdentifier: String) -> Bool {
+        appliedPolicies.contains(resourceIdentifier)
+    }
 }
 
 private func XCTAssertThrowsErrorAsync(

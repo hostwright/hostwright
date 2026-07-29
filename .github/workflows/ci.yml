@@ -15,6 +15,27 @@ jobs:
         run: swift build
       - name: Test
         run: swift test
+      - name: Guest network-policy loader
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd Guest/HostwrightNetfilter
+          test -z "$(gofmt -l .)"
+          GOTOOLCHAIN=local go test ./...
+          GOTOOLCHAIN=local GOOS=linux GOARCH=arm64 CGO_ENABLED=0 \
+            go test -c -mod=readonly -trimpath \
+            -o "$RUNNER_TEMP/hostwright-netfilter-tests"
+          for build in first second; do
+            GOTOOLCHAIN=local GOOS=linux GOARCH=arm64 CGO_ENABLED=0 \
+              go build -mod=readonly -trimpath -buildvcs=false \
+              -ldflags="-buildid= -s -w" \
+              -o "$RUNNER_TEMP/hostwright-netfilter-$build" .
+          done
+          cmp \
+            "$RUNNER_TEMP/hostwright-netfilter-first" \
+            "$RUNNER_TEMP/hostwright-netfilter-second"
+          file "$RUNNER_TEMP/hostwright-netfilter-first" \
+            | grep -F "ELF 64-bit LSB executable, ARM aarch64"
       - name: Local integration
         run: scripts/integration.sh
       - name: Roadmap governance

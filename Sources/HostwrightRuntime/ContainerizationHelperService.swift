@@ -1,5 +1,6 @@
 import Foundation
 import HostwrightCore
+import HostwrightNetworking
 
 public struct ContainerizationHelperEmptyPayload: Codable, Equatable, Sendable {
     public init() {}
@@ -240,41 +241,49 @@ public struct ContainerizationHelperCreatePayload: Codable, Equatable, Sendable 
     public let resourceIdentifier: String
     public let resourceUUID: String
     public let projectUUID: String
+    public let logicalServiceName: String
     public let image: ContainerizationHelperImageEvidence
     public let command: [String]
     public let environment: [RuntimeInventoryEnvironmentEntry]
     public let labels: [RuntimeInventoryLabel]
     public let networks: [RuntimeDesiredNetworkAttachment]
+    public let networkPolicy: HostwrightServiceNetworkPolicy?
 
     public init(
         resourceIdentifier: String,
         resourceUUID: String,
         projectUUID: String,
+        logicalServiceName: String = "service",
         image: ContainerizationHelperImageEvidence,
         command: [String],
         environment: [RuntimeInventoryEnvironmentEntry],
         labels: [RuntimeInventoryLabel],
-        networks: [RuntimeDesiredNetworkAttachment] = []
+        networks: [RuntimeDesiredNetworkAttachment] = [],
+        networkPolicy: HostwrightServiceNetworkPolicy? = nil
     ) {
         self.resourceIdentifier = resourceIdentifier
         self.resourceUUID = resourceUUID
         self.projectUUID = projectUUID
+        self.logicalServiceName = logicalServiceName
         self.image = image
         self.command = command
         self.environment = environment
         self.labels = labels
         self.networks = networks
+        self.networkPolicy = networkPolicy
     }
 
     private enum CodingKeys: String, CodingKey {
         case resourceIdentifier
         case resourceUUID
         case projectUUID
+        case logicalServiceName
         case image
         case command
         case environment
         case labels
         case networks
+        case networkPolicy
     }
 
     public init(from decoder: Decoder) throws {
@@ -283,6 +292,18 @@ public struct ContainerizationHelperCreatePayload: Codable, Equatable, Sendable 
             resourceIdentifier: try values.decode(String.self, forKey: .resourceIdentifier),
             resourceUUID: try values.decode(String.self, forKey: .resourceUUID),
             projectUUID: try values.decode(String.self, forKey: .projectUUID),
+            logicalServiceName:
+                try values.decodeIfPresent(
+                    String.self,
+                    forKey: .logicalServiceName
+                ) ??
+                values.decode(
+                    [RuntimeInventoryLabel].self,
+                    forKey: .labels
+                ).first {
+                    $0.key == RuntimeManagedResourceIdentity.serviceLabel
+                }?.value ??
+                "service",
             image: try values.decode(ContainerizationHelperImageEvidence.self, forKey: .image),
             command: try values.decode([String].self, forKey: .command),
             environment: try values.decode(
@@ -293,7 +314,11 @@ public struct ContainerizationHelperCreatePayload: Codable, Equatable, Sendable 
             networks: try values.decodeIfPresent(
                 [RuntimeDesiredNetworkAttachment].self,
                 forKey: .networks
-            ) ?? []
+            ) ?? [],
+            networkPolicy: try values.decodeIfPresent(
+                HostwrightServiceNetworkPolicy.self,
+                forKey: .networkPolicy
+            )
         )
     }
 
@@ -302,6 +327,7 @@ public struct ContainerizationHelperCreatePayload: Codable, Equatable, Sendable 
         try values.encode(resourceIdentifier, forKey: .resourceIdentifier)
         try values.encode(resourceUUID, forKey: .resourceUUID)
         try values.encode(projectUUID, forKey: .projectUUID)
+        try values.encode(logicalServiceName, forKey: .logicalServiceName)
         try values.encode(image, forKey: .image)
         try values.encode(command, forKey: .command)
         try values.encode(environment, forKey: .environment)
@@ -309,6 +335,7 @@ public struct ContainerizationHelperCreatePayload: Codable, Equatable, Sendable 
         if !networks.isEmpty {
             try values.encode(networks, forKey: .networks)
         }
+        try values.encodeIfPresent(networkPolicy, forKey: .networkPolicy)
     }
 }
 

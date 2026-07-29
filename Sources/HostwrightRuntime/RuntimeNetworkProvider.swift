@@ -152,6 +152,52 @@ public struct RuntimeHostAccessProviderCapabilities:
         )
 }
 
+public struct RuntimeNetworkPolicyProviderCapabilities:
+    Codable,
+    Equatable,
+    Sendable
+{
+    public let state: RuntimeProviderCapabilityState
+    public let reason: RuntimeProviderFeatureReason
+    public let directions: [HostwrightNetworkPolicyDirection]
+    public let enforcesExactIdentity: Bool
+    public let enforcesCIDR: Bool
+    public let enforcesDNS: Bool
+    public let appliesAtomicGenerations: Bool
+    public let observesRuleDigest: Bool
+
+    public init(
+        state: RuntimeProviderCapabilityState,
+        reason: RuntimeProviderFeatureReason,
+        directions: [HostwrightNetworkPolicyDirection],
+        enforcesExactIdentity: Bool,
+        enforcesCIDR: Bool,
+        enforcesDNS: Bool,
+        appliesAtomicGenerations: Bool,
+        observesRuleDigest: Bool
+    ) {
+        self.state = state
+        self.reason = reason
+        self.directions = directions.sorted { $0.rawValue < $1.rawValue }
+        self.enforcesExactIdentity = enforcesExactIdentity
+        self.enforcesCIDR = enforcesCIDR
+        self.enforcesDNS = enforcesDNS
+        self.appliesAtomicGenerations = appliesAtomicGenerations
+        self.observesRuleDigest = observesRuleDigest
+    }
+
+    public static let unavailable = Self(
+        state: .unavailable,
+        reason: .notImplemented,
+        directions: [],
+        enforcesExactIdentity: false,
+        enforcesCIDR: false,
+        enforcesDNS: false,
+        appliesAtomicGenerations: false,
+        observesRuleDigest: false
+    )
+}
+
 public struct RuntimeNetworkProviderCapabilities: Codable, Equatable, Sendable {
     public static let currentSchemaVersion = 1
 
@@ -163,6 +209,7 @@ public struct RuntimeNetworkProviderCapabilities: Codable, Equatable, Sendable {
     public let ipv6AddressModes: [RuntimeNetworkAddressMode]
     public let attachmentTiming: RuntimeNetworkAttachmentTiming
     public let hostAccess: RuntimeHostAccessProviderCapabilities?
+    public let networkPolicy: RuntimeNetworkPolicyProviderCapabilities?
 
     public init(
         schemaVersion: Int = RuntimeNetworkProviderCapabilities.currentSchemaVersion,
@@ -172,7 +219,8 @@ public struct RuntimeNetworkProviderCapabilities: Codable, Equatable, Sendable {
         ipv4AddressModes: [RuntimeNetworkAddressMode],
         ipv6AddressModes: [RuntimeNetworkAddressMode],
         attachmentTiming: RuntimeNetworkAttachmentTiming,
-        hostAccess: RuntimeHostAccessProviderCapabilities? = nil
+        hostAccess: RuntimeHostAccessProviderCapabilities? = nil,
+        networkPolicy: RuntimeNetworkPolicyProviderCapabilities? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.providerID = providerID
@@ -182,6 +230,7 @@ public struct RuntimeNetworkProviderCapabilities: Codable, Equatable, Sendable {
         self.ipv6AddressModes = ipv6AddressModes.sorted { $0.rawValue < $1.rawValue }
         self.attachmentTiming = attachmentTiming
         self.hostAccess = hostAccess
+        self.networkPolicy = networkPolicy
     }
 
     public func status(
@@ -210,7 +259,8 @@ public struct RuntimeNetworkProviderCapabilities: Codable, Equatable, Sendable {
         ipv4AddressModes: [.automatic, .cidr],
         ipv6AddressModes: [.automatic, .cidr],
         attachmentTiming: .containerCreateOnly,
-        hostAccess: .guardedBroker
+        hostAccess: .guardedBroker,
+        networkPolicy: .unavailable
     )
 
     public static let appleContainerizationUnavailable = RuntimeNetworkProviderCapabilities(
@@ -226,7 +276,8 @@ public struct RuntimeNetworkProviderCapabilities: Codable, Equatable, Sendable {
         ipv4AddressModes: [],
         ipv6AddressModes: [],
         attachmentTiming: .unavailable,
-        hostAccess: .unavailable
+        hostAccess: .unavailable,
+        networkPolicy: .unavailable
     )
 }
 

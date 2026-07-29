@@ -125,6 +125,7 @@ public enum ManifestCanonicalEncoder {
         }
         appendVolumeDeclarations(manifest.volumes, to: &lines)
         appendNetworkDefinitions(manifest.networks, to: &lines)
+        appendCertificateDeclarations(manifest.certificates, to: &lines)
         appendIngress(manifest.ingress, to: &lines)
         lines.append("services:")
 
@@ -183,6 +184,7 @@ public enum ManifestCanonicalEncoder {
             )
             appendHostAccess(service.hostAccess, to: &lines)
             appendServiceNetworks(service.networks, to: &lines)
+            appendNetworkPolicy(service.networkPolicy, to: &lines)
             appendMounts(service.mounts, to: &lines)
 
             let probes = canonicalProbes(for: service)
@@ -310,6 +312,16 @@ public enum ManifestCanonicalEncoder {
                     "      authentication: \(quote(listener.exposure.authentication.rawValue))"
                 )
             }
+            if let certificate = listener.certificate {
+                lines.append("    certificate: \(quote(certificate))")
+            }
+            if !listener.peers.isEmpty {
+                lines.append("    peers:")
+                for peer in listener.peers.sorted(by: { ($0.service, $0.role.rawValue) < ($1.service, $1.role.rawValue) }) {
+                    lines.append("      - service: \(quote(peer.service))")
+                    lines.append("        role: \(quote(peer.role.rawValue))")
+                }
+            }
             lines.append("    port: \(listener.port)")
             lines.append("    routes:")
             for route in listener.routes.sorted(
@@ -332,6 +344,20 @@ public enum ManifestCanonicalEncoder {
                 )
                 lines.append("        targetPort: \(route.targetPort)")
             }
+        }
+    }
+
+    private static func appendCertificateDeclarations(_ certificates: [String: HostwrightCertificateDeclaration], to lines: inout [String]) {
+        guard !certificates.isEmpty else { return }
+        lines.append("certificates:")
+        for (name, certificate) in certificates.sorted(by: { $0.key < $1.key }) {
+            lines.append("  \(quote(name)):")
+            lines.append("    source: \(quote(certificate.source.rawValue))")
+            if let identitySHA256 = certificate.identitySHA256 { lines.append("    identitySHA256: \(quote(identitySHA256))") }
+            if let issuer = certificate.issuer { lines.append("    issuer: \(quote(issuer))") }
+            lines.append("    renewBeforeSeconds: \(certificate.renewBeforeSeconds)")
+            lines.append("    validitySeconds: \(certificate.validitySeconds)")
+            lines.append("    statusPolicy: \(quote(certificate.statusPolicy.rawValue))")
         }
     }
 
@@ -462,6 +488,43 @@ public enum ManifestCanonicalEncoder {
                 "        addressClass: \(quote(endpoint.addressClass.rawValue))"
             )
             lines.append("        port: \(endpoint.port)")
+        }
+    }
+
+    private static func appendNetworkPolicy(
+        _ policy: HostwrightServiceNetworkPolicy?,
+        to lines: inout [String]
+    ) {
+        guard let policy else { return }
+        lines.append("    networkPolicy:")
+        appendNetworkPolicyRules(policy.ingress, direction: "ingress", to: &lines)
+        appendNetworkPolicyRules(policy.egress, direction: "egress", to: &lines)
+    }
+
+    private static func appendNetworkPolicyRules(
+        _ rules: [HostwrightNetworkPolicyRule],
+        direction: String,
+        to lines: inout [String]
+    ) {
+        guard !rules.isEmpty else {
+            lines.append("      \(direction): []")
+            return
+        }
+        lines.append("      \(direction):")
+        for rule in rules.sorted(by: { $0.canonicalKey < $1.canonicalKey }) {
+            var fields: [(String, String)] = []
+            if let project = rule.project { fields.append(("project", quote(project))) }
+            if let service = rule.service { fields.append(("service", quote(service))) }
+            if let identity = rule.identity { fields.append(("identity", quote(identity))) }
+            if let protocolName = rule.protocolName { fields.append(("protocol", quote(protocolName.rawValue))) }
+            if let address = rule.address { fields.append(("address", quote(address))) }
+            if let port = rule.port { fields.append(("port", "\(port)")) }
+            if let dns = rule.dns { fields.append(("dns", quote(dns))) }
+            guard let first = fields.first else { continue }
+            lines.append("        - \(first.0): \(first.1)")
+            for field in fields.dropFirst() {
+                lines.append("          \(field.0): \(field.1)")
+            }
         }
     }
 

@@ -460,6 +460,7 @@ final class Phase07ContainerizationNetworkLiveTests: XCTestCase {
                     RuntimeManagedResourceIdentity.resourceIdentifier(for: identity),
                 resourceUUID: context.resourceUUID,
                 projectUUID: context.projectResourceUUID,
+                logicalServiceName: serviceName,
                 image: image,
                 command: command,
                 environment: [],

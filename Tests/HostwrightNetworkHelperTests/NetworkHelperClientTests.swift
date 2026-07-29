@@ -151,7 +151,15 @@ final class NetworkHelperClientTests: XCTestCase {
                 process.standardOutput = FileHandle.nullDevice
                 process.standardError = FileHandle.nullDevice
                 try process.run()
-                return NetworkHelperProcessLease(process: process)
+                return NetworkHelperProcessLease(
+                    processID: process.processIdentifier,
+                    isRunning: { process.isRunning },
+                    terminate: {
+                        if process.isRunning {
+                            process.terminate()
+                        }
+                    }
+                )
             }
         )
         let identity = NetworkHelperDNSIdentity(

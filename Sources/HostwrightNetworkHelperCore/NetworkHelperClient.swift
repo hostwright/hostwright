@@ -160,29 +160,35 @@ public struct NetworkHelperClientConfiguration: Equatable, Sendable {
 }
 
 final class NetworkHelperProcessLease: @unchecked Sendable {
-    let process: Process
     let processID: pid_t
+    private let running: @Sendable () -> Bool
+    private let terminate: @Sendable () -> Void
 
-    init(process: Process) {
-        self.process = process
-        processID = process.processIdentifier
+    init(
+        processID: pid_t,
+        isRunning: @escaping @Sendable () -> Bool,
+        terminate: @escaping @Sendable () -> Void
+    ) {
+        self.processID = processID
+        running = isRunning
+        self.terminate = terminate
     }
 
     var isRunning: Bool {
-        process.isRunning
+        running()
     }
 
     func waitForExit(deadlineMilliseconds: Int64) -> Bool {
-        while process.isRunning,
+        while isRunning,
               Self.monotonicMilliseconds() < deadlineMilliseconds {
             usleep(10_000)
         }
-        return !process.isRunning
+        return !isRunning
     }
 
     func terminateIfRunning() {
-        guard process.isRunning else { return }
-        process.terminate()
+        guard isRunning else { return }
+        terminate()
     }
 
     private static func monotonicMilliseconds() -> Int64 {
@@ -199,36 +205,307 @@ struct NetworkHelperProcessLauncher: Sendable {
     ) throws -> NetworkHelperProcessLease
 
     static let live = Self { configuration in
-        var metadata = stat()
-        guard lstat(configuration.executableURL.path, &metadata) == 0,
-              (metadata.st_mode & S_IFMT) == S_IFREG,
-              metadata.st_uid == geteuid() || metadata.st_uid == 0,
-              metadata.st_nlink == 1,
-              access(configuration.executableURL.path, X_OK) == 0 else {
-            throw NetworkHelperClientError.executableRejected
-        }
+        try NetworkHelperPOSIXLauncher.launch(configuration)
+    }
+}
 
-        let process = Process()
-        process.executableURL = configuration.executableURL
-        process.arguments = [
+private enum NetworkHelperPOSIXLauncher {
+    private struct ExecutableIdentity: Equatable {
+        let device: UInt64
+        let inode: UInt64
+        let owner: UInt32
+        let mode: UInt16
+        let links: UInt16
+        let size: Int64
+        let modifiedSeconds: Int64
+        let modifiedNanoseconds: Int64
+        let changedSeconds: Int64
+        let changedNanoseconds: Int64
+
+        init(path: String) throws {
+            var metadata = stat()
+            guard lstat(path, &metadata) == 0,
+                  (metadata.st_mode & S_IFMT) == S_IFREG,
+                  metadata.st_uid == geteuid() || metadata.st_uid == 0,
+                  metadata.st_nlink == 1,
+                  metadata.st_mode
+                    & (S_IWGRP | S_IWOTH | S_ISUID | S_ISGID | S_ISTXT)
+                    == 0,
+                  metadata.st_mode & S_IXUSR != 0 else {
+                throw NetworkHelperClientError.executableRejected
+            }
+            device = UInt64(metadata.st_dev)
+            inode = UInt64(metadata.st_ino)
+            owner = UInt32(metadata.st_uid)
+            mode = UInt16(metadata.st_mode & 0o7777)
+            links = UInt16(metadata.st_nlink)
+            size = Int64(metadata.st_size)
+            modifiedSeconds = Int64(metadata.st_mtimespec.tv_sec)
+            modifiedNanoseconds = Int64(metadata.st_mtimespec.tv_nsec)
+            changedSeconds = Int64(metadata.st_ctimespec.tv_sec)
+            changedNanoseconds = Int64(metadata.st_ctimespec.tv_nsec)
+        }
+    }
+
+    static func launch(
+        _ configuration: NetworkHelperClientConfiguration
+    ) throws -> NetworkHelperProcessLease {
+        let executablePath = configuration.executableURL.path
+        let executableIdentity = try ExecutableIdentity(path: executablePath)
+        let rootDirectory = Darwin.open(
+            "/",
+            O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC
+        )
+        guard rootDirectory >= 0 else {
+            throw NetworkHelperClientError.launchFailed
+        }
+        defer { Darwin.close(rootDirectory) }
+
+        var fileActions: posix_spawn_file_actions_t?
+        var attributes: posix_spawnattr_t?
+        guard posix_spawn_file_actions_init(&fileActions) == 0 else {
+            throw NetworkHelperClientError.launchFailed
+        }
+        defer { posix_spawn_file_actions_destroy(&fileActions) }
+        guard posix_spawnattr_init(&attributes) == 0 else {
+            throw NetworkHelperClientError.launchFailed
+        }
+        defer { posix_spawnattr_destroy(&attributes) }
+
+        try requireSuccess(
+            posix_spawn_file_actions_addfchdir(
+                &fileActions,
+                rootDirectory
+            )
+        )
+        try requireSuccess(
+            posix_spawn_file_actions_addclose(
+                &fileActions,
+                rootDirectory
+            )
+        )
+        try requireSuccess(
+            posix_spawn_file_actions_addopen(
+                &fileActions,
+                STDIN_FILENO,
+                "/dev/null",
+                O_RDONLY,
+                0
+            )
+        )
+        try requireSuccess(
+            posix_spawn_file_actions_addopen(
+                &fileActions,
+                STDOUT_FILENO,
+                "/dev/null",
+                O_WRONLY,
+                0
+            )
+        )
+        try requireSuccess(
+            posix_spawn_file_actions_addopen(
+                &fileActions,
+                STDERR_FILENO,
+                "/dev/null",
+                O_WRONLY,
+                0
+            )
+        )
+
+        var signalMask = sigset_t()
+        sigemptyset(&signalMask)
+        try requireSuccess(
+            posix_spawnattr_setsigmask(&attributes, &signalMask)
+        )
+        var defaultSignals = sigset_t()
+        sigemptyset(&defaultSignals)
+        for signal in [SIGALRM, SIGHUP, SIGINT, SIGPIPE, SIGQUIT, SIGTERM] {
+            sigaddset(&defaultSignals, signal)
+        }
+        try requireSuccess(
+            posix_spawnattr_setsigdefault(&attributes, &defaultSignals)
+        )
+        let flags = Int16(
+            POSIX_SPAWN_SETSID |
+                POSIX_SPAWN_CLOEXEC_DEFAULT |
+                POSIX_SPAWN_SETSIGMASK |
+                POSIX_SPAWN_SETSIGDEF |
+                POSIX_SPAWN_START_SUSPENDED
+        )
+        try requireSuccess(
+            posix_spawnattr_setflags(&attributes, flags)
+        )
+
+        var arguments = try cStringVector([
+            executablePath,
             "--runtime-directory",
             configuration.runtimeDirectoryURL.path,
             "--idle-timeout-milliseconds",
             String(configuration.helperIdleTimeoutMilliseconds)
-        ]
-        process.environment = [:]
-        process.standardInput = FileHandle.nullDevice
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
+        ])
+        defer { freeCStringVector(&arguments) }
+        var environment: [UnsafeMutablePointer<CChar>?] = [nil]
+        var processID = pid_t(0)
+        let launchCode = arguments.withUnsafeMutableBufferPointer {
+            argumentBuffer in
+            environment.withUnsafeMutableBufferPointer {
+                environmentBuffer in
+                posix_spawn(
+                    &processID,
+                    executablePath,
+                    &fileActions,
+                    &attributes,
+                    argumentBuffer.baseAddress!,
+                    environmentBuffer.baseAddress!
+                )
+            }
+        }
+        guard launchCode == 0, processID > 0 else {
+            throw NetworkHelperClientError.launchFailed
+        }
+
         do {
-            try process.run()
+            guard try ExecutableIdentity(path: executablePath)
+                    == executableIdentity else {
+                throw NetworkHelperClientError.executableRejected
+            }
         } catch {
+            terminateSuspended(processID)
+            throw error
+        }
+        guard kill(processID, SIGCONT) == 0 else {
+            terminateSuspended(processID)
             throw NetworkHelperClientError.launchFailed
         }
-        guard process.processIdentifier > 0 else {
+
+        let state = NetworkHelperPOSIXProcessState(processID: processID)
+        return NetworkHelperProcessLease(
+            processID: processID,
+            isRunning: { state.isRunning },
+            terminate: { state.terminate() }
+        )
+    }
+
+    private static func requireSuccess(_ code: Int32) throws {
+        guard code == 0 else {
             throw NetworkHelperClientError.launchFailed
         }
-        return NetworkHelperProcessLease(process: process)
+    }
+
+    private static func cStringVector(
+        _ strings: [String]
+    ) throws -> [UnsafeMutablePointer<CChar>?] {
+        var result: [UnsafeMutablePointer<CChar>?] = []
+        result.reserveCapacity(strings.count + 1)
+        for string in strings {
+            guard !string.contains("\0"),
+                  let pointer = strdup(string) else {
+                freeCStringVector(&result)
+                throw NetworkHelperClientError.launchFailed
+            }
+            result.append(pointer)
+        }
+        result.append(nil)
+        return result
+    }
+
+    private static func freeCStringVector(
+        _ vector: inout [UnsafeMutablePointer<CChar>?]
+    ) {
+        for pointer in vector {
+            if let pointer { free(pointer) }
+        }
+        vector.removeAll(keepingCapacity: false)
+    }
+
+    private static func terminateSuspended(_ processID: pid_t) {
+        if kill(-processID, SIGKILL) != 0, errno == ESRCH {
+            _ = kill(processID, SIGKILL)
+        }
+        var status: Int32 = 0
+        while waitpid(processID, &status, 0) < 0, errno == EINTR {}
+    }
+}
+
+private final class NetworkHelperPOSIXProcessState: @unchecked Sendable {
+    private let processID: pid_t
+    private let condition = NSCondition()
+    private var reaped = false
+    private var terminationStarted = false
+
+    init(processID: pid_t) {
+        self.processID = processID
+        DispatchQueue.global(qos: .utility).async { [self] in
+            observeLeaderExitCleanDescendantsAndReap()
+        }
+    }
+
+    var isRunning: Bool {
+        condition.lock()
+        defer { condition.unlock() }
+        return !reaped
+    }
+
+    func terminate() {
+        condition.lock()
+        let shouldSignal = !reaped && !terminationStarted
+        if shouldSignal { terminationStarted = true }
+        condition.unlock()
+
+        if shouldSignal {
+            signalProcessGroup(SIGTERM)
+            if !waitUntilReaped(milliseconds: 100) {
+                signalProcessGroup(SIGKILL)
+            }
+        }
+        _ = waitUntilReaped(milliseconds: 2_000)
+    }
+
+    private func observeLeaderExitCleanDescendantsAndReap() {
+        var information = siginfo_t()
+        while waitid(
+            P_PID,
+            id_t(processID),
+            &information,
+            WEXITED | WNOWAIT
+        ) != 0 {
+            if errno == EINTR { continue }
+            markReaped()
+            return
+        }
+        guard information.si_pid == processID else {
+            markReaped()
+            return
+        }
+
+        _ = kill(-processID, SIGKILL)
+        var status: Int32 = 0
+        while waitpid(processID, &status, 0) < 0, errno == EINTR {}
+        markReaped()
+    }
+
+    private func markReaped() {
+        condition.lock()
+        reaped = true
+        condition.broadcast()
+        condition.unlock()
+    }
+
+    private func waitUntilReaped(milliseconds: Int) -> Bool {
+        let deadline = Date(
+            timeIntervalSinceNow: Double(milliseconds) / 1_000
+        )
+        condition.lock()
+        while !reaped, condition.wait(until: deadline) {}
+        let result = reaped
+        condition.unlock()
+        return result
+    }
+
+    private func signalProcessGroup(_ signal: Int32) {
+        if kill(-processID, signal) != 0, errno == ESRCH {
+            _ = kill(processID, signal)
+        }
     }
 }
 

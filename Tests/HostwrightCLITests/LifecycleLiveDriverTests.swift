@@ -443,8 +443,7 @@ final class LifecycleLiveDriverTests: XCTestCase {
         project: demo
         imagePolicy: require-digest
         networks:
-          backend:
-            ipv6: disabled
+          backend: {}
         services:
           api:
             image: registry.example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa

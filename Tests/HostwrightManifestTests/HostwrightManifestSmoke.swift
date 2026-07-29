@@ -1839,7 +1839,8 @@ final class HostwrightManifestTests: XCTestCase {
             Set(properties.keys),
             [
                 "version", "project", "imagePolicy", "imageTrust", "imageSBOM",
-                "imageVulnerability", "imageProvenance", "volumes", "networks", "services"
+                "imageVulnerability", "imageProvenance", "volumes", "networks",
+                "certificates", "ingress", "services"
             ]
         )
         let required = try XCTUnwrap(schemaJSON["required"] as? [String])
@@ -2135,7 +2136,7 @@ final class HostwrightManifestTests: XCTestCase {
                 "image", "replicas", "platform", "resources", "user", "group", "workdir",
                 "entrypoint", "command", "init", "dependsOn", "env", "secretEnv", "labels",
                 "ports", "hostAccess", "networks", "volumes", "health", "probes",
-                "restart", "update", "hooks",
+                "networkPolicy", "restart", "update", "hooks",
                 "rosetta", "virtualization", "readOnlyRootFilesystem", "shmSize"
             ]
         )

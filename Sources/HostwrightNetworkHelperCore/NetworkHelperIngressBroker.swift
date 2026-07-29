@@ -194,20 +194,15 @@ final class NetworkHelperIngressBroker: @unchecked Sendable {
           guard previousByEndpoint[endpoint] == nil else {
             throw NetworkHelperError.bindingUnavailable
           }
-          let listener = try NetworkHelperIngressBoundListener(
+          let listener = try makeReplacementListener(
             binding: binding,
             endpoint: endpoint,
             configuration: configuration,
             preparedIdentity: preparedIdentity,
             peerPolicy: peerPolicy,
-            accessLogger: { [weak self] entry in
-              self?.record(
-                entry,
-                identity: identity
-              )
-            }
+            identity: identity,
+            requiresModeReplacement: requiresModeReplacement
           )
-          try listener.startForValidation()
           created.append(listener)
           next[endpoint] = listener
         }
@@ -384,6 +379,42 @@ final class NetworkHelperIngressBroker: @unchecked Sendable {
     _ binding: ProjectIngressListenerBinding
   ) -> String {
     "\(binding.bindAddress):\(binding.port)"
+  }
+
+  private func makeReplacementListener(
+    binding: ProjectIngressListenerBinding,
+    endpoint: String,
+    configuration: NetworkHelperIngressConfiguration,
+    preparedIdentity: NetworkHelperTLSPreparedIdentity?,
+    peerPolicy: NetworkHelperMutualTLSPolicy?,
+    identity: NetworkHelperDNSIdentity,
+    requiresModeReplacement: Bool
+  ) throws -> NetworkHelperIngressBoundListener {
+    let accessLogger: @Sendable (NetworkHelperIngressAccessLogEntry) -> Void = {
+      [weak self] entry in
+      self?.record(
+        entry,
+        identity: identity
+      )
+    }
+    let attempts = requiresModeReplacement ? 10 : 1
+    for attempt in 0..<attempts {
+      do {
+        let listener = try NetworkHelperIngressBoundListener(
+          binding: binding,
+          endpoint: endpoint,
+          configuration: configuration,
+          preparedIdentity: preparedIdentity,
+          peerPolicy: peerPolicy,
+          accessLogger: accessLogger
+        )
+        try listener.startForValidation()
+        return listener
+      } catch NetworkHelperError.bindingUnavailable where attempt + 1 < attempts {
+        Thread.sleep(forTimeInterval: 0.02)
+      }
+    }
+    throw NetworkHelperError.bindingUnavailable
   }
 
   private static func sha256(_ data: Data) -> String {

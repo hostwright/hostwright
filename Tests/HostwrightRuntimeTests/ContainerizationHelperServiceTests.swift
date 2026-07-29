@@ -209,11 +209,13 @@ final class ContainerizationHelperServiceTests: XCTestCase {
             try await dispatcher.dispatch(frame: createFrame, nowUnixMilliseconds: 1_000)
         }
 
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: .seconds(5))
         var createStarted = false
-        for _ in 0..<1_000 {
+        while clock.now < deadline {
             createStarted = await backend.createStarted()
             if createStarted { break }
-            await Task.yield()
+            try await clock.sleep(for: .milliseconds(1))
         }
         XCTAssertTrue(createStarted)
 

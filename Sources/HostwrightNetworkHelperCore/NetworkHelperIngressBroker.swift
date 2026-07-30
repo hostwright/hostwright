@@ -1287,7 +1287,15 @@ final class NetworkHelperIngressListener:
       )
       return
     }
-    Self.bridge(client, upstream)
+    if request.isWebSocket {
+      Self.bridgeWebSocket(client, upstream)
+    } else {
+      _ = Darwin.shutdown(upstream, SHUT_WR)
+      Self.relayHTTPResponse(
+        from: upstream,
+        to: client
+      )
+    }
     record(
       listenerName: listenerName,
       request: request,
@@ -1581,8 +1589,13 @@ final class NetworkHelperIngressListener:
       "\(request.method) \(request.target) HTTP/1.1"
     ]
     for (name, value) in request.headers
-    where name != "proxy-connection" {
+    where name != "proxy-connection"
+      && (request.isWebSocket || name != "connection")
+    {
       lines.append("\(name): \(value)")
+    }
+    if !request.isWebSocket {
+      lines.append("connection: close")
     }
     let data =
       Data(
@@ -1675,7 +1688,10 @@ final class NetworkHelperIngressListener:
     return descriptor
   }
 
-  private static func bridge(_ first: Int32, _ second: Int32) {
+  private static func bridgeWebSocket(
+    _ first: Int32,
+    _ second: Int32
+  ) {
     var descriptors = [
       pollfd(
         fd: first,
@@ -1729,6 +1745,57 @@ final class NetworkHelperIngressListener:
       if descriptors.contains(where: {
         $0.revents & Int16(POLLERR | POLLHUP | POLLNVAL) != 0
       }) {
+        return
+      }
+    }
+  }
+
+  private static func relayHTTPResponse(
+    from source: Int32,
+    to destination: Int32
+  ) {
+    var descriptor = pollfd(
+      fd: source,
+      events: Int16(POLLIN),
+      revents: 0
+    )
+    let deadlineStep = idleTimeoutMilliseconds
+    var deadline = monotonicMilliseconds() + deadlineStep
+    var buffer = [UInt8](
+      repeating: 0,
+      count: maximumChunkBytes
+    )
+    while monotonicMilliseconds() < deadline {
+      let ready = Darwin.poll(
+        &descriptor,
+        1,
+        100
+      )
+      if ready < 0 {
+        if errno == EINTR { continue }
+        return
+      }
+      if ready == 0 { continue }
+      if descriptor.revents & Int16(POLLIN) != 0 {
+        let count = Darwin.recv(
+          source,
+          &buffer,
+          buffer.count,
+          0
+        )
+        guard count > 0,
+          writeAll(
+            destination,
+            data: Data(buffer[0..<count])
+          )
+        else {
+          return
+        }
+        deadline = monotonicMilliseconds() + deadlineStep
+      }
+      if descriptor.revents
+        & Int16(POLLERR | POLLHUP | POLLNVAL) != 0
+      {
         return
       }
     }

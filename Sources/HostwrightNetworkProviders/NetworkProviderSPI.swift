@@ -42,6 +42,8 @@ public struct NetworkProviderDeclaration: Codable, Equatable, Sendable {
 public struct NetworkProviderGrant: Codable, Equatable, Sendable {
     public let identifier: String
     public let kind: NetworkProviderKind
+    public let moduleSHA256: String
+    public let signer: String
     public let allowedHTTPSOrigins: Set<String>
     public let secretReferences: Set<String>
     public let identityScopes: Set<String>
@@ -52,6 +54,8 @@ public struct NetworkProviderGrant: Codable, Equatable, Sendable {
     public init(
         identifier: String,
         kind: NetworkProviderKind,
+        moduleSHA256: String,
+        signer: String,
         allowedHTTPSOrigins: Set<String>,
         secretReferences: Set<String> = [],
         identityScopes: Set<String> = [],
@@ -61,6 +65,8 @@ public struct NetworkProviderGrant: Codable, Equatable, Sendable {
     ) {
         self.identifier = identifier
         self.kind = kind
+        self.moduleSHA256 = moduleSHA256
+        self.signer = signer
         self.allowedHTTPSOrigins = allowedHTTPSOrigins
         self.secretReferences = secretReferences
         self.identityScopes = identityScopes
@@ -323,7 +329,9 @@ public actor RestrictedNetworkProviderHost {
         now: Date
     ) throws {
         guard declaration.identifier == grant.identifier,
-              declaration.kind == grant.kind
+              declaration.kind == grant.kind,
+              declaration.moduleSHA256 == grant.moduleSHA256,
+              declaration.signer == grant.signer
         else {
             throw NetworkProviderError.deniedGrant
         }

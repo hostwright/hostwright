@@ -123,6 +123,8 @@ public struct NetworkHelperProviderInvocation:
 private struct NetworkHelperProviderGrantWire: Codable {
     let identifier: String
     let kind: NetworkProviderKind
+    let moduleSHA256: String
+    let signer: String
     let allowedHTTPSOrigins: [String]
     let secretReferences: [String]
     let identityScopes: [String]
@@ -133,6 +135,8 @@ private struct NetworkHelperProviderGrantWire: Codable {
     init(_ value: NetworkProviderGrant) {
         identifier = value.identifier
         kind = value.kind
+        moduleSHA256 = value.moduleSHA256
+        signer = value.signer
         allowedHTTPSOrigins = value.allowedHTTPSOrigins.sorted()
         secretReferences = value.secretReferences.sorted()
         identityScopes = value.identityScopes.sorted()
@@ -145,6 +149,8 @@ private struct NetworkHelperProviderGrantWire: Codable {
         NetworkProviderGrant(
             identifier: identifier,
             kind: kind,
+            moduleSHA256: moduleSHA256,
+            signer: signer,
             allowedHTTPSOrigins: Set(allowedHTTPSOrigins),
             secretReferences: Set(secretReferences),
             identityScopes: Set(identityScopes),
@@ -203,9 +209,31 @@ private struct NetworkHelperProviderAuthority:
 {
     let identifier: String
     let moduleSHA256: String
+    let signer: String
     let kind: NetworkProviderKind
     let identity: NetworkHelperDNSIdentity
     let activatedAt: Date
+}
+
+private struct NetworkHelperProviderAuthorityV1:
+    Codable,
+    Equatable,
+    Sendable
+{
+    let identifier: String
+    let moduleSHA256: String
+    let kind: NetworkProviderKind
+    let identity: NetworkHelperDNSIdentity
+    let activatedAt: Date
+}
+
+private struct NetworkHelperProviderStateV1:
+    Codable,
+    Equatable,
+    Sendable
+{
+    let schemaVersion: Int
+    let authorities: [NetworkHelperProviderAuthorityV1]
 }
 
 private struct NetworkHelperProviderState:
@@ -219,9 +247,14 @@ private struct NetworkHelperProviderState:
     init(
         authorities: [NetworkHelperProviderAuthority] = []
     ) {
-        schemaVersion = 1
+        schemaVersion = 2
         self.authorities = authorities
     }
+}
+
+private struct NetworkHelperProviderLoadedState {
+    let state: NetworkHelperProviderState
+    let requiresPersistence: Bool
 }
 
 actor NetworkHelperProviderStateStore: NetworkProviderRevocationStore {
@@ -249,11 +282,20 @@ actor NetworkHelperProviderStateStore: NetworkProviderRevocationStore {
             )
         )
         try Self.removeInterruptedWrites(rootURL, owner: owner)
-        state = try Self.loadState(
+        let loaded = try Self.loadState(
             from: stateURL,
             owner: owner
-        ) ?? NetworkHelperProviderState()
+        )
+        state = loaded?.state ?? NetworkHelperProviderState()
         try Self.validate(state)
+        if loaded?.requiresPersistence == true {
+            try Self.write(
+                state,
+                stateURL: stateURL,
+                rootURL: rootURL,
+                owner: owner
+            )
+        }
     }
 
     func isRevoked(
@@ -304,6 +346,7 @@ actor NetworkHelperProviderStateStore: NetworkProviderRevocationStore {
         let authority = NetworkHelperProviderAuthority(
             identifier: declaration.identifier,
             moduleSHA256: declaration.moduleSHA256,
+            signer: declaration.signer,
             kind: declaration.kind,
             identity: identity,
             activatedAt: at
@@ -343,6 +386,19 @@ actor NetworkHelperProviderStateStore: NetworkProviderRevocationStore {
         }
     }
 
+    func hasAuthority(
+        declaration: NetworkProviderDeclaration,
+        identity: NetworkHelperDNSIdentity
+    ) -> Bool {
+        state.authorities.contains {
+            $0.identifier == declaration.identifier &&
+                $0.moduleSHA256 == declaration.moduleSHA256 &&
+                $0.signer == declaration.signer &&
+                $0.kind == declaration.kind &&
+                $0.identity == identity
+        }
+    }
+
     func hasAnyAuthority() -> Bool {
         !state.authorities.isEmpty
     }
@@ -358,6 +414,31 @@ actor NetworkHelperProviderStateStore: NetworkProviderRevocationStore {
 
     private static func validate(
         _ state: NetworkHelperProviderState
+    ) throws {
+        guard state.schemaVersion == 2,
+              state.authorities.count <= maximumAuthorities,
+              state.authorities == state.authorities.sorted(by: {
+                  ($0.identifier, $0.moduleSHA256) <
+                      ($1.identifier, $1.moduleSHA256)
+              }),
+              Set(state.authorities.map {
+                  key($0.identifier, $0.moduleSHA256)
+              }).count == state.authorities.count,
+              state.authorities.allSatisfy({
+                  (try? $0.identity.validated()) != nil
+              }),
+              state.authorities.allSatisfy({
+                  validIdentifier($0.identifier) &&
+                      validSHA256($0.moduleSHA256) &&
+                      validSigner($0.signer)
+              })
+        else {
+            throw NetworkProviderError.executionFailed
+        }
+    }
+
+    private static func validate(
+        _ state: NetworkHelperProviderStateV1
     ) throws {
         guard state.schemaVersion == 1,
               state.authorities.count <= maximumAuthorities,
@@ -392,6 +473,15 @@ actor NetworkHelperProviderStateStore: NetworkProviderRevocationStore {
             of: "^[a-f0-9]{64}$",
             options: .regularExpression
         ) != nil
+    }
+
+    private static func validSigner(_ value: String) -> Bool {
+        value.utf8.count <= 128 &&
+            value.range(
+                of: "^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$",
+                options: .regularExpression
+            ) != nil &&
+            !value.contains("..")
     }
 
     private static func key(
@@ -442,7 +532,7 @@ actor NetworkHelperProviderStateStore: NetworkProviderRevocationStore {
     private static func loadState(
         from url: URL,
         owner: uid_t
-    ) throws -> NetworkHelperProviderState? {
+    ) throws -> NetworkHelperProviderLoadedState? {
         let descriptor = open(
             url.path,
             O_RDONLY | O_CLOEXEC | O_NOFOLLOW
@@ -485,15 +575,31 @@ actor NetworkHelperProviderStateStore: NetworkProviderRevocationStore {
         }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .millisecondsSince1970
-        guard count == data.count,
-              let value = try? decoder.decode(
-                NetworkHelperProviderState.self,
-                from: data
-              ),
-              (try? canonical(value)) == data else {
+        guard count == data.count else {
             throw NetworkProviderError.executionFailed
         }
-        return value
+        if let legacy = try? decoder.decode(
+            NetworkHelperProviderStateV1.self,
+            from: data
+        ), legacy.schemaVersion == 1,
+           (try? canonical(legacy)) == data {
+            try validate(legacy)
+            return NetworkHelperProviderLoadedState(
+                state: NetworkHelperProviderState(),
+                requiresPersistence: true
+            )
+        }
+        guard let value = try? decoder.decode(
+            NetworkHelperProviderState.self,
+            from: data
+        ), value.schemaVersion == 2,
+           (try? canonical(value)) == data else {
+            throw NetworkProviderError.executionFailed
+        }
+        return NetworkHelperProviderLoadedState(
+            state: value,
+            requiresPersistence: false
+        )
     }
 
     private static func write(
@@ -753,6 +859,17 @@ final class NetworkHelperProviderCoordinator: @unchecked Sendable {
         let identity = try identity.validated()
         let request = try request.validated()
         let declaration = try decodedDeclaration(request.declaration)
+        if request.operation != .setup {
+            let hasAuthority = try awaitResult {
+                await self.state.hasAuthority(
+                    declaration: declaration,
+                    identity: identity
+                )
+            }
+            guard hasAuthority else {
+                throw NetworkProviderError.deniedGrant
+            }
+        }
         let result = try awaitResult {
             try await self.host.invoke(
                 declaration: request.declaration,

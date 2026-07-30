@@ -3093,6 +3093,7 @@ public struct MigrationRunner: Sendable {
                     desired_sha256 TEXT NOT NULL,
                     observed_sha256 TEXT,
                     route_json TEXT NOT NULL,
+                    route_json_sha256 TEXT NOT NULL,
                     lifecycle_state TEXT NOT NULL CHECK (lifecycle_state IN ('intended','connecting','active','draining','closed','faulted')),
                     finalizer_state TEXT NOT NULL CHECK (finalizer_state IN ('pending','active','releasing','released','quarantined')),
                     selected_transport TEXT CHECK (selected_transport IS NULL OR selected_transport IN ('direct','relay')),
@@ -3107,6 +3108,7 @@ public struct MigrationRunner: Sendable {
                     CHECK (length(desired_sha256) = 64 AND desired_sha256 NOT GLOB '*[^0-9a-f]*'),
                     CHECK (observed_sha256 IS NULL OR (length(observed_sha256) = 64 AND observed_sha256 NOT GLOB '*[^0-9a-f]*')),
                     CHECK (json_valid(route_json) AND json_type(route_json) = 'object' AND length(route_json) <= 65536),
+                    CHECK (length(route_json_sha256) = 64 AND route_json_sha256 NOT GLOB '*[^0-9a-f]*'),
                     CHECK (
                         (lifecycle_state = 'intended' AND finalizer_state = 'pending' AND observed_sha256 IS NULL)
                         OR (lifecycle_state = 'connecting' AND (

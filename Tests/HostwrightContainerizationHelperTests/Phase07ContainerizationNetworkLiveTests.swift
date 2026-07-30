@@ -213,6 +213,10 @@ final class Phase07ContainerizationNetworkLiveTests: XCTestCase {
             logicalName: "isolated",
             projectUUID: projectB
         )
+        let natNetwork = try RuntimeNetworkIdentity(
+            logicalName: "nat",
+            projectUUID: projectA
+        )
         let networkAContext = mutationContext(
             snapshot: snapshot,
             resourceUUID: networkA.resourceUUID,
@@ -231,13 +235,20 @@ final class Phase07ContainerizationNetworkLiveTests: XCTestCase {
             projectUUID: projectB,
             operation: "network-isolated"
         )
+        let natNetworkContext = mutationContext(
+            snapshot: snapshot,
+            resourceUUID: natNetwork.resourceUUID,
+            projectUUID: projectA,
+            operation: "network-nat"
+        )
         let liveNetworks = [
             LiveNetwork(identity: networkA, context: networkAContext),
             LiveNetwork(identity: networkB, context: networkBContext),
             LiveNetwork(
                 identity: isolatedNetwork,
                 context: isolatedNetworkContext
-            )
+            ),
+            LiveNetwork(identity: natNetwork, context: natNetworkContext)
         ]
         var createdNetworks: [LiveNetwork] = []
         var createdContainers: [LiveContainer] = []
@@ -274,6 +285,23 @@ final class Phase07ContainerizationNetworkLiveTests: XCTestCase {
                 context: isolatedNetworkContext
             )
             createdNetworks.append(liveNetworks[2])
+            let createdNAT = try await client.networkCreate(
+                RuntimeNetworkCreateRequest(
+                    identity: natNetwork,
+                    mode: .nat,
+                    ipv4: .cidr("192.168.243.0/24"),
+                    ipv6: .cidr("fd00:7:4::/64")
+                ),
+                context: natNetworkContext
+            )
+            createdNetworks.append(liveNetworks[3])
+            let inspectedNAT = try await client.networkInspect(
+                RuntimeNetworkInspectRequest(identity: natNetwork)
+            )
+            guard createdNAT.observedNetwork?.kind == "vmnet:nat",
+                  inspectedNAT.observedNetwork?.kind == "vmnet:nat" else {
+                throw LiveFailure.unexpectedNetworkKind
+            }
             guard createdA.observedNetwork?.addresses.first !=
                     createdB.observedNetwork?.addresses.first,
                   createdA.observedNetwork?.addresses.first !=
@@ -282,6 +310,25 @@ final class Phase07ContainerizationNetworkLiveTests: XCTestCase {
                     createdIsolated.observedNetwork?.addresses.first else {
                 throw LiveFailure.networkSubnetsCollided
             }
+
+            let natClient = try liveContainer(
+                projectName: "gate07-a",
+                serviceName: "nat-client",
+                projectUUID: projectA,
+                snapshot: snapshot,
+                image: workloadImage,
+                networks: [natNetwork],
+                command: Self.pythonCommand(Self.natClientProgram)
+            )
+            createdContainers.append(natClient)
+            try await create(natClient, using: client)
+            try await start(natClient, using: client)
+            _ = try await waitForLog(
+                client: client,
+                resourceIdentifier: natClient.resourceIdentifier,
+                success: "nat-ok",
+                failure: "nat-failed"
+            )
 
             let server = try liveContainer(
                 projectName: "gate07-a",
@@ -393,9 +440,11 @@ final class Phase07ContainerizationNetworkLiveTests: XCTestCase {
                 server: server,
                 dualClient: dualClient,
                 isolatedClient: isolatedClient,
+                natClient: natClient,
                 networkA: networkA,
                 networkB: networkB,
-                isolatedNetwork: isolatedNetwork
+                isolatedNetwork: isolatedNetwork,
+                natNetwork: natNetwork
             )
         } catch {
             bodyError = error
@@ -551,9 +600,11 @@ final class Phase07ContainerizationNetworkLiveTests: XCTestCase {
         server: LiveContainer,
         dualClient: LiveContainer,
         isolatedClient: LiveContainer,
+        natClient: LiveContainer,
         networkA: RuntimeNetworkIdentity,
         networkB: RuntimeNetworkIdentity,
-        isolatedNetwork: RuntimeNetworkIdentity
+        isolatedNetwork: RuntimeNetworkIdentity,
+        natNetwork: RuntimeNetworkIdentity
     ) throws {
         let serverNetworks = try ownedContainer(server, inventory: inventory).networks
         let dualNetworks = try ownedContainer(dualClient, inventory: inventory).networks
@@ -561,11 +612,17 @@ final class Phase07ContainerizationNetworkLiveTests: XCTestCase {
             isolatedClient,
             inventory: inventory
         ).networks
+        let natNetworks = try ownedContainer(
+            natClient,
+            inventory: inventory
+        ).networks
         guard Set(serverNetworks.map(\.networkID)) == [networkA.runtimeIdentifier],
               Set(dualNetworks.map(\.networkID)) ==
                 [networkA.runtimeIdentifier, networkB.runtimeIdentifier],
               Set(isolatedNetworks.map(\.networkID)) ==
-                [isolatedNetwork.runtimeIdentifier] else {
+                [isolatedNetwork.runtimeIdentifier],
+              Set(natNetworks.map(\.networkID)) ==
+                [natNetwork.runtimeIdentifier] else {
             throw LiveFailure.topologyMismatch
         }
     }
@@ -878,6 +935,25 @@ final class Phase07ContainerizationNetworkLiveTests: XCTestCase {
     while True:
         time.sleep(60)
     """
+
+    private static let natClientProgram = """
+    import socket
+    import time
+    targets = (("1.1.1.1", 443), ("9.9.9.9", 443))
+    for _ in range(20):
+        for address, port in targets:
+            try:
+                connection = socket.create_connection((address, port), timeout=2)
+                connection.close()
+                print(f"nat-ok {address}:{port}", flush=True)
+                while True:
+                    time.sleep(60)
+            except OSError:
+                pass
+        time.sleep(0.25)
+    print("nat-failed", flush=True)
+    raise SystemExit(10)
+    """
 }
 
 private struct LiveContainer: Sendable {
@@ -915,6 +991,7 @@ private enum LiveFailure: Error {
     case probeFailed(String)
     case probeTimedOut(String)
     case topologyMismatch
+    case unexpectedNetworkKind
     case unsafeConfiguration
     case unsafeWorkRoot
     case workloadLayoutMustContainOneImage

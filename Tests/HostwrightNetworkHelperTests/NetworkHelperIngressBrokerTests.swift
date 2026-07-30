@@ -111,6 +111,87 @@ final class NetworkHelperIngressBrokerTests: XCTestCase {
     XCTAssertEqual(finished.wait(timeout: .now() + 2), .success)
   }
 
+  func testHTTPConnectionDoesNotForwardASecondUnauthorizedRequest()
+    throws
+  {
+    let backend = try makeServer()
+    defer { Darwin.close(backend.descriptor) }
+    let firstReceived = DispatchSemaphore(value: 0)
+    let inspectSecond = DispatchSemaphore(value: 0)
+    let secondReceived = DispatchSemaphore(value: 0)
+    let finished = DispatchSemaphore(value: 0)
+    serveOneRequestAndDetectSecond(
+      backend.descriptor,
+      firstReceived: firstReceived,
+      inspectSecond: inspectSecond,
+      secondReceived: secondReceived,
+      finished: finished
+    )
+
+    let ingressPort = try availablePort()
+    let broker = NetworkHelperIngressBroker()
+    _ = try broker.apply(
+      identity: identity(),
+      bindings: [
+        binding(
+          port: ingressPort,
+          backendPort: backend.port
+        )
+      ]
+    )
+    defer { broker.remove(identity: identity()) }
+
+    let client = try connect(port: ingressPort)
+    defer { Darwin.close(client) }
+    let allowed =
+      "GET /v1 HTTP/1.1\r\n"
+      + "Host: api.internal\r\n"
+      + "Connection: keep-alive\r\n\r\n"
+    XCTAssertEqual(
+      allowed.withCString {
+        Darwin.send(client, $0, strlen($0), 0)
+      },
+      allowed.utf8.count
+    )
+    XCTAssertEqual(
+      firstReceived.wait(timeout: .now() + 2),
+      .success
+    )
+    XCTAssertTrue(
+      waitForReadable(client, milliseconds: 2_000)
+    )
+    let response = String(
+      data: receiveUntilHeaders(client),
+      encoding: .utf8
+    )
+    XCTAssertTrue(
+      response?.hasPrefix("HTTP/1.1 200 OK") == true,
+      response ?? ""
+    )
+
+    let unauthorized =
+      "POST /admin HTTP/1.1\r\n"
+      + "Host: forbidden.internal\r\n"
+      + "Connection: close\r\n"
+      + "Content-Length: 0\r\n\r\n"
+    XCTAssertEqual(
+      unauthorized.withCString {
+        Darwin.send(client, $0, strlen($0), 0)
+      },
+      unauthorized.utf8.count
+    )
+    inspectSecond.signal()
+
+    XCTAssertEqual(
+      finished.wait(timeout: .now() + 2),
+      .success
+    )
+    XCTAssertEqual(
+      secondReceived.wait(timeout: .now()),
+      .timedOut
+    )
+  }
+
   func testIngressPolicyReplacementRollbackAndRuleLossFailClosed()
     throws
   {
@@ -1482,6 +1563,67 @@ private func serveOnce(
     _ = receiveUntilHeaders(connection)
     _ = response.withCString { pointer in
       Darwin.send(connection, pointer, strlen(pointer), 0)
+    }
+  }
+}
+
+private func serveOneRequestAndDetectSecond(
+  _ listener: Int32,
+  firstReceived: DispatchSemaphore,
+  inspectSecond: DispatchSemaphore,
+  secondReceived: DispatchSemaphore,
+  finished: DispatchSemaphore
+) {
+  DispatchQueue.global(qos: .userInitiated).async {
+    defer { finished.signal() }
+    guard waitForReadable(listener, milliseconds: 5_000)
+    else {
+      return
+    }
+    let connection = Darwin.accept(listener, nil, nil)
+    guard connection >= 0 else { return }
+    defer { Darwin.close(connection) }
+    guard !receiveUntilHeaders(connection).isEmpty else {
+      return
+    }
+    let response =
+      "HTTP/1.1 200 OK\r\n"
+      + "content-length: 2\r\n"
+      + "connection: keep-alive\r\n\r\nok"
+    guard
+      response.withCString({
+        Darwin.send(
+          connection,
+          $0,
+          strlen($0),
+          0
+        )
+      }) == response.utf8.count
+    else {
+      return
+    }
+    firstReceived.signal()
+    guard
+      inspectSecond.wait(timeout: .now() + 2)
+        == .success,
+      waitForReadable(
+        connection,
+        milliseconds: 500
+      )
+    else {
+      return
+    }
+    var buffer = [UInt8](
+      repeating: 0,
+      count: 4_096
+    )
+    if Darwin.recv(
+      connection,
+      &buffer,
+      buffer.count,
+      0
+    ) > 0 {
+      secondReceived.signal()
     }
   }
 }

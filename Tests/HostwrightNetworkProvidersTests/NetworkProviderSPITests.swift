@@ -149,7 +149,9 @@ final class NetworkProviderSPITests: XCTestCase {
                 declaration: wrongDigestDeclaration,
                 detachedCMS: Data("detached-cms".utf8),
                 module: module,
-                grant: self.grant(),
+                grant: self.grant(
+                    moduleSHA256: String(repeating: "0", count: 64)
+                ),
                 operation: .status
             )
         }
@@ -197,6 +199,72 @@ final class NetworkProviderSPITests: XCTestCase {
                 operation: .status
             )
         }
+    }
+
+    func testGrantCannotBeReusedByDifferentModuleOrSigner() async throws {
+        let moduleA = Data("reference-wasm-a".utf8)
+        let moduleB = Data("reference-wasm-b".utf8)
+        let declarationB = try declaration(for: moduleB)
+        let executions = Counter()
+        let hostB = RestrictedNetworkProviderHost(
+            verifier: Verifier(
+                expectedContent: declarationB,
+                expectedSigner: "local-test"
+            ),
+            executor: Executor { _, _ in
+                executions.increment()
+                return Data()
+            },
+            revocations: Revocations()
+        )
+        let grantA = grant(moduleSHA256: digest(moduleA))
+        let grantWire = try canonicalJSON(grantA)
+        let grantObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: grantWire)
+                as? [String: Any]
+        )
+
+        XCTAssertEqual(grantObject["moduleSHA256"] as? String, digest(moduleA))
+        XCTAssertEqual(grantObject["signer"] as? String, "local-test")
+        await assertProviderError(.deniedGrant) {
+            try await hostB.invoke(
+                declaration: declarationB,
+                detachedCMS: Data("detached-cms".utf8),
+                module: moduleB,
+                grant: grantA,
+                operation: .status
+            )
+        }
+
+        let signerBDeclaration = try canonicalJSON(
+            NetworkProviderDeclaration(
+                identifier: "example.reference",
+                kind: .tunnelProvider,
+                moduleSHA256: digest(moduleA),
+                signer: "other-signer"
+            )
+        )
+        let signerBHost = RestrictedNetworkProviderHost(
+            verifier: Verifier(
+                expectedContent: signerBDeclaration,
+                expectedSigner: "other-signer"
+            ),
+            executor: Executor { _, _ in
+                executions.increment()
+                return Data()
+            },
+            revocations: Revocations()
+        )
+        await assertProviderError(.deniedGrant) {
+            try await signerBHost.invoke(
+                declaration: signerBDeclaration,
+                detachedCMS: Data("detached-cms".utf8),
+                module: moduleA,
+                grant: grantA,
+                operation: .status
+            )
+        }
+        XCTAssertEqual(executions.value, 0)
     }
 
     func testRevokedGrantStopsBeforeExecution() async throws {
@@ -459,11 +527,15 @@ final class NetworkProviderSPITests: XCTestCase {
 
     private func grant(
         identifier: String = "example.reference",
+        moduleSHA256: String = digest(Data("reference-wasm".utf8)),
+        signer: String = "local-test",
         expiresAt: Date = .distantFuture
     ) -> NetworkProviderGrant {
         NetworkProviderGrant(
             identifier: identifier,
             kind: .tunnelProvider,
+            moduleSHA256: moduleSHA256,
+            signer: signer,
             allowedHTTPSOrigins: ["https://127.0.0.1:9443"],
             secretReferences: ["secret:relay-token"],
             identityScopes: ["identity:project-a"],

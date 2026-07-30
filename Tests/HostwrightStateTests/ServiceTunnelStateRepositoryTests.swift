@@ -30,6 +30,65 @@ final class ServiceTunnelStateRepositoryTests: XCTestCase {
                     "service_tunnel_sessions"
                 )
             )
+            XCTAssertTrue(
+                try columnNames(
+                    store,
+                    table: "service_tunnel_sessions"
+                ).contains("route_json_sha256")
+            )
+            XCTAssertEqual(
+                StateIntegrityService(store: store).inspect().health,
+                .healthy
+            )
+        }
+    }
+
+    func testStateIntegrityRequiresTunnelSchemaObjects() throws {
+        try withStore { store in
+            XCTAssertEqual(
+                StateIntegrityService(store: store).inspect().health,
+                .healthy
+            )
+
+            try store.withConnection { connection in
+                try connection.run(
+                    "DROP INDEX service_tunnel_recovery_idx"
+                )
+            }
+            let missingIndex = StateIntegrityService(
+                store: store
+            ).inspect()
+            XCTAssertEqual(missingIndex.health, .unrecoverable)
+            XCTAssertTrue(
+                missingIndex.checks.contains {
+                    $0.identifier == "hostwright.schema-objects"
+                        && $0.status == .failed
+                        && $0.message.contains(
+                            "service_tunnel_recovery_idx"
+                        )
+                }
+            )
+        }
+
+        try withStore { store in
+            try store.withConnection { connection in
+                try connection.run(
+                    "DROP TABLE service_tunnel_sessions"
+                )
+            }
+            let missingTable = StateIntegrityService(
+                store: store
+            ).inspect()
+            XCTAssertEqual(missingTable.health, .unrecoverable)
+            XCTAssertTrue(
+                missingTable.checks.contains {
+                    $0.identifier == "hostwright.schema-objects"
+                        && $0.status == .failed
+                        && $0.message.contains(
+                            "service_tunnel_sessions"
+                        )
+                }
+            )
         }
     }
 
@@ -205,6 +264,136 @@ final class ServiceTunnelStateRepositoryTests: XCTestCase {
         }
     }
 
+    func testInvalidStoredTunnelRouteCountsAsAuthoritativeCorruption()
+        throws
+    {
+        try withStore { store in
+            try seedAuthority(store)
+            let route = try makeRoute()
+            try store.serviceTunnels.save(
+                intent(route: route, updatedAt: 1_000)
+            )
+
+            try store.withConnection { connection in
+                try connection.run(
+                    """
+                    UPDATE service_tunnel_sessions
+                    SET route_json = ?
+                    WHERE id = ?
+                    """,
+                    bindings: [
+                        .text("{\"projectUUID\":\"\(projectUUID)\"}"),
+                        .text(route.routeUUID)
+                    ]
+                )
+            }
+
+            try store.withConnection(
+                createIfNeeded: false,
+                readOnly: true
+            ) { connection in
+                XCTAssertEqual(
+                    try ServiceTunnelStateRepository
+                        .invalidStoredRecordCount(
+                            on: connection
+                        ),
+                    1
+                )
+            }
+
+            let report = StateIntegrityService(store: store)
+                .inspect()
+            XCTAssertEqual(report.health, .unrecoverable)
+            XCTAssertTrue(
+                report.checks.contains {
+                    $0.identifier ==
+                        "hostwright.authoritative-records"
+                        && $0.status == .failed
+                        && $0.affectedRows == 1
+                }
+            )
+        }
+    }
+
+    func testAuthenticatedEndpointTamperingFailsLoadAndIntegrity()
+        throws
+    {
+        try withStore { store in
+            try seedAuthority(store)
+            let route = try makeRoute()
+            try store.serviceTunnels.save(
+                intent(route: route, updatedAt: 1_000)
+            )
+            let tampered = try HostwrightTunnelRoute(
+                routeUUID: route.routeUUID,
+                projectUUID: route.projectUUID,
+                peerUUID: route.peerUUID,
+                generation: route.generation,
+                providerID: route.providerID,
+                providerGeneration: route.providerGeneration,
+                fencingToken: route.fencingToken,
+                operationGroupID: route.operationGroupID,
+                desiredSHA256: route.desiredSHA256,
+                authenticatedEndpoints: [
+                    try HostwrightTunnelEndpoint(
+                        host: "127.0.0.2",
+                        port: 9443
+                    )
+                ],
+                relayEndpoint: route.relayEndpoint
+            )
+
+            try overwriteRouteJSON(
+                tampered,
+                routeUUID: route.routeUUID,
+                store: store
+            )
+            try assertLoadAndIntegrityRejectTampering(
+                routeUUID: route.routeUUID,
+                store: store
+            )
+        }
+    }
+
+    func testRelayEndpointTamperingFailsLoadAndIntegrity()
+        throws
+    {
+        try withStore { store in
+            try seedAuthority(store)
+            let route = try makeRoute()
+            try store.serviceTunnels.save(
+                intent(route: route, updatedAt: 1_000)
+            )
+            let tampered = try HostwrightTunnelRoute(
+                routeUUID: route.routeUUID,
+                projectUUID: route.projectUUID,
+                peerUUID: route.peerUUID,
+                generation: route.generation,
+                providerID: route.providerID,
+                providerGeneration: route.providerGeneration,
+                fencingToken: route.fencingToken,
+                operationGroupID: route.operationGroupID,
+                desiredSHA256: route.desiredSHA256,
+                authenticatedEndpoints:
+                    route.authenticatedEndpoints,
+                relayEndpoint: try HostwrightTunnelEndpoint(
+                    host: "tampered-relay.example.test",
+                    port: 9444
+                )
+            )
+
+            try overwriteRouteJSON(
+                tampered,
+                routeUUID: route.routeUUID,
+                store: store
+            )
+            try assertLoadAndIntegrityRejectTampering(
+                routeUUID: route.routeUUID,
+                store: store
+            )
+        }
+    }
+
     private func intent(
         route: HostwrightTunnelRoute,
         updatedAt: Int64
@@ -239,7 +428,74 @@ final class ServiceTunnelStateRepositoryTests: XCTestCase {
                     host: "127.0.0.1",
                     port: 8443
                 )
-            ]
+            ],
+            relayEndpoint: try HostwrightTunnelEndpoint(
+                host: "relay.example.test",
+                port: 9443
+            )
+        )
+    }
+
+    private func overwriteRouteJSON(
+        _ route: HostwrightTunnelRoute,
+        routeUUID: String,
+        store: SQLiteStateStore
+    ) throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [
+            .sortedKeys,
+            .withoutEscapingSlashes
+        ]
+        let routeJSON = String(
+            decoding: try encoder.encode(route),
+            as: UTF8.self
+        )
+        try store.withConnection { connection in
+            try connection.run(
+                """
+                UPDATE service_tunnel_sessions
+                SET route_json = ?
+                WHERE id = ?
+                """,
+                bindings: [
+                    .text(routeJSON),
+                    .text(routeUUID)
+                ]
+            )
+        }
+    }
+
+    private func assertLoadAndIntegrityRejectTampering(
+        routeUUID: String,
+        store: SQLiteStateStore,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws {
+        XCTAssertThrowsError(
+            try store.serviceTunnels.load(id: routeUUID),
+            file: file,
+            line: line
+        )
+        XCTAssertThrowsError(
+            try store.serviceTunnels.load(routeUUID: routeUUID),
+            file: file,
+            line: line
+        )
+        let report = StateIntegrityService(store: store).inspect()
+        XCTAssertEqual(
+            report.health,
+            .unrecoverable,
+            file: file,
+            line: line
+        )
+        XCTAssertTrue(
+            report.checks.contains {
+                $0.identifier == "hostwright.authoritative-records"
+                    && $0.status == .failed
+                    && $0.affectedRows == 1
+            },
+            file: file,
+            line: line
         )
     }
 
@@ -322,6 +578,22 @@ final class ServiceTunnelStateRepositoryTests: XCTestCase {
                 ORDER BY name
                 """
             ).compactMap { $0.first ?? nil }
+        }
+    }
+
+    private func columnNames(
+        _ store: SQLiteStateStore,
+        table: String
+    ) throws -> [String] {
+        try store.withConnection(
+            createIfNeeded: false,
+            readOnly: true
+        ) {
+            try $0.query(
+                "PRAGMA table_info(\(table))"
+            ).compactMap { row in
+                row.count > 1 ? row[1] : nil
+            }
         }
     }
 

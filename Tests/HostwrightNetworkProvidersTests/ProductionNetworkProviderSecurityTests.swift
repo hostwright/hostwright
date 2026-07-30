@@ -59,6 +59,9 @@ final class ProductionNetworkProviderSecurityTests: XCTestCase {
             responseTemplate: responseTemplate,
             noncePlaceholder: noncePlaceholder
         )
+        let moduleSHA256 = SHA256.hash(data: module)
+            .map { String(format: "%02x", $0) }
+            .joined()
         let fixture = try DetachedCMSFixture(contentBuilder: { certificateDER in
             let fingerprint = "sha256:"
                 + SHA256.hash(data: certificateDER)
@@ -68,9 +71,7 @@ final class ProductionNetworkProviderSecurityTests: XCTestCase {
                 NetworkProviderDeclaration(
                     identifier: "example.reference",
                     kind: .tunnelProvider,
-                    moduleSHA256: SHA256.hash(data: module)
-                        .map { String(format: "%02x", $0) }
-                        .joined(),
+                    moduleSHA256: moduleSHA256,
                     signer: fingerprint
                 )
             )
@@ -113,6 +114,8 @@ final class ProductionNetworkProviderSecurityTests: XCTestCase {
         let reviewedGrant = NetworkProviderGrant(
             identifier: "example.reference",
             kind: .tunnelProvider,
+            moduleSHA256: moduleSHA256,
+            signer: fingerprint,
             allowedHTTPSOrigins: [reviewedOrigin],
             approvedBy: "reviewer",
             expiresAt: .distantFuture
@@ -131,6 +134,8 @@ final class ProductionNetworkProviderSecurityTests: XCTestCase {
         let outOfGrant = NetworkProviderGrant(
             identifier: "example.reference",
             kind: .tunnelProvider,
+            moduleSHA256: moduleSHA256,
+            signer: fingerprint,
             allowedHTTPSOrigins: ["https://127.0.0.1:9444"],
             approvedBy: "reviewer",
             expiresAt: .distantFuture

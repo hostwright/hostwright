@@ -226,6 +226,96 @@ final class NetworkHelperProviderCoordinatorTests: XCTestCase {
         }
     }
 
+    func testRestartMigratesCanonicalV1StateAndRequiresExactSetup()
+        async throws
+    {
+        try await withFixture { fixture in
+            try fixture.prepareProviderStateRoot()
+            let revokedIdentifier = "revoked.example"
+            let revokedModuleSHA256 = String(repeating: "f", count: 64)
+            let revocations =
+                try FileBackedNetworkProviderRevocationStore(
+                    directoryURL: fixture.providerStateRoot
+                        .appendingPathComponent(
+                            "revocations",
+                            isDirectory: true
+                        )
+                )
+            try await revocations.revoke(
+                identifier: revokedIdentifier,
+                moduleSHA256: revokedModuleSHA256,
+                at: Date(timeIntervalSince1970: 1_000)
+            )
+            let revocationState = try Data(
+                contentsOf: fixture.revocationStateURL
+            )
+            try fixture.writeLegacyProviderState()
+
+            let executor = RecordingProviderExecutor()
+            let migrated = try fixture.coordinator(executor: executor)
+
+            XCTAssertFalse(migrated.hasActiveAuthorities)
+            XCTAssertFalse(
+                try migrated.hasAuthority(
+                    identifier: fixture.identifier,
+                    moduleSHA256: fixture.moduleSHA256
+                )
+            )
+            XCTAssertEqual(
+                try Data(contentsOf: fixture.authorityStateURL),
+                Data(#"{"authorities":[],"schemaVersion":2}"#.utf8)
+            )
+            XCTAssertEqual(
+                try Data(contentsOf: fixture.revocationStateURL),
+                revocationState
+            )
+            let reopenedRevocations =
+                try FileBackedNetworkProviderRevocationStore(
+                    directoryURL: fixture.providerStateRoot
+                        .appendingPathComponent(
+                            "revocations",
+                            isDirectory: true
+                        )
+                )
+            let revocationPreserved =
+                try await reopenedRevocations.isRevoked(
+                    identifier: revokedIdentifier,
+                    moduleSHA256: revokedModuleSHA256
+                )
+            XCTAssertTrue(
+                revocationPreserved
+            )
+
+            let rejected = try fixture.dispatch(
+                coordinator: migrated,
+                invocation: fixture.invocation(operation: .status)
+            )
+            XCTAssertEqual(rejected.error?.code, .providerRejected)
+            let migratedOperations = await executor.operations()
+            XCTAssertEqual(migratedOperations, [])
+
+            XCTAssertNil(
+                try fixture.dispatch(
+                    coordinator: migrated,
+                    invocation: fixture.invocation(operation: .setup)
+                ).error
+            )
+
+            let restartedExecutor = RecordingProviderExecutor()
+            let restarted = try fixture.coordinator(
+                executor: restartedExecutor
+            )
+            XCTAssertNil(
+                try fixture.dispatch(
+                    coordinator: restarted,
+                    invocation: fixture.invocation(operation: .status)
+                ).error
+            )
+            let restartedOperations = await restartedExecutor.operations()
+            XCTAssertEqual(restartedOperations, [.status])
+        }
+    }
+
     func testWorkerCrashDoesNotActivateAuthorityOrLeakTemporaryState()
         async throws
     {
@@ -247,6 +337,68 @@ final class NetworkHelperProviderCoordinatorTests: XCTestCase {
                 )
             )
             XCTAssertEqual(try fixture.providerInventory(), before)
+        }
+    }
+
+    func testOperationsRequireExactActiveAuthorityBeforeExecution()
+        async throws
+    {
+        try await withFixture { fixture in
+            let executor = RecordingProviderExecutor()
+            let coordinator = try fixture.coordinator(
+                executor: executor
+            )
+            for operation in NetworkProviderOperation.allCases
+                where operation != .setup {
+                let response = try fixture.dispatch(
+                    coordinator: coordinator,
+                    invocation:
+                        fixture.invocation(operation: operation)
+                )
+                XCTAssertEqual(
+                    response.error?.code,
+                    .providerRejected,
+                    "\(operation.rawValue) executed without active authority"
+                )
+            }
+            let rejectedOperations = await executor.operations()
+            XCTAssertEqual(rejectedOperations, [])
+
+            XCTAssertNil(
+                try fixture.dispatch(
+                    coordinator: coordinator,
+                    invocation:
+                        fixture.invocation(operation: .setup)
+                ).error
+            )
+            let replacedSignerDeclaration = try fixture.declaration(
+                signer:
+                    "sha256:\(String(repeating: "b", count: 64))"
+            )
+            let replacedSigner = try fixture.dispatch(
+                coordinator: coordinator,
+                invocation: fixture.invocation(
+                    operation: .status,
+                    declaration: replacedSignerDeclaration,
+                    detachedCMS: Data("detached-cms".utf8)
+                )
+            )
+            XCTAssertEqual(
+                replacedSigner.error?.code,
+                .providerRejected
+            )
+            let signerRejectedOperations = await executor.operations()
+            XCTAssertEqual(signerRejectedOperations, [.setup])
+
+            XCTAssertNil(
+                try fixture.dispatch(
+                    coordinator: coordinator,
+                    invocation:
+                        fixture.invocation(operation: .status)
+                ).error
+            )
+            let authorizedOperations = await executor.operations()
+            XCTAssertEqual(authorizedOperations, [.setup, .status])
         }
     }
 
@@ -327,6 +479,25 @@ private struct ProviderFixture {
         )
     }
 
+    var authorityStateURL: URL {
+        providerStateRoot.appendingPathComponent(
+            "authority.json",
+            isDirectory: false
+        )
+    }
+
+    var revocationStateURL: URL {
+        providerStateRoot
+            .appendingPathComponent(
+                "revocations",
+                isDirectory: true
+            )
+            .appendingPathComponent(
+                "network-provider-revocations.json",
+                isDirectory: false
+            )
+    }
+
     var moduleSHA256: String {
         SHA256.hash(data: module)
             .map { String(format: "%02x", $0) }
@@ -393,13 +564,19 @@ private struct ProviderFixture {
         declaration: Data,
         detachedCMS: Data
     ) throws -> NetworkHelperProviderInvocation {
-        NetworkHelperProviderInvocation(
+        let reviewedDeclaration = try JSONDecoder().decode(
+            NetworkProviderDeclaration.self,
+            from: declaration
+        )
+        return NetworkHelperProviderInvocation(
             declaration: declaration,
             detachedCMS: detachedCMS,
             module: module,
             grant: NetworkProviderGrant(
                 identifier: identifier,
                 kind: .tunnelProvider,
+                moduleSHA256: reviewedDeclaration.moduleSHA256,
+                signer: reviewedDeclaration.signer,
                 allowedHTTPSOrigins: ["https://127.0.0.1:9443"],
                 secretReferences: ["secret:relay-token"],
                 identityScopes: ["identity:project-a"],
@@ -412,10 +589,7 @@ private struct ProviderFixture {
     }
 
     func pinTrustedSigner(_ certificateDER: Data) throws {
-        if mkdir(providerStateRoot.path, 0o700) != 0,
-           errno != EEXIST {
-            throw ProviderCMSTestError.fileOperationFailed
-        }
+        try prepareProviderStateRoot()
         let trustRoot = providerStateRoot.appendingPathComponent(
             NetworkHelperProviderTrustStore.directoryName,
             isDirectory: true
@@ -459,6 +633,71 @@ private struct ProviderFixture {
         }
         guard fsync(descriptor) == 0 else {
             throw ProviderCMSTestError.fileOperationFailed
+        }
+    }
+
+    func prepareProviderStateRoot() throws {
+        if mkdir(providerStateRoot.path, 0o700) != 0,
+           errno != EEXIST {
+            throw ProviderCMSTestError.fileOperationFailed
+        }
+    }
+
+    func writeLegacyProviderState() throws {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .millisecondsSince1970
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        let state = LegacyProviderState(
+            schemaVersion: 1,
+            authorities: [
+                LegacyProviderAuthority(
+                    identifier: identifier,
+                    moduleSHA256: moduleSHA256,
+                    kind: .tunnelProvider,
+                    identity: identity,
+                    activatedAt: Date(timeIntervalSince1970: 500)
+                )
+            ]
+        )
+        try writeProviderState(try encoder.encode(state))
+    }
+
+    private func writeProviderState(_ data: Data) throws {
+        let descriptor = open(
+            authorityStateURL.path,
+            O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW,
+            0o600
+        )
+        guard descriptor >= 0 else {
+            throw ProviderCMSTestError.fileOperationFailed
+        }
+        var retainedError: Error?
+        do {
+            try data.withUnsafeBytes { bytes in
+                var offset = 0
+                while offset < bytes.count {
+                    let count = Darwin.write(
+                        descriptor,
+                        bytes.baseAddress!.advanced(by: offset),
+                        bytes.count - offset
+                    )
+                    if count < 0, errno == EINTR {
+                        continue
+                    }
+                    guard count > 0 else {
+                        throw ProviderCMSTestError.fileOperationFailed
+                    }
+                    offset += count
+                }
+            }
+            guard fsync(descriptor) == 0 else {
+                throw ProviderCMSTestError.fileOperationFailed
+            }
+        } catch {
+            retainedError = error
+        }
+        guard close(descriptor) == 0, retainedError == nil else {
+            throw retainedError ?? ProviderCMSTestError.fileOperationFailed
         }
     }
 
@@ -525,6 +764,19 @@ private struct ProviderFixture {
     }
 }
 
+private struct LegacyProviderState: Codable {
+    let schemaVersion: Int
+    let authorities: [LegacyProviderAuthority]
+}
+
+private struct LegacyProviderAuthority: Codable {
+    let identifier: String
+    let moduleSHA256: String
+    let kind: NetworkProviderKind
+    let identity: NetworkHelperDNSIdentity
+    let activatedAt: Date
+}
+
 private struct AcceptingProviderVerifier: DetachedCMSVerifier {
     func verifyDetachedCMS(
         signature: Data,
@@ -580,6 +832,38 @@ private struct CrashingProviderExecutor:
         sandbox: NetworkProviderSandbox
     ) async throws -> Data {
         throw NetworkProviderError.executionFailed
+    }
+}
+
+private actor RecordingProviderExecutor:
+    NetworkProviderWasmExecutor
+{
+    private var recordedOperations: [NetworkProviderOperation] = []
+
+    func execute(
+        module: Data,
+        stdin: Data,
+        sandbox: NetworkProviderSandbox
+    ) async throws -> Data {
+        let request = try JSONDecoder().decode(
+            TestProviderRequest.self,
+            from: stdin
+        )
+        recordedOperations.append(request.operation)
+        return try canonicalJSON(
+            TestProviderResponse(
+                version: 1,
+                nonce: request.nonce,
+                operation: request.operation,
+                status: "ok",
+                payload: ["result": "ok"],
+                brokerRequests: nil
+            )
+        )
+    }
+
+    func operations() -> [NetworkProviderOperation] {
+        recordedOperations
     }
 }
 

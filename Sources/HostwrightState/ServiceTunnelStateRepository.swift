@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import HostwrightCore
 import HostwrightNetworking
@@ -38,15 +39,17 @@ public struct ServiceTunnelStateRepository: Sendable {
                         """
                         UPDATE service_tunnel_sessions
                         SET generation = ?, fencing_token = ?, desired_sha256 = ?,
-                            observed_sha256 = ?, route_json = ?, lifecycle_state = ?,
-                            finalizer_state = ?, selected_transport = ?, key_epoch = ?,
-                            reconnect_attempt = ?, updated_at_ms = ?
+                            observed_sha256 = ?, route_json = ?,
+                            route_json_sha256 = ?, lifecycle_state = ?,
+                            finalizer_state = ?, selected_transport = ?,
+                            key_epoch = ?, reconnect_attempt = ?, updated_at_ms = ?
                         WHERE id = ? AND generation = ? AND fencing_token = ?
                         """,
                         bindings: [
                             .int64(record.generation), .text(record.fencingToken),
                             .text(record.desiredSHA256), Self.optional(record.observedSHA256),
-                            .text(record.routeJSON), .text(record.lifecycleState.rawValue),
+                            .text(record.routeJSON), .text(record.routeJSONSHA256),
+                            .text(record.lifecycleState.rawValue),
                             .text(record.finalizerState.rawValue),
                             Self.optional(record.selectedTransport?.rawValue),
                             .int64(record.keyEpoch), .int(record.reconnectAttempt),
@@ -69,9 +72,10 @@ public struct ServiceTunnelStateRepository: Sendable {
                             id, project_uuid, peer_uuid, generation, provider_id,
                             provider_generation, fencing_token, operation_group_id,
                             desired_sha256, observed_sha256, route_json,
+                            route_json_sha256,
                             lifecycle_state, finalizer_state, selected_transport,
                             key_epoch, reconnect_attempt, created_at_ms, updated_at_ms
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         bindings: [
                             .text(record.id), .text(record.projectUUID), .text(record.peerUUID),
@@ -79,6 +83,7 @@ public struct ServiceTunnelStateRepository: Sendable {
                             .int64(record.providerGeneration), .text(record.fencingToken),
                             .text(record.operationGroupID), .text(record.desiredSHA256),
                             Self.optional(record.observedSHA256), .text(record.routeJSON),
+                            .text(record.routeJSONSHA256),
                             .text(record.lifecycleState.rawValue), .text(record.finalizerState.rawValue),
                             Self.optional(record.selectedTransport?.rawValue),
                             .int64(record.keyEpoch), .int(record.reconnectAttempt),
@@ -153,6 +158,24 @@ public struct ServiceTunnelStateRepository: Sendable {
         }
     }
 
+    static func invalidStoredRecordCount(
+        on connection: SQLiteConnection
+    ) throws -> Int {
+        var invalid = 0
+        for row in try connection.query(
+            select + " ORDER BY project_uuid, peer_uuid, generation, id"
+        ) {
+            do {
+                let record = try decode(row)
+                try validateStoredBinding(record, on: connection)
+                try validateStoredRoute(record)
+            } catch {
+                invalid += 1
+            }
+        }
+        return invalid
+    }
+
     private static func validateAuthority(
         _ record: ServiceTunnelStateRecord,
         on connection: SQLiteConnection
@@ -180,6 +203,57 @@ public struct ServiceTunnelStateRepository: Sendable {
         }
     }
 
+    private static func validateStoredBinding(
+        _ record: ServiceTunnelStateRecord,
+        on connection: SQLiteConnection
+    ) throws {
+        let rows = try connection.query(
+            """
+            SELECT project.mutation_provider, project.provider_generation,
+                   operation.fencing_token, project.resource_uuid
+            FROM projects AS project
+            JOIN operation_groups AS operation
+              ON operation.project_id = project.id
+            WHERE project.resource_uuid = ? AND operation.id = ?
+            LIMIT 1
+            """,
+            bindings: [.text(record.projectUUID), .text(record.operationGroupID)]
+        )
+        guard let row = rows.first,
+              row.count == 4,
+              RuntimeProviderBinding.stableID(
+                for: row[0] ?? ""
+              )?.rawValue == record.providerID,
+              Int64(row[1] ?? "") == record.providerGeneration,
+              row[2] == record.fencingToken,
+              row[3] == record.projectUUID else {
+            throw StateStoreError.invalidRecord(
+                "Service tunnel stored provider and operation ownership is inconsistent."
+            )
+        }
+    }
+
+    private static func validateStoredRoute(
+        _ record: ServiceTunnelStateRecord
+    ) throws {
+        let route = try decodeCanonicalRoute(record.routeJSON)
+        guard sha256(Data(record.routeJSON.utf8))
+                == record.routeJSONSHA256,
+              route.routeUUID == record.id,
+              route.projectUUID == record.projectUUID,
+              route.peerUUID == record.peerUUID,
+              route.generation == record.generation,
+              route.providerID == record.providerID,
+              route.providerGeneration == record.providerGeneration,
+              route.fencingToken == record.fencingToken,
+              route.operationGroupID == record.operationGroupID,
+              route.desiredSHA256 == record.desiredSHA256 else {
+            throw StateStoreError.invalidRecord(
+                "Persisted service tunnel route lost exact authority."
+            )
+        }
+    }
+
     private static func validate(_ record: ServiceTunnelStateRecord) throws {
         try validateUUID(record.id, label: "service tunnel id")
         try validateUUID(record.projectUUID, label: "project UUID")
@@ -188,6 +262,7 @@ public struct ServiceTunnelStateRepository: Sendable {
         try validateUUID(record.operationGroupID, label: "operation group id")
         try validateSHA256(record.desiredSHA256)
         if let observed = record.observedSHA256 { try validateSHA256(observed) }
+        try validateSHA256(record.routeJSONSHA256)
         guard record.generation > 0, record.providerGeneration > 0,
               record.keyEpoch > 0, (0...8).contains(record.reconnectAttempt),
               record.updatedAtUnixMilliseconds >= record.createdAtUnixMilliseconds,
@@ -196,6 +271,7 @@ public struct ServiceTunnelStateRepository: Sendable {
               validShape(record) else {
             throw StateStoreError.invalidRecord("Service tunnel intent has invalid lifecycle or bounded evidence.")
         }
+        try validateStoredRoute(record)
     }
 
     private static func validShape(_ record: ServiceTunnelStateRecord) -> Bool {
@@ -238,26 +314,28 @@ public struct ServiceTunnelStateRepository: Sendable {
     private static let select = """
         SELECT id, project_uuid, peer_uuid, generation, provider_id,
                provider_generation, fencing_token, operation_group_id,
-               desired_sha256, observed_sha256, route_json, lifecycle_state,
-               finalizer_state, selected_transport, key_epoch,
+               desired_sha256, observed_sha256, route_json,
+               route_json_sha256, lifecycle_state, finalizer_state,
+               selected_transport, key_epoch,
                reconnect_attempt, created_at_ms, updated_at_ms
         FROM service_tunnel_sessions
         """
 
     private static func decode(_ row: [String?]) throws -> ServiceTunnelStateRecord {
-        guard row.count == 18,
+        guard row.count == 19,
               let id = row[0], let project = row[1], let peer = row[2],
               let generation = row[3].flatMap(Int64.init), let provider = row[4],
               let providerGeneration = row[5].flatMap(Int64.init), let fence = row[6],
               let group = row[7], let desired = row[8], let routeJSON = row[10],
-              let lifecycleText = row[11], let lifecycle = ServiceTunnelLifecycleState(rawValue: lifecycleText),
-              let finalizerText = row[12], let finalizer = ServiceTunnelFinalizerState(rawValue: finalizerText),
-              let keyEpoch = row[14].flatMap(Int64.init),
-              let reconnect = row[15].flatMap(Int.init),
-              let created = row[16].flatMap(Int64.init), let updated = row[17].flatMap(Int64.init) else {
+              let routeJSONSHA256 = row[11],
+              let lifecycleText = row[12], let lifecycle = ServiceTunnelLifecycleState(rawValue: lifecycleText),
+              let finalizerText = row[13], let finalizer = ServiceTunnelFinalizerState(rawValue: finalizerText),
+              let keyEpoch = row[15].flatMap(Int64.init),
+              let reconnect = row[16].flatMap(Int.init),
+              let created = row[17].flatMap(Int64.init), let updated = row[18].flatMap(Int64.init) else {
             throw StateStoreError.invalidRecord("Persisted service tunnel intent is incomplete.")
         }
-        let transport = try row[13].map {
+        let transport = try row[14].map {
             guard let value = ServiceTunnelTransportState(rawValue: $0) else {
                 throw StateStoreError.invalidRecord("Persisted service tunnel transport is invalid.")
             }
@@ -267,7 +345,8 @@ public struct ServiceTunnelStateRepository: Sendable {
             id: id, projectUUID: project, peerUUID: peer, generation: generation,
             providerID: provider, providerGeneration: providerGeneration,
             fencingToken: fence, operationGroupID: group, desiredSHA256: desired,
-            observedSHA256: row[9], routeJSON: routeJSON, lifecycleState: lifecycle,
+            observedSHA256: row[9], routeJSON: routeJSON,
+            routeJSONSHA256: routeJSONSHA256, lifecycleState: lifecycle,
             finalizerState: finalizer, selectedTransport: transport, keyEpoch: keyEpoch,
             reconnectAttempt: reconnect, createdAtUnixMilliseconds: created,
             updatedAtUnixMilliseconds: updated
@@ -278,6 +357,41 @@ public struct ServiceTunnelStateRepository: Sendable {
 
     private static func optional(_ value: String?) -> SQLiteValue {
         value.map(SQLiteValue.text) ?? .null
+    }
+
+    private static func decodeCanonicalRoute(
+        _ routeJSON: String
+    ) throws -> HostwrightTunnelRoute {
+        let data = Data(routeJSON.utf8)
+        do {
+            let route = try JSONDecoder().decode(
+                HostwrightTunnelRoute.self,
+                from: data
+            )
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [
+                .sortedKeys,
+                .withoutEscapingSlashes
+            ]
+            guard try encoder.encode(route) == data else {
+                throw StateStoreError.invalidRecord(
+                    "Persisted service tunnel route JSON is not canonical."
+                )
+            }
+            return route
+        } catch let error as StateStoreError {
+            throw error
+        } catch {
+            throw StateStoreError.invalidRecord(
+                "Persisted service tunnel route JSON is invalid."
+            )
+        }
+    }
+
+    private static func sha256(_ data: Data) -> String {
+        SHA256.hash(data: data).map {
+            String(format: "%02x", $0)
+        }.joined()
     }
 
     private static func validateUUID(_ value: String, label: String) throws {
@@ -304,8 +418,9 @@ extension ServiceTunnelStateRepository: HostwrightTunnelIntentPersisting {
     public func save(_ intent: HostwrightTunnelSessionIntent) throws {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        let routeData = try encoder.encode(intent.route)
         let routeJSON = String(
-            decoding: try encoder.encode(intent.route),
+            decoding: routeData,
             as: UTF8.self
         )
         let existing = try load(id: intent.route.routeUUID)
@@ -321,6 +436,7 @@ extension ServiceTunnelStateRepository: HostwrightTunnelIntentPersisting {
             desiredSHA256: intent.route.desiredSHA256,
             observedSHA256: intent.observedSHA256,
             routeJSON: routeJSON,
+            routeJSONSHA256: Self.sha256(routeData),
             lifecycleState: Self.lifecycle(intent.phase),
             finalizerState: Self.finalizer(intent.finalizer),
             selectedTransport: intent.selectedTransport.map {
@@ -351,12 +467,8 @@ extension ServiceTunnelStateRepository: HostwrightTunnelIntentPersisting {
         guard let record = try load(id: routeUUID) else {
             return nil
         }
+        let route = try Self.decodeCanonicalRoute(record.routeJSON)
         guard
-            let data = record.routeJSON.data(using: .utf8),
-            let route = try? JSONDecoder().decode(
-                HostwrightTunnelRoute.self,
-                from: data
-            ),
             route.routeUUID == record.id,
             route.projectUUID == record.projectUUID,
             route.peerUUID == record.peerUUID,

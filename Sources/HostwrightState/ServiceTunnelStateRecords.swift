@@ -42,6 +42,7 @@ public struct ServiceTunnelStateRecord: Equatable, Sendable {
     public let desiredSHA256: String
     public let observedSHA256: String?
     public let routeJSON: String
+    public let routeJSONSHA256: String
     public let lifecycleState: ServiceTunnelLifecycleState
     public let finalizerState: ServiceTunnelFinalizerState
     public let selectedTransport: ServiceTunnelTransportState?
@@ -62,6 +63,7 @@ public struct ServiceTunnelStateRecord: Equatable, Sendable {
         desiredSHA256: String,
         observedSHA256: String?,
         routeJSON: String,
+        routeJSONSHA256: String,
         lifecycleState: ServiceTunnelLifecycleState,
         finalizerState: ServiceTunnelFinalizerState,
         selectedTransport: ServiceTunnelTransportState?,
@@ -81,6 +83,7 @@ public struct ServiceTunnelStateRecord: Equatable, Sendable {
         self.desiredSHA256 = desiredSHA256
         self.observedSHA256 = observedSHA256
         self.routeJSON = routeJSON
+        self.routeJSONSHA256 = routeJSONSHA256
         self.lifecycleState = lifecycleState
         self.finalizerState = finalizerState
         self.selectedTransport = selectedTransport

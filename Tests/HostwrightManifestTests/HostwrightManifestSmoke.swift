@@ -1840,7 +1840,7 @@ final class HostwrightManifestTests: XCTestCase {
             [
                 "version", "project", "imagePolicy", "imageTrust", "imageSBOM",
                 "imageVulnerability", "imageProvenance", "volumes", "networks",
-                "certificates", "ingress", "services"
+                "certificates", "ingress", "tunnels", "services"
             ]
         )
         let required = try XCTUnwrap(schemaJSON["required"] as? [String])

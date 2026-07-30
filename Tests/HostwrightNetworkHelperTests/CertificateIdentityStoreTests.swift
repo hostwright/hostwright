@@ -72,6 +72,25 @@ final class CertificateIdentityStoreTests: XCTestCase {
         }
     }
 
+    func testSecureSerialNumbersAreNonzeroTwentyByteValues() throws {
+        let first = try CertificateIdentityStore.secureSerialNumberBytes()
+        let second = try CertificateIdentityStore.secureSerialNumberBytes()
+
+        XCTAssertEqual(first.count, 20)
+        XCTAssertEqual(second.count, 20)
+        XCTAssertTrue(first.contains(where: { $0 != 0 }))
+        XCTAssertTrue(second.contains(where: { $0 != 0 }))
+        XCTAssertNotEqual(first, second)
+    }
+
+    func testSecureSerialNumberUsesCanonicalByteBackedEncoding() throws {
+        let serial = try CertificateIdentityStore.secureSerialNumber()
+
+        XCTAssertFalse(serial.bytes.isEmpty)
+        XCTAssertLessThanOrEqual(serial.bytes.count, 20)
+        XCTAssertTrue(serial.bytes.contains(where: { $0 != 0 }))
+    }
+
     func testImportedAndManagedResolutionRejectUppercaseBeforeKeychainAccess()
         throws
     {

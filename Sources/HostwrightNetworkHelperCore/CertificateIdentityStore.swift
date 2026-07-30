@@ -261,7 +261,7 @@ public final class CertificateIdentityStore: @unchecked Sendable {
       let issuerPrivateKey = try Certificate.PrivateKey(issuerKey)
       let issuerCertificate = try Certificate(
         version: .v3,
-        serialNumber: .init(),
+        serialNumber: try Self.secureSerialNumber(),
         publicKey: issuerPrivateKey.publicKey,
         notValidBefore: notValidBefore,
         notValidAfter: notValidAfter,
@@ -290,7 +290,7 @@ public final class CertificateIdentityStore: @unchecked Sendable {
       let serverAuth = try ExtendedKeyUsage([.serverAuth])
       let leafCertificate = try Certificate(
         version: .v3,
-        serialNumber: .init(),
+        serialNumber: try Self.secureSerialNumber(),
         publicKey: leafPrivateKey.publicKey,
         notValidBefore: notValidBefore,
         notValidAfter: notValidAfter,
@@ -479,7 +479,7 @@ public final class CertificateIdentityStore: @unchecked Sendable {
       let clientAuth = try ExtendedKeyUsage([.clientAuth])
       let leaf = try Certificate(
         version: .v3,
-        serialNumber: .init(),
+        serialNumber: try Self.secureSerialNumber(),
         publicKey: leafPrivateKey.publicKey,
         notValidBefore: now.addingTimeInterval(-60),
         notValidAfter: now.addingTimeInterval(validity),
@@ -925,6 +925,34 @@ public final class CertificateIdentityStore: @unchecked Sendable {
     guard validity > 0, validity <= maximumLeafValidity else {
       throw CertificateIdentityStoreError.invalidValidity
     }
+  }
+
+  static func secureSerialNumberBytes() throws -> [UInt8] {
+    for _ in 0..<2 {
+      var bytes = [UInt8](repeating: 0, count: 20)
+      let status = bytes.withUnsafeMutableBytes { buffer in
+        guard let baseAddress = buffer.baseAddress else {
+          return errSecParam
+        }
+        return SecRandomCopyBytes(
+          kSecRandomDefault,
+          buffer.count,
+          baseAddress
+        )
+      }
+      guard status == errSecSuccess else {
+        throw CertificateIdentityStoreError.keychainFailure(status)
+      }
+      if bytes.contains(where: { $0 != 0 }) {
+        return bytes
+      }
+    }
+    throw CertificateIdentityStoreError.validationFailed
+  }
+
+  static func secureSerialNumber() throws -> Certificate.SerialNumber {
+    let bytes = try secureSerialNumberBytes()
+    return Certificate.SerialNumber(bytes: ArraySlice(bytes))
   }
 
   static func mapKeychainStatus(

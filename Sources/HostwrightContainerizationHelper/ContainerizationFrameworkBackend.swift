@@ -1080,8 +1080,6 @@ extension ContainerizationFrameworkBackend {
         records[record.resourceIdentifier] = record
         do {
             try Task.checkCancellation()
-            try await reconcileDriverNetworkPolicies()
-            record = records[record.resourceIdentifier] ?? record
             try await driver.restart(record)
             try Task.checkCancellation()
             try await reconcileDriverNetworkPolicies()

@@ -557,9 +557,9 @@ final class ContainerizationFrameworkBackendTests: XCTestCase {
         let repairedApplyCount = await driver.policyApplyCount(
             resourceIdentifier: request.resourceIdentifier
         )
-        XCTAssertGreaterThan(
+        XCTAssertEqual(
             repairedApplyCount,
-            firstApplyCount
+            firstApplyCount + 1
         )
 
         _ = try await backend.delete(mutation, context: context)

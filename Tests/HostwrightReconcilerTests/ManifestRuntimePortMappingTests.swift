@@ -234,18 +234,19 @@ final class ManifestRuntimePortMappingTests: XCTestCase {
         XCTAssertEqual(mapping.ingress, manifest.ingress)
     }
 
-    func testBlocksNonlocalIngressUntilTLSAndMTLSAreQualified() {
+    func testCarriesQualifiedLANIngressWithoutLegacyAvailabilityBlocker() {
         let exposure = HostwrightPortExposurePolicy(
             scope: .lan,
             interfaces: ["en0"],
             networkClasses: [.privateLAN],
             allowedCIDRs: ["192.168.1.0/24"],
-            authentication: .mutualTLS
+            authentication: .tls
         )
         let ingress = HostwrightIngressListener(
             bindAddress: "192.168.1.10",
             port: 8_443,
             exposure: exposure,
+            certificate: "api-tls",
             routes: [
                 HostwrightIngressRoute(
                     hostname: "api.example.test",
@@ -267,19 +268,22 @@ final class ManifestRuntimePortMappingTests: XCTestCase {
                 imageTrust: nil,
                 imageSBOM: nil,
                 networks: [:],
+                certificates: [
+                    "api-tls": HostwrightCertificateDeclaration(
+                        source: .localCA
+                    ),
+                ],
                 ingress: ["public": ingress],
                 services: [service]
             )
         )
 
-        XCTAssertTrue(mapping.issues.contains {
-            $0.kind == .unsupportedFeature &&
-                $0.severity == .blocker &&
-                $0.stableDetailKey ==
-                    "ingress:public:192.168.1.10:8443" &&
-                $0.message ==
-                    "Ingress listener 'public' requires a qualified secure TLS/mTLS listener before non-localhost activation."
-        })
+        XCTAssertTrue(mapping.issues.isEmpty)
+        XCTAssertEqual(mapping.ingress["public"], ingress)
+        XCTAssertEqual(
+            mapping.certificates["api-tls"],
+            HostwrightCertificateDeclaration(source: .localCA)
+        )
     }
 
     func testLegacyPortLiteralStillMapsAsFixedTCPOnLocalhost() throws {

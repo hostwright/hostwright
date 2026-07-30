@@ -45,11 +45,6 @@ public enum ManifestRuntimeMapper {
             (try? HostwrightLocalPathResolver.resolve()
                 .layout.publishedSocketDirectory)
         var issues: [PlanIssue] = []
-        appendIngressAvailabilityIssues(
-            manifest.ingress,
-            projectName: projectName,
-            issues: &issues
-        )
 
         let networks = manifest.networks
             .sorted { $0.key < $1.key }
@@ -90,32 +85,6 @@ public enum ManifestRuntimeMapper {
             ingress: manifest.ingress,
             issues: issues
         )
-    }
-
-    private static func appendIngressAvailabilityIssues(
-        _ ingress: [String: HostwrightIngressListener],
-        projectName: String,
-        issues: inout [PlanIssue]
-    ) {
-        for (name, listener) in ingress.sorted(by: { $0.key < $1.key })
-        where !listener.exposure.isDefaultLocalhost {
-            issues.append(
-                PlanIssue(
-                    kind: .unsupportedFeature,
-                    severity: .blocker,
-                    identity: RuntimeServiceIdentity(
-                        projectName: projectName,
-                        serviceName:
-                            listener.routes.first?.targetService ??
-                            "ingress"
-                    ),
-                    message:
-                        "Ingress listener '\(name)' requires a qualified secure TLS/mTLS listener before non-localhost activation.",
-                    stableDetailKey:
-                        "ingress:\(name):\(listener.bindAddress):\(listener.port)"
-                )
-            )
-        }
     }
 
     private static func map(

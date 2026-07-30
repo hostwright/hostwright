@@ -66,6 +66,10 @@ final class DistributionIntegrationTests: XCTestCase {
                 "--hostwright-control-binary", binaries.appendingPathComponent("hostwright-control").path,
                 "--hostwright-containerization-helper-binary",
                 binaries.appendingPathComponent("hostwright-containerization-helper").path,
+                "--hostwright-network-helper-binary",
+                binaries.appendingPathComponent("hostwright-network-helper").path,
+                "--hostwright-network-provider-worker-binary",
+                binaries.appendingPathComponent("hostwright-network-provider-worker").path,
                 "--hostwright-storage-helper-binary",
                 binaries.appendingPathComponent("hostwright-storage-helper").path,
                 "--hostwright-dist-binary", binaries.appendingPathComponent("hostwright-dist").path,
@@ -847,8 +851,50 @@ final class DistributionIntegrationTests: XCTestCase {
         }
     }
 
+    func testAssemblerRejectsWrongNetworkHelperContractVersions() throws {
+        try withTemporaryRoot { root in
+            let binaries = repositoryRoot()
+                .appendingPathComponent(".build/debug", isDirectory: true)
+            for (name, networkHelper, providerWorker) in [
+                (
+                    "wrong-network-helper",
+                    binaries.appendingPathComponent("hostwright"),
+                    binaries.appendingPathComponent(
+                        "hostwright-network-provider-worker"
+                    )
+                ),
+                (
+                    "wrong-provider-worker",
+                    binaries.appendingPathComponent("hostwright-network-helper"),
+                    binaries.appendingPathComponent("hostwright")
+                )
+            ] {
+                XCTAssertThrowsError(
+                    try makeArtifact(
+                        root: root,
+                        name: name,
+                        commit: baselineCommit,
+                        networkHelperBinary: networkHelper,
+                        networkProviderWorkerBinary: providerWorker
+                    )
+                ) { error in
+                    guard case let DistributionError.invalidArtifact(message) = error else {
+                        return XCTFail("unexpected error: \(error)")
+                    }
+                    XCTAssertTrue(message.contains("version"))
+                }
+            }
+        }
+    }
+
     @discardableResult
-    private func makeArtifact(root: URL, name: String, commit: String) throws -> DistributionBuildReport {
+    private func makeArtifact(
+        root: URL,
+        name: String,
+        commit: String,
+        networkHelperBinary: URL? = nil,
+        networkProviderWorkerBinary: URL? = nil
+    ) throws -> DistributionBuildReport {
         let repository = repositoryRoot()
         let binaries = repository.appendingPathComponent(".build/debug", isDirectory: true)
         return try DistributionAssembler().assemble(
@@ -857,6 +903,12 @@ final class DistributionIntegrationTests: XCTestCase {
                 hostwrightControlBinary: binaries.appendingPathComponent("hostwright-control"),
                 hostwrightContainerizationHelperBinary: binaries
                     .appendingPathComponent("hostwright-containerization-helper"),
+                hostwrightNetworkHelperBinary: networkHelperBinary
+                    ?? binaries.appendingPathComponent("hostwright-network-helper"),
+                hostwrightNetworkProviderWorkerBinary: networkProviderWorkerBinary
+                    ?? binaries.appendingPathComponent(
+                        "hostwright-network-provider-worker"
+                    ),
                 hostwrightStorageHelperBinary: binaries
                     .appendingPathComponent("hostwright-storage-helper"),
                 hostwrightDistributionBinary: binaries.appendingPathComponent("hostwright-dist"),

@@ -2,6 +2,7 @@ import CryptoKit
 import Darwin
 import Foundation
 import HostwrightNetworking
+import HostwrightNetworkProviders
 import HostwrightRuntime
 
 public enum NetworkHelperClientError: Error, Equatable, Sendable {
@@ -25,6 +26,8 @@ public enum NetworkHelperClientError: Error, Equatable, Sendable {
     case bindingUnavailable
     case certificateUnavailable
     case invalidCertificate
+    case invalidProvider
+    case providerRejected
     case helperFailure
     case cleanupFailed
 }
@@ -517,6 +520,7 @@ public actor NetworkHelperClient {
     private let launcher: NetworkHelperProcessLauncher
     private var processLease: NetworkHelperProcessLease?
     private var retainsActiveBindings = false
+    private var retainsProviderAuthority = false
 
     public init(configuration: NetworkHelperClientConfiguration) {
         self.configuration = configuration
@@ -624,10 +628,50 @@ public actor NetworkHelperClient {
         retainsActiveBindings = false
     }
 
+    public func invokeProvider(
+        identity: NetworkHelperDNSIdentity,
+        invocation: NetworkHelperProviderInvocation
+    ) throws -> NetworkHelperProviderResult {
+        if invocation.longRunning,
+           configuration.requestTimeoutMilliseconds
+            <= Int64(
+                NetworkProviderSandbox.longTimeoutMilliseconds
+            ) {
+            throw NetworkHelperClientError.invalidConfiguration
+        }
+        let result = try exchangeProvider(
+            NetworkHelperRequest(
+                operation: .providerInvoke,
+                identity: identity,
+                providerInvocation: invocation
+            )
+        )
+        if invocation.operation == .setup {
+            retainsProviderAuthority = true
+        } else if invocation.operation == .teardown {
+            retainsProviderAuthority = false
+        }
+        return result
+    }
+
+    public func revokeProvider(
+        identity: NetworkHelperDNSIdentity,
+        revocation: NetworkHelperProviderRevocation
+    ) throws {
+        _ = try exchangeProvider(
+            NetworkHelperRequest(
+                operation: .providerRevoke,
+                identity: identity,
+                providerRevocation: revocation
+            )
+        )
+        retainsProviderAuthority = false
+    }
+
     public func close() throws {
         guard let lease = processLease else { return }
         processLease = nil
-        if retainsActiveBindings {
+        if retainsActiveBindings || retainsProviderAuthority {
             return
         }
         let idleDeadline = Self.monotonicMilliseconds()
@@ -660,6 +704,28 @@ public actor NetworkHelperClient {
     private func exchange(
         _ request: NetworkHelperRequest
     ) throws -> NetworkHelperStatus {
+        let response = try rawExchange(request)
+        guard let status = response.status,
+              response.providerResult == nil else {
+            throw NetworkHelperClientError.protocolFailure
+        }
+        return status
+    }
+
+    private func exchangeProvider(
+        _ request: NetworkHelperRequest
+    ) throws -> NetworkHelperProviderResult {
+        let response = try rawExchange(request)
+        guard response.status == nil,
+              let providerResult = response.providerResult else {
+            throw NetworkHelperClientError.protocolFailure
+        }
+        return providerResult
+    }
+
+    private func rawExchange(
+        _ request: NetworkHelperRequest
+    ) throws -> NetworkHelperResponse {
         _ = try request.validated()
         let lease = try ensureProcess()
         let descriptor = try connect(to: lease)
@@ -687,16 +753,17 @@ public actor NetworkHelperClient {
         guard response.protocolVersion == NetworkHelperProtocolV1.version,
               response.requestID == request.requestID,
               response.operation == request.operation,
-              (response.status == nil) != (response.error == nil) else {
+              [
+                  response.status != nil,
+                  response.providerResult != nil,
+                  response.error != nil
+              ].filter({ $0 }).count == 1 else {
             throw NetworkHelperClientError.protocolFailure
         }
         if let error = response.error {
             throw Self.map(error.code)
         }
-        guard let status = response.status else {
-            throw NetworkHelperClientError.protocolFailure
-        }
-        return status
+        return response
     }
 
     static func map(
@@ -729,6 +796,10 @@ public actor NetworkHelperClient {
             return .certificateUnavailable
         case .invalidCertificate:
             return .invalidCertificate
+        case .invalidProvider:
+            return .invalidProvider
+        case .providerRejected:
+            return .providerRejected
         }
     }
 

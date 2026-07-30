@@ -17,6 +17,13 @@ public enum NetworkHelperExecutable {
             isDirectory: true
         )
         let store = try NetworkHelperStateStore(rootURL: stateRoot)
+        let providerCoordinator =
+            try NetworkHelperProviderCoordinator(
+                stateRootURL: runtimeDirectoryURL.appendingPathComponent(
+                    "provider-state",
+                    isDirectory: true
+                )
+            )
         let hostAccessBroker = NetworkHelperHostAccessBroker()
         let ingressBroker = NetworkHelperIngressBroker()
         let certificateCoordinator =
@@ -157,7 +164,8 @@ public enum NetworkHelperExecutable {
                 hostAccessBroker: hostAccessBroker,
                 ingressBroker: ingressBroker,
                 certificateCoordinator: certificateCoordinator,
-                policyBroker: policyBroker
+                policyBroker: policyBroker,
+                providerCoordinator: providerCoordinator
             ),
             authenticator: .productionClient(),
             idleTimeoutMilliseconds: idleTimeoutMilliseconds

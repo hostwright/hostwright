@@ -22,6 +22,10 @@ let package = Package(
             name: "hostwright-network-helper",
             targets: ["HostwrightNetworkHelper"]
         ),
+        .executable(
+            name: "hostwright-network-provider-worker",
+            targets: ["HostwrightNetworkProviderWorker"]
+        ),
         .executable(name: "hostwrightd", targets: ["HostwrightDaemon"]),
         .executable(name: "hostwright-dist", targets: ["HostwrightDistributionTool"]),
         .executable(
@@ -39,6 +43,7 @@ let package = Package(
         .library(name: "HostwrightImport", targets: ["HostwrightImport"]),
         .library(name: "HostwrightExtensions", targets: ["HostwrightExtensions"]),
         .library(name: "HostwrightNetworking", targets: ["HostwrightNetworking"]),
+        .library(name: "HostwrightNetworkProviders", targets: ["HostwrightNetworkProviders"]),
         .library(name: "HostwrightObservability", targets: ["HostwrightObservability"]),
         .library(name: "HostwrightPolicy", targets: ["HostwrightPolicy"]),
         .library(name: "HostwrightRegistry", targets: ["HostwrightRegistry"]),
@@ -61,6 +66,10 @@ let package = Package(
         .package(
             url: "https://github.com/apple/swift-certificates.git",
             exact: "1.19.3"
+        ),
+        .package(
+            url: "https://github.com/swiftwasm/WasmKit.git",
+            exact: "0.3.1"
         )
     ],
     targets: [
@@ -137,6 +146,7 @@ let package = Package(
             name: "HostwrightNetworkHelperCore",
             dependencies: [
                 "HostwrightNetworking",
+                "HostwrightNetworkProviders",
                 "HostwrightRuntime",
                 .product(name: "X509", package: "swift-certificates")
             ],
@@ -248,6 +258,22 @@ let package = Package(
         .target(
             name: "HostwrightNetworking",
             dependencies: ["HostwrightCore"]
+        ),
+        .target(
+            name: "HostwrightNetworkProviders",
+            dependencies: [
+                "HostwrightCore",
+                .product(name: "WasmKit", package: "WasmKit")
+            ],
+            exclude: ["Worker"]
+        ),
+        .executableTarget(
+            name: "HostwrightNetworkProviderWorker",
+            dependencies: [
+                "HostwrightNetworkProviders",
+                .product(name: "WasmKit", package: "WasmKit")
+            ],
+            path: "Sources/HostwrightNetworkProviders/Worker"
         ),
         .target(
             name: "HostwrightObservability",
@@ -428,6 +454,13 @@ let package = Package(
         .testTarget(
             name: "HostwrightNetworkingTests",
             dependencies: ["HostwrightNetworking"]
+        ),
+        .testTarget(
+            name: "HostwrightNetworkProvidersTests",
+            dependencies: [
+                "HostwrightNetworkProviders",
+                "HostwrightNetworkProviderWorker"
+            ]
         ),
         .testTarget(
             name: "HostwrightNetworkHelperTests",

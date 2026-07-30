@@ -1,5 +1,6 @@
 import Foundation
 import HostwrightNetworking
+import HostwrightNetworkProviders
 import HostwrightRuntime
 
 public enum NetworkHelperProtocolV1 {
@@ -71,6 +72,8 @@ enum NetworkHelperOperation: String, Codable, CaseIterable, Sendable {
     case apply
     case status
     case remove
+    case providerInvoke
+    case providerRevoke
 }
 
 enum NetworkHelperDisposition: String, Codable, Sendable {
@@ -125,6 +128,8 @@ struct NetworkHelperRequest: Codable, Equatable, Sendable {
     let certificateBindings: [ProjectCertificateRequestBinding]?
     let policyPlan: NetworkPolicyPlan?
     let predecessorFencingToken: String?
+    let providerInvocation: NetworkHelperProviderInvocation?
+    let providerRevocation: NetworkHelperProviderRevocation?
 
     init(
         protocolVersion: Int = NetworkHelperProtocolV1.version,
@@ -136,7 +141,9 @@ struct NetworkHelperRequest: Codable, Equatable, Sendable {
         ingressBindings: [ProjectIngressListenerBinding] = [],
         certificateBindings: [ProjectCertificateRequestBinding] = [],
         policyPlan: NetworkPolicyPlan? = nil,
-        predecessorFencingToken: String? = nil
+        predecessorFencingToken: String? = nil,
+        providerInvocation: NetworkHelperProviderInvocation? = nil,
+        providerRevocation: NetworkHelperProviderRevocation? = nil
     ) {
         self.protocolVersion = protocolVersion
         self.requestID = requestID.uuidString.lowercased()
@@ -154,6 +161,8 @@ struct NetworkHelperRequest: Codable, Equatable, Sendable {
         )
         self.policyPlan = policyPlan
         self.predecessorFencingToken = predecessorFencingToken
+        self.providerInvocation = providerInvocation
+        self.providerRevocation = providerRevocation
     }
 
     func validated() throws -> Self {
@@ -197,6 +206,10 @@ struct NetworkHelperRequest: Codable, Equatable, Sendable {
                     identity: identity
                 )
             }
+            guard providerInvocation == nil,
+                  providerRevocation == nil else {
+                throw NetworkHelperError.invalidRequest
+            }
         case .status, .remove:
             guard corefile == nil,
                   hostAccessBindings == nil ||
@@ -206,9 +219,41 @@ struct NetworkHelperRequest: Codable, Equatable, Sendable {
                   certificateBindings == nil ||
                     certificateBindings?.isEmpty == true,
                   policyPlan == nil,
-                  predecessorFencingToken == nil else {
+                  predecessorFencingToken == nil,
+                  providerInvocation == nil,
+                  providerRevocation == nil else {
                 throw NetworkHelperError.invalidRequest
             }
+        case .providerInvoke:
+            guard corefile == nil,
+                  hostAccessBindings == nil ||
+                    hostAccessBindings?.isEmpty == true,
+                  ingressBindings == nil ||
+                    ingressBindings?.isEmpty == true,
+                  certificateBindings == nil ||
+                    certificateBindings?.isEmpty == true,
+                  policyPlan == nil,
+                  predecessorFencingToken == nil,
+                  let providerInvocation,
+                  providerRevocation == nil else {
+                throw NetworkHelperError.invalidRequest
+            }
+            _ = try providerInvocation.validated()
+        case .providerRevoke:
+            guard corefile == nil,
+                  hostAccessBindings == nil ||
+                    hostAccessBindings?.isEmpty == true,
+                  ingressBindings == nil ||
+                    ingressBindings?.isEmpty == true,
+                  certificateBindings == nil ||
+                    certificateBindings?.isEmpty == true,
+                  policyPlan == nil,
+                  predecessorFencingToken == nil,
+                  providerInvocation == nil,
+                  let providerRevocation else {
+                throw NetworkHelperError.invalidRequest
+            }
+            _ = try providerRevocation.validated()
         }
         return self
     }
@@ -325,6 +370,8 @@ enum NetworkHelperErrorCode: String, Codable, Sendable {
     case bindingUnavailable
     case certificateUnavailable
     case invalidCertificate
+    case invalidProvider
+    case providerRejected
 }
 
 struct NetworkHelperFailure: Codable, Equatable, Sendable {
@@ -337,6 +384,7 @@ struct NetworkHelperResponse: Codable, Equatable, Sendable {
     let requestID: String
     let operation: NetworkHelperOperation
     let status: NetworkHelperStatus?
+    let providerResult: NetworkHelperProviderResult?
     let error: NetworkHelperFailure?
 
     init(
@@ -348,6 +396,20 @@ struct NetworkHelperResponse: Codable, Equatable, Sendable {
         self.requestID = requestID
         self.operation = operation
         self.status = status
+        providerResult = nil
+        error = nil
+    }
+
+    init(
+        requestID: String,
+        operation: NetworkHelperOperation,
+        providerResult: NetworkHelperProviderResult
+    ) {
+        protocolVersion = NetworkHelperProtocolV1.version
+        self.requestID = requestID
+        self.operation = operation
+        status = nil
+        self.providerResult = providerResult
         error = nil
     }
 
@@ -360,6 +422,7 @@ struct NetworkHelperResponse: Codable, Equatable, Sendable {
         self.requestID = requestID
         self.operation = operation
         status = nil
+        providerResult = nil
         self.error = error
     }
 }
@@ -378,6 +441,8 @@ enum NetworkHelperError: Error, Equatable, Sendable {
     case bindingUnavailable
     case certificateUnavailable
     case invalidCertificate
+    case invalidProvider
+    case providerRejected
 
     var failure: NetworkHelperFailure {
         let code: NetworkHelperErrorCode
@@ -424,6 +489,12 @@ enum NetworkHelperError: Error, Equatable, Sendable {
         case .invalidCertificate:
             code = .invalidCertificate
             message = "certificate request is invalid"
+        case .invalidProvider:
+            code = .invalidProvider
+            message = "network provider request is invalid"
+        case .providerRejected:
+            code = .providerRejected
+            message = "network provider operation was rejected"
         }
         return NetworkHelperFailure(code: code, message: message)
     }

@@ -1,6 +1,7 @@
 import Darwin
 import Foundation
 import HostwrightNetworking
+import HostwrightNetworkProviders
 import HostwrightRuntime
 
 struct NetworkHelperDispatcher: @unchecked Sendable {
@@ -9,6 +10,7 @@ struct NetworkHelperDispatcher: @unchecked Sendable {
     let ingressBroker: NetworkHelperIngressBroker
     let certificateCoordinator: NetworkHelperCertificateCoordinator
     let policyBroker: NetworkHelperPolicyBroker
+    let providerCoordinator: NetworkHelperProviderCoordinator?
 
     init(
         store: NetworkHelperStateStore,
@@ -18,20 +20,23 @@ struct NetworkHelperDispatcher: @unchecked Sendable {
             NetworkHelperIngressBroker(),
         certificateCoordinator: NetworkHelperCertificateCoordinator =
             NetworkHelperCertificateCoordinator(),
-        policyBroker: NetworkHelperPolicyBroker = NetworkHelperPolicyBroker()
+        policyBroker: NetworkHelperPolicyBroker = NetworkHelperPolicyBroker(),
+        providerCoordinator: NetworkHelperProviderCoordinator? = nil
     ) {
         self.store = store
         self.hostAccessBroker = hostAccessBroker
         self.ingressBroker = ingressBroker
         self.certificateCoordinator = certificateCoordinator
         self.policyBroker = policyBroker
+        self.providerCoordinator = providerCoordinator
     }
 
     var hasActiveBindings: Bool {
         hostAccessBroker.hasActiveBindings ||
             ingressBroker.hasActiveBindings ||
             certificateCoordinator.hasActiveCertificates ||
-            policyBroker.hasActivePolicies
+            policyBroker.hasActivePolicies ||
+            providerCoordinator?.hasActiveAuthorities == true
     }
 
     func dispatch(frame: Data) throws -> Data {
@@ -168,6 +173,40 @@ struct NetworkHelperDispatcher: @unchecked Sendable {
                     certificateActive: false,
                     policyActive: false
                 )
+            case .providerInvoke:
+                guard let providerCoordinator,
+                      let invocation =
+                        request.providerInvocation else {
+                    throw NetworkHelperError.invalidProvider
+                }
+                return try NetworkHelperCanonicalJSON.frame(
+                    NetworkHelperResponse(
+                        requestID: request.requestID,
+                        operation: request.operation,
+                        providerResult:
+                            try providerCoordinator.invoke(
+                                identity: request.identity,
+                                request: invocation
+                            )
+                    )
+                )
+            case .providerRevoke:
+                guard let providerCoordinator,
+                      let revocation =
+                        request.providerRevocation else {
+                    throw NetworkHelperError.invalidProvider
+                }
+                return try NetworkHelperCanonicalJSON.frame(
+                    NetworkHelperResponse(
+                        requestID: request.requestID,
+                        operation: request.operation,
+                        providerResult:
+                            try providerCoordinator.revoke(
+                                identity: request.identity,
+                                request: revocation
+                            )
+                    )
+                )
             }
             return try NetworkHelperCanonicalJSON.frame(
                 NetworkHelperResponse(
@@ -182,6 +221,14 @@ struct NetworkHelperDispatcher: @unchecked Sendable {
                     requestID: request.requestID,
                     operation: request.operation,
                     error: error.failure
+                )
+            )
+        } catch is NetworkProviderError {
+            return try NetworkHelperCanonicalJSON.frame(
+                NetworkHelperResponse(
+                    requestID: request.requestID,
+                    operation: request.operation,
+                    error: NetworkHelperError.providerRejected.failure
                 )
             )
         }
@@ -478,11 +525,12 @@ enum NetworkHelperConnectionHandler {
         timeoutMilliseconds: Int64 = 5_000
     ) throws {
         precondition(timeoutMilliseconds > 0)
-        let deadline = monotonicMilliseconds() + timeoutMilliseconds
+        let readDeadline =
+            monotonicMilliseconds() + timeoutMilliseconds
         let header = try readExact(
             descriptor: descriptor,
             byteCount: ContainerizationHelperProtocolV1.frameHeaderBytes,
-            deadlineMilliseconds: deadline
+            deadlineMilliseconds: readDeadline
         )
         let payloadLength = header.reduce(UInt32(0)) {
             ($0 << 8) | UInt32($1)
@@ -496,13 +544,14 @@ enum NetworkHelperConnectionHandler {
         let payload = try readExact(
             descriptor: descriptor,
             byteCount: Int(payloadLength),
-            deadlineMilliseconds: deadline
+            deadlineMilliseconds: readDeadline
         )
         let response = try dispatcher.dispatch(frame: header + payload)
         try writeAll(
             descriptor: descriptor,
             data: response,
-            deadlineMilliseconds: deadline
+            deadlineMilliseconds:
+                monotonicMilliseconds() + timeoutMilliseconds
         )
     }
 

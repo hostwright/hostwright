@@ -2422,6 +2422,24 @@ public struct DistributionInstalledLifecycle: Sendable {
                 )
             }
         }
+        for (executable, expectedVersion) in [
+            ("hostwright-network-helper", "network-helper-protocol-v1"),
+            ("hostwright-network-provider-worker", "network-provider-spi-v1")
+        ] where installedPaths.contains("bin/\(executable)") {
+            let result = try runner.run(
+                executablePath: prefix.appendingPathComponent("bin/\(executable)").path,
+                arguments: ["--version"],
+                label: "verify installed \(executable) version",
+                timeoutSeconds: 30,
+                cancellation: cancellation
+            )
+            guard result.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+                == expectedVersion else {
+                throw DistributionError.lifecycleFailed(
+                    "installed \(executable) version output did not match its provider contract"
+                )
+            }
+        }
         if installedPaths.contains("bin/hostwright-storage-helper") {
             let result = try runner.run(
                 executablePath: prefix

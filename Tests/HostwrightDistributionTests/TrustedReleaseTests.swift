@@ -4,6 +4,18 @@ import HostwrightCore
 import XCTest
 
 final class TrustedReleaseTests: XCTestCase {
+    func testPublishedPhaseTwoReleaseSchemaRemainsVerifiable() throws {
+        let manifest = makeManifest(
+            schemaVersion: 1,
+            payloadModes: DistributionLayout.legacyTrustedPayloadModesV1
+        )
+
+        XCTAssertNoThrow(try manifest.validate())
+        XCTAssertNoThrow(
+            try makeProvenance(manifest: manifest).validate(manifest: manifest)
+        )
+    }
+
     func testDeveloperIDParserSelectsOnlyExactApplicationAndInstallerIdentities() throws {
         let applicationFingerprint = String(repeating: "A", count: 40)
         let installerFingerprint = String(repeating: "B", count: 40)
@@ -608,11 +620,21 @@ final class TrustedReleaseTests: XCTestCase {
                   hostwright
                   hostwright-control
                   hostwright-containerization-helper
+                  hostwright-network-helper
+                  hostwright-network-provider-worker
                   hostwright-storage-helper
                   hostwright-dist
                   hostwrightd
                 ]
             """
+        ))
+        XCTAssertTrue(formula.contains(
+            "assert_equal \"network-helper-protocol-v1\", shell_output(" +
+                "\"#{bin}/hostwright-network-helper --version\").strip"
+        ))
+        XCTAssertTrue(formula.contains(
+            "assert_equal \"network-provider-spi-v1\", shell_output(" +
+                "\"#{bin}/hostwright-network-provider-worker --version\").strip"
         ))
         XCTAssertTrue(formula.contains(
             "storage_helper_version = shell_output(" +
@@ -874,7 +896,10 @@ final class TrustedReleaseTests: XCTestCase {
         }
     }
 
-    private func makeManifest() -> TrustedReleaseManifest {
+    private func makeManifest(
+        schemaVersion: Int = 2,
+        payloadModes: [String: Int] = DistributionLayout.payloadModes
+    ) -> TrustedReleaseManifest {
         let version = "0.0.2-dev"
         let commit = String(repeating: "a", count: 40)
         let artifactID = "hostwright-\(version)-macos-arm64-\(commit.prefix(12))"
@@ -902,6 +927,7 @@ final class TrustedReleaseTests: XCTestCase {
             sizeBytes: 200
         )
         return TrustedReleaseManifest(
+            schemaVersion: schemaVersion,
             artifactID: artifactID,
             packageVersion: version,
             releaseTag: "v\(version)",
@@ -911,12 +937,12 @@ final class TrustedReleaseTests: XCTestCase {
             createdAt: "2026-07-13T12:00:00Z",
             applicationSigner: application,
             installerSigner: installer,
-            payloadFiles: DistributionLayout.payloadModes.keys.sorted().map {
+            payloadFiles: payloadModes.keys.sorted().map {
                 DistributionFileRecord(
                     path: $0,
                     sha256: digest,
                     sizeBytes: 1,
-                    mode: DistributionLayout.payloadModes[$0]!
+                    mode: payloadModes[$0]!
                 )
             },
             archive: archive,
@@ -965,7 +991,9 @@ final class TrustedReleaseTests: XCTestCase {
                     buildType: "urn:hostwright:buildtype:swiftpm-developer-id:v1",
                     externalParameters: ProvenanceExternalParameters(
                         configuration: "release",
-                        products: DistributionLayout.shippedExecutableNames,
+                        products: DistributionLayout.executableNames(
+                            payloadPaths: Set(manifest.payloadFiles.map(\.path))
+                        )!,
                         platform: "macos",
                         architecture: "arm64"
                     ),

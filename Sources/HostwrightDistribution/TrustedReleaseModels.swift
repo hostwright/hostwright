@@ -156,7 +156,7 @@ public struct TrustedReleaseManifest: Codable, Equatable, Sendable {
     public let packageNotarization: TrustedNotarizationRecord
 
     public init(
-        schemaVersion: Int = 1,
+        schemaVersion: Int = 2,
         artifactID: String,
         packageVersion: String,
         releaseTag: String,
@@ -200,7 +200,7 @@ public struct TrustedReleaseManifest: Codable, Equatable, Sendable {
     }
 
     public func validate() throws {
-        guard schemaVersion == 1,
+        guard schemaVersion == 1 || schemaVersion == 2,
               packageVersion.range(
                 of: "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$",
                 options: .regularExpression
@@ -223,8 +223,11 @@ public struct TrustedReleaseManifest: Codable, Equatable, Sendable {
               applicationSigner.teamIdentifier == installerSigner.teamIdentifier else {
             throw DistributionError.invalidManifest("application and installer identities must belong to one Developer ID team")
         }
-        guard payloadFiles.map(\.path) == payloadFiles.map(\.path).sorted(),
-              Set(payloadFiles.map(\.path)) == Set(DistributionLayout.payloadModes.keys),
+        guard let expectedModes = DistributionLayout.trustedPayloadModes(
+            schemaVersion: schemaVersion
+        ),
+              payloadFiles.map(\.path) == payloadFiles.map(\.path).sorted(),
+              Set(payloadFiles.map(\.path)) == Set(expectedModes.keys),
               Set(payloadFiles.map(\.path)).count == payloadFiles.count else {
             throw DistributionError.invalidManifest("trusted release payload inventory is incomplete")
         }
@@ -232,7 +235,7 @@ public struct TrustedReleaseManifest: Codable, Equatable, Sendable {
             guard DistributionPathPolicy.isSafeRelativePath(file.path),
                   file.sha256.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil,
                   file.sizeBytes > 0,
-                  DistributionLayout.payloadModes[file.path] == file.mode else {
+                  expectedModes[file.path] == file.mode else {
                 throw DistributionError.invalidManifest("trusted release payload metadata is invalid for \(file.path)")
             }
         }
@@ -428,7 +431,10 @@ public struct TrustedReleaseProvenanceStatement: Codable, Equatable, Sendable {
               subject == expectedSubjects,
               predicate.buildDefinition.buildType == "urn:hostwright:buildtype:swiftpm-developer-id:v1",
               predicate.buildDefinition.externalParameters.configuration == "release",
-              predicate.buildDefinition.externalParameters.products == DistributionLayout.shippedExecutableNames,
+              predicate.buildDefinition.externalParameters.products
+                == DistributionLayout.executableNames(
+                    payloadPaths: Set(manifest.payloadFiles.map(\.path))
+                ),
               predicate.buildDefinition.externalParameters.platform == manifest.platform,
               predicate.buildDefinition.externalParameters.architecture == manifest.architecture,
               !predicate.buildDefinition.internalParameters.sourceDirty,

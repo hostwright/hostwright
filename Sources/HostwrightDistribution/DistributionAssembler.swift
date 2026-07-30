@@ -6,6 +6,8 @@ public struct DistributionAssemblyRequest: Sendable {
     public let hostwrightBinary: URL
     public let hostwrightControlBinary: URL
     public let hostwrightContainerizationHelperBinary: URL
+    public let hostwrightNetworkHelperBinary: URL
+    public let hostwrightNetworkProviderWorkerBinary: URL
     public let hostwrightStorageHelperBinary: URL
     public let hostwrightDistributionBinary: URL
     public let hostwrightDaemonBinary: URL
@@ -27,6 +29,8 @@ public struct DistributionAssemblyRequest: Sendable {
         hostwrightBinary: URL,
         hostwrightControlBinary: URL,
         hostwrightContainerizationHelperBinary: URL,
+        hostwrightNetworkHelperBinary: URL,
+        hostwrightNetworkProviderWorkerBinary: URL,
         hostwrightStorageHelperBinary: URL,
         hostwrightDistributionBinary: URL,
         hostwrightDaemonBinary: URL,
@@ -47,6 +51,9 @@ public struct DistributionAssemblyRequest: Sendable {
         self.hostwrightBinary = hostwrightBinary
         self.hostwrightControlBinary = hostwrightControlBinary
         self.hostwrightContainerizationHelperBinary = hostwrightContainerizationHelperBinary
+        self.hostwrightNetworkHelperBinary = hostwrightNetworkHelperBinary
+        self.hostwrightNetworkProviderWorkerBinary =
+            hostwrightNetworkProviderWorkerBinary
         self.hostwrightStorageHelperBinary = hostwrightStorageHelperBinary
         self.hostwrightDistributionBinary = hostwrightDistributionBinary
         self.hostwrightDaemonBinary = hostwrightDaemonBinary
@@ -147,6 +154,23 @@ public struct DistributionAssembler: Sendable {
             commands: &commands
         )
         try validateBinary(
+            request.hostwrightNetworkHelperBinary,
+            versionArguments: ["--version"],
+            expectedVersion: "network-helper-protocol-v1",
+            label: "validate hostwright-network-helper version",
+            cancellation: cancellation,
+            commands: &commands
+        )
+        try validateBinary(
+            request.hostwrightNetworkProviderWorkerBinary,
+            versionArguments: ["--version"],
+            expectedVersion: "network-provider-spi-v1",
+            label:
+                "validate hostwright-network-provider-worker version",
+            cancellation: cancellation,
+            commands: &commands
+        )
+        try validateBinary(
             request.hostwrightStorageHelperBinary,
             versionArguments: ["--version"],
             expectedVersion: LocalStorageProviderContract.providerVersion,
@@ -177,6 +201,19 @@ public struct DistributionAssembler: Sendable {
         try validateArchitecture(
             request.hostwrightContainerizationHelperBinary,
             label: "validate hostwright-containerization-helper architecture",
+            cancellation: cancellation,
+            commands: &commands
+        )
+        try validateArchitecture(
+            request.hostwrightNetworkHelperBinary,
+            label: "validate hostwright-network-helper architecture",
+            cancellation: cancellation,
+            commands: &commands
+        )
+        try validateArchitecture(
+            request.hostwrightNetworkProviderWorkerBinary,
+            label:
+                "validate hostwright-network-provider-worker architecture",
             cancellation: cancellation,
             commands: &commands
         )
@@ -222,6 +259,8 @@ public struct DistributionAssembler: Sendable {
             ("bin/hostwright", request.hostwrightBinary),
             ("bin/hostwright-control", request.hostwrightControlBinary),
             ("bin/hostwright-containerization-helper", request.hostwrightContainerizationHelperBinary),
+            ("bin/hostwright-network-helper", request.hostwrightNetworkHelperBinary),
+            ("bin/hostwright-network-provider-worker", request.hostwrightNetworkProviderWorkerBinary),
             ("bin/hostwright-storage-helper", request.hostwrightStorageHelperBinary),
             ("bin/hostwright-dist", request.hostwrightDistributionBinary),
             ("bin/hostwrightd", request.hostwrightDaemonBinary),
@@ -915,6 +954,12 @@ public struct DistributionCleanBuilder: Sendable {
         let control = backingBinPath.appendingPathComponent("hostwright-control")
         let helper = backingBinPath
             .appendingPathComponent("hostwright-containerization-helper")
+        let networkHelper = backingBinPath
+            .appendingPathComponent("hostwright-network-helper")
+        let networkProviderWorker = backingBinPath
+            .appendingPathComponent(
+                "hostwright-network-provider-worker"
+            )
         let storageHelper = backingBinPath
             .appendingPathComponent("hostwright-storage-helper")
         let distribution = backingBinPath.appendingPathComponent("hostwright-dist")
@@ -972,6 +1017,9 @@ public struct DistributionCleanBuilder: Sendable {
                 hostwrightBinary: hostwright,
                 hostwrightControlBinary: control,
                 hostwrightContainerizationHelperBinary: helper,
+                hostwrightNetworkHelperBinary: networkHelper,
+                hostwrightNetworkProviderWorkerBinary:
+                    networkProviderWorker,
                 hostwrightStorageHelperBinary: storageHelper,
                 hostwrightDistributionBinary: distribution,
                 hostwrightDaemonBinary: daemon,

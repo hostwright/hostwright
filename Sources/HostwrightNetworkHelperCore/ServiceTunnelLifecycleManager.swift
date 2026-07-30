@@ -87,6 +87,7 @@ final class NetworkHelperServiceTunnelManager:
     private let lock = NSLock()
     private var sessions: [String: LiveSession] = [:]
     private var remoteSessions: [String: RemoteSession] = [:]
+    private var reconnectingRoutes = Set<String>()
 
     init(
         store: any HostwrightTunnelIntentPersisting,
@@ -120,7 +121,8 @@ final class NetworkHelperServiceTunnelManager:
 
     var hasActiveSessions: Bool {
         lock.withLock {
-            !sessions.isEmpty || !remoteSessions.isEmpty
+            !sessions.isEmpty || !remoteSessions.isEmpty ||
+                !reconnectingRoutes.isEmpty
         }
     }
 
@@ -132,6 +134,11 @@ final class NetworkHelperServiceTunnelManager:
             let request = try request.validated(
                 identity: identity
             )
+            guard !reconnectingRoutes.contains(
+                request.route.routeUUID
+            ) else {
+                throw NetworkHelperError.tunnelRejected
+            }
             if let execution = request.execution {
                 return try setupRemote(
                     identity: identity,
@@ -281,24 +288,36 @@ final class NetworkHelperServiceTunnelManager:
         identity: NetworkHelperDNSIdentity,
         request: NetworkHelperTunnelRequest
     ) throws -> NetworkHelperTunnelResult {
-        try lock.withLock {
-            let request = try request.validated(
-                identity: identity
+        let request = try request.validated(
+            identity: identity
+        )
+        if let execution = request.execution {
+            return try reconnectRemote(
+                identity: identity,
+                request: request,
+                execution: execution
             )
-            if let execution = request.execution {
-                return try reconnectRemote(
-                    identity: identity,
-                    request: request,
-                    execution: execution
-                )
-            }
-            guard let existing = sessions.removeValue(
-                forKey: request.route.routeUUID
-            ), existing.route == request.route,
+        }
+        let existing = try lock.withLock {
+            guard reconnectingRoutes.insert(
+                request.route.routeUUID
+            ).inserted,
+            let existing = sessions[
+                request.route.routeUUID
+            ], existing.route == request.route,
             existing.identity == identity else {
+                reconnectingRoutes.remove(
+                    request.route.routeUUID
+                )
                 throw NetworkHelperError.tunnelRejected
             }
-            close(existing, drain: false)
+            sessions.removeValue(
+                forKey: request.route.routeUUID
+            )
+            return existing
+        }
+        close(existing, drain: false)
+        do {
             let reconnectDelay = try controller.reconnect(
                 routeUUID: request.route.routeUUID,
                 fencingToken: request.route.fencingToken
@@ -325,17 +344,55 @@ final class NetworkHelperServiceTunnelManager:
                 timeoutMilliseconds:
                     request.timeoutMilliseconds
             )
-            sessions[request.route.routeUUID] = replacement
-            try controller.activate(
-                routeUUID: request.route.routeUUID,
-                fencingToken: request.route.fencingToken
-            )
-            return try currentResult(
-                route: request.route,
-                live: true,
-                reconnectDelayMilliseconds:
-                    reconnectDelay
-            )
+            do {
+                return try lock.withLock {
+                    guard reconnectingRoutes.contains(
+                        request.route.routeUUID
+                    ),
+                    sessions[request.route.routeUUID] == nil,
+                    remoteSessions[request.route.routeUUID] == nil else {
+                        throw NetworkHelperError.tunnelRejected
+                    }
+                    sessions[request.route.routeUUID] =
+                        replacement
+                    do {
+                        try controller.activate(
+                            routeUUID:
+                                request.route.routeUUID,
+                            fencingToken:
+                                request.route.fencingToken
+                        )
+                        reconnectingRoutes.remove(
+                            request.route.routeUUID
+                        )
+                        return try currentResult(
+                            route: request.route,
+                            live: true,
+                            reconnectDelayMilliseconds:
+                                reconnectDelay
+                        )
+                    } catch {
+                        sessions.removeValue(
+                            forKey:
+                                request.route.routeUUID
+                        )
+                        reconnectingRoutes.remove(
+                            request.route.routeUUID
+                        )
+                        throw error
+                    }
+                }
+            } catch {
+                close(replacement, drain: false)
+                throw error
+            }
+        } catch {
+            _ = lock.withLock {
+                reconnectingRoutes.remove(
+                    request.route.routeUUID
+                )
+            }
+            throw error
         }
     }
 
@@ -347,6 +404,11 @@ final class NetworkHelperServiceTunnelManager:
             let request = try request.validated(
                 identity: identity
             )
+            guard !reconnectingRoutes.contains(
+                request.route.routeUUID
+            ) else {
+                throw NetworkHelperError.tunnelRejected
+            }
             if let session =
                     remoteSessions[request.route.routeUUID] {
                 guard session.route == request.route,
@@ -388,14 +450,22 @@ final class NetworkHelperServiceTunnelManager:
             let request = try request.validated(
                 identity: identity
             )
-            if let existing = remoteSessions.removeValue(
-                forKey: request.route.routeUUID
-            ) {
+            guard !reconnectingRoutes.contains(
+                request.route.routeUUID
+            ) else {
+                throw NetworkHelperError.tunnelRejected
+            }
+            if let existing = remoteSessions[
+                request.route.routeUUID
+            ] {
                 guard existing.route == request.route,
                       existing.identity == identity,
                       existing.execution == request.execution else {
                     throw NetworkHelperError.tunnelRejected
                 }
+                remoteSessions.removeValue(
+                    forKey: request.route.routeUUID
+                )
                 close(existing, drain: true)
                 try controller.sleep(
                     routeUUID: request.route.routeUUID,
@@ -406,13 +476,16 @@ final class NetworkHelperServiceTunnelManager:
                     live: false
                 )
             }
-            if let existing = sessions.removeValue(
-                forKey: request.route.routeUUID
-            ) {
+            if let existing = sessions[
+                request.route.routeUUID
+            ] {
                 guard existing.route == request.route,
                       existing.identity == identity else {
                     throw NetworkHelperError.tunnelRejected
                 }
+                sessions.removeValue(
+                    forKey: request.route.routeUUID
+                )
                 close(existing, drain: true)
             } else {
                 identityRegistry.admit(request.route)
@@ -437,14 +510,22 @@ final class NetworkHelperServiceTunnelManager:
             let request = try request.validated(
                 identity: identity
             )
-            if let existing = remoteSessions.removeValue(
-                forKey: request.route.routeUUID
-            ) {
+            guard !reconnectingRoutes.contains(
+                request.route.routeUUID
+            ) else {
+                throw NetworkHelperError.tunnelRejected
+            }
+            if let existing = remoteSessions[
+                request.route.routeUUID
+            ] {
                 guard existing.route == request.route,
                       existing.identity == identity,
                       existing.execution == request.execution else {
                     throw NetworkHelperError.tunnelRejected
                 }
+                remoteSessions.removeValue(
+                    forKey: request.route.routeUUID
+                )
                 close(existing, drain: true)
                 try controller.teardown(
                     routeUUID: request.route.routeUUID,
@@ -463,13 +544,16 @@ final class NetworkHelperServiceTunnelManager:
                         request.route.desiredSHA256
                 )
             }
-            if let existing = sessions.removeValue(
-                forKey: request.route.routeUUID
-            ) {
+            if let existing = sessions[
+                request.route.routeUUID
+            ] {
                 guard existing.route == request.route,
                       existing.identity == identity else {
                     throw NetworkHelperError.tunnelRejected
                 }
+                sessions.removeValue(
+                    forKey: request.route.routeUUID
+                )
                 close(existing, drain: true)
                 try certificateCoordinator.cleanup(
                     identity: identity,
@@ -579,25 +663,35 @@ final class NetworkHelperServiceTunnelManager:
         request: NetworkHelperTunnelRequest,
         execution: NetworkHelperTunnelExecution
     ) throws -> NetworkHelperTunnelResult {
-        guard let existing = remoteSessions[
-            request.route.routeUUID
-        ], existing.route == request.route,
-        existing.identity == identity,
-        existing.execution == execution else {
-            throw NetworkHelperError.tunnelRejected
+        let existing = try lock.withLock {
+            guard reconnectingRoutes.insert(
+                request.route.routeUUID
+            ).inserted,
+            let existing = remoteSessions[
+                request.route.routeUUID
+            ], existing.route == request.route,
+            existing.identity == identity,
+            existing.execution == execution else {
+                reconnectingRoutes.remove(
+                    request.route.routeUUID
+                )
+                throw NetworkHelperError.tunnelRejected
+            }
+            remoteSessions.removeValue(
+                forKey: request.route.routeUUID
+            )
+            return existing
         }
-        remoteSessions.removeValue(
-            forKey: request.route.routeUUID
-        )
         close(existing, drain: false)
-        let reconnectDelay = try controller.reconnect(
-            routeUUID: request.route.routeUUID,
-            fencingToken: request.route.fencingToken
-        )
-        Thread.sleep(
-            forTimeInterval: Double(reconnectDelay) / 1_000
-        )
         do {
+            let reconnectDelay = try controller.reconnect(
+                routeUUID: request.route.routeUUID,
+                fencingToken: request.route.fencingToken
+            )
+            Thread.sleep(
+                forTimeInterval:
+                    Double(reconnectDelay) / 1_000
+            )
             let replacement = try connectRemote(
                 route: request.route,
                 identity: identity,
@@ -605,23 +699,53 @@ final class NetworkHelperServiceTunnelManager:
                 timeoutMilliseconds:
                     request.timeoutMilliseconds
             )
-            remoteSessions[request.route.routeUUID] =
-                replacement
-            try controller.activate(
-                routeUUID: request.route.routeUUID,
-                fencingToken: request.route.fencingToken
-            )
-            return try currentResult(
-                route: request.route,
-                live: true,
-                reconnectDelayMilliseconds:
-                    reconnectDelay
-            )
-        } catch {
-            if let replacement = remoteSessions.removeValue(
-                forKey: request.route.routeUUID
-            ) {
+            do {
+                return try lock.withLock {
+                    guard reconnectingRoutes.contains(
+                        request.route.routeUUID
+                    ),
+                    sessions[request.route.routeUUID] == nil,
+                    remoteSessions[request.route.routeUUID] == nil else {
+                        throw NetworkHelperError.tunnelRejected
+                    }
+                    remoteSessions[request.route.routeUUID] =
+                        replacement
+                    do {
+                        try controller.activate(
+                            routeUUID:
+                                request.route.routeUUID,
+                            fencingToken:
+                                request.route.fencingToken
+                        )
+                        reconnectingRoutes.remove(
+                            request.route.routeUUID
+                        )
+                        return try currentResult(
+                            route: request.route,
+                            live: true,
+                            reconnectDelayMilliseconds:
+                                reconnectDelay
+                        )
+                    } catch {
+                        remoteSessions.removeValue(
+                            forKey:
+                                request.route.routeUUID
+                        )
+                        reconnectingRoutes.remove(
+                            request.route.routeUUID
+                        )
+                        throw error
+                    }
+                }
+            } catch {
                 close(replacement, drain: false)
+                throw error
+            }
+        } catch {
+            _ = lock.withLock {
+                reconnectingRoutes.remove(
+                    request.route.routeUUID
+                )
             }
             identityRegistry.revoke(request.route.routeUUID)
             throw error

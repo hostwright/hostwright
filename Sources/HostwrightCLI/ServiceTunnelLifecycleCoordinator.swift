@@ -494,6 +494,11 @@ enum ServiceTunnelLifecycleCoordinator {
                     routeUUID: $0.id
                 )?.route
             }
+        let persistedByID = Dictionary(
+            uniqueKeysWithValues: persisted.map {
+                ($0.routeUUID, $0)
+            }
+        )
         switch command {
         case .down, .stop:
             for route in persisted.sorted(by: routePrecedes) {
@@ -525,9 +530,8 @@ enum ServiceTunnelLifecycleCoordinator {
             }
             for route in desiredRoutes.sorted(by: routePrecedes) {
                 if command == .restart,
-                   let current = persisted.first(where: {
-                       $0 == route
-                   }) {
+                   let current = persistedByID[route.routeUUID],
+                   current == route {
                     let status = try await helper.status(
                         route: current,
                         timeoutMilliseconds: timeout

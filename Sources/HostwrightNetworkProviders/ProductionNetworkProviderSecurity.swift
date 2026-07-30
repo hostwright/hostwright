@@ -130,20 +130,28 @@ public actor FileBackedNetworkProviderRevocationStore:
 
     public func isRevoked(
         identifier: String,
-        moduleSHA256: String
+        moduleSHA256: String,
+        scope: String?
     ) async throws -> Bool {
         records.contains {
-            $0.identifier == identifier && $0.moduleSHA256 == moduleSHA256
+            $0.identifier == identifier &&
+                $0.moduleSHA256 == moduleSHA256 &&
+                ($0.scope == nil || $0.scope == scope)
         }
     }
 
     public func revoke(
         identifier: String,
         moduleSHA256: String,
+        scope: String?,
         at: Date
     ) async throws {
         guard Self.isValidIdentifier(identifier),
               moduleSHA256.range(
+                  of: "^[a-f0-9]{64}$",
+                  options: .regularExpression
+              ) != nil,
+              scope == nil || scope?.range(
                   of: "^[a-f0-9]{64}$",
                   options: .regularExpression
               ) != nil
@@ -151,7 +159,9 @@ public actor FileBackedNetworkProviderRevocationStore:
             throw NetworkProviderError.invalidDeclaration
         }
         if records.contains(where: {
-            $0.identifier == identifier && $0.moduleSHA256 == moduleSHA256
+            $0.identifier == identifier &&
+                $0.moduleSHA256 == moduleSHA256 &&
+                $0.scope == scope
         }) {
             return
         }
@@ -160,6 +170,7 @@ public actor FileBackedNetworkProviderRevocationStore:
             RevocationRecord(
                 identifier: identifier,
                 moduleSHA256: moduleSHA256,
+                scope: scope,
                 revokedAt: at
             )
         )
@@ -167,7 +178,10 @@ public actor FileBackedNetworkProviderRevocationStore:
             if $0.identifier != $1.identifier {
                 return $0.identifier < $1.identifier
             }
-            return $0.moduleSHA256 < $1.moduleSHA256
+            if $0.moduleSHA256 != $1.moduleSHA256 {
+                return $0.moduleSHA256 < $1.moduleSHA256
+            }
+            return ($0.scope ?? "") < ($1.scope ?? "")
         }
         try Self.persist(
             RevocationState(version: 1, records: updated),
@@ -359,9 +373,10 @@ private struct RevocationState: Codable {
 private struct RevocationRecord: Codable {
     let identifier: String
     let moduleSHA256: String
+    let scope: String?
     let revokedAt: Date
 
     var key: String {
-        "\(identifier):\(moduleSHA256)"
+        "\(identifier):\(moduleSHA256):\(scope ?? "")"
     }
 }

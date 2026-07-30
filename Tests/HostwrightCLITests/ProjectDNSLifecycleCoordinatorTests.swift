@@ -960,6 +960,86 @@ final class ProjectDNSLifecycleCoordinatorTests: XCTestCase {
         XCTAssertEqual(releasedRecord.finalizerState, .released)
     }
 
+    func testGuardedHostAccessRejectsMissingOrMismatchedHelperEvidence()
+        async throws
+    {
+        let fixture = try makeDNSFixture(hostAccess: true)
+        defer { fixture.cleanup() }
+        _ = try await ProjectDNSLifecycleCoordinator.reconcile(
+            preparation: fixture.preparation,
+            planSHA256: dnsTestDigest("d"),
+            store: fixture.store,
+            helper: fixture.helper,
+            runtime: fixture.runtime
+        )
+        let record = try XCTUnwrap(
+            try fixture.store.networkPorts.loadProject(
+                projectUUID:
+                    fixture.preparation.projectResourceUUID
+            ).first
+        )
+        let group = try XCTUnwrap(
+            try fixture.store.operationGroups.load(
+                id: record.operationGroupID
+            )
+        )
+        let batch = ProjectDNSHostAccessReservationBatch(
+            desired: [record],
+            stale: []
+        )
+
+        XCTAssertThrowsError(
+            try ProjectDNSHostAccessReservations.commit(
+                batch,
+                helperSHA256: nil,
+                group: group,
+                store: fixture.store
+            )
+        )
+        XCTAssertThrowsError(
+            try ProjectDNSHostAccessReservations.commit(
+                batch,
+                helperSHA256: dnsTestDigest("9"),
+                group: group,
+                store: fixture.store
+            )
+        )
+        XCTAssertEqual(
+            try fixture.store.networkPorts.load(id: record.id),
+            record
+        )
+    }
+
+    func testGuardedHostAccessRejectsStaleActiveReservationEvidence()
+        async throws
+    {
+        let fixture = try makeDNSFixture(hostAccess: true)
+        defer { fixture.cleanup() }
+        _ = try await ProjectDNSLifecycleCoordinator.reconcile(
+            preparation: fixture.preparation,
+            planSHA256: dnsTestDigest("d"),
+            store: fixture.store,
+            helper: fixture.helper,
+            runtime: fixture.runtime
+        )
+        let record = try XCTUnwrap(
+            try fixture.store.networkPorts.loadProject(
+                projectUUID:
+                    fixture.preparation.projectResourceUUID
+            ).first
+        )
+
+        XCTAssertThrowsError(
+            try ProjectDNSHostAccessReservations.requireActive(
+                bindings: [dnsTestHostAccessBinding()],
+                helperSHA256: dnsTestDigest("9"),
+                dnsUUID: record.resourceUUID,
+                preparation: fixture.preparation,
+                store: fixture.store
+            )
+        )
+    }
+
     func testIngressDigestMismatchRejectsHelperEvidence()
         async throws
     {
@@ -1999,6 +2079,20 @@ private func dnsTestSHA256(
     SHA256.hash(data: Data(value.utf8))
         .map { String(format: "%02x", $0) }
         .joined()
+}
+
+private func dnsTestHostAccessBinding()
+    -> ProjectDNSHostAccessBinding
+{
+    ProjectDNSHostAccessBinding(
+        hostname: "host-api.internal",
+        protocolName: .tcp,
+        addressClass: .loopback,
+        listenAddress: "192.168.70.1",
+        clientCIDR: "192.168.70.0/24",
+        targetAddress: "127.0.0.1",
+        port: 18_080
+    )
 }
 
 private func dnsTestHostAccessSHA256(

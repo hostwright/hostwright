@@ -266,6 +266,7 @@ actor NetworkHelperProviderStateStore: NetworkProviderRevocationStore {
     private let owner: uid_t
     private let revocations: FileBackedNetworkProviderRevocationStore
     private var state: NetworkHelperProviderState
+    private var revoking = Set<String>()
 
     init(rootURL: URL) throws {
         self.rootURL = rootURL
@@ -300,22 +301,26 @@ actor NetworkHelperProviderStateStore: NetworkProviderRevocationStore {
 
     func isRevoked(
         identifier: String,
-        moduleSHA256: String
+        moduleSHA256: String,
+        scope: String?
     ) async throws -> Bool {
         try await revocations.isRevoked(
             identifier: identifier,
-            moduleSHA256: moduleSHA256
+            moduleSHA256: moduleSHA256,
+            scope: scope
         )
     }
 
     func revoke(
         identifier: String,
         moduleSHA256: String,
+        scope: String?,
         at: Date
     ) async throws {
         try await revocations.revoke(
             identifier: identifier,
             moduleSHA256: moduleSHA256,
+            scope: scope,
             at: at
         )
     }
@@ -325,7 +330,10 @@ actor NetworkHelperProviderStateStore: NetworkProviderRevocationStore {
         for authority in state.authorities {
             if try await revocations.isRevoked(
                 identifier: authority.identifier,
-                moduleSHA256: authority.moduleSHA256
+                moduleSHA256: authority.moduleSHA256,
+                scope: try Self.revocationScope(
+                    for: authority.identity
+                )
             ) {
                 continue
             }
@@ -343,6 +351,16 @@ actor NetworkHelperProviderStateStore: NetworkProviderRevocationStore {
         identity: NetworkHelperDNSIdentity,
         at: Date
     ) throws {
+        let scope = try Self.revocationScope(for: identity)
+        guard !revoking.contains(
+            Self.key(
+                declaration.identifier,
+                declaration.moduleSHA256,
+                scope
+            )
+        ) else {
+            throw NetworkProviderError.deniedGrant
+        }
         let authority = NetworkHelperProviderAuthority(
             identifier: declaration.identifier,
             moduleSHA256: declaration.moduleSHA256,
@@ -352,28 +370,78 @@ actor NetworkHelperProviderStateStore: NetworkProviderRevocationStore {
             activatedAt: at
         )
         state.authorities.removeAll {
-            $0.identifier == declaration.identifier
+            $0.identifier == declaration.identifier &&
+                $0.identity == identity
         }
         guard state.authorities.count < Self.maximumAuthorities else {
             throw NetworkProviderError.executionFailed
         }
         state.authorities.append(authority)
-        state.authorities.sort {
-            ($0.identifier, $0.moduleSHA256) <
-                ($1.identifier, $1.moduleSHA256)
-        }
+        state.authorities.sort(by: Self.authorityPrecedes)
         try persist()
+    }
+
+    func beginExclusiveRevocation(
+        identifier: String,
+        moduleSHA256: String,
+        identity: NetworkHelperDNSIdentity
+    ) throws -> String {
+        let scope = try Self.revocationScope(for: identity)
+        let key = Self.key(identifier, moduleSHA256, scope)
+        guard !revoking.contains(key),
+              state.authorities.contains(where: {
+                  $0.identifier == identifier &&
+                      $0.moduleSHA256 == moduleSHA256 &&
+                      $0.identity == identity
+              }) else {
+            throw NetworkProviderError.deniedGrant
+        }
+        revoking.insert(key)
+        return scope
+    }
+
+    func cancelExclusiveRevocation(
+        identifier: String,
+        moduleSHA256: String,
+        scope: String
+    ) {
+        revoking.remove(Self.key(identifier, moduleSHA256, scope))
     }
 
     func deactivate(
         identifier: String,
-        moduleSHA256: String
+        moduleSHA256: String,
+        identity: NetworkHelperDNSIdentity
     ) throws {
         state.authorities.removeAll {
             $0.identifier == identifier &&
-                $0.moduleSHA256 == moduleSHA256
+                $0.moduleSHA256 == moduleSHA256 &&
+                $0.identity == identity
         }
         try persist()
+    }
+
+    func finishExclusiveRevocation(
+        identifier: String,
+        moduleSHA256: String,
+        identity: NetworkHelperDNSIdentity,
+        scope: String
+    ) throws {
+        let key = Self.key(identifier, moduleSHA256, scope)
+        guard revoking.contains(key) else {
+            throw NetworkProviderError.deniedGrant
+        }
+        state.authorities.removeAll {
+            $0.identifier == identifier &&
+                $0.moduleSHA256 == moduleSHA256 &&
+                $0.identity == identity
+        }
+        do {
+            try persist()
+            revoking.remove(key)
+        } catch {
+            throw error
+        }
     }
 
     func hasAuthority(
@@ -383,6 +451,18 @@ actor NetworkHelperProviderStateStore: NetworkProviderRevocationStore {
         state.authorities.contains {
             $0.identifier == identifier &&
                 $0.moduleSHA256 == moduleSHA256
+        }
+    }
+
+    func hasAuthority(
+        identifier: String,
+        moduleSHA256: String,
+        identity: NetworkHelperDNSIdentity
+    ) -> Bool {
+        state.authorities.contains {
+            $0.identifier == identifier &&
+                $0.moduleSHA256 == moduleSHA256 &&
+                $0.identity == identity
         }
     }
 
@@ -417,12 +497,12 @@ actor NetworkHelperProviderStateStore: NetworkProviderRevocationStore {
     ) throws {
         guard state.schemaVersion == 2,
               state.authorities.count <= maximumAuthorities,
-              state.authorities == state.authorities.sorted(by: {
-                  ($0.identifier, $0.moduleSHA256) <
-                      ($1.identifier, $1.moduleSHA256)
-              }),
+              state.authorities ==
+                state.authorities.sorted(
+                    by: authorityPrecedes
+                ),
               Set(state.authorities.map {
-                  key($0.identifier, $0.moduleSHA256)
+                  authorityKey($0)
               }).count == state.authorities.count,
               state.authorities.allSatisfy({
                   (try? $0.identity.validated()) != nil
@@ -447,7 +527,7 @@ actor NetworkHelperProviderStateStore: NetworkProviderRevocationStore {
                       ($1.identifier, $1.moduleSHA256)
               }),
               Set(state.authorities.map {
-                  key($0.identifier, $0.moduleSHA256)
+                  key($0.identifier, $0.moduleSHA256, "")
               }).count == state.authorities.count,
               state.authorities.allSatisfy({
                   (try? $0.identity.validated()) != nil
@@ -486,9 +566,45 @@ actor NetworkHelperProviderStateStore: NetworkProviderRevocationStore {
 
     private static func key(
         _ identifier: String,
-        _ moduleSHA256: String
+        _ moduleSHA256: String,
+        _ scope: String
     ) -> String {
-        "\(identifier):\(moduleSHA256)"
+        "\(identifier):\(moduleSHA256):\(scope)"
+    }
+
+    static func revocationScope(
+        for identity: NetworkHelperDNSIdentity
+    ) throws -> String {
+        let identity = try identity.validated()
+        let material = [
+            identity.projectUUID,
+            identity.dnsUUID,
+            String(identity.generation),
+            identity.fencingToken,
+        ].joined(separator: "\u{1f}")
+        return SHA256.hash(data: Data(material.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+    }
+
+    private static func authorityKey(
+        _ authority: NetworkHelperProviderAuthority
+    ) -> String {
+        [
+            authority.identifier,
+            authority.moduleSHA256,
+            authority.identity.projectUUID,
+            authority.identity.dnsUUID,
+            String(authority.identity.generation),
+            authority.identity.fencingToken,
+        ].joined(separator: "\u{1f}")
+    }
+
+    private static func authorityPrecedes(
+        _ lhs: NetworkHelperProviderAuthority,
+        _ rhs: NetworkHelperProviderAuthority
+    ) -> Bool {
+        authorityKey(lhs) < authorityKey(rhs)
     }
 
     private static func prepareDirectory(
@@ -878,7 +994,10 @@ final class NetworkHelperProviderCoordinator: @unchecked Sendable {
                 grant: request.grant,
                 operation: request.operation,
                 payload: request.payload,
-                longRunning: request.longRunning
+                longRunning: request.longRunning,
+                revocationScope:
+                    try NetworkHelperProviderStateStore
+                        .revocationScope(for: identity)
             )
         }
         switch request.operation {
@@ -894,7 +1013,8 @@ final class NetworkHelperProviderCoordinator: @unchecked Sendable {
             try awaitResult {
                 try await self.state.deactivate(
                     identifier: declaration.identifier,
-                    moduleSHA256: declaration.moduleSHA256
+                    moduleSHA256: declaration.moduleSHA256,
+                    identity: identity
                 )
             }
         case .status, .routes, .identity, .renewal, .reconnect, .drain:
@@ -907,18 +1027,42 @@ final class NetworkHelperProviderCoordinator: @unchecked Sendable {
         identity: NetworkHelperDNSIdentity,
         request: NetworkHelperProviderRevocation
     ) throws -> NetworkHelperProviderResult {
-        _ = try identity.validated()
+        let identity = try identity.validated()
         let request = try request.validated()
-        try awaitResult {
-            try await self.host.revokeThenStop(
+        let revocationScope = try awaitResult {
+            try await self.state.beginExclusiveRevocation(
                 identifier: request.identifier,
-                moduleSHA256: request.moduleSHA256
-            ) {
-                try await self.state.deactivate(
+                moduleSHA256: request.moduleSHA256,
+                identity: identity
+            )
+        }
+        do {
+            try awaitResult {
+                try await self.host.revokeThenStop(
                     identifier: request.identifier,
-                    moduleSHA256: request.moduleSHA256
+                    moduleSHA256: request.moduleSHA256,
+                    revocationScope: revocationScope
+                ) {
+                    try await self.state
+                        .finishExclusiveRevocation(
+                            identifier:
+                                request.identifier,
+                            moduleSHA256:
+                                request.moduleSHA256,
+                            identity: identity,
+                            scope: revocationScope
+                        )
+                }
+            }
+        } catch {
+            try? awaitResult {
+                await self.state.cancelExclusiveRevocation(
+                    identifier: request.identifier,
+                    moduleSHA256: request.moduleSHA256,
+                    scope: revocationScope
                 )
             }
+            throw error
         }
         return NetworkHelperProviderResult(payload: [:])
     }

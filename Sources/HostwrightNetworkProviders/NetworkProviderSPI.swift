@@ -128,10 +128,45 @@ public protocol NetworkProviderWasmExecutor: Sendable {
 }
 
 public protocol NetworkProviderRevocationStore: Sendable {
-    func isRevoked(identifier: String, moduleSHA256: String) async throws -> Bool
+    func isRevoked(
+        identifier: String,
+        moduleSHA256: String,
+        scope: String?
+    ) async throws -> Bool
 
     /// The implementation must durably persist the revocation before returning.
-    func revoke(identifier: String, moduleSHA256: String, at: Date) async throws
+    func revoke(
+        identifier: String,
+        moduleSHA256: String,
+        scope: String?,
+        at: Date
+    ) async throws
+}
+
+public extension NetworkProviderRevocationStore {
+    func isRevoked(
+        identifier: String,
+        moduleSHA256: String
+    ) async throws -> Bool {
+        try await isRevoked(
+            identifier: identifier,
+            moduleSHA256: moduleSHA256,
+            scope: nil
+        )
+    }
+
+    func revoke(
+        identifier: String,
+        moduleSHA256: String,
+        at: Date
+    ) async throws {
+        try await revoke(
+            identifier: identifier,
+            moduleSHA256: moduleSHA256,
+            scope: nil,
+            at: at
+        )
+    }
 }
 
 public struct NetworkProviderSecretHandle: Equatable, Sendable {
@@ -221,13 +256,16 @@ public actor RestrictedNetworkProviderHost {
         operation: NetworkProviderOperation,
         payload: [String: String] = [:],
         longRunning: Bool = false,
+        revocationScope: String? = nil,
         now: Date = .now
     ) async throws -> [String: String] {
         let declared = try parseDeclaration(declaration)
         try validateGrant(grant, for: declared, now: now)
+        try Self.validateRevocationScope(revocationScope)
         guard !(try await revocations.isRevoked(
             identifier: declared.identifier,
-            moduleSHA256: declared.moduleSHA256
+            moduleSHA256: declared.moduleSHA256,
+            scope: revocationScope
         )) else {
             throw NetworkProviderError.revoked
         }
@@ -301,15 +339,29 @@ public actor RestrictedNetworkProviderHost {
     public func revokeThenStop(
         identifier: String,
         moduleSHA256: String,
+        revocationScope: String? = nil,
         stop: @Sendable () async throws -> Void,
         at: Date = .now
     ) async throws {
+        try Self.validateRevocationScope(revocationScope)
         try await revocations.revoke(
             identifier: identifier,
             moduleSHA256: moduleSHA256,
+            scope: revocationScope,
             at: at
         )
         try await stop()
+    }
+
+    private static func validateRevocationScope(
+        _ scope: String?
+    ) throws {
+        guard scope == nil || scope?.range(
+            of: "^[a-f0-9]{64}$",
+            options: .regularExpression
+        ) != nil else {
+            throw NetworkProviderError.invalidDeclaration
+        }
     }
 
     private func issueNonce() -> String {

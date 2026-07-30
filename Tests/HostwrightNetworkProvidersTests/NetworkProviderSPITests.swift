@@ -647,7 +647,8 @@ private actor Revocations: NetworkProviderRevocationStore {
 
     func isRevoked(
         identifier: String,
-        moduleSHA256: String
+        moduleSHA256: String,
+        scope: String?
     ) async throws -> Bool {
         revoked
     }
@@ -655,6 +656,7 @@ private actor Revocations: NetworkProviderRevocationStore {
     func revoke(
         identifier: String,
         moduleSHA256: String,
+        scope: String?,
         at: Date
     ) async throws {
         revoked = true

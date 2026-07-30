@@ -92,6 +92,66 @@ final class ServiceTunnelLifecycleManagerTests: XCTestCase {
         XCTAssertEqual(store.removeCount, 1)
     }
 
+    func testReconnectBackoffDoesNotHoldManagerWideLock()
+        async throws
+    {
+        let store = MemoryStore()
+        let route = try makeRoute()
+        let identity = makeIdentity()
+        let request = NetworkHelperTunnelRequest(
+            route: route,
+            timeoutMilliseconds: 8_000
+        )
+        let manager = NetworkHelperServiceTunnelManager(
+            store: store,
+            certificateCoordinator:
+                NetworkHelperCertificateCoordinator()
+        )
+        _ = try manager.setup(
+            identity: identity,
+            request: request
+        )
+
+        let reconnect = Task.detached {
+            try manager.reconnect(
+                identity: identity,
+                request: request
+            )
+        }
+        var observedBackoff = false
+        for _ in 0..<100 {
+            if try store.load(
+                routeUUID: route.routeUUID
+            )?.phase == .connecting {
+                observedBackoff = true
+                break
+            }
+            try await Task.sleep(
+                nanoseconds: 5_000_000
+            )
+        }
+        XCTAssertTrue(observedBackoff)
+
+        let started = Date()
+        let status = try manager.status(
+            identity: identity,
+            request: request
+        )
+        XCTAssertLessThan(
+            Date().timeIntervalSince(started),
+            0.4
+        )
+        XCTAssertEqual(status.phase, .connecting)
+        XCTAssertFalse(status.live)
+        let reconnected = try await reconnect.value
+        XCTAssertTrue(reconnected.live)
+
+        _ = try manager.teardown(
+            identity: identity,
+            request: request
+        )
+    }
+
     func testCrashRestartRecoversPersistedIntentThroughSetup()
         throws
     {

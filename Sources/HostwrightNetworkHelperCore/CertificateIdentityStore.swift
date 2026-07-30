@@ -168,11 +168,6 @@ public struct ManagedCertificateIdentityEvidence: @unchecked Sendable {
   }
 }
 
-public struct CertificateIdentityRotation: @unchecked Sendable {
-  public let current: CertificateIdentityHandle
-  public let prior: CertificateIdentityHandle?
-}
-
 /// Stores Hostwright-generated TLS identities without exporting private keys.
 ///
 /// Managed identities are located exclusively by immutable UUID-backed scope.
@@ -720,30 +715,6 @@ public final class CertificateIdentityStore: @unchecked Sendable {
       expectedDNSNames: try Self.dnsNames(from: leaf),
       now: now
     )
-  }
-
-  public func validatedRotation(
-    current: CertificateIdentityHandle,
-    prior: CertificateIdentityHandle?,
-    expectedDNSNames: [String],
-    expectedCA: SecCertificate? = nil,
-    now: Date = Date()
-  ) throws -> CertificateIdentityRotation {
-    try validate(
-      current,
-      expectedDNSNames: expectedDNSNames,
-      expectedCA: expectedCA,
-      now: now
-    )
-    if let prior {
-      try validate(
-        prior,
-        expectedDNSNames: expectedDNSNames,
-        expectedCA: expectedCA,
-        now: now
-      )
-    }
-    return CertificateIdentityRotation(current: current, prior: prior)
   }
 
   public func validate(

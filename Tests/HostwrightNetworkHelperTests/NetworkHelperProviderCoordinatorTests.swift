@@ -180,6 +180,194 @@ final class NetworkHelperProviderCoordinatorTests: XCTestCase {
                 invocation: fixture.invocation(operation: .status)
             )
             XCTAssertEqual(rejected.error?.code, .providerRejected)
+            let setupRejected = try fixture.dispatch(
+                coordinator: restarted,
+                invocation: fixture.invocation(operation: .setup)
+            )
+            XCTAssertEqual(
+                setupRejected.error?.code,
+                .providerRejected
+            )
+        }
+    }
+
+    func testAuthoritiesAndTeardownAreScopedByProjectIdentity()
+        async throws
+    {
+        try await withFixture { fixture in
+            let coordinator = try fixture.coordinator()
+            let peerIdentity = fixture.peerIdentity()
+            XCTAssertNil(
+                try fixture.dispatch(
+                    coordinator: coordinator,
+                    identity: fixture.identity,
+                    invocation:
+                        fixture.invocation(operation: .setup)
+                ).error
+            )
+            XCTAssertNil(
+                try fixture.dispatch(
+                    coordinator: coordinator,
+                    identity: peerIdentity,
+                    invocation:
+                        fixture.invocation(operation: .setup)
+                ).error
+            )
+            let restarted = try fixture.coordinator()
+            XCTAssertNil(
+                try fixture.dispatch(
+                    coordinator: restarted,
+                    identity: fixture.identity,
+                    invocation:
+                        fixture.invocation(operation: .status)
+                ).error
+            )
+            XCTAssertNil(
+                try fixture.dispatch(
+                    coordinator: restarted,
+                    identity: peerIdentity,
+                    invocation:
+                        fixture.invocation(operation: .status)
+                ).error
+            )
+
+            XCTAssertNil(
+                try fixture.dispatch(
+                    coordinator: restarted,
+                    identity: fixture.identity,
+                    invocation:
+                        fixture.invocation(operation: .teardown)
+                ).error
+            )
+            XCTAssertEqual(
+                try fixture.dispatch(
+                    coordinator: restarted,
+                    identity: fixture.identity,
+                    invocation:
+                        fixture.invocation(operation: .status)
+                ).error?.code,
+                .providerRejected
+            )
+            XCTAssertNil(
+                try fixture.dispatch(
+                    coordinator: restarted,
+                    identity: peerIdentity,
+                    invocation:
+                        fixture.invocation(operation: .status)
+                ).error
+            )
+        }
+    }
+
+    func testRevocationRequiresExactActiveProjectIdentity()
+        async throws
+    {
+        try await withFixture { fixture in
+            let coordinator = try fixture.coordinator()
+            let peerIdentity = fixture.peerIdentity()
+            XCTAssertNil(
+                try fixture.dispatch(
+                    coordinator: coordinator,
+                    identity: peerIdentity,
+                    invocation:
+                        fixture.invocation(operation: .setup)
+                ).error
+            )
+
+            XCTAssertEqual(
+                try fixture.dispatchRevocation(
+                    coordinator: coordinator,
+                    identity: fixture.identity
+                ).error?.code,
+                .providerRejected
+            )
+            XCTAssertNil(
+                try fixture.dispatch(
+                    coordinator: coordinator,
+                    identity: peerIdentity,
+                    invocation:
+                        fixture.invocation(operation: .status)
+                ).error
+            )
+            XCTAssertNil(
+                try fixture.dispatchRevocation(
+                    coordinator: coordinator,
+                    identity: peerIdentity
+                ).error
+            )
+        }
+    }
+
+    func testRevocationRemovesOnlyExactProjectAuthority()
+        async throws
+    {
+        try await withFixture { fixture in
+            let coordinator = try fixture.coordinator()
+            let peerIdentity = fixture.peerIdentity()
+            XCTAssertNil(
+                try fixture.dispatch(
+                    coordinator: coordinator,
+                    identity: fixture.identity,
+                    invocation:
+                        fixture.invocation(operation: .setup)
+                ).error
+            )
+            XCTAssertNil(
+                try fixture.dispatch(
+                    coordinator: coordinator,
+                    identity: peerIdentity,
+                    invocation:
+                        fixture.invocation(operation: .setup)
+                ).error
+            )
+
+            XCTAssertNil(
+                try fixture.dispatchRevocation(
+                    coordinator: coordinator,
+                    identity: fixture.identity
+                ).error
+            )
+            XCTAssertEqual(
+                try fixture.dispatch(
+                    coordinator: coordinator,
+                    identity: fixture.identity,
+                    invocation:
+                        fixture.invocation(operation: .status)
+                ).error?.code,
+                .providerRejected
+            )
+            XCTAssertNil(
+                try fixture.dispatch(
+                    coordinator: coordinator,
+                    identity: peerIdentity,
+                    invocation:
+                        fixture.invocation(operation: .status)
+                ).error
+            )
+            XCTAssertNil(
+                try fixture.dispatch(
+                    coordinator: coordinator,
+                    identity: peerIdentity,
+                    invocation:
+                        fixture.invocation(operation: .teardown)
+                ).error
+            )
+            XCTAssertNil(
+                try fixture.dispatch(
+                    coordinator: coordinator,
+                    identity: peerIdentity,
+                    invocation:
+                        fixture.invocation(operation: .setup)
+                ).error
+            )
+            XCTAssertNil(
+                try fixture.dispatch(
+                    coordinator: coordinator,
+                    identity: peerIdentity,
+                    invocation:
+                        fixture.invocation(operation: .status)
+                ).error
+            )
         }
     }
 
@@ -706,6 +894,18 @@ private struct ProviderFixture {
         invocation: NetworkHelperProviderInvocation
     ) throws -> NetworkHelperResponse {
         try dispatch(
+            coordinator: coordinator,
+            identity: identity,
+            invocation: invocation
+        )
+    }
+
+    func dispatch(
+        coordinator: NetworkHelperProviderCoordinator,
+        identity: NetworkHelperDNSIdentity,
+        invocation: NetworkHelperProviderInvocation
+    ) throws -> NetworkHelperResponse {
+        try dispatch(
             NetworkHelperDispatcher(
                 store: dnsStore,
                 providerCoordinator: coordinator
@@ -721,6 +921,16 @@ private struct ProviderFixture {
     func dispatchRevocation(
         coordinator: NetworkHelperProviderCoordinator
     ) throws -> NetworkHelperResponse {
+        try dispatchRevocation(
+            coordinator: coordinator,
+            identity: identity
+        )
+    }
+
+    func dispatchRevocation(
+        coordinator: NetworkHelperProviderCoordinator,
+        identity: NetworkHelperDNSIdentity
+    ) throws -> NetworkHelperResponse {
         try dispatch(
             NetworkHelperDispatcher(
                 store: dnsStore,
@@ -735,6 +945,15 @@ private struct ProviderFixture {
                         moduleSHA256: moduleSHA256
                     )
             )
+        )
+    }
+
+    func peerIdentity() -> NetworkHelperDNSIdentity {
+        NetworkHelperDNSIdentity(
+            projectUUID: UUID().uuidString.lowercased(),
+            dnsUUID: UUID().uuidString.lowercased(),
+            generation: 1,
+            fencingToken: UUID().uuidString.lowercased()
         )
     }
 

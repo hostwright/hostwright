@@ -1232,12 +1232,21 @@ final class NetworkHelperIngressListener:
       return
     }
     let ordered = orderedBackends(route.backends)
+    let connectionDeadline =
+      Self.monotonicMilliseconds()
+      + Self.connectTimeoutMilliseconds
     var upstream: Int32 = -1
     var selectedBackend: ProjectIngressBackend?
-    for backend in ordered.prefix(2) {
+    for (index, backend) in ordered.enumerated() {
+      let remaining =
+        connectionDeadline - Self.monotonicMilliseconds()
+      guard remaining > 0 else { break }
+      let attemptsRemaining = Int64(ordered.count - index)
       if let connected = try? connect(
         backend,
-        client: client
+        client: client,
+        timeoutMilliseconds:
+          max(1, remaining / attemptsRemaining)
       ) {
         upstream = connected
         selectedBackend = backend
@@ -1606,7 +1615,8 @@ final class NetworkHelperIngressListener:
 
   private func connect(
     _ backend: ProjectIngressBackend,
-    client: Int32
+    client: Int32,
+    timeoutMilliseconds: Int64
   ) throws -> Int32 {
     let family =
       backend.address.contains(":")
@@ -1665,7 +1675,12 @@ final class NetworkHelperIngressListener:
       Darwin.poll(
         &pollDescriptor,
         1,
-        Int32(Self.connectTimeoutMilliseconds)
+        Int32(
+          min(
+            timeoutMilliseconds,
+            Int64(Int32.max)
+          )
+        )
       ) > 0
     else {
       throw NetworkHelperError.bindingUnavailable

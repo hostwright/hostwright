@@ -1116,6 +1116,74 @@ final class NetworkHelperIngressBrokerTests: XCTestCase {
     XCTAssertEqual(secondFinished.wait(timeout: .now() + 2), .success)
   }
 
+  func testFailoverReachesThirdBackendWithinSharedConnectDeadline() throws {
+    let backend = try makeServer()
+    defer { Darwin.close(backend.descriptor) }
+    let finished = DispatchSemaphore(value: 0)
+    serveOnce(
+      backend.descriptor,
+      response: response(body: "third"),
+      finished: finished
+    )
+
+    let ingressPort = try availablePort()
+    let broker = NetworkHelperIngressBroker()
+    let backends = [
+      ProjectIngressBackend(
+        serviceUUID:
+          "00000000-0000-4000-8000-000000000001",
+        address: "127.0.0.2",
+        port: backend.port
+      ),
+      ProjectIngressBackend(
+        serviceUUID:
+          "00000000-0000-4000-8000-000000000002",
+        address: "127.0.0.3",
+        port: backend.port
+      ),
+      ProjectIngressBackend(
+        serviceUUID: projectUUID,
+        address: "127.0.0.1",
+        port: backend.port
+      ),
+    ]
+    _ = try broker.apply(
+      identity: identity(),
+      bindings: [
+        ProjectIngressListenerBinding(
+          name: "api",
+          bindAddress: "127.0.0.1",
+          port: ingressPort,
+          exposure: .localhost,
+          routes: [
+            ProjectIngressRouteBinding(
+              hostname: "api.internal",
+              pathPrefix: "/v1",
+              methods: ["GET"],
+              protocolName: .http,
+              targetServiceName: "api",
+              targetServiceUUIDs:
+                backends.map(\.serviceUUID).sorted(),
+              targetPort: backend.port,
+              backends: backends
+            )
+          ]
+        )
+      ]
+    )
+    defer { broker.remove(identity: identity()) }
+
+    XCTAssertTrue(
+      try request(
+        port: ingressPort,
+        request:
+          "GET /v1 HTTP/1.1\r\n"
+          + "Host: api.internal\r\n\r\n"
+      ).hasSuffix("\r\n\r\nthird")
+    )
+    XCTAssertEqual(finished.wait(timeout: .now() + 2), .success)
+  }
+
   func testMultiListenerReloadPublishesOneImmutableGeneration() throws {
     let oldFirst = try makeServer()
     let oldSecond = try makeServer()

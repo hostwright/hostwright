@@ -1908,6 +1908,68 @@ final class NetworkHelperTests: XCTestCase {
         }
     }
 
+    func testDispatcherRemovalFailureKeepsActiveIngressAndState() throws {
+        let backend = try makeLoopbackTCPServer()
+        defer { Darwin.close(backend.descriptor) }
+        let ingressReservation = try makeLoopbackTCPServer()
+        let ingressPort = ingressReservation.port
+        Darwin.close(ingressReservation.descriptor)
+
+        try withStore { store, root in
+            let broker = NetworkHelperIngressBroker()
+            let dispatcher = NetworkHelperDispatcher(
+                store: store,
+                ingressBroker: broker
+            )
+            let activeIdentity = identity()
+            let binding = ingressBinding(
+                port: ingressPort,
+                backendPort: backend.port
+            )
+
+            let applied = try dispatch(
+                dispatcher,
+                NetworkHelperRequest(
+                    operation: .apply,
+                    identity: activeIdentity,
+                    corefile: corefile(),
+                    ingressBindings: [binding]
+                )
+            )
+            XCTAssertEqual(applied.status?.ingressActive, true)
+            XCTAssertTrue(broker.hasActiveBindings)
+
+            let dnsRoot = root
+                .appendingPathComponent(projectUUID)
+                .appendingPathComponent(dnsUUID)
+            XCTAssertEqual(chmod(dnsRoot.path, 0o500), 0)
+            let failedRemoval = try dispatch(
+                dispatcher,
+                NetworkHelperRequest(
+                    operation: .remove,
+                    identity: activeIdentity
+                )
+            )
+            XCTAssertNotNil(failedRemoval.error)
+            XCTAssertTrue(broker.hasActiveBindings)
+
+            XCTAssertEqual(chmod(dnsRoot.path, 0o700), 0)
+            XCTAssertEqual(
+                try store.status(identity: activeIdentity).disposition,
+                .active
+            )
+            let removed = try dispatch(
+                dispatcher,
+                NetworkHelperRequest(
+                    operation: .remove,
+                    identity: activeIdentity
+                )
+            )
+            XCTAssertEqual(removed.status?.disposition, .absent)
+            XCTAssertFalse(broker.hasActiveBindings)
+        }
+    }
+
     func testDispatcherStatusReplaysPersistedIngressAfterBrokerRestart()
         throws
     {
@@ -2138,7 +2200,8 @@ final class NetworkHelperTests: XCTestCase {
     }
 
     private func ingressBinding(
-        port: Int = 8_443
+        port: Int = 8_443,
+        backendPort: Int = 8_080
     ) -> ProjectIngressListenerBinding {
         ProjectIngressListenerBinding(
             name: "api",
@@ -2152,11 +2215,11 @@ final class NetworkHelperTests: XCTestCase {
                 protocolName: .http,
                 targetServiceName: "api",
                 targetServiceUUIDs: [projectUUID],
-                targetPort: 8_080,
+                targetPort: backendPort,
                 backends: [ProjectIngressBackend(
                     serviceUUID: projectUUID,
                     address: "127.0.0.1",
-                    port: 8_080
+                    port: backendPort
                 )]
             )]
         )

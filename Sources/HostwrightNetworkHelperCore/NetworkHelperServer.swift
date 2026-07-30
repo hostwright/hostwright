@@ -142,8 +142,12 @@ struct NetworkHelperDispatcher: @unchecked Sendable {
                     .first(where: {
                         $0.identity == request.identity
                     })?.bindings ?? []
+                let removed = try store.remove(
+                    identity: request.identity
+                )
                 ingressBroker.remove(identity: request.identity)
                 policyBroker.remove(identity: request.identity)
+                hostAccessBroker.remove(identity: request.identity)
                 if let evidence {
                     try certificateCoordinator.cleanup(
                         identity: request.identity,
@@ -161,15 +165,7 @@ struct NetworkHelperDispatcher: @unchecked Sendable {
                         identity: retired.identity,
                         evidence: retired
                     )
-                    try store.clearRetiredCertificateEvidence(
-                        identity: request.identity,
-                        expected: retired
-                    )
                 }
-                let removed = try store.remove(
-                    identity: request.identity
-                )
-                hostAccessBroker.remove(identity: request.identity)
                 status = withActivity(
                     removed,
                     hostAccessActive: false,

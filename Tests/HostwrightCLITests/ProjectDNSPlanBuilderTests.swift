@@ -743,9 +743,11 @@ final class ProjectDNSPlanBuilderTests: XCTestCase {
         )
 
         XCTAssertEqual(firstPlan.ingressBindings, secondPlan.ingressBindings)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
         XCTAssertEqual(
-            try JSONEncoder().encode(firstPlan.ingressBindings),
-            try JSONEncoder().encode(secondPlan.ingressBindings)
+            try encoder.encode(firstPlan.ingressBindings),
+            try encoder.encode(secondPlan.ingressBindings)
         )
     }
 

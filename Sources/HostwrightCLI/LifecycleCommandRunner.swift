@@ -163,6 +163,8 @@ public struct LifecycleCommandPreparation: Sendable {
     public let certificates:
         [String: HostwrightCertificateDeclaration]
     public let ingress: [String: HostwrightIngressListener]
+    public let tunnelDeclarations:
+        [String: HostwrightTunnelDeclaration]
     public let previousDesiredState: DesiredRuntimeState?
     public let observedState: ObservedRuntimeState
     public let observationSHA256: String
@@ -184,6 +186,8 @@ public struct LifecycleCommandPreparation: Sendable {
         certificates:
             [String: HostwrightCertificateDeclaration] = [:],
         ingress: [String: HostwrightIngressListener] = [:],
+        tunnelDeclarations:
+            [String: HostwrightTunnelDeclaration] = [:],
         previousDesiredState: DesiredRuntimeState? = nil,
         observedState: ObservedRuntimeState,
         observationSHA256: String,
@@ -203,6 +207,7 @@ public struct LifecycleCommandPreparation: Sendable {
         self.desiredState = desiredState
         self.certificates = certificates
         self.ingress = ingress
+        self.tunnelDeclarations = tunnelDeclarations
         self.previousDesiredState = previousDesiredState
         self.observedState = observedState
         self.observationSHA256 = observationSHA256
@@ -447,6 +452,7 @@ enum LifecycleImageLockBinder {
                     preparation.desiredState.ownedResourceHints
             ),
             ingress: preparation.ingress,
+            tunnelDeclarations: preparation.tunnelDeclarations,
             previousDesiredState: previousDesiredState,
             observedState: preparation.observedState,
             observationSHA256: preparation.observationSHA256,

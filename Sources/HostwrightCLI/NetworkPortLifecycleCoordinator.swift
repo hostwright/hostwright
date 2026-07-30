@@ -1,4 +1,5 @@
 import CryptoKit
+import Darwin
 import Foundation
 import HostwrightCore
 import HostwrightNetworking
@@ -909,14 +910,71 @@ enum NetworkPortLifecycleCoordinator {
             hostPort: 1_024,
             protocolName: .tcp
         ).bindAddress
-        guard normalized ==
-                NetworkBindAddressPolicy.localhostBindAddress ||
-                normalized == "::1" else {
+        var ipv4 = in_addr()
+        if normalized.withCString({
+            inet_pton(AF_INET, $0, &ipv4)
+        }) == 1 {
+            return try renderedIPv4(&ipv4)
+        }
+        var ipv6 = in6_addr()
+        if normalized.withCString({
+            inet_pton(AF_INET6, $0, &ipv6)
+        }) == 1 {
+            return try renderedIPv6(&ipv6)
+        }
+        throw conflict(
+            "Port reservation requires an exact IPv4 or IPv6 bind address."
+        )
+    }
+
+    private static func renderedIPv4(
+        _ address: inout in_addr
+    ) throws -> String {
+        var buffer = [CChar](
+            repeating: 0,
+            count: Int(INET_ADDRSTRLEN)
+        )
+        guard inet_ntop(
+            AF_INET,
+            &address,
+            &buffer,
+            socklen_t(buffer.count)
+        ) != nil else {
             throw conflict(
-                "Port reservation supports explicit localhost bindings only."
+                "Port reservation could not canonicalize the bind address."
             )
         }
-        return normalized
+        return String(
+            decoding: buffer.prefix { $0 != 0 }.map {
+                UInt8(bitPattern: $0)
+            },
+            as: UTF8.self
+        )
+    }
+
+    private static func renderedIPv6(
+        _ address: inout in6_addr
+    ) throws -> String {
+        var buffer = [CChar](
+            repeating: 0,
+            count: Int(INET6_ADDRSTRLEN)
+        )
+        guard inet_ntop(
+            AF_INET6,
+            &address,
+            &buffer,
+            socklen_t(buffer.count)
+        ) != nil else {
+            throw conflict(
+                "Port reservation could not canonicalize the bind address."
+            )
+        }
+        return String(
+            decoding: buffer.prefix { $0 != 0 }.map {
+                UInt8(bitPattern: $0)
+            },
+            as: UTF8.self
+        )
     }
 
     private static func selectNewHostPort(

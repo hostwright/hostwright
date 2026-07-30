@@ -581,6 +581,33 @@ final class Phase07NetworkManifestTests: XCTestCase {
         )
     }
 
+    func testGuardedHostAccessRejectsIPv6OnlyProjectNetwork()
+        throws
+    {
+        assertFailure(
+            """
+            version: 2
+            project: host-access-demo
+            networks:
+              guarded:
+                ipv4: disabled
+                ipv6: fd42::/64
+            services:
+              api:
+                image: local/api:latest
+                networks: [guarded]
+                hostAccess:
+                  - hostname: api.hostwright.internal
+                    protocol: tcp
+                    addressClass: loopback
+                    port: 8080
+            """,
+            contains:
+                "hostAccess requires an IPv4-enabled project network",
+            path: "$.services.api.networks[0]"
+        )
+    }
+
     func testPublishedPortExposureParsesAndCanonicalizes() throws {
         let manifest = try ManifestValidator.validated(
             """
@@ -642,6 +669,20 @@ final class Phase07NetworkManifestTests: XCTestCase {
     }
 
     func testRejectsInvalidPublishedPortExposure() {
+        assertFailure(
+            """
+            version: 2
+            project: exposure-demo
+            services:
+              api:
+                image: local/api:latest
+                ports:
+                  - bind: 127.0.0.2
+                    target: 8443
+            """,
+            contains: "localhost exposure requires",
+            path: "$.services.api"
+        )
         assertFailure(
             """
             version: 2
@@ -1151,6 +1192,436 @@ final class Phase07NetworkManifestTests: XCTestCase {
             """,
             contains: "protocol must be one of: tcp, udp",
             path: "$.services.api.networkPolicy.ingress[0].protocol"
+        )
+    }
+
+    func testTunnelDeclarationsRoundTripCanonically() throws {
+        let manifest = try ManifestValidator.validated(
+            """
+            version: 2
+            project: tunnel-demo
+            tunnels:
+              peer-api:
+                targetService: api
+                targetPort: 8080
+                peerUUID: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+                authenticatedEndpoints:
+                  - scheme: tls
+                    host: peer.example.test
+                    port: 443
+                relayEndpoint:
+                  scheme: tls
+                  host: relay.example.test
+                  port: 8443
+                bonjourDiscovery: false
+            services:
+              api:
+                image: local/api:latest
+                ports:
+                  - host: 8080
+                    target: 8080
+                    exposure:
+                      scope: tunnel
+                      authentication: authenticated-tunnel
+            """
+        )
+
+        let tunnel = try XCTUnwrap(manifest.tunnels["peer-api"])
+        XCTAssertEqual(tunnel.peerUUID, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+        XCTAssertEqual(tunnel.authenticatedEndpoints.map(\.host), ["peer.example.test"])
+        XCTAssertEqual(tunnel.relayEndpoint?.port, 8443)
+        XCTAssertFalse(tunnel.bonjourDiscovery)
+
+        let canonical = try ManifestCanonicalEncoder.encode(manifest)
+        XCTAssertTrue(canonical.contains("tunnels:"))
+        XCTAssertEqual(try ManifestValidator.validated(canonical), manifest)
+    }
+
+    func testTunnelDeclarationRequiresResolvablePortAndDiscoveryPath() {
+        assertFailure(
+            """
+            version: 2
+            project: tunnel-demo
+            tunnels:
+              peer-api:
+                targetService: api
+                targetPort: 9090
+                peerUUID: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+            services:
+              api:
+                image: local/api:latest
+                ports:
+                  - host: 8080
+                    target: 8080
+                    exposure:
+                      scope: tunnel
+                      authentication: authenticated-tunnel
+            """,
+            contains: "target port 9090 must reference a declared container port",
+            path: "$.tunnels.peer-api.targetPort"
+        )
+        assertFailure(
+            """
+            version: 2
+            project: tunnel-demo
+            tunnels:
+              peer-api:
+                targetService: api
+                targetPort: 8080
+                peerUUID: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+                bonjourDiscovery: false
+            services:
+              api:
+                image: local/api:latest
+                ports:
+                  - host: 8080
+                    target: 8080
+                    exposure:
+                      scope: tunnel
+                      authentication: authenticated-tunnel
+            """,
+            contains: "requires an authenticated endpoint or Bonjour discovery",
+            path: "$.tunnels.peer-api"
+        )
+    }
+
+    func testTunnelDeclarationRejectsNonCanonicalPeerAndUnsafeEndpoint() {
+        assertFailure(
+            """
+            version: 2
+            project: tunnel-demo
+            tunnels:
+              peer-api:
+                targetService: api
+                targetPort: 8080
+                peerUUID: AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA
+                authenticatedEndpoints:
+                  - scheme: tls
+                    host: peer/path.example.test
+                    port: 443
+            services:
+              api:
+                image: local/api:latest
+                ports:
+                  - host: 8080
+                    target: 8080
+                    exposure:
+                      scope: tunnel
+                      authentication: authenticated-tunnel
+            """,
+            contains: "peerUUID must be a canonical lowercase",
+            path: "$.tunnels.peer-api.peerUUID"
+        )
+        assertFailure(
+            """
+            version: 2
+            project: tunnel-demo
+            tunnels:
+              peer-api:
+                targetService: api
+                targetPort: 8080
+                peerUUID: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+                authenticatedEndpoints:
+                  - scheme: tls
+                    host: peer/path.example.test
+                    port: 443
+            services:
+              api:
+                image: local/api:latest
+                ports:
+                  - host: 8080
+                    target: 8080
+                    exposure:
+                      scope: tunnel
+                      authentication: authenticated-tunnel
+            """,
+            contains:
+                "endpoint host must be a canonical hostname, IPv4 address, or IPv6 address",
+            path: "$.tunnels.peer-api.authenticatedEndpoints[0].host"
+        )
+    }
+
+    func testTunnelDeclarationSupportsCanonicalIPv6Endpoint() throws {
+        let manifest = try ManifestValidator.validated(
+            """
+            version: 2
+            project: tunnel-demo
+            tunnels:
+              peer-api:
+                targetService: api
+                targetPort: 8080
+                peerUUID: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+                authenticatedEndpoints:
+                  - scheme: tls
+                    host: 2001:db8::1
+                    port: 443
+            services:
+              api:
+                image: local/api:latest
+                ports:
+                  - host: 8080
+                    target: 8080
+                    exposure:
+                      scope: tunnel
+                      authentication: authenticated-tunnel
+            """
+        )
+        XCTAssertEqual(manifest.tunnels["peer-api"]?.authenticatedEndpoints[0].host, "2001:db8::1")
+        XCTAssertEqual(
+            try ManifestValidator.validated(ManifestCanonicalEncoder.encode(manifest)),
+            manifest
+        )
+    }
+
+    func testTunnelDeclarationRejectsNonTunnelPortAndReplicas() {
+        assertFailure(
+            """
+            version: 2
+            project: tunnel-demo
+            tunnels:
+              peer-api:
+                targetService: api
+                targetPort: 8080
+                peerUUID: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+                authenticatedEndpoints:
+                  - scheme: tls
+                    host: peer.example.test
+                    port: 443
+            services:
+              api:
+                image: local/api:latest
+                ports: ["8080:8080"]
+            """,
+            contains:
+                "must use tunnel exposure with authenticated-tunnel identity",
+            path: "$.tunnels.peer-api.targetPort"
+        )
+        assertFailure(
+            """
+            version: 2
+            project: tunnel-demo
+            tunnels:
+              peer-api:
+                targetService: api
+                targetPort: 8080
+                peerUUID: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+                authenticatedEndpoints:
+                  - scheme: tls
+                    host: peer.example.test
+                    port: 443
+            services:
+              api:
+                image: local/api:latest
+                replicas: 2
+                ports:
+                  - host: 8080
+                    target: 8080
+                    exposure:
+                      scope: tunnel
+                      authentication: authenticated-tunnel
+            """,
+            contains: "requires exactly one target service replica",
+            path: "$.tunnels.peer-api.targetService"
+        )
+    }
+
+    func testRemoteListenerTrustRoundTripsCanonically() throws {
+        let manifest = try ManifestValidator.validated(
+            """
+            version: 2
+            project: tunnel-listener
+            tunnels:
+              peer-api:
+                targetService: api
+                targetPort: 8080
+                peerUUID: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+                role: listener
+                trust:
+                  wireRouteUUID: dddddddd-dddd-4ddd-8ddd-dddddddddddd
+                  wireGeneration: 1
+                  localIdentitySHA256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                  peerTrustAnchorSHA256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+                  peerCertificateSHA256: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+                  peerIdentityURI: spiffe://hostwright.internal/projects/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/resources/cccccccc-cccc-4ccc-8ccc-cccccccccccc/roles/tunnel/generations/1
+                bindEndpoint:
+                  host: 10.0.0.8
+                  port: 7443
+                bonjourDiscovery: false
+            services:
+              api:
+                image: local/api:latest
+                ports:
+                  - host: 8080
+                    target: 8080
+                    protocol: tcp
+                    bind: 127.0.0.1
+                    exposure:
+                      scope: tunnel
+                      authentication: authenticated-tunnel
+            """
+        )
+
+        let tunnel = try XCTUnwrap(manifest.tunnels["peer-api"])
+        XCTAssertEqual(tunnel.role, .listener)
+        XCTAssertEqual(tunnel.bindEndpoint?.host, "10.0.0.8")
+        XCTAssertNotNil(tunnel.trust?.peerIdentityURI)
+        XCTAssertNil(tunnel.trust?.peerDNSName)
+        let canonical = try ManifestCanonicalEncoder.encode(manifest)
+        XCTAssertTrue(canonical.contains(#"role: "listener""#))
+        XCTAssertTrue(canonical.contains("peerTrustAnchorSHA256:"))
+        XCTAssertEqual(try ManifestValidator.validated(canonical), manifest)
+    }
+
+    func testRemoteDialerTrustDoesNotRequireRemoteServiceLocally() throws {
+        let manifest = try ManifestValidator.validated(
+            """
+            version: 2
+            project: tunnel-dialer
+            tunnels:
+              peer-api:
+                targetService: remote-api
+                targetPort: 8080
+                peerUUID: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+                role: dialer
+                trust:
+                  wireRouteUUID: dddddddd-dddd-4ddd-8ddd-dddddddddddd
+                  wireGeneration: 1
+                  localIdentitySHA256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                  peerTrustAnchorSHA256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+                  peerCertificateSHA256: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+                  peerDNSName: peer.example.test
+                bindEndpoint:
+                  host: 127.0.0.1
+                  port: 9443
+                authenticatedEndpoints:
+                  - host: peer.example.test
+                    port: 7443
+                bonjourDiscovery: false
+            services:
+              client:
+                image: local/client:latest
+            """
+        )
+
+        let tunnel = try XCTUnwrap(manifest.tunnels["peer-api"])
+        XCTAssertEqual(tunnel.role, .dialer)
+        XCTAssertEqual(tunnel.targetService, "remote-api")
+        XCTAssertTrue(try XCTUnwrap(tunnel.bindEndpoint).isLoopback)
+        XCTAssertEqual(tunnel.trust?.peerDNSName, "peer.example.test")
+        XCTAssertEqual(
+            try ManifestValidator.validated(ManifestCanonicalEncoder.encode(manifest)),
+            manifest
+        )
+    }
+
+    func testRemoteTunnelRolesRejectMissingOrAmbiguousTrust() {
+        assertFailure(
+            """
+            version: 2
+            project: tunnel-listener
+            tunnels:
+              peer-api:
+                targetService: api
+                targetPort: 8080
+                peerUUID: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+                role: listener
+                bindEndpoint: { host: 10.0.0.8, port: 7443 }
+            services:
+              api:
+                image: local/api:latest
+                ports:
+                  - host: 8080
+                    target: 8080
+                    exposure:
+                      scope: tunnel
+                      authentication: authenticated-tunnel
+            """,
+            contains: "requires explicit non-TOFU trust",
+            path: "$.tunnels.peer-api.trust"
+        )
+        assertFailure(
+            """
+            version: 2
+            project: tunnel-dialer
+            tunnels:
+              peer-api:
+                targetService: remote-api
+                targetPort: 8080
+                peerUUID: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+                role: dialer
+                trust:
+                  wireRouteUUID: dddddddd-dddd-4ddd-8ddd-dddddddddddd
+                  wireGeneration: 1
+                  localIdentitySHA256: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+                  peerTrustAnchorSHA256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+                  peerCertificateSHA256: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+                  peerIdentityURI: spiffe://hostwright.internal/projects/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/resources/cccccccc-cccc-4ccc-8ccc-cccccccccccc/roles/tunnel/generations/1
+                bindEndpoint: { host: 0.0.0.0, port: 9443 }
+                authenticatedEndpoints:
+                  - { host: peer.example.test, port: 7443 }
+            services:
+              client:
+                image: local/client:latest
+            """,
+            contains: "canonical lowercase SHA-256",
+            path: "$.tunnels.peer-api.trust"
+        )
+    }
+
+    func testLocalLoopbackTunnelRejectsRemoteTrustFields() {
+        assertFailure(
+            """
+            version: 2
+            project: tunnel-local
+            tunnels:
+              peer-api:
+                targetService: api
+                targetPort: 8080
+                peerUUID: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+                trust:
+                  wireRouteUUID: dddddddd-dddd-4ddd-8ddd-dddddddddddd
+                  wireGeneration: 1
+                  localIdentitySHA256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                  peerTrustAnchorSHA256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+                  peerCertificateSHA256: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+            services:
+              api:
+                image: local/api:latest
+                ports:
+                  - host: 8080
+                    target: 8080
+                    exposure:
+                      scope: tunnel
+                      authentication: authenticated-tunnel
+            """,
+            contains: "local-loopback role must not declare remote trust",
+            path: "$.tunnels.peer-api"
+        )
+    }
+
+    func testTunnelTargetRequiresSingleTCPLoopbackMapping() {
+        assertFailure(
+            """
+            version: 2
+            project: tunnel-udp
+            tunnels:
+              peer-api:
+                targetService: api
+                targetPort: 8080
+                peerUUID: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+            services:
+              api:
+                image: local/api:latest
+                ports:
+                  - host: 8080
+                    target: 8080
+                    protocol: udp
+                    exposure:
+                      scope: tunnel
+                      authentication: authenticated-tunnel
+            """,
+            contains: "must resolve to one TCP loopback mapping",
+            path: "$.tunnels.peer-api.targetPort"
         )
     }
 

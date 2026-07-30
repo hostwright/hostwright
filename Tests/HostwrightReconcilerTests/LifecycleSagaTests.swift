@@ -216,6 +216,81 @@ final class LifecyclePlanTests: XCTestCase {
 }
 
 final class LifecycleSagaExecutorTests: XCTestCase {
+    func testFinalizerRunsUnderActiveGroupAndResumesSameFence()
+        async throws
+    {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+        let finalizer = FailOnceLifecycleFinalizer(
+            store: fixture.store
+        )
+        let first = LifecycleSagaExecutor(
+            store: fixture.store,
+            effects: InspectingLifecycleEffects(
+                store: fixture.store
+            ),
+            validator: ExactLifecycleValidator(),
+            clock: FixedLifecycleClock(),
+            finalizer: finalizer
+        )
+        let interrupted = try await first.execute(
+            plan: fixture.plan,
+            operationID: fixture.operationID,
+            groupID: fixture.groupID,
+            fencingToken: fixture.fence,
+            lockOwner: "lifecycle-finalizer-test"
+        )
+        XCTAssertEqual(interrupted.status, .interrupted)
+        XCTAssertEqual(
+            try fixture.store.operationGroups.load(
+                id: fixture.groupID
+            )?.checkpoint,
+            "finalizer:failed"
+        )
+
+        let resumed = LifecycleSagaExecutor(
+            store: fixture.store,
+            effects: InspectingLifecycleEffects(
+                store: fixture.store
+            ),
+            validator: ExactLifecycleValidator(),
+            clock: FixedLifecycleClock(),
+            finalizer: finalizer
+        )
+        let result = try await resumed.execute(
+            plan: fixture.plan,
+            operationID: fixture.operationID,
+            groupID: fixture.groupID,
+            fencingToken: fixture.fence,
+            lockOwner: "lifecycle-finalizer-resume"
+        )
+        XCTAssertEqual(result.status, .succeeded)
+        let resumedCallCount = await finalizer.callCount()
+        let activeOnly =
+            await finalizer.onlyObservedActiveGroups()
+        XCTAssertEqual(resumedCallCount, 2)
+        XCTAssertTrue(activeOnly)
+        XCTAssertEqual(
+            try fixture.store.operationGroups.load(
+                id: fixture.groupID
+            )?.status,
+            .succeeded
+        )
+        let repeated = try await resumed.execute(
+            plan: fixture.plan,
+            operationID: fixture.operationID,
+            groupID: fixture.groupID,
+            fencingToken: fixture.fence,
+            lockOwner: "lifecycle-finalizer-reobserve"
+        )
+        XCTAssertEqual(repeated.status, .alreadySucceeded)
+        let repeatedCallCount = await finalizer.callCount()
+        let expectedGroups =
+            await finalizer.onlyObservedExpectedGroups()
+        XCTAssertEqual(repeatedCallCount, 3)
+        XCTAssertTrue(expectedGroups)
+    }
+
     func testIntentIsDurableBeforeEffectAndSuccessfulNodesCheckpoint() async throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
@@ -1207,6 +1282,45 @@ final class LifecycleSagaExecutorTests: XCTestCase {
             diagnostic: "scripted failure",
             guidance: "follow recorded recovery"
         )
+    }
+}
+
+private actor FailOnceLifecycleFinalizer:
+    LifecycleSagaFinalizing
+{
+    private struct ExpectedFailure: Error {}
+    let store: SQLiteStateStore
+    private var calls = 0
+    private var observedStatuses: [OperationGroupStatus] = []
+
+    init(store: SQLiteStateStore) {
+        self.store = store
+    }
+
+    func finalize(
+        context: LifecycleSagaContext
+    ) async throws {
+        calls += 1
+        if let status = try store.operationGroups.load(
+            id: context.groupID
+        )?.status {
+            observedStatuses.append(status)
+        }
+        if calls == 1 {
+            throw ExpectedFailure()
+        }
+    }
+
+    func callCount() -> Int {
+        calls
+    }
+
+    func onlyObservedActiveGroups() -> Bool {
+        Array(observedStatuses.prefix(2)) == [.active, .active]
+    }
+
+    func onlyObservedExpectedGroups() -> Bool {
+        observedStatuses == [.active, .active, .succeeded]
     }
 }
 

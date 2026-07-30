@@ -28,6 +28,8 @@ public enum NetworkHelperClientError: Error, Equatable, Sendable {
     case invalidCertificate
     case invalidProvider
     case providerRejected
+    case invalidTunnel
+    case tunnelRejected
     case helperFailure
     case cleanupFailed
 }
@@ -119,19 +121,22 @@ public struct NetworkHelperClientConfiguration: Equatable, Sendable {
     public let launchTimeoutMilliseconds: Int64
     public let requestTimeoutMilliseconds: Int64
     public let helperIdleTimeoutMilliseconds: Int64
+    public let stateDatabaseURL: URL?
 
     public init(
         executableURL: URL,
         runtimeDirectoryURL: URL,
         launchTimeoutMilliseconds: Int64 = 5_000,
         requestTimeoutMilliseconds: Int64 = 5_000,
-        helperIdleTimeoutMilliseconds: Int64 = 1_000
+        helperIdleTimeoutMilliseconds: Int64 = 1_000,
+        stateDatabaseURL: URL? = nil
     ) {
         self.executableURL = executableURL
         self.runtimeDirectoryURL = runtimeDirectoryURL
         self.launchTimeoutMilliseconds = launchTimeoutMilliseconds
         self.requestTimeoutMilliseconds = requestTimeoutMilliseconds
         self.helperIdleTimeoutMilliseconds = helperIdleTimeoutMilliseconds
+        self.stateDatabaseURL = stateDatabaseURL
     }
 
     func validated() throws -> Self {
@@ -140,7 +145,10 @@ public struct NetworkHelperClientConfiguration: Equatable, Sendable {
               launchTimeoutMilliseconds > 0,
               requestTimeoutMilliseconds > 0,
               helperIdleTimeoutMilliseconds > 0,
-              helperIdleTimeoutMilliseconds <= 30_000 else {
+              helperIdleTimeoutMilliseconds <= 30_000,
+              stateDatabaseURL.map({
+                Self.isNormalizedAbsolute($0.path)
+              }) ?? true else {
             throw NetworkHelperClientError.invalidConfiguration
         }
         return self
@@ -339,13 +347,21 @@ private enum NetworkHelperPOSIXLauncher {
             posix_spawnattr_setflags(&attributes, flags)
         )
 
-        var arguments = try cStringVector([
+        var launchArguments = [
             executablePath,
             "--runtime-directory",
             configuration.runtimeDirectoryURL.path,
             "--idle-timeout-milliseconds",
             String(configuration.helperIdleTimeoutMilliseconds)
-        ])
+        ]
+        if let stateDatabaseURL =
+            configuration.stateDatabaseURL {
+            launchArguments.append(contentsOf: [
+                "--state-database",
+                stateDatabaseURL.path
+            ])
+        }
+        var arguments = try cStringVector(launchArguments)
         defer { freeCStringVector(&arguments) }
         var environment: [UnsafeMutablePointer<CChar>?] = [nil]
         var processID = pid_t(0)
@@ -521,6 +537,7 @@ public actor NetworkHelperClient {
     private var processLease: NetworkHelperProcessLease?
     private var retainsActiveBindings = false
     private var retainsProviderAuthority = false
+    private var retainsTunnelAuthority = false
 
     public init(configuration: NetworkHelperClientConfiguration) {
         self.configuration = configuration
@@ -668,10 +685,109 @@ public actor NetworkHelperClient {
         retainsProviderAuthority = false
     }
 
+    public func setupTunnel(
+        identity: NetworkHelperDNSIdentity,
+        request: NetworkHelperTunnelRequest
+    ) throws -> NetworkHelperTunnelResult {
+        let result = try exchangeTunnel(
+            NetworkHelperRequest(
+                operation: .tunnelSetup,
+                identity: identity,
+                tunnel: request
+            )
+        )
+        guard result.phase == .active, result.live else {
+            throw NetworkHelperClientError.protocolFailure
+        }
+        retainsTunnelAuthority = true
+        return result
+    }
+
+    public func tunnelStatus(
+        identity: NetworkHelperDNSIdentity,
+        request: NetworkHelperTunnelRequest
+    ) throws -> NetworkHelperTunnelResult {
+        try exchangeTunnel(
+            NetworkHelperRequest(
+                operation: .tunnelStatus,
+                identity: identity,
+                tunnel: request
+            )
+        )
+    }
+
+    public func reconnectTunnel(
+        identity: NetworkHelperDNSIdentity,
+        request: NetworkHelperTunnelRequest
+    ) throws -> NetworkHelperTunnelResult {
+        let result = try exchangeTunnel(
+            NetworkHelperRequest(
+                operation: .tunnelReconnect,
+                identity: identity,
+                tunnel: request
+            )
+        )
+        guard result.phase == .active, result.live else {
+            throw NetworkHelperClientError.protocolFailure
+        }
+        retainsTunnelAuthority = true
+        return result
+    }
+
+    public func rotateTunnelKey(
+        identity: NetworkHelperDNSIdentity,
+        request: NetworkHelperTunnelRequest
+    ) throws -> NetworkHelperTunnelResult {
+        try exchangeTunnel(
+            NetworkHelperRequest(
+                operation: .tunnelRotateKey,
+                identity: identity,
+                tunnel: request
+            )
+        )
+    }
+
+    public func drainTunnel(
+        identity: NetworkHelperDNSIdentity,
+        request: NetworkHelperTunnelRequest
+    ) throws -> NetworkHelperTunnelResult {
+        let result = try exchangeTunnel(
+            NetworkHelperRequest(
+                operation: .tunnelDrain,
+                identity: identity,
+                tunnel: request
+            )
+        )
+        guard result.phase == .draining, !result.live else {
+            throw NetworkHelperClientError.protocolFailure
+        }
+        retainsTunnelAuthority = true
+        return result
+    }
+
+    public func teardownTunnel(
+        identity: NetworkHelperDNSIdentity,
+        request: NetworkHelperTunnelRequest
+    ) throws -> NetworkHelperTunnelResult {
+        let result = try exchangeTunnel(
+            NetworkHelperRequest(
+                operation: .tunnelTeardown,
+                identity: identity,
+                tunnel: request
+            )
+        )
+        guard result.phase == .closed, !result.live else {
+            throw NetworkHelperClientError.protocolFailure
+        }
+        retainsTunnelAuthority = false
+        return result
+    }
+
     public func close() throws {
         guard let lease = processLease else { return }
         processLease = nil
-        if retainsActiveBindings || retainsProviderAuthority {
+        if retainsActiveBindings || retainsProviderAuthority ||
+            retainsTunnelAuthority {
             return
         }
         let idleDeadline = Self.monotonicMilliseconds()
@@ -723,6 +839,18 @@ public actor NetworkHelperClient {
         return providerResult
     }
 
+    private func exchangeTunnel(
+        _ request: NetworkHelperRequest
+    ) throws -> NetworkHelperTunnelResult {
+        let response = try rawExchange(request)
+        guard response.status == nil,
+              response.providerResult == nil,
+              let tunnelResult = response.tunnelResult else {
+            throw NetworkHelperClientError.protocolFailure
+        }
+        return tunnelResult
+    }
+
     private func rawExchange(
         _ request: NetworkHelperRequest
     ) throws -> NetworkHelperResponse {
@@ -756,6 +884,7 @@ public actor NetworkHelperClient {
               [
                   response.status != nil,
                   response.providerResult != nil,
+                  response.tunnelResult != nil,
                   response.error != nil
               ].filter({ $0 }).count == 1 else {
             throw NetworkHelperClientError.protocolFailure
@@ -800,6 +929,10 @@ public actor NetworkHelperClient {
             return .invalidProvider
         case .providerRejected:
             return .providerRejected
+        case .invalidTunnel:
+            return .invalidTunnel
+        case .tunnelRejected:
+            return .tunnelRejected
         }
     }
 

@@ -19,8 +19,16 @@ public struct ServiceTunnelStateRepository: Sendable {
         try Self.validate(record)
         return try store.withValidatedConnection { connection in
             try connection.transaction {
-                try Self.validateAuthority(record, on: connection)
-                if let existing = try Self.load(id: record.id, on: connection) {
+                let existing = try Self.load(
+                    id: record.id,
+                    on: connection
+                )
+                try Self.validateAuthority(
+                    record,
+                    allowsSucceededGroup: existing != nil,
+                    on: connection
+                )
+                if let existing {
                     if existing == record { return record }
                     guard let expected,
                           existing.generation == expected.generation,
@@ -178,15 +186,17 @@ public struct ServiceTunnelStateRepository: Sendable {
 
     private static func validateAuthority(
         _ record: ServiceTunnelStateRecord,
+        allowsSucceededGroup: Bool,
         on connection: SQLiteConnection
     ) throws {
         let rows = try connection.query(
             """
             SELECT operation.fencing_token, project.resource_uuid,
-                   project.mutation_provider, project.provider_generation
+                   project.mutation_provider, project.provider_generation,
+                   operation.status
             FROM operation_groups AS operation
             JOIN projects AS project ON project.id = operation.project_id
-            WHERE operation.id = ? AND operation.status = 'active'
+            WHERE operation.id = ?
             LIMIT 1
             """,
             bindings: [.text(record.operationGroupID)]
@@ -196,7 +206,13 @@ public struct ServiceTunnelStateRepository: Sendable {
               rows[0][1] == record.projectUUID,
               let provider = rows[0][2],
               RuntimeProviderBinding.stableID(for: provider)?.rawValue == record.providerID,
-              rows[0][3].flatMap(Int64.init) == record.providerGeneration else {
+              rows[0][3].flatMap(Int64.init) == record.providerGeneration,
+              rows[0][4] == OperationGroupStatus.active.rawValue ||
+                (
+                    allowsSucceededGroup &&
+                    rows[0][4] ==
+                        OperationGroupStatus.succeeded.rawValue
+                ) else {
             throw StateStoreError.invalidRecord(
                 "Service tunnel intent requires the active operation group and exact project provider fence."
             )

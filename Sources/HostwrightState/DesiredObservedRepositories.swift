@@ -20,6 +20,28 @@ public struct DesiredStateRepository: Sendable {
         timestamp: String,
         mutationProvider: String? = nil
     ) throws {
+        try saveManifestSnapshot(
+            projectID: projectID,
+            manifestPath: manifestPath,
+            manifestHash: manifestHash,
+            desiredGeneration: desiredGeneration,
+            manifest: manifest,
+            timestamp: timestamp,
+            mutationProvider: mutationProvider,
+            projectResourceUUID: nil
+        )
+    }
+
+    public func saveManifestSnapshot(
+        projectID: String,
+        manifestPath: String?,
+        manifestHash: String,
+        desiredGeneration: Int,
+        manifest: HostwrightManifest,
+        timestamp: String,
+        mutationProvider: String?,
+        projectResourceUUID: String?
+    ) throws {
         guard let projectName = manifest.project, !projectName.isEmpty else {
             throw StateStoreError.invalidRecord("Manifest snapshot requires a project name.")
         }
@@ -38,6 +60,7 @@ public struct DesiredStateRepository: Sendable {
             manifestHash: manifestHash,
             createdAt: timestamp,
             updatedAt: timestamp,
+            resourceUUID: projectResourceUUID,
             manifestVersion: manifest.effectiveVersion,
             mutationProvider: mutationProvider,
             providerGeneration: mutationProvider == nil ? 0 : desiredGeneration

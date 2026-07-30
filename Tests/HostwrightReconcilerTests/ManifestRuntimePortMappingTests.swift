@@ -202,6 +202,77 @@ final class ManifestRuntimePortMappingTests: XCTestCase {
         })
     }
 
+    func testMapsLoopbackAuthenticatedTunnelPublishedPortWithoutBlocker() throws {
+        let exposure = HostwrightPortExposurePolicy(
+            scope: .tunnel,
+            authentication: .authenticatedTunnel
+        )
+        let service = HostwrightService(
+            name: "api",
+            image: "example.invalid/api:local",
+            publishedPorts: [
+                HostwrightPublishedPort(
+                    host: HostwrightPortSpan(start: 18_080),
+                    target: HostwrightPortSpan(start: 8_080),
+                    protocolName: .tcp,
+                    bindAddress: "127.0.0.1",
+                    exposure: exposure
+                ),
+            ]
+        )
+
+        let mapping = ManifestRuntimeMapper.map(
+            HostwrightManifest(version: 2, project: "demo", services: [service])
+        )
+
+        XCTAssertTrue(mapping.issues.isEmpty)
+        XCTAssertEqual(
+            try XCTUnwrap(mapping.desiredState.services.first?.ports.first)
+                .exposurePolicy,
+            exposure
+        )
+    }
+
+    func testCarriesTunnelDeclarationsWithoutRuntimeAuthority() throws {
+        let declaration = HostwrightTunnelDeclaration(
+            targetService: "api",
+            targetPort: 8_080,
+            peerUUID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            authenticatedEndpoints: [
+                HostwrightTunnelManifestEndpoint(
+                    host: "peer.example.test",
+                    port: 443
+                ),
+            ],
+            bonjourDiscovery: false
+        )
+        let manifest = HostwrightManifest(
+            version: 2,
+            project: "demo",
+            imagePolicy: nil,
+            imageTrust: nil,
+            imageSBOM: nil,
+            networks: [:],
+            certificates: [:],
+            tunnels: ["peer-api": declaration],
+            services: [
+                HostwrightService(
+                    name: "api",
+                    image: "example.invalid/api:local",
+                    ports: ["8080:8080"]
+                ),
+            ]
+        )
+
+        let mapping = ManifestRuntimeMapper.map(manifest)
+
+        XCTAssertTrue(mapping.issues.isEmpty)
+        XCTAssertEqual(
+            mapping.tunnelDeclarations,
+            ["peer-api": declaration]
+        )
+    }
+
     func testCarriesLocalhostIngressWithoutAddingBlockers() throws {
         let route = HostwrightIngressRoute(
             hostname: "api.hostwright.internal",

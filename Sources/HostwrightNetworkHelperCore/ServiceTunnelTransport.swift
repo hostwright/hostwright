@@ -100,6 +100,276 @@ struct HostwrightTunnelCertificateCoordinatorAdapter {
             )
         )
     }
+
+    func remoteCredentials(
+        execution: NetworkHelperTunnelExecution,
+        identityStore: CertificateIdentityStore =
+            CertificateIdentityStore()
+    ) throws -> HostwrightTunnelTLSCredentials {
+        let execution = try execution.validated()
+        let local = try identityStore.resolveImportedIdentity(
+            certificateSHA256:
+                execution.localIdentitySHA256
+        )
+        let trustAnchor = try identityStore.resolveCertificate(
+            certificateSHA256:
+                execution.peerTrustAnchorSHA256
+        )
+        switch execution.role {
+        case .listener:
+            guard local.metadata.supportsServerAuthentication,
+                  let peerIdentityURI =
+                    execution.peerIdentityURI else {
+                throw HostwrightTunnelSocketError
+                    .invalidCredentials
+            }
+            let policy = try NetworkHelperMutualTLSPolicy(
+                trustAnchors: [trustAnchor],
+                trustedPeers: [
+                    try NetworkHelperTrustedPeer(
+                        identityURI: peerIdentityURI,
+                        certificateSHA256:
+                            execution.peerCertificateSHA256
+                    ),
+                ]
+            )
+            return HostwrightTunnelTLSCredentials(
+                localIdentity: local,
+                peerVerifier: .server(
+                    HostwrightTunnelServerPeerVerifier(
+                        policy: policy
+                    )
+                )
+            )
+        case .dialer:
+            guard local.metadata.supportsClientAuthentication,
+                  let peerDNSName =
+                    execution.peerDNSName else {
+                throw HostwrightTunnelSocketError
+                    .invalidCredentials
+            }
+            return HostwrightTunnelTLSCredentials(
+                localIdentity: local,
+                peerVerifier: .client(
+                    HostwrightTunnelClientPeerVerifier(
+                        trustAnchors: [trustAnchor],
+                        dnsName: peerDNSName,
+                        certificateSHA256:
+                            execution.peerCertificateSHA256
+                    )
+                )
+            )
+        }
+    }
+}
+
+public struct NetworkHelperTunnelCredentialPreflightResult:
+    Equatable,
+    Sendable
+{
+    public let role: NetworkHelperTunnelRole
+    public let localIdentitySHA256: String
+    public let peerTrustAnchorSHA256: String
+    public let peerCertificateSHA256: String
+}
+
+public struct NetworkHelperTunnelCredentialDescriptor:
+    Equatable,
+    Sendable
+{
+    public let role: NetworkHelperTunnelRole
+    public let localIdentitySHA256: String
+    public let peerTrustAnchorSHA256: String
+    public let peerCertificateSHA256: String
+    public let peerDNSName: String?
+    public let peerIdentityURI: String?
+
+    public init(
+        role: NetworkHelperTunnelRole,
+        localIdentitySHA256: String,
+        peerTrustAnchorSHA256: String,
+        peerCertificateSHA256: String,
+        peerDNSName: String? = nil,
+        peerIdentityURI: String? = nil
+    ) {
+        self.role = role
+        self.localIdentitySHA256 = localIdentitySHA256
+        self.peerTrustAnchorSHA256 =
+            peerTrustAnchorSHA256
+        self.peerCertificateSHA256 =
+            peerCertificateSHA256
+        self.peerDNSName = peerDNSName
+        self.peerIdentityURI = peerIdentityURI
+    }
+}
+
+public enum NetworkHelperTunnelCredentialPreflight {
+    public static func validate(
+        execution: NetworkHelperTunnelExecution
+    ) throws -> NetworkHelperTunnelCredentialPreflightResult {
+        let execution = try execution.validated()
+        return try validate(
+            descriptor:
+                NetworkHelperTunnelCredentialDescriptor(
+                    role: execution.role,
+                    localIdentitySHA256:
+                        execution.localIdentitySHA256,
+                    peerTrustAnchorSHA256:
+                        execution.peerTrustAnchorSHA256,
+                    peerCertificateSHA256:
+                        execution.peerCertificateSHA256,
+                    peerDNSName: execution.peerDNSName,
+                    peerIdentityURI:
+                        execution.peerIdentityURI
+                )
+        )
+    }
+
+    public static func validate(
+        descriptor:
+            NetworkHelperTunnelCredentialDescriptor
+    ) throws -> NetworkHelperTunnelCredentialPreflightResult {
+        try validateDescriptor(descriptor)
+        let store = CertificateIdentityStore()
+        let local = try store.resolveImportedIdentity(
+            certificateSHA256:
+                descriptor.localIdentitySHA256
+        )
+        let anchor = try store.resolveCertificate(
+            certificateSHA256:
+                descriptor.peerTrustAnchorSHA256
+        )
+        let peer = try store.resolveCertificateMetadata(
+            certificateSHA256:
+                descriptor.peerCertificateSHA256
+        )
+        let trust = try trust(
+            leaf: peer.certificate,
+            anchor: anchor,
+            descriptor: descriptor
+        )
+        switch descriptor.role {
+        case .listener:
+            guard local.metadata.supportsServerAuthentication,
+                  peer.metadata.supportsClientAuthentication,
+                  let peerIdentityURI =
+                    descriptor.peerIdentityURI,
+                  peer.metadata.uriNames == [peerIdentityURI],
+                  try NetworkHelperMutualTLSPolicy(
+                    trustAnchors: [anchor],
+                    trustedPeers: [
+                        NetworkHelperTrustedPeer(
+                            identityURI: peerIdentityURI,
+                            certificateSHA256:
+                                descriptor.peerCertificateSHA256
+                        ),
+                    ]
+                  ).evaluate(trust) else {
+                throw NetworkHelperError.invalidCertificate
+            }
+        case .dialer:
+            guard local.metadata.supportsClientAuthentication,
+                  peer.metadata.supportsServerAuthentication,
+                  let peerDNSName = descriptor.peerDNSName,
+                  peer.metadata.dnsNames.contains(peerDNSName)
+            else {
+                throw NetworkHelperError.invalidCertificate
+            }
+            let verifier = HostwrightTunnelClientPeerVerifier(
+                trustAnchors: [anchor],
+                dnsName: peerDNSName,
+                certificateSHA256:
+                    descriptor.peerCertificateSHA256
+            )
+            guard HostwrightTunnelTLS.evaluateServer(
+                trust,
+                verifier: verifier
+            ) else {
+                throw NetworkHelperError.invalidCertificate
+            }
+        }
+        return NetworkHelperTunnelCredentialPreflightResult(
+            role: descriptor.role,
+            localIdentitySHA256:
+                local.metadata.certificateSHA256,
+            peerTrustAnchorSHA256:
+                descriptor.peerTrustAnchorSHA256,
+            peerCertificateSHA256:
+                peer.metadata.certificateSHA256
+        )
+    }
+
+    private static func trust(
+        leaf: SecCertificate,
+        anchor: SecCertificate,
+        descriptor:
+            NetworkHelperTunnelCredentialDescriptor
+    ) throws -> SecTrust {
+        let policy: SecPolicy
+        switch descriptor.role {
+        case .listener:
+            policy = SecPolicyCreateSSL(false, nil)
+        case .dialer:
+            policy = SecPolicyCreateSSL(
+                true,
+                descriptor.peerDNSName as CFString?
+            )
+        }
+        var trust: SecTrust?
+        guard SecTrustCreateWithCertificates(
+            leaf,
+            policy,
+            &trust
+        ) == errSecSuccess,
+        let trust,
+        SecTrustSetAnchorCertificates(
+            trust,
+            [anchor] as CFArray
+        ) == errSecSuccess,
+        SecTrustSetAnchorCertificatesOnly(
+            trust,
+            true
+        ) == errSecSuccess,
+        SecTrustSetNetworkFetchAllowed(
+            trust,
+            false
+        ) == errSecSuccess else {
+            throw NetworkHelperError.invalidCertificate
+        }
+        return trust
+    }
+
+    private static func validateDescriptor(
+        _ descriptor:
+            NetworkHelperTunnelCredentialDescriptor
+    ) throws {
+        let fingerprints = [
+            descriptor.localIdentitySHA256,
+            descriptor.peerTrustAnchorSHA256,
+            descriptor.peerCertificateSHA256,
+        ]
+        guard fingerprints.allSatisfy({
+            $0.utf8.count == 64 &&
+                $0.utf8.allSatisfy {
+                    (48...57).contains($0) ||
+                        (97...102).contains($0)
+                }
+        }) else {
+            throw NetworkHelperError.invalidCertificate
+        }
+        switch descriptor.role {
+        case .listener:
+            guard descriptor.peerDNSName == nil,
+                  descriptor.peerIdentityURI != nil else {
+                throw NetworkHelperError.invalidCertificate
+            }
+        case .dialer:
+            guard descriptor.peerIdentityURI == nil,
+                  descriptor.peerDNSName != nil else {
+                throw NetworkHelperError.invalidCertificate
+            }
+        }
+    }
 }
 
 private enum HostwrightTunnelWireKind: UInt8 {
@@ -650,7 +920,7 @@ final class HostwrightServiceTunnelConnection: @unchecked Sendable {
 
 final class HostwrightServiceTunnelDialer: Sendable {
     private static let directAttemptBudgetMilliseconds:
-        Int64 = 1_000
+        Int64 = 3_000
     typealias CredentialsProvider = @Sendable (
         HostwrightTunnelRoute,
         HostwrightTunnelEndpoint,
@@ -936,6 +1206,424 @@ final class HostwrightServiceTunnelListener: @unchecked Sendable {
     }
 }
 
+final class HostwrightTunnelServiceForwarder:
+    @unchecked Sendable
+{
+    private static let operationTimeoutMilliseconds:
+        Int64 = 5_000
+    private static let acceptPollMilliseconds:
+        Int64 = 250
+
+    private let listener: HostwrightServiceTunnelListener
+    private let target: HostwrightTunnelEndpoint
+    private let queue = DispatchQueue(
+        label: "dev.hostwright.service-tunnel.forwarder",
+        qos: .userInitiated,
+        attributes: .concurrent
+    )
+    private let lock = NSLock()
+    private var stopped = false
+    private var connections:
+        [HostwrightServiceTunnelConnection] = []
+
+    init(
+        listener: HostwrightServiceTunnelListener,
+        target: HostwrightTunnelEndpoint
+    ) {
+        self.listener = listener
+        self.target = target
+    }
+
+    func start() {
+        queue.async { [weak self] in
+            self?.acceptLoop()
+        }
+    }
+
+    func stop() {
+        let snapshot = lock.withLock {
+            stopped = true
+            let values = connections
+            connections.removeAll()
+            return values
+        }
+        listener.stop()
+        snapshot.forEach { $0.cancel() }
+    }
+
+    private func acceptLoop() {
+        while !lock.withLock({ stopped }) {
+            do {
+                let connection = try listener.next(
+                    deadlineUnixMilliseconds:
+                        HostwrightServiceTunnelConnection
+                            .nowMilliseconds()
+                        + Self.acceptPollMilliseconds
+                )
+                let admitted = lock.withLock {
+                    guard !stopped,
+                          connections.count < 8 else {
+                        return false
+                    }
+                    connections.append(connection)
+                    return true
+                }
+                guard admitted else {
+                    connection.cancel()
+                    continue
+                }
+                queue.async { [weak self] in
+                    self?.forward(connection)
+                }
+            } catch HostwrightTunnelSocketError
+                .deadlineExceeded {
+                continue
+            } catch {
+                if !lock.withLock({ stopped }) {
+                    Thread.sleep(forTimeInterval: 0.05)
+                }
+            }
+        }
+    }
+
+    private func forward(
+        _ tunnel: HostwrightServiceTunnelConnection
+    ) {
+        defer {
+            tunnel.cancel()
+            lock.withLock {
+                connections.removeAll { $0 === tunnel }
+            }
+        }
+        do {
+            let service = try connectService()
+            defer { service.cancel() }
+            while !lock.withLock({ stopped }) {
+                let deadline =
+                    HostwrightServiceTunnelConnection
+                        .nowMilliseconds()
+                    + Self.operationTimeoutMilliseconds
+                guard let frame = try tunnel.receive(
+                    deadlineUnixMilliseconds: deadline
+                ) else {
+                    continue
+                }
+                guard service.send(
+                    frame.payload,
+                    timeoutMilliseconds:
+                        Self.operationTimeoutMilliseconds
+                ), let response = service.receive(
+                    maximumLength:
+                        HostwrightTunnelFrame
+                            .maximumPayloadBytes,
+                    timeoutMilliseconds:
+                        Self.operationTimeoutMilliseconds
+                ), !response.isEmpty else {
+                    throw HostwrightTunnelSocketError
+                        .connectionFailed
+                }
+                _ = try tunnel.send(
+                    channel: frame.channel,
+                    payload: response,
+                    deadlineUnixMilliseconds:
+                        HostwrightServiceTunnelConnection
+                            .nowMilliseconds()
+                        + Self.operationTimeoutMilliseconds
+                )
+            }
+        } catch {
+            return
+        }
+    }
+
+    private func connectService()
+        throws -> NetworkHelperTLSConnection
+    {
+        guard let port = NWEndpoint.Port(
+            rawValue: UInt16(target.port)
+        ) else {
+            throw HostwrightTunnelSocketError.connectionFailed
+        }
+        let raw = NWConnection(
+            host: NWEndpoint.Host(target.host),
+            port: port,
+            using: .tcp
+        )
+        let connection = NetworkHelperTLSConnection(
+            connection: raw,
+            label: "service-tunnel-target"
+        )
+        guard connection.start(
+            timeoutMilliseconds:
+                Self.operationTimeoutMilliseconds
+        ) else {
+            connection.cancel()
+            throw HostwrightTunnelSocketError.connectionFailed
+        }
+        return connection
+    }
+}
+
+final class HostwrightTunnelLocalForwarder:
+    @unchecked Sendable
+{
+    private static let operationTimeoutMilliseconds:
+        Int64 = 30_000
+    private static let chunkBytes = 64 * 1_024
+    private static let maximumConnections = 8
+
+    private let connect:
+        @Sendable () throws -> HostwrightServiceTunnelConnection
+    private let listener: NWListener
+    private let queue = DispatchQueue(
+        label: "dev.hostwright.service-tunnel.local-forwarder",
+        qos: .userInitiated,
+        attributes: .concurrent
+    )
+    private let lock = NSLock()
+    private var stopped = false
+    private var initialTunnel:
+        HostwrightServiceTunnelConnection?
+    private var pendingConnections = 0
+    private var active:
+        [ObjectIdentifier: (
+            local: NetworkHelperTLSConnection,
+            tunnel: HostwrightServiceTunnelConnection
+        )] = [:]
+
+    init(
+        initialTunnel: HostwrightServiceTunnelConnection,
+        endpoint: HostwrightTunnelEndpoint,
+        connect: @escaping @Sendable () throws ->
+            HostwrightServiceTunnelConnection
+    ) throws {
+        guard let port = NWEndpoint.Port(
+            rawValue: UInt16(endpoint.port)
+        ) else {
+            throw HostwrightTunnelSocketError.connectionFailed
+        }
+        self.initialTunnel = initialTunnel
+        self.connect = connect
+        let parameters = NWParameters.tcp
+        parameters.requiredLocalEndpoint = .hostPort(
+            host: NWEndpoint.Host(endpoint.host),
+            port: port
+        )
+        listener = try NWListener(using: parameters)
+        listener.newConnectionHandler = { [weak self] raw in
+            self?.accept(raw)
+        }
+    }
+
+    func start(
+        deadlineUnixMilliseconds: Int64
+    ) throws {
+        let completed = DispatchSemaphore(value: 0)
+        let ready = HostwrightTunnelLockedValue<Bool?>(nil)
+        listener.stateUpdateHandler = { state in
+            let result: Bool?
+            switch state {
+            case .ready: result = true
+            case .failed, .cancelled: result = false
+            case .setup, .waiting: result = nil
+            @unknown default: result = false
+            }
+            guard let result else { return }
+            let first = ready.update {
+                guard $0 == nil else { return false }
+                $0 = result
+                return true
+            }
+            if first { completed.signal() }
+        }
+        listener.start(queue: queue)
+        let remaining = deadlineUnixMilliseconds
+            - HostwrightServiceTunnelConnection
+                .nowMilliseconds()
+        guard remaining > 0,
+              completed.wait(
+                timeout: .now()
+                    + .milliseconds(Int(remaining))
+              ) == .success,
+              ready.read() == true else {
+            stop()
+            throw HostwrightTunnelSocketError.connectionFailed
+        }
+    }
+
+    func stop() {
+        let snapshot = lock.withLock {
+            guard !stopped else {
+                return (
+                    HostwrightServiceTunnelConnection?.none,
+                    [(
+                        local: NetworkHelperTLSConnection,
+                        tunnel:
+                            HostwrightServiceTunnelConnection
+                    )]()
+                )
+            }
+            stopped = true
+            let initial = initialTunnel
+            initialTunnel = nil
+            let values = Array(active.values)
+            active.removeAll()
+            return (initial, values)
+            }
+        listener.cancel()
+        snapshot.0?.cancel()
+        snapshot.1.forEach {
+            $0.local.cancel()
+            $0.tunnel.cancel()
+        }
+    }
+
+    private func accept(_ raw: NWConnection) {
+        let local = NetworkHelperTLSConnection(
+            connection: raw,
+            label: "service-tunnel-local-client"
+        )
+        let reserved = lock.withLock {
+            guard !stopped,
+                  active.count + pendingConnections
+                    < Self.maximumConnections else {
+                return false
+            }
+            pendingConnections += 1
+            return true
+        }
+        guard reserved else {
+            local.cancel()
+            return
+        }
+        queue.async { [weak self] in
+            guard let self else {
+                local.cancel()
+                return
+            }
+            guard local.start(timeoutMilliseconds: 5_000)
+            else {
+                lock.withLock { pendingConnections -= 1 }
+                local.cancel()
+                return
+            }
+            let tunnel: HostwrightServiceTunnelConnection
+            do {
+                tunnel = try lock.withLock {
+                    if let initialTunnel {
+                        self.initialTunnel = nil
+                        return initialTunnel
+                    }
+                    return try connect()
+                }
+            } catch {
+                lock.withLock { pendingConnections -= 1 }
+                local.cancel()
+                return
+            }
+            let identifier = ObjectIdentifier(local)
+            let admitted = lock.withLock {
+                pendingConnections -= 1
+                guard !stopped else { return false }
+                active[identifier] = (local, tunnel)
+                return true
+            }
+            guard admitted else {
+                local.cancel()
+                tunnel.cancel()
+                return
+            }
+            let group = DispatchGroup()
+            group.enter()
+            queue.async { [weak self] in
+                defer {
+                    local.cancel()
+                    tunnel.cancel()
+                    group.leave()
+                }
+                self?.copyLocalToTunnel(
+                    local,
+                    tunnel: tunnel
+                )
+            }
+            group.enter()
+            queue.async { [weak self] in
+                defer {
+                    local.cancel()
+                    tunnel.cancel()
+                    group.leave()
+                }
+                self?.copyTunnelToLocal(
+                    tunnel,
+                    local: local
+                )
+            }
+            group.notify(queue: queue) { [weak self] in
+                _ = self?.lock.withLock {
+                    self?.active.removeValue(
+                        forKey: identifier
+                    )
+                }
+            }
+        }
+    }
+
+    private func copyLocalToTunnel(
+        _ local: NetworkHelperTLSConnection,
+        tunnel: HostwrightServiceTunnelConnection
+    ) {
+        while !lock.withLock({ stopped }) {
+            guard let data = local.receive(
+                maximumLength: Self.chunkBytes,
+                timeoutMilliseconds:
+                    Self.operationTimeoutMilliseconds
+            ), !data.isEmpty else {
+                return
+            }
+            do {
+                _ = try tunnel.send(
+                    channel: 1,
+                    payload: data,
+                    deadlineUnixMilliseconds:
+                        HostwrightServiceTunnelConnection
+                            .nowMilliseconds()
+                        + Self.operationTimeoutMilliseconds
+                )
+            } catch {
+                return
+            }
+        }
+    }
+
+    private func copyTunnelToLocal(
+        _ tunnel: HostwrightServiceTunnelConnection,
+        local: NetworkHelperTLSConnection
+    ) {
+        while !lock.withLock({ stopped }) {
+            do {
+                guard let frame = try tunnel.receive(
+                    deadlineUnixMilliseconds:
+                        HostwrightServiceTunnelConnection
+                            .nowMilliseconds()
+                        + Self.operationTimeoutMilliseconds
+                ) else {
+                    continue
+                }
+                guard frame.channel == 1,
+                      local.send(
+                        frame.payload,
+                        timeoutMilliseconds:
+                            Self.operationTimeoutMilliseconds
+                      ) else {
+                    return
+                }
+            } catch {
+                return
+            }
+        }
+    }
+}
+
 private enum HostwrightTunnelTLS {
     static func parameters(
         credentials: HostwrightTunnelTLSCredentials,
@@ -996,7 +1684,7 @@ private enum HostwrightTunnelTLS {
         return parameters
     }
 
-    private static func evaluateServer(
+    fileprivate static func evaluateServer(
         _ trust: SecTrust,
         verifier: HostwrightTunnelClientPeerVerifier
     ) -> Bool {

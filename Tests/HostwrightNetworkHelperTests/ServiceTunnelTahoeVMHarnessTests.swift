@@ -11,6 +11,42 @@ import XCTest
 /// echo one channel-0 frame. This harness never creates a VM, weakens trust,
 /// discovers credentials, or falls back to a public relay.
 final class ServiceTunnelTahoeVMHarnessTests: XCTestCase {
+    func testQualificationConfigurationUsesCanonicalHelperFrame()
+        throws
+    {
+        let environment = ProcessInfo.processInfo.environment
+        guard let path = environment[
+            "HOSTWRIGHT_GATE13_HELPER_CONFIGURATION"
+        ], !path.isEmpty else {
+            throw XCTSkip(
+                "Set HOSTWRIGHT_GATE13_HELPER_CONFIGURATION for the attended canonical-frame check."
+            )
+        }
+        let configuration = try JSONDecoder().decode(
+            HelperConfiguration.self,
+            from: Data(
+                contentsOf: URL(fileURLWithPath: path),
+                options: [.mappedIfSafe]
+            )
+        )
+        let request = NetworkHelperRequest(
+            requestID: UUID(
+                uuidString:
+                    "14141414-1414-4414-8414-141414141414"
+            )!,
+            operation: .tunnelSetup,
+            identity: configuration.identity,
+            tunnel: configuration.request
+        )
+        XCTAssertEqual(
+            try NetworkHelperCanonicalJSON.decodeFrame(
+                NetworkHelperRequest.self,
+                from: NetworkHelperCanonicalJSON.frame(request)
+            ),
+            request
+        )
+    }
+
     func testExistingTahoeVMEchoesAuthenticatedFrame()
         throws
     {
@@ -127,5 +163,10 @@ final class ServiceTunnelTahoeVMHarnessTests: XCTestCase {
             )
         }
         return value
+    }
+
+    private struct HelperConfiguration: Decodable {
+        let identity: NetworkHelperDNSIdentity
+        let request: NetworkHelperTunnelRequest
     }
 }

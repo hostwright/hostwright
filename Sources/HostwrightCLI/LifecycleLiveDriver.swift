@@ -107,6 +107,10 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
                     providerRootURL: environment.storageProviderRootURL()
                 )
         )
+        try ServiceTunnelLifecycleCoordinator
+            .validateLiveCredentialPrerequisites(
+                mapping.tunnelDeclarations
+            )
         let selectedProvider = try hostwrightSelectRuntimeProvider(
             requested: options.runtimeProvider,
             store: store,
@@ -239,6 +243,7 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
             desiredState: desiredState,
             certificates: mapping.certificates,
             ingress: mapping.ingress,
+            tunnelDeclarations: mapping.tunnelDeclarations,
             previousDesiredState: previousDesiredState,
             observedState: observedState,
             observationSHA256: inventory.semanticSHA256,
@@ -493,11 +498,34 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
             probeStore: probeStore,
             environment: environment
         )
+        let hasPersistedServiceTunnels =
+            !(try store.serviceTunnels.listRecoverable(
+                projectUUID: preparation.projectResourceUUID
+            )).isEmpty
+        let serviceTunnelFinalizer:
+            LifecycleServiceTunnelFinalizer?
+        if !preparation.tunnelDeclarations.isEmpty ||
+            hasPersistedServiceTunnels {
+            serviceTunnelFinalizer =
+                try LifecycleServiceTunnelFinalizer(
+                    preparation: preparation,
+                    timeoutSeconds: options.timeoutSeconds,
+                    store: store,
+                    helper: LiveServiceTunnelHelperDriver(
+                        environment: environment,
+                        stateDatabasePath:
+                            options.stateDatabasePath
+                    )
+                )
+        } else {
+            serviceTunnelFinalizer = nil
+        }
         let executor = LifecycleSagaExecutor(
             store: store,
             effects: effects,
             validator: validator,
-            recoveryStateJSONRedacted: recoveryStateJSONRedacted
+            recoveryStateJSONRedacted: recoveryStateJSONRedacted,
+            finalizer: serviceTunnelFinalizer
         )
         let result = try hostwrightWaitForAsync {
             try await executor.execute(

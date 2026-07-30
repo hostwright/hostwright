@@ -35,6 +35,39 @@ final class HostwrightStateTests: XCTestCase {
         }
     }
 
+    func testManifestSnapshotPersistsExplicitProjectResourceUUID()
+        throws {
+        try withTemporaryStore { store, _ in
+            try store.migrate()
+            let resourceUUID =
+                "11111111-1111-4111-8111-111111111117"
+            try store.desiredStates.saveManifestSnapshot(
+                projectID: "qualification:\(resourceUUID)",
+                manifestPath: nil,
+                manifestHash: String(repeating: "a", count: 64),
+                desiredGeneration: 1,
+                manifest: HostwrightManifest(
+                    version: HostwrightManifest.currentVersion,
+                    project: "gate13-qualification",
+                    services: []
+                ),
+                timestamp: timestamp,
+                mutationProvider: "apple-container-cli",
+                projectResourceUUID: resourceUUID
+            )
+
+            let project = try store.desiredStates.loadProject(
+                id: "qualification:\(resourceUUID)"
+            )
+            XCTAssertEqual(project.resourceUUID, resourceUUID)
+            XCTAssertEqual(
+                project.mutationProvider,
+                "apple-container-cli"
+            )
+            XCTAssertEqual(project.providerGeneration, 1)
+        }
+    }
+
     func testMigrationBackfillsLegacyOwnershipRuntimeAdapter() throws {
         try withTemporaryStore { store, databaseURL in
             try MigrationRunner().apply(to: store, throughVersion: 4)

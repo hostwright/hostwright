@@ -5,7 +5,9 @@ import HostwrightRuntime
 public enum NetworkHelperExecutable {
     public static func run(
         runtimeDirectoryURL: URL,
-        idleTimeoutMilliseconds: Int64 = 30_000
+        idleTimeoutMilliseconds: Int64 = 30_000,
+        tunnelStore:
+            (any HostwrightTunnelIntentPersisting)? = nil
     ) throws {
         let runtimeDirectory =
             try ContainerizationHelperRuntimeDirectory.prepare(
@@ -28,6 +30,12 @@ public enum NetworkHelperExecutable {
         let ingressBroker = NetworkHelperIngressBroker()
         let certificateCoordinator =
             NetworkHelperCertificateCoordinator()
+        let tunnelManager = tunnelStore.map {
+            NetworkHelperServiceTunnelManager(
+                store: $0,
+                certificateCoordinator: certificateCoordinator
+            )
+        }
         let policyBroker = NetworkHelperPolicyBroker()
         let policyConfigurations =
             try store.activePolicyConfigurations()
@@ -165,7 +173,8 @@ public enum NetworkHelperExecutable {
                 ingressBroker: ingressBroker,
                 certificateCoordinator: certificateCoordinator,
                 policyBroker: policyBroker,
-                providerCoordinator: providerCoordinator
+                providerCoordinator: providerCoordinator,
+                tunnelManager: tunnelManager
             ),
             authenticator: .productionClient(),
             idleTimeoutMilliseconds: idleTimeoutMilliseconds

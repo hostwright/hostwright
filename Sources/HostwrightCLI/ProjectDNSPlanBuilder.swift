@@ -216,7 +216,29 @@ enum ProjectDNSPlanBuilder {
                         "listener '\(name)' has an invalid localhost bind address"
                     )
                 }
-            case .lan, .public:
+            case .lan:
+                let environment =
+                    try hostEnvironment ??
+                    NetworkHostEnvironmentProbe.current()
+                let evaluation =
+                    NetworkExposureEnvironmentEvaluator.evaluate(
+                        policy: listener.exposure,
+                        bindAddress: listener.bindAddress,
+                        environment: environment
+                    )
+                guard evaluation.isAllowed else {
+                    throw ProjectDNSPlanningError.invalidIngress(
+                        "listener '\(name)' exposure is unavailable: "
+                            + evaluation.issues.map(\.rawValue)
+                                .joined(separator: ",")
+                    )
+                }
+            case .public:
+                guard listener.exposure.authentication == .mutualTLS else {
+                    throw ProjectDNSPlanningError.invalidIngress(
+                        "listener '\(name)' authenticated-tunnel exposure requires scope 'tunnel' and its dedicated provider path"
+                    )
+                }
                 let environment =
                     try hostEnvironment ??
                     NetworkHostEnvironmentProbe.current()

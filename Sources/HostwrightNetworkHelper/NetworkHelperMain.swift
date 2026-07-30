@@ -1,6 +1,7 @@
 import Darwin
 import Foundation
 import HostwrightNetworkHelperCore
+import HostwrightState
 
 private enum NetworkHelperMainError: Error {
     case invalidArguments
@@ -17,30 +18,64 @@ struct HostwrightNetworkHelperMain {
                 )
                 return
             }
-            guard arguments.count == 2 || arguments.count == 4,
-                  arguments[0] == "--runtime-directory",
-                  arguments.count == 2
-                    || arguments[2] == "--idle-timeout-milliseconds" else {
+            guard arguments.count >= 2,
+                  arguments.count.isMultiple(of: 2) else {
                 throw NetworkHelperMainError.invalidArguments
             }
-            let idleTimeoutMilliseconds: Int64
-            if arguments.count == 4 {
-                guard let value = Int64(arguments[3]),
-                      value > 0,
-                      value <= 30_000 else {
+            var runtimeDirectoryPath: String?
+            var stateDatabasePath: String?
+            var idleTimeoutMilliseconds: Int64 = 30_000
+            var index = 0
+            while index < arguments.count {
+                let flag = arguments[index]
+                let value = arguments[index + 1]
+                switch flag {
+                case "--runtime-directory":
+                    guard runtimeDirectoryPath == nil else {
+                        throw NetworkHelperMainError.invalidArguments
+                    }
+                    runtimeDirectoryPath = value
+                case "--idle-timeout-milliseconds":
+                    guard let parsed = Int64(value),
+                          parsed > 0,
+                          parsed <= 30_000 else {
+                        throw NetworkHelperMainError.invalidArguments
+                    }
+                    idleTimeoutMilliseconds = parsed
+                case "--state-database":
+                    guard stateDatabasePath == nil else {
+                        throw NetworkHelperMainError.invalidArguments
+                    }
+                    stateDatabasePath = value
+                default:
                     throw NetworkHelperMainError.invalidArguments
                 }
-                idleTimeoutMilliseconds = value
-            } else {
-                idleTimeoutMilliseconds = 30_000
+                index += 2
+            }
+            guard let runtimeDirectoryPath else {
+                throw NetworkHelperMainError.invalidArguments
             }
             let runtimeDirectoryURL = URL(
-                fileURLWithPath: arguments[1],
+                fileURLWithPath: runtimeDirectoryPath,
                 isDirectory: true
             )
+            let tunnelStore:
+                ServiceTunnelStateRepository?
+            if let stateDatabasePath {
+                let store = SQLiteStateStore(
+                    configuration: StateStoreConfiguration(
+                        explicitDatabasePath: stateDatabasePath
+                    )
+                )
+                try store.validateSchema()
+                tunnelStore = store.serviceTunnels
+            } else {
+                tunnelStore = nil
+            }
             try NetworkHelperExecutable.run(
                 runtimeDirectoryURL: runtimeDirectoryURL,
-                idleTimeoutMilliseconds: idleTimeoutMilliseconds
+                idleTimeoutMilliseconds: idleTimeoutMilliseconds,
+                tunnelStore: tunnelStore
             )
         } catch {
             FileHandle.standardError.write(

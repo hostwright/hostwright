@@ -10,6 +10,8 @@ public struct ManifestRuntimeMappingResult: Equatable, Sendable {
     public let certificates:
         [String: HostwrightCertificateDeclaration]
     public let ingress: [String: HostwrightIngressListener]
+    public let tunnelDeclarations:
+        [String: HostwrightTunnelDeclaration]
     public let issues: [PlanIssue]
 
     public init(
@@ -17,11 +19,14 @@ public struct ManifestRuntimeMappingResult: Equatable, Sendable {
         certificates:
             [String: HostwrightCertificateDeclaration] = [:],
         ingress: [String: HostwrightIngressListener] = [:],
+        tunnelDeclarations:
+            [String: HostwrightTunnelDeclaration] = [:],
         issues: [PlanIssue] = []
     ) {
         self.desiredState = desiredState
         self.certificates = certificates
         self.ingress = ingress
+        self.tunnelDeclarations = tunnelDeclarations
         self.issues = issues.sorted { $0.orderingKey < $1.orderingKey }
     }
 }
@@ -83,6 +88,7 @@ public enum ManifestRuntimeMapper {
             ),
             certificates: manifest.certificates,
             ingress: manifest.ingress,
+            tunnelDeclarations: manifest.tunnels,
             issues: issues
         )
     }
@@ -410,7 +416,10 @@ public enum ManifestRuntimeMapper {
                     stableDetailKey: port.effectiveBindAddress
                 )
             )
-        } else if exposure.scope != .localhost {
+        } else if !isSupportedTunnelPortExposure(
+            exposure,
+            bindAddress: port.effectiveBindAddress
+        ) && exposure.scope != .localhost {
             issues.append(
                 PlanIssue(
                     kind: .unsupportedFeature,
@@ -460,6 +469,15 @@ public enum ManifestRuntimeMapper {
                 exposurePolicy: exposure
             )
         }
+    }
+
+    private static func isSupportedTunnelPortExposure(
+        _ exposure: HostwrightPortExposurePolicy,
+        bindAddress: String
+    ) -> Bool {
+        exposure.scope == .tunnel &&
+            NetworkBindAddressPolicy.isLocalhost(bindAddress) &&
+            exposure.authentication == .authenticatedTunnel
     }
 
     private static func exposureStableKey(

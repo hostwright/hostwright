@@ -127,6 +127,7 @@ public enum ManifestCanonicalEncoder {
         appendNetworkDefinitions(manifest.networks, to: &lines)
         appendCertificateDeclarations(manifest.certificates, to: &lines)
         appendIngress(manifest.ingress, to: &lines)
+        appendTunnels(manifest.tunnels, to: &lines)
         lines.append("services:")
 
         for service in manifest.services.sorted(by: { $0.name < $1.name }) {
@@ -343,6 +344,73 @@ public enum ManifestCanonicalEncoder {
                     "        targetService: \(quote(route.targetService))"
                 )
                 lines.append("        targetPort: \(route.targetPort)")
+            }
+        }
+    }
+
+    private static func appendTunnels(
+        _ tunnels: [String: HostwrightTunnelDeclaration],
+        to lines: inout [String]
+    ) {
+        guard !tunnels.isEmpty else { return }
+        lines.append("tunnels:")
+        for (name, tunnel) in tunnels.sorted(by: { $0.key < $1.key }) {
+            lines.append("  \(quote(name)):")
+            lines.append("    targetService: \(quote(tunnel.targetService))")
+            lines.append("    targetPort: \(tunnel.targetPort)")
+            lines.append("    peerUUID: \(quote(tunnel.peerUUID))")
+            if tunnel.role != .localLoopback {
+                lines.append("    role: \(quote(tunnel.role.rawValue))")
+            }
+            if let trust = tunnel.trust {
+                lines.append("    trust:")
+                lines.append(
+                    "      wireRouteUUID: \(quote(trust.wireRouteUUID))"
+                )
+                lines.append(
+                    "      wireGeneration: \(trust.wireGeneration)"
+                )
+                lines.append(
+                    "      localIdentitySHA256: \(quote(trust.localIdentitySHA256))"
+                )
+                lines.append(
+                    "      peerTrustAnchorSHA256: \(quote(trust.peerTrustAnchorSHA256))"
+                )
+                lines.append(
+                    "      peerCertificateSHA256: \(quote(trust.peerCertificateSHA256))"
+                )
+                if let peerDNSName = trust.peerDNSName {
+                    lines.append(
+                        "      peerDNSName: \(quote(peerDNSName))"
+                    )
+                }
+                if let peerIdentityURI = trust.peerIdentityURI {
+                    lines.append(
+                        "      peerIdentityURI: \(quote(peerIdentityURI))"
+                    )
+                }
+            }
+            if let bind = tunnel.bindEndpoint {
+                lines.append("    bindEndpoint:")
+                lines.append("      host: \(quote(bind.host))")
+                lines.append("      port: \(bind.port)")
+            }
+            if !tunnel.authenticatedEndpoints.isEmpty {
+                lines.append("    authenticatedEndpoints:")
+                for endpoint in tunnel.authenticatedEndpoints {
+                    lines.append("      - scheme: \(quote(endpoint.scheme.rawValue))")
+                    lines.append("        host: \(quote(endpoint.host))")
+                    lines.append("        port: \(endpoint.port)")
+                }
+            }
+            if let relay = tunnel.relayEndpoint {
+                lines.append("    relayEndpoint:")
+                lines.append("      scheme: \(quote(relay.scheme.rawValue))")
+                lines.append("      host: \(quote(relay.host))")
+                lines.append("      port: \(relay.port)")
+            }
+            if !tunnel.bonjourDiscovery {
+                lines.append("    bonjourDiscovery: false")
             }
         }
     }

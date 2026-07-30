@@ -36,6 +36,11 @@ struct LiveProjectDNSHelperDriver: ProjectDNSHelperDriving {
             ).appendingPathComponent(
                 "network-helper",
                 isDirectory: true
+            ),
+            stateDatabaseURL: URL(
+                fileURLWithPath:
+                    resolution.stateDatabasePath,
+                isDirectory: false
             )
         )
         client = NetworkHelperClient(configuration: configuration)

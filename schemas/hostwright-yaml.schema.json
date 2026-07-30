@@ -125,6 +125,9 @@
     "ingress": {
       "$ref": "#/$defs/ingressListeners"
     },
+    "tunnels": {
+      "$ref": "#/$defs/tunnelDeclarations"
+    },
     "services": {
       "type": "object",
       "minProperties": 1,
@@ -361,6 +364,190 @@
       },
       "additionalProperties": {
         "$ref": "#/$defs/ingressListener"
+      }
+    },
+    "tunnelDeclarations": {
+      "type": "object",
+      "maxProperties": 64,
+      "propertyNames": { "$ref": "#/$defs/name" },
+      "additionalProperties": { "$ref": "#/$defs/tunnelDeclaration" }
+    },
+    "tunnelDeclaration": {
+      "type": "object",
+      "required": ["targetService", "targetPort", "peerUUID"],
+      "additionalProperties": false,
+      "properties": {
+        "targetService": { "$ref": "#/$defs/name" },
+        "targetPort": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "peerUUID": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "role": {
+          "enum": ["local-loopback", "listener", "dialer"],
+          "default": "local-loopback"
+        },
+        "trust": { "$ref": "#/$defs/tunnelTrust" },
+        "bindEndpoint": { "$ref": "#/$defs/tunnelBindEndpoint" },
+        "authenticatedEndpoints": {
+          "type": "array",
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/tunnelEndpoint" }
+        },
+        "relayEndpoint": { "$ref": "#/$defs/tunnelEndpoint" },
+        "bonjourDiscovery": {
+          "type": "boolean",
+          "default": true
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "role": { "const": "listener" } },
+            "required": ["role"]
+          },
+          "then": {
+            "required": ["trust", "bindEndpoint"],
+            "properties": {
+              "trust": { "required": ["peerIdentityURI"] }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "role": { "const": "dialer" } },
+            "required": ["role"]
+          },
+          "then": {
+            "required": ["trust", "bindEndpoint"],
+            "properties": {
+              "trust": { "required": ["peerDNSName"] }
+            },
+            "anyOf": [
+              {
+                "required": ["authenticatedEndpoints"],
+                "properties": {
+                  "authenticatedEndpoints": { "minItems": 1 }
+                }
+              },
+              {
+                "properties": {
+                  "bonjourDiscovery": { "const": true }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": { "role": { "const": "local-loopback" } }
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                { "required": ["trust"] },
+                { "required": ["bindEndpoint"] }
+              ]
+            },
+            "anyOf": [
+              {
+                "required": ["authenticatedEndpoints"],
+                "properties": {
+                  "authenticatedEndpoints": { "minItems": 1 }
+                }
+              },
+              {
+                "properties": {
+                  "bonjourDiscovery": { "const": true }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "tunnelTrust": {
+      "type": "object",
+      "required": [
+        "wireRouteUUID",
+        "wireGeneration",
+        "localIdentitySHA256",
+        "peerTrustAnchorSHA256",
+        "peerCertificateSHA256"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "wireRouteUUID": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "wireGeneration": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "localIdentitySHA256": { "$ref": "#/$defs/lowercaseSHA256" },
+        "peerTrustAnchorSHA256": { "$ref": "#/$defs/lowercaseSHA256" },
+        "peerCertificateSHA256": { "$ref": "#/$defs/lowercaseSHA256" },
+        "peerDNSName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 253,
+          "pattern": "^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$"
+        },
+        "peerIdentityURI": {
+          "type": "string",
+          "maxLength": 512,
+          "pattern": "^spiffe://hostwright\\.internal/projects/[0-9a-f-]+/resources/[0-9a-f-]+/roles/(workload|ingress|tunnel|node)/generations/[1-9][0-9]*$"
+        }
+      }
+    },
+    "lowercaseSHA256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "tunnelBindEndpoint": {
+      "type": "object",
+      "required": ["host", "port"],
+      "additionalProperties": false,
+      "properties": {
+        "host": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 253,
+          "pattern": "^[^/@\\[\\]\\s]+$"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        }
+      }
+    },
+    "tunnelEndpoint": {
+      "type": "object",
+      "required": ["host", "port"],
+      "additionalProperties": false,
+      "properties": {
+        "scheme": {
+          "const": "tls",
+          "default": "tls"
+        },
+        "host": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 253,
+          "pattern": "^[^/@\\[\\]\\s]+$"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        }
       }
     },
     "certificateDeclarations": {

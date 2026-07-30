@@ -11,6 +11,7 @@ struct NetworkHelperDispatcher: @unchecked Sendable {
     let certificateCoordinator: NetworkHelperCertificateCoordinator
     let policyBroker: NetworkHelperPolicyBroker
     let providerCoordinator: NetworkHelperProviderCoordinator?
+    let tunnelManager: NetworkHelperServiceTunnelManager?
 
     init(
         store: NetworkHelperStateStore,
@@ -21,7 +22,8 @@ struct NetworkHelperDispatcher: @unchecked Sendable {
         certificateCoordinator: NetworkHelperCertificateCoordinator =
             NetworkHelperCertificateCoordinator(),
         policyBroker: NetworkHelperPolicyBroker = NetworkHelperPolicyBroker(),
-        providerCoordinator: NetworkHelperProviderCoordinator? = nil
+        providerCoordinator: NetworkHelperProviderCoordinator? = nil,
+        tunnelManager: NetworkHelperServiceTunnelManager? = nil
     ) {
         self.store = store
         self.hostAccessBroker = hostAccessBroker
@@ -29,6 +31,7 @@ struct NetworkHelperDispatcher: @unchecked Sendable {
         self.certificateCoordinator = certificateCoordinator
         self.policyBroker = policyBroker
         self.providerCoordinator = providerCoordinator
+        self.tunnelManager = tunnelManager
     }
 
     var hasActiveBindings: Bool {
@@ -36,7 +39,8 @@ struct NetworkHelperDispatcher: @unchecked Sendable {
             ingressBroker.hasActiveBindings ||
             certificateCoordinator.hasActiveCertificates ||
             policyBroker.hasActivePolicies ||
-            providerCoordinator?.hasActiveAuthorities == true
+            providerCoordinator?.hasActiveAuthorities == true ||
+            tunnelManager?.hasActiveSessions == true
     }
 
     func dispatch(frame: Data) throws -> Data {
@@ -207,6 +211,57 @@ struct NetworkHelperDispatcher: @unchecked Sendable {
                             )
                     )
                 )
+            case .tunnelSetup, .tunnelStatus,
+                    .tunnelReconnect, .tunnelRotateKey,
+                    .tunnelDrain,
+                    .tunnelTeardown:
+                guard let tunnelManager,
+                      let tunnel = request.tunnel else {
+                    throw NetworkHelperError.invalidTunnel
+                }
+                let result: NetworkHelperTunnelResult
+                switch request.operation {
+                case .tunnelSetup:
+                    result = try tunnelManager.setup(
+                        identity: request.identity,
+                        request: tunnel
+                    )
+                case .tunnelStatus:
+                    result = try tunnelManager.status(
+                        identity: request.identity,
+                        request: tunnel
+                    )
+                case .tunnelReconnect:
+                    result = try tunnelManager.reconnect(
+                        identity: request.identity,
+                        request: tunnel
+                    )
+                case .tunnelRotateKey:
+                    result = try tunnelManager.rotateKey(
+                        identity: request.identity,
+                        request: tunnel
+                    )
+                case .tunnelDrain:
+                    result = try tunnelManager.drain(
+                        identity: request.identity,
+                        request: tunnel
+                    )
+                case .tunnelTeardown:
+                    result = try tunnelManager.teardown(
+                        identity: request.identity,
+                        request: tunnel
+                    )
+                case .apply, .status, .remove,
+                        .providerInvoke, .providerRevoke:
+                    throw NetworkHelperError.invalidTunnel
+                }
+                return try NetworkHelperCanonicalJSON.frame(
+                    NetworkHelperResponse(
+                        requestID: request.requestID,
+                        operation: request.operation,
+                        tunnelResult: result
+                    )
+                )
             }
             return try NetworkHelperCanonicalJSON.frame(
                 NetworkHelperResponse(
@@ -229,6 +284,40 @@ struct NetworkHelperDispatcher: @unchecked Sendable {
                     requestID: request.requestID,
                     operation: request.operation,
                     error: NetworkHelperError.providerRejected.failure
+                )
+            )
+        } catch is HostwrightTunnelControllerError {
+            return try NetworkHelperCanonicalJSON.frame(
+                NetworkHelperResponse(
+                    requestID: request.requestID,
+                    operation: request.operation,
+                    error: NetworkHelperError.tunnelRejected.failure
+                )
+            )
+        } catch is HostwrightTunnelSocketError {
+            return try NetworkHelperCanonicalJSON.frame(
+                NetworkHelperResponse(
+                    requestID: request.requestID,
+                    operation: request.operation,
+                    error: NetworkHelperError.tunnelRejected.failure
+                )
+            )
+        } catch let error as CertificateIdentityStoreError {
+            let mapped: NetworkHelperError
+            switch error {
+            case .notFound, .keychainLocked, .accessDenied,
+                    .cancelled:
+                mapped = .certificateUnavailable
+            case .invalidScope, .invalidFingerprint, .invalidDNSName,
+                    .invalidValidity, .duplicate, .tampered,
+                    .validationFailed, .keychainFailure:
+                mapped = .invalidCertificate
+            }
+            return try NetworkHelperCanonicalJSON.frame(
+                NetworkHelperResponse(
+                    requestID: request.requestID,
+                    operation: request.operation,
+                    error: mapped.failure
                 )
             )
         }

@@ -230,6 +230,144 @@ final class ServiceTunnelStateRepositoryTests: XCTestCase {
         }
     }
 
+    func testRemoteListenerIntentUsesExactProjectAndOperationAuthority()
+        throws
+    {
+        try withStore { store in
+            try seedAuthority(
+                store,
+                providerID: "apple-containerization"
+            )
+            let route = try HostwrightTunnelRoute(
+                routeUUID:
+                    "55555555-5555-4555-8555-555555555557",
+                projectUUID: projectUUID,
+                peerUUID: peerUUID,
+                generation: 1,
+                providerID: "apple-containerization",
+                providerGeneration: 1,
+                fencingToken: fence,
+                operationGroupID: operationGroup,
+                desiredSHA256: String(repeating: "a", count: 64),
+                role: .listener,
+                trust: HostwrightTunnelTrust(
+                    wireRouteUUID:
+                        "66666666-6666-4666-8666-666666666667",
+                    wireGeneration: 1,
+                    localIdentitySHA256:
+                        String(repeating: "1", count: 64),
+                    peerTrustAnchorSHA256:
+                        String(repeating: "2", count: 64),
+                    peerCertificateSHA256:
+                        String(repeating: "3", count: 64),
+                    peerIdentityURI:
+                        "spiffe://hostwright.internal/projects/"
+                        + "\(projectUUID)/resources/\(peerUUID)"
+                        + "/roles/tunnel/generations/1"
+                ),
+                bindEndpoint: HostwrightTunnelBindEndpoint(
+                    host: "192.168.65.16",
+                    port: 39_082
+                ),
+                forwardEndpoint: try HostwrightTunnelEndpoint(
+                    host: "127.0.0.1",
+                    port: 39_081
+                ),
+                authenticatedEndpoints: []
+            )
+            let intent = HostwrightTunnelSessionIntent(
+                route: route,
+                phase: .connecting,
+                finalizer: .pending,
+                selectedTransport: .direct,
+                keyEpoch: 1,
+                reconnectAttempt: 0,
+                observedSHA256: nil,
+                updatedAtUnixMilliseconds: 1_000
+            )
+
+            try store.serviceTunnels.save(intent)
+
+            XCTAssertEqual(
+                try store.serviceTunnels.load(
+                    routeUUID: route.routeUUID
+                ),
+                intent
+            )
+        }
+    }
+
+    func testSucceededGroupAllowsExactReplacementButNotNewIntent()
+        throws
+    {
+        try withStore { store in
+            try seedAuthority(store)
+            let route = try makeRoute()
+            try store.serviceTunnels.save(
+                intent(route: route, updatedAt: 1_000)
+            )
+            try store.operationGroups.finish(
+                groupID: operationGroup,
+                status: .succeeded,
+                checkpoint: "verified",
+                manualRecoveryHintRedacted: "",
+                updatedAt: "2026-07-29T12:01:00Z",
+                metadataJSONRedacted: "{}"
+            )
+
+            try store.serviceTunnels.save(
+                HostwrightTunnelSessionIntent(
+                    route: route,
+                    phase: .active,
+                    finalizer: .active,
+                    selectedTransport: .direct,
+                    keyEpoch: 1,
+                    reconnectAttempt: 0,
+                    observedSHA256:
+                        route.desiredSHA256,
+                    updatedAtUnixMilliseconds: 2_000
+                )
+            )
+            XCTAssertEqual(
+                try store.serviceTunnels.load(
+                    routeUUID: route.routeUUID
+                )?.phase,
+                .active
+            )
+
+            let newRoute = try HostwrightTunnelRoute(
+                routeUUID:
+                    "77777777-7777-4777-8777-777777777777",
+                projectUUID: projectUUID,
+                peerUUID:
+                    "88888888-8888-4888-8888-888888888888",
+                generation: 1,
+                providerID: route.providerID,
+                providerGeneration:
+                    route.providerGeneration,
+                fencingToken: fence,
+                operationGroupID: operationGroup,
+                desiredSHA256:
+                    String(repeating: "b", count: 64),
+                authenticatedEndpoints:
+                    route.authenticatedEndpoints
+            )
+            XCTAssertThrowsError(
+                try store.serviceTunnels.save(
+                    intent(
+                        route: newRoute,
+                        updatedAt: 3_000
+                    )
+                )
+            )
+            XCTAssertNil(
+                try store.serviceTunnels.load(
+                    routeUUID: newRoute.routeUUID
+                )
+            )
+        }
+    }
+
     func testDuplicatePeerAndConflictingGenerationFailClosed()
         throws
     {
@@ -500,7 +638,8 @@ final class ServiceTunnelStateRepositoryTests: XCTestCase {
     }
 
     private func seedAuthority(
-        _ store: SQLiteStateStore
+        _ store: SQLiteStateStore,
+        providerID: String = "apple-container-cli"
     ) throws {
         try store.withConnection { connection in
             try connection.run(
@@ -519,7 +658,7 @@ final class ServiceTunnelStateRepositoryTests: XCTestCase {
                     .text("2026-07-29T12:00:00Z"),
                     .text("2026-07-29T12:00:00Z"),
                     .text(projectUUID),
-                    .text("apple-container-cli")
+                    .text(providerID)
                 ]
             )
         }

@@ -228,6 +228,48 @@ public final class CertificateIdentityStore: @unchecked Sendable {
     throw CertificateIdentityStoreError.notFound
   }
 
+  func resolveCertificate(
+    certificateSHA256: String
+  ) throws -> SecCertificate {
+    let expected = try Self.canonicalFingerprint(certificateSHA256)
+    let context = Self.nonInteractiveContext()
+    let query: [CFString: Any] = [
+      kSecClass: kSecClassCertificate,
+      kSecReturnRef: true,
+      kSecMatchLimit: kSecMatchLimitAll,
+      kSecUseAuthenticationContext: context,
+    ]
+    var result: CFTypeRef?
+    let status = SecItemCopyMatching(query as CFDictionary, &result)
+    guard status == errSecSuccess else {
+      throw Self.mapKeychainStatus(status)
+    }
+    guard let certificates = result as? [SecCertificate] else {
+      throw CertificateIdentityStoreError.tampered
+    }
+    guard let certificate = certificates.first(where: {
+      fingerprint($0) == expected
+    }) else {
+      throw CertificateIdentityStoreError.notFound
+    }
+    return certificate
+  }
+
+  func resolveCertificateMetadata(
+    certificateSHA256: String
+  ) throws -> (
+    certificate: SecCertificate,
+    metadata: CertificateIdentityMetadata
+  ) {
+    let certificate = try resolveCertificate(
+      certificateSHA256: certificateSHA256
+    )
+    return (
+      certificate,
+      try metadata(for: certificate)
+    )
+  }
+
   public func generateLocalIdentity(
     scope: CertificateIdentityScope,
     dnsNames: [String],

@@ -286,7 +286,7 @@ private struct ManifestNodeDecoder {
             allowed: [
                 "version", "project", "imagePolicy", "imageTrust", "imageSBOM",
                 "imageVulnerability", "imageProvenance", "volumes", "networks",
-                "certificates", "ingress", "services"
+                "certificates", "ingress", "tunnels", "services"
             ]
         )
         let version = try values["version"].map(versionInteger)
@@ -327,6 +327,9 @@ private struct ManifestNodeDecoder {
         let ingress = try values["ingress"].map {
             try decodeIngressListeners($0, path: "$.ingress")
         } ?? [:]
+        let tunnels = try values["tunnels"].map {
+            try decodeTunnelDeclarations($0, path: "$.tunnels")
+        } ?? [:]
         let services = try values["services"].map(decodeServices) ?? []
         return HostwrightManifest(
             version: version,
@@ -340,7 +343,227 @@ private struct ManifestNodeDecoder {
             networks: networks,
             certificates: certificates,
             ingress: ingress,
+            tunnels: tunnels,
             services: services
+        )
+    }
+
+    private func decodeTunnelDeclarations(
+        _ node: Node,
+        path: String
+    ) throws -> [String: HostwrightTunnelDeclaration] {
+        let entries = try rawMapping(node, path: path)
+        guard entries.count <= HostwrightTunnelDeclaration.maximumDeclarations else {
+            throw ManifestParser.failure(
+                "Tunnels accepts at most \(HostwrightTunnelDeclaration.maximumDeclarations) declarations.",
+                code: .manifestValidationFailed,
+                node: node,
+                path: path
+            )
+        }
+        var result: [String: HostwrightTunnelDeclaration] = [:]
+        for pair in entries {
+            let name = try keyString(pair.key, path: path)
+            let declarationPath = "\(path).\(name)"
+            let values = try mapping(
+                pair.value,
+                path: declarationPath,
+                allowed: [
+                    "targetService", "targetPort", "peerUUID",
+                    "role", "trust", "bindEndpoint", "authenticatedEndpoints",
+                    "relayEndpoint", "bonjourDiscovery"
+                ]
+            )
+            let targetService = try requiredString(
+                values["targetService"],
+                path: "\(declarationPath).targetService",
+                message: "Tunnel targetService is required."
+            )
+            let targetPort = try requiredInteger(
+                values["targetPort"],
+                path: "\(declarationPath).targetPort",
+                message: "Tunnel targetPort is required."
+            )
+            let peerUUID = try requiredString(
+                values["peerUUID"],
+                path: "\(declarationPath).peerUUID",
+                message: "Tunnel peerUUID is required."
+            )
+            guard HostwrightResourceUUID.isValid(peerUUID),
+                  peerUUID == peerUUID.lowercased() else {
+                throw ManifestParser.failure(
+                    "Tunnel peerUUID must be a canonical lowercase Hostwright UUID.",
+                    code: .manifestValidationFailed,
+                    node: values["peerUUID"],
+                    path: "\(declarationPath).peerUUID"
+                )
+            }
+            let roleRaw = try values["role"].map {
+                try string($0, path: "\(declarationPath).role")
+            } ?? HostwrightTunnelRole.localLoopback.rawValue
+            guard let role = HostwrightTunnelRole(rawValue: roleRaw) else {
+                throw ManifestParser.failure(
+                    "Tunnel role must be one of: local-loopback, listener, dialer.",
+                    code: .manifestValidationFailed,
+                    node: values["role"],
+                    path: "\(declarationPath).role"
+                )
+            }
+            let trust = try values["trust"].map {
+                try decodeTunnelTrust($0, path: "\(declarationPath).trust")
+            }
+            let bindEndpoint = try values["bindEndpoint"].map {
+                try decodeTunnelBindEndpoint($0, path: "\(declarationPath).bindEndpoint")
+            }
+            let endpoints = try values["authenticatedEndpoints"].map {
+                try decodeTunnelEndpoints(
+                    $0,
+                    path: "\(declarationPath).authenticatedEndpoints"
+                )
+            } ?? []
+            let relayEndpoint = try values["relayEndpoint"].map {
+                try decodeTunnelEndpoint($0, path: "\(declarationPath).relayEndpoint")
+            }
+            let bonjourDiscovery = try values["bonjourDiscovery"].map {
+                try boolean($0, path: "\(declarationPath).bonjourDiscovery")
+            } ?? true
+            result[name] = HostwrightTunnelDeclaration(
+                targetService: targetService,
+                targetPort: targetPort,
+                peerUUID: peerUUID,
+                role: role,
+                trust: trust,
+                bindEndpoint: bindEndpoint,
+                authenticatedEndpoints: endpoints,
+                relayEndpoint: relayEndpoint,
+                bonjourDiscovery: bonjourDiscovery
+            )
+        }
+        return result
+    }
+
+    private func decodeTunnelTrust(
+        _ node: Node,
+        path: String
+    ) throws -> HostwrightTunnelTrust {
+        let values = try mapping(
+            node,
+            path: path,
+            allowed: [
+                "wireRouteUUID", "wireGeneration",
+                "localIdentitySHA256", "peerTrustAnchorSHA256",
+                "peerCertificateSHA256", "peerDNSName", "peerIdentityURI"
+            ]
+        )
+        return HostwrightTunnelTrust(
+            wireRouteUUID: try requiredString(
+                values["wireRouteUUID"],
+                path: "\(path).wireRouteUUID",
+                message: "Tunnel trust wireRouteUUID is required."
+            ),
+            wireGeneration: Int64(try requiredInteger(
+                values["wireGeneration"],
+                path: "\(path).wireGeneration",
+                message: "Tunnel trust wireGeneration is required."
+            )),
+            localIdentitySHA256: try requiredString(
+                values["localIdentitySHA256"],
+                path: "\(path).localIdentitySHA256",
+                message: "Tunnel trust localIdentitySHA256 is required."
+            ),
+            peerTrustAnchorSHA256: try requiredString(
+                values["peerTrustAnchorSHA256"],
+                path: "\(path).peerTrustAnchorSHA256",
+                message: "Tunnel trust peerTrustAnchorSHA256 is required."
+            ),
+            peerCertificateSHA256: try requiredString(
+                values["peerCertificateSHA256"],
+                path: "\(path).peerCertificateSHA256",
+                message: "Tunnel trust peerCertificateSHA256 is required."
+            ),
+            peerDNSName: try values["peerDNSName"].map {
+                try string($0, path: "\(path).peerDNSName")
+            },
+            peerIdentityURI: try values["peerIdentityURI"].map {
+                try string($0, path: "\(path).peerIdentityURI")
+            }
+        )
+    }
+
+    private func decodeTunnelBindEndpoint(
+        _ node: Node,
+        path: String
+    ) throws -> HostwrightTunnelBindEndpoint {
+        let values = try mapping(node, path: path, allowed: ["host", "port"])
+        let host = try requiredString(
+            values["host"],
+            path: "\(path).host",
+            message: "Tunnel bindEndpoint host is required."
+        )
+        guard HostwrightTunnelManifestEndpoint.canonicalHost(host) == host else {
+            throw ManifestParser.failure(
+                "Tunnel bindEndpoint host must be a canonical hostname, IPv4 address, or IPv6 address.",
+                code: .manifestValidationFailed,
+                node: values["host"],
+                path: "\(path).host"
+            )
+        }
+        return HostwrightTunnelBindEndpoint(
+            host: host,
+            port: try requiredInteger(
+                values["port"],
+                path: "\(path).port",
+                message: "Tunnel bindEndpoint port is required."
+            )
+        )
+    }
+
+    private func decodeTunnelEndpoints(
+        _ node: Node,
+        path: String
+    ) throws -> [HostwrightTunnelManifestEndpoint] {
+        guard case .sequence(let sequence) = node,
+              sequence.count <= HostwrightTunnelDeclaration.maximumAuthenticatedEndpoints else {
+            throw ManifestParser.failure(
+                "Tunnel authenticatedEndpoints must be a sequence of at most \(HostwrightTunnelDeclaration.maximumAuthenticatedEndpoints) entries.",
+                code: .manifestValidationFailed,
+                node: node,
+                path: path
+            )
+        }
+        return try sequence.enumerated().map {
+            try decodeTunnelEndpoint($0.element, path: "\(path)[\($0.offset)]")
+        }
+    }
+
+    private func decodeTunnelEndpoint(
+        _ node: Node,
+        path: String
+    ) throws -> HostwrightTunnelManifestEndpoint {
+        let values = try mapping(node, path: path, allowed: ["scheme", "host", "port"])
+        let schemeRaw = try values["scheme"].map { try string($0, path: "\(path).scheme") }
+            ?? HostwrightTunnelEndpointScheme.tls.rawValue
+        guard let scheme = HostwrightTunnelEndpointScheme(rawValue: schemeRaw) else {
+            throw ManifestParser.failure(
+                "Tunnel endpoint scheme must be tls.",
+                code: .manifestValidationFailed,
+                node: values["scheme"],
+                path: "\(path).scheme"
+            )
+        }
+        let host = try requiredString(values["host"], path: "\(path).host", message: "Tunnel endpoint host is required.")
+        guard HostwrightTunnelManifestEndpoint.canonicalHost(host) == host else {
+            throw ManifestParser.failure(
+                "Tunnel endpoint host must be a canonical hostname, IPv4 address, or IPv6 address.",
+                code: .manifestValidationFailed,
+                node: values["host"],
+                path: "\(path).host"
+            )
+        }
+        return HostwrightTunnelManifestEndpoint(
+            scheme: scheme,
+            host: host,
+            port: try requiredInteger(values["port"], path: "\(path).port", message: "Tunnel endpoint port is required.")
         )
     }
 

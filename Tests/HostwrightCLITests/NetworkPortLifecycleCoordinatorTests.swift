@@ -3,11 +3,82 @@ import XCTest
 @testable import HostwrightCLI
 @testable import HostwrightCore
 @testable import HostwrightManifest
+@testable import HostwrightNetworking
 @testable import HostwrightReconciler
 @testable import HostwrightRuntime
 @testable import HostwrightState
 
 final class NetworkPortLifecycleCoordinatorTests: XCTestCase {
+    func testNonLocalExactBindPlansOnlyAfterExposureApproval()
+        throws
+    {
+        let bindAddress = "192.168.50.12"
+        let policy = HostwrightPortExposurePolicy(
+            scope: .lan,
+            interfaces: ["en0"],
+            networkClasses: [.privateLAN],
+            allowedCIDRs: ["192.168.50.0/24"],
+            authentication: .tls
+        )
+        let fixture = try makeFixture(
+            ports: [
+                RuntimePortMapping(
+                    hostPort: 18_080,
+                    containerPort: 8_080,
+                    protocolName: .tcp,
+                    bindAddress: bindAddress,
+                    allocation: .fixed,
+                    exposurePolicy: policy
+                ),
+            ]
+        )
+        defer { fixture.cleanup() }
+        var approvedEndpoints: [NetworkPortEndpoint] = []
+
+        let resolved = try NetworkPortLifecycleCoordinator
+            .resolveForPlanning(
+                desiredState: DesiredRuntimeState(
+                    projectName: fixture.plan.projectName,
+                    services: [fixture.service]
+                ),
+                projectID: fixture.plan.projectID,
+                projectResourceUUID:
+                    fixture.plan.projectResourceUUID,
+                providerID: fixture.plan.providerID,
+                providerGeneration:
+                    fixture.plan.providerGeneration,
+                resourceUUID: { _ in
+                    fixture.node.resourceUUID
+                },
+                store: fixture.store,
+                isExposureAvailable: { endpoint, exposure in
+                    approvedEndpoints.append(endpoint)
+                    XCTAssertEqual(exposure, policy)
+                    return true
+                }
+            )
+
+        XCTAssertEqual(
+            resolved.services[0].ports[0].bindAddress,
+            bindAddress
+        )
+        XCTAssertEqual(
+            approvedEndpoints,
+            [
+                NetworkPortEndpoint(
+                    bindAddress: bindAddress,
+                    hostPort: 18_080,
+                    protocolName: .tcp
+                ),
+                NetworkPortEndpoint(
+                    bindAddress: bindAddress,
+                    hostPort: 18_080,
+                    protocolName: .tcp
+                ),
+            ]
+        )
+    }
+
     func testPlanningResolutionPreservesUnixSocketPublications() throws {
         let socket = RuntimeUnixSocketPublication(
             hostPath: "/tmp/hostwright/api.sock",

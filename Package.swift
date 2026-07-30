@@ -26,6 +26,10 @@ let package = Package(
             name: "hostwright-network-provider-worker",
             targets: ["HostwrightNetworkProviderWorker"]
         ),
+        .executable(
+            name: "hostwright-tunnel-qualification",
+            targets: ["HostwrightTunnelQualificationTool"]
+        ),
         .executable(name: "hostwrightd", targets: ["HostwrightDaemon"]),
         .executable(name: "hostwright-dist", targets: ["HostwrightDistributionTool"]),
         .executable(
@@ -140,7 +144,10 @@ let package = Package(
         ),
         .executableTarget(
             name: "HostwrightNetworkHelper",
-            dependencies: ["HostwrightNetworkHelperCore"]
+            dependencies: [
+                "HostwrightNetworkHelperCore",
+                "HostwrightState"
+            ]
         ),
         .target(
             name: "HostwrightNetworkHelperCore",
@@ -325,6 +332,15 @@ let package = Package(
                 "HostwrightSecrets"
             ],
             path: "Tests/HostwrightTestSupport"
+        ),
+        .executableTarget(
+            name: "HostwrightTunnelQualificationTool",
+            dependencies: [
+                "HostwrightManifest",
+                "HostwrightNetworkHelperCore",
+                "HostwrightState"
+            ],
+            path: "Tests/HostwrightTunnelQualificationTool"
         ),
         .testTarget(
             name: "HostwrightControlTests",

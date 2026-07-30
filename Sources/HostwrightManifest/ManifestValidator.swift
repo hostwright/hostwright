@@ -35,6 +35,12 @@ public enum ManifestValidator {
             declaredNames: declaredNames,
             issues: &issues
         )
+        validateTunnelDeclarations(
+            manifest.tunnels,
+            services: manifest.services,
+            declaredNames: declaredNames,
+            issues: &issues
+        )
         let referencedCertificates = Set(
             manifest.ingress.values.compactMap(\.certificate)
         )
@@ -59,6 +65,7 @@ public enum ManifestValidator {
                 declaredNames: declaredNames,
                 declaredVolumes: declaredVolumes,
                 declaredNetworks: declaredNetworks,
+                networkDefinitions: manifest.networks,
                 issues: &issues
             )
             if !serviceNames.insert(service.name).inserted {
@@ -139,6 +146,7 @@ public enum ManifestValidator {
         declaredNames: Set<String>,
         declaredVolumes: Set<String>,
         declaredNetworks: Set<String>,
+        networkDefinitions: [String: HostwrightNetworkDefinition],
         issues: inout [ManifestIssue]
     ) {
         validateName(service.name, field: "service name", issues: &issues)
@@ -231,6 +239,19 @@ public enum ManifestValidator {
                         "Service '\(service.name)' hostAccess requires exactly one declared project-network attachment so its guarded gateway is unambiguous.",
                     path:
                         "$.services.\(service.name).networks"
+                )
+            )
+        } else if !service.hostAccess.isEmpty,
+                  let networkName = service.networks.first?.network,
+                  let network = networkDefinitions[networkName],
+                  network.ipv4 == .disabled {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message:
+                        "Service '\(service.name)' hostAccess requires an IPv4-enabled project network because Apple's guarded host gateway is IPv4-only.",
+                    path:
+                        "$.services.\(service.name).networks[0]"
                 )
             )
         }
@@ -702,6 +723,341 @@ public enum ManifestValidator {
                     }
                 }
             }
+        }
+    }
+
+    private static func validateTunnelDeclarations(
+        _ tunnels: [String: HostwrightTunnelDeclaration],
+        services: [HostwrightService],
+        declaredNames: Set<String>,
+        issues: inout [ManifestIssue]
+    ) {
+        guard tunnels.count <= HostwrightTunnelDeclaration.maximumDeclarations else {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "Tunnels accepts at most \(HostwrightTunnelDeclaration.maximumDeclarations) declarations.",
+                    path: "$.tunnels"
+                )
+            )
+            return
+        }
+        let servicesByName = Dictionary(
+            services.map { ($0.name, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        for (name, tunnel) in tunnels.sorted(by: { $0.key < $1.key }) {
+            let path = "$.tunnels.\(name)"
+            validateName(name, field: "tunnel name", issues: &issues)
+            validateName(
+                tunnel.targetService,
+                field: "tunnel target service",
+                issues: &issues
+            )
+            if !isValidPort(tunnel.targetPort) {
+                issues.append(
+                    ManifestIssue(
+                        code: .manifestValidationFailed,
+                        message:
+                            "Tunnel '\(name)' target port must be within 1...65535.",
+                        path: "\(path).targetPort"
+                    )
+                )
+            }
+            if tunnel.role != .dialer {
+                guard declaredNames.contains(tunnel.targetService),
+                      let target = servicesByName[tunnel.targetService] else {
+                    issues.append(
+                        ManifestIssue(
+                            code: .manifestValidationFailed,
+                            message: "Tunnel '\(name)' references missing service '\(tunnel.targetService)'.",
+                            path: "\(path).targetService"
+                        )
+                    )
+                    continue
+                }
+                let declaredPorts = Set(
+                    target.publishedPorts.flatMap { Array($0.containerPortRange) }
+                )
+                let matchingPorts = target.publishedPorts.filter {
+                    $0.containerPortRange.contains(tunnel.targetPort)
+                }
+                if !declaredPorts.contains(tunnel.targetPort) {
+                    issues.append(
+                        ManifestIssue(
+                            code: .manifestValidationFailed,
+                            message: "Tunnel '\(name)' target port \(tunnel.targetPort) must reference a declared container port on service '\(tunnel.targetService)'.",
+                            path: "\(path).targetPort"
+                        )
+                    )
+                } else if !matchingPorts.contains(where: {
+                    $0.effectiveExposure.scope == .tunnel &&
+                        $0.effectiveExposure.authentication ==
+                            .authenticatedTunnel
+                }) {
+                    issues.append(
+                        ManifestIssue(
+                            code: .manifestValidationFailed,
+                            message:
+                                "Tunnel '\(name)' target port \(tunnel.targetPort) must use tunnel exposure with authenticated-tunnel identity.",
+                            path: "\(path).targetPort"
+                        )
+                    )
+                }
+                if matchingPorts.count != 1 ||
+                    matchingPorts.first?.protocolName != .tcp ||
+                    matchingPorts.first?.target.singlePort != tunnel.targetPort ||
+                    matchingPorts.first.map({
+                        !isLoopbackBindAddress($0.effectiveBindAddress)
+                    }) != false {
+                    issues.append(
+                        ManifestIssue(
+                            code: .manifestValidationFailed,
+                            message:
+                                "Tunnel '\(name)' target must resolve to one TCP loopback mapping.",
+                            path: "\(path).targetPort"
+                        )
+                    )
+                }
+                if target.replicas != 1 {
+                    issues.append(
+                        ManifestIssue(
+                            code: .manifestValidationFailed,
+                            message:
+                                "Tunnel '\(name)' currently requires exactly one target service replica.",
+                            path: "\(path).targetService"
+                        )
+                    )
+                }
+            }
+            if !HostwrightResourceUUID.isValid(tunnel.peerUUID) ||
+                tunnel.peerUUID != tunnel.peerUUID.lowercased() {
+                issues.append(
+                    ManifestIssue(
+                        code: .manifestValidationFailed,
+                        message: "Tunnel '\(name)' peerUUID must be a canonical lowercase Hostwright UUID.",
+                        path: "\(path).peerUUID"
+                    )
+                )
+            }
+            if tunnel.authenticatedEndpoints.count >
+                HostwrightTunnelDeclaration.maximumAuthenticatedEndpoints ||
+                Set(tunnel.authenticatedEndpoints).count !=
+                    tunnel.authenticatedEndpoints.count {
+                issues.append(
+                    ManifestIssue(
+                        code: .manifestValidationFailed,
+                        message: "Tunnel '\(name)' authenticatedEndpoints must be unique and contain at most \(HostwrightTunnelDeclaration.maximumAuthenticatedEndpoints) entries.",
+                        path: "\(path).authenticatedEndpoints"
+                    )
+                )
+            }
+            validateTunnelRole(tunnel, name: name, path: path, issues: &issues)
+            for (index, endpoint) in tunnel.authenticatedEndpoints.enumerated() {
+                validateTunnelEndpoint(
+                    endpoint,
+                    tunnelName: name,
+                    path: "\(path).authenticatedEndpoints[\(index)]",
+                    issues: &issues
+                )
+            }
+            if let relay = tunnel.relayEndpoint {
+                validateTunnelEndpoint(
+                    relay,
+                    tunnelName: name,
+                    path: "\(path).relayEndpoint",
+                    issues: &issues
+                )
+            }
+        }
+    }
+
+    private static func validateTunnelRole(
+        _ tunnel: HostwrightTunnelDeclaration,
+        name: String,
+        path: String,
+        issues: inout [ManifestIssue]
+    ) {
+        switch tunnel.role {
+        case .localLoopback:
+            if tunnel.trust != nil || tunnel.bindEndpoint != nil {
+                issues.append(
+                    ManifestIssue(
+                        code: .manifestValidationFailed,
+                        message:
+                            "Tunnel '\(name)' local-loopback role must not declare remote trust or a bindEndpoint.",
+                        path: path
+                    )
+                )
+            }
+            if tunnel.authenticatedEndpoints.isEmpty &&
+                !tunnel.bonjourDiscovery {
+                issues.append(
+                    ManifestIssue(
+                        code: .manifestValidationFailed,
+                        message:
+                            "Tunnel '\(name)' requires an authenticated endpoint or Bonjour discovery.",
+                        path: path
+                    )
+                )
+            }
+        case .listener:
+            guard let trust = tunnel.trust else {
+                issues.append(
+                    ManifestIssue(
+                        code: .manifestValidationFailed,
+                        message:
+                            "Tunnel '\(name)' listener role requires explicit non-TOFU trust.",
+                        path: "\(path).trust"
+                    )
+                )
+                return
+            }
+            validateTunnelTrust(
+                trust,
+                role: tunnel.role,
+                name: name,
+                path: "\(path).trust",
+                issues: &issues
+            )
+            guard let bind = tunnel.bindEndpoint else {
+                issues.append(
+                    ManifestIssue(
+                        code: .manifestValidationFailed,
+                        message:
+                            "Tunnel '\(name)' listener role requires an exact bindEndpoint.",
+                        path: "\(path).bindEndpoint"
+                    )
+                )
+                return
+            }
+            if !bind.isValid || !bind.isIPAddress || bind.isWildcard {
+                issues.append(
+                    ManifestIssue(
+                        code: .manifestValidationFailed,
+                        message:
+                            "Tunnel '\(name)' listener bindEndpoint must use a canonical exact non-wildcard host and port within 1...65535.",
+                        path: "\(path).bindEndpoint"
+                    )
+                )
+            }
+        case .dialer:
+            guard let trust = tunnel.trust else {
+                issues.append(
+                    ManifestIssue(
+                        code: .manifestValidationFailed,
+                        message:
+                            "Tunnel '\(name)' dialer role requires explicit non-TOFU trust.",
+                        path: "\(path).trust"
+                    )
+                )
+                return
+            }
+            validateTunnelTrust(
+                trust,
+                role: tunnel.role,
+                name: name,
+                path: "\(path).trust",
+                issues: &issues
+            )
+            guard let bind = tunnel.bindEndpoint else {
+                issues.append(
+                    ManifestIssue(
+                        code: .manifestValidationFailed,
+                        message:
+                            "Tunnel '\(name)' dialer role requires an exact loopback bindEndpoint.",
+                        path: "\(path).bindEndpoint"
+                    )
+                )
+                return
+            }
+            if !bind.isValid || !bind.isLoopback {
+                issues.append(
+                    ManifestIssue(
+                        code: .manifestValidationFailed,
+                        message:
+                            "Tunnel '\(name)' dialer bindEndpoint must use an exact loopback host and port within 1...65535.",
+                        path: "\(path).bindEndpoint"
+                    )
+                )
+            }
+            if tunnel.authenticatedEndpoints.isEmpty &&
+                !tunnel.bonjourDiscovery {
+                issues.append(
+                    ManifestIssue(
+                        code: .manifestValidationFailed,
+                        message:
+                            "Tunnel '\(name)' dialer requires an authenticated endpoint or Bonjour discovery.",
+                        path: path
+                    )
+                )
+            }
+        }
+    }
+
+    private static func validateTunnelTrust(
+        _ trust: HostwrightTunnelTrust,
+        role: HostwrightTunnelRole,
+        name: String,
+        path: String,
+        issues: inout [ManifestIssue]
+    ) {
+        if !trust.isValid {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message:
+                        "Tunnel '\(name)' trust requires canonical lowercase SHA-256 identity references and canonical peer names.",
+                    path: path
+                )
+            )
+        }
+        switch role {
+        case .listener:
+            if trust.peerIdentityURI == nil || trust.peerDNSName != nil {
+                issues.append(
+                    ManifestIssue(
+                        code: .manifestValidationFailed,
+                        message:
+                            "Tunnel '\(name)' listener trust requires peerIdentityURI and must not declare peerDNSName.",
+                        path: path
+                    )
+                )
+            }
+        case .dialer:
+            if trust.peerDNSName == nil || trust.peerIdentityURI != nil {
+                issues.append(
+                    ManifestIssue(
+                        code: .manifestValidationFailed,
+                        message:
+                            "Tunnel '\(name)' dialer trust requires peerDNSName and must not declare peerIdentityURI.",
+                        path: path
+                    )
+                )
+            }
+        case .localLoopback:
+            break
+        }
+    }
+
+    private static func validateTunnelEndpoint(
+        _ endpoint: HostwrightTunnelManifestEndpoint,
+        tunnelName: String,
+        path: String,
+        issues: inout [ManifestIssue]
+    ) {
+        guard endpoint.scheme == .tls,
+              HostwrightTunnelManifestEndpoint.isValidHost(endpoint.host),
+              HostwrightTunnelManifestEndpoint.canonicalHost(endpoint.host) == endpoint.host,
+              isValidPort(endpoint.port) else {
+            issues.append(
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "Tunnel '\(tunnelName)' endpoint must use tls with a canonical host and port within 1...65535.",
+                    path: path
+                )
+            )
+            return
         }
     }
 
@@ -1808,7 +2164,7 @@ public enum ManifestValidator {
     }
 
     private static func isLoopbackBindAddress(_ value: String) -> Bool {
-        value == "::1" || value.hasPrefix("127.")
+        value == "::1" || value == "127.0.0.1"
     }
 
     private static func isValidIPv4Address(_ value: String) -> Bool {

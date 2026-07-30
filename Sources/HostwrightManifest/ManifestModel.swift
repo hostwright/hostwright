@@ -17,6 +17,7 @@ public struct HostwrightManifest: Equatable, Sendable {
     public var networks: [String: HostwrightNetworkDefinition]
     public var certificates: [String: HostwrightCertificateDeclaration]
     public var ingress: [String: HostwrightIngressListener]
+    public var tunnels: [String: HostwrightTunnelDeclaration]
     public var services: [HostwrightService]
 
     public var effectiveVersion: Int {
@@ -40,6 +41,7 @@ public struct HostwrightManifest: Equatable, Sendable {
             networks: [:],
             certificates: [:],
             ingress: [:],
+            tunnels: [:],
             services: services
         )
     }
@@ -57,6 +59,7 @@ public struct HostwrightManifest: Equatable, Sendable {
             networks: [:],
             certificates: [:],
             ingress: [:],
+            tunnels: [:],
             services: services
         )
     }
@@ -84,6 +87,7 @@ public struct HostwrightManifest: Equatable, Sendable {
             networks: [:],
             certificates: [:],
             ingress: [:],
+            tunnels: [:],
             services: services
         )
     }
@@ -100,6 +104,7 @@ public struct HostwrightManifest: Equatable, Sendable {
         networks: [String: HostwrightNetworkDefinition],
         certificates: [String: HostwrightCertificateDeclaration],
         ingress: [String: HostwrightIngressListener] = [:],
+        tunnels: [String: HostwrightTunnelDeclaration] = [:],
         services: [HostwrightService]
     ) {
         self.version = version
@@ -113,6 +118,7 @@ public struct HostwrightManifest: Equatable, Sendable {
         self.networks = networks
         self.certificates = certificates
         self.ingress = ingress
+        self.tunnels = tunnels
         self.services = services
     }
 
@@ -141,6 +147,7 @@ public struct HostwrightManifest: Equatable, Sendable {
             networks: networks,
             certificates: [:],
             ingress: ingress,
+            tunnels: [:],
             services: services
         )
     }
@@ -163,6 +170,7 @@ public struct HostwrightManifest: Equatable, Sendable {
             networks: [:],
             certificates: [:],
             ingress: [:],
+            tunnels: [:],
             services: services
         )
     }
@@ -186,6 +194,7 @@ public struct HostwrightManifest: Equatable, Sendable {
             networks: [:],
             certificates: [:],
             ingress: [:],
+            tunnels: [:],
             services: services
         )
     }

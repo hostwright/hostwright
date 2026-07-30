@@ -679,6 +679,58 @@ final class ProjectDNSPlanBuilderTests: XCTestCase {
         }
     }
 
+    func testPublicAuthenticatedTunnelIngressRequiresDedicatedTunnelPath() {
+        let service = DesiredRuntimeService(
+            identity: RuntimeServiceIdentity(
+                projectName: "demo",
+                serviceName: "api",
+                instanceName: "api-0"
+            ),
+            logicalServiceName: "api",
+            image: "local/api:dev"
+        )
+        let listener = HostwrightIngressListener(
+            bindAddress: "203.0.113.10",
+            port: 8_443,
+            exposure: HostwrightPortExposurePolicy(
+                scope: .public,
+                interfaces: ["en0"],
+                networkClasses: [.publicInternet],
+                allowedCIDRs: ["203.0.113.0/24"],
+                authentication: .authenticatedTunnel
+            ),
+            routes: [
+                HostwrightIngressRoute(
+                    hostname: "api.example.test",
+                    targetService: "api",
+                    targetPort: 8_080
+                ),
+            ]
+        )
+
+        XCTAssertThrowsError(
+            try ProjectDNSPlanBuilder.build(
+                projectUUID: "11111111-1111-4111-8111-111111111111",
+                desiredState: DesiredRuntimeState(
+                    projectName: "demo",
+                    services: [service]
+                ),
+                observedState: ObservedRuntimeState(
+                    projectName: "demo",
+                    services: []
+                ),
+                ingress: ["api": listener],
+                projectID: "project-demo"
+            )
+        ) {
+            XCTAssertTrue(
+                String(describing: $0).contains(
+                    "requires scope 'tunnel' and its dedicated provider path"
+                )
+            )
+        }
+    }
+
     func testIngressPlanIsDeterministicAcrossInputOrdering()
         throws
     {

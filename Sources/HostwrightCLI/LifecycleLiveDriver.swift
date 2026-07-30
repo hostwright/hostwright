@@ -162,6 +162,7 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
         let inventory = try hostwrightWaitForAsync {
             try await adapter.inventory()
         }
+        let exposureEnvironment = try NetworkHostEnvironmentProbe.current()
         let plannedDesiredState =
             try NetworkPortLifecycleCoordinator.resolveForPlanning(
                 desiredState: mapping.desiredState,
@@ -176,7 +177,14 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
                         in: inventory
                     ),
                 isAvailable:
-                    NetworkPortSocketAvailability.isAvailable
+                    NetworkPortSocketAvailability.isAvailable,
+                isExposureAvailable: { endpoint, policy in
+                    try NetworkPortSocketAvailability.isAvailable(
+                        endpoint,
+                        exposurePolicy: policy,
+                        environment: exposureEnvironment
+                    )
+                }
             )
         let desiredState = DesiredRuntimeState(
             projectName: plannedDesiredState.projectName,

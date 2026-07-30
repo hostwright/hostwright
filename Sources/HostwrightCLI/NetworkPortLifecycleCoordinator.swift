@@ -88,6 +88,8 @@ private struct NetworkPortWorkItem {
 enum NetworkPortLifecycleCoordinator {
     typealias AvailabilityProbe =
         (NetworkPortEndpoint) throws -> Bool
+    typealias ExposureAvailabilityProbe =
+        (NetworkPortEndpoint, HostwrightPortExposurePolicy) throws -> Bool
     typealias ResourceUUIDResolver =
         (RuntimeServiceIdentity) throws -> String?
 
@@ -121,7 +123,8 @@ enum NetworkPortLifecycleCoordinator {
         bindings: [LifecycleResourceBinding],
         store: SQLiteStateStore,
         occupiedPorts: Set<NetworkPortEndpoint> = [],
-        isAvailable: AvailabilityProbe = { _ in true }
+        isAvailable: AvailabilityProbe = { _ in true },
+        isExposureAvailable: ExposureAvailabilityProbe? = nil
     ) throws -> DesiredRuntimeState {
         let bindingsByIdentity = Dictionary(
             grouping: bindings,
@@ -156,7 +159,8 @@ enum NetworkPortLifecycleCoordinator {
             },
             store: store,
             occupiedPorts: occupiedPorts,
-            isAvailable: isAvailable
+            isAvailable: isAvailable,
+            isExposureAvailable: isExposureAvailable
         )
     }
 
@@ -169,7 +173,8 @@ enum NetworkPortLifecycleCoordinator {
         resourceUUID: ResourceUUIDResolver,
         store: SQLiteStateStore,
         occupiedPorts: Set<NetworkPortEndpoint> = [],
-        isAvailable: AvailabilityProbe = { _ in true }
+        isAvailable: AvailabilityProbe = { _ in true },
+        isExposureAvailable: ExposureAvailabilityProbe? = nil
     ) throws -> DesiredRuntimeState {
         guard !projectID.isEmpty,
               HostwrightResourceUUID.isValid(
@@ -232,6 +237,25 @@ enum NetworkPortLifecycleCoordinator {
             desiredState: desiredState,
             resourceUUIDs: resourceUUIDs
         )
+        for item in workItems where item.mapping.exposurePolicy.scope != .localhost {
+            guard let isExposureAvailable else {
+                throw conflict(
+                    "Non-local port planning requires an approved exposure availability check."
+                )
+            }
+            guard try isExposureAvailable(
+                NetworkPortEndpoint(
+                    bindAddress: item.bindAddress,
+                    hostPort: item.mapping.hostPort ?? 0,
+                    protocolName: item.mapping.protocolName
+                ),
+                item.mapping.exposurePolicy
+            ) else {
+                throw conflict(
+                    "The declared non-local exposure is not currently available."
+                )
+            }
+        }
         var resolvedMappings:
             [Int: [Int: RuntimePortMapping]] = [:]
         var claimed: Set<NetworkPortEndpoint> = []
@@ -283,7 +307,8 @@ enum NetworkPortLifecycleCoordinator {
                     occupiedPorts: occupiedPorts,
                     claimedPorts: claimed,
                     store: store,
-                    isAvailable: isAvailable
+                    isAvailable: isAvailable,
+                    isExposureAvailable: isExposureAvailable
                 )
             }
 
@@ -306,7 +331,8 @@ enum NetworkPortLifecycleCoordinator {
                 containerPort: item.mapping.containerPort,
                 protocolName: item.mapping.protocolName,
                 bindAddress: item.bindAddress,
-                allocation: item.mapping.allocation
+                allocation: item.mapping.allocation,
+                exposurePolicy: item.mapping.exposurePolicy
             )
         }
 
@@ -900,7 +926,8 @@ enum NetworkPortLifecycleCoordinator {
         occupiedPorts: Set<NetworkPortEndpoint>,
         claimedPorts: Set<NetworkPortEndpoint>,
         store: SQLiteStateStore,
-        isAvailable: AvailabilityProbe
+        isAvailable: AvailabilityProbe,
+        isExposureAvailable: ExposureAvailabilityProbe?
     ) throws -> Int {
         switch mapping.allocation {
         case .fixed:
@@ -917,6 +944,12 @@ enum NetworkPortLifecycleCoordinator {
                         mapping.protocolName
                     )
                 )
+            let available = try availability(
+                endpoint,
+                policy: mapping.exposurePolicy,
+                isAvailable: isAvailable,
+                isExposureAvailable: isExposureAvailable
+            )
             guard !persistedUnavailable.contains(hostPort),
                   !stateRecords.contains(where: {
                 endpoint.conflicts(
@@ -926,7 +959,7 @@ enum NetworkPortLifecycleCoordinator {
             }),
             !containsConflict(endpoint, in: occupiedPorts),
             !containsConflict(endpoint, in: claimedPorts),
-            try isAvailable(endpoint) else {
+            available else {
                 throw conflict(
                     "A fixed host port conflicts with durable or structured runtime state."
                 )
@@ -955,7 +988,12 @@ enum NetworkPortLifecycleCoordinator {
                     containsConflict(endpoint, in: claimedPorts) {
                     continue
                 }
-                if try !isAvailable(endpoint) {
+                if try !availability(
+                    endpoint,
+                    policy: mapping.exposurePolicy,
+                    isAvailable: isAvailable,
+                    isExposureAvailable: isExposureAvailable
+                ) {
                     continue
                 }
                 selected = hostPort
@@ -974,6 +1012,19 @@ enum NetworkPortLifecycleCoordinator {
             }
             return selected
         }
+    }
+
+    private static func availability(
+        _ endpoint: NetworkPortEndpoint,
+        policy: HostwrightPortExposurePolicy,
+        isAvailable: AvailabilityProbe,
+        isExposureAvailable: ExposureAvailabilityProbe?
+    ) throws -> Bool {
+        if policy.scope == .localhost {
+            return try isAvailable(endpoint)
+        }
+        guard let isExposureAvailable else { return false }
+        return try isExposureAvailable(endpoint, policy)
     }
 
     private static func logicalMatch(

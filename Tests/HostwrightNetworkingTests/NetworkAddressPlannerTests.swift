@@ -85,6 +85,33 @@ final class NetworkAddressPlannerTests: XCTestCase {
         XCTAssertEqual(granted.selectedAddress, selected)
     }
 
+    func testLANEvaluationDefersUnprobedPermissionToListenerReadiness() {
+        let selected = interfaceAddress(
+            interfaceName: "en0",
+            address: "192.168.1.10"
+        )
+        let evaluation = NetworkExposureEnvironmentEvaluator.evaluate(
+            policy: HostwrightPortExposurePolicy(
+                scope: .lan,
+                interfaces: ["en0"],
+                networkClasses: [.privateLAN],
+                allowedCIDRs: ["192.168.1.0/24"],
+                authentication: .tls
+            ),
+            bindAddress: selected.address,
+            environment: environment(
+                addresses: [selected],
+                permission: .notProbed
+            )
+        )
+
+        XCTAssertTrue(evaluation.isAllowed)
+        XCTAssertEqual(
+            evaluation.warnings,
+            [.localNetworkPermissionPending]
+        )
+    }
+
     func testLANEvaluationDeniesInterfaceAndNetworkClassMismatches() {
         let selected = interfaceAddress(
             interfaceName: "en1",
@@ -108,6 +135,26 @@ final class NetworkAddressPlannerTests: XCTestCase {
             evaluation.issues,
             [.interfaceNotAllowed, .networkClassNotAllowed]
         )
+    }
+
+    func testLANEvaluationDeniesAddressOutsideDeclaredCIDRs() {
+        let selected = interfaceAddress(
+            interfaceName: "en0",
+            address: "192.168.2.10"
+        )
+        let evaluation = NetworkExposureEnvironmentEvaluator.evaluate(
+            policy: HostwrightPortExposurePolicy(
+                scope: .lan,
+                interfaces: ["en0"],
+                networkClasses: [.privateLAN],
+                allowedCIDRs: ["192.168.1.0/24"],
+                authentication: .tls
+            ),
+            bindAddress: selected.address,
+            environment: environment(addresses: [selected])
+        )
+
+        XCTAssertEqual(evaluation.issues, [.allowedCIDRNotAllowed])
     }
 
     func testExposureEnvironmentTransitionKeepsRebindsAndDrains() {

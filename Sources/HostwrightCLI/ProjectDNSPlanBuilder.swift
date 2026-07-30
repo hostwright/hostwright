@@ -15,6 +15,7 @@ enum ProjectDNSPlanBuilder {
         ingress: [String: HostwrightIngressListener] = [:],
         projectID: String? = nil,
         resourceBindings: [LifecycleResourceBinding] = [],
+        hostEnvironment: NetworkHostEnvironmentSnapshot? = nil,
         options: ProjectDNSOptions = ProjectDNSOptions()
     ) throws -> ProjectDNSPlan {
         let observedByIdentity = Dictionary(
@@ -57,7 +58,8 @@ enum ProjectDNSPlanBuilder {
             projectID: projectID,
             desiredState: desiredState,
             observedState: observedState,
-            resourceBindings: resourceBindings
+            resourceBindings: resourceBindings,
+            hostEnvironment: hostEnvironment
         )
         let policyPlan = try networkPolicyPlan(
             projectUUID: projectUUID,
@@ -179,7 +181,8 @@ enum ProjectDNSPlanBuilder {
         projectID: String?,
         desiredState: DesiredRuntimeState,
         observedState: ObservedRuntimeState,
-        resourceBindings: [LifecycleResourceBinding]
+        resourceBindings: [LifecycleResourceBinding],
+        hostEnvironment: NetworkHostEnvironmentSnapshot?
     ) throws -> [ProjectIngressListenerBinding] {
         guard !ingress.isEmpty else { return [] }
         guard let projectID, !projectID.isEmpty else {
@@ -204,12 +207,35 @@ enum ProjectDNSPlanBuilder {
         return try ingress.sorted(by: { $0.key < $1.key }).map {
             name,
             listener in
-            guard listener.exposure.scope == .localhost,
-                  NetworkBindAddressPolicy.isLocalhost(
+            switch listener.exposure.scope {
+            case .localhost:
+                guard NetworkBindAddressPolicy.isLocalhost(
                     listener.bindAddress
-                  ) else {
+                ) else {
+                    throw ProjectDNSPlanningError.invalidIngress(
+                        "listener '\(name)' has an invalid localhost bind address"
+                    )
+                }
+            case .lan, .public:
+                let environment =
+                    try hostEnvironment ??
+                    NetworkHostEnvironmentProbe.current()
+                let evaluation =
+                    NetworkExposureEnvironmentEvaluator.evaluate(
+                        policy: listener.exposure,
+                        bindAddress: listener.bindAddress,
+                        environment: environment
+                    )
+                guard evaluation.isAllowed else {
+                    throw ProjectDNSPlanningError.invalidIngress(
+                        "listener '\(name)' exposure is unavailable: "
+                            + evaluation.issues.map(\.rawValue)
+                                .joined(separator: ",")
+                    )
+                }
+            case .project, .tunnel:
                 throw ProjectDNSPlanningError.invalidIngress(
-                    "listener '\(name)' cannot activate before its secure non-local exposure is qualified"
+                    "listener '\(name)' exposure requires its dedicated provider path"
                 )
             }
             var peerIdentities = Set<HostwrightMutualTLSIdentity>()

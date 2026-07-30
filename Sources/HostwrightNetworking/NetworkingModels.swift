@@ -159,6 +159,31 @@ public struct HostwrightPortExposurePolicy:
 }
 
 public enum NetworkExposurePolicyValidation {
+    public static func contains(address: String, in cidr: String) -> Bool {
+        guard let canonical = canonicalCIDR(cidr) else { return false }
+        let components = canonical.split(separator: "/", maxSplits: 1)
+        guard components.count == 2, let prefix = Int(components[1]) else {
+            return false
+        }
+        for family in [AF_INET, AF_INET6] {
+            guard let candidate = addressBytes(address, family: family),
+                  let network = addressBytes(String(components[0]), family: family),
+                  candidate.count == network.count else {
+                continue
+            }
+            for bit in 0..<prefix {
+                let byte = bit / 8
+                let shift = 7 - (bit % 8)
+                if (candidate[byte] & UInt8(1 << shift)) !=
+                    (network[byte] & UInt8(1 << shift)) {
+                    return false
+                }
+            }
+            return true
+        }
+        return false
+    }
+
     public static func isValidInterfaceSelector(
         _ value: String
     ) -> Bool {
@@ -330,6 +355,7 @@ public enum NetworkExposureEnvironmentIssue:
     case bindAddressUnavailable
     case interfaceNotAllowed
     case networkClassNotAllowed
+    case allowedCIDRNotAllowed
 }
 
 public enum NetworkExposureEnvironmentWarning:
@@ -339,6 +365,7 @@ public enum NetworkExposureEnvironmentWarning:
     Hashable,
     Sendable
 {
+    case localNetworkPermissionPending
     case privateRelayActive
     case privateRelayNotObservable
     case vpnRouteActive
@@ -419,8 +446,10 @@ public enum NetworkExposureEnvironmentEvaluator {
                 issues.append(.bindAddressUnavailable)
             }
         case .lan, .public:
-            if environment.localNetworkPermission != .granted {
+            if environment.localNetworkPermission == .denied {
                 issues.append(.localNetworkPermissionNotGranted)
+            } else if environment.localNetworkPermission == .notProbed {
+                warnings.append(.localNetworkPermissionPending)
             }
             let exactAddress = environment.addresses.first {
                 !$0.isLoopback && $0.address == bindAddress
@@ -438,6 +467,14 @@ public enum NetworkExposureEnvironmentEvaluator {
                     exactAddress.networkClass
                 ) {
                     issues.append(.networkClassNotAllowed)
+                }
+                if !policy.allowedCIDRs.contains(where: {
+                    NetworkExposurePolicyValidation.contains(
+                        address: exactAddress.address,
+                        in: $0
+                    )
+                }) {
+                    issues.append(.allowedCIDRNotAllowed)
                 }
             }
             switch environment.privateRelayState {

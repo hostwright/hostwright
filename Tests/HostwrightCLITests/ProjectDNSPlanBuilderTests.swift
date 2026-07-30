@@ -519,6 +519,166 @@ final class ProjectDNSPlanBuilderTests: XCTestCase {
         XCTAssertTrue(route.backends.isEmpty)
     }
 
+    func testLANIngressRequiresExactApprovedHostEnvironment() throws {
+        let projectUUID =
+            "11111111-1111-4111-8111-111111111111"
+        let service = DesiredRuntimeService(
+            identity: RuntimeServiceIdentity(
+                projectName: "demo",
+                serviceName: "api",
+                instanceName: "api-0"
+            ),
+            logicalServiceName: "api",
+            image: "local/api:dev"
+        )
+        let exposure = HostwrightPortExposurePolicy(
+            scope: .lan,
+            interfaces: ["en0"],
+            networkClasses: [.privateLAN],
+            allowedCIDRs: ["192.168.1.0/24"],
+            authentication: .tls
+        )
+        let listener = HostwrightIngressListener(
+            bindAddress: "192.168.1.10",
+            port: 8_443,
+            exposure: exposure,
+            certificate: "api-tls",
+            routes: [
+                HostwrightIngressRoute(
+                    hostname: "api.example.test",
+                    targetService: "api",
+                    targetPort: 8_080
+                ),
+            ]
+        )
+        let environment = NetworkHostEnvironmentSnapshot(
+            addresses: [
+                NetworkHostInterfaceAddress(
+                    interfaceName: "en0",
+                    address: "192.168.1.10",
+                    cidr: "192.168.1.0/24",
+                    family: .ipv4,
+                    networkClass: .privateLAN,
+                    isLoopback: false
+                ),
+            ],
+            primaryInterface: "en0",
+            defaultRouter: "192.168.1.1",
+            vpnState: .inactive,
+            privateRelayState: .notObservable,
+            localNetworkPermission: .notProbed
+        )
+
+        let plan = try ProjectDNSPlanBuilder.build(
+            projectUUID: projectUUID,
+            desiredState: DesiredRuntimeState(
+                projectName: "demo",
+                services: [service]
+            ),
+            observedState: ObservedRuntimeState(
+                projectName: "demo",
+                services: []
+            ),
+            certificates: [
+                "api-tls": HostwrightCertificateDeclaration(
+                    source: .localCA
+                ),
+            ],
+            ingress: ["api": listener],
+            projectID: "project-demo",
+            hostEnvironment: environment
+        )
+
+        XCTAssertEqual(
+            plan.ingressBindings.first?.exposure,
+            exposure
+        )
+        XCTAssertEqual(
+            plan.ingressBindings.first?.bindAddress,
+            "192.168.1.10"
+        )
+    }
+
+    func testLANIngressRejectsDeniedLocalNetworkPermission() {
+        let service = DesiredRuntimeService(
+            identity: RuntimeServiceIdentity(
+                projectName: "demo",
+                serviceName: "api",
+                instanceName: "api-0"
+            ),
+            logicalServiceName: "api",
+            image: "local/api:dev"
+        )
+        let exposure = HostwrightPortExposurePolicy(
+            scope: .lan,
+            interfaces: ["en0"],
+            networkClasses: [.privateLAN],
+            allowedCIDRs: ["192.168.1.0/24"],
+            authentication: .tls
+        )
+        let environment = NetworkHostEnvironmentSnapshot(
+            addresses: [
+                NetworkHostInterfaceAddress(
+                    interfaceName: "en0",
+                    address: "192.168.1.10",
+                    cidr: "192.168.1.0/24",
+                    family: .ipv4,
+                    networkClass: .privateLAN,
+                    isLoopback: false
+                ),
+            ],
+            primaryInterface: "en0",
+            defaultRouter: "192.168.1.1",
+            vpnState: .inactive,
+            privateRelayState: .inactive,
+            localNetworkPermission: .denied
+        )
+
+        XCTAssertThrowsError(
+            try ProjectDNSPlanBuilder.build(
+                projectUUID:
+                    "11111111-1111-4111-8111-111111111111",
+                desiredState: DesiredRuntimeState(
+                    projectName: "demo",
+                    services: [service]
+                ),
+                observedState: ObservedRuntimeState(
+                    projectName: "demo",
+                    services: []
+                ),
+                certificates: [
+                    "api-tls": HostwrightCertificateDeclaration(
+                        source: .localCA
+                    ),
+                ],
+                ingress: [
+                    "api": HostwrightIngressListener(
+                        bindAddress: "192.168.1.10",
+                        port: 8_443,
+                        exposure: exposure,
+                        certificate: "api-tls",
+                        routes: [
+                            HostwrightIngressRoute(
+                                hostname: "api.example.test",
+                                targetService: "api",
+                                targetPort: 8_080
+                            ),
+                        ]
+                    ),
+                ],
+                projectID: "project-demo",
+                hostEnvironment: environment
+            )
+        ) {
+            XCTAssertTrue(
+                String(describing: $0).contains(
+                    NetworkExposureEnvironmentIssue
+                        .localNetworkPermissionNotGranted.rawValue
+                )
+            )
+        }
+    }
+
     func testIngressPlanIsDeterministicAcrossInputOrdering()
         throws
     {

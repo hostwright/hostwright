@@ -20,14 +20,11 @@ enum NetworkHelperIngressValidation {
           listener.name
         ),
         names.insert(listener.name).inserted,
-        NetworkBindAddressPolicy.isLocalhost(
-          listener.bindAddress
-        ),
-        listener.exposure.scope == .localhost,
         NetworkExposurePolicyValidation.isSemanticallyValid(
           listener.exposure,
           bindAddress: listener.bindAddress
         ),
+        directListenerExposure(listener.exposure),
         (1...65_535).contains(listener.port),
         !listener.routes.isEmpty,
         listener.routes.count <= HostwrightIngressListener.maximumRoutes,
@@ -163,6 +160,19 @@ enum NetworkHelperIngressValidation {
   private static func canonicalUUID(_ value: String) -> Bool {
     guard let uuid = UUID(uuidString: value) else { return false }
     return uuid.uuidString.lowercased() == value
+  }
+
+  private static func directListenerExposure(
+    _ exposure: HostwrightPortExposurePolicy
+  ) -> Bool {
+    switch exposure.scope {
+    case .localhost, .lan:
+      return true
+    case .public:
+      return exposure.authentication == .mutualTLS
+    case .project, .tunnel:
+      return false
+    }
   }
 
   private static func canonicalAddress(_ value: String) -> Bool {

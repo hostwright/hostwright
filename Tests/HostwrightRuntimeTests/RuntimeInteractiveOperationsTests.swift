@@ -1117,9 +1117,9 @@ final class RuntimeInteractiveOperationsTests: XCTestCase {
     }
 
     func testSlowOutputSinkCannotBlockTimeoutAndProcessCleanupDecision() async throws {
-        let sinkStarted = DispatchSemaphore(value: 0)
+        let sinkStarted = expectation(description: "output sink started")
         let releaseSink = DispatchSemaphore(value: 0)
-        let runnerFinished = DispatchSemaphore(value: 0)
+        let runnerFinished = expectation(description: "process runner finished")
         let runner = TimeoutAfterOutputInteractiveProcessRunner(
             runnerFinished: runnerFinished
         )
@@ -1140,13 +1140,13 @@ final class RuntimeInteractiveOperationsTests: XCTestCase {
                 capabilitySnapshot: capability,
                 timeoutMilliseconds: 1_000
             ) { _ in
-                sinkStarted.signal()
+                sinkStarted.fulfill()
                 _ = releaseSink.wait(timeout: .now() + 2)
             }
         }
 
-        XCTAssertEqual(sinkStarted.wait(timeout: .now() + 5), .success)
-        XCTAssertEqual(runnerFinished.wait(timeout: .now() + 5), .success)
+        await fulfillment(of: [sinkStarted], timeout: 5)
+        await fulfillment(of: [runnerFinished], timeout: 5)
         releaseSink.signal()
         do {
             _ = try await task.value
@@ -1508,9 +1508,9 @@ private struct FixedInteractiveStructuredReader:
 private final class TimeoutAfterOutputInteractiveProcessRunner:
     RuntimeInteractiveProcessRunning,
     @unchecked Sendable {
-    private let runnerFinished: DispatchSemaphore
+    private let runnerFinished: XCTestExpectation
 
-    init(runnerFinished: DispatchSemaphore) {
+    init(runnerFinished: XCTestExpectation) {
         self.runnerFinished = runnerFinished
     }
 
@@ -1525,7 +1525,7 @@ private final class TimeoutAfterOutputInteractiveProcessRunner:
                 data: Data("output-before-timeout".utf8)
             )
         )
-        runnerFinished.signal()
+        runnerFinished.fulfill()
         throw RuntimeInteractiveError.processTimedOut
     }
 }

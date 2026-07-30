@@ -163,6 +163,33 @@ final class WasmKitNetworkProviderExecutorTests: XCTestCase {
     }
 }
 
+func providerConformanceModule(
+    responseTemplate: Data,
+    noncePlaceholder: String
+) throws -> Data {
+    let nonceBytes = Data(noncePlaceholder.utf8)
+    guard nonceBytes.count == 36,
+          let nonceRange = responseTemplate.range(of: nonceBytes)
+    else {
+        throw TestModuleError.invalidNoncePlaceholder
+    }
+    let nonceInputOffset = Data(#"{"nonce":""#.utf8).count
+    var runBody: [UInt8] = [0x00, 0x41]
+    runBody += signedLEB(Int64(nonceRange.lowerBound))
+    runBody += [0x20, 0x00, 0x41]
+    runBody += signedLEB(Int64(nonceInputOffset))
+    runBody += [0x6a, 0x41]
+    runBody += signedLEB(Int64(nonceBytes.count))
+    runBody += [0xfc, 0x0a, 0x00, 0x00, 0x42]
+    runBody += signedLEB(Int64(responseTemplate.count))
+    runBody += [0x0b]
+    return referenceModule(
+        runBody: runBody,
+        allocationPointer: 65_536,
+        initialMemory: responseTemplate
+    )
+}
+
 private func referenceModule(
     maximumPages: UInt64 = 1_024,
     runBody: [UInt8] = [
@@ -178,7 +205,9 @@ private func referenceModule(
         0xad,
         0x84,
         0x0b
-    ]
+    ],
+    allocationPointer: Int64 = 0,
+    initialMemory: Data? = nil
 ) -> Data {
     var module: [UInt8] = [0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]
     appendSection(
@@ -212,11 +241,25 @@ private func referenceModule(
     appendExport(name: "hostwright_run", kind: 0x00, index: 1, to: &exports)
     appendSection(id: 7, payload: exports, to: &module)
 
-    let allocateBody: [UInt8] = [0x00, 0x41, 0x00, 0x0b]
+    let allocateBody = [0x00, 0x41]
+        + signedLEB(allocationPointer)
+        + [0x0b]
     var code: [UInt8] = [0x02]
     code += unsignedLEB(UInt64(allocateBody.count)) + allocateBody
     code += unsignedLEB(UInt64(runBody.count)) + runBody
     appendSection(id: 10, payload: code, to: &module)
+    if let initialMemory {
+        var dataSegment: [UInt8] = [
+            0x01,
+            0x00,
+            0x41,
+            0x00,
+            0x0b
+        ]
+        dataSegment += unsignedLEB(UInt64(initialMemory.count))
+        dataSegment.append(contentsOf: initialMemory)
+        appendSection(id: 11, payload: dataSegment, to: &module)
+    }
     return Data(module)
 }
 
@@ -251,4 +294,26 @@ private func unsignedLEB(_ value: UInt64) -> [UInt8] {
         result.append(byte)
     } while value != 0
     return result
+}
+
+private func signedLEB(_ initialValue: Int64) -> [UInt8] {
+    var value = initialValue
+    var result: [UInt8] = []
+    while true {
+        var byte = UInt8(truncatingIfNeeded: value) & 0x7f
+        value >>= 7
+        let signBitIsSet = byte & 0x40 != 0
+        if (value == 0 && !signBitIsSet)
+            || (value == -1 && signBitIsSet)
+        {
+            result.append(byte)
+            return result
+        }
+        byte |= 0x80
+        result.append(byte)
+    }
+}
+
+private enum TestModuleError: Error {
+    case invalidNoncePlaceholder
 }

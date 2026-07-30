@@ -36,6 +36,127 @@ final class ProductionNetworkProviderSecurityTests: XCTestCase {
         )
     }
 
+    func testSignedConformanceModuleUsesOnlyReviewedLocalHTTPSOrigin() async throws {
+        let reviewedOrigin = "https://127.0.0.1:9443"
+        let noncePlaceholder = "00000000-0000-0000-0000-000000000000"
+        let responseTemplate = try canonicalSecurityJSON(
+            IntegratedProviderResponse(
+                version: 1,
+                nonce: noncePlaceholder,
+                operation: .setup,
+                status: "ok",
+                payload: ["result": "local-https-ok"],
+                brokerRequests: [
+                    NetworkProviderBrokerRequest(
+                        kind: .https,
+                        scope: reviewedOrigin,
+                        request: Data("probe".utf8)
+                    )
+                ]
+            )
+        )
+        let module = try providerConformanceModule(
+            responseTemplate: responseTemplate,
+            noncePlaceholder: noncePlaceholder
+        )
+        let fixture = try DetachedCMSFixture(contentBuilder: { certificateDER in
+            let fingerprint = "sha256:"
+                + SHA256.hash(data: certificateDER)
+                    .map { String(format: "%02x", $0) }
+                    .joined()
+            return try canonicalSecurityJSON(
+                NetworkProviderDeclaration(
+                    identifier: "example.reference",
+                    kind: .tunnelProvider,
+                    moduleSHA256: SHA256.hash(data: module)
+                        .map { String(format: "%02x", $0) }
+                        .joined(),
+                    signer: fingerprint
+                )
+            )
+        })
+        let fingerprint = "sha256:"
+            + SHA256.hash(data: fixture.certificateDER)
+                .map { String(format: "%02x", $0) }
+                .joined()
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [LocalHTTPSReferenceProtocol.self]
+        let broker = URLSessionNetworkProviderBroker(
+            configuration: configuration,
+            secretReferenceResolver: { _ in
+                throw NetworkProviderError.deniedGrant
+            },
+            identityHandler: { _, _ in
+                throw NetworkProviderError.deniedGrant
+            },
+            routeHandler: { _, _ in
+                throw NetworkProviderError.deniedGrant
+            }
+        )
+        let revocationRoot = temporaryDirectory()
+        defer {
+            try? FileManager.default.removeItem(at: revocationRoot)
+        }
+        let host = RestrictedNetworkProviderHost(
+            verifier: SecurityDetachedCMSVerifier(
+                trustedCertificateDER: [fixture.certificateDER]
+            ),
+            executor: try WasmKitNetworkProviderExecutor(
+                workerExecutableURL: workerExecutable()
+            ),
+            revocations: try FileBackedNetworkProviderRevocationStore(
+                directoryURL: revocationRoot
+            ),
+            broker: broker
+        )
+        LocalHTTPSReferenceProtocol.resetHandledRequestCount()
+        let reviewedGrant = NetworkProviderGrant(
+            identifier: "example.reference",
+            kind: .tunnelProvider,
+            allowedHTTPSOrigins: [reviewedOrigin],
+            approvedBy: "reviewer",
+            expiresAt: .distantFuture
+        )
+
+        let result = try await host.invoke(
+            declaration: fixture.content,
+            detachedCMS: fixture.signature,
+            module: module,
+            grant: reviewedGrant,
+            operation: .setup
+        )
+
+        XCTAssertEqual(result, ["result": "local-https-ok"])
+        XCTAssertEqual(LocalHTTPSReferenceProtocol.handledRequestCount, 1)
+        let outOfGrant = NetworkProviderGrant(
+            identifier: "example.reference",
+            kind: .tunnelProvider,
+            allowedHTTPSOrigins: ["https://127.0.0.1:9444"],
+            approvedBy: "reviewer",
+            expiresAt: .distantFuture
+        )
+        do {
+            _ = try await host.invoke(
+                declaration: fixture.content,
+                detachedCMS: fixture.signature,
+                module: module,
+                grant: outOfGrant,
+                operation: .setup
+            )
+            XCTFail("Expected an out-of-grant origin to be denied")
+        } catch let error as NetworkProviderError {
+            XCTAssertEqual(error, .deniedGrant)
+        }
+        XCTAssertEqual(LocalHTTPSReferenceProtocol.handledRequestCount, 1)
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                NetworkProviderDeclaration.self,
+                from: fixture.content
+            ).signer,
+            fingerprint
+        )
+    }
+
     func testFileBackedRevocationPersistsAtomicallyAcrossInstances() async throws {
         let root = temporaryDirectory()
         defer {
@@ -193,16 +314,48 @@ final class ProductionNetworkProviderSecurityTests: XCTestCase {
             isDirectory: true
         )
     }
+
+    private func workerExecutable() throws -> URL {
+        let candidate = Bundle(for: ProductionNetworkProviderSecurityTests.self)
+            .bundleURL
+            .deletingLastPathComponent()
+            .appendingPathComponent(
+                WasmKitNetworkProviderExecutor.workerExecutableName
+            )
+        guard FileManager.default.isExecutableFile(atPath: candidate.path) else {
+            throw XCTSkip("Worker executable was not built at \(candidate.path)")
+        }
+        return candidate
+    }
+}
+
+private struct IntegratedProviderResponse: Encodable {
+    let version: Int
+    let nonce: String
+    let operation: NetworkProviderOperation
+    let status: String
+    let payload: [String: String]
+    let brokerRequests: [NetworkProviderBrokerRequest]
+    let httpsOrigin: String? = nil
+    let secretReference: String? = nil
+    let identityScope: String? = nil
+    let routeScope: String? = nil
 }
 
 private struct DetachedCMSFixture {
-    let content = Data(
-        #"{"apiVersion":1,"identifier":"example.reference"}"#.utf8
-    )
+    let content: Data
     let certificateDER: Data
     let signature: Data
 
     init() throws {
+        try self.init { _ in
+            Data(
+                #"{"apiVersion":1,"identifier":"example.reference"}"#.utf8
+            )
+        }
+    }
+
+    init(contentBuilder: (Data) throws -> Data) throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(
             "hostwright-cms-\(UUID().uuidString)",
             isDirectory: true
@@ -219,7 +372,6 @@ private struct DetachedCMSFixture {
         let certificateURL = root.appendingPathComponent("certificate.pem")
         let certificateDERURL = root.appendingPathComponent("certificate.der")
         let signatureURL = root.appendingPathComponent("signature.der")
-        try content.write(to: contentURL)
 
         try Self.runOpenSSL(
             [
@@ -242,6 +394,20 @@ private struct DetachedCMSFixture {
         )
         try Self.runOpenSSL(
             [
+                "x509",
+                "-in",
+                certificateURL.path,
+                "-outform",
+                "DER",
+                "-out",
+                certificateDERURL.path
+            ]
+        )
+        let certificateDER = try Data(contentsOf: certificateDERURL)
+        let content = try contentBuilder(certificateDER)
+        try content.write(to: contentURL)
+        try Self.runOpenSSL(
+            [
                 "smime",
                 "-sign",
                 "-binary",
@@ -257,19 +423,9 @@ private struct DetachedCMSFixture {
                 signatureURL.path
             ]
         )
-        try Self.runOpenSSL(
-            [
-                "x509",
-                "-in",
-                certificateURL.path,
-                "-outform",
-                "DER",
-                "-out",
-                certificateDERURL.path
-            ]
-        )
-        certificateDER = try Data(contentsOf: certificateDERURL)
-        signature = try Data(contentsOf: signatureURL)
+        self.content = content
+        self.certificateDER = certificateDER
+        self.signature = try Data(contentsOf: signatureURL)
     }
 
     private static func runOpenSSL(_ arguments: [String]) throws {
@@ -324,6 +480,16 @@ private enum TestSecurityError: Error {
 }
 
 private final class LocalHTTPSReferenceProtocol: URLProtocol {
+    private static let handledRequests = LockedRequestCount()
+
+    static var handledRequestCount: Int {
+        handledRequests.value
+    }
+
+    static func resetHandledRequestCount() {
+        handledRequests.reset()
+    }
+
     override class func canInit(with request: URLRequest) -> Bool {
         request.url?.absoluteString == "https://127.0.0.1:9443"
     }
@@ -349,6 +515,7 @@ private final class LocalHTTPSReferenceProtocol: URLProtocol {
             )
             return
         }
+        Self.handledRequests.increment()
         client?.urlProtocol(
             self,
             didReceive: response,
@@ -385,4 +552,33 @@ private final class LocalHTTPSReferenceProtocol: URLProtocol {
             body.append(buffer, count: count)
         }
     }
+}
+
+private final class LockedRequestCount: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+
+    var value: Int {
+        lock.withLock {
+            count
+        }
+    }
+
+    func increment() {
+        lock.withLock {
+            count += 1
+        }
+    }
+
+    func reset() {
+        lock.withLock {
+            count = 0
+        }
+    }
+}
+
+private func canonicalSecurityJSON<T: Encodable>(_ value: T) throws -> Data {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+    return try encoder.encode(value)
 }

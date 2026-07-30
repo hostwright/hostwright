@@ -88,6 +88,20 @@ func TestNDPRuleOnlyMatchesDeclaredICMPv6Type(t *testing.T) {
 	}
 }
 
+func TestEstablishedRelatedRuleLoadsConnectionState(t *testing.T) {
+	expressions, err := expressionsForRule(compiledRule{
+		Direction: directionInput,
+		Kind:      ruleEstablishedRelated,
+	})
+	if err != nil {
+		t.Fatalf("expressionsForRule returned error: %v", err)
+	}
+	connectionState, ok := expressions[0].(*expr.Ct)
+	if !ok || connectionState.Key != expr.CtKeySTATE {
+		t.Fatalf("unexpected connection-state expression: %#v", expressions[0])
+	}
+}
+
 func TestAnyPortRuleOmitsTransportPortExpressions(t *testing.T) {
 	expressions, err := expressionsForAddressRule(compiledRule{
 		Direction: directionInput,

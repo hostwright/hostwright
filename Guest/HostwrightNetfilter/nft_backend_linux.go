@@ -252,7 +252,7 @@ func expressionsForRule(rule compiledRule) ([]expr.Any, error) {
 		}, nil
 	case ruleEstablishedRelated:
 		return []expr.Any{
-			&expr.CT{Register: 1, Key: expr.CtKeySTATE},
+			&expr.Ct{Register: 1, Key: expr.CtKeySTATE},
 			&expr.Bitwise{
 				SourceRegister: 1,
 				DestRegister:   1,

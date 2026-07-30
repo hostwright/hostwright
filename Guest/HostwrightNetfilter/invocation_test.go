@@ -19,12 +19,12 @@ func TestParseInvocationAcceptsOnlyLockedGuestAgentModes(t *testing.T) {
 			mode:      invocationStdio,
 		},
 		{
-			name:      "file",
+			name: "file",
 			arguments: []string{
 				agentFileArgument,
 				guestAgentUpdateRequestPath,
 			},
-			mode:      invocationFile,
+			mode: invocationFile,
 		},
 		{
 			name: "bootstrap",

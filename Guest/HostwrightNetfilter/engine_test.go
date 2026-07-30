@@ -161,9 +161,9 @@ func TestExecuteApplyRepairsOwnedRuleLoss(t *testing.T) {
 	value := minimalApplyRequest(4)
 	backend := &fakeFirewallBackend{
 		snapshot: firewallSnapshot{
-			Exists:    true,
-			Owned:     true,
-			Valid:     false,
+			Exists: true,
+			Owned:  true,
+			Valid:  false,
 			Identity: policyIdentity{
 				Digest:     value.PolicyDigest,
 				Generation: value.Generation,
@@ -247,10 +247,10 @@ func TestExecuteCancelledContextDoesNotMutatePolicy(t *testing.T) {
 
 func TestExecuteReplaceFailureRetainsPriorPolicy(t *testing.T) {
 	prior := firewallSnapshot{
-		Exists:   true,
-		Owned:    true,
-		Valid:    false,
-		Identity: policyIdentity{Digest: testDigest, Generation: 1},
+		Exists:    true,
+		Owned:     true,
+		Valid:     false,
+		Identity:  policyIdentity{Digest: testDigest, Generation: 1},
 		RuleCount: 7,
 	}
 	backend := &fakeFirewallBackend{

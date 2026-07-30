@@ -10,8 +10,8 @@ import (
 func TestNormalizePolicySortsRulesAndDNSServers(t *testing.T) {
 	value := unsignedTestRequest(3)
 	value.Ingress = []wireRule{
-			{CIDR: "2001:db8::/64", Protocol: "udp", DestinationPort: portReference(53)},
-			{CIDR: "10.0.0.0/24", Protocol: "tcp", DestinationPort: portReference(443)},
+		{CIDR: "2001:db8::/64", Protocol: "udp", DestinationPort: portReference(53)},
+		{CIDR: "10.0.0.0/24", Protocol: "tcp", DestinationPort: portReference(443)},
 	}
 	value.DNSServers = []string{"2001:4860:4860::8888", "1.1.1.1"}
 	normalized, err := normalizePolicy(value)
@@ -72,10 +72,10 @@ func TestNormalizePolicyRejectsNoncanonicalAndDuplicateValues(t *testing.T) {
 func TestCompilePolicyInstallsDefaultDropExceptionsAndExactAllows(t *testing.T) {
 	value := unsignedTestRequest(4)
 	value.Ingress = []wireRule{
-			{CIDR: "10.0.0.0/24", Protocol: "tcp", DestinationPort: portReference(443)},
+		{CIDR: "10.0.0.0/24", Protocol: "tcp", DestinationPort: portReference(443)},
 	}
 	value.Egress = []wireRule{
-			{CIDR: "2001:db8::/64", Protocol: "udp", DestinationPort: portReference(8443)},
+		{CIDR: "2001:db8::/64", Protocol: "udp", DestinationPort: portReference(8443)},
 	}
 	value.DNSServers = []string{"1.1.1.1"}
 	normalized, err := normalizePolicy(value)
@@ -118,7 +118,7 @@ func TestCompilePolicyInstallsDefaultDropExceptionsAndExactAllows(t *testing.T) 
 func TestCompilePolicyDeduplicatesExplicitDNSAllow(t *testing.T) {
 	value := unsignedTestRequest(5)
 	value.Egress = []wireRule{
-			{CIDR: "1.1.1.1/32", Protocol: "tcp", DestinationPort: portReference(53)},
+		{CIDR: "1.1.1.1/32", Protocol: "tcp", DestinationPort: portReference(53)},
 	}
 	value.DNSServers = []string{"1.1.1.1"}
 	normalized, err := normalizePolicy(value)
@@ -145,7 +145,7 @@ func TestCompilePolicyDeduplicatesExplicitDNSAllow(t *testing.T) {
 func TestCompilePolicySupportsExactAnyPortRule(t *testing.T) {
 	value := unsignedTestRequest(6)
 	value.Ingress = []wireRule{
-			{CIDR: "192.0.2.0/24", Protocol: "tcp"},
+		{CIDR: "192.0.2.0/24", Protocol: "tcp"},
 	}
 	normalized, err := normalizePolicy(value)
 	if err != nil {

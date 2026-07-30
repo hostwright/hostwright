@@ -2534,7 +2534,7 @@ public struct MigrationRunner: Sendable {
         ),
         SchemaMigration(
             version: 16,
-            description: "Fenced project network, attachment, and DNS state",
+            description: "Fenced project network, attachment, DNS, and service tunnel state",
             statements: [
                 """
                 CREATE TABLE IF NOT EXISTS network_resources (
@@ -3080,6 +3080,46 @@ public struct MigrationRunner: Sendable {
                     CHECK (julianday(created_at) IS NOT NULL AND julianday(updated_at) IS NOT NULL AND julianday(updated_at) >= julianday(created_at))
                 )
                 """,
+                """
+                CREATE TABLE IF NOT EXISTS service_tunnel_sessions (
+                    id TEXT PRIMARY KEY,
+                    project_uuid TEXT NOT NULL REFERENCES projects(resource_uuid) ON DELETE RESTRICT,
+                    peer_uuid TEXT NOT NULL,
+                    generation INTEGER NOT NULL CHECK (generation >= 1),
+                    provider_id TEXT NOT NULL,
+                    provider_generation INTEGER NOT NULL CHECK (provider_generation >= 1),
+                    fencing_token TEXT NOT NULL,
+                    operation_group_id TEXT NOT NULL REFERENCES operation_groups(id) ON DELETE RESTRICT,
+                    desired_sha256 TEXT NOT NULL,
+                    observed_sha256 TEXT,
+                    route_json TEXT NOT NULL,
+                    lifecycle_state TEXT NOT NULL CHECK (lifecycle_state IN ('intended','connecting','active','draining','closed','faulted')),
+                    finalizer_state TEXT NOT NULL CHECK (finalizer_state IN ('pending','active','releasing','released','quarantined')),
+                    selected_transport TEXT CHECK (selected_transport IS NULL OR selected_transport IN ('direct','relay')),
+                    key_epoch INTEGER NOT NULL CHECK (key_epoch >= 1),
+                    reconnect_attempt INTEGER NOT NULL CHECK (reconnect_attempt BETWEEN 0 AND 8),
+                    created_at_ms INTEGER NOT NULL CHECK (created_at_ms >= 0),
+                    updated_at_ms INTEGER NOT NULL CHECK (updated_at_ms >= created_at_ms),
+                    CHECK (length(id) = 36 AND replace(id, '-', '') NOT GLOB '*[^0-9a-f]*'),
+                    CHECK (length(project_uuid) = 36 AND replace(project_uuid, '-', '') NOT GLOB '*[^0-9a-f]*'),
+                    CHECK (length(peer_uuid) = 36 AND replace(peer_uuid, '-', '') NOT GLOB '*[^0-9a-f]*'),
+                    CHECK (length(fencing_token) = 36 AND replace(fencing_token, '-', '') NOT GLOB '*[^0-9a-f]*'),
+                    CHECK (length(desired_sha256) = 64 AND desired_sha256 NOT GLOB '*[^0-9a-f]*'),
+                    CHECK (observed_sha256 IS NULL OR (length(observed_sha256) = 64 AND observed_sha256 NOT GLOB '*[^0-9a-f]*')),
+                    CHECK (json_valid(route_json) AND json_type(route_json) = 'object' AND length(route_json) <= 65536),
+                    CHECK (
+                        (lifecycle_state = 'intended' AND finalizer_state = 'pending' AND observed_sha256 IS NULL)
+                        OR (lifecycle_state = 'connecting' AND (
+                            (finalizer_state = 'pending' AND observed_sha256 IS NULL)
+                            OR (finalizer_state = 'active' AND observed_sha256 IS NOT NULL)
+                        ))
+                        OR (lifecycle_state = 'active' AND finalizer_state = 'active' AND observed_sha256 IS NOT NULL)
+                        OR (lifecycle_state = 'draining' AND finalizer_state = 'releasing')
+                        OR (lifecycle_state = 'closed' AND finalizer_state = 'released' AND observed_sha256 IS NOT NULL)
+                        OR (lifecycle_state = 'faulted' AND finalizer_state = 'quarantined')
+                    )
+                )
+                """,
                 "CREATE INDEX IF NOT EXISTS network_resources_project_idx ON network_resources(project_uuid, lifecycle_state, name, id)",
                 "CREATE INDEX IF NOT EXISTS network_resources_provider_idx ON network_resources(provider_id, runtime_name, lifecycle_state)",
                 "CREATE INDEX IF NOT EXISTS network_resources_operation_idx ON network_resources(operation_group_id, updated_at)",
@@ -3094,7 +3134,10 @@ public struct MigrationRunner: Sendable {
                 "CREATE UNIQUE INDEX IF NOT EXISTS network_port_reservations_active_idx ON network_port_reservations(bind_address, host_port, protocol) WHERE lifecycle_state != 'released'",
                 "CREATE INDEX IF NOT EXISTS network_port_reservations_project_idx ON network_port_reservations(project_uuid, lifecycle_state, service_name, host_port)",
                 "CREATE INDEX IF NOT EXISTS network_port_reservations_resource_idx ON network_port_reservations(resource_uuid, lifecycle_state, host_port)",
-                "CREATE INDEX IF NOT EXISTS network_port_reservations_operation_idx ON network_port_reservations(operation_group_id, updated_at)"
+                "CREATE INDEX IF NOT EXISTS network_port_reservations_operation_idx ON network_port_reservations(operation_group_id, updated_at)",
+                "CREATE UNIQUE INDEX IF NOT EXISTS service_tunnel_active_peer_idx ON service_tunnel_sessions(project_uuid, peer_uuid) WHERE lifecycle_state != 'closed'",
+                "CREATE INDEX IF NOT EXISTS service_tunnel_operation_idx ON service_tunnel_sessions(operation_group_id, generation)",
+                "CREATE INDEX IF NOT EXISTS service_tunnel_recovery_idx ON service_tunnel_sessions(lifecycle_state, updated_at_ms)"
             ]
         )
     ]

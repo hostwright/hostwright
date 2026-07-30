@@ -478,6 +478,18 @@ final class SecureSubprocessTests: XCTestCase {
         ) { error in
             XCTAssertEqual(error as? SecureSubprocessError, .invalidRequest(.invalidInputLimit))
         }
+
+        XCTAssertThrowsError(
+            try SecureSubprocessRunner().run(
+                SecureSubprocessRequest(
+                    executablePath: "/usr/bin/printf",
+                    maximumStandardInputBytes:
+                        SecureSubprocessRequest.maximumInputBytes + 1
+                )
+            )
+        ) { error in
+            XCTAssertEqual(error as? SecureSubprocessError, .invalidRequest(.invalidInputLimit))
+        }
     }
 
     private func makeCompiledFixture() throws -> (root: URL, executable: URL) {

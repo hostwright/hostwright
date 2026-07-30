@@ -1,5 +1,5 @@
-import Darwin
 import Foundation
+import HostwrightCore
 import WasmKit
 
 public struct WasmKitNetworkProviderExecutor: NetworkProviderWasmExecutor {
@@ -40,29 +40,20 @@ public struct WasmKitNetworkProviderExecutor: NetworkProviderWasmExecutor {
             throw NetworkProviderError.executionFailed
         }
 
-        let controller = WorkerProcessController()
-        return try await withTaskCancellationHandler {
-            try await Task.detached {
-                try Self.runWorker(
-                    executableURL: workerExecutableURL,
-                    module: module,
-                    input: stdin,
-                    sandbox: sandbox,
-                    controller: controller
-                )
-            }.value
-        } onCancel: {
-            controller.cancel()
-        }
+        return try await Self.runWorker(
+            executableURL: workerExecutableURL,
+            module: module,
+            input: stdin,
+            sandbox: sandbox
+        )
     }
 
     private static func runWorker(
         executableURL: URL,
         module: Data,
         input: Data,
-        sandbox: NetworkProviderSandbox,
-        controller: WorkerProcessController
-    ) throws -> Data {
+        sandbox: NetworkProviderSandbox
+    ) async throws -> Data {
         let request = WasmWorkerRequest(
             module: module,
             input: input,
@@ -74,62 +65,38 @@ public struct WasmKitNetworkProviderExecutor: NetworkProviderWasmExecutor {
             throw NetworkProviderError.executionFailed
         }
 
-        let process = Process()
-        process.executableURL = executableURL
-        process.arguments = []
-        process.environment = [:]
-        let inputPipe = Pipe()
-        let outputPipe = Pipe()
-        process.standardInput = inputPipe
-        process.standardOutput = outputPipe
-        process.standardError = FileHandle.nullDevice
-        controller.attach(process)
-        guard !controller.isCancelled else {
+        let subprocessRequest = SecureSubprocessRequest(
+            executablePath: executableURL.path,
+            environment: SecureSubprocessEnvironment.minimal,
+            workingDirectory: "/",
+            standardInput: encodedRequest,
+            timeoutMilliseconds: sandbox.timeoutMilliseconds,
+            terminationGraceMilliseconds: 100,
+            maximumStandardOutputBytes: Self.maximumWorkerResponseBytes,
+            maximumStandardErrorBytes: 64 * 1_024,
+            maximumStandardInputBytes: Self.maximumWorkerRequestBytes
+        )
+        let result: SecureSubprocessResult
+        do {
+            result = try await SecureSubprocessRunner().runAsync(
+                subprocessRequest
+            )
+        } catch let error as SecureSubprocessError {
+            if case .outputLimitExceeded = error {
+                throw NetworkProviderError.outputLimitExceeded
+            }
+            throw NetworkProviderError.executionFailed
+        } catch {
             throw NetworkProviderError.executionFailed
         }
-        let deadline = ContinuousClock.now
-            .advanced(by: .milliseconds(sandbox.timeoutMilliseconds))
-        try process.run()
-        try? inputPipe.fileHandleForReading.close()
-        try? outputPipe.fileHandleForWriting.close()
-
-        let collector = BoundedPipeCollector(
-            maximumBytes: Self.maximumWorkerResponseBytes,
-            controller: controller
-        )
-        collector.start(reading: outputPipe.fileHandleForReading)
-        let writer = BoundedPipeWriter()
-        writer.start(
-            writing: encodedRequest,
-            to: inputPipe.fileHandleForWriting
-        )
-
-        while process.isRunning && ContinuousClock.now < deadline && !controller.isCancelled {
-            Thread.sleep(forTimeInterval: 0.01)
-        }
-        if process.isRunning {
-            kill(process.processIdentifier, SIGKILL)
-        }
-        process.waitUntilExit()
-        let writeResult = writer.result()
-        let collected = collector.result()
-        controller.detach()
-
-        if case .failure = writeResult {
-            throw NetworkProviderError.executionFailed
-        }
-        switch collected {
-        case .failure(let error):
-            throw error
-        case .success:
-            break
-        }
-        guard !controller.isCancelled,
-              ContinuousClock.now < deadline,
-              process.terminationReason == .exit,
-              process.terminationStatus == 0,
-              case .success(let responseData) = collected,
-              let response = try? JSONDecoder().decode(WasmWorkerResponse.self, from: responseData)
+        guard result.exitStatus == 0,
+              result.terminationSignal == nil,
+              !result.standardOutputTruncated,
+              !result.standardErrorTruncated,
+              let response = try? JSONDecoder().decode(
+                  WasmWorkerResponse.self,
+                  from: result.standardOutput
+              )
         else {
             throw NetworkProviderError.executionFailed
         }
@@ -317,163 +284,6 @@ public struct WasmWorkerResponse: Codable, Sendable {
     public init(output: Data?, error: NetworkProviderError?) {
         self.output = output
         self.error = error
-    }
-}
-
-private final class WorkerProcessController: @unchecked Sendable {
-    private let lock = NSLock()
-    private var process: Process?
-    private var cancelled = false
-
-    var isCancelled: Bool {
-        lock.withLock {
-            cancelled
-        }
-    }
-
-    func attach(_ process: Process) {
-        lock.withLock {
-            self.process = process
-            if cancelled, process.isRunning {
-                kill(process.processIdentifier, SIGKILL)
-            }
-        }
-    }
-
-    func detach() {
-        lock.withLock {
-            process = nil
-        }
-    }
-
-    func cancel() {
-        lock.withLock {
-            cancelled = true
-            if let process, process.isRunning {
-                kill(process.processIdentifier, SIGKILL)
-            }
-        }
-    }
-
-    func terminate() {
-        lock.withLock {
-            if let process, process.isRunning {
-                kill(process.processIdentifier, SIGKILL)
-            }
-        }
-    }
-}
-
-private final class BoundedPipeCollector: @unchecked Sendable {
-    private let maximumBytes: Int
-    private let controller: WorkerProcessController
-    private let condition = NSCondition()
-    private var collected = Data()
-    private var failure: NetworkProviderError?
-    private var complete = false
-
-    init(maximumBytes: Int, controller: WorkerProcessController) {
-        self.maximumBytes = maximumBytes
-        self.controller = controller
-    }
-
-    func start(reading handle: FileHandle) {
-        Thread.detachNewThread {
-            self.consume(handle)
-        }
-    }
-
-    func result() -> Result<Data, NetworkProviderError> {
-        condition.lock()
-        while !complete {
-            condition.wait()
-        }
-        let result: Result<Data, NetworkProviderError>
-        if let failure {
-            result = .failure(failure)
-        } else {
-            result = .success(collected)
-        }
-        condition.unlock()
-        return result
-    }
-
-    private func consume(_ handle: FileHandle) {
-        defer {
-            try? handle.close()
-        }
-        do {
-            while let chunk = try handle.read(upToCount: 64 * 1_024),
-                  !chunk.isEmpty
-            {
-                condition.lock()
-                guard chunk.count <= maximumBytes - collected.count else {
-                    failure = .outputLimitExceeded
-                    condition.unlock()
-                    controller.terminate()
-                    finish()
-                    return
-                }
-                collected.append(chunk)
-                condition.unlock()
-            }
-        } catch {
-            condition.lock()
-            failure = .executionFailed
-            condition.unlock()
-        }
-        finish()
-    }
-
-    private func finish() {
-        condition.lock()
-        complete = true
-        condition.broadcast()
-        condition.unlock()
-    }
-}
-
-private final class BoundedPipeWriter: @unchecked Sendable {
-    private let condition = NSCondition()
-    private var failure: NetworkProviderError?
-    private var complete = false
-
-    func start(writing data: Data, to handle: FileHandle) {
-        Thread.detachNewThread {
-            defer {
-                try? handle.close()
-                self.finish()
-            }
-            do {
-                try handle.write(contentsOf: data)
-            } catch {
-                self.condition.lock()
-                self.failure = .executionFailed
-                self.condition.unlock()
-            }
-        }
-    }
-
-    func result() -> Result<Void, NetworkProviderError> {
-        condition.lock()
-        while !complete {
-            condition.wait()
-        }
-        let result: Result<Void, NetworkProviderError>
-        if let failure {
-            result = .failure(failure)
-        } else {
-            result = .success(())
-        }
-        condition.unlock()
-        return result
-    }
-
-    private func finish() {
-        condition.lock()
-        complete = true
-        condition.broadcast()
-        condition.unlock()
     }
 }
 

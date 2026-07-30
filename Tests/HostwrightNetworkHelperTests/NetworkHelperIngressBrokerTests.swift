@@ -1184,6 +1184,158 @@ final class NetworkHelperIngressBrokerTests: XCTestCase {
     XCTAssertEqual(finished.wait(timeout: .now() + 2), .success)
   }
 
+  func testSafeRequestFailsOverAfterBackendStaysSilent() throws {
+    let backend = try makeServer()
+    defer { Darwin.close(backend.descriptor) }
+    let firstFinished = DispatchSemaphore(value: 0)
+    let thirdFinished = DispatchSemaphore(value: 0)
+    serveStallThenRespond(
+      backend.descriptor,
+      response: response(body: "third"),
+      stallMilliseconds: 2_000,
+      firstFinished: firstFinished,
+      responseFinished: thirdFinished
+    )
+
+    let backends = [
+      ProjectIngressBackend(
+        serviceUUID:
+          "00000000-0000-4000-8000-000000000001",
+        address: "127.0.0.1",
+        port: backend.port
+      ),
+      ProjectIngressBackend(
+        serviceUUID:
+          "00000000-0000-4000-8000-000000000002",
+        address: "127.0.0.2",
+        port: backend.port
+      ),
+      ProjectIngressBackend(
+        serviceUUID:
+          "00000000-0000-4000-8000-000000000003",
+        address: "127.0.0.1",
+        port: backend.port
+      ),
+    ]
+    let ingressPort = try availablePort()
+    let broker = NetworkHelperIngressBroker()
+    _ = try broker.apply(
+      identity: identity(),
+      bindings: [
+        ProjectIngressListenerBinding(
+          name: "api",
+          bindAddress: "127.0.0.1",
+          port: ingressPort,
+          exposure: .localhost,
+          routes: [
+            ProjectIngressRouteBinding(
+              hostname: "api.internal",
+              pathPrefix: "/v1",
+              methods: ["GET"],
+              protocolName: .http,
+              targetServiceName: "api",
+              targetServiceUUIDs:
+                backends.map(\.serviceUUID).sorted(),
+              targetPort: backend.port,
+              backends: backends
+            )
+          ]
+        )
+      ]
+    )
+    defer { broker.remove(identity: identity()) }
+
+    XCTAssertTrue(
+      try request(
+        port: ingressPort,
+        request:
+          "GET /v1 HTTP/1.1\r\n"
+          + "Host: api.internal\r\n\r\n"
+      ).hasSuffix("\r\n\r\nthird")
+    )
+    XCTAssertEqual(
+      firstFinished.wait(timeout: .now() + 2),
+      .success
+    )
+    XCTAssertEqual(
+      thirdFinished.wait(timeout: .now() + 2),
+      .success
+    )
+  }
+
+  func testUnsafeRequestDoesNotReplayAfterBackendAccepts() throws {
+    let backend = try makeServer()
+    defer { Darwin.close(backend.descriptor) }
+    let retried = DispatchSemaphore(value: 0)
+    let finished = DispatchSemaphore(value: 0)
+    serveCloseAndDetectRetry(
+      backend.descriptor,
+      retried: retried,
+      finished: finished
+    )
+    let backends = [
+      ProjectIngressBackend(
+        serviceUUID:
+          "00000000-0000-4000-8000-000000000001",
+        address: "127.0.0.1",
+        port: backend.port
+      ),
+      ProjectIngressBackend(
+        serviceUUID:
+          "00000000-0000-4000-8000-000000000002",
+        address: "127.0.0.1",
+        port: backend.port
+      ),
+    ]
+    let ingressPort = try availablePort()
+    let broker = NetworkHelperIngressBroker()
+    _ = try broker.apply(
+      identity: identity(),
+      bindings: [
+        ProjectIngressListenerBinding(
+          name: "api",
+          bindAddress: "127.0.0.1",
+          port: ingressPort,
+          exposure: .localhost,
+          routes: [
+            ProjectIngressRouteBinding(
+              hostname: "api.internal",
+              pathPrefix: "/v1",
+              methods: ["POST"],
+              protocolName: .http,
+              targetServiceName: "api",
+              targetServiceUUIDs:
+                backends.map(\.serviceUUID).sorted(),
+              targetPort: backend.port,
+              backends: backends
+            )
+          ]
+        )
+      ]
+    )
+    defer { broker.remove(identity: identity()) }
+
+    let response = try request(
+      port: ingressPort,
+      request:
+        "POST /v1 HTTP/1.1\r\n"
+        + "Host: api.internal\r\n"
+        + "Content-Length: 0\r\n\r\n"
+    )
+    XCTAssertTrue(
+      response.hasPrefix("HTTP/1.1 502 Bad Gateway"),
+      response
+    )
+    XCTAssertEqual(
+      finished.wait(timeout: .now() + 2),
+      .success
+    )
+    XCTAssertEqual(
+      retried.wait(timeout: .now()),
+      .timedOut
+    )
+  }
+
   func testMultiListenerReloadPublishesOneImmutableGeneration() throws {
     let oldFirst = try makeServer()
     let oldSecond = try makeServer()
@@ -1631,6 +1783,65 @@ private func serveOnce(
     _ = receiveUntilHeaders(connection)
     _ = response.withCString { pointer in
       Darwin.send(connection, pointer, strlen(pointer), 0)
+    }
+  }
+}
+
+private func serveStallThenRespond(
+  _ listener: Int32,
+  response: String,
+  stallMilliseconds: UInt32,
+  firstFinished: DispatchSemaphore,
+  responseFinished: DispatchSemaphore
+) {
+  DispatchQueue.global(qos: .userInitiated).async {
+    defer { responseFinished.signal() }
+    for attempt in 0..<2 {
+      guard waitForReadable(listener, milliseconds: 5_000)
+      else {
+        return
+      }
+      let connection = Darwin.accept(listener, nil, nil)
+      guard connection >= 0 else { return }
+      _ = receiveUntilHeaders(connection)
+      if attempt == 0 {
+        firstFinished.signal()
+        usleep(stallMilliseconds * 1_000)
+        Darwin.close(connection)
+        continue
+      }
+      _ = response.withCString { pointer in
+        Darwin.send(connection, pointer, strlen(pointer), 0)
+      }
+      Darwin.close(connection)
+    }
+  }
+}
+
+private func serveCloseAndDetectRetry(
+  _ listener: Int32,
+  retried: DispatchSemaphore,
+  finished: DispatchSemaphore
+) {
+  DispatchQueue.global(qos: .userInitiated).async {
+    defer { finished.signal() }
+    guard waitForReadable(listener, milliseconds: 5_000)
+    else {
+      return
+    }
+    let first = Darwin.accept(listener, nil, nil)
+    guard first >= 0 else { return }
+    _ = receiveUntilHeaders(first)
+    Darwin.close(first)
+
+    guard waitForReadable(listener, milliseconds: 500)
+    else {
+      return
+    }
+    let second = Darwin.accept(listener, nil, nil)
+    if second >= 0 {
+      retried.signal()
+      Darwin.close(second)
     }
   }
 }

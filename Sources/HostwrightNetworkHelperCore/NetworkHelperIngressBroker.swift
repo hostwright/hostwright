@@ -902,6 +902,12 @@ enum NetworkHelperIngressHTTPParser {
 final class NetworkHelperIngressListener:
   @unchecked Sendable
 {
+  private enum InitialRelayResult {
+    case forwarded
+    case upstreamFailed
+    case clientFailed
+  }
+
   private static let maximumConnections = 128
   private static let maximumChunkBytes = 64 * 1_024
   private static let connectTimeoutMilliseconds: Int64 = 5_000
@@ -1235,82 +1241,94 @@ final class NetworkHelperIngressListener:
     let connectionDeadline =
       Self.monotonicMilliseconds()
       + Self.connectTimeoutMilliseconds
-    var upstream: Int32 = -1
-    var selectedBackend: ProjectIngressBackend?
+    let mayRetry = Self.mayRetry(request)
+    var failedBackend: ProjectIngressBackend?
     for (index, backend) in ordered.enumerated() {
       let remaining =
         connectionDeadline - Self.monotonicMilliseconds()
       guard remaining > 0 else { break }
       let attemptsRemaining = Int64(ordered.count - index)
-      if let connected = try? connect(
+      guard let upstream = try? connect(
         backend,
         client: client,
         timeoutMilliseconds:
           max(1, remaining / attemptsRemaining)
-      ) {
-        upstream = connected
-        selectedBackend = backend
+      ) else {
+        failedBackend = backend
+        continue
+      }
+      failedBackend = backend
+      let responseRemaining =
+        connectionDeadline - Self.monotonicMilliseconds()
+      let attemptDeadline =
+        mayRetry
+        ? Self.monotonicMilliseconds()
+          + max(1, responseRemaining / attemptsRemaining)
+        : connectionDeadline
+      guard Self.writeRequest(
+        request,
+        descriptor: upstream,
+        deadlineMilliseconds: attemptDeadline
+      ) else {
+        closeTrackedDescriptor(upstream, client: client)
+        if mayRetry { continue }
         break
       }
-    }
-    guard upstream >= 0 else {
-      Self.writeError(
-        client,
-        status: 502,
-        reason: "Bad Gateway"
-      )
-      record(
-        listenerName: listenerName,
-        request: request,
-        route: route,
-        backend: nil,
-        outcome: .upstreamFailed,
-        started: started
-      )
-      return
-    }
-    defer {
-      closeTrackedDescriptor(
-        upstream,
-        client: client
-      )
-    }
-    guard
-      Self.writeRequest(
-        request,
-        descriptor: upstream
-      )
-    else {
-      Self.writeError(
-        client,
-        status: 502,
-        reason: "Bad Gateway"
-      )
-      record(
-        listenerName: listenerName,
-        request: request,
-        route: route,
-        backend: selectedBackend,
-        outcome: .upstreamFailed,
-        started: started
-      )
-      return
-    }
-    if request.isWebSocket {
-      Self.bridgeWebSocket(client, upstream)
-    } else {
-      _ = Darwin.shutdown(upstream, SHUT_WR)
-      Self.relayHTTPResponse(
+      if !request.isWebSocket {
+        _ = Darwin.shutdown(upstream, SHUT_WR)
+      }
+      switch Self.relayFirstUpstreamChunk(
         from: upstream,
-        to: client
-      )
+        to: client,
+        deadlineMilliseconds: attemptDeadline
+      ) {
+      case .forwarded:
+        if request.isWebSocket {
+          Self.bridgeWebSocket(client, upstream)
+        } else {
+          Self.relayHTTPResponse(
+            from: upstream,
+            to: client
+          )
+        }
+        closeTrackedDescriptor(upstream, client: client)
+        record(
+          listenerName: listenerName,
+          request: request,
+          route: route,
+          backend: backend,
+          outcome: .forwarded,
+          started: started
+        )
+        return
+      case .upstreamFailed:
+        closeTrackedDescriptor(upstream, client: client)
+        if mayRetry { continue }
+      case .clientFailed:
+        closeTrackedDescriptor(upstream, client: client)
+        record(
+          listenerName: listenerName,
+          request: request,
+          route: route,
+          backend: backend,
+          outcome: .upstreamFailed,
+          started: started
+        )
+        return
+      }
+      break
     }
+    Self.writeError(
+      client,
+      status: 502,
+      reason: "Bad Gateway"
+    )
     record(
       listenerName: listenerName,
       request: request,
       route: route,
-      backend: selectedBackend,
-      outcome: .forwarded,
+      backend: failedBackend,
+      outcome: .upstreamFailed,
       started: started
     )
   }
@@ -1592,7 +1610,8 @@ final class NetworkHelperIngressListener:
 
   private static func writeRequest(
     _ request: NetworkHelperIngressHTTPRequest,
-    descriptor: Int32
+    descriptor: Int32,
+    deadlineMilliseconds: Int64
   ) -> Bool {
     var lines = [
       "\(request.method) \(request.target) HTTP/1.1"
@@ -1610,7 +1629,23 @@ final class NetworkHelperIngressListener:
       Data(
         (lines.joined(separator: "\r\n") + "\r\n\r\n").utf8
       ) + request.body
-    return writeAll(descriptor, data: data)
+    return writeAll(
+      descriptor,
+      data: data,
+      deadlineMilliseconds: deadlineMilliseconds
+    )
+  }
+
+  private static func mayRetry(
+    _ request: NetworkHelperIngressHTTPRequest
+  ) -> Bool {
+    guard !request.isWebSocket else { return false }
+    switch request.method {
+    case "GET", "HEAD", "OPTIONS":
+      return true
+    default:
+      return false
+    }
   }
 
   private func connect(
@@ -1765,6 +1800,66 @@ final class NetworkHelperIngressListener:
     }
   }
 
+  private static func relayFirstUpstreamChunk(
+    from source: Int32,
+    to destination: Int32,
+    deadlineMilliseconds: Int64
+  ) -> InitialRelayResult {
+    var descriptor = pollfd(
+      fd: source,
+      events: Int16(POLLIN),
+      revents: 0
+    )
+    var buffer = [UInt8](
+      repeating: 0,
+      count: maximumChunkBytes
+    )
+    while monotonicMilliseconds() < deadlineMilliseconds {
+      descriptor.revents = 0
+      let remaining =
+        deadlineMilliseconds - monotonicMilliseconds()
+      let ready = Darwin.poll(
+        &descriptor,
+        1,
+        Int32(min(remaining, 100))
+      )
+      if ready < 0 {
+        if errno == EINTR { continue }
+        return .upstreamFailed
+      }
+      if ready == 0 { continue }
+      if descriptor.revents & Int16(POLLIN) != 0 {
+        let count = Darwin.recv(
+          source,
+          &buffer,
+          buffer.count,
+          0
+        )
+        if count < 0,
+          errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR
+        {
+          continue
+        }
+        guard count > 0 else {
+          return .upstreamFailed
+        }
+        return writeAll(
+          destination,
+          data: Data(buffer[0..<count]),
+          deadlineMilliseconds: deadlineMilliseconds
+        )
+          ? .forwarded
+          : .clientFailed
+      }
+      if descriptor.revents
+        & Int16(POLLERR | POLLHUP | POLLNVAL) != 0
+      {
+        return .upstreamFailed
+      }
+    }
+    return .upstreamFailed
+  }
+
   private static func relayHTTPResponse(
     from source: Int32,
     to destination: Int32
@@ -1835,9 +1930,12 @@ final class NetworkHelperIngressListener:
 
   private static func writeAll(
     _ descriptor: Int32,
-    data: Data
+    data: Data,
+    deadlineMilliseconds: Int64? = nil
   ) -> Bool {
-    let deadline = monotonicMilliseconds() + idleTimeoutMilliseconds
+    let deadline =
+      deadlineMilliseconds
+      ?? monotonicMilliseconds() + idleTimeoutMilliseconds
     var offset = 0
     return data.withUnsafeBytes { bytes in
       guard let base = bytes.baseAddress else {

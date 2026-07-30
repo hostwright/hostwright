@@ -79,99 +79,75 @@ struct NetworkHelperDispatcher: @unchecked Sendable {
                     allowCertificateAcquisition: true
                 )
             case .status:
-                let persisted = try store.status(
+                if try store.hasPreparedRemoval(
                     identity: request.identity
-                )
-                if persisted.disposition == .active {
-                    let hostAccessBindings = try store
-                        .activeHostAccessConfigurations()
-                        .first(where: {
-                            $0.identity == request.identity
-                        })?.bindings ?? []
-                    let ingressBindings = try store
-                        .activeIngressConfigurations()
-                        .first(where: {
-                            $0.identity == request.identity
-                        })?.bindings ?? []
-                    let certificateBindings = try store
-                        .activeCertificateConfigurations()
-                        .first(where: {
-                            $0.identity == request.identity
-                        })?.bindings ?? []
-                    let policyPlan = try store
-                        .activePolicyConfigurations()
-                        .first(where: {
-                            $0.identity == request.identity
-                        })?.plan
-                    status = try activatingStatus(
-                        persisted,
-                        identity: request.identity,
-                        hostAccessBindings: hostAccessBindings,
-                        ingressBindings: ingressBindings,
-                        certificateBindings: certificateBindings,
-                        policyPlan: policyPlan,
-                        allowCertificateAcquisition: false
+                ) {
+                    status = try completePreparedRemoval(
+                        identity: request.identity
                     )
                 } else {
-                    status = withActivity(
-                        persisted,
-                        hostAccessActive: false,
-                        ingressActive: false,
-                        certificateActive: false,
-                        policyActive: false
+                    let persisted = try store.status(
+                        identity: request.identity
                     )
+                    if persisted.disposition == .active {
+                        let hostAccessBindings = try store
+                            .activeHostAccessConfigurations()
+                            .first(where: {
+                                $0.identity == request.identity
+                            })?.bindings ?? []
+                        let ingressBindings = try store
+                            .activeIngressConfigurations()
+                            .first(where: {
+                                $0.identity == request.identity
+                            })?.bindings ?? []
+                        let certificateBindings = try store
+                            .activeCertificateConfigurations()
+                            .first(where: {
+                                $0.identity == request.identity
+                            })?.bindings ?? []
+                        let policyPlan = try store
+                            .activePolicyConfigurations()
+                            .first(where: {
+                                $0.identity == request.identity
+                            })?.plan
+                        status = try activatingStatus(
+                            persisted,
+                            identity: request.identity,
+                            hostAccessBindings: hostAccessBindings,
+                            ingressBindings: ingressBindings,
+                            certificateBindings: certificateBindings,
+                            policyPlan: policyPlan,
+                            allowCertificateAcquisition: false
+                        )
+                    } else {
+                        status = withActivity(
+                            persisted,
+                            hostAccessActive: false,
+                            ingressActive: false,
+                            certificateActive: false,
+                            policyActive: false
+                        )
+                    }
                 }
             case .remove:
-                let persisted = try store.status(
+                if try !store.hasPreparedRemoval(
                     identity: request.identity
-                )
-                guard persisted.disposition == .active else {
-                    if persisted.disposition == .quarantined {
-                        throw NetworkHelperError.quarantined
+                ) {
+                    let persisted = try store.status(
+                        identity: request.identity
+                    )
+                    guard persisted.disposition == .active else {
+                        if persisted.disposition == .quarantined {
+                            throw NetworkHelperError.quarantined
+                        }
+                        throw NetworkHelperError.conflict
                     }
-                    throw NetworkHelperError.conflict
-                }
-                let evidence = try store.certificateEvidence(
-                    identity: request.identity
-                )
-                let retired = try store.retiredCertificateEvidence(
-                    identity: request.identity
-                )
-                let certificateBindings = try store
-                    .activeCertificateConfigurations()
-                    .first(where: {
-                        $0.identity == request.identity
-                    })?.bindings ?? []
-                let removed = try store.remove(
-                    identity: request.identity
-                )
-                ingressBroker.remove(identity: request.identity)
-                policyBroker.remove(identity: request.identity)
-                hostAccessBroker.remove(identity: request.identity)
-                if let evidence {
-                    try certificateCoordinator.cleanup(
-                        identity: request.identity,
-                        evidence: evidence
-                    )
-                } else {
-                    try certificateCoordinator
-                        .cleanupUnrecordedManagedIdentities(
-                            identity: request.identity,
-                            bindings: certificateBindings
-                        )
-                }
-                if let retired {
-                    try certificateCoordinator.cleanup(
-                        identity: retired.identity,
-                        evidence: retired
+                    try store.prepareRemoval(
+                        identity: request.identity
                     )
                 }
-                status = withActivity(
-                    removed,
-                    hostAccessActive: false,
-                    ingressActive: false,
-                    certificateActive: false,
-                    policyActive: false
+                status = try completePreparedRemoval(
+                    identity: request.identity
                 )
             case .providerInvoke:
                 guard let providerCoordinator,
@@ -317,6 +293,53 @@ struct NetworkHelperDispatcher: @unchecked Sendable {
                 )
             )
         }
+    }
+
+    private func completePreparedRemoval(
+        identity: NetworkHelperDNSIdentity
+    ) throws -> NetworkHelperStatus {
+        let evidence = try store.certificateEvidence(
+            identity: identity
+        )
+        let retired = try store.retiredCertificateEvidence(
+            identity: identity
+        )
+        let certificateBindings =
+            try store.persistedCertificateBindings(
+                identity: identity
+            )
+
+        ingressBroker.remove(identity: identity)
+        policyBroker.remove(identity: identity)
+        hostAccessBroker.remove(identity: identity)
+        if let evidence {
+            try certificateCoordinator.cleanup(
+                identity: identity,
+                evidence: evidence
+            )
+        } else {
+            try certificateCoordinator
+                .cleanupUnrecordedManagedIdentities(
+                    identity: identity,
+                    bindings: certificateBindings
+                )
+        }
+        if let retired {
+            try certificateCoordinator.cleanup(
+                identity: retired.identity,
+                evidence: retired
+            )
+        }
+        let removed = try store.commitPreparedRemoval(
+            identity: identity
+        )
+        return withActivity(
+            removed,
+            hostAccessActive: false,
+            ingressActive: false,
+            certificateActive: false,
+            policyActive: false
+        )
     }
 
     private func activatingStatus(

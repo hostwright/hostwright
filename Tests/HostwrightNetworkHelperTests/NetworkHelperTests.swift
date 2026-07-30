@@ -1970,6 +1970,72 @@ final class NetworkHelperTests: XCTestCase {
         }
     }
 
+    func testDispatcherRetriesPreparedRemovalAfterCommitFailure() throws {
+        let backend = try makeLoopbackTCPServer()
+        defer { Darwin.close(backend.descriptor) }
+        let ingressReservation = try makeLoopbackTCPServer()
+        let ingressPort = ingressReservation.port
+        Darwin.close(ingressReservation.descriptor)
+
+        try withStore { store, root in
+            let broker = NetworkHelperIngressBroker()
+            let dispatcher = NetworkHelperDispatcher(
+                store: store,
+                ingressBroker: broker
+            )
+            let activeIdentity = identity()
+            _ = try dispatch(
+                dispatcher,
+                NetworkHelperRequest(
+                    operation: .apply,
+                    identity: activeIdentity,
+                    corefile: corefile(),
+                    ingressBindings: [
+                        ingressBinding(
+                            port: ingressPort,
+                            backendPort: backend.port
+                        )
+                    ]
+                )
+            )
+            XCTAssertTrue(broker.hasActiveBindings)
+            try store.prepareRemoval(identity: activeIdentity)
+            broker.remove(identity: activeIdentity)
+            XCTAssertFalse(broker.hasActiveBindings)
+
+            let dnsRoot = root
+                .appendingPathComponent(projectUUID)
+                .appendingPathComponent(dnsUUID)
+            XCTAssertEqual(chmod(dnsRoot.path, 0o500), 0)
+            XCTAssertThrowsError(
+                try store.commitPreparedRemoval(
+                    identity: activeIdentity
+                )
+            )
+            XCTAssertEqual(chmod(dnsRoot.path, 0o700), 0)
+            XCTAssertTrue(
+                try store.activeIngressConfigurations().isEmpty
+            )
+            XCTAssertEqual(
+                try store.status(identity: activeIdentity).disposition,
+                .active
+            )
+            let recovered = try dispatch(
+                dispatcher,
+                NetworkHelperRequest(
+                    operation: .status,
+                    identity: activeIdentity
+                )
+            )
+            XCTAssertNil(recovered.error)
+            XCTAssertEqual(recovered.status?.disposition, .absent)
+            XCTAssertFalse(broker.hasActiveBindings)
+            XCTAssertFalse(
+                FileManager.default.fileExists(atPath: dnsRoot.path)
+            )
+        }
+    }
+
     func testDispatcherStatusReplaysPersistedIngressAfterBrokerRestart()
         throws
     {

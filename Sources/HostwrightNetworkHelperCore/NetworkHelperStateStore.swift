@@ -485,6 +485,11 @@ final class NetworkHelperStateStore: @unchecked Sendable {
 
         try recoverLocked()
         let dnsRoot = try ensureDNSRoot(for: identity)
+        guard !fileManager.fileExists(
+            atPath: preparedRemovalURL(dnsRoot: dnsRoot).path
+        ) else {
+            throw NetworkHelperError.conflict
+        }
         let current = try currentStatusLocked(
             requestedIdentity: identity,
             dnsRoot: dnsRoot
@@ -622,19 +627,14 @@ final class NetworkHelperStateStore: @unchecked Sendable {
         )
     }
 
-    func remove(identity: NetworkHelperDNSIdentity) throws -> NetworkHelperStatus {
+    func prepareRemoval(identity: NetworkHelperDNSIdentity) throws {
         lock.lock()
         defer { lock.unlock() }
         let identity = try identity.validated()
         try recoverLocked()
         let dnsRoot = dnsRootURL(for: identity)
         guard fileManager.fileExists(atPath: dnsRoot.path) else {
-            return NetworkHelperStatus(
-                disposition: .absent,
-                identity: nil,
-                corefileSHA256: nil,
-                reason: nil
-            )
+            return
         }
 
         let status = try currentStatusLocked(
@@ -653,16 +653,89 @@ final class NetworkHelperStateStore: @unchecked Sendable {
             dnsUUID: identity.dnsUUID
         )
 
-        let markerURL = dnsRoot.appendingPathComponent(
-            "removal.json",
-            isDirectory: false
-        )
+        let markerURL = preparedRemovalURL(dnsRoot: dnsRoot)
+        if fileManager.fileExists(atPath: markerURL.path) {
+            let marker: NetworkHelperRemovalMarker = try loadCanonical(
+                NetworkHelperRemovalMarker.self,
+                from: markerURL
+            )
+            guard marker.schemaVersion == 1,
+                  marker.projectUUID == identity.projectUUID,
+                  marker.dnsUUID == identity.dnsUUID else {
+                throw NetworkHelperError.quarantined
+            }
+            return
+        }
         try writeExclusive(
             try NetworkHelperCanonicalJSON.encode(
                 NetworkHelperRemovalMarker(identity: identity)
             ),
             to: markerURL
         )
+        try synchronizeDirectory(dnsRoot)
+    }
+
+    func hasPreparedRemoval(
+        identity: NetworkHelperDNSIdentity
+    ) throws -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        let identity = try identity.validated()
+        try recoverLocked()
+        let dnsRoot = dnsRootURL(for: identity)
+        guard fileManager.fileExists(atPath: dnsRoot.path) else {
+            return false
+        }
+        let markerURL = preparedRemovalURL(dnsRoot: dnsRoot)
+        guard fileManager.fileExists(atPath: markerURL.path) else {
+            return false
+        }
+        let marker: NetworkHelperRemovalMarker = try loadCanonical(
+            NetworkHelperRemovalMarker.self,
+            from: markerURL
+        )
+        guard marker.schemaVersion == 1,
+              marker.projectUUID == identity.projectUUID,
+              marker.dnsUUID == identity.dnsUUID else {
+            throw NetworkHelperError.quarantined
+        }
+        return true
+    }
+
+    func commitPreparedRemoval(
+        identity: NetworkHelperDNSIdentity
+    ) throws -> NetworkHelperStatus {
+        lock.lock()
+        defer { lock.unlock() }
+        let identity = try identity.validated()
+        try recoverLocked()
+        let dnsRoot = dnsRootURL(for: identity)
+        guard fileManager.fileExists(atPath: dnsRoot.path) else {
+            return NetworkHelperStatus(
+                disposition: .absent,
+                identity: nil,
+                corefileSHA256: nil,
+                reason: nil
+            )
+        }
+        let markerURL = preparedRemovalURL(dnsRoot: dnsRoot)
+        let marker: NetworkHelperRemovalMarker = try loadCanonical(
+            NetworkHelperRemovalMarker.self,
+            from: markerURL
+        )
+        guard marker.schemaVersion == 1,
+              marker.projectUUID == identity.projectUUID,
+              marker.dnsUUID == identity.dnsUUID else {
+            throw NetworkHelperError.quarantined
+        }
+        let committedMarkerURL = dnsRoot.appendingPathComponent(
+            "removal.json",
+            isDirectory: false
+        )
+        guard rename(markerURL.path, committedMarkerURL.path) == 0 else {
+            throw NetworkHelperError.ioFailure
+        }
+        try synchronizeDirectory(dnsRoot)
 
         let projectRoot = dnsRoot.deletingLastPathComponent()
         let removingURL = projectRoot.appendingPathComponent(
@@ -672,6 +745,7 @@ final class NetworkHelperStateStore: @unchecked Sendable {
         guard rename(dnsRoot.path, removingURL.path) == 0 else {
             throw NetworkHelperError.ioFailure
         }
+        try synchronizeDirectory(projectRoot)
         try finishRemoval(at: removingURL)
         try removeDirectoryIfEmpty(projectRoot)
         return NetworkHelperStatus(
@@ -680,6 +754,11 @@ final class NetworkHelperStateStore: @unchecked Sendable {
             corefileSHA256: nil,
             reason: nil
         )
+    }
+
+    func remove(identity: NetworkHelperDNSIdentity) throws -> NetworkHelperStatus {
+        try prepareRemoval(identity: identity)
+        return try commitPreparedRemoval(identity: identity)
     }
 
     func recover() throws {
@@ -701,6 +780,9 @@ final class NetworkHelperStateStore: @unchecked Sendable {
             for dnsRoot in try safeDirectoryContents(at: projectURL) {
                 guard Self.isCanonicalUUID(
                     dnsRoot.lastPathComponent
+                ),
+                !fileManager.fileExists(
+                    atPath: preparedRemovalURL(dnsRoot: dnsRoot).path
                 ) else {
                     continue
                 }
@@ -764,7 +846,10 @@ final class NetworkHelperStateStore: @unchecked Sendable {
         var result: [NetworkHelperPersistedIngressConfiguration] = []
         for projectURL in try safeDirectoryContents(at: rootURL) {
             for dnsRoot in try safeDirectoryContents(at: projectURL) {
-                guard Self.isCanonicalUUID(dnsRoot.lastPathComponent) else {
+                guard Self.isCanonicalUUID(dnsRoot.lastPathComponent),
+                      !fileManager.fileExists(
+                        atPath: preparedRemovalURL(dnsRoot: dnsRoot).path
+                      ) else {
                     continue
                 }
                 let pointerURL = dnsRoot.appendingPathComponent("current.json")
@@ -807,6 +892,12 @@ final class NetworkHelperStateStore: @unchecked Sendable {
         var result: [NetworkHelperPersistedCertificateConfiguration] = []
         for projectURL in try safeDirectoryContents(at: rootURL) {
             for dnsRoot in try safeDirectoryContents(at: projectURL) {
+                guard Self.isCanonicalUUID(dnsRoot.lastPathComponent),
+                      !fileManager.fileExists(
+                        atPath: preparedRemovalURL(dnsRoot: dnsRoot).path
+                      ) else {
+                    continue
+                }
                 let pointerURL = dnsRoot.appendingPathComponent("current.json")
                 guard fileManager.fileExists(atPath: pointerURL.path) else { continue }
                 let pointer: NetworkHelperCurrentPointer = try loadCanonical(NetworkHelperCurrentPointer.self, from: pointerURL)
@@ -820,6 +911,32 @@ final class NetworkHelperStateStore: @unchecked Sendable {
         return result.sorted { ($0.identity.projectUUID, $0.identity.dnsUUID) < ($1.identity.projectUUID, $1.identity.dnsUUID) }
     }
 
+    func persistedCertificateBindings(
+        identity: NetworkHelperDNSIdentity
+    ) throws -> [ProjectCertificateRequestBinding] {
+        lock.lock()
+        defer { lock.unlock() }
+        let identity = try identity.validated()
+        try recoverLocked()
+        let dnsRoot = dnsRootURL(for: identity)
+        guard fileManager.fileExists(atPath: dnsRoot.path) else {
+            return []
+        }
+        let status = try currentStatusLocked(
+            requestedIdentity: identity,
+            dnsRoot: dnsRoot
+        )
+        guard status.disposition == .active else {
+            throw status.disposition == .quarantined
+                ? NetworkHelperError.quarantined
+                : NetworkHelperError.conflict
+        }
+        return try certificateBindings(
+            dnsRoot: dnsRoot,
+            expectedSHA256: status.certificateSHA256
+        )
+    }
+
     func activePolicyConfigurations() throws
         -> [NetworkHelperPersistedPolicyConfiguration]
     {
@@ -829,6 +946,12 @@ final class NetworkHelperStateStore: @unchecked Sendable {
         var result: [NetworkHelperPersistedPolicyConfiguration] = []
         for projectURL in try safeDirectoryContents(at: rootURL) {
             for dnsRoot in try safeDirectoryContents(at: projectURL) {
+                guard Self.isCanonicalUUID(dnsRoot.lastPathComponent),
+                      !fileManager.fileExists(
+                        atPath: preparedRemovalURL(dnsRoot: dnsRoot).path
+                      ) else {
+                    continue
+                }
                 let pointerURL = dnsRoot.appendingPathComponent("current.json")
                 guard fileManager.fileExists(atPath: pointerURL.path) else {
                     continue
@@ -2713,7 +2836,8 @@ final class NetworkHelperStateStore: @unchecked Sendable {
             "certificate-pending.json",
             "certificate-retired.json",
             "current.json",
-            "generations"
+            "generations",
+            "removal-intent.json"
         ])
         let rootEntries = try safeDirectoryContents(at: dnsRoot)
         guard Set(rootEntries.map(\.lastPathComponent))
@@ -2784,6 +2908,13 @@ final class NetworkHelperStateStore: @unchecked Sendable {
             }
             try removeGenerationDirectory(entry)
         }
+    }
+
+    private func preparedRemovalURL(dnsRoot: URL) -> URL {
+        dnsRoot.appendingPathComponent(
+            "removal-intent.json",
+            isDirectory: false
+        )
     }
 
     private func finishRemoval(at removalURL: URL) throws {

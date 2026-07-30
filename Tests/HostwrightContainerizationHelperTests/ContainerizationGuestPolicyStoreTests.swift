@@ -48,6 +48,17 @@ final class ContainerizationGuestPolicyStoreTests: XCTestCase {
             )
         )
         XCTAssertEqual(persistedRequest, request)
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                ContainerizationGuestNetworkPolicyLoaderRequest.self,
+                from: Data(
+                    contentsOf: share.appendingPathComponent(
+                        "network-policy.json"
+                    )
+                )
+            ),
+            request
+        )
         XCTAssertEqual(try mode(share), 0o700)
         XCTAssertEqual(
             try mode(
@@ -58,6 +69,12 @@ final class ContainerizationGuestPolicyStoreTests: XCTestCase {
         XCTAssertEqual(
             try mode(
                 share.appendingPathComponent("bootstrap-policy.json")
+            ),
+            0o400
+        )
+        XCTAssertEqual(
+            try mode(
+                share.appendingPathComponent("network-policy.json")
             ),
             0o400
         )
@@ -139,6 +156,107 @@ final class ContainerizationGuestPolicyStoreTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: requestURL), before)
     }
 
+    func testRepeatedUpdatePreservesRequestFileInode() throws {
+        let parent = try makePrivateParent()
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let store = try ContainerizationGuestPolicyStore(
+            rootURL: parent.appendingPathComponent(
+                "guest-policies",
+                isDirectory: true
+            ),
+            asset: ContainerizationGuestPolicyAsset(
+                validatedData: Data("loader".utf8)
+            )
+        )
+        let bootstrap = ContainerizationGuestNetworkPolicyLoaderRequest(
+            operation: .apply,
+            policy: try policy(generation: 1)
+        )
+        let share = try store.prepareShare(
+            resourceIdentifier: "project-api-1",
+            request: bootstrap
+        )
+        let requestURL = share.appendingPathComponent(
+            "network-policy.json"
+        )
+        let inodeBefore = try inode(requestURL)
+        let first = ContainerizationGuestNetworkPolicyLoaderRequest(
+            operation: .apply,
+            policy: try policy(generation: 2, port: 8443)
+        )
+        try store.writeUpdateRequest(
+            first,
+            resourceIdentifier: "project-api-1"
+        )
+        XCTAssertEqual(try inode(requestURL), inodeBefore)
+
+        let second = ContainerizationGuestNetworkPolicyLoaderRequest(
+            operation: .remove,
+            policy: try policy(generation: 3, port: 9443)
+        )
+        try store.writeUpdateRequest(
+            second,
+            resourceIdentifier: "project-api-1"
+        )
+
+        XCTAssertEqual(try inode(requestURL), inodeBefore)
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                ContainerizationGuestNetworkPolicyLoaderRequest.self,
+                from: Data(contentsOf: requestURL)
+            ),
+            second
+        )
+        XCTAssertEqual(try mode(requestURL), 0o400)
+    }
+
+    func testUpdateRefusesReplacedRequestPath() throws {
+        let parent = try makePrivateParent()
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let store = try ContainerizationGuestPolicyStore(
+            rootURL: parent.appendingPathComponent(
+                "guest-policies",
+                isDirectory: true
+            ),
+            asset: ContainerizationGuestPolicyAsset(
+                validatedData: Data("loader".utf8)
+            )
+        )
+        let share = try store.prepareShare(
+            resourceIdentifier: "project-api-1",
+            request: ContainerizationGuestNetworkPolicyLoaderRequest(
+                operation: .apply,
+                policy: try policy(generation: 1)
+            )
+        )
+        let requestURL = share.appendingPathComponent(
+            "network-policy.json"
+        )
+        XCTAssertEqual(unlink(requestURL.path), 0)
+        XCTAssertEqual(symlink("/etc/passwd", requestURL.path), 0)
+
+        XCTAssertThrowsError(
+            try store.writeUpdateRequest(
+                ContainerizationGuestNetworkPolicyLoaderRequest(
+                    operation: .apply,
+                    policy: try policy(generation: 2)
+                ),
+                resourceIdentifier: "project-api-1"
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? ContainerizationGuestPolicyStoreError,
+                .unsafeFile
+            )
+        }
+        XCTAssertEqual(
+            try FileManager.default.destinationOfSymbolicLink(
+                atPath: requestURL.path
+            ),
+            "/etc/passwd"
+        )
+    }
+
     func testRemovalRefusesUnexpectedFiles() throws {
         let parent = try makePrivateParent()
         defer { try? FileManager.default.removeItem(at: parent) }
@@ -217,5 +335,13 @@ final class ContainerizationGuestPolicyStoreTests: XCTestCase {
             throw ContainerizationGuestPolicyStoreError.operationFailed
         }
         return metadata.st_mode & 0o777
+    }
+
+    private func inode(_ url: URL) throws -> UInt64 {
+        var metadata = stat()
+        guard lstat(url.path, &metadata) == 0 else {
+            throw ContainerizationGuestPolicyStoreError.operationFailed
+        }
+        return metadata.st_ino
     }
 }

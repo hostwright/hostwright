@@ -84,6 +84,11 @@ final class ContainerizationGuestPolicyStore: @unchecked Sendable {
             request,
             resourceIdentifier: resourceIdentifier
         )
+        try writeRequest(
+            request,
+            fileName: "network-policy.json",
+            resourceIdentifier: resourceIdentifier
+        )
         return directory
     }
 
@@ -313,6 +318,69 @@ final class ContainerizationGuestPolicyStore: @unchecked Sendable {
     ) throws {
         let directory = destination.deletingLastPathComponent()
         try requirePrivateDirectory(directory)
+        var existing = stat()
+        if lstat(destination.path, &existing) == 0 {
+            existing = try requirePrivateRegularFile(
+                destination,
+                exactMode: mode
+            )
+            let inspector = Darwin.open(
+                destination.path,
+                O_RDONLY | O_CLOEXEC | O_NOFOLLOW
+            )
+            guard inspector >= 0 else {
+                throw ContainerizationGuestPolicyStoreError.operationFailed
+            }
+            var restoreMode = false
+            defer {
+                if restoreMode {
+                    _ = fchmod(inspector, mode)
+                }
+                Darwin.close(inspector)
+            }
+            var inspected = stat()
+            guard fstat(inspector, &inspected) == 0,
+                  inspected.st_dev == existing.st_dev,
+                  inspected.st_ino == existing.st_ino,
+                  inspected.st_uid == existing.st_uid,
+                  inspected.st_nlink == existing.st_nlink,
+                  inspected.st_mode == existing.st_mode,
+                  fchmod(inspector, S_IRUSR | S_IWUSR) == 0 else {
+                throw ContainerizationGuestPolicyStoreError.unsafeFile
+            }
+            restoreMode = true
+            let writer = Darwin.open(
+                destination.path,
+                O_WRONLY | O_CLOEXEC | O_NOFOLLOW
+            )
+            guard writer >= 0 else {
+                throw ContainerizationGuestPolicyStoreError.operationFailed
+            }
+            defer { Darwin.close(writer) }
+            var opened = stat()
+            guard fstat(writer, &opened) == 0,
+                  opened.st_dev == inspected.st_dev,
+                  opened.st_ino == inspected.st_ino,
+                  opened.st_uid == inspected.st_uid,
+                  opened.st_nlink == inspected.st_nlink,
+                  opened.st_mode & S_IFMT == S_IFREG,
+                  opened.st_mode & 0o777 == (S_IRUSR | S_IWUSR),
+                  ftruncate(writer, 0) == 0 else {
+                throw ContainerizationGuestPolicyStoreError.operationFailed
+            }
+            try writeAll(data, to: writer)
+            guard fsync(writer) == 0,
+                  fchmod(writer, mode) == 0,
+                  fsync(writer) == 0 else {
+                throw ContainerizationGuestPolicyStoreError.operationFailed
+            }
+            restoreMode = false
+            try syncDirectory(directory)
+            return
+        }
+        guard errno == ENOENT else {
+            throw ContainerizationGuestPolicyStoreError.operationFailed
+        }
         let temporary = directory.appendingPathComponent(
             ".write-\(UUID().uuidString.lowercased())",
             isDirectory: false
@@ -332,6 +400,36 @@ final class ContainerizationGuestPolicyStore: @unchecked Sendable {
                 _ = unlink(temporary.path)
             }
         }
+        try writeAll(data, to: descriptor)
+        guard fsync(descriptor) == 0,
+              rename(temporary.path, destination.path) == 0 else {
+            throw ContainerizationGuestPolicyStoreError.operationFailed
+        }
+        removeTemporary = false
+        try syncDirectory(directory)
+    }
+
+    private static func requirePrivateRegularFile(
+        _ url: URL,
+        exactMode: mode_t
+    ) throws -> stat {
+        var metadata = stat()
+        guard lstat(url.path, &metadata) == 0,
+              metadata.st_mode & S_IFMT == S_IFREG,
+              metadata.st_uid == geteuid(),
+              metadata.st_nlink == 1,
+              metadata.st_mode & 0o777 == exactMode,
+              metadata.st_mode &
+                (S_IWGRP | S_IWOTH | S_ISUID | S_ISGID) == 0 else {
+            throw ContainerizationGuestPolicyStoreError.unsafeFile
+        }
+        return metadata
+    }
+
+    private static func writeAll(
+        _ data: Data,
+        to descriptor: Int32
+    ) throws {
         try data.withUnsafeBytes { bytes in
             var written = 0
             while written < bytes.count {
@@ -347,12 +445,6 @@ final class ContainerizationGuestPolicyStore: @unchecked Sendable {
                 written += result
             }
         }
-        guard fsync(descriptor) == 0,
-              rename(temporary.path, destination.path) == 0 else {
-            throw ContainerizationGuestPolicyStoreError.operationFailed
-        }
-        removeTemporary = false
-        try syncDirectory(directory)
     }
 
     private static func syncDirectory(_ url: URL) throws {

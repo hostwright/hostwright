@@ -1253,9 +1253,12 @@ private final class RuntimeStreamDelivery: @unchecked Sendable {
         group.enter()
         DispatchQueue.global(qos: .userInitiated).async { [self] in
             defer { group.leave() }
-            ready.signal()
             do {
-                while let envelope = try queue.dequeue() {
+                var isFirstDequeue = true
+                while let envelope = try queue.dequeue(
+                    onReady: isFirstDequeue ? { ready.signal() } : nil
+                ) {
+                    isFirstDequeue = false
                     try sink(envelope)
                 }
             } catch {

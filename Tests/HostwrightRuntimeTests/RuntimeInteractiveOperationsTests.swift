@@ -1159,6 +1159,42 @@ final class RuntimeInteractiveOperationsTests: XCTestCase {
         }
     }
 
+    func testStreamConsumerReadinessOwnsQueueBoundaryBeforeProducerStarts() async throws {
+        let queue = RuntimeStreamBackpressureQueue()
+        let consumerReady = expectation(description: "consumer owns queue boundary")
+        let releaseConsumer = DispatchSemaphore(value: 0)
+        let producerStarted = expectation(description: "producer started")
+        let producerFinished = LockedBoolean()
+        let frame = try RuntimeStreamEnvelope(
+            sequence: 0,
+            stream: .standardOutput,
+            payload: Data("ready".utf8),
+            endOfStream: false
+        )
+
+        let consumer = Task.detached {
+            try queue.dequeue {
+                consumerReady.fulfill()
+                releaseConsumer.wait()
+            }
+        }
+        await fulfillment(of: [consumerReady], timeout: 5)
+
+        let producer = Task.detached {
+            producerStarted.fulfill()
+            try queue.enqueueWithoutWaiting(frame)
+            producerFinished.setTrue()
+        }
+        await fulfillment(of: [producerStarted], timeout: 5)
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertFalse(producerFinished.value)
+        releaseConsumer.signal()
+        let consumed = try await consumer.value
+        XCTAssertEqual(consumed, frame)
+        try await producer.value
+        XCTAssertTrue(producerFinished.value)
+    }
+
     func testPOSIXRunnerStreamsBinaryInputAndClosesStdin() async throws {
         let control = RuntimeInteractiveProcessControl()
         let input = Data([0x00, 0xff, 0x41, 0x0a])
@@ -1554,6 +1590,19 @@ private final class LockedFrames: @unchecked Sendable {
                 .filter { $0.stream == stream && !$0.endOfStream }
                 .reduce(into: Data()) { $0.append($1.payload) }
         }
+    }
+}
+
+private final class LockedBoolean: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage = false
+
+    func setTrue() {
+        lock.withLock { storage = true }
+    }
+
+    var value: Bool {
+        lock.withLock { storage }
     }
 }
 

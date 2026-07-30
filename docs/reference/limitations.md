@@ -6,9 +6,11 @@ Phase 02 qualification is complete. The immutable unsupported `v0.0.2-dev.11` an
 
 Phase 03 qualification is complete for Apple `container` 1.0.0 and 1.1.0 plus the exact Containerization 0.35.0 helper. The two providers share capability negotiation, deterministic observation, normalized outcomes, provider fencing/migration, and restart/upgrade recovery. Containerization is not linked into the main process.
 
-Phase 04 qualification is complete for the single-host capability subset each provider advertises. Strict Manifest v2, dependency/replica reconciliation, `up/down/run/start/stop/restart/rm/update`, typed probes, bounded interactive operations, rolling/recreate updates, verified rollback, and resumable recovery use the durable state saga, now at schema v15. Phase 05 image commands provide Apple CLI inspection, pull, push, tag, load, save, build, exact owned delete, and exact owned-unreferenced prune; the Containerization helper advertises image mutation as unavailable before effects. Lifecycle review resolves locally available image references to provider/platform-bound descriptor and variant locks, persists desired and observed evidence, and refuses tag or capability drift. OCI referrer discovery, graph verification, cache, copy/publication, fenced retention, offline reads, exact owned cleanup, exact offline Sigstore bundle v0.3 signature trust, bounded SPDX/CycloneDX image-SBOM generation and binding, exact signed vulnerability-report policy, and DSSE-wrapped in-toto/SLSA build-provenance generation and verification with lifecycle/recovery enforcement are available. Bounded provider-scoped cache accounting, operator and policy pins, cancellation-safe shared/exclusive leases, deterministic pressure plans, exact confirmation-bound owned-content pruning, and recovery accounting are also available.
+Phase 04 qualification is complete for the single-host capability subset each provider advertises. Strict Manifest v2, dependency/replica reconciliation, `up/down/run/start/stop/restart/rm/update`, typed probes, bounded interactive operations, rolling/recreate updates, verified rollback, and resumable recovery use the durable state saga, now at schema v16. Phase 05 image commands provide Apple CLI inspection, pull, push, tag, load, save, build, exact owned delete, and exact owned-unreferenced prune; the Containerization helper advertises image mutation as unavailable before effects. Lifecycle review resolves locally available image references to provider/platform-bound descriptor and variant locks, persists desired and observed evidence, and refuses tag or capability drift. OCI referrer discovery, graph verification, cache, copy/publication, fenced retention, offline reads, exact owned cleanup, exact offline Sigstore bundle v0.3 signature trust, bounded SPDX/CycloneDX image-SBOM generation and binding, exact signed vulnerability-report policy, and DSSE-wrapped in-toto/SLSA build-provenance generation and verification with lifecycle/recovery enforcement are available. Bounded provider-scoped cache accounting, operator and policy pins, cancellation-safe shared/exclusive leases, deterministic pressure plans, exact confirmation-bound owned-content pruning, and recovery accounting are also available.
 
-Phase 06 qualification is complete for exact Hostwright-owned persistent storage on one Mac. The built-in `hostwright-local` provider, one-shot Control parity, and schema-v15 state records now cover guarded bind/tmpfs mounts, named-volume lifecycle, attachment fencing, snapshots, verified online backup and restore, quota and pressure accounting, reclaim policy, and orphan quarantine/GC with exact cleanup. Hostwright still does not implement shared storage, custom networked volume systems, native/global/unmanaged garbage collection, or multi-host storage authority. This evidence does not make Hostwright GA or production ready.
+Phase 06 qualification is complete for exact Hostwright-owned persistent storage on one Mac. The built-in `hostwright-local` provider, one-shot Control parity, and current schema-v16 state records cover guarded bind/tmpfs mounts, named-volume lifecycle, attachment fencing, snapshots, verified online backup and restore, quota and pressure accounting, reclaim policy, and orphan quarantine/GC with exact cleanup. Hostwright still does not implement shared storage, custom networked volume systems, native/global/unmanaged garbage collection, or multi-host storage authority. This evidence does not make Hostwright GA or production ready.
+
+Phase 07 qualification is complete for the exact networking subset each provider advertises. Hostwright now qualifies UUID-owned project networks, deterministic project DNS and service aliases, structured TCP/UDP and Unix-socket publication, guarded host access, explicit LAN exposure, local TLS and mTLS ingress, fail-closed ingress/egress policy, authenticated service tunnels, and signed sandboxed network-provider modules through `hostwright-network-helper`. Unsupported providers or unavailable exposure modes fail before mutation; generic public relays, unmanaged DNS mutation, and a general plugin system remain outside scope.
 
 Permanent exclusions are limited to private Apple APIs, unsupported Intel/old-macOS emulation, unsafe writes without cluster quorum, silent telemetry, unauthenticated public exposure, and destructive garbage collection of unmanaged resources. Homebrew-core and direct guest accelerator constraints have implemented fallback tracks.
 
@@ -140,10 +142,10 @@ Hostwright is not production ready.
 - Cloud team service, central remote control, hosted audit log, user tracking, enterprise support workflow, remote policy distribution, macOS user/group/ACL management, MDM integration, or shared-secret management.
 - External telemetry, hosted diagnostics, automatic bundle upload, OSLog integration, or production support-bundle workflows.
 - Launch agent or service installer.
-- DNS behavior.
-- Service discovery, network alias, reverse proxy, or public exposure management.
-- Tunnel management.
-- Cloudflare Tunnel, Tailscale Serve/Funnel, WireGuard, mTLS provisioning, or reverse proxy setup.
+- arbitrary unmanaged DNS behavior.
+- Unmanaged host-wide service discovery, DNS, aliases, or reverse-proxy configuration.
+- General VPN, NetworkExtension, or arbitrary tunnel management.
+- Built-in Cloudflare Tunnel, Tailscale Serve/Funnel, or WireGuard setup; public exposure still requires an authenticated tunnel/provider path and exact policy.
 - Cloud control plane.
 - Kubernetes-class Apple silicon control plane.
 - Web dashboard.
@@ -170,8 +172,8 @@ Hostwright is not production ready.
 - External scheduler API compatibility.
 - Multi-Mac orchestration.
 - Remote host agents, membership service, peer discovery, state replication, remote mutation, remote placement, or scheduler API.
-- Local DNS resolver.
-- Cloudflare, Tailscale, WireGuard, or other tunnel integration.
+- arbitrary host-wide DNS resolver mutation.
+- built-in Cloudflare, Tailscale, WireGuard, or other third-party tunnel integration beyond the signed provider SPI and qualified first-party tunnel path.
 - Cloud control plane.
 - GPU/ANE scheduling.
 - Metal, Core ML, or MLX container support promises.

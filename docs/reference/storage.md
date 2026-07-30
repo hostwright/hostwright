@@ -1,6 +1,6 @@
 # Storage
 
-Hostwright manages persistent storage on one Mac through Storage Provider API v1 and schema-v15 state. The shipped provider ID is `hostwright-local`. It stores only Hostwright-owned data below:
+Hostwright manages persistent storage on one Mac through Storage Provider API v1 and current schema-v16 state. The shipped provider ID is `hostwright-local`. It stores only Hostwright-owned data below:
 
 ```text
 ~/Library/Application Support/Hostwright/storage/providers/hostwright-local
@@ -128,7 +128,7 @@ Pressure planning is deterministic and bounded. It protects active attachments, 
 
 `retain` is the default. Delete-class policies execute only after dependencies are detached and exact ownership, provider generation, resource generation, fencing, policy, and confirmation still match. `snapshot-before-delete` and `backup-before-delete` additionally require a fresh verified protection artifact.
 
-Orphan discovery compares schema-v15 authority, active durable operations, provider observation, ownership labels, holds, attachments, and tracked history. It classifies missing, leaked, modified, unknown, ambiguous, and unmanaged resources. Ambiguous or changed resources enter a safe hold; only aged, exact Hostwright-owned candidates enter a reclaim plan.
+Orphan discovery compares schema-v16 authority, active durable operations, provider observation, ownership labels, holds, attachments, and tracked history. It classifies missing, leaked, modified, unknown, ambiguous, and unmanaged resources. Ambiguous or changed resources enter a safe hold; only aged, exact Hostwright-owned candidates enter a reclaim plan.
 
 Use:
 

@@ -14,7 +14,7 @@ Hostwright does not provide generic plugin loading, installation, distribution, 
 - Third-party and untrusted declarations are blockers in current core scope.
 - Empty declarations fail closed instead of disappearing from policy output.
 
-Phase 33 remains a non-mutating declaration model. Phase 41 can execute only the fixed `hostwright-extension-handshake-v1` protocol operation; it does not send capability payloads or grant runtime, state, secret, networking, tunnel, accelerator, or control-plane access.
+Phase 33 remains a non-mutating declaration model. Phase 41 can execute only the fixed `hostwright-extension-handshake-v1` protocol operation; it does not send capability payloads or grant runtime, state, secret, networking, tunnel, accelerator, or control-plane access. Phase 07's signed, digest-bound Network Provider SPI is a separate restricted Wasm boundary inside `hostwright-network-helper`; it does not turn this general extension handshake into a plugin runtime.
 
 ## Executable Handshake Scope
 
@@ -41,8 +41,8 @@ A passing check proves only that the exact reviewed file completed this protocol
 | Control-surface integration | Declaration-only read integration can be allowed when it preserves local policy, redaction, audit, secure selected state paths, and no-runtime-mutation boundaries. |
 | Diagnostics integration | Declaration-only read/export integration can be allowed when it preserves `HostwrightState`, secure selected state paths, redaction, audit, local-only/no-upload, and no-runtime-mutation boundaries. |
 | Runtime adapter | Runtime observation declarations can be evaluated only as non-mutating paths behind `RuntimeAdapter`; runtime mutation remains unsupported for extensions. |
-| Networking provider | Current core blocks provider networking configuration. |
-| Tunnel provider | Current core blocks tunnels, DNS, reverse proxy setup, and public exposure. |
+| Networking provider | The general extension host blocks networking configuration; Phase 07 certificate/tunnel providers use the separate signed Network Provider SPI. |
+| Tunnel provider | The general extension host blocks tunnel authority; Phase 07's separate SPI grants only exact brokered origins, secret references, identities, and routes. |
 | Scheduler integration | Declaration-only scheduler advice can be allowed when it stays advisory, local, redacted, audited, and non-mutating. |
 | Future extension | Must fail closed until a separate issue defines capability, threat model, and proof. |
 
@@ -118,7 +118,7 @@ Controls in this phase:
 - Untrusted code execution.
 - Sandboxing or descendant-process containment guarantees.
 - Runtime mutation extension path.
-- Provider networking, DNS, tunnel, reverse proxy, or cloud exposure integration.
+- Provider networking, DNS, tunnel, reverse proxy, or cloud exposure integration through the general extension host.
 - Secret backend extension path.
 - Accelerator integration.
 - GUI implementation.

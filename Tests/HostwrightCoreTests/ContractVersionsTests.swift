@@ -103,7 +103,7 @@ final class ContractVersionsTests: XCTestCase {
         }) else {
             return XCTFail("Ingress capability is missing.")
         }
-        XCTAssertEqual(ingress.state, .experimental)
+        XCTAssertEqual(ingress.state, .stable)
         XCTAssertEqual(ingress.phase, 7)
         XCTAssertEqual(ingress.issue, 172)
         XCTAssertTrue(ingress.reason.contains("HTTP/1.1"))

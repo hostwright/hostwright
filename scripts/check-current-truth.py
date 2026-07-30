@@ -83,6 +83,7 @@ def main() -> int:
     require("`brew install hostwright` does not exist today" in readme, "README must state the unqualified brew command does not exist", errors)
     require("macOS command-line control plane" in readme, "README lacks the product purpose", errors)
     require("Manifest v2" in readme and "SQLite schema v16" in readme, "README lacks current manifest/state contracts", errors)
+    require("project networks" in readme and "service tunnels" in readme, "README lacks current Phase 07 networking truth", errors)
     require("Apple `container` 1.0.0 and 1.1.0" in readme, "README lacks the tested Apple container matrix", errors)
     require("`hostwright image`, `registry`, `secret`" in readme, "README lacks the current image, registry, and secret surfaces", errors)
     require("brew install hostwright/tap/hostwright" in readme, "README lacks the available vendor-tap command", errors)

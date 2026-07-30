@@ -140,7 +140,7 @@ Architecture references:
 - Hostwright runs on one Mac. It has no multi-host control plane or high-availability state authority.
 - The manifest parser accepts the documented Hostwright YAML subset. It rejects unsupported YAML, unknown Kubernetes or Compose fields, and unsafe paths.
 - Hostwright has no Kubernetes or CRI compatibility, Docker API, full Compose compatibility, GUI, or cloud service.
-- Hostwright supports exact Hostwright-owned named volumes, guarded mounts, snapshots, verified online backup/restore, quota and pressure accounting, reclaim policy, and orphan quarantine/GC. Custom networks, DNS, ingress, tunnels, and broad public exposure remain outside the supported surface.
+- Hostwright supports exact Hostwright-owned named volumes, guarded mounts, snapshots, verified online backup/restore, quota and pressure accounting, reclaim policy, orphan quarantine/GC, UUID-owned project networks, project DNS/service aliases, explicit localhost or LAN ingress with TLS/mTLS policy, guarded host access, and authenticated service tunnels. Unsupported providers or unqualified exposure modes fail before mutation.
 - `hostwright-control` has no persistent listener. `hostwrightd` has no background service installation or unattended mutation.
 - Cleanup and image pruning require exact ownership and confirmation. Hostwright does not delete unmanaged resources or run global garbage collection.
 - Hostwright is not production-ready and has no support SLA.

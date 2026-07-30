@@ -858,11 +858,14 @@ final class Phase07ContainerizationNetworkLiveTests: XCTestCase {
     run = int(marker.read_text()) + 1 if marker.exists() else 1
     marker.write_text(str(run))
     print(f"dual-ok-{run}", flush=True)
+    while True:
+        time.sleep(60)
     """
 
     private static let isolatedClientProgram = """
     import socket
     import sys
+    import time
     for address in (sys.argv[1], sys.argv[2]):
         try:
             connection = socket.create_connection((address, int(sys.argv[3])), timeout=2)
@@ -872,6 +875,8 @@ final class Phase07ContainerizationNetworkLiveTests: XCTestCase {
         except OSError:
             pass
     print("isolation-ok", flush=True)
+    while True:
+        time.sleep(60)
     """
 }
 

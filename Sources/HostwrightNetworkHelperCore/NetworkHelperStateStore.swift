@@ -160,6 +160,38 @@ struct NetworkHelperPeerCertificateEvidence:
     }
 }
 
+/// Bounded opaque Keychain references. These are evidence, not credentials.
+struct NetworkHelperCertificateKeychainReferences: Codable, Equatable, Sendable {
+    static let maximumReferenceBytes = 4_096
+    let leafCertificate: Data
+    let leafKey: Data
+    let issuerCertificate: Data?
+    let issuerKey: Data?
+
+    init?(_ references: CertificateIdentityPersistentReferences?) {
+        guard let references,
+              references.leafCertificate.count <= Self.maximumReferenceBytes,
+              references.leafKey.count <= Self.maximumReferenceBytes,
+              references.issuerCertificate?.count ?? 0 <= Self.maximumReferenceBytes,
+              references.issuerKey?.count ?? 0 <= Self.maximumReferenceBytes else {
+            return nil
+        }
+        leafCertificate = references.leafCertificate
+        leafKey = references.leafKey
+        issuerCertificate = references.issuerCertificate
+        issuerKey = references.issuerKey
+    }
+
+    var persistentReferences: CertificateIdentityPersistentReferences {
+        CertificateIdentityPersistentReferences(
+            leafCertificate: leafCertificate,
+            leafKey: leafKey,
+            issuerCertificate: issuerCertificate,
+            issuerKey: issuerKey
+        )
+    }
+}
+
 struct NetworkHelperCertificateEvidence: Codable, Equatable, Sendable {
     let name: String
     let certificateUUID: String
@@ -169,10 +201,12 @@ struct NetworkHelperCertificateEvidence: Codable, Equatable, Sendable {
     let dnsNames: [String]
     let uriNames: [String]
     let supportsServerAuthentication: Bool
+    let managed: Bool
     let peers: [NetworkHelperPeerCertificateEvidence]
     let notValidBefore: Date
     let notValidAfter: Date
     let revocationStatus: String
+    let keychainReferences: NetworkHelperCertificateKeychainReferences?
 
     init(
         name: String,
@@ -183,10 +217,12 @@ struct NetworkHelperCertificateEvidence: Codable, Equatable, Sendable {
         dnsNames: [String],
         uriNames: [String] = [],
         supportsServerAuthentication: Bool = true,
+        managed: Bool = false,
         peers: [NetworkHelperPeerCertificateEvidence] = [],
         notValidBefore: Date,
         notValidAfter: Date,
-        revocationStatus: String
+        revocationStatus: String,
+        keychainReferences: NetworkHelperCertificateKeychainReferences? = nil
     ) {
         self.name = name
         self.certificateUUID = certificateUUID
@@ -197,12 +233,14 @@ struct NetworkHelperCertificateEvidence: Codable, Equatable, Sendable {
         self.uriNames = uriNames.sorted()
         self.supportsServerAuthentication =
             supportsServerAuthentication
+        self.managed = managed
         self.peers = peers.sorted(
             by: NetworkHelperPeerCertificateEvidence.canonicalPrecedes
         )
         self.notValidBefore = notValidBefore
         self.notValidAfter = notValidAfter
         self.revocationStatus = revocationStatus
+        self.keychainReferences = keychainReferences
     }
 
     static func canonicalPrecedes(
@@ -222,10 +260,12 @@ struct NetworkHelperCertificateEvidence: Codable, Equatable, Sendable {
         case dnsNames
         case uriNames
         case supportsServerAuthentication
+        case managed
         case peers
         case notValidBefore
         case notValidAfter
         case revocationStatus
+        case keychainReferences
     }
 
     init(from decoder: Decoder) throws {
@@ -260,6 +300,10 @@ struct NetworkHelperCertificateEvidence: Codable, Equatable, Sendable {
                 Bool.self,
                 forKey: .supportsServerAuthentication
             ) ?? true,
+            managed: try values.decodeIfPresent(
+                Bool.self,
+                forKey: .managed
+            ) ?? false,
             peers: try values.decodeIfPresent(
                 [NetworkHelperPeerCertificateEvidence].self,
                 forKey: .peers
@@ -275,6 +319,10 @@ struct NetworkHelperCertificateEvidence: Codable, Equatable, Sendable {
             revocationStatus: try values.decode(
                 String.self,
                 forKey: .revocationStatus
+            ),
+            keychainReferences: try values.decodeIfPresent(
+                NetworkHelperCertificateKeychainReferences.self,
+                forKey: .keychainReferences
             )
         )
     }
@@ -301,6 +349,47 @@ struct NetworkHelperPersistedCertificateEvidence:
         self.certificates = certificates.sorted(
             by: NetworkHelperCertificateEvidence.canonicalPrecedes
         )
+    }
+}
+
+enum NetworkHelperCertificateReplacementPhase:
+    String,
+    Codable,
+    Equatable,
+    Sendable
+{
+    case intent
+    case verified
+}
+
+/// Durable, bounded certificate replacement state. The intent is written
+/// before an issuer or Keychain mutation. Verified evidence is added only
+/// after the exact replacement has passed the certificate boundary.
+struct NetworkHelperPendingCertificateReplacement:
+    Codable,
+    Equatable,
+    Sendable
+{
+    let schemaVersion: Int
+    let identity: NetworkHelperDNSIdentity
+    let requestSHA256: String
+    let phase: NetworkHelperCertificateReplacementPhase
+    let priorEvidenceSHA256: String?
+    let replacement: NetworkHelperPersistedCertificateEvidence?
+
+    init(
+        identity: NetworkHelperDNSIdentity,
+        requestSHA256: String,
+        phase: NetworkHelperCertificateReplacementPhase,
+        priorEvidenceSHA256: String?,
+        replacement: NetworkHelperPersistedCertificateEvidence?
+    ) {
+        schemaVersion = 1
+        self.identity = identity
+        self.requestSHA256 = requestSHA256
+        self.phase = phase
+        self.priorEvidenceSHA256 = priorEvidenceSHA256
+        self.replacement = replacement
     }
 }
 
@@ -400,6 +489,12 @@ final class NetworkHelperStateStore: @unchecked Sendable {
             requestedIdentity: identity,
             dnsRoot: dnsRoot
         )
+        let retainsPriorGenerationForCertificateReplacement =
+            current.identity != nil &&
+            (
+                current.identity != identity ||
+                current.certificateSHA256 != certificateSHA256
+            )
         switch current.disposition {
         case .active:
             let digest = Self.sha256(Data(corefile.utf8))
@@ -476,12 +571,14 @@ final class NetworkHelperStateStore: @unchecked Sendable {
             pointer: NetworkHelperCurrentPointer(metadata: metadata),
             dnsRoot: dnsRoot
         )
-        try removeSupersededGenerations(
-            dnsRoot: dnsRoot,
-            keeping: identity.generation,
-            projectUUID: identity.projectUUID,
-            dnsUUID: identity.dnsUUID
-        )
+        if !retainsPriorGenerationForCertificateReplacement {
+            try removeSupersededGenerations(
+                dnsRoot: dnsRoot,
+                keeping: identity.generation,
+                projectUUID: identity.projectUUID,
+                dnsUUID: identity.dnsUUID
+            )
+        }
         return NetworkHelperStatus(
             disposition: .active,
             identity: identity,
@@ -588,7 +685,9 @@ final class NetworkHelperStateStore: @unchecked Sendable {
     func recover() throws {
         lock.lock()
         defer { lock.unlock() }
-        try recoverLocked()
+        try recoverLocked(
+            recoverInterruptedCertificateIntent: true
+        )
     }
 
     func activeHostAccessConfigurations() throws
@@ -861,6 +960,244 @@ final class NetworkHelperStateStore: @unchecked Sendable {
         return evidence
     }
 
+    /// Persists the fenced replacement intent before acquisition starts.
+    /// Repeating the call after a crash returns the exact pending transaction.
+    func beginCertificateReplacement(
+        identity: NetworkHelperDNSIdentity
+    ) throws -> NetworkHelperPendingCertificateReplacement {
+        lock.lock()
+        defer { lock.unlock() }
+        let identity = try identity.validated()
+        try recoverLocked()
+        let dnsRoot = dnsRootURL(for: identity)
+        let status = try currentStatusLocked(
+            requestedIdentity: identity,
+            dnsRoot: dnsRoot
+        )
+        guard status.disposition == .active,
+              let requestSHA256 = status.certificateSHA256 else {
+            throw status.disposition == .quarantined
+                ? NetworkHelperError.quarantined
+                : NetworkHelperError.conflict
+        }
+        if let pending = try pendingCertificateReplacementLocked(
+            dnsRoot: dnsRoot
+        ) {
+            return try validatedPendingCertificateReplacement(
+                pending,
+                expectedIdentity: identity,
+                expectedRequestSHA256: requestSHA256,
+                dnsRoot: dnsRoot
+            )
+        }
+        let prior = try currentOrRetiredCertificateEvidence(
+            dnsRoot: dnsRoot
+        )
+        let transaction = NetworkHelperPendingCertificateReplacement(
+            identity: identity,
+            requestSHA256: requestSHA256,
+            phase: .intent,
+            priorEvidenceSHA256: try prior.map {
+                Self.sha256(try NetworkHelperCanonicalJSON.encode($0))
+            },
+            replacement: nil
+        )
+        try replacePendingCertificateReplacement(
+            transaction,
+            dnsRoot: dnsRoot
+        )
+        return transaction
+    }
+
+    /// Adds validated replacement evidence without changing the current
+    /// certificate pointer or the retained prior generation.
+    func recordPendingCertificateReplacement(
+        identity: NetworkHelperDNSIdentity,
+        certificates: [NetworkHelperCertificateEvidence]
+    ) throws -> NetworkHelperPendingCertificateReplacement {
+        lock.lock()
+        defer { lock.unlock() }
+        let identity = try identity.validated()
+        try recoverLocked()
+        let dnsRoot = dnsRootURL(for: identity)
+        guard let pending = try pendingCertificateReplacementLocked(
+            dnsRoot: dnsRoot
+        ) else {
+            throw NetworkHelperError.conflict
+        }
+        let validated = try validatedPendingCertificateReplacement(
+            pending,
+            expectedIdentity: identity,
+            expectedRequestSHA256: pending.requestSHA256,
+            dnsRoot: dnsRoot
+        )
+        let replacement = try validatedCertificateEvidence(
+            NetworkHelperPersistedCertificateEvidence(
+                identity: identity,
+                requestSHA256: validated.requestSHA256,
+                certificates: certificates
+            ),
+            expectedIdentity: identity,
+            expectedRequestSHA256: validated.requestSHA256,
+            expectedBindings: try certificateBindings(
+                dnsRoot: dnsRoot,
+                expectedSHA256: validated.requestSHA256
+            )
+        )
+        let verified = NetworkHelperPendingCertificateReplacement(
+            identity: identity,
+            requestSHA256: validated.requestSHA256,
+            phase: .verified,
+            priorEvidenceSHA256: validated.priorEvidenceSHA256,
+            replacement: replacement
+        )
+        try replacePendingCertificateReplacement(
+            verified,
+            dnsRoot: dnsRoot
+        )
+        return verified
+    }
+
+    func pendingCertificateReplacement(
+        identity: NetworkHelperDNSIdentity
+    ) throws -> NetworkHelperPendingCertificateReplacement? {
+        lock.lock()
+        defer { lock.unlock() }
+        let identity = try identity.validated()
+        try recoverLocked()
+        let dnsRoot = dnsRootURL(for: identity)
+        guard let pending = try pendingCertificateReplacementLocked(
+            dnsRoot: dnsRoot
+        ) else {
+            return nil
+        }
+        return try validatedPendingCertificateReplacement(
+            pending,
+            expectedIdentity: identity,
+            expectedRequestSHA256: pending.requestSHA256,
+            dnsRoot: dnsRoot
+        )
+    }
+
+    /// Advances the certificate evidence pointer only after the replacement
+    /// was durably verified. The operation is idempotent across crashes.
+    func promotePendingCertificateReplacement(
+        identity: NetworkHelperDNSIdentity
+    ) throws -> NetworkHelperPersistedCertificateEvidence {
+        lock.lock()
+        defer { lock.unlock() }
+        let identity = try identity.validated()
+        try recoverLocked()
+        let dnsRoot = dnsRootURL(for: identity)
+        guard let raw = try pendingCertificateReplacementLocked(
+            dnsRoot: dnsRoot
+        ) else {
+            throw NetworkHelperError.conflict
+        }
+        let pending = try validatedPendingCertificateReplacement(
+            raw,
+            expectedIdentity: identity,
+            expectedRequestSHA256: raw.requestSHA256,
+            dnsRoot: dnsRoot
+        )
+        guard pending.phase == .verified,
+              let replacement = pending.replacement else {
+            throw NetworkHelperError.conflict
+        }
+
+        let currentURL = certificateEvidenceURL(dnsRoot: dnsRoot)
+        let retiredURL = retiredCertificateEvidenceURL(dnsRoot: dnsRoot)
+        if fileManager.fileExists(atPath: currentURL.path) {
+            let current: NetworkHelperPersistedCertificateEvidence =
+                try loadCanonical(
+                    NetworkHelperPersistedCertificateEvidence.self,
+                    from: currentURL
+                )
+            if current == replacement {
+                try removeRegularFileIfPresent(
+                    pendingCertificateReplacementURL(dnsRoot: dnsRoot)
+                )
+                try synchronizeDirectory(dnsRoot)
+                return replacement
+            }
+            guard !fileManager.fileExists(atPath: retiredURL.path) else {
+                throw NetworkHelperError.conflict
+            }
+            let currentDigest = Self.sha256(
+                try NetworkHelperCanonicalJSON.encode(current)
+            )
+            guard currentDigest == pending.priorEvidenceSHA256 else {
+                throw NetworkHelperError.quarantined
+            }
+            _ = try validatedRetiredCertificateEvidence(current)
+            guard rename(currentURL.path, retiredURL.path) == 0 else {
+                throw NetworkHelperError.ioFailure
+            }
+            try synchronizeDirectory(dnsRoot)
+        } else if let expectedPrior = pending.priorEvidenceSHA256 {
+            guard fileManager.fileExists(atPath: retiredURL.path) else {
+                throw NetworkHelperError.quarantined
+            }
+            let retired: NetworkHelperPersistedCertificateEvidence =
+                try loadCanonical(
+                    NetworkHelperPersistedCertificateEvidence.self,
+                    from: retiredURL
+                )
+            guard Self.sha256(
+                try NetworkHelperCanonicalJSON.encode(retired)
+            ) == expectedPrior else {
+                throw NetworkHelperError.quarantined
+            }
+        }
+
+        let temporary = dnsRoot.appendingPathComponent(
+            ".certificate-evidence-\(UUID().uuidString.lowercased())"
+        )
+        try writeExclusive(
+            try NetworkHelperCanonicalJSON.encode(replacement),
+            to: temporary
+        )
+        guard rename(temporary.path, currentURL.path) == 0 else {
+            _ = unlink(temporary.path)
+            throw NetworkHelperError.ioFailure
+        }
+        try synchronizeDirectory(dnsRoot)
+        try removeRegularFileIfPresent(
+            pendingCertificateReplacementURL(dnsRoot: dnsRoot)
+        )
+        try synchronizeDirectory(dnsRoot)
+        return replacement
+    }
+
+    /// Removes only the pending record and returns verified evidence so the
+    /// coordinator can delete the exact newly-created owned items.
+    @discardableResult
+    func rollbackPendingCertificateReplacement(
+        identity: NetworkHelperDNSIdentity
+    ) throws -> NetworkHelperPersistedCertificateEvidence? {
+        lock.lock()
+        defer { lock.unlock() }
+        let identity = try identity.validated()
+        try recoverLocked()
+        let dnsRoot = dnsRootURL(for: identity)
+        guard let raw = try pendingCertificateReplacementLocked(
+            dnsRoot: dnsRoot
+        ) else {
+            return nil
+        }
+        let pending = try validatedPendingCertificateReplacement(
+            raw,
+            expectedIdentity: identity,
+            expectedRequestSHA256: raw.requestSHA256,
+            dnsRoot: dnsRoot
+        )
+        try removeRegularFileIfPresent(
+            pendingCertificateReplacementURL(dnsRoot: dnsRoot)
+        )
+        try synchronizeDirectory(dnsRoot)
+        return pending.replacement
+    }
+
     func retiredCertificateEvidence(
         identity: NetworkHelperDNSIdentity
     ) throws -> NetworkHelperPersistedCertificateEvidence? {
@@ -903,6 +1240,19 @@ final class NetworkHelperStateStore: @unchecked Sendable {
         }
         try removeRegularFileIfPresent(url)
         try synchronizeDirectory(dnsRoot)
+        let pointer: NetworkHelperCurrentPointer = try loadCanonical(
+            NetworkHelperCurrentPointer.self,
+            from: dnsRoot.appendingPathComponent(
+                "current.json",
+                isDirectory: false
+            )
+        )
+        try removeSupersededGenerations(
+            dnsRoot: dnsRoot,
+            keeping: pointer.identity.generation,
+            projectUUID: pointer.identity.projectUUID,
+            dnsUUID: pointer.identity.dnsUUID
+        )
     }
 
     private func certificateBindings(
@@ -974,6 +1324,9 @@ final class NetworkHelperStateStore: @unchecked Sendable {
                   Set(certificate.peers.map(\.identity)).count ==
                     certificate.peers.count,
                   certificate.notValidBefore < certificate.notValidAfter,
+                  Self.validKeychainReferences(
+                    certificate.keychainReferences
+                  ),
                   CertificateRevocationStatus(
                     rawValue: certificate.revocationStatus
                   ) != nil else {
@@ -1024,7 +1377,17 @@ final class NetworkHelperStateStore: @unchecked Sendable {
                     }
                 }
             case .provider:
-                throw NetworkHelperError.certificateUnavailable
+                guard binding.peerIdentities.isEmpty,
+                      certificate.peers.isEmpty,
+                      binding.issuer != nil,
+                      !certificate.managed ||
+                        (
+                            certificate.issuerCertificateSHA256
+                                .map(Self.isCanonicalSHA256) == true &&
+                            certificate.keychainReferences != nil
+                        ) else {
+                    throw NetworkHelperError.quarantined
+                }
             }
         }
         return evidence
@@ -1070,6 +1433,9 @@ final class NetworkHelperStateStore: @unchecked Sendable {
                     certificate.peers.count,
                   certificate.notValidBefore <
                     certificate.notValidAfter,
+                  Self.validKeychainReferences(
+                    certificate.keychainReferences
+                  ),
                   CertificateRevocationStatus(
                     rawValue: certificate.revocationStatus
                   ) != nil else {
@@ -1103,13 +1469,23 @@ final class NetworkHelperStateStore: @unchecked Sendable {
                     throw NetworkHelperError.quarantined
                 }
             case .provider:
-                throw NetworkHelperError.quarantined
+                guard certificate.peers.isEmpty,
+                      !certificate.managed ||
+                        (
+                            certificate.issuerCertificateSHA256
+                                .map(Self.isCanonicalSHA256) == true &&
+                            certificate.keychainReferences != nil
+                        ) else {
+                    throw NetworkHelperError.quarantined
+                }
             }
         }
         return evidence
     }
 
-    private func recoverLocked() throws {
+    private func recoverLocked(
+        recoverInterruptedCertificateIntent: Bool = false
+    ) throws {
         try Self.validatePrivateDirectory(rootURL, owner: owner)
         var rootMetadata = stat()
         guard lstat(rootURL.path, &rootMetadata) == 0,
@@ -1168,7 +1544,9 @@ final class NetworkHelperStateStore: @unchecked Sendable {
                 try recoverDNSRoot(
                     entry,
                     projectUUID: projectURL.lastPathComponent,
-                    dnsUUID: entry.lastPathComponent
+                    dnsUUID: entry.lastPathComponent,
+                    recoverInterruptedCertificateIntent:
+                        recoverInterruptedCertificateIntent
                 )
             }
             try removeDirectoryIfEmpty(projectURL)
@@ -1178,7 +1556,8 @@ final class NetworkHelperStateStore: @unchecked Sendable {
     private func recoverDNSRoot(
         _ dnsRoot: URL,
         projectUUID: String,
-        dnsUUID: String
+        dnsUUID: String,
+        recoverInterruptedCertificateIntent: Bool
     ) throws {
         try Self.validatePrivateDirectory(dnsRoot, owner: owner)
         let generations = dnsRoot.appendingPathComponent(
@@ -1232,6 +1611,20 @@ final class NetworkHelperStateStore: @unchecked Sendable {
             }
             try removeRegularFileIfPresent(entry)
         }
+        for entry in try safeDirectoryContents(at: dnsRoot)
+            where entry.lastPathComponent.hasPrefix(
+                ".certificate-pending-"
+            ) {
+            let suffix = String(
+                entry.lastPathComponent.dropFirst(
+                    ".certificate-pending-".count
+                )
+            )
+            guard Self.isCanonicalUUID(suffix) else {
+                throw NetworkHelperError.quarantined
+            }
+            try removeRegularFileIfPresent(entry)
+        }
 
         let pointerURL = dnsRoot.appendingPathComponent(
             "current.json",
@@ -1254,12 +1647,17 @@ final class NetworkHelperStateStore: @unchecked Sendable {
                     atPath: retiredCertificateEvidenceURL(
                         dnsRoot: dnsRoot
                     ).path
+               ),
+               !fileManager.fileExists(
+                    atPath: pendingCertificateReplacementURL(
+                        dnsRoot: dnsRoot
+                    ).path
                ) {
                 return
             }
             throw NetworkHelperError.quarantined
         }
-        let pointer: NetworkHelperCurrentPointer = try loadCanonical(
+        var pointer: NetworkHelperCurrentPointer = try loadCanonical(
             NetworkHelperCurrentPointer.self,
             from: pointerURL
         )
@@ -1276,11 +1674,106 @@ final class NetworkHelperStateStore: @unchecked Sendable {
             ),
             expected: pointer
         )
-        try refreshActiveCorefile(pointer: pointer, dnsRoot: dnsRoot)
-        let currentEvidenceURL = certificateEvidenceURL(
+        let retiredURL = retiredCertificateEvidenceURL(
             dnsRoot: dnsRoot
         )
-        let retiredURL = retiredCertificateEvidenceURL(
+        if recoverInterruptedCertificateIntent,
+           let rawPending = try pendingCertificateReplacementLocked(
+            dnsRoot: dnsRoot
+        ), let requestSHA256 = pointer.certificateSHA256 {
+            let pending = try validatedPendingCertificateReplacement(
+                rawPending,
+                expectedIdentity: pointer.identity,
+                expectedRequestSHA256: requestSHA256,
+                dnsRoot: dnsRoot
+            )
+            if pending.phase == .intent,
+           let expectedPrior = pending.priorEvidenceSHA256,
+           fileManager.fileExists(atPath: retiredURL.path) {
+            let retired: NetworkHelperPersistedCertificateEvidence =
+                try loadCanonical(
+                    NetworkHelperPersistedCertificateEvidence.self,
+                    from: retiredURL
+                )
+            _ = try validatedRetiredCertificateEvidence(retired)
+            guard Self.sha256(
+                try NetworkHelperCanonicalJSON.encode(retired)
+            ) == expectedPrior,
+                  retired.identity.projectUUID == projectUUID,
+                  retired.identity.dnsUUID == dnsUUID,
+                  retired.identity.generation <
+                    pointer.identity.generation else {
+                throw NetworkHelperError.quarantined
+            }
+            let priorGenerationURL = generationURL(
+                dnsRoot: dnsRoot,
+                generation: retired.identity.generation
+            )
+            guard fileManager.fileExists(
+                atPath: priorGenerationURL.path
+            ) else {
+                throw NetworkHelperError.quarantined
+            }
+            let priorMetadata: NetworkHelperPersistedMetadata =
+                try loadCanonical(
+                    NetworkHelperPersistedMetadata.self,
+                    from: priorGenerationURL.appendingPathComponent(
+                        "metadata.json",
+                        isDirectory: false
+                    )
+                )
+            let priorPointer = NetworkHelperCurrentPointer(
+                metadata: priorMetadata
+            )
+            guard priorPointer.identity == retired.identity,
+                  priorPointer.certificateSHA256 ==
+                    retired.requestSHA256 else {
+                throw NetworkHelperError.quarantined
+            }
+            try validateGeneration(
+                at: priorGenerationURL,
+                expected: priorPointer
+            )
+            let interruptedGeneration = pointer.identity.generation
+            try replaceCurrentPointer(
+                priorPointer,
+                dnsRoot: dnsRoot
+            )
+            try refreshActiveCorefile(
+                pointer: priorPointer,
+                dnsRoot: dnsRoot
+            )
+            let currentEvidenceURL = certificateEvidenceURL(
+                dnsRoot: dnsRoot
+            )
+            guard !fileManager.fileExists(
+                atPath: currentEvidenceURL.path
+            ), rename(
+                retiredURL.path,
+                currentEvidenceURL.path
+            ) == 0 else {
+                throw NetworkHelperError.quarantined
+            }
+            try removeRegularFileIfPresent(
+                pendingCertificateReplacementURL(
+                    dnsRoot: dnsRoot
+                )
+            )
+            if interruptedGeneration !=
+                priorPointer.identity.generation {
+                try removeGenerationDirectory(
+                    generationURL(
+                        dnsRoot: dnsRoot,
+                        generation: interruptedGeneration
+                    )
+                )
+            }
+            try synchronizeDirectory(dnsRoot)
+            pointer = priorPointer
+            }
+        }
+        try refreshActiveCorefile(pointer: pointer, dnsRoot: dnsRoot)
+        let currentEvidenceURL = certificateEvidenceURL(
             dnsRoot: dnsRoot
         )
         if !fileManager.fileExists(atPath: currentEvidenceURL.path),
@@ -1314,12 +1807,51 @@ final class NetworkHelperStateStore: @unchecked Sendable {
                 )
             _ = try validatedRetiredCertificateEvidence(retired)
         }
-        try removeSupersededGenerations(
-            dnsRoot: dnsRoot,
-            keeping: pointer.identity.generation,
-            projectUUID: projectUUID,
-            dnsUUID: dnsUUID
-        )
+        if let pending = try pendingCertificateReplacementLocked(
+            dnsRoot: dnsRoot
+        ) {
+            let validated = try validatedPendingCertificateReplacement(
+                pending,
+                expectedIdentity: pointer.identity,
+                expectedRequestSHA256:
+                    pending.requestSHA256,
+                dnsRoot: dnsRoot
+            )
+            guard validated.requestSHA256 ==
+                    pointer.certificateSHA256 else {
+                throw NetworkHelperError.quarantined
+            }
+            if let replacement = validated.replacement,
+               fileManager.fileExists(
+                    atPath: currentEvidenceURL.path
+               ) {
+                let current:
+                    NetworkHelperPersistedCertificateEvidence =
+                    try loadCanonical(
+                        NetworkHelperPersistedCertificateEvidence.self,
+                        from: currentEvidenceURL
+                    )
+                if current == replacement {
+                    try removeRegularFileIfPresent(
+                        pendingCertificateReplacementURL(
+                            dnsRoot: dnsRoot
+                        )
+                    )
+                    try synchronizeDirectory(dnsRoot)
+                }
+            }
+        }
+        if try pendingCertificateReplacementLocked(
+            dnsRoot: dnsRoot
+        ) == nil,
+           !fileManager.fileExists(atPath: retiredURL.path) {
+            try removeSupersededGenerations(
+                dnsRoot: dnsRoot,
+                keeping: pointer.identity.generation,
+                projectUUID: projectUUID,
+                dnsUUID: dnsUUID
+            )
+        }
     }
 
     private func currentStatusLocked(
@@ -1443,6 +1975,123 @@ final class NetworkHelperStateStore: @unchecked Sendable {
             "certificate-retired.json",
             isDirectory: false
         )
+    }
+
+    private func pendingCertificateReplacementURL(dnsRoot: URL) -> URL {
+        dnsRoot.appendingPathComponent(
+            "certificate-pending.json",
+            isDirectory: false
+        )
+    }
+
+    private func pendingCertificateReplacementLocked(
+        dnsRoot: URL
+    ) throws -> NetworkHelperPendingCertificateReplacement? {
+        let url = pendingCertificateReplacementURL(dnsRoot: dnsRoot)
+        guard fileManager.fileExists(atPath: url.path) else { return nil }
+        return try loadCanonical(
+            NetworkHelperPendingCertificateReplacement.self,
+            from: url
+        )
+    }
+
+    private func currentOrRetiredCertificateEvidence(
+        dnsRoot: URL
+    ) throws -> NetworkHelperPersistedCertificateEvidence? {
+        for url in [
+            certificateEvidenceURL(dnsRoot: dnsRoot),
+            retiredCertificateEvidenceURL(dnsRoot: dnsRoot),
+        ] where fileManager.fileExists(atPath: url.path) {
+            let evidence: NetworkHelperPersistedCertificateEvidence =
+                try loadCanonical(
+                    NetworkHelperPersistedCertificateEvidence.self,
+                    from: url
+                )
+            _ = try validatedRetiredCertificateEvidence(evidence)
+            return evidence
+        }
+        return nil
+    }
+
+    private func replacePendingCertificateReplacement(
+        _ pending: NetworkHelperPendingCertificateReplacement,
+        dnsRoot: URL
+    ) throws {
+        let temporary = dnsRoot.appendingPathComponent(
+            ".certificate-pending-\(UUID().uuidString.lowercased())",
+            isDirectory: false
+        )
+        try writeExclusive(
+            try NetworkHelperCanonicalJSON.encode(pending),
+            to: temporary
+        )
+        guard rename(
+            temporary.path,
+            pendingCertificateReplacementURL(dnsRoot: dnsRoot).path
+        ) == 0 else {
+            _ = unlink(temporary.path)
+            throw NetworkHelperError.ioFailure
+        }
+        try synchronizeDirectory(dnsRoot)
+    }
+
+    private func validatedPendingCertificateReplacement(
+        _ pending: NetworkHelperPendingCertificateReplacement,
+        expectedIdentity: NetworkHelperDNSIdentity,
+        expectedRequestSHA256: String,
+        dnsRoot: URL
+    ) throws -> NetworkHelperPendingCertificateReplacement {
+        guard pending.schemaVersion == 1,
+              pending.identity == expectedIdentity,
+              pending.requestSHA256 == expectedRequestSHA256,
+              Self.isCanonicalSHA256(pending.requestSHA256),
+              pending.priorEvidenceSHA256.map(Self.isCanonicalSHA256)
+                ?? true else {
+            throw NetworkHelperError.quarantined
+        }
+        switch pending.phase {
+        case .intent:
+            guard pending.replacement == nil else {
+                throw NetworkHelperError.quarantined
+            }
+        case .verified:
+            guard let replacement = pending.replacement else {
+                throw NetworkHelperError.quarantined
+            }
+            _ = try validatedCertificateEvidence(
+                replacement,
+                expectedIdentity: expectedIdentity,
+                expectedRequestSHA256: expectedRequestSHA256,
+                expectedBindings: try certificateBindings(
+                    dnsRoot: dnsRoot,
+                    expectedSHA256: expectedRequestSHA256
+                )
+            )
+        }
+        if let expectedPrior = pending.priorEvidenceSHA256 {
+            var foundPrior = false
+            for url in [
+                certificateEvidenceURL(dnsRoot: dnsRoot),
+                retiredCertificateEvidenceURL(dnsRoot: dnsRoot),
+            ] where fileManager.fileExists(atPath: url.path) {
+                let evidence:
+                    NetworkHelperPersistedCertificateEvidence =
+                    try loadCanonical(
+                        NetworkHelperPersistedCertificateEvidence.self,
+                        from: url
+                    )
+                if Self.sha256(
+                    try NetworkHelperCanonicalJSON.encode(evidence)
+                ) == expectedPrior {
+                    foundPrior = true
+                    break
+                }
+            }
+            guard foundPrior else {
+                throw NetworkHelperError.quarantined
+            }
+        }
+        return pending
     }
 
     private func retireCertificateEvidenceIfPresent(
@@ -2061,6 +2710,7 @@ final class NetworkHelperStateStore: @unchecked Sendable {
         let allowedRootEntries = Set([
             "active",
             "certificate-evidence.json",
+            "certificate-pending.json",
             "certificate-retired.json",
             "current.json",
             "generations"
@@ -2211,6 +2861,12 @@ final class NetworkHelperStateStore: @unchecked Sendable {
         try removeRegularFileIfPresent(
             removalURL.appendingPathComponent(
                 "certificate-retired.json",
+                isDirectory: false
+            )
+        )
+        try removeRegularFileIfPresent(
+            removalURL.appendingPathComponent(
+                "certificate-pending.json",
                 isDirectory: false
             )
         )
@@ -2418,6 +3074,26 @@ final class NetworkHelperStateStore: @unchecked Sendable {
             value.utf8.allSatisfy {
                 (48...57).contains($0) || (97...102).contains($0)
             }
+    }
+
+    private static func validKeychainReferences(
+        _ references: NetworkHelperCertificateKeychainReferences?
+    ) -> Bool {
+        guard let references else { return true }
+        return !references.leafCertificate.isEmpty &&
+            !references.leafKey.isEmpty &&
+            references.leafCertificate.count <=
+                NetworkHelperCertificateKeychainReferences
+                    .maximumReferenceBytes &&
+            references.leafKey.count <=
+                NetworkHelperCertificateKeychainReferences
+                    .maximumReferenceBytes &&
+            (references.issuerCertificate?.count ?? 0) <=
+                NetworkHelperCertificateKeychainReferences
+                    .maximumReferenceBytes &&
+            (references.issuerKey?.count ?? 0) <=
+                NetworkHelperCertificateKeychainReferences
+                    .maximumReferenceBytes
     }
 
     private static func preparePrivateDirectory(

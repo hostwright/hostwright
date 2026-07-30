@@ -119,17 +119,39 @@ public struct CertificateIdentityHandle: @unchecked Sendable {
   /// Issuer certificates for serving, ordered nearest issuer first.
   /// The leaf is represented by `identity` and is not duplicated here.
   public let certificateChain: [SecCertificate]
+  /// Stable Keychain item references captured from the exact items that were
+  /// validated.  They are opaque and must never be synthesized from labels.
+  public let persistentReferences: CertificateIdentityPersistentReferences?
 
-  fileprivate init(
+  init(
     identity: SecIdentity,
     metadata: CertificateIdentityMetadata,
     managedScope: CertificateIdentityScope?,
-    certificateChain: [SecCertificate]
+    certificateChain: [SecCertificate],
+    persistentReferences: CertificateIdentityPersistentReferences? = nil
   ) {
     self.identity = identity
     self.metadata = metadata
     self.managedScope = managedScope
     self.certificateChain = certificateChain
+    self.persistentReferences = persistentReferences
+  }
+}
+
+/// Opaque references to the Keychain records that make up a managed identity.
+/// These are retained as evidence so a caller never needs to rediscover an
+/// owned credential through an ambient identity search.
+public struct CertificateIdentityPersistentReferences: Sendable {
+  public let leafCertificate: Data
+  public let leafKey: Data
+  public let issuerCertificate: Data?
+  public let issuerKey: Data?
+
+  init(leafCertificate: Data, leafKey: Data, issuerCertificate: Data?, issuerKey: Data?) {
+    self.leafCertificate = leafCertificate
+    self.leafKey = leafKey
+    self.issuerCertificate = issuerCertificate
+    self.issuerKey = issuerKey
   }
 }
 
@@ -378,6 +400,43 @@ public final class CertificateIdentityStore: @unchecked Sendable {
     return evidence.handle
   }
 
+  /// Resolves a previously validated managed identity from its exact Keychain
+  /// references.  The scope is still checked against ownership tags so a
+  /// reference cannot be replayed for a different project or generation.
+  public func resolveManagedIdentity(
+    scope: CertificateIdentityScope,
+    persistentReferences: CertificateIdentityPersistentReferences,
+    expectedLeafSHA256: String,
+    expectedIssuerSHA256: String,
+    now: Date = Date()
+  ) throws -> CertificateIdentityHandle {
+    let leafCertificate = try copyPersistentCertificate(
+      persistentReferences.leafCertificate
+    )
+    let issuerReference = try required(persistentReferences.issuerCertificate)
+    let issuerKeyReference = try required(persistentReferences.issuerKey)
+    let issuerCertificate = try copyPersistentCertificate(issuerReference)
+    let leafKey = try copyPersistentKey(persistentReferences.leafKey)
+    let issuerKey = try copyPersistentKey(issuerKeyReference)
+    let evidence = try makeManagedEvidence(
+      scope: scope,
+      leafCertificate: leafCertificate,
+      issuerCertificate: issuerCertificate,
+      leafKey: leafKey,
+      issuerKey: issuerKey,
+      expectedDNSNames: try Self.dnsNames(from: Certificate(leafCertificate)),
+      now: now
+    )
+    let expectedLeaf = try Self.canonicalFingerprint(expectedLeafSHA256)
+    let expectedIssuer = try Self.canonicalFingerprint(expectedIssuerSHA256)
+    guard evidence.handle.metadata.certificateSHA256 == expectedLeaf,
+      evidence.issuerCertificateSHA256 == expectedIssuer
+    else {
+      throw CertificateIdentityStoreError.tampered
+    }
+    return evidence.handle
+  }
+
   /// Issues a client-authentication-only leaf from the CA already owned by
   /// `issuerScope`.  The peer scope contains only this leaf and its key.
   public func issueManagedClientIdentity(
@@ -542,8 +601,13 @@ public final class CertificateIdentityStore: @unchecked Sendable {
     }
     let certificate = try certificate(for: handle.identity)
     let parsed = try Certificate(certificate)
+    let basicConstraints = try parsed.extensions.basicConstraints
+    let keyUsage = try parsed.extensions.keyUsage
     guard parsed.notValidBefore <= now.addingTimeInterval(clockSkew),
       parsed.notValidAfter >= now.addingTimeInterval(-clockSkew),
+      basicConstraints == .notCertificateAuthority,
+      keyUsage?.digitalSignature == true,
+      keyUsage?.keyCertSign != true,
       try parsed.extensions.extendedKeyUsage?.contains(.clientAuth) == true,
       try parsed.extensions.extendedKeyUsage?.contains(.serverAuth) == false,
       try Self.dnsNames(from: parsed).isEmpty,
@@ -654,11 +718,16 @@ public final class CertificateIdentityStore: @unchecked Sendable {
     let certificate = try certificate(for: handle.identity)
     let parsed = try Certificate(certificate)
     let extendedKeyUsage = try parsed.extensions.extendedKeyUsage
+    let basicConstraints = try parsed.extensions.basicConstraints
+    let keyUsage = try parsed.extensions.keyUsage
     let actualNames = try Self.dnsNames(from: parsed)
 
     guard
       parsed.notValidBefore <= now.addingTimeInterval(clockSkew),
       parsed.notValidAfter >= now.addingTimeInterval(-clockSkew),
+      basicConstraints == .notCertificateAuthority,
+      keyUsage?.digitalSignature == true,
+      keyUsage?.keyCertSign != true,
       extendedKeyUsage?.contains(.serverAuth) == true,
       actualNames == expectedNames
     else {
@@ -997,6 +1066,48 @@ public final class CertificateIdentityStore: @unchecked Sendable {
     return key
   }
 
+  private func copyPersistentKey(_ reference: Data) throws -> SecKey {
+    let query: [CFString: Any] = [
+      kSecValuePersistentRef: reference,
+      kSecReturnRef: true,
+      kSecUseAuthenticationContext: Self.nonInteractiveContext(),
+    ]
+    var result: CFTypeRef?
+    let status = SecItemCopyMatching(query as CFDictionary, &result)
+    guard status == errSecSuccess,
+      let result,
+      CFGetTypeID(result) == SecKeyGetTypeID()
+    else {
+      throw Self.mapKeychainStatus(status)
+    }
+    let key = result as! SecKey
+    try requireKeyAttributes(key)
+    return key
+  }
+
+  private func copyPersistentCertificate(_ reference: Data) throws -> SecCertificate {
+    let query: [CFString: Any] = [
+      kSecValuePersistentRef: reference,
+      kSecReturnRef: true,
+      kSecUseAuthenticationContext: Self.nonInteractiveContext(),
+    ]
+    var result: CFTypeRef?
+    let status = SecItemCopyMatching(query as CFDictionary, &result)
+    guard status == errSecSuccess,
+      let result,
+      CFGetTypeID(result) == SecCertificateGetTypeID()
+    else {
+      throw Self.mapKeychainStatus(status)
+    }
+    let certificate = result as! SecCertificate
+    return certificate
+  }
+
+  private func required(_ value: Data?) throws -> Data {
+    guard let value else { throw CertificateIdentityStoreError.tampered }
+    return value
+  }
+
   private func copyKeyIfPresent(
     scope: CertificateIdentityScope,
     role: Role
@@ -1090,7 +1201,13 @@ public final class CertificateIdentityStore: @unchecked Sendable {
         issuerCertificateSHA256: issuerSHA256
       ),
       managedScope: scope,
-      certificateChain: [issuerCertificate]
+      certificateChain: [issuerCertificate],
+      persistentReferences: try persistentReferences(
+        leafCertificate: leafCertificate,
+        leafKey: leafKey,
+        issuerCertificate: issuerCertificate,
+        issuerKey: issuerKey
+      )
     )
     try validateManagedPair(
       handle: handle,
@@ -1122,7 +1239,13 @@ public final class CertificateIdentityStore: @unchecked Sendable {
       metadata: try metadata(
         for: leafCertificate, issuerCertificateSHA256: fingerprint(issuerCertificate)),
       managedScope: peerScope,
-      certificateChain: [issuerCertificate]
+      certificateChain: [issuerCertificate],
+      persistentReferences: try persistentReferences(
+        leafCertificate: leafCertificate,
+        leafKey: leafKey,
+        issuerCertificate: issuerCertificate,
+        issuerKey: nil
+      )
     )
     try validateManagedClientIdentity(
       handle, expectedURI: expectedURI, expectedCA: issuerCertificate, now: now,
@@ -1141,6 +1264,42 @@ public final class CertificateIdentityStore: @unchecked Sendable {
       throw CertificateIdentityStoreError.validationFailed
     }
     try requireKeyAttributes(key)
+  }
+
+  private func persistentReferences(
+    leafCertificate: SecCertificate,
+    leafKey: SecKey,
+    issuerCertificate: SecCertificate?,
+    issuerKey: SecKey?
+  ) throws -> CertificateIdentityPersistentReferences {
+    try CertificateIdentityPersistentReferences(
+      leafCertificate: persistentReference(for: leafCertificate, itemClass: kSecClassCertificate),
+      leafKey: persistentReference(for: leafKey, itemClass: kSecClassKey),
+      issuerCertificate: try issuerCertificate.map {
+        try persistentReference(for: $0, itemClass: kSecClassCertificate)
+      },
+      issuerKey: try issuerKey.map {
+        try persistentReference(for: $0, itemClass: kSecClassKey)
+      }
+    )
+  }
+
+  private func persistentReference(
+    for item: CFTypeRef,
+    itemClass: CFString
+  ) throws -> Data {
+    let query: [CFString: Any] = [
+      kSecClass: itemClass,
+      kSecValueRef: item,
+      kSecReturnPersistentRef: true,
+      kSecUseAuthenticationContext: Self.nonInteractiveContext(),
+    ]
+    var result: CFTypeRef?
+    let status = SecItemCopyMatching(query as CFDictionary, &result)
+    guard status == errSecSuccess, let result = result as? Data else {
+      throw Self.mapKeychainStatus(status)
+    }
+    return result
   }
 
   private func validateManagedPair(

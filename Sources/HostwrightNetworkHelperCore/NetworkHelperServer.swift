@@ -66,7 +66,8 @@ struct NetworkHelperDispatcher: @unchecked Sendable {
                         request.ingressBindings ?? [],
                     certificateBindings:
                         request.certificateBindings ?? [],
-                    policyPlan: request.policyPlan
+                    policyPlan: request.policyPlan,
+                    allowCertificateAcquisition: true
                 )
             case .status:
                 let persisted = try store.status(
@@ -99,7 +100,8 @@ struct NetworkHelperDispatcher: @unchecked Sendable {
                         hostAccessBindings: hostAccessBindings,
                         ingressBindings: ingressBindings,
                         certificateBindings: certificateBindings,
-                        policyPlan: policyPlan
+                        policyPlan: policyPlan,
+                        allowCertificateAcquisition: false
                     )
                 } else {
                     status = withActivity(
@@ -191,7 +193,8 @@ struct NetworkHelperDispatcher: @unchecked Sendable {
         hostAccessBindings: [ProjectDNSHostAccessBinding],
         ingressBindings: [ProjectIngressListenerBinding],
         certificateBindings: [ProjectCertificateRequestBinding],
-        policyPlan: NetworkPolicyPlan?
+        policyPlan: NetworkPolicyPlan?,
+        allowCertificateAcquisition: Bool
     ) throws -> NetworkHelperStatus {
         guard persisted.disposition == .active else {
             return withActivity(
@@ -223,21 +226,36 @@ struct NetworkHelperDispatcher: @unchecked Sendable {
         let certificateActive: Bool
         let activation: NetworkHelperCertificateActivation
         if let expected = persisted.certificateSHA256 {
-            let priorEvidence = try store.certificateEvidence(
+            let currentEvidence = try store.certificateEvidence(
                 identity: identity
             )
-            activation = try certificateCoordinator.apply(
-                identity: identity,
-                bindings: certificateBindings,
-                persistedEvidence: priorEvidence,
-                overlapEvidence:
-                    try store.retiredCertificateEvidence(
-                        identity: identity
-                    )
+            let pending = try store.pendingCertificateReplacement(
+                identity: identity
             )
-            let recorded = try store.recordCertificateEvidence(
-                identity: identity,
-                certificates: activation.evidence
+            let overlap = try store.retiredCertificateEvidence(
+                identity: identity
+            )
+            if let currentEvidence, pending == nil {
+                activation = try certificateCoordinator.apply(
+                    identity: identity,
+                    bindings: certificateBindings,
+                    persistedEvidence: currentEvidence,
+                    overlapEvidence: overlap
+                )
+            } else if pending?.phase == .verified ||
+                allowCertificateAcquisition {
+                activation = try certificateCoordinator
+                    .applyCertificateReplacement(
+                        identity: identity,
+                        bindings: certificateBindings,
+                        stateStore: store,
+                        overlapEvidence: overlap
+                    )
+            } else {
+                throw NetworkHelperError.certificateUnavailable
+            }
+            let recorded = try store.certificateEvidence(
+                identity: identity
             )
             certificateActive =
                 recorded?.requestSHA256 == expected &&

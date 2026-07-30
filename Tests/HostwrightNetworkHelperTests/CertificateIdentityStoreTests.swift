@@ -377,6 +377,35 @@ final class CertificateIdentityStoreTests: XCTestCase {
         }
     }
 
+    func testPersistentRefRestart() throws {
+        let store = CertificateIdentityStore()
+        let scope = try CertificateIdentityScope(
+            projectUUID: UUID(), certificateUUID: UUID(), generation: 1
+        )
+        let generated = try store.generateLocalIdentity(
+            scope: scope, dnsNames: ["api.internal"], validity: 3_600
+        )
+        let issuer = try XCTUnwrap(generated.metadata.issuerCertificateSHA256)
+        defer {
+            try? store.cleanupManagedIdentity(
+                scope: scope,
+                expectedLeafSHA256: generated.metadata.certificateSHA256,
+                expectedIssuerSHA256: issuer
+            )
+        }
+        let references = try XCTUnwrap(generated.persistentReferences)
+        let recovered = try store.resolveManagedIdentity(
+            scope: scope,
+            persistentReferences: references,
+            expectedLeafSHA256: generated.metadata.certificateSHA256,
+            expectedIssuerSHA256: issuer
+        )
+        XCTAssertEqual(
+            recovered.metadata.certificateSHA256,
+            generated.metadata.certificateSHA256
+        )
+    }
+
     func testManagedCleanupRetriesAfterLeafCertificateWasDeleted()
         throws
     {

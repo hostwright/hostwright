@@ -3,6 +3,23 @@ import Foundation
 import HostwrightNetworking
 @preconcurrency import Security
 
+/// The intentionally narrow certificate-provider boundary.  It accepts a
+/// validated declaration and returns a locally usable identity; it does not
+/// expose discovery, installation, credential access, or arbitrary plugins.
+protocol NetworkHelperCertificateIssuer: Sendable {
+  var identifier: String { get }
+  func issue(
+    binding: ProjectCertificateRequestBinding,
+    now: Date
+  ) throws -> NetworkHelperIssuedCertificate
+}
+
+struct NetworkHelperIssuedCertificate: @unchecked Sendable {
+  let identity: CertificateIdentityHandle
+  /// Status is trusted only when this issuer explicitly supplies it.
+  let verifiedRevocationStatus: CertificateRevocationStatus?
+}
+
 struct NetworkHelperCertificateActivation: @unchecked Sendable {
   let identities: [String: CertificateIdentityHandle]
   let peerIdentities: [String: CertificateIdentityHandle]
@@ -22,6 +39,7 @@ final class NetworkHelperCertificateCoordinator: @unchecked Sendable {
   }
 
   private let identityStore: CertificateIdentityStore
+  private let certificateIssuers: [String: any NetworkHelperCertificateIssuer]
   private let now: @Sendable () -> Date
   private let lock = NSLock()
   private var active: [String: NetworkHelperCertificateActivation] = [:]
@@ -29,9 +47,13 @@ final class NetworkHelperCertificateCoordinator: @unchecked Sendable {
   init(
     identityStore: CertificateIdentityStore =
       CertificateIdentityStore(),
-    now: @escaping @Sendable () -> Date = Date.init
+    certificateIssuers: [any NetworkHelperCertificateIssuer] = [],
+    now: @escaping @Sendable () -> Date = { Date() }
   ) {
     self.identityStore = identityStore
+    self.certificateIssuers = Dictionary(
+      uniqueKeysWithValues: certificateIssuers.map { ($0.identifier, $0) }
+    )
     self.now = now
   }
 
@@ -52,7 +74,8 @@ final class NetworkHelperCertificateCoordinator: @unchecked Sendable {
     persistedEvidence:
       NetworkHelperPersistedCertificateEvidence? = nil,
     overlapEvidence:
-      NetworkHelperPersistedCertificateEvidence? = nil
+      NetworkHelperPersistedCertificateEvidence? = nil,
+    commitActivation: Bool = true
   ) throws -> NetworkHelperCertificateActivation {
     let identity = try identity.validated()
     let bindings = try NetworkHelperCertificateValidation.validated(
@@ -86,6 +109,21 @@ final class NetworkHelperCertificateCoordinator: @unchecked Sendable {
     var mutualTLSPolicies: [String: NetworkHelperMutualTLSPolicy] = [:]
     var currentMutualTLSPolicies: [String: NetworkHelperMutualTLSPolicy] = [:]
     var evidence: [NetworkHelperCertificateEvidence] = []
+    var pendingManaged: [(CertificateIdentityScope, String, String)] = []
+    var promoted = false
+    defer {
+      if !promoted {
+        // Only identities created by this attempt are rolled back; prior
+        // evidence and imported credentials remain untouched.
+        for (scope, leaf, issuer) in pendingManaged.reversed() {
+          try? identityStore.cleanupManagedIdentity(
+            scope: scope,
+            expectedLeafSHA256: leaf,
+            expectedIssuerSHA256: issuer
+          )
+        }
+      }
+    }
     let persistedByName = Dictionary(
       uniqueKeysWithValues: (persistedEvidence?.certificates ?? []).map {
         ($0.name, $0)
@@ -125,10 +163,18 @@ final class NetworkHelperCertificateCoordinator: @unchecked Sendable {
             throw NetworkHelperError.quarantined
           }
           handle = try mapIdentityStoreError {
-            try identityStore.resolveManagedIdentity(
+            if let references = persisted.keychainReferences {
+              return try identityStore.resolveManagedIdentity(
+                scope: scope,
+                persistentReferences: references.persistentReferences,
+                expectedLeafSHA256: persisted.certificateSHA256,
+                expectedIssuerSHA256: issuer,
+                now: now()
+              )
+            }
+            return try identityStore.resolveManagedIdentity(
               scope: scope,
-              expectedLeafSHA256:
-                persisted.certificateSHA256,
+              expectedLeafSHA256: persisted.certificateSHA256,
               expectedIssuerSHA256: issuer,
               now: now()
             )
@@ -150,19 +196,89 @@ final class NetworkHelperCertificateCoordinator: @unchecked Sendable {
                 now: now()
               )
             }
+            if let issuer = handle.metadata.issuerCertificateSHA256 {
+              pendingManaged.append((
+                scope, handle.metadata.certificateSHA256, issuer
+              ))
+            } else {
+              throw NetworkHelperError.invalidCertificate
+            }
           } catch {
             throw Self.mappedIdentityStoreError(error)
           }
         }
       case .provider:
-        throw NetworkHelperError.certificateUnavailable
+        if let persisted = persistedByName[binding.name] {
+          guard persisted.managed,
+            let references = persisted.keychainReferences,
+            let issuerSHA256 =
+              persisted.issuerCertificateSHA256
+          else {
+            // Persisted provider evidence is never an instruction to issue.
+            // Without exact owned Keychain references it cannot be safely
+            // rehydrated after restart.
+            throw NetworkHelperError.certificateUnavailable
+          }
+          let scope = try mapIdentityStoreError {
+            try CertificateIdentityScope(
+              projectUUID: identity.projectUUID,
+              certificateUUID: binding.certificateUUID,
+              generation: identity.generation
+            )
+          }
+          let resolved = try mapIdentityStoreError {
+            try identityStore.resolveManagedIdentity(
+              scope: scope,
+              persistentReferences: references.persistentReferences,
+              expectedLeafSHA256: persisted.certificateSHA256,
+              expectedIssuerSHA256: issuerSHA256,
+              now: now()
+            )
+          }
+          handle = Self.applyingIssuerStatus(
+            CertificateRevocationStatus(
+              rawValue: persisted.revocationStatus
+            ),
+            to: resolved
+          )
+          break
+        }
+        guard let issuerID = binding.issuer,
+          let issuer = certificateIssuers[issuerID]
+        else {
+          throw NetworkHelperError.certificateUnavailable
+        }
+        do {
+          let issued = try issuer.issue(binding: binding, now: now())
+          handle = Self.applyingIssuerStatus(
+            issued.verifiedRevocationStatus,
+            to: issued.identity
+          )
+          if let scope = handle.managedScope,
+            let issuerSHA256 =
+              handle.metadata.issuerCertificateSHA256
+          {
+            pendingManaged.append((
+              scope,
+              handle.metadata.certificateSHA256,
+              issuerSHA256
+            ))
+          }
+        } catch is CancellationError {
+          throw NetworkHelperError.certificateUnavailable
+        } catch {
+          // Provider outages and an issuer-declared cancellation are not a
+          // certificate validation failure and must preserve the prior active
+          // activation until a later successful promotion.
+          throw NetworkHelperError.certificateUnavailable
+        }
       }
 
       try mapIdentityStoreError {
         try identityStore.validate(
           handle,
           expectedDNSNames: binding.dnsNames,
-          expectedCA: binding.source == .localCA
+          expectedCA: binding.source != .imported
             ? handle.certificateChain.first
             : nil,
           now: now()
@@ -235,11 +351,16 @@ final class NetworkHelperCertificateCoordinator: @unchecked Sendable {
           uriNames: handle.metadata.uriNames,
           supportsServerAuthentication:
             handle.metadata.supportsServerAuthentication,
+          managed: handle.managedScope != nil,
           peers: peerActivation.evidence,
           notValidBefore: handle.metadata.notValidBefore,
           notValidAfter: handle.metadata.notValidAfter,
           revocationStatus:
-            handle.metadata.revocationStatus.rawValue
+            handle.metadata.revocationStatus.rawValue,
+          keychainReferences:
+            NetworkHelperCertificateKeychainReferences(
+              handle.persistentReferences
+            )
         )
       )
     }
@@ -261,10 +382,74 @@ final class NetworkHelperCertificateCoordinator: @unchecked Sendable {
       evidence: evidence,
       evidenceSHA256: evidenceSHA256
     )
-    lock.withLock {
-      active[Self.key(identity)] = activation
+    if commitActivation {
+      lock.withLock {
+        active[Self.key(identity)] = activation
+      }
     }
+    promoted = true
     return activation
+  }
+
+  /// Minimal production transaction contract: callers persist the DNS
+  /// generation first, then use this method before switching a listener.
+  /// Prior activation remains installed until durable evidence promotion.
+  func applyCertificateReplacement(
+    identity: NetworkHelperDNSIdentity,
+    bindings: [ProjectCertificateRequestBinding],
+    stateStore: NetworkHelperStateStore,
+    overlapEvidence:
+      NetworkHelperPersistedCertificateEvidence? = nil
+  ) throws -> NetworkHelperCertificateActivation {
+    let pending = try stateStore.beginCertificateReplacement(
+      identity: identity
+    )
+    var replacementEvidence = pending.replacement
+    var acquiredEvidence:
+      NetworkHelperPersistedCertificateEvidence?
+    do {
+      let activation = try apply(
+        identity: identity,
+        bindings: bindings,
+        persistedEvidence: replacementEvidence,
+        overlapEvidence: overlapEvidence,
+        commitActivation: false
+      )
+      acquiredEvidence = NetworkHelperPersistedCertificateEvidence(
+        identity: identity,
+        requestSHA256: pending.requestSHA256,
+        certificates: activation.evidence
+      )
+      if replacementEvidence == nil {
+        replacementEvidence = try stateStore
+          .recordPendingCertificateReplacement(
+            identity: identity,
+            certificates: activation.evidence
+          ).replacement
+      }
+      _ = try stateStore.promotePendingCertificateReplacement(
+        identity: identity
+      )
+      lock.withLock {
+        active[Self.key(identity)] = activation
+      }
+      return activation
+    } catch {
+      let recorded = try? stateStore
+        .pendingCertificateReplacement(identity: identity)?
+        .replacement
+      if let evidence =
+        replacementEvidence ?? recorded ?? acquiredEvidence {
+        try cleanupManagedReplacement(
+          identity: identity,
+          evidence: evidence
+        )
+      }
+      _ = try stateStore.rollbackPendingCertificateReplacement(
+        identity: identity
+      )
+      throw error
+    }
   }
 
   func deactivate(identity: NetworkHelperDNSIdentity) {
@@ -283,12 +468,27 @@ final class NetworkHelperCertificateCoordinator: @unchecked Sendable {
         throw NetworkHelperError.quarantined
       }
     }
-    for certificate in evidence?.certificates ?? [] {
-      guard certificate.source == .localCA else { continue }
+    if let evidence {
+      try cleanupManagedReplacement(
+        identity: identity,
+        evidence: evidence
+      )
+    }
+    deactivate(identity: identity)
+  }
+
+  private func cleanupManagedReplacement(
+    identity: NetworkHelperDNSIdentity,
+    evidence: NetworkHelperPersistedCertificateEvidence
+  ) throws {
+    for certificate in evidence.certificates {
+      guard certificate.source == .localCA ||
+        certificate.managed else { continue }
       guard let issuer = certificate.issuerCertificateSHA256 else {
         throw NetworkHelperError.quarantined
       }
-      for peer in certificate.peers {
+      for peer in certificate.source == .localCA
+        ? certificate.peers : [] {
         let peerScope = try mapIdentityStoreError {
           try Self.peerScope(
             projectUUID: identity.projectUUID,
@@ -329,7 +529,6 @@ final class NetworkHelperCertificateCoordinator: @unchecked Sendable {
         throw Self.mappedIdentityStoreError(error)
       }
     }
-    deactivate(identity: identity)
   }
 
   func cleanupUnrecordedManagedIdentities(
@@ -691,6 +890,31 @@ final class NetworkHelperCertificateCoordinator: @unchecked Sendable {
       .keychainFailure:
       return .invalidCertificate
     }
+  }
+
+  private static func applyingIssuerStatus(
+    _ status: CertificateRevocationStatus?,
+    to handle: CertificateIdentityHandle
+  ) -> CertificateIdentityHandle {
+    let metadata = handle.metadata
+    return CertificateIdentityHandle(
+      identity: handle.identity,
+      metadata: CertificateIdentityMetadata(
+        certificateSHA256: metadata.certificateSHA256,
+        dnsNames: metadata.dnsNames,
+        uriNames: metadata.uriNames,
+        supportsServerAuthentication: metadata.supportsServerAuthentication,
+        supportsClientAuthentication: metadata.supportsClientAuthentication,
+        notValidBefore: metadata.notValidBefore,
+        notValidAfter: metadata.notValidAfter,
+        // Never infer OCSP/revocation truth from transport or cache state.
+        revocationStatus: status ?? .unavailable,
+        issuerCertificateSHA256: metadata.issuerCertificateSHA256
+      ),
+      managedScope: handle.managedScope,
+      certificateChain: handle.certificateChain,
+      persistentReferences: handle.persistentReferences
+    )
   }
 
   private func mapIdentityStoreError<T>(

@@ -247,7 +247,7 @@ final class Phase07ContainerizationNetworkLiveTests: XCTestCase {
             let createdA = try await client.networkCreate(
                 RuntimeNetworkCreateRequest(
                     identity: networkA,
-                    mode: .nat,
+                    mode: .hostOnly,
                     ipv4: .cidr("192.168.240.0/24"),
                     ipv6: .cidr("fd00:7:1::/64")
                 ),
@@ -257,7 +257,7 @@ final class Phase07ContainerizationNetworkLiveTests: XCTestCase {
             let createdB = try await client.networkCreate(
                 RuntimeNetworkCreateRequest(
                     identity: networkB,
-                    mode: .nat,
+                    mode: .hostOnly,
                     ipv4: .cidr("192.168.241.0/24"),
                     ipv6: .cidr("fd00:7:2::/64")
                 ),
@@ -267,7 +267,7 @@ final class Phase07ContainerizationNetworkLiveTests: XCTestCase {
             let createdIsolated = try await client.networkCreate(
                 RuntimeNetworkCreateRequest(
                     identity: isolatedNetwork,
-                    mode: .nat,
+                    mode: .hostOnly,
                     ipv4: .cidr("192.168.242.0/24"),
                     ipv6: .cidr("fd00:7:3::/64")
                 ),
@@ -295,8 +295,8 @@ final class Phase07ContainerizationNetworkLiveTests: XCTestCase {
                     Self.serverNetworkPolicy()
                 }
             )
-            try await create(server, using: client)
             createdContainers.append(server)
+            try await create(server, using: client)
             let serverAddresses = try serverAddresses(
                 in: try await client.observe(),
                 server: server,
@@ -331,8 +331,8 @@ final class Phase07ContainerizationNetworkLiveTests: XCTestCase {
                     Self.clientNetworkPolicy()
                 }
             )
-            try await create(dualClient, using: client)
             createdContainers.append(dualClient)
+            try await create(dualClient, using: client)
             try await start(dualClient, using: client)
             _ = try await waitForLog(
                 client: client,
@@ -377,8 +377,8 @@ final class Phase07ContainerizationNetworkLiveTests: XCTestCase {
                     ]
                 )
             )
-            try await create(isolatedClient, using: client)
             createdContainers.append(isolatedClient)
+            try await create(isolatedClient, using: client)
             try await start(isolatedClient, using: client)
             _ = try await waitForLog(
                 client: client,
@@ -612,6 +612,13 @@ final class Phase07ContainerizationNetworkLiveTests: XCTestCase {
         var failures: [String] = []
         for container in containers {
             do {
+                let inventory = try await client.observe()
+                guard inventory.containers.contains(where: {
+                    $0.name == container.resourceIdentifier &&
+                        $0.ownership == container.ownership
+                }) else {
+                    continue
+                }
                 _ = try await client.delete(
                     ContainerizationHelperMutationPayload(
                         resourceIdentifier: container.resourceIdentifier,

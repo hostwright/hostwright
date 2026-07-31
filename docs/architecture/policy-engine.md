@@ -21,7 +21,7 @@ Hostwright now has a local policy module, `HostwrightPolicy`, for deterministic 
 | --- | --- |
 | Identity | Empty project or service identity is a blocker before planning or mutation. |
 | Ports | Duplicate desired host ports and observed non-target host-port conflicts are blockers. Privileged host ports are warnings because the narrower create path rejects them before mutation. |
-| Exposure | Broad bind addresses are blockers. Secure exposure scopes such as tunnels, DNS, cloud, and reverse proxy setup remain unsupported. |
+| Exposure | Localhost remains the default. Unqualified broad binds are blockers; Phase 07 LAN, ingress, DNS, and tunnel paths proceed only through their separate exact policy, identity, capability, and confirmation gates. Cloud exposure remains unsupported. |
 | Mounts | Ambiguous mount references, host-root mounts, and parent-traversal sources are blockers. |
 | Images | `imagePolicy: require-digest` failures are local string-policy blockers only. |
 | Environment and secrets | Secret-like environment values are warning decisions for plan redaction; unresolved secret references are blockers before mutation. |

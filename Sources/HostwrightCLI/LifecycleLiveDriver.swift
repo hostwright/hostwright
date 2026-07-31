@@ -2,6 +2,7 @@ import CryptoKit
 import Foundation
 import HostwrightCore
 import HostwrightManifest
+import HostwrightNetworking
 import HostwrightReconciler
 import HostwrightRegistry
 import HostwrightRuntime
@@ -96,6 +97,7 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
         )
         var mapping = ManifestRuntimeMapper.map(
             manifest,
+            projectResourceUUID: initialProjectResourceUUID,
             bindMountBaseDirectory:
                 manifestBaseDirectory(for: options.manifestPath),
             namedVolumeSources:
@@ -105,6 +107,10 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
                     providerRootURL: environment.storageProviderRootURL()
                 )
         )
+        try ServiceTunnelLifecycleCoordinator
+            .validateLiveCredentialPrerequisites(
+                mapping.tunnelDeclarations
+            )
         let selectedProvider = try hostwrightSelectRuntimeProvider(
             requested: options.runtimeProvider,
             store: store,
@@ -132,6 +138,7 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
         if projectResourceUUID != initialProjectResourceUUID {
             mapping = ManifestRuntimeMapper.map(
                 manifest,
+                projectResourceUUID: projectResourceUUID,
                 bindMountBaseDirectory:
                     manifestBaseDirectory(for: options.manifestPath),
                 namedVolumeSources:
@@ -155,9 +162,38 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
             providerID: providerID,
             bindings: resourceBindings
         )
+        let adapter = selectedProvider.adapter
+        let inventory = try hostwrightWaitForAsync {
+            try await adapter.inventory()
+        }
+        let exposureEnvironment = try NetworkHostEnvironmentProbe.current()
+        let plannedDesiredState =
+            try NetworkPortLifecycleCoordinator.resolveForPlanning(
+                desiredState: mapping.desiredState,
+                projectID: projectID,
+                projectResourceUUID: projectResourceUUID,
+                providerID: providerID,
+                providerGeneration: providerGeneration,
+                bindings: resourceBindings,
+                store: store,
+                occupiedPorts:
+                    NetworkPortLifecycleCoordinator.occupiedPorts(
+                        in: inventory
+                    ),
+                isAvailable:
+                    NetworkPortSocketAvailability.isAvailable,
+                isExposureAvailable: { endpoint, policy in
+                    try NetworkPortSocketAvailability.isAvailable(
+                        endpoint,
+                        exposurePolicy: policy,
+                        environment: exposureEnvironment
+                    )
+                }
+            )
         let desiredState = DesiredRuntimeState(
-            projectName: mapping.desiredState.projectName,
-            services: mapping.desiredState.services,
+            projectName: plannedDesiredState.projectName,
+            networks: plannedDesiredState.networks,
+            services: plannedDesiredState.services,
             ownedResourceHints: resourceBindings.map {
                 RuntimeOwnedResourceHint(
                     resourceIdentifier: $0.resourceIdentifier,
@@ -167,7 +203,6 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
                 )
             }
         )
-        let adapter = selectedProvider.adapter
         let observedState = try hostwrightWaitForAsync {
             try await adapter.observe(desiredState: desiredState)
         }
@@ -180,15 +215,12 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
                 message: "Lifecycle observation returned stale or incompatible provider metadata. No mutation was attempted."
             )
         }
-        let inventory = try hostwrightWaitForAsync {
-            try await adapter.inventory()
-        }
         let projectGeneration = max(
             resourceBindings.map(\.projectGeneration).max() ?? 1,
             1
         )
         let selectedServices = options.serviceNames.isEmpty
-            ? mapping.desiredState.services.map(\.logicalServiceName).sorted()
+            ? plannedDesiredState.services.map(\.logicalServiceName).sorted()
             : options.serviceNames.sorted()
         let planFence = lifecyclePlanFence(
             command: options.command,
@@ -209,6 +241,9 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
             manifestBaseDirectory: manifestBaseDirectory(for: options.manifestPath),
             mappingIssues: mapping.issues,
             desiredState: desiredState,
+            certificates: mapping.certificates,
+            ingress: mapping.ingress,
+            tunnelDeclarations: mapping.tunnelDeclarations,
             previousDesiredState: previousDesiredState,
             observedState: observedState,
             observationSHA256: inventory.semanticSHA256,
@@ -307,6 +342,88 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
             store: store,
             manifest: validated.manifest
         )
+        let recoverySnapshot: DesiredStateRecoverySnapshot?
+        if compiled.plan.command == .update {
+            guard let snapshot = try store.desiredStates.loadRecoverySnapshot(
+                projectID: preparation.projectID
+            ) else {
+                throw StateStoreError.invalidRecord(
+                    "Lifecycle update requires one authoritative healthy desired-state snapshot."
+                )
+            }
+            recoverySnapshot = snapshot
+        } else {
+            recoverySnapshot = nil
+        }
+        let now = hostwrightTimestamp()
+        try store.desiredStates.saveManifestSnapshot(
+            projectID: preparation.projectID,
+            manifestPath: options.manifestPath,
+            manifestHash: preparation.manifestSHA256,
+            desiredGeneration: preparation.providerGeneration,
+            manifest: validated.manifest,
+            timestamp: now,
+            mutationProvider: preparation.providerID.rawValue
+        )
+        let networkReconciliation:
+            NetworkLifecycleReconciliationResult?
+        if lifecycleRequiresProjectNetworkProvisioning(
+            compiled.plan.command
+        ) {
+            networkReconciliation = try hostwrightWaitForAsync {
+                try await NetworkLifecycleCoordinator.reconcile(
+                    preparation: preparation,
+                    planSHA256: compiled.plan.planSHA256,
+                    store: store,
+                    environment: environment
+                )
+            }
+        } else {
+            networkReconciliation = nil
+        }
+        let projectDNSHelper: LiveProjectDNSHelperDriver?
+        let projectDNSRuntime: LiveProjectDNSRuntimeDriver?
+        let projectDNSReconciliation:
+            ProjectDNSLifecycleReconciliationResult?
+        let hasPersistedProjectDNS =
+            try store.projectDNS.load(
+                projectUUID: preparation.projectResourceUUID
+            ) != nil
+        if !preparation.desiredState.networks.isEmpty ||
+            !preparation.ingress.isEmpty ||
+            hasPersistedProjectDNS {
+            let helper = try LiveProjectDNSHelperDriver(
+                environment: environment,
+                stateDatabasePath: options.stateDatabasePath
+            )
+            let runtime = LiveProjectDNSRuntimeDriver(
+                adapter: adapter
+            )
+            projectDNSHelper = helper
+            projectDNSRuntime = runtime
+            if lifecycleRequiresProjectDNSProvisioning(
+                compiled.plan.command
+            ) {
+                projectDNSReconciliation =
+                    try hostwrightWaitForAsync {
+                        try await ProjectDNSLifecycleCoordinator
+                            .reconcile(
+                                preparation: preparation,
+                                planSHA256:
+                                    compiled.plan.planSHA256,
+                                store: store,
+                                helper: helper,
+                                runtime: runtime
+                            )
+                    }
+            } else {
+                projectDNSReconciliation = nil
+            }
+        } else {
+            projectDNSHelper = nil
+            projectDNSRuntime = nil
+            projectDNSReconciliation = nil
+        }
         let storageReconciliation:
             StorageLifecycleReconciliationResult?
         if lifecycleRequiresNamedVolumeProvisioning(
@@ -327,20 +444,6 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
         } else {
             storageReconciliation = nil
         }
-        let now = hostwrightTimestamp()
-        let recoverySnapshot: DesiredStateRecoverySnapshot?
-        if compiled.plan.command == .update {
-            guard let snapshot = try store.desiredStates.loadRecoverySnapshot(
-                projectID: preparation.projectID
-            ) else {
-                throw StateStoreError.invalidRecord(
-                    "Lifecycle update requires one authoritative healthy desired-state snapshot."
-                )
-            }
-            recoverySnapshot = snapshot
-        } else {
-            recoverySnapshot = nil
-        }
         let recoveryStateJSONRedacted = try recoverySnapshot.map(
             lifecycleRecoveryStateJSONRedacted
         )
@@ -351,15 +454,6 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
         let groupID = HostwrightResourceUUID.legacy(
             kind: "lifecycle-group",
             identifier: compiled.plan.planSHA256
-        )
-        try store.desiredStates.saveManifestSnapshot(
-            projectID: preparation.projectID,
-            manifestPath: options.manifestPath,
-            manifestHash: preparation.manifestSHA256,
-            desiredGeneration: preparation.providerGeneration,
-            manifest: validated.manifest,
-            timestamp: now,
-            mutationProvider: preparation.providerID.rawValue
         )
         try lifecyclePersistDesiredImageLocks(
             plan: compiled.plan,
@@ -404,11 +498,34 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
             probeStore: probeStore,
             environment: environment
         )
+        let hasPersistedServiceTunnels =
+            !(try store.serviceTunnels.listRecoverable(
+                projectUUID: preparation.projectResourceUUID
+            )).isEmpty
+        let serviceTunnelFinalizer:
+            LifecycleServiceTunnelFinalizer?
+        if !preparation.tunnelDeclarations.isEmpty ||
+            hasPersistedServiceTunnels {
+            serviceTunnelFinalizer =
+                try LifecycleServiceTunnelFinalizer(
+                    preparation: preparation,
+                    timeoutSeconds: options.timeoutSeconds,
+                    store: store,
+                    helper: LiveServiceTunnelHelperDriver(
+                        environment: environment,
+                        stateDatabasePath:
+                            options.stateDatabasePath
+                    )
+                )
+        } else {
+            serviceTunnelFinalizer = nil
+        }
         let executor = LifecycleSagaExecutor(
             store: store,
             effects: effects,
             validator: validator,
-            recoveryStateJSONRedacted: recoveryStateJSONRedacted
+            recoveryStateJSONRedacted: recoveryStateJSONRedacted,
+            finalizer: serviceTunnelFinalizer
         )
         let result = try hostwrightWaitForAsync {
             try await executor.execute(
@@ -430,6 +547,43 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
             !validated.manifest.volumes.isEmpty
         if result.status == .succeeded ||
             result.status == .alreadySucceeded {
+            if compiled.plan.command != .remove,
+               (
+                   !preparation.desiredState.networks.isEmpty ||
+                       !preparation.ingress.isEmpty
+               ),
+               let projectDNSHelper,
+               let projectDNSRuntime {
+                let freshObserved = try hostwrightWaitForAsync {
+                    try await lifecycleProjectDNSRefreshObservation(
+                        adapter: adapter,
+                        preparation: preparation,
+                        store: store
+                    )
+                }
+                guard freshObserved.adapterMetadata?.providerID ==
+                        preparation.providerID,
+                      freshObserved.capabilitySHA256 ==
+                        preparation.capabilitySHA256 else {
+                    throw HostwrightDiagnostic(
+                        code: .runtimeUnavailable,
+                        message:
+                            "Project DNS ready-record refresh refused stale provider observation."
+                    )
+                }
+                try hostwrightWaitForAsync {
+                    try await ProjectDNSLifecycleCoordinator
+                        .refresh(
+                            preparation: preparation,
+                            observedState: freshObserved,
+                            planSHA256:
+                                compiled.plan.planSHA256,
+                            store: store,
+                            helper: projectDNSHelper,
+                            runtime: projectDNSRuntime
+                        )
+                }
+            }
             if manifestDeclaresNamedVolumes &&
                 lifecycleRequiresNamedVolumeDetach(
                 compiled.plan.command
@@ -475,6 +629,33 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
                         )
                 }
             }
+            if compiled.plan.command == .remove {
+                if let projectDNSHelper,
+                   let projectDNSRuntime {
+                    try hostwrightWaitForAsync {
+                        try await ProjectDNSLifecycleCoordinator
+                            .remove(
+                                preparation: preparation,
+                                planSHA256:
+                                    compiled.plan.planSHA256,
+                                store: store,
+                                helper: projectDNSHelper,
+                                runtime: projectDNSRuntime
+                            )
+                    }
+                }
+                try hostwrightWaitForAsync {
+                    try await NetworkLifecycleCoordinator
+                        .removeNetworks(
+                            networkUUIDs: nil,
+                            preparation: preparation,
+                            planSHA256:
+                                compiled.plan.planSHA256,
+                            store: store,
+                            environment: environment
+                        )
+                }
+            }
         } else if result.status == .compensated,
                   manifestDeclaresNamedVolumes,
                   let storageReconciliation,
@@ -507,8 +688,94 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
                     )
             }
         }
+        if result.status == .compensated,
+           let projectDNSReconciliation,
+           let projectDNSHelper,
+           let projectDNSRuntime {
+            try hostwrightWaitForAsync {
+                try await ProjectDNSLifecycleCoordinator
+                    .compensateNewlyCreated(
+                        projectDNSReconciliation,
+                        preparation: preparation,
+                        planSHA256:
+                            compiled.plan.planSHA256,
+                        store: store,
+                        helper: projectDNSHelper,
+                        runtime: projectDNSRuntime
+                    )
+            }
+        }
+        if result.status == .compensated,
+           let networkReconciliation,
+           !networkReconciliation
+            .newlyCreatedNetworkUUIDs.isEmpty {
+            try hostwrightWaitForAsync {
+                try await NetworkLifecycleCoordinator
+                    .removeNetworks(
+                        networkUUIDs: Set(
+                            networkReconciliation
+                                .newlyCreatedNetworkUUIDs
+                        ),
+                        preparation: preparation,
+                        planSHA256:
+                            compiled.plan.planSHA256,
+                        store: store,
+                        environment: environment
+                    )
+            }
+        }
         return result
     }
+}
+
+private func lifecycleRequiresProjectNetworkProvisioning(
+    _ command: LifecycleCommand
+) -> Bool {
+    switch command {
+    case .up, .run, .start, .restart, .update, .apply:
+        true
+    case .down, .stop, .remove, .resume, .rollback:
+        false
+    }
+}
+
+private func lifecycleRequiresProjectDNSProvisioning(
+    _ command: LifecycleCommand
+) -> Bool {
+    switch command {
+    case .up, .run, .start, .restart, .update, .apply,
+            .resume, .rollback:
+        true
+    case .down, .stop, .remove:
+        false
+    }
+}
+
+func lifecycleProjectDNSRefreshObservation(
+    adapter: any RuntimeAdapter,
+    preparation: LifecycleCommandPreparation,
+    store: SQLiteStateStore
+) async throws -> ObservedRuntimeState {
+    let bindings = try lifecycleBindings(
+        store: store,
+        projectID: preparation.projectID,
+        providerID: preparation.providerID,
+        desiredState: preparation.desiredState
+    )
+    let desiredState = DesiredRuntimeState(
+        projectName: preparation.desiredState.projectName,
+        networks: preparation.desiredState.networks,
+        services: preparation.desiredState.services,
+        ownedResourceHints: bindings.map {
+            RuntimeOwnedResourceHint(
+                resourceIdentifier: $0.resourceIdentifier,
+                identity: $0.identity,
+                identityVersion: $0.identityVersion,
+                ownership: $0.ownershipEvidence
+            )
+        }.sorted { $0.resourceIdentifier < $1.resourceIdentifier }
+    )
+    return try await adapter.observe(desiredState: desiredState)
 }
 
 private func lifecycleRequiresNamedVolumeProvisioning(
@@ -2533,6 +2800,7 @@ actor LifecycleRuntimeExecutionState {
     func desiredStateSnapshot() -> DesiredRuntimeState {
         DesiredRuntimeState(
             projectName: desiredState.projectName,
+            networks: desiredState.networks,
             services: desiredState.services,
             ownedResourceHints: bindingsByResourceUUID.values
                 .map {
@@ -2650,9 +2918,7 @@ struct LifecycleLiveValidator: LifecycleSagaContextValidating {
                     $0.projectUUID == plan.projectResourceUUID &&
                     $0.projectGeneration == plan.projectGeneration &&
                     $0.providerID == plan.providerID &&
-                    $0.providerGeneration == plan.providerGeneration &&
-                    ($0.fencingToken == expectedFencingToken ||
-                        $0.fencingToken == binding?.currentFencingToken)
+                    $0.providerGeneration == plan.providerGeneration
             } == true
         return LifecycleSagaValidation(
             providerID: capability.descriptor.providerID,
@@ -2869,6 +3135,16 @@ struct LifecycleLiveEffects: LifecycleSagaEffects {
                 planHash: context.plan.planSHA256,
                 manifestHash: context.plan.manifestSHA256,
                 context: mutationContext(node: node, context: context)
+            )
+            try await persistNetworkPortIntent(
+                action: action,
+                node: node,
+                context: context
+            )
+            try await persistNetworkAttachmentIntent(
+                action: action,
+                node: node,
+                context: context
             )
             let imageContentLease =
                 try await acquireImageContentLeaseIfNeeded(
@@ -3147,6 +3423,7 @@ struct LifecycleLiveEffects: LifecycleSagaEffects {
                 )
                 desired = DesiredRuntimeState(
                     projectName: desired.projectName,
+                    networks: desired.networks,
                     services: desired.services,
                     ownedResourceHints: hints.sorted {
                         $0.resourceIdentifier <
@@ -3272,6 +3549,16 @@ struct LifecycleLiveEffects: LifecycleSagaEffects {
                 observedService: matches.first,
                 desiredService: await state.desiredService(for: node.key)
             ) {
+                try reconcileNetworkPorts(
+                    node: node,
+                    context: context,
+                    inventory: inventory
+                )
+                try await reconcileNetworkAttachments(
+                    node: node,
+                    context: context,
+                    inventory: inventory
+                )
                 try await persistVerifiedProjection(
                     node: node,
                     context: context,
@@ -3306,6 +3593,354 @@ struct LifecycleLiveEffects: LifecycleSagaEffects {
                 )
             )
         }
+    }
+
+    private func persistNetworkPortIntent(
+        action: PlannedRuntimeAction,
+        node: LifecyclePlanNode,
+        context: LifecycleSagaContext
+    ) async throws {
+        guard node.action == .create ||
+                node.action == .delete ||
+                node.action == .retire else {
+            return
+        }
+        if node.action == .create {
+            guard let desired = action.desiredService else {
+                throw HostwrightDiagnostic(
+                    code: .runtimeUnavailable,
+                    message:
+                        "Port reservation requires the exact desired service before runtime creation."
+                )
+            }
+            guard !desired.ports.isEmpty else {
+                return
+            }
+            let group = try exactNetworkPortOperationGroup(
+                context: context
+            )
+            let inventory = try await adapter.inventory()
+            _ = try NetworkPortLifecycleCoordinator.reserve(
+                service: desired,
+                node: node,
+                plan: context.plan,
+                group: group,
+                inventory: inventory,
+                store: store,
+                isAvailable:
+                    NetworkPortSocketAvailability.isAvailable
+            )
+            return
+        }
+        let portRecords = try store.networkPorts.loadProject(
+            projectUUID: context.plan.projectResourceUUID
+        ).filter {
+            $0.resourceUUID == node.resourceUUID
+        }
+        guard !portRecords.isEmpty else {
+            return
+        }
+        let group = try exactNetworkPortOperationGroup(
+            context: context
+        )
+        let inventory = try await adapter.inventory()
+        let priorFencingToken = await state.binding(
+            resourceUUID: node.resourceUUID,
+            resourceIdentifier: node.resourceIdentifier
+        )?.currentFencingToken
+        _ = try NetworkPortLifecycleCoordinator.beginRelease(
+            node: node,
+            plan: context.plan,
+            group: group,
+            inventory: inventory,
+            priorFencingToken: priorFencingToken,
+            store: store
+        )
+    }
+
+    private func reconcileNetworkPorts(
+        node: LifecyclePlanNode,
+        context: LifecycleSagaContext,
+        inventory: RuntimeInventory
+    ) throws {
+        guard node.action == .create ||
+                node.action == .delete ||
+                node.action == .retire else {
+            return
+        }
+        let portRecords = try store.networkPorts.loadProject(
+            projectUUID: context.plan.projectResourceUUID
+        ).filter {
+            $0.resourceUUID == node.resourceUUID
+        }
+        guard !portRecords.isEmpty else {
+            return
+        }
+        let group = try exactNetworkPortOperationGroup(
+            context: context
+        )
+        if node.action == .create {
+            _ = try NetworkPortLifecycleCoordinator.confirmActive(
+                node: node,
+                plan: context.plan,
+                group: group,
+                inventory: inventory,
+                store: store
+            )
+            return
+        }
+        _ = try NetworkPortLifecycleCoordinator.confirmReleased(
+            node: node,
+            plan: context.plan,
+            group: group,
+            inventory: inventory,
+            store: store
+        )
+    }
+
+    private func exactNetworkPortOperationGroup(
+        context: LifecycleSagaContext
+    ) throws -> OperationGroupRecord {
+        guard let group = try store.operationGroups.load(
+            id: context.groupID
+        ),
+        group.status == .active,
+        group.groupKind == "lifecycle-v1",
+        group.projectID == context.plan.projectID,
+        group.planHash == context.plan.planSHA256,
+        group.groupIdempotencyKey ==
+            context.plan.planSHA256,
+        group.fencingToken == context.fencingToken else {
+            throw HostwrightDiagnostic(
+                code: .runtimeUnavailable,
+                message:
+                    "Port lifecycle lost the exact active operation-group authority."
+            )
+        }
+        return group
+    }
+
+    private func persistNetworkAttachmentIntent(
+        action: PlannedRuntimeAction,
+        node: LifecyclePlanNode,
+        context: LifecycleSagaContext
+    ) async throws {
+        switch action.kind {
+        case .create:
+            guard let desired = action.desiredService,
+                  !desired.networks.isEmpty else {
+                return
+            }
+            let authority = try await networkAttachmentAuthority(
+                context: context
+            )
+            let repository = store.networks
+            for attachment in desired.networks.sorted(
+                by: {
+                    if $0.networkRuntimeIdentifier !=
+                        $1.networkRuntimeIdentifier {
+                        return $0.networkRuntimeIdentifier <
+                            $1.networkRuntimeIdentifier
+                    }
+                    return $0.networkResourceUUID <
+                        $1.networkResourceUUID
+                }
+            ) {
+                guard let network = try repository.loadNetwork(
+                    id: attachment.networkResourceUUID
+                ),
+                network.runtimeName ==
+                    attachment.networkRuntimeIdentifier else {
+                    throw NetworkAttachmentLifecycleError
+                        .ownershipConflict(
+                            "Create-time attachment requires one exact available network record."
+                        )
+                }
+                let descriptor = try NetworkAttachmentCreateDescriptor(
+                    network: network,
+                    containerRuntimeIdentifier:
+                        action.resourceIdentifier,
+                    containerContext:
+                        mutationContext(
+                            node: node,
+                            context: context
+                        ),
+                    aliases: attachment.aliases
+                )
+                _ = try NetworkAttachmentLifecycle
+                    .persistCreateIntent(
+                        descriptor,
+                        authority: authority,
+                        timestamp: hostwrightTimestamp(),
+                        repository: repository
+                    )
+            }
+        case .remove:
+            let authority = try await networkAttachmentAuthority(
+                context: context
+            )
+            let repository = store.networks
+            let records = try NetworkAttachmentLifecycle
+                .reverseReleaseOrder(
+                    projectUUID:
+                        context.plan.projectResourceUUID,
+                    resourceUUID: node.resourceUUID,
+                    providerID: context.plan.providerID,
+                    providerGeneration:
+                        context.plan.providerGeneration,
+                    repository: repository
+                )
+            for record in records {
+                _ = try NetworkAttachmentLifecycle
+                    .persistReleaseIntent(
+                        record: record,
+                        authority: authority,
+                        timestamp: hostwrightTimestamp(),
+                        repository: repository
+                    )
+            }
+        case .start, .stop, .restart, .update, .noOp:
+            return
+        }
+    }
+
+    private func reconcileNetworkAttachments(
+        node: LifecyclePlanNode,
+        context: LifecycleSagaContext,
+        inventory: RuntimeInventory
+    ) async throws {
+        let repository = store.networks
+        let authority = try await networkAttachmentAuthority(
+            context: context
+        )
+        if node.action == .create,
+           let desired = await state.desiredService(for: node.key) {
+            let containerIdentifier =
+                node.resourceIdentifier ??
+                desired.identity.managedResourceIdentifier
+            for attachment in desired.networks.sorted(
+                by: {
+                    if $0.networkRuntimeIdentifier !=
+                        $1.networkRuntimeIdentifier {
+                        return $0.networkRuntimeIdentifier <
+                            $1.networkRuntimeIdentifier
+                    }
+                    return $0.networkResourceUUID <
+                        $1.networkResourceUUID
+                }
+            ) {
+                guard let network = try repository.loadNetwork(
+                    id: attachment.networkResourceUUID
+                ) else {
+                    throw NetworkAttachmentLifecycleError
+                        .ownershipConflict(
+                            "Attachment verification lost its exact network record."
+                        )
+                }
+                let descriptor = try NetworkAttachmentCreateDescriptor(
+                    network: network,
+                    containerRuntimeIdentifier:
+                        containerIdentifier,
+                    containerContext:
+                        mutationContext(
+                            node: node,
+                            context: context
+                        ),
+                    aliases: attachment.aliases
+                )
+                guard let record = try repository.loadAttachment(
+                    id: descriptor.attachmentUUID
+                ) else {
+                    throw NetworkAttachmentLifecycleError
+                        .ownershipConflict(
+                            "Attachment verification lost its durable pre-mutation intent."
+                        )
+                }
+                switch try NetworkAttachmentLifecycle
+                    .resolveCreateObservation(
+                        record: record,
+                        descriptor: descriptor,
+                        inventory: inventory,
+                        trigger: .postMutation,
+                        authority: authority,
+                        timestamp: hostwrightTimestamp(),
+                        repository: repository
+                    ) {
+                case .attached:
+                    break
+                case .absent:
+                    throw NetworkAttachmentLifecycleError
+                        .observationIndeterminate(
+                            "Structured observation did not prove the requested create-time network attachment."
+                        )
+                case .quarantined:
+                    throw NetworkAttachmentLifecycleError
+                        .ownershipConflict(
+                            "Structured observation found ambiguous network attachment ownership."
+                        )
+                }
+            }
+        }
+        if node.action == .delete || node.action == .retire {
+            let containerIdentifier: String
+            if let resourceIdentifier =
+                node.resourceIdentifier {
+                containerIdentifier = resourceIdentifier
+            } else {
+                containerIdentifier = await state.identity(
+                    for: node,
+                    projectName: context.plan.projectName
+                ).managedResourceIdentifier
+            }
+            let records = try NetworkAttachmentLifecycle
+                .reverseReleaseOrder(
+                    projectUUID:
+                        context.plan.projectResourceUUID,
+                    resourceUUID: node.resourceUUID,
+                    providerID: context.plan.providerID,
+                    providerGeneration:
+                        context.plan.providerGeneration,
+                    repository: repository
+                )
+            for record in records {
+                try NetworkAttachmentLifecycle
+                    .releaseAfterVerifiedAbsence(
+                        record: record,
+                        containerRuntimeIdentifier:
+                            containerIdentifier,
+                        inventory: inventory,
+                        authority: authority,
+                        timestamp: hostwrightTimestamp(),
+                        repository: repository
+                    )
+            }
+        }
+    }
+
+    private func networkAttachmentAuthority(
+        context: LifecycleSagaContext
+    ) async throws -> NetworkStateMutationAuthority {
+        let capability = try await adapter.capabilitySnapshot()
+        guard capability.descriptor.providerID ==
+                context.plan.providerID,
+              capability.canonicalSHA256 ==
+                context.plan.capabilitySHA256 else {
+            throw NetworkAttachmentLifecycleError
+                .ownershipConflict(
+                    "Network attachment mutation refused a stale capability snapshot."
+                )
+        }
+        return NetworkStateMutationAuthority(
+            providerID: context.plan.providerID.rawValue,
+            providerGeneration:
+                Int64(context.plan.providerGeneration),
+            operationGroupID: context.groupID,
+            fencingToken: context.fencingToken,
+            plannedCapabilitySHA256:
+                context.plan.capabilitySHA256,
+            currentCapabilitySHA256:
+                capability.canonicalSHA256
+        )
     }
 
     private func recoveredSpecialEvidence(
@@ -4650,16 +5285,20 @@ struct LifecycleLiveEffects: LifecycleSagaEffects {
             )
         }
         let desiredService: DesiredRuntimeService?
-        if kind == .create, let service = await state.desiredService(for: node.key) {
-            desiredService = try resolveSecretReferences(
-                service,
-                workload: try lifecycleSecretWorkloadScope(
-                    projectResourceUUID: plan.projectResourceUUID,
-                    resourceUUID: node.resourceUUID,
-                    generation: node.resourceGeneration,
-                    serviceName: service.logicalServiceName
+        if let service = await state.desiredService(for: node.key) {
+            if kind == .create {
+                desiredService = try resolveSecretReferences(
+                    service,
+                    workload: try lifecycleSecretWorkloadScope(
+                        projectResourceUUID: plan.projectResourceUUID,
+                        resourceUUID: node.resourceUUID,
+                        generation: node.resourceGeneration,
+                        serviceName: service.logicalServiceName
+                    )
                 )
-            )
+            } else {
+                desiredService = service
+            }
         } else {
             desiredService = nil
         }
@@ -4707,9 +5346,7 @@ struct LifecycleLiveEffects: LifecycleSagaEffects {
             ownership.projectUUID == plan.projectResourceUUID &&
             ownership.projectGeneration == plan.projectGeneration &&
             ownership.providerID == plan.providerID &&
-            ownership.providerGeneration == plan.providerGeneration &&
-            (ownership.fencingToken == node.fencingToken ||
-                ownership.fencingToken == binding?.currentFencingToken)
+            ownership.providerGeneration == plan.providerGeneration
     }
 
     private func postconditionSatisfied(
@@ -4733,7 +5370,9 @@ struct LifecycleLiveEffects: LifecycleSagaEffects {
                     observedService?.lifecycleState ?? .unknown
                 )
         case .delete, .retire:
-            return exactContainer == nil && observedService == nil
+            return exactContainer == nil &&
+                (observedService == nil ||
+                    observedService?.lifecycleState == .missing)
         case .verify:
             guard let observedService else { return false }
             return node.postconditions.allSatisfy { condition in
@@ -5444,6 +6083,38 @@ private func lifecyclePreflightDesiredExecution(
             "Runtime capability changed before lifecycle preflight. No runtime mutation was attempted."
         )
     }
+    if preparation.desiredState.services.contains(where: {
+        !$0.hostAccess.isEmpty
+    }) {
+        let networkProvider =
+            try environment.networkProviderForProvider(
+                preparation.providerID
+            )
+        let networkCapabilities = try hostwrightWaitForAsync {
+            try await networkProvider.networkCapabilities()
+        }
+        try lifecyclePreflightHostAccessCapabilities(
+            services: preparation.desiredState.services,
+            providerID: preparation.providerID,
+            capabilities: networkCapabilities
+        )
+    }
+    if preparation.desiredState.services.contains(where: {
+        $0.networkPolicy != nil
+    }) {
+        let networkProvider =
+            try environment.networkProviderForProvider(
+                preparation.providerID
+            )
+        let networkCapabilities = try hostwrightWaitForAsync {
+            try await networkProvider.networkCapabilities()
+        }
+        try lifecyclePreflightNetworkPolicyCapabilities(
+            services: preparation.desiredState.services,
+            providerID: preparation.providerID,
+            capabilities: networkCapabilities
+        )
+    }
     try lifecyclePreflightImageTrust(
         planSHA256: compiled.plan.planSHA256,
         projectID: preparation.projectID,
@@ -5559,6 +6230,73 @@ private func lifecyclePreflightDesiredExecution(
                 with: sanitizedEnvironment
             ),
             providerID: preparation.providerID
+        )
+    }
+}
+
+func lifecyclePreflightNetworkPolicyCapabilities(
+    services: [DesiredRuntimeService],
+    providerID: RuntimeProviderID,
+    capabilities: RuntimeNetworkProviderCapabilities
+) throws {
+    let declared = services.compactMap(\.networkPolicy)
+    guard !declared.isEmpty else { return }
+    guard capabilities.providerID == providerID,
+          let policy = capabilities.networkPolicy,
+          policy.state == .available,
+          policy.reason == .implemented,
+          Set(policy.directions) ==
+            Set(HostwrightNetworkPolicyDirection.allCases),
+          policy.enforcesExactIdentity,
+          policy.appliesAtomicGenerations,
+          policy.observesRuleDigest else {
+        throw RuntimeAdapterError.mutationUnavailableByPolicy(
+            "The selected runtime provider does not qualify exact ingress and egress network-policy enforcement with atomic observable generations. No runtime mutation was attempted."
+        )
+    }
+    let rules = declared.flatMap { $0.ingress + $0.egress }
+    if rules.contains(where: { $0.address != nil }),
+       !policy.enforcesCIDR {
+        throw RuntimeAdapterError.mutationUnavailableByPolicy(
+            "The selected runtime provider does not qualify exact CIDR network-policy enforcement. No runtime mutation was attempted."
+        )
+    }
+    if rules.contains(where: { $0.dns != nil }),
+       !policy.enforcesDNS {
+        throw RuntimeAdapterError.mutationUnavailableByPolicy(
+            "The selected runtime provider does not qualify DNS-aware network-policy enforcement. No runtime mutation was attempted."
+        )
+    }
+}
+
+func lifecyclePreflightHostAccessCapabilities(
+    services: [DesiredRuntimeService],
+    providerID: RuntimeProviderID,
+    capabilities: RuntimeNetworkProviderCapabilities
+) throws {
+    let declared = services.filter { !$0.hostAccess.isEmpty }
+    guard !declared.isEmpty else { return }
+    guard capabilities.providerID == providerID,
+          let hostAccess = capabilities.hostAccess,
+          hostAccess.state == .available,
+          hostAccess.reason == .implemented,
+          hostAccess.requiresManagedProjectNetwork,
+          hostAccess.enforcesExactEndpointAllowlist else {
+        throw RuntimeAdapterError.mutationUnavailableByPolicy(
+            "The selected runtime provider does not qualify guarded host access with exact endpoint enforcement. No runtime mutation was attempted."
+        )
+    }
+    let protocols = Set(hostAccess.protocols)
+    let addressClasses = Set(hostAccess.addressClasses)
+    guard declared.allSatisfy({ service in
+        service.networks.count == 1 &&
+            service.hostAccess.allSatisfy {
+                protocols.contains($0.protocolName) &&
+                    addressClasses.contains($0.addressClass)
+            }
+    }) else {
+        throw RuntimeAdapterError.mutationUnavailableByPolicy(
+            "Guarded host access requires one managed project network and provider-qualified endpoint protocol and address classes. No runtime mutation was attempted."
         )
     }
 }
@@ -6852,6 +7590,10 @@ private func lifecycleReplacingEnvironment(
         environment: environment,
         labels: service.labels,
         ports: service.ports,
+        publishedSockets: service.publishedSockets,
+        hostAccess: service.hostAccess,
+        networkPolicy: service.networkPolicy,
+        networks: service.networks,
         mounts: service.mounts,
         healthCheck: service.healthCheck,
         probes: service.probes,

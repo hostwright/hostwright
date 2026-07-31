@@ -116,6 +116,18 @@
     "volumes": {
       "$ref": "#/$defs/volumeDeclarations"
     },
+    "networks": {
+      "$ref": "#/$defs/networkDeclarations"
+    },
+    "certificates": {
+      "$ref": "#/$defs/certificateDeclarations"
+    },
+    "ingress": {
+      "$ref": "#/$defs/ingressListeners"
+    },
+    "tunnels": {
+      "$ref": "#/$defs/tunnelDeclarations"
+    },
     "services": {
       "type": "object",
       "minProperties": 1,
@@ -221,6 +233,460 @@
         },
         "labels": {
           "$ref": "#/$defs/labels"
+        }
+      }
+    },
+    "networkDeclarations": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/name"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/networkDeclaration"
+      }
+    },
+    "networkDeclaration": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "driver": {
+          "enum": ["nat", "hostOnly"],
+          "default": "nat"
+        },
+        "ipv4": {
+          "$ref": "#/$defs/networkAddressRequest",
+          "default": "auto"
+        },
+        "ipv6": {
+          "$ref": "#/$defs/networkAddressRequest",
+          "default": "auto"
+        }
+      }
+    },
+    "networkAddressRequest": {
+      "oneOf": [
+        {
+          "enum": ["auto", "disabled"]
+        },
+        {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[^\\s/]+/[0-9]{1,3}$"
+        }
+      ]
+    },
+    "serviceNetworkAttachment": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/name"
+        },
+        {
+          "type": "object",
+          "required": ["network"],
+          "additionalProperties": false,
+          "properties": {
+            "network": {
+              "$ref": "#/$defs/name"
+            },
+            "aliases": {
+              "type": "array",
+              "maxItems": 64,
+              "uniqueItems": true,
+              "items": {
+                "$ref": "#/$defs/name"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "networkPolicyRules": {
+      "type": "array",
+      "maxItems": 256,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "minProperties": 1,
+        "additionalProperties": false,
+        "properties": {
+          "project": { "$ref": "#/$defs/name" },
+          "service": { "$ref": "#/$defs/name" },
+          "identity": { "type": "string", "minLength": 1, "maxLength": 512 },
+          "protocol": { "enum": ["tcp", "udp"] },
+          "address": { "type": "string", "minLength": 3, "maxLength": 128 },
+          "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+          "dns": { "$ref": "#/$defs/hostAccessHostname" }
+        }
+      }
+    },
+    "hostAccessHostname": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 253,
+      "pattern": "^(?!(?:[0-9]{1,3}\\.){3}[0-9]{1,3}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$",
+      "not": {
+        "enum": [
+          "instance-data",
+          "localhost",
+          "localhost.localdomain",
+          "metadata",
+          "metadata.aws.internal",
+          "metadata.google.internal"
+        ]
+      }
+    },
+    "hostAccessEndpoint": {
+      "type": "object",
+      "required": ["hostname", "protocol", "addressClass", "port"],
+      "additionalProperties": false,
+      "properties": {
+        "hostname": {
+          "$ref": "#/$defs/hostAccessHostname"
+        },
+        "protocol": {
+          "enum": ["tcp", "udp"]
+        },
+        "addressClass": {
+          "enum": ["loopback", "interface"]
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        }
+      }
+    },
+    "ingressListeners": {
+      "type": "object",
+      "maxProperties": 64,
+      "propertyNames": {
+        "$ref": "#/$defs/name"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/ingressListener"
+      }
+    },
+    "tunnelDeclarations": {
+      "type": "object",
+      "maxProperties": 64,
+      "propertyNames": { "$ref": "#/$defs/name" },
+      "additionalProperties": { "$ref": "#/$defs/tunnelDeclaration" }
+    },
+    "tunnelDeclaration": {
+      "type": "object",
+      "required": ["targetService", "targetPort", "peerUUID"],
+      "additionalProperties": false,
+      "properties": {
+        "targetService": { "$ref": "#/$defs/name" },
+        "targetPort": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "peerUUID": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "role": {
+          "enum": ["local-loopback", "listener", "dialer"],
+          "default": "local-loopback"
+        },
+        "trust": { "$ref": "#/$defs/tunnelTrust" },
+        "bindEndpoint": { "$ref": "#/$defs/tunnelBindEndpoint" },
+        "authenticatedEndpoints": {
+          "type": "array",
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/tunnelEndpoint" }
+        },
+        "relayEndpoint": { "$ref": "#/$defs/tunnelEndpoint" },
+        "bonjourDiscovery": {
+          "type": "boolean",
+          "default": true
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "role": { "const": "listener" } },
+            "required": ["role"]
+          },
+          "then": {
+            "required": ["trust", "bindEndpoint"],
+            "properties": {
+              "trust": { "required": ["peerIdentityURI"] }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "role": { "const": "dialer" } },
+            "required": ["role"]
+          },
+          "then": {
+            "required": ["trust", "bindEndpoint"],
+            "properties": {
+              "trust": { "required": ["peerDNSName"] }
+            },
+            "anyOf": [
+              {
+                "required": ["authenticatedEndpoints"],
+                "properties": {
+                  "authenticatedEndpoints": { "minItems": 1 }
+                }
+              },
+              {
+                "properties": {
+                  "bonjourDiscovery": { "const": true }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": { "role": { "const": "local-loopback" } }
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                { "required": ["trust"] },
+                { "required": ["bindEndpoint"] }
+              ]
+            },
+            "anyOf": [
+              {
+                "required": ["authenticatedEndpoints"],
+                "properties": {
+                  "authenticatedEndpoints": { "minItems": 1 }
+                }
+              },
+              {
+                "properties": {
+                  "bonjourDiscovery": { "const": true }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "tunnelTrust": {
+      "type": "object",
+      "required": [
+        "wireRouteUUID",
+        "wireGeneration",
+        "localIdentitySHA256",
+        "peerTrustAnchorSHA256",
+        "peerCertificateSHA256"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "wireRouteUUID": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "wireGeneration": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "localIdentitySHA256": { "$ref": "#/$defs/lowercaseSHA256" },
+        "peerTrustAnchorSHA256": { "$ref": "#/$defs/lowercaseSHA256" },
+        "peerCertificateSHA256": { "$ref": "#/$defs/lowercaseSHA256" },
+        "peerDNSName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 253,
+          "pattern": "^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$"
+        },
+        "peerIdentityURI": {
+          "type": "string",
+          "maxLength": 512,
+          "pattern": "^spiffe://hostwright\\.internal/projects/[0-9a-f-]+/resources/[0-9a-f-]+/roles/(workload|ingress|tunnel|node)/generations/[1-9][0-9]*$"
+        }
+      }
+    },
+    "lowercaseSHA256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "tunnelBindEndpoint": {
+      "type": "object",
+      "required": ["host", "port"],
+      "additionalProperties": false,
+      "properties": {
+        "host": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 253,
+          "pattern": "^[^/@\\[\\]\\s]+$"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        }
+      }
+    },
+    "tunnelEndpoint": {
+      "type": "object",
+      "required": ["host", "port"],
+      "additionalProperties": false,
+      "properties": {
+        "scheme": {
+          "const": "tls",
+          "default": "tls"
+        },
+        "host": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 253,
+          "pattern": "^[^/@\\[\\]\\s]+$"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        }
+      }
+    },
+    "certificateDeclarations": {
+      "type": "object",
+      "maxProperties": 64,
+      "propertyNames": { "$ref": "#/$defs/name" },
+      "additionalProperties": { "$ref": "#/$defs/certificateDeclaration" }
+    },
+    "certificateDeclaration": {
+      "type": "object",
+      "required": ["source"],
+      "additionalProperties": false,
+      "properties": {
+        "source": { "enum": ["imported", "localCA", "provider"] },
+        "identitySHA256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "issuer": { "$ref": "#/$defs/name" },
+        "renewBeforeSeconds": { "type": "integer", "minimum": 3600, "maximum": 2592000, "default": 604800 },
+        "validitySeconds": { "type": "integer", "minimum": 86400, "maximum": 31536000, "default": 2592000 },
+        "statusPolicy": { "enum": ["disabled", "ifAvailable", "required"], "default": "ifAvailable" }
+      },
+      "allOf": [
+        { "if": { "properties": { "source": { "const": "imported" } } }, "then": { "required": ["identitySHA256"], "not": { "required": ["issuer"] } } },
+        { "if": { "properties": { "source": { "const": "localCA" } } }, "then": { "not": { "anyOf": [{ "required": ["identitySHA256"] }, { "required": ["issuer"] }] } } },
+        { "if": { "properties": { "source": { "const": "provider" } } }, "then": { "required": ["issuer"], "not": { "required": ["identitySHA256"] } } }
+      ]
+    },
+    "ingressListener": {
+      "type": "object",
+      "required": ["port", "routes"],
+      "additionalProperties": false,
+      "properties": {
+        "bind": {
+          "type": "string",
+          "maxLength": 64,
+          "default": "127.0.0.1"
+        },
+        "certificate": { "$ref": "#/$defs/name" },
+        "peers": {
+          "type": "array",
+          "maxItems": 256,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "required": ["service", "role"],
+            "additionalProperties": false,
+            "properties": {
+              "service": { "$ref": "#/$defs/name" },
+              "role": { "enum": ["workload", "ingress", "tunnel", "node"] }
+            }
+          }
+        },
+        "exposure": {
+          "$ref": "#/$defs/ingressExposure"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "routes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "items": {
+            "$ref": "#/$defs/ingressRoute"
+          }
+        }
+      }
+    },
+    "ingressExposure": {
+      "type": "object",
+      "required": ["scope", "authentication"],
+      "additionalProperties": false,
+      "properties": {
+        "scope": { "enum": ["localhost", "lan", "tunnel", "public"] },
+        "interfaces": {
+          "type": "array",
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 15, "pattern": "^(?!\\.{1,2}$)[A-Za-z0-9._-]+$" }
+        },
+        "networkClasses": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "enum": ["private", "vpn", "public"] }
+        },
+        "allowedCIDRs": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 3, "maxLength": 43 }
+        },
+        "authentication": { "enum": ["none", "tls", "mtls", "authenticated-tunnel"] }
+      }
+    },
+    "ingressRouteHostname": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 253,
+      "pattern": "^(?!(?:[0-9]{1,3}\\.){3}[0-9]{1,3}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$",
+      "not": {
+        "enum": ["instance-data", "localhost", "localhost.localdomain", "metadata", "metadata.aws.internal", "metadata.google.internal"]
+      }
+    },
+    "ingressRoute": {
+      "type": "object",
+      "required": ["hostname", "targetService", "targetPort"],
+      "additionalProperties": false,
+      "properties": {
+        "hostname": {
+          "$ref": "#/$defs/ingressRouteHostname"
+        },
+        "pathPrefix": {
+          "type": "string",
+          "maxLength": 1024,
+          "pattern": "^/(?!.*//)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[%?#])[^\\u0000-\\u001F\\u007F]*$",
+          "default": "/"
+        },
+        "methods": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {
+            "enum": ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
+          },
+          "default": ["GET"]
+        },
+        "protocol": {
+          "enum": ["http", "websocket"],
+          "default": "http"
+        },
+        "targetService": {
+          "$ref": "#/$defs/name"
+        },
+        "targetPort": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
         }
       }
     },
@@ -631,8 +1097,125 @@
           "type": "array",
           "uniqueItems": true,
           "items": {
-            "type": "string",
-            "pattern": "^[0-9]{1,5}:[0-9]{1,5}$"
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,5}:[0-9]{1,5}$"
+              },
+              {
+                "type": "object",
+                "required": ["target"],
+                "additionalProperties": false,
+                "properties": {
+                  "bind": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "host": {
+                    "oneOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 65535
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^[0-9]{1,5}-[0-9]{1,5}$"
+                      }
+                    ]
+                  },
+                  "target": {
+                    "oneOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 65535
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^[0-9]{1,5}-[0-9]{1,5}$"
+                      }
+                    ]
+                  },
+                  "protocol": {
+                    "enum": ["tcp", "udp"]
+                  },
+                  "exposure": {
+                    "type": "object",
+                    "required": ["scope", "authentication"],
+                    "additionalProperties": false,
+                    "properties": {
+                      "scope": { "enum": ["localhost", "lan", "tunnel", "public"] },
+                      "interfaces": {
+                        "type": "array",
+                        "maxItems": 8,
+                        "uniqueItems": true,
+                        "items": { "type": "string", "minLength": 1, "maxLength": 15, "pattern": "^(?!\\.{1,2}$)[A-Za-z0-9._-]+$" }
+                      },
+                      "networkClasses": {
+                        "type": "array",
+                        "uniqueItems": true,
+                        "items": { "enum": ["private", "vpn", "public"] }
+                      },
+                      "allowedCIDRs": {
+                        "type": "array",
+                        "maxItems": 32,
+                        "uniqueItems": true,
+                        "items": { "type": "string", "minLength": 3, "maxLength": 43 }
+                      },
+                      "authentication": { "enum": ["none", "tls", "mtls", "authenticated-tunnel"] }
+                    }
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": ["target", "protocol"],
+                "additionalProperties": false,
+                "properties": {
+                  "host": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 255,
+                    "pattern": "^(?!\\.{1,2}$)[A-Za-z0-9._-]+$"
+                  },
+                  "target": {
+                    "type": "string",
+                    "maxLength": 107,
+                    "pattern": "^/(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*//)[^:\\u0000]+$"
+                  },
+                  "protocol": {
+                    "const": "unix"
+                  },
+                  "mode": {
+                    "enum": ["0600", "0660"]
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "hostAccess": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/hostAccessEndpoint"
+          }
+        },
+        "networks": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/serviceNetworkAttachment"
+          }
+        },
+        "networkPolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "ingress": { "$ref": "#/$defs/networkPolicyRules" },
+            "egress": { "$ref": "#/$defs/networkPolicyRules" }
           }
         },
         "volumes": {

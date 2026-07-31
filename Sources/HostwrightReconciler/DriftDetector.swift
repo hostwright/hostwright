@@ -334,17 +334,29 @@ public enum DriftDetector {
     ) {
         let desiredPorts = Set(desired.ports.map(stablePortKey))
         let observedPorts = Set(observed.ports.map(stablePortKey))
-        guard desiredPorts != observedPorts else {
+        let desiredSockets = Set(
+            desired.publishedSockets.map(stableSocketKey)
+        )
+        let observedSockets = Set(
+            observed.publishedSockets.map(stableSocketKey)
+        )
+        guard desiredPorts != observedPorts ||
+                desiredSockets != observedSockets else {
             return
         }
 
-        let detail = "desired=\(desiredPorts.sorted().joined(separator: ","));observed=\(observedPorts.sorted().joined(separator: ","))"
+        let detail =
+            "desired=\(desiredPorts.sorted().joined(separator: ","));" +
+            "observed=\(observedPorts.sorted().joined(separator: ","));" +
+            "desiredSockets=\(desiredSockets.sorted().joined(separator: ","));" +
+            "observedSockets=\(observedSockets.sorted().joined(separator: ","))"
         drift.append(
             DriftRecord(
                 kind: .portMismatch,
                 severity: .warning,
                 identity: desired.identity,
-                reason: "Observed port set differs from desired port set.",
+                reason:
+                    "Observed published port or Unix socket set differs from desired state.",
                 stableDetailKey: detail
             )
         )
@@ -471,7 +483,23 @@ public enum DriftDetector {
             port.bindAddress ?? "localhost",
             port.hostPort.map(String.init) ?? "",
             String(port.containerPort),
-            port.protocolName.rawValue
+            port.protocolName.rawValue,
+            port.exposurePolicy.scope.rawValue,
+            port.exposurePolicy.authentication.rawValue,
+            port.exposurePolicy.interfaces.joined(separator: ","),
+            port.exposurePolicy.networkClasses.map(\.rawValue)
+                .joined(separator: ","),
+            port.exposurePolicy.allowedCIDRs.joined(separator: ",")
+        ].joined(separator: ":")
+    }
+
+    private static func stableSocketKey(
+        _ socket: RuntimeUnixSocketPublication
+    ) -> String {
+        [
+            socket.hostPath,
+            socket.containerPath,
+            socket.mode.rawValue
         ].joined(separator: ":")
     }
 

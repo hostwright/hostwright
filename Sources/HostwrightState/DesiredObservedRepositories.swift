@@ -1,6 +1,7 @@
 import Foundation
 import HostwrightCore
 import HostwrightManifest
+import HostwrightNetworking
 import HostwrightRuntime
 
 public struct DesiredStateRepository: Sendable {
@@ -18,6 +19,28 @@ public struct DesiredStateRepository: Sendable {
         manifest: HostwrightManifest,
         timestamp: String,
         mutationProvider: String? = nil
+    ) throws {
+        try saveManifestSnapshot(
+            projectID: projectID,
+            manifestPath: manifestPath,
+            manifestHash: manifestHash,
+            desiredGeneration: desiredGeneration,
+            manifest: manifest,
+            timestamp: timestamp,
+            mutationProvider: mutationProvider,
+            projectResourceUUID: nil
+        )
+    }
+
+    public func saveManifestSnapshot(
+        projectID: String,
+        manifestPath: String?,
+        manifestHash: String,
+        desiredGeneration: Int,
+        manifest: HostwrightManifest,
+        timestamp: String,
+        mutationProvider: String?,
+        projectResourceUUID: String?
     ) throws {
         guard let projectName = manifest.project, !projectName.isEmpty else {
             throw StateStoreError.invalidRecord("Manifest snapshot requires a project name.")
@@ -37,6 +60,7 @@ public struct DesiredStateRepository: Sendable {
             manifestHash: manifestHash,
             createdAt: timestamp,
             updatedAt: timestamp,
+            resourceUUID: projectResourceUUID,
             manifestVersion: manifest.effectiveVersion,
             mutationProvider: mutationProvider,
             providerGeneration: mutationProvider == nil ? 0 : desiredGeneration
@@ -334,7 +358,21 @@ public struct DesiredStateRepository: Sendable {
             serviceName: service.name,
             image: image,
             commandJSON: try StateJSON.encodeStringArray(service.command),
-            portsJSON: try StateJSON.encodeStringArray(service.ports),
+            portsJSON: try StateJSON.encode(
+                service.publishedPorts.sorted {
+                    publishedPortKey($0) < publishedPortKey($1)
+                }.map(publishedPortJSON) +
+                    service.publishedSockets.sorted {
+                        publishedSocketKey($0) <
+                            publishedSocketKey($1)
+                    }.map(publishedSocketJSON) +
+                    service.hostAccess.sorted(
+                        by: HostwrightHostAccessPolicy.canonicalPrecedes
+                    ).map(hostAccessJSON) +
+                    (service.networkPolicy.map {
+                        [networkPolicyJSON($0)]
+                    } ?? [])
+            ),
             mountsJSON: try StateJSON.encodeStringArray(service.volumes),
             environmentJSONRedacted: try StateJSON.encode(redactedEnvironment),
             manifestHash: manifestHash,
@@ -343,6 +381,113 @@ public struct DesiredStateRepository: Sendable {
             updatedAt: timestamp,
             mutationProvider: mutationProvider
         )
+    }
+
+    private func publishedPortJSON(
+        _ port: HostwrightPublishedPort
+    ) -> [String: Any] {
+        [
+            "allocation": port.host == nil ? "dynamic" : "fixed",
+            "bindAddress": port.effectiveBindAddress,
+            "exposure": exposureJSON(port.effectiveExposure),
+            "host": port.host.map { $0.canonicalString as Any } ?? NSNull(),
+            "protocol": port.protocolName.rawValue,
+            "target": port.target.canonicalString
+        ]
+    }
+
+    private func publishedPortKey(
+        _ port: HostwrightPublishedPort
+    ) -> String {
+        [
+            port.effectiveBindAddress,
+            port.host?.canonicalString ?? "dynamic",
+            port.target.canonicalString,
+            port.protocolName.rawValue,
+            exposureKey(port.effectiveExposure)
+        ].joined(separator: "\u{1f}")
+    }
+
+    private func exposureJSON(
+        _ exposure: HostwrightPortExposurePolicy
+    ) -> [String: Any] {
+        [
+            "allowedCIDRs": exposure.allowedCIDRs,
+            "accessMode": exposure.authentication.rawValue,
+            "interfaces": exposure.interfaces,
+            "networkClasses": exposure.networkClasses.map(\.rawValue),
+            "scope": exposure.scope.rawValue
+        ]
+    }
+
+    private func exposureKey(
+        _ exposure: HostwrightPortExposurePolicy
+    ) -> String {
+        [
+            exposure.scope.rawValue,
+            exposure.authentication.rawValue,
+            exposure.interfaces.joined(separator: ","),
+            exposure.networkClasses.map(\.rawValue).joined(separator: ","),
+            exposure.allowedCIDRs.joined(separator: ",")
+        ].joined(separator: "|")
+    }
+
+    private func publishedSocketJSON(
+        _ socket: HostwrightPublishedSocket
+    ) -> [String: Any] {
+        [
+            "host": socket.hostName.map { $0 as Any } ?? NSNull(),
+            "mode": socket.mode.rawValue,
+            "protocol": "unix",
+            "target": socket.containerPath
+        ]
+    }
+
+    private func publishedSocketKey(
+        _ socket: HostwrightPublishedSocket
+    ) -> String {
+        [
+            socket.hostName ?? "automatic",
+            socket.containerPath,
+            socket.mode.rawValue
+        ].joined(separator: "\u{1f}")
+    }
+
+    private func hostAccessJSON(
+        _ endpoint: HostwrightHostAccessEndpoint
+    ) -> [String: Any] {
+        [
+            "addressClass": endpoint.addressClass.rawValue,
+            "hostname": endpoint.hostname,
+            "kind": "host-access",
+            "port": endpoint.port,
+            "protocol": endpoint.protocolName.rawValue
+        ]
+    }
+
+    private func networkPolicyJSON(
+        _ policy: HostwrightServiceNetworkPolicy
+    ) -> [String: Any] {
+        [
+            "egress": policy.egress.map(networkPolicyRuleJSON),
+            "ingress": policy.ingress.map(networkPolicyRuleJSON),
+            "kind": "network-policy"
+        ]
+    }
+
+    private func networkPolicyRuleJSON(
+        _ rule: HostwrightNetworkPolicyRule
+    ) -> [String: Any] {
+        [
+            "address": rule.address.map { $0 as Any } ?? NSNull(),
+            "dns": rule.dns.map { $0 as Any } ?? NSNull(),
+            "identity": rule.identity.map { $0 as Any } ?? NSNull(),
+            "port": rule.port.map { $0 as Any } ?? NSNull(),
+            "project": rule.project.map { $0 as Any } ?? NSNull(),
+            "protocol":
+                rule.protocolName.map { $0.rawValue as Any } ?? NSNull(),
+            "service": rule.service.map { $0 as Any } ?? NSNull()
+        ]
     }
 
     private func upsert(_ project: StateProjectRecord, on connection: SQLiteConnection) throws {
@@ -585,7 +730,13 @@ public struct ObservedStateRepository: Sendable {
             image: service.image,
             lifecycleState: service.lifecycleState,
             healthState: service.healthState,
-            portsJSON: try StateJSON.encode(service.ports.map(portJSON)),
+            portsJSON: try StateJSON.encode(
+                service.ports.map(portJSON) +
+                    service.publishedSockets.sorted {
+                        ($0.hostPath, $0.containerPath, $0.mode.rawValue) <
+                            ($1.hostPath, $1.containerPath, $1.mode.rawValue)
+                    }.map(socketJSON)
+            ),
             networksJSON: try StateJSON.encode(service.networks.map(networkJSON)),
             mountsJSON: try StateJSON.encode(service.mounts.map(mountJSON)),
             runtimeIdentifiersJSON: try StateJSON.encode([

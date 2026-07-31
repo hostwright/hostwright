@@ -1939,7 +1939,15 @@ final class HostwrightCLITests: XCTestCase {
                         image: "local/demo:latest",
                         lifecycleState: .running,
                         healthState: .healthy,
-                        ports: [RuntimePortMapping(hostPort: 8080, containerPort: 8080)]
+                        ports: [RuntimePortMapping(hostPort: 8080, containerPort: 8080)],
+                        publishedSockets: [
+                            RuntimeUnixSocketPublication(
+                                hostPath:
+                                    "/tmp/hostwright/api.sock",
+                                containerPath: "/run/api.sock",
+                                mode: .ownerAndGroup
+                            )
+                        ]
                     )
                 ],
                 adapterMetadata: fakeAdapterMetadata
@@ -1956,12 +1964,95 @@ final class HostwrightCLITests: XCTestCase {
             XCTAssertTrue(result.standardOutput.contains("Runtime parser: status-observation-v1"))
             XCTAssertTrue(result.standardOutput.contains("Telemetry: local-only; no upload"))
             XCTAssertTrue(result.standardOutput.contains("lifecycle=running"))
+            XCTAssertTrue(
+                result.standardOutput.contains(
+                    "sockets=/tmp/hostwright/api.sock->/run/api.sock/0660"
+                )
+            )
             XCTAssertTrue(result.standardOutput.contains("id=\(RuntimeServiceIdentity(projectName: "demo", serviceName: "api").managedResourceIdentifier)"))
             let events = try SQLiteStateStore(path: databasePath).events.loadAll()
             let statusEvent = try XCTUnwrap(events.first { $0.type == "status.observed" })
             XCTAssertEqual(
                 try jsonObject(statusEvent.payloadJSONRedacted)["capabilitySHA256"] as? String,
                 ScriptedApplyRuntimeAdapter.testCapabilitySnapshot.canonicalSHA256
+            )
+        }
+    }
+
+    func testStatusReportsMultipleReplicasWithoutDuplicateKeyFailure() throws {
+        try withTemporaryDatabase { databasePath in
+            let manifest = """
+            version: 2
+            project: demo
+            services:
+              api:
+                image: local/demo:latest
+                replicas: 2
+
+            """
+            let primaryIdentity = RuntimeServiceIdentity(
+                projectName: "demo",
+                serviceName: "api"
+            )
+            let replicaIdentity = RuntimeServiceIdentity(
+                projectName: "demo",
+                serviceName: "api",
+                instanceName: "replica-1"
+            )
+            let observed = ObservedRuntimeState(
+                projectName: "demo",
+                services: [
+                    ObservedRuntimeService(
+                        identity: replicaIdentity,
+                        resourceIdentifier: replicaIdentity.managedResourceIdentifier,
+                        image: "local/demo:latest",
+                        lifecycleState: .running,
+                        healthState: .healthy
+                    ),
+                    ObservedRuntimeService(
+                        identity: primaryIdentity,
+                        resourceIdentifier: primaryIdentity.managedResourceIdentifier,
+                        image: "local/demo:latest",
+                        lifecycleState: .running,
+                        healthState: .healthy
+                    )
+                ],
+                adapterMetadata: fakeAdapterMetadata
+            )
+            let files = FileBox(files: [
+                HostwrightIdentity.manifestFileName: manifest
+            ])
+            let adapter = ScriptedApplyRuntimeAdapter(observedState: observed)
+
+            let textResult = HostwrightCLI.run(
+                arguments: ["status", "--state-db", databasePath],
+                environment: environment(files: files, runtimeAdapter: adapter)
+            )
+            XCTAssertEqual(textResult.exitCode, 0)
+            XCTAssertTrue(textResult.standardOutput.contains("- api: id="))
+            XCTAssertTrue(
+                textResult.standardOutput.contains("- api[replica-1]: id=")
+            )
+
+            let jsonResult = HostwrightCLI.run(
+                arguments: [
+                    "status", "--state-db", databasePath, "--output", "json"
+                ],
+                environment: environment(files: files, runtimeAdapter: adapter)
+            )
+            XCTAssertEqual(jsonResult.exitCode, 0)
+            let json = try jsonObject(jsonResult.standardOutput)
+            let services = try XCTUnwrap(json["services"] as? [[String: Any]])
+            let instances = try XCTUnwrap(
+                services.first?["instances"] as? [[String: Any]]
+            )
+            XCTAssertEqual(
+                instances.compactMap { $0["instance"] as? String },
+                ["replica-1"]
+            )
+            XCTAssertEqual(
+                instances.compactMap { $0["identity"] as? String },
+                ["demo/api", "demo/api/replica-1"]
             )
         }
     }
@@ -2040,6 +2131,14 @@ final class HostwrightCLITests: XCTestCase {
                         lifecycleState: .running,
                         healthState: .healthy,
                         ports: [RuntimePortMapping(hostPort: 8080, containerPort: 8080)],
+                        publishedSockets: [
+                            RuntimeUnixSocketPublication(
+                                hostPath:
+                                    "/tmp/hostwright/api.sock",
+                                containerPath: "/run/api.sock",
+                                mode: .ownerAndGroup
+                            )
+                        ],
                         networks: [
                             RuntimeNetworkAttachment(
                                 name: "default",
@@ -2077,6 +2176,19 @@ final class HostwrightCLITests: XCTestCase {
                 observedService["resourceIdentifier"] as? String,
                 RuntimeServiceIdentity(projectName: "demo", serviceName: "api").managedResourceIdentifier
             )
+            let sockets = try XCTUnwrap(
+                observedService["sockets"] as? [[String: Any]]
+            )
+            XCTAssertEqual(sockets.count, 1)
+            XCTAssertEqual(
+                sockets[0]["containerPath"] as? String,
+                "/run/api.sock"
+            )
+            XCTAssertEqual(
+                sockets[0]["hostPath"] as? String,
+                "/tmp/hostwright/api.sock"
+            )
+            XCTAssertEqual(sockets[0]["mode"] as? String, "0660")
             let networks = try XCTUnwrap(observedService["networks"] as? [[String: Any]])
             XCTAssertEqual(networks.first?["ipv4Address"] as? String, "192.168.64.8/24")
             XCTAssertEqual(networks.first?["mtu"] as? Int, 1280)

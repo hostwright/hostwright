@@ -25,6 +25,7 @@ readonly vminit_layer_digest="e3b2b9d347c2e5834d9fe5b4d615f5c0632c485d785e64f5c6
 readonly vminit_layer_size="66895112"
 readonly vminit_index_media_type="application/vnd.oci.image.index.v1+json"
 readonly vminit_manifest_media_type="application/vnd.oci.image.manifest.v1+json"
+readonly guest_loader_name="hostwright-netfilter"
 
 work_root=""
 
@@ -36,7 +37,8 @@ die() {
 usage() {
   /bin/cat >&2 <<'USAGE'
 Usage:
-  prepare-containerization-assets.sh --output ABSOLUTE_PATH [--dry-run]
+  prepare-containerization-assets.sh --output ABSOLUTE_PATH \
+    [--guest-loader LINUX_ARM64_ELF] [--dry-run]
   prepare-containerization-assets.sh --verify ABSOLUTE_PATH
 USAGE
 }
@@ -120,6 +122,7 @@ expected_entries() {
 
 expected_directories() {
   /bin/cat <<EOF
+guest
 kernel
 vminit
 vminit/blobs
@@ -129,6 +132,7 @@ EOF
 
 expected_files() {
   /bin/cat <<EOF
+guest/$guest_loader_name
 kernel/$kernel_name
 vminit/blobs/sha256/$vminit_configuration_digest
 vminit/blobs/sha256/$vminit_index_digest
@@ -137,6 +141,23 @@ vminit/blobs/sha256/$vminit_variant_digest
 vminit/index.json
 vminit/oci-layout
 EOF
+}
+
+verify_guest_loader() {
+  local file="$1"
+  [[ -f "$file" && ! -L "$file" ]] \
+    || die "Guest network-policy loader is missing or not a regular file."
+  local size
+  size="$(/usr/bin/stat -f '%z' "$file")"
+  (( size >= 20 && size <= 64 * 1024 * 1024 )) \
+    || die "Guest network-policy loader size is invalid."
+  local header
+  header="$(/usr/bin/od -An -tx1 -N20 "$file" \
+    | /usr/bin/tr -s '[:space:]' ' ' \
+    | /usr/bin/awk '{$1=$1; print}')"
+  [[ "$header" == "7f 45 4c 46 02 01 01 "*" 02 00 b7 00" \
+      || "$header" == "7f 45 4c 46 02 01 01 "*" 03 00 b7 00" ]] \
+    || die "Guest network-policy loader must be one Linux ARM64 ELF executable."
 }
 
 verify_tree() {
@@ -181,6 +202,7 @@ verify_tree() {
     "$vminit_configuration_size" "$vminit_configuration_digest" "vminit configuration"
   verify_file "$root/vminit/blobs/sha256/$vminit_layer_digest" \
     "$vminit_layer_size" "$vminit_layer_digest" "vminit layer"
+  verify_guest_loader "$root/guest/$guest_loader_name"
 
   local expected_layout expected_index
   expected_layout='{"imageLayoutVersion":"1.0.0"}'
@@ -200,6 +222,7 @@ vminit index: sha256:$vminit_index_digest ($vminit_index_size bytes)
 vminit arm64 manifest: sha256:$vminit_variant_digest ($vminit_variant_size bytes)
 vminit configuration: sha256:$vminit_configuration_digest ($vminit_configuration_size bytes)
 vminit layer: sha256:$vminit_layer_digest ($vminit_layer_size bytes)
+Guest policy loader: supplied Linux ARM64 ELF; SHA-256 is recorded in the signed payload manifest
 EOF
 }
 
@@ -224,6 +247,7 @@ download_registry() {
 
 prepare() {
   local output="$1"
+  local guest_loader="$2"
   local parent base downloads staging token_response auth_config token
   parent="$(/usr/bin/dirname "$output")"
   base="$(/usr/bin/basename "$output")"
@@ -234,11 +258,17 @@ prepare() {
     return
   fi
 
+  [[ -n "$guest_loader" ]] \
+    || die "--guest-loader is required when preparing a new asset root." 64
+  assert_safe_absolute_path "$guest_loader"
+  verify_guest_loader "$guest_loader"
+
   [[ -x /usr/bin/awk && -x /usr/bin/basename && -x /usr/bin/curl \
       && -x /usr/bin/dirname && -x /usr/bin/find && -x /usr/bin/id \
       && -x /usr/bin/mktemp && -x /usr/bin/plutil && -x /usr/bin/sed \
       && -x /usr/bin/shasum && -x /usr/bin/sort && -x /usr/bin/stat \
-      && -x /usr/bin/tar && -x /bin/chmod && -x /bin/mkdir && -x /bin/mv ]] \
+      && -x /usr/bin/tar && -x /usr/bin/tr && -x /usr/bin/od \
+      && -x /bin/chmod && -x /bin/cp && -x /bin/mkdir && -x /bin/mv ]] \
     || die "Required macOS asset verification tools are unavailable." 69
 
   work_root="$(/usr/bin/mktemp -d "$parent/.${base}.prepare.XXXXXXXX")"
@@ -248,6 +278,8 @@ prepare() {
   downloads="$work_root/downloads"
   staging="$work_root/root"
   /bin/mkdir -m 700 "$downloads" "$staging"
+  /bin/mkdir -m 700 "$staging/guest"
+  /bin/cp -p "$guest_loader" "$staging/guest/$guest_loader_name"
 
   local kernel_archive="$downloads/kata-static-3.28.0-arm64.tar.zst"
   download_public "$kernel_archive_url" "$kernel_archive"
@@ -320,6 +352,7 @@ prepare() {
 
 mode=""
 output=""
+guest_loader=""
 dry_run=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -338,6 +371,11 @@ while [[ $# -gt 0 ]]; do
     --dry-run)
       dry_run=true
       shift
+      ;;
+    --guest-loader)
+      [[ $# -ge 2 && -z "$guest_loader" ]] || { usage; exit 64; }
+      guest_loader="$2"
+      shift 2
       ;;
     -h|--help)
       usage
@@ -366,7 +404,7 @@ case "$mode" in
       print_lock
       printf 'Dry run: no files downloaded or written for %s\n' "$output"
     else
-      prepare "$output"
+      prepare "$output" "$guest_loader"
     fi
     ;;
 esac

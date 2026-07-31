@@ -324,6 +324,8 @@ public enum HomebrewFormulaRenderer {
               hostwright
               hostwright-control
               hostwright-containerization-helper
+              hostwright-network-helper
+              hostwright-network-provider-worker
               hostwright-storage-helper
               hostwright-dist
               hostwrightd
@@ -359,6 +361,8 @@ public enum HomebrewFormulaRenderer {
             assert_equal version.to_s, shell_output("#{bin}/hostwright --version").strip
             assert_equal version.to_s, shell_output("#{bin}/hostwright-control --version").strip
             assert_equal version.to_s, shell_output("#{bin}/hostwright-containerization-helper --version").strip
+            assert_equal "network-helper-protocol-v1", shell_output("#{bin}/hostwright-network-helper --version").strip
+            assert_equal "network-provider-spi-v1", shell_output("#{bin}/hostwright-network-provider-worker --version").strip
             storage_helper_version = shell_output("#{bin}/hostwright-storage-helper --version").strip
             assert_equal "\(LocalStorageProviderContract.providerVersion)", storage_helper_version
             assert_equal version.to_s, shell_output("#{bin}/hostwright-dist --version").strip

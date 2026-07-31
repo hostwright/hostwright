@@ -174,6 +174,20 @@ struct DistributionInstaller: Sendable {
                 evidenceCommand("installed \(executable) --version", result: result)
             )
         }
+        for (executable, expectedVersion) in [
+            ("hostwright-network-helper", "network-helper-protocol-v1"),
+            ("hostwright-network-provider-worker", "network-provider-spi-v1")
+        ] where installedPaths.contains("bin/\(executable)") {
+            let result = try verifyInstalledVersion(
+                executable,
+                expectedVersion: expectedVersion,
+                prefix: prefix,
+                cancellation: cancellation
+            )
+            commands.append(
+                evidenceCommand("installed \(executable) --version", result: result)
+            )
+        }
         if installedPaths.contains("bin/hostwright-storage-helper") {
             let result = try verifyInstalledVersion(
                 "hostwright-storage-helper",

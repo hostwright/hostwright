@@ -181,9 +181,15 @@ public enum AppleContainerInventoryParser {
                 maximumBytes: maximumStatsBytes
             )
             let payloads = try decoder.decode([StatsPayload].self, from: data)
-            guard payloads.count == 1,
-                  let payload = payloads.first,
-                  payload.id == containerID,
+            guard payloads.count <= 1 else {
+                throw RuntimeAdapterError.outputParseFailed(
+                    "Apple container inventory stats did not identify exactly one observed container."
+                )
+            }
+            guard let payload = payloads.first else {
+                continue
+            }
+            guard payload.id == containerID,
                   payload.numProcesses <= UInt64(Int.max) else {
                 throw RuntimeAdapterError.outputParseFailed(
                     "Apple container inventory stats did not identify exactly one observed container."
@@ -233,6 +239,9 @@ public enum AppleContainerInventoryParser {
             ),
             initConfiguration: try initConfiguration(payload.configuration.initProcess),
             ports: try ports(payload.configuration.publishedPorts),
+            publishedSockets: try sockets(
+                payload.configuration.publishedSockets ?? []
+            ),
             mounts: try mounts(payload.configuration.mounts),
             networks: try networkAttachments(
                 configured: payload.configuration.networks,
@@ -335,7 +344,7 @@ public enum AppleContainerInventoryParser {
             kind: "\(evidence.plugin):\(evidence.mode.rawValue)",
             addresses: addresses,
             labels: inventoryLabels(evidence.labels),
-            ownership: try ownership(
+            ownership: try networkOwnership(
                 labels: evidence.labels,
                 resourceIdentifier: evidence.id
             )
@@ -479,6 +488,29 @@ public enum AppleContainerInventoryParser {
         return result
     }
 
+    private static func sockets(
+        _ payloads: [SocketPayload]
+    ) throws -> [RuntimeUnixSocketPublication] {
+        try payloads.map { payload in
+            let mode: RuntimeUnixSocketMode
+            switch payload.permissions ?? 0o600 {
+            case 0o600:
+                mode = .ownerOnly
+            case 0o660:
+                mode = .ownerAndGroup
+            default:
+                throw RuntimeAdapterError.outputParseFailed(
+                    "Apple container inventory contained unsupported Unix socket permissions."
+                )
+            }
+            return RuntimeUnixSocketPublication(
+                hostPath: payload.hostPath,
+                containerPath: payload.containerPath,
+                mode: mode
+            )
+        }
+    }
+
     private static func mounts(_ payloads: [MountPayload]) throws -> [RuntimeInventoryMount] {
         try payloads.map { payload in
             let hasReadOnly = payload.options.contains("ro")
@@ -597,6 +629,33 @@ public enum AppleContainerInventoryParser {
         return evidence
     }
 
+    private static func networkOwnership(
+        labels: [String: String],
+        resourceIdentifier: String
+    ) throws -> RuntimeInventoryOwnershipEvidence? {
+        let evidence = try RuntimeManagedResourceIdentity.ownershipEvidence(
+            from: labels,
+            expectedProviderID: .appleContainerCLI
+        )
+        guard let evidence else { return nil }
+        guard labels[RuntimeManagedResourceIdentity.resourceIdentifierLabel] ==
+                resourceIdentifier,
+              labels[RuntimeNetworkOwnership.resourceKindLabel] ==
+                RuntimeNetworkOwnership.resourceKind,
+              let logicalName = labels[RuntimeNetworkOwnership.networkNameLabel],
+              let identity = try? RuntimeNetworkIdentity(
+                  logicalName: logicalName,
+                  resourceUUID: evidence.resourceUUID,
+                  projectUUID: evidence.projectUUID
+              ),
+              identity.runtimeIdentifier == resourceIdentifier else {
+            throw RuntimeAdapterError.outputParseFailed(
+                "Apple container inventory contained conflicting managed network identity labels."
+            )
+        }
+        return evidence
+    }
+
     private static func inventoryLabels(
         _ labels: [String: String]
     ) -> [RuntimeInventoryLabel] {
@@ -673,11 +732,18 @@ private struct ContainerConfigurationPayload: Decodable {
     let image: ImageDescriptionPayload
     let mounts: [MountPayload]
     let publishedPorts: [PortPayload]
+    let publishedSockets: [SocketPayload]?
     let labels: [String: String]
     let networks: [ConfiguredNetworkPayload]
     let initProcess: ProcessPayload
     let platform: PlatformPayload
     let resources: ResourcesPayload
+}
+
+private struct SocketPayload: Decodable {
+    let containerPath: String
+    let hostPath: String
+    let permissions: UInt16?
 }
 
 private struct ImageDescriptionPayload: Decodable {

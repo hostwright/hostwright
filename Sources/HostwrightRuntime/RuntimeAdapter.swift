@@ -1,3 +1,6 @@
+import HostwrightCore
+import HostwrightNetworking
+
 public enum RuntimeAdapterError: Error, Equatable, Sendable {
     case runtimeUnavailable(String)
     case executableNotFound(String)
@@ -157,6 +160,7 @@ public enum RuntimeCreateSubsetPolicy {
         _ service: DesiredRuntimeService,
         providerID: RuntimeProviderID
     ) throws {
+        try validateHostAccess(service)
         if providerID == .appleContainerCLI {
             try validateAppleContainerCLI(service)
             return
@@ -168,6 +172,44 @@ public enum RuntimeCreateSubsetPolicy {
         throw RuntimeAdapterError.mutationUnavailableByPolicy(
             "Create-subset validation is unavailable for the selected runtime provider."
         )
+    }
+
+    private static func validateHostAccess(
+        _ service: DesiredRuntimeService
+    ) throws {
+        guard service.hostAccess.count <=
+                HostwrightHostAccessEndpoint
+                    .maximumEndpointsPerService else {
+            throw RuntimeAdapterError.commandRejected(
+                classification: .mutating,
+                message:
+                    "Guarded host access exceeds the per-service endpoint limit."
+            )
+        }
+        guard service.hostAccess.isEmpty ||
+                service.networks.count == 1 else {
+            throw RuntimeAdapterError.commandRejected(
+                classification: .mutating,
+                message:
+                    "Guarded host access requires exactly one managed project-network attachment."
+            )
+        }
+        let identities = service.hostAccess.map {
+            HostwrightHostAccessPolicy.endpointIdentity($0)
+        }
+        guard service.hostAccess.allSatisfy({
+            HostwrightHostAccessPolicy.isValidHostname(
+                $0.hostname
+            ) &&
+                (1...65_535).contains($0.port)
+        }),
+        Set(identities).count == identities.count else {
+            throw RuntimeAdapterError.commandRejected(
+                classification: .mutating,
+                message:
+                    "Guarded host access requires unique exact hostnames, protocols, address classes, and ports."
+            )
+        }
     }
 
     private static func validateAppleContainerCLI(_ service: DesiredRuntimeService) throws {
@@ -186,12 +228,56 @@ public enum RuntimeCreateSubsetPolicy {
             )
         }
         guard service.ports.allSatisfy({
+            $0.exposurePolicy.isDefaultLocalhost
+        }) else {
+            throw RuntimeAdapterError.commandRejected(
+                classification: .mutating,
+                message:
+                    "Create-only apply requires a qualified secure listener provider for non-localhost exposure."
+            )
+        }
+        guard service.ports.allSatisfy({
             $0.bindAddress == nil || $0.bindAddress == "127.0.0.1"
         }) else {
             throw RuntimeAdapterError.commandRejected(
                 classification: .mutating,
                 message: "Create-only apply accepts only localhost port publishing."
             )
+        }
+        if !service.publishedSockets.isEmpty {
+            let socketRoot = try? HostwrightLocalPathResolver.resolve()
+                .layout.publishedSocketDirectory
+            guard let socketRoot,
+                  service.publishedSockets.allSatisfy({
+                      (try? HostwrightLocalPathResolver
+                          .normalizedAbsolutePath(
+                              $0.hostPath,
+                              role: "published socket host path"
+                          )) == $0.hostPath &&
+                          (try? HostwrightLocalPathResolver
+                              .normalizedAbsolutePath(
+                                  $0.containerPath,
+                                  role: "published socket container path"
+                              )) == $0.containerPath &&
+                          $0.hostPath.hasPrefix(socketRoot + "/") &&
+                          $0.hostPath.utf8.count <= 103 &&
+                          $0.containerPath.hasPrefix("/") &&
+                          $0.containerPath.utf8.count <= 107 &&
+                          AppleContainerCommand.unixSocketGuestPathFits(
+                              resourceIdentifier:
+                                  service.identity
+                                      .managedResourceIdentifier,
+                              containerPath: $0.containerPath
+                          ) &&
+                          !$0.hostPath.contains(":") &&
+                          !$0.containerPath.contains(":")
+                  }) else {
+                throw RuntimeAdapterError.commandRejected(
+                    classification: .mutating,
+                    message:
+                        "Apple container CLI Unix socket publication requires normalized paths inside Hostwright's private Application Support socket root that fit the provider's effective guest relay path limit."
+                )
+            }
         }
         guard !service.image.hasPrefix("-") else {
             throw RuntimeAdapterError.commandRejected(classification: .mutating, message: "Create-only apply rejects image values beginning with '-'.")
@@ -236,6 +322,7 @@ public enum RuntimeCreateSubsetPolicy {
         )
         guard service.mounts.isEmpty,
               service.ports.isEmpty,
+              service.publishedSockets.isEmpty,
               service.healthCheck == nil,
               service.probes.configuredKinds.isEmpty,
               service.platformOperatingSystem == "linux",

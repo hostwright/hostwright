@@ -145,6 +145,7 @@ public struct TrustedReleaseVerifier: Sendable {
         )
 
         let payloadManifest = DistributionArtifactManifest(
+            schemaVersion: manifest.schemaVersion,
             artifactID: manifest.artifactID,
             packageVersion: manifest.packageVersion,
             sourceCommit: manifest.sourceCommit,
@@ -309,6 +310,7 @@ public struct TrustedReleaseVerifier: Sendable {
             commands: &commands
         )
         let payloadManifest = DistributionArtifactManifest(
+            schemaVersion: verified.manifest.schemaVersion,
             artifactID: verified.manifest.artifactID,
             packageVersion: verified.manifest.packageVersion,
             sourceCommit: verified.manifest.sourceCommit,
@@ -387,6 +389,7 @@ public struct TrustedReleaseVerifier: Sendable {
             from: root.appendingPathComponent(DistributionLayout.manifestFileName)
         )
         let expectedInternal = DistributionArtifactManifest(
+            schemaVersion: manifest.schemaVersion,
             artifactID: manifest.artifactID,
             packageVersion: manifest.packageVersion,
             sourceCommit: manifest.sourceCommit,
@@ -401,6 +404,7 @@ public struct TrustedReleaseVerifier: Sendable {
         try verifyPayloadFiles(manifest.payloadFiles, under: root, cancellation: cancellation)
         try verifyExecutableTrust(
             root: root,
+            payloadFiles: manifest.payloadFiles,
             signer: manifest.applicationSigner,
             cancellation: cancellation,
             commands: &commands
@@ -485,6 +489,7 @@ public struct TrustedReleaseVerifier: Sendable {
             from: payloadRoot.appendingPathComponent(packageManifestPath)
         )
         let expectedManifest = DistributionArtifactManifest(
+            schemaVersion: manifest.schemaVersion,
             artifactID: manifest.artifactID,
             packageVersion: manifest.packageVersion,
             sourceCommit: manifest.sourceCommit,
@@ -580,11 +585,12 @@ public struct TrustedReleaseVerifier: Sendable {
 
     private func verifyExecutableTrust(
         root: URL,
+        payloadFiles: [DistributionFileRecord],
         signer: TrustedReleaseIdentity,
         cancellation: SecureSubprocessCancellation,
         commands: inout [HostwrightEvidenceCommand]
     ) throws {
-        for relativePath in DistributionLayout.shippedBinaryPaths {
+        for relativePath in payloadFiles.map(\.path).filter({ $0.hasPrefix("bin/") }) {
             try verifyExecutableTrust(
                 root.appendingPathComponent(relativePath),
                 signer: signer,

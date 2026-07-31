@@ -1,4 +1,5 @@
 import HostwrightCore
+import HostwrightNetworking
 import HostwrightSecrets
 
 public struct HostwrightManifest: Equatable, Sendable {
@@ -13,6 +14,10 @@ public struct HostwrightManifest: Equatable, Sendable {
     public var imageVulnerability: HostwrightImageVulnerabilityPolicy?
     public var imageProvenance: HostwrightImageProvenancePolicy?
     public var volumes: [String: HostwrightVolumeDeclaration]
+    public var networks: [String: HostwrightNetworkDefinition]
+    public var certificates: [String: HostwrightCertificateDeclaration]
+    public var ingress: [String: HostwrightIngressListener]
+    public var tunnels: [String: HostwrightTunnelDeclaration]
     public var services: [HostwrightService]
 
     public var effectiveVersion: Int {
@@ -33,6 +38,10 @@ public struct HostwrightManifest: Equatable, Sendable {
             imageVulnerability: nil,
             imageProvenance: nil,
             volumes: [:],
+            networks: [:],
+            certificates: [:],
+            ingress: [:],
+            tunnels: [:],
             services: services
         )
     }
@@ -47,6 +56,10 @@ public struct HostwrightManifest: Equatable, Sendable {
             imageVulnerability: nil,
             imageProvenance: nil,
             volumes: [:],
+            networks: [:],
+            certificates: [:],
+            ingress: [:],
+            tunnels: [:],
             services: services
         )
     }
@@ -62,6 +75,38 @@ public struct HostwrightManifest: Equatable, Sendable {
         volumes: [String: HostwrightVolumeDeclaration] = [:],
         services: [HostwrightService]
     ) {
+        self.init(
+            version: version,
+            project: project,
+            imagePolicy: imagePolicy,
+            imageTrust: imageTrust,
+            imageSBOM: imageSBOM,
+            imageVulnerability: imageVulnerability,
+            imageProvenance: imageProvenance,
+            volumes: volumes,
+            networks: [:],
+            certificates: [:],
+            ingress: [:],
+            tunnels: [:],
+            services: services
+        )
+    }
+
+    public init(
+        version: Int?,
+        project: String?,
+        imagePolicy: HostwrightImagePolicy?,
+        imageTrust: HostwrightImageTrustPolicy?,
+        imageSBOM: HostwrightImageSBOMPolicy?,
+        imageVulnerability: HostwrightImageVulnerabilityPolicy? = nil,
+        imageProvenance: HostwrightImageProvenancePolicy? = nil,
+        volumes: [String: HostwrightVolumeDeclaration] = [:],
+        networks: [String: HostwrightNetworkDefinition],
+        certificates: [String: HostwrightCertificateDeclaration],
+        ingress: [String: HostwrightIngressListener] = [:],
+        tunnels: [String: HostwrightTunnelDeclaration] = [:],
+        services: [HostwrightService]
+    ) {
         self.version = version
         self.project = project
         self.imagePolicy = imagePolicy
@@ -70,7 +115,41 @@ public struct HostwrightManifest: Equatable, Sendable {
         self.imageVulnerability = imageVulnerability
         self.imageProvenance = imageProvenance
         self.volumes = volumes
+        self.networks = networks
+        self.certificates = certificates
+        self.ingress = ingress
+        self.tunnels = tunnels
         self.services = services
+    }
+
+    public init(
+        version: Int?,
+        project: String?,
+        imagePolicy: HostwrightImagePolicy?,
+        imageTrust: HostwrightImageTrustPolicy?,
+        imageSBOM: HostwrightImageSBOMPolicy?,
+        imageVulnerability: HostwrightImageVulnerabilityPolicy? = nil,
+        imageProvenance: HostwrightImageProvenancePolicy? = nil,
+        volumes: [String: HostwrightVolumeDeclaration] = [:],
+        networks: [String: HostwrightNetworkDefinition],
+        ingress: [String: HostwrightIngressListener] = [:],
+        services: [HostwrightService]
+    ) {
+        self.init(
+            version: version,
+            project: project,
+            imagePolicy: imagePolicy,
+            imageTrust: imageTrust,
+            imageSBOM: imageSBOM,
+            imageVulnerability: imageVulnerability,
+            imageProvenance: imageProvenance,
+            volumes: volumes,
+            networks: networks,
+            certificates: [:],
+            ingress: ingress,
+            tunnels: [:],
+            services: services
+        )
     }
 
     public init(
@@ -88,6 +167,10 @@ public struct HostwrightManifest: Equatable, Sendable {
             imageVulnerability: nil,
             imageProvenance: nil,
             volumes: [:],
+            networks: [:],
+            certificates: [:],
+            ingress: [:],
+            tunnels: [:],
             services: services
         )
     }
@@ -108,6 +191,10 @@ public struct HostwrightManifest: Equatable, Sendable {
             imageVulnerability: nil,
             imageProvenance: nil,
             volumes: [:],
+            networks: [:],
+            certificates: [:],
+            ingress: [:],
+            tunnels: [:],
             services: services
         )
     }
@@ -456,6 +543,173 @@ public struct HostwrightMountSpec: Equatable, Sendable {
     }
 }
 
+public enum HostwrightPortProtocol: String, Equatable, Sendable {
+    case tcp
+    case udp
+}
+
+public struct HostwrightPortSpan: Equatable, Sendable {
+    public let start: Int
+    public let end: Int
+
+    public init(start: Int, end: Int? = nil) {
+        self.start = start
+        self.end = end ?? start
+    }
+
+    public var isSingle: Bool {
+        start == end
+    }
+
+    public var count: Int {
+        (end - start) + 1
+    }
+
+    public var singlePort: Int? {
+        isSingle ? start : nil
+    }
+
+    public var canonicalString: String {
+        isSingle ? String(start) : "\(start)-\(end)"
+    }
+
+    public var closedRange: ClosedRange<Int> {
+        start ... end
+    }
+}
+
+public struct HostwrightPublishedPort: Sendable {
+    public static let localhostBindAddress = "127.0.0.1"
+    public static let dynamicHostPortRange = 49_152 ... 65_535
+
+    public let host: HostwrightPortSpan?
+    public let target: HostwrightPortSpan
+    public let protocolName: HostwrightPortProtocol
+    public let bindAddress: String?
+    public let exposure: HostwrightPortExposurePolicy?
+    public let legacyLiteral: String?
+
+    public init(
+        host: HostwrightPortSpan? = nil,
+        target: HostwrightPortSpan,
+        protocolName: HostwrightPortProtocol = .tcp,
+        bindAddress: String? = nil,
+        legacyLiteral: String? = nil
+    ) {
+        self.init(
+            host: host,
+            target: target,
+            protocolName: protocolName,
+            bindAddress: bindAddress,
+            exposure: nil,
+            legacyLiteral: legacyLiteral
+        )
+    }
+
+    public init(
+        host: HostwrightPortSpan?,
+        target: HostwrightPortSpan,
+        protocolName: HostwrightPortProtocol,
+        bindAddress: String?,
+        exposure: HostwrightPortExposurePolicy?,
+        legacyLiteral: String? = nil
+    ) {
+        self.host = host
+        self.target = target
+        self.protocolName = protocolName
+        self.bindAddress = bindAddress
+        self.exposure = exposure
+        self.legacyLiteral = legacyLiteral
+    }
+
+    public var effectiveBindAddress: String {
+        let normalized = NetworkBindAddressPolicy.normalizedBindAddress(
+            bindAddress
+        )
+        return normalized == "localhost"
+            ? Self.localhostBindAddress
+            : normalized
+    }
+
+    public var effectiveExposure: HostwrightPortExposurePolicy {
+        exposure ?? .localhost
+    }
+
+    public var hostPort: Int? {
+        host?.singlePort
+    }
+
+    public var containerPort: Int {
+        target.start
+    }
+
+    public var hostPortRange: ClosedRange<Int>? {
+        host?.closedRange
+    }
+
+    public var containerPortRange: ClosedRange<Int> {
+        target.closedRange
+    }
+
+    public var canonicalLegacyLiteral: String? {
+        guard protocolName == .tcp,
+              effectiveBindAddress == Self.localhostBindAddress,
+              let hostPort,
+              let containerPort = target.singlePort else {
+            return nil
+        }
+        return "\(hostPort):\(containerPort)"
+    }
+
+    public static func legacy(_ value: String) -> HostwrightPublishedPort? {
+        let parts = value.split(separator: ":", omittingEmptySubsequences: false)
+        guard parts.count == 2,
+              let hostPort = Int(parts[0]),
+              let containerPort = Int(parts[1]) else {
+            return nil
+        }
+
+        return HostwrightPublishedPort(
+            host: HostwrightPortSpan(start: hostPort),
+            target: HostwrightPortSpan(start: containerPort),
+            protocolName: .tcp,
+            bindAddress: localhostBindAddress,
+            legacyLiteral: value
+        )
+    }
+}
+
+extension HostwrightPublishedPort: Equatable {
+    public static func == (lhs: HostwrightPublishedPort, rhs: HostwrightPublishedPort) -> Bool {
+        lhs.host == rhs.host &&
+            lhs.target == rhs.target &&
+            lhs.protocolName == rhs.protocolName &&
+            lhs.effectiveBindAddress == rhs.effectiveBindAddress &&
+            lhs.effectiveExposure == rhs.effectiveExposure
+    }
+}
+
+public enum HostwrightPublishedSocketMode: String, Equatable, Sendable {
+    case ownerOnly = "0600"
+    case ownerAndGroup = "0660"
+}
+
+public struct HostwrightPublishedSocket: Equatable, Sendable {
+    public let hostName: String?
+    public let containerPath: String
+    public let mode: HostwrightPublishedSocketMode
+
+    public init(
+        hostName: String? = nil,
+        containerPath: String,
+        mode: HostwrightPublishedSocketMode = .ownerOnly
+    ) {
+        self.hostName = hostName
+        self.containerPath = containerPath
+        self.mode = mode
+    }
+}
+
 public struct HostwrightService: Equatable, Sendable {
     public var name: String
     public var image: String?
@@ -473,6 +727,11 @@ public struct HostwrightService: Equatable, Sendable {
     public var secretEnv: [String: HostwrightSecretReference]
     public var labels: [String: String]
     public var ports: [String]
+    public var publishedPorts: [HostwrightPublishedPort]
+    public var publishedSockets: [HostwrightPublishedSocket]
+    public var hostAccess: [HostwrightHostAccessEndpoint]
+    public var networks: [HostwrightServiceNetworkAttachment]
+    public var networkPolicy: HostwrightServiceNetworkPolicy?
     public var volumes: [String]
     public var mounts: [HostwrightMountSpec]
     public var probes: HostwrightProbes
@@ -502,6 +761,80 @@ public struct HostwrightService: Equatable, Sendable {
         secretEnv: [String: HostwrightSecretReference] = [:],
         labels: [String: String] = [:],
         ports: [String] = [],
+        publishedPorts: [HostwrightPublishedPort] = [],
+        publishedSockets: [HostwrightPublishedSocket] = [],
+        hostAccess: [HostwrightHostAccessEndpoint] = [],
+        networkPolicy: HostwrightServiceNetworkPolicy? = nil,
+        volumes: [String] = [],
+        mounts: [HostwrightMountSpec] = [],
+        probes: HostwrightProbes = HostwrightProbes(),
+        health: HostwrightHealthCheck? = nil,
+        restart: HostwrightRestart? = nil,
+        update: HostwrightUpdatePolicy = HostwrightUpdatePolicy(),
+        hooks: HostwrightHooks = HostwrightHooks(),
+        rosetta: Bool = false,
+        virtualization: Bool = false,
+        readOnlyRootFilesystem: Bool = false,
+        shmSize: String? = nil
+    ) {
+        self.init(
+            name: name,
+            image: image,
+            replicas: replicas,
+            platform: platform,
+            resources: resources,
+            user: user,
+            group: group,
+            workdir: workdir,
+            entrypoint: entrypoint,
+            command: command,
+            initProcess: initProcess,
+            dependsOn: dependsOn,
+            env: env,
+            secretEnv: secretEnv,
+            labels: labels,
+            ports: ports,
+            publishedPorts: publishedPorts,
+            publishedSockets: publishedSockets,
+            hostAccess: hostAccess,
+            networks: [],
+            networkPolicy: networkPolicy,
+            volumes: volumes,
+            mounts: mounts,
+            probes: probes,
+            health: health,
+            restart: restart,
+            update: update,
+            hooks: hooks,
+            rosetta: rosetta,
+            virtualization: virtualization,
+            readOnlyRootFilesystem: readOnlyRootFilesystem,
+            shmSize: shmSize
+        )
+    }
+
+    public init(
+        name: String,
+        image: String?,
+        replicas: Int = 1,
+        platform: HostwrightPlatform = HostwrightPlatform(),
+        resources: HostwrightResources? = nil,
+        user: UInt32? = nil,
+        group: UInt32? = nil,
+        workdir: String? = nil,
+        entrypoint: [String] = [],
+        command: [String] = [],
+        initProcess: Bool = false,
+        dependsOn: [String: HostwrightDependencyCondition] = [:],
+        env: [String: String] = [:],
+        secretEnv: [String: HostwrightSecretReference] = [:],
+        labels: [String: String] = [:],
+        ports: [String] = [],
+        publishedPorts: [HostwrightPublishedPort] = [],
+        publishedSockets: [HostwrightPublishedSocket] = [],
+        hostAccess: [HostwrightHostAccessEndpoint] = [],
+        networks: [HostwrightServiceNetworkAttachment],
+        networkPolicy: HostwrightServiceNetworkPolicy? = nil,
         volumes: [String] = [],
         mounts: [HostwrightMountSpec] = [],
         probes: HostwrightProbes = HostwrightProbes(),
@@ -529,7 +862,13 @@ public struct HostwrightService: Equatable, Sendable {
         self.env = env
         self.secretEnv = secretEnv
         self.labels = labels
-        self.ports = ports
+        let normalizedPublishedPorts = publishedPorts.isEmpty ? ports.compactMap(HostwrightPublishedPort.legacy) : publishedPorts
+        self.publishedPorts = normalizedPublishedPorts
+        self.publishedSockets = publishedSockets
+        self.hostAccess = hostAccess
+        self.ports = ports.isEmpty ? normalizedPublishedPorts.compactMap(\.canonicalLegacyLiteral) : ports
+        self.networks = networks
+        self.networkPolicy = networkPolicy
         self.volumes = volumes
         self.mounts = mounts.isEmpty ? volumes.compactMap(HostwrightMountSpec.legacy) : mounts
         self.probes = probes

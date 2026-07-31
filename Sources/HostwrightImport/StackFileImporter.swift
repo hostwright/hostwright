@@ -610,12 +610,11 @@ public enum HostwrightManifestEmitter {
             if !service.command.isEmpty {
                 lines.append("    command: \(inlineArray(service.command))")
             }
-            if !service.ports.isEmpty {
-                lines.append("    ports:")
-                for port in service.ports {
-                    lines.append("      - \(quoted(port))")
-                }
-            }
+            appendPublishedPorts(
+                service.publishedPorts,
+                legacyFallback: service.ports,
+                to: &lines
+            )
             if !service.volumes.isEmpty {
                 lines.append("    volumes:")
                 for volume in service.volumes {
@@ -653,6 +652,51 @@ public enum HostwrightManifestEmitter {
 
     private static func inlineArray(_ values: [String]) -> String {
         "[" + values.map(quoted).joined(separator: ", ") + "]"
+    }
+
+    private static func appendPublishedPorts(
+        _ values: [HostwrightPublishedPort],
+        legacyFallback: [String],
+        to lines: inout [String]
+    ) {
+        guard !values.isEmpty || !legacyFallback.isEmpty else {
+            return
+        }
+        lines.append("    ports:")
+        if values.isEmpty {
+            for value in legacyFallback {
+                lines.append("      - \(quoted(value))")
+            }
+            return
+        }
+        for value in values {
+            if let legacyLiteral = value.legacyLiteral {
+                lines.append("      - \(quoted(legacyLiteral))")
+                continue
+            }
+            lines.append(
+                "      - bind: \(quoted(value.effectiveBindAddress))"
+            )
+            if let host = value.host {
+                lines.append(
+                    "        host: \(portSpan(host))"
+                )
+            }
+            lines.append(
+                "        target: \(portSpan(value.target))"
+            )
+            lines.append(
+                "        protocol: \(quoted(value.protocolName.rawValue))"
+            )
+        }
+    }
+
+    private static func portSpan(
+        _ value: HostwrightPortSpan
+    ) -> String {
+        value.isSingle
+            ? String(value.start)
+            : quoted(value.canonicalString)
     }
 
     private static func scalar(_ value: String) -> String {

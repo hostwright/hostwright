@@ -2,7 +2,7 @@
 
 Hostwright `0.0.2-dev` is not production ready. The active release target is `v0.0.2`; security-sensitive features remain unsupported until their owning roadmap issue has clean security and runtime evidence.
 
-The v0.0.2 program turns earlier unsupported security-sensitive scope into explicit implementation work for trusted install, secrets, supply chain, storage, networking, tunnels, autonomous mutation, identity/RBAC/admission/audit, plugins, clusters, interoperability, GUI/MDM, and optional cloud control. This does not make those capabilities supported today. The exact current state is emitted by `hostwright capabilities --json` and the implementation/verification ownership is in the [v0.0.2 plan](../roadmap/v0.0.2/IMPLEMENTATION_PLAN.md).
+The v0.0.2 program turns earlier unsupported security-sensitive scope into explicit implementation work for trusted install, secrets, supply chain, storage, networking, tunnels, autonomous mutation, identity/RBAC/admission/audit, plugins, clusters, interoperability, GUI/MDM, and optional cloud control. The exact current state is emitted by `hostwright capabilities --json`; only the qualified networking, storage, lifecycle, and distribution subsets described there are supported on this development line.
 
 ## Runtime Boundary
 
@@ -14,9 +14,9 @@ Production subprocess execution uses one shared bounded implementation. It passe
 
 ## Mutation Boundaries
 
-Supported application mutation requires an exact lifecycle plan hash and one durable schema-v15 operation group. `up`, `down`, `run`, `start`, `stop`, `restart`, `rm`, and `update` revalidate provider identity, capability digest, project/resource generation, ownership UUID, and fence before every mutation wave. Intent and compensation are persisted before effects; ambiguous results are re-observed; automatic rollback runs only when ownership and every inverse effect are provable. Otherwise Hostwright records a safe hold.
+Supported application mutation requires an exact lifecycle plan hash and one durable schema-v16 operation group. `up`, `down`, `run`, `start`, `stop`, `restart`, `rm`, and `update` revalidate provider identity, capability digest, project/resource generation, ownership UUID, and fence before every mutation wave. Intent and compensation are persisted before effects; ambiguous results are re-observed; automatic rollback runs only when ownership and every inverse effect are provable. Otherwise Hostwright records a safe hold.
 
-Phase 04 workload lifecycle remains separate from Phase 05 image preparation and Phase 06 storage. Image commands implement strict Apple CLI pull/build/push/tag/load/save/inspect plus exact Hostwright-owned delete/prune. Storage commands implement exact Hostwright-owned named volumes, snapshots, verified backup/restore, quotas, reclaim, and orphan recovery. Neither surface adds custom networking/DNS/ingress, unattended daemon mutation, or broad/unmanaged cleanup.
+Phase 04 workload lifecycle remains separate from Phase 05 image preparation, Phase 06 storage, and the exact Phase 07 networking boundary. Image commands implement strict Apple CLI pull/build/push/tag/load/save/inspect plus exact Hostwright-owned delete/prune. Storage commands implement exact Hostwright-owned named volumes, snapshots, verified backup/restore, quotas, reclaim, and orphan recovery. Networking commands implement exact owned networks, DNS, ingress, certificates, policy, and tunnels; none of these surfaces add unattended daemon mutation or broad/unmanaged cleanup.
 
 Restart policy state can block managed restart through backoff, operator hold, manual disable, and crash-loop protection. The foreground daemon records restart state but does not start or restart services by itself.
 
@@ -113,7 +113,7 @@ Cleanup does not delete images, volumes, networks, Apple builder resources, base
 
 ## Storage Boundary
 
-Named-volume authority comes from schema-v15 project/resource UUIDs, provider ID, generation, fencing token, ownership proof, and current provider observation. A name or filesystem path is never sufficient. The shipped `hostwright-local` provider confines managed data below its private Application Support root; its signed helper validates peer UID, process identity, code signature, bounded protocol frames, capability digest, deadline, idempotency key, and mutation context.
+Named-volume authority comes from schema-v16 project/resource UUIDs, provider ID, generation, fencing token, ownership proof, and current provider observation. A name or filesystem path is never sufficient. The shipped `hostwright-local` provider confines managed data below its private Application Support root; its signed helper validates peer UID, process identity, code signature, bounded protocol frames, capability digest, deadline, idempotency key, and mutation context.
 
 Bind mounts use descriptor-based no-symlink validation and reject host root, devices, traversal, unsafe ownership or permissions, and identity swaps. Writable attachment, detach, snapshot, restore, expansion, delete, and reclaim revalidate generation and fencing immediately before effects. One-writer and read-only-many rules are enforced from both durable state and provider observation.
 
@@ -211,7 +211,7 @@ Gate 10 does not inspect source repositories, run a build, establish a remote bu
 
 ## Network Exposure
 
-The currently executable Manifest v2 subset uses `"host:container"` syntax and does not expose a bind-address field. Hostwright-created Apple container publishes use explicit `127.0.0.1:host:container` bindings by default. Broad bind addresses such as `0.0.0.0` and `::` remain blocked when represented in runtime desired state, and observed non-target services occupying the same host port block mutation planning when live observation is available. Phase 07 may expand this only with explicit LAN/ingress policy, identity, and cleanup.
+Legacy `"host:container"` mappings still canonicalize to `127.0.0.1` TCP publication by default. Structured Phase 07 networking adds explicit localhost/LAN/public policy, certificates, peer identity, and exact cleanup. Broad binds remain blocked unless the requested exposure policy, interface, CIDR, authentication mode, provider capability, and confirmation path all match the qualified contract.
 
 ## Accelerator Boundary
 
@@ -226,7 +226,7 @@ The current development build does not yet include the following. Their v0.0.2 i
 - privileged helper;
 - supported/qualified installer channel or launch agent;
 - unattended daemon mutation;
-- DNS or tunnel management;
+- arbitrary DNS mutation or unmanaged tunnel management;
 - cloud control plane;
 - Kubernetes, CRI, Docker API, or Docker Compose compatibility;
 - GPU/ANE scheduling, Metal/Core ML/MLX/PyTorch MPS container support, host-native accelerator helpers, or host accelerator device exposure;

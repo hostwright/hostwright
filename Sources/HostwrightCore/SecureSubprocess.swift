@@ -16,6 +16,7 @@ public enum SecureSubprocessRequestError: Error, Equatable, Sendable {
 public struct SecureSubprocessRequest: Equatable, Sendable {
     public static let defaultMaximumOutputBytes = 8 * 1_024 * 1_024
     public static let defaultMaximumInputBytes = 1 * 1_024 * 1_024
+    public static let maximumInputBytes = 24 * 1_024 * 1_024
 
     public let executablePath: String
     public let arguments: [String]
@@ -506,7 +507,9 @@ public struct SecureSubprocessRunner: Sendable {
               (1...(64 * 1_024 * 1_024)).contains(request.maximumStandardErrorBytes) else {
             throw SecureSubprocessError.invalidRequest(.invalidOutputLimit)
         }
-        guard (0...(16 * 1_024 * 1_024)).contains(request.maximumStandardInputBytes),
+        guard (0...SecureSubprocessRequest.maximumInputBytes).contains(
+            request.maximumStandardInputBytes
+        ),
               (request.standardInput?.count ?? 0) <= request.maximumStandardInputBytes else {
             throw SecureSubprocessError.invalidRequest(.invalidInputLimit)
         }

@@ -18,6 +18,18 @@ let package = Package(
             name: "hostwright-storage-helper",
             targets: ["HostwrightStorageProviderHelper"]
         ),
+        .executable(
+            name: "hostwright-network-helper",
+            targets: ["HostwrightNetworkHelper"]
+        ),
+        .executable(
+            name: "hostwright-network-provider-worker",
+            targets: ["HostwrightNetworkProviderWorker"]
+        ),
+        .executable(
+            name: "hostwright-tunnel-qualification",
+            targets: ["HostwrightTunnelQualificationTool"]
+        ),
         .executable(name: "hostwrightd", targets: ["HostwrightDaemon"]),
         .executable(name: "hostwright-dist", targets: ["HostwrightDistributionTool"]),
         .executable(
@@ -35,6 +47,7 @@ let package = Package(
         .library(name: "HostwrightImport", targets: ["HostwrightImport"]),
         .library(name: "HostwrightExtensions", targets: ["HostwrightExtensions"]),
         .library(name: "HostwrightNetworking", targets: ["HostwrightNetworking"]),
+        .library(name: "HostwrightNetworkProviders", targets: ["HostwrightNetworkProviders"]),
         .library(name: "HostwrightObservability", targets: ["HostwrightObservability"]),
         .library(name: "HostwrightPolicy", targets: ["HostwrightPolicy"]),
         .library(name: "HostwrightRegistry", targets: ["HostwrightRegistry"]),
@@ -53,6 +66,14 @@ let package = Package(
         .package(
             url: "https://github.com/jpsim/Yams.git",
             exact: "6.2.2"
+        ),
+        .package(
+            url: "https://github.com/apple/swift-certificates.git",
+            exact: "1.19.3"
+        ),
+        .package(
+            url: "https://github.com/swiftwasm/WasmKit.git",
+            exact: "0.3.1"
         )
     ],
     targets: [
@@ -64,6 +85,8 @@ let package = Package(
                 "HostwrightHealth",
                 "HostwrightImport",
                 "HostwrightManifest",
+                "HostwrightNetworkHelperCore",
+                "HostwrightNetworking",
                 "HostwrightPolicy",
                 "HostwrightReconciler",
                 "HostwrightRegistry",
@@ -85,6 +108,7 @@ let package = Package(
             name: "HostwrightContainerizationHelper",
             dependencies: [
                 "HostwrightCore",
+                "HostwrightNetworking",
                 "HostwrightRuntime",
                 .product(name: "Containerization", package: "containerization"),
                 .product(name: "ContainerizationOCI", package: "containerization")
@@ -118,6 +142,25 @@ let package = Package(
                 "HostwrightStorageHelper"
             ]
         ),
+        .executableTarget(
+            name: "HostwrightNetworkHelper",
+            dependencies: [
+                "HostwrightNetworkHelperCore",
+                "HostwrightState"
+            ]
+        ),
+        .target(
+            name: "HostwrightNetworkHelperCore",
+            dependencies: [
+                "HostwrightNetworking",
+                "HostwrightNetworkProviders",
+                "HostwrightRuntime",
+                .product(name: "X509", package: "swift-certificates")
+            ],
+            linkerSettings: [
+                .linkedFramework("Security")
+            ]
+        ),
         .target(name: "HostwrightCore"),
         .target(
             name: "HostwrightControl",
@@ -147,6 +190,7 @@ let package = Package(
             name: "HostwrightManifest",
             dependencies: [
                 "HostwrightCore",
+                "HostwrightNetworking",
                 "HostwrightSecrets",
                 .product(name: "Yams", package: "Yams")
             ]
@@ -155,6 +199,7 @@ let package = Package(
             name: "HostwrightRuntime",
             dependencies: [
                 "HostwrightCore",
+                "HostwrightNetworking",
                 "HostwrightSecrets"
             ]
         ),
@@ -222,6 +267,22 @@ let package = Package(
             dependencies: ["HostwrightCore"]
         ),
         .target(
+            name: "HostwrightNetworkProviders",
+            dependencies: [
+                "HostwrightCore",
+                .product(name: "WasmKit", package: "WasmKit")
+            ],
+            exclude: ["Worker"]
+        ),
+        .executableTarget(
+            name: "HostwrightNetworkProviderWorker",
+            dependencies: [
+                "HostwrightNetworkProviders",
+                .product(name: "WasmKit", package: "WasmKit")
+            ],
+            path: "Sources/HostwrightNetworkProviders/Worker"
+        ),
+        .target(
             name: "HostwrightObservability",
             dependencies: ["HostwrightCore"]
         ),
@@ -271,6 +332,15 @@ let package = Package(
                 "HostwrightSecrets"
             ],
             path: "Tests/HostwrightTestSupport"
+        ),
+        .executableTarget(
+            name: "HostwrightTunnelQualificationTool",
+            dependencies: [
+                "HostwrightManifest",
+                "HostwrightNetworkHelperCore",
+                "HostwrightState"
+            ],
+            path: "Tests/HostwrightTunnelQualificationTool"
         ),
         .testTarget(
             name: "HostwrightControlTests",
@@ -327,7 +397,9 @@ let package = Package(
             name: "HostwrightContainerizationHelperTests",
             dependencies: [
                 "HostwrightContainerizationHelper",
-                "HostwrightRuntime"
+                "HostwrightCore",
+                "HostwrightRuntime",
+                .product(name: "Containerization", package: "containerization")
             ]
         ),
         .testTarget(
@@ -398,6 +470,20 @@ let package = Package(
         .testTarget(
             name: "HostwrightNetworkingTests",
             dependencies: ["HostwrightNetworking"]
+        ),
+        .testTarget(
+            name: "HostwrightNetworkProvidersTests",
+            dependencies: [
+                "HostwrightNetworkProviders",
+                "HostwrightNetworkProviderWorker"
+            ]
+        ),
+        .testTarget(
+            name: "HostwrightNetworkHelperTests",
+            dependencies: [
+                "HostwrightNetworkHelperCore",
+                "HostwrightRuntime"
+            ]
         ),
         .testTarget(
             name: "HostwrightObservabilityTests",

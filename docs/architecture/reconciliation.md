@@ -8,7 +8,7 @@ Reconciliation is the loop that compares desired state with observed state and p
 2. Observe runtime state through `RuntimeAdapter`.
 3. Bind the immutable provider capability digest and compute drift.
 4. Compile a canonical dependency DAG with preconditions, postconditions, timeouts, idempotency keys, and compensation.
-5. Persist complete schema-v15 intent, including immutable image locks, exact supply-chain policy bindings, content leases, and storage authority, before the first external effect.
+5. Persist complete schema-v16 intent, including immutable image locks, exact supply-chain policy bindings, content leases, storage authority, and network authority, before the first external effect.
 6. Execute ready nodes with deterministic bounded parallelism.
 7. Re-observe and persist verification after each mutation wave.
 8. Complete, compensate, resume, or enter a precise safe hold.
@@ -42,7 +42,7 @@ The planner detects:
 - unsupported unknown observed lifecycle state;
 - unavailable observation.
 
-The lifecycle planner also detects replica, dependency, revision, probe, and ownership/fence drift. It rejects named volumes, custom networks, unavailable secrets, unavailable architecture/Apple options, and missing local images before external mutation.
+The lifecycle planner also detects replica, dependency, revision, probe, and ownership/fence drift. Named volumes and Phase 07 networking compile through their exact provider boundaries; unavailable secrets, providers, enforcement capabilities, architecture/Apple options, and missing local images fail before external mutation.
 
 ## Correctness Requirements
 

@@ -42,6 +42,14 @@ final class ContainerizationHelperBootstrapTests: XCTestCase {
             fixture.assetLock.initImageVariantDigest
         )
         XCTAssertEqual(document.rootfsSizeBytes, 4 * 1_024 * 1_024 * 1_024)
+        XCTAssertEqual(
+            document.guestNetworkPolicyLoaderPath,
+            fixture.guestNetworkPolicyLoaderURL.path
+        )
+        XCTAssertEqual(
+            document.guestNetworkPolicyLoaderSHA256,
+            try fixture.guestNetworkPolicyLoaderSHA256()
+        )
         XCTAssertNoThrow(try fixture.clientConfiguration.validateForLaunch())
         XCTAssertEqual(try fixture.temporaryConfigurationFiles(), [])
     }
@@ -118,6 +126,27 @@ final class ContainerizationHelperBootstrapTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: replaced.supportURL.path))
     }
 
+    func testPrepareRejectsInvalidGuestPolicyLoaderBeforePersistence() throws {
+        let fixture = try ContainerizationHelperBootstrapFixture()
+        try Data("not-a-linux-executable".utf8).write(
+            to: fixture.guestNetworkPolicyLoaderURL
+        )
+        XCTAssertEqual(
+            chmod(fixture.guestNetworkPolicyLoaderURL.path, 0o700),
+            0
+        )
+
+        XCTAssertThrowsError(try fixture.prepare()) { error in
+            XCTAssertEqual(
+                error as? ContainerizationHelperClientError,
+                .unsafeExecutable
+            )
+        }
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: fixture.supportURL.path)
+        )
+    }
+
     func testConcurrentPrepareUsesOneExclusiveDurableConfiguration() async throws {
         let fixture = try ContainerizationHelperBootstrapFixture()
 
@@ -185,6 +214,7 @@ private final class ContainerizationHelperBootstrapFixture: @unchecked Sendable 
     let dataRootURL: URL
     let kernelURL: URL
     let initImageLayoutURL: URL
+    let guestNetworkPolicyLoaderURL: URL
     let layerURL: URL
     let assetLock: ContainerizationHelperBootstrapAssetLock
     let clientConfiguration: ContainerizationHelperClientConfiguration
@@ -239,6 +269,12 @@ private final class ContainerizationHelperBootstrapFixture: @unchecked Sendable 
             )
         let kernelDirectory = assetRoot.appendingPathComponent("kernel", isDirectory: true)
         initImageLayoutURL = assetRoot.appendingPathComponent("vminit", isDirectory: true)
+        let guestDirectory = assetRoot.appendingPathComponent("guest", isDirectory: true)
+        guestNetworkPolicyLoaderURL = guestDirectory.appendingPathComponent(
+            ContainerizationRuntimeAssetContract
+                .guestNetworkPolicyLoaderFileName,
+            isDirectory: false
+        )
         let blobDirectory = initImageLayoutURL
             .appendingPathComponent("blobs/sha256", isDirectory: true)
         for directory in [
@@ -246,6 +282,7 @@ private final class ContainerizationHelperBootstrapFixture: @unchecked Sendable 
             prefixURL.appendingPathComponent("share/hostwright", isDirectory: true),
             assetRoot,
             kernelDirectory,
+            guestDirectory,
             initImageLayoutURL,
             initImageLayoutURL.appendingPathComponent("blobs", isDirectory: true),
             blobDirectory
@@ -279,6 +316,22 @@ private final class ContainerizationHelperBootstrapFixture: @unchecked Sendable 
         kernelURL = kernelDirectory.appendingPathComponent(assetLock.kernel.name)
         layerURL = blobDirectory.appendingPathComponent(assetLock.initImageLayer.name)
         try Self.write(kernel, to: kernelURL)
+        var guestLoader = Data(repeating: 0, count: 64)
+        guestLoader.replaceSubrange(
+            0..<20,
+            with: [
+                0x7f, 0x45, 0x4c, 0x46,
+                2, 1, 1, 0,
+                0, 0, 0, 0, 0, 0, 0, 0,
+                3, 0,
+                183, 0
+            ]
+        )
+        try Self.write(guestLoader, to: guestNetworkPolicyLoaderURL)
+        XCTAssertEqual(
+            chmod(guestNetworkPolicyLoaderURL.path, 0o700),
+            0
+        )
         try Self.write(imageIndex, to: blobDirectory.appendingPathComponent(indexLock.name))
         try Self.write(imageVariant, to: blobDirectory.appendingPathComponent(variantLock.name))
         try Self.write(
@@ -350,6 +403,10 @@ private final class ContainerizationHelperBootstrapFixture: @unchecked Sendable 
         return [UInt64(metadata.st_dev), UInt64(metadata.st_ino)]
     }
 
+    func guestNetworkPolicyLoaderSHA256() throws -> String {
+        Self.sha256(try Data(contentsOf: guestNetworkPolicyLoaderURL))
+    }
+
     private static func lockedFile(
         data: Data
     ) -> ContainerizationHelperBootstrapAssetLock.File {
@@ -382,6 +439,8 @@ private struct BootstrapDocument: Decodable {
     let initImageDescriptorDigest: String
     let initImageVariantDigest: String
     let rootfsSizeBytes: UInt64
+    let guestNetworkPolicyLoaderPath: String
+    let guestNetworkPolicyLoaderSHA256: String
 }
 
 private func makeDirectory(_ url: URL, mode: mode_t) throws {

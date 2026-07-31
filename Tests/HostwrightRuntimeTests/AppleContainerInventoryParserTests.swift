@@ -96,6 +96,50 @@ final class AppleContainerInventoryParserTests: XCTestCase {
         XCTAssertEqual(AppleContainerInventoryParser.processDetailsAvailability, .unsupported)
     }
 
+    func testStoppedContainerAllowsEmptyStatsPayload() throws {
+        let data = Data(
+            try fixture("apple-container-1.1.0-inventory-containers.json").utf8
+        )
+        var payload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: data) as? [[String: Any]]
+        )
+        var managed = try XCTUnwrap(payload.first)
+        var managedStatus = try XCTUnwrap(
+            managed["status"] as? [String: Any]
+        )
+        managedStatus["state"] = "stopped"
+        managedStatus["networks"] = []
+        managed["status"] = managedStatus
+        payload[0] = managed
+        let stoppedContainers = try XCTUnwrap(
+            String(
+                data: try JSONSerialization.data(
+                    withJSONObject: payload,
+                    options: [.sortedKeys]
+                ),
+                encoding: .utf8
+            )
+        )
+
+        let inventory = try AppleContainerInventoryParser.parse(
+            outputs: try outputs(
+                version: "1.1.0",
+                containers: stoppedContainers,
+                statsByContainerID: [managedContainerID: "[]"]
+            )
+        )
+
+        let container = try XCTUnwrap(
+            inventory.containers.first {
+                $0.runtimeID == managedContainerID
+            }
+        )
+        XCTAssertEqual(container.lifecycle, .stopped)
+        XCTAssertNil(container.usage)
+        XCTAssertEqual(container.networks.map(\.networkID), ["default"])
+        XCTAssertEqual(container.networks[0].addresses, [])
+    }
+
     func testRejectsPartialOrConflictingOwnershipWithoutNameFallback() throws {
         let valid = try fixture("apple-container-1.1.0-inventory-containers.json")
         let mutations = [
@@ -128,6 +172,121 @@ final class AppleContainerInventoryParserTests: XCTestCase {
                 )
             )
         }
+    }
+
+    func testObservesPublishedUnixSocketsAndRejectsUnsupportedMode()
+        throws {
+        var payload = try XCTUnwrap(
+            JSONSerialization.jsonObject(
+                with: Data(
+                    try fixture(
+                        "apple-container-1.1.0-inventory-containers.json"
+                    ).utf8
+                )
+            ) as? [[String: Any]]
+        )
+        var managed = payload[0]
+        var configuration = try XCTUnwrap(
+            managed["configuration"] as? [String: Any]
+        )
+        configuration["publishedSockets"] = [[
+            "containerPath": "/run/api.sock",
+            "hostPath": "/tmp/hostwright-api.sock",
+            "permissions": 0o660
+        ]]
+        managed["configuration"] = configuration
+        payload[0] = managed
+
+        let encoded = String(
+            decoding: try JSONSerialization.data(
+                withJSONObject: payload,
+                options: [.sortedKeys]
+            ),
+            as: UTF8.self
+        )
+        let inventory = try AppleContainerInventoryParser.parse(
+            outputs: try outputs(
+                version: "1.1.0",
+                containers: encoded
+            )
+        )
+        XCTAssertEqual(
+            inventory.containers.first {
+                $0.runtimeID == managedContainerID
+            }?.publishedSockets,
+            [
+                RuntimeUnixSocketPublication(
+                    hostPath: "/tmp/hostwright-api.sock",
+                    containerPath: "/run/api.sock",
+                    mode: .ownerAndGroup
+                )
+            ]
+        )
+
+        configuration["publishedSockets"] = [[
+            "containerPath": "/run/api.sock",
+            "hostPath": "/tmp/hostwright-api.sock",
+            "permissions": 0o666
+        ]]
+        managed["configuration"] = configuration
+        payload[0] = managed
+        let invalid = String(
+            decoding: try JSONSerialization.data(
+                withJSONObject: payload,
+                options: [.sortedKeys]
+            ),
+            as: UTF8.self
+        )
+        XCTAssertThrowsError(
+            try AppleContainerInventoryParser.parse(
+                outputs: try outputs(
+                    version: "1.1.0",
+                    containers: invalid
+                )
+            )
+        )
+    }
+
+    func testManagedNetworkOwnershipUsesExactUUIDDerivedIdentity() throws {
+        let identity = try RuntimeNetworkIdentity(
+            logicalName: "backend",
+            projectUUID: "11111111-1111-4111-8111-111111111111"
+        )
+        let context = RuntimeMutationContext(
+            providerID: .appleContainerCLI,
+            capabilitySHA256: String(repeating: "a", count: 64),
+            operationID: "network/create",
+            resourceUUID: identity.resourceUUID,
+            resourceGeneration: 1,
+            projectResourceUUID: identity.projectUUID,
+            projectGeneration: 1,
+            providerGeneration: 1,
+            fencingToken: "22222222-2222-4222-8222-222222222222"
+        )
+        let labels = try RuntimeNetworkOwnership.labels(
+            for: identity,
+            context: context
+        )
+        let networkJSON = try encodedNetwork(identity: identity, labels: labels)
+        let inventory = try AppleContainerInventoryParser.parse(
+            outputs: try outputs(version: "1.1.0", networks: networkJSON)
+        )
+
+        XCTAssertEqual(inventory.networks.count, 1)
+        XCTAssertEqual(inventory.networks[0].runtimeID, identity.runtimeIdentifier)
+        XCTAssertEqual(inventory.networks[0].ownership?.resourceUUID, identity.resourceUUID)
+        XCTAssertEqual(inventory.networks[0].ownership?.projectUUID, identity.projectUUID)
+
+        var conflicting = labels
+        conflicting[RuntimeNetworkOwnership.networkNameLabel] = "other"
+        XCTAssertThrowsError(
+            try AppleContainerInventoryParser.parse(
+                outputs: try outputs(
+                    version: "1.1.0",
+                    networks: try encodedNetwork(identity: identity, labels: conflicting)
+                )
+            )
+        )
     }
 
     func testRejectsPartialConflictingNestedAndUnsupportedContainerDetails() throws {
@@ -326,20 +485,46 @@ final class AppleContainerInventoryParserTests: XCTestCase {
         version: String,
         containers: String? = nil,
         status: String? = nil,
-        machines: String? = nil
+        machines: String? = nil,
+        networks: String? = nil,
+        statsByContainerID: [String: String]? = nil
     ) throws -> AppleContainerInventoryOutputs {
         AppleContainerInventoryOutputs(
             version: try fixture("apple-container-\(version)-version.txt"),
             systemStatus: try status ?? fixture("apple-container-\(version)-system-status.json"),
             containers: try containers ?? fixture("apple-container-\(version)-inventory-containers.json"),
             images: try fixture("apple-container-\(version)-image-list.json"),
-            networks: try fixture("apple-container-\(version)-network-list.json"),
+            networks: try networks ?? fixture("apple-container-\(version)-network-list.json"),
             volumes: try fixture("apple-container-\(version)-volume-list.json"),
             machines: try machines ?? fixture("apple-container-\(version)-machine-list.json"),
-            statsByContainerID: [
-                managedContainerID: try fixture("apple-container-\(version)-stats.json")
+            statsByContainerID: try statsByContainerID ?? [
+                managedContainerID: fixture("apple-container-\(version)-stats.json")
             ]
         )
+    }
+
+    private func encodedNetwork(
+        identity: RuntimeNetworkIdentity,
+        labels: [String: String]
+    ) throws -> String {
+        let object: [[String: Any]] = [[
+            "configuration": [
+                "creationDate": "2026-07-26T17:53:56Z",
+                "labels": labels,
+                "mode": "nat",
+                "name": identity.runtimeIdentifier,
+                "options": [:],
+                "plugin": "container-network-vmnet"
+            ],
+            "id": identity.runtimeIdentifier,
+            "status": [
+                "ipv4Gateway": "192.168.65.1",
+                "ipv4Subnet": "192.168.65.0/24",
+                "ipv6Subnet": "fd00:65::/64"
+            ]
+        ]]
+        let data = try JSONSerialization.data(withJSONObject: object)
+        return try XCTUnwrap(String(data: data, encoding: .utf8))
     }
 
     private func reversedJSONArray(_ text: String) throws -> String {

@@ -59,27 +59,15 @@ final class DistributionContainerizationAssetSecurityTests: XCTestCase {
 
     func testLoadRejectsWritableAssetFile() throws {
         try withTemporaryDirectory { temporary in
-            let root = temporary.appendingPathComponent("assets", isDirectory: true)
-            let kernelDirectory = root.appendingPathComponent("kernel", isDirectory: true)
-            try FileManager.default.createDirectory(
-                at: root,
-                withIntermediateDirectories: false
+            let root = try makeDistributionTestContainerizationAssetRoot(
+                at: temporary
             )
-            try FileManager.default.createDirectory(
-                at: kernelDirectory,
-                withIntermediateDirectories: false
-            )
-            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: root.path)
-            try FileManager.default.setAttributes(
-                [.posixPermissions: 0o700],
-                ofItemAtPath: kernelDirectory.path
+            let kernelDirectory = root.appendingPathComponent(
+                "kernel",
+                isDirectory: true
             )
             let kernel = kernelDirectory.appendingPathComponent(
                 DistributionContainerizationAssets.kernelFileName
-            )
-            try Data("not-the-locked-kernel\n".utf8).write(
-                to: kernel,
-                options: .withoutOverwriting
             )
             try FileManager.default.setAttributes([.posixPermissions: 0o664], ofItemAtPath: kernel.path)
 

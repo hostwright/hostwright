@@ -8,7 +8,7 @@ Hostwright needs to observe, plan, and eventually mutate container runtime state
 
 ## Current State
 
-Phase 03 implements two Runtime Provider API v2 providers behind `RuntimeAdapter`: `apple-container-cli` and `apple-containerization`. Each exposes only capabilities it passed in the shared conformance suite. Phase 04 composes those qualified primitives into the confirmed single-host lifecycle, probes, bounded interactive operations, rolling/recreate updates, rollback, and recovery. Provider capability snapshots remain authoritative; an unavailable operation fails before execution.
+Phase 03 implements two Runtime Provider API v2 providers behind `RuntimeAdapter`: `apple-container-cli` and `apple-containerization`. Each exposes only capabilities it passed in the shared conformance suite. Phase 04 composes those qualified primitives into the confirmed single-host lifecycle, and Phase 07 adds exact network lifecycle and policy capabilities without bypassing the provider boundary. Provider capability snapshots remain authoritative; an unavailable operation fails before execution.
 
 Implemented:
 
@@ -34,7 +34,7 @@ The helper uses a private mode-`0700` runtime directory and mode-`0600` socket, 
 Not implemented:
 
 - image pull, build, load, push, tag, image delete, or prune;
-- named-volume lifecycle, snapshots, custom networks, DNS, ingress, or broad bind exposure;
+- provider operations not advertised by the selected provider, including unsupported network enforcement or exposure modes;
 - unattended daemon runtime mutation;
 - broad or unmanaged cleanup.
 
@@ -149,14 +149,14 @@ Migration binds its dry-run token to source observation, source and target capab
 
 ## Mutation Boundary
 
-Phase 04 lifecycle support uses:
+The confirmed lifecycle uses:
 
 - structured local-image evidence before creation;
-- exact UUID/fence-labeled create with localhost-only port publishing and supported bind mounts;
+- exact UUID/fence-labeled create with capability-qualified ports, sockets, networks, DNS, policy, and supported mounts;
 - start, stop, managed restart, and delete for exact Hostwright-owned identifiers;
 - structured observation after every ambiguous or completed effect;
 - bounded exec, attach, copy, export, inspect, stats, and log-follow operations only when the selected provider advertises them.
 
-The lifecycle planner, not a raw provider command, implements replicas, dependencies, probes, rolling/recreate updates, rollback, and checkpoint recovery. The adapter still rejects image pull/build/load, named volumes, DNS, custom networks, broad bind exposure, custom runtime/kernel, SSH forwarding, `--all`, `--force`, image deletion, volume deletion, and unmanaged cleanup.
+The lifecycle planner, not a raw provider command, implements replicas, dependencies, probes, rolling/recreate updates, rollback, network coordination, and checkpoint recovery. The adapter still rejects any unadvertised image, storage, network, DNS, policy, or exposure operation plus custom runtime/kernel, SSH forwarding, `--all`, `--force`, and unmanaged cleanup.
 
-The latest live identity proof used the existing local `docker.io/library/python:alpine` image without pulling. Two projects whose legacy identifiers were identical produced distinct v2 identifiers and labels, were observed concurrently with Apple container 1.0.0 network metadata, exited naturally, and were removed through exact token-confirmed Hostwright cleanup. Apple builder runtime state and the base image remained outside Hostwright ownership. Localhost HTTP forwarding is not claimed by that proof because macOS Local Network access for `container-runtime-linux` is disabled on the proof host.
+The Phase 03 live identity proof used the existing local `docker.io/library/python:alpine` image without pulling. Two projects whose legacy identifiers were identical produced distinct v2 identifiers and labels, were observed concurrently with Apple container 1.0.0 network metadata, exited naturally, and were removed through exact token-confirmed Hostwright cleanup. Apple builder runtime state and the base image remained outside Hostwright ownership. That proof did not claim localhost forwarding; Phase 07 separately qualified Apple Local Network forwarding, permission denial, restart recovery, conflict handling, and exact cleanup.

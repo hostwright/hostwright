@@ -127,6 +127,49 @@ final class HostwrightImportTests: XCTestCase {
         XCTAssertEqual(roundTripped.services.first?.env["NOTE"], #"a\b"c"#)
     }
 
+    func testManifestEmitterPreservesStructuredPublishedPorts() throws {
+        let publishedPorts = [
+            try XCTUnwrap(HostwrightPublishedPort.legacy("18080:8080")),
+            HostwrightPublishedPort(
+                target: HostwrightPortSpan(start: 8_181),
+                protocolName: .tcp,
+                bindAddress: "127.0.0.1"
+            ),
+            HostwrightPublishedPort(
+                host: HostwrightPortSpan(start: 19_090, end: 19_091),
+                target: HostwrightPortSpan(start: 9_090, end: 9_091),
+                protocolName: .udp,
+                bindAddress: "::1"
+            ),
+        ]
+        let manifest = HostwrightManifest(
+            version: 2,
+            project: "demo",
+            services: [
+                HostwrightService(
+                    name: "api",
+                    image: "example.invalid/api:latest",
+                    publishedPorts: publishedPorts
+                ),
+            ]
+        )
+
+        let rendered = HostwrightManifestEmitter.render(manifest)
+        XCTAssertTrue(rendered.contains(#"      - "18080:8080""#))
+        XCTAssertTrue(rendered.contains(#"      - bind: "127.0.0.1""#))
+        XCTAssertTrue(rendered.contains("        target: 8181"))
+        XCTAssertTrue(rendered.contains(#"      - bind: "::1""#))
+        XCTAssertTrue(rendered.contains(#"        host: "19090-19091""#))
+        XCTAssertTrue(rendered.contains(#"        target: "9090-9091""#))
+        XCTAssertTrue(rendered.contains(#"        protocol: "udp""#))
+
+        let roundTripped = try ManifestValidator.validated(rendered)
+        XCTAssertEqual(
+            roundTripped.services.first?.publishedPorts,
+            publishedPorts
+        )
+    }
+
     func testUnsupportedNetworkingAndSecretFieldsFailClosedWithPolicyReasons() {
         let result = StackFileImporter.convert(
             """

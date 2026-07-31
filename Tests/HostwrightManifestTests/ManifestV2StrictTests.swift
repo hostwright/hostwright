@@ -18,6 +18,17 @@ final class ManifestV2StrictTests: XCTestCase {
         XCTAssertTrue(web.initProcess)
         XCTAssertEqual(web.dependsOn, ["db": .ready])
         XCTAssertEqual(web.labels, ["com.example.role": "frontend"])
+        XCTAssertEqual(
+            web.publishedPorts,
+            [
+                HostwrightPublishedPort(
+                    host: HostwrightPortSpan(start: 8080),
+                    target: HostwrightPortSpan(start: 8080),
+                    protocolName: .tcp,
+                    bindAddress: HostwrightPublishedPort.localhostBindAddress
+                )
+            ]
+        )
         XCTAssertEqual(web.probes.startup?.action, .exec(["/usr/bin/check", "--startup"]))
         XCTAssertEqual(web.probes.readiness?.action, .tcp(port: 8080))
         XCTAssertEqual(web.probes.liveness?.action, .http(port: 8080, path: "/health"))
@@ -535,6 +546,105 @@ final class ManifestV2StrictTests: XCTestCase {
             """,
             contains: "replicas must be between 1 and 256",
             requireSource: false
+        )
+    }
+
+    func testValidationRejectsInvalidStructuredPortDeclarations() {
+        assertFailure(
+            """
+            version: 2
+            project: demo
+            services:
+              api:
+                image: local/api:latest
+                ports:
+                  - bind: localhost
+                    host: "18080-18082"
+                    target: "8080-8081"
+                    protocol: sctp
+            """,
+            contains: "protocol must be one of: tcp, udp, unix",
+            requireSource: false
+        )
+
+        assertFailure(
+            """
+            version: 2
+            project: demo
+            services:
+              api:
+                image: local/api:latest
+                ports:
+                  - bind: 127.0.0.1
+                    host: 80
+                    target: 8080
+            """,
+            contains: "fixed published ports must be 1024 or higher",
+            requireSource: false
+        )
+
+        assertFailure(
+            """
+            version: 2
+            project: demo
+            services:
+              api:
+                image: local/api:latest
+                ports:
+                  - bind: 127.0.0.1
+                    host: "18080-18082"
+                    target: "8080-8081"
+            """,
+            contains: "structured port ranges must have equal host and target lengths",
+            requireSource: false
+        )
+    }
+
+    func testProbePortsUseStructuredTargetPorts() throws {
+        let manifest = try ManifestValidator.validated(
+            """
+            version: 2
+            project: demo
+            services:
+              api:
+                image: local/api:latest
+                ports:
+                  - bind: 127.0.0.1
+                    host: 18080
+                    target: 8080
+                    protocol: tcp
+                probes:
+                  readiness:
+                    tcp:
+                      port: 8080
+            """
+        )
+
+        XCTAssertEqual(manifest.services[0].probes.readiness?.action, .tcp(port: 8080))
+    }
+
+    func testDynamicPublishedPortRangeIsAcceptedAndCanonical() throws {
+        let manifest = try ManifestValidator.validated(
+            """
+            version: 2
+            project: demo
+            services:
+              api:
+                image: local/api:latest
+                ports:
+                  - target: "8080-8082"
+                    protocol: udp
+            """
+        )
+
+        let port = try XCTUnwrap(manifest.services.first?.publishedPorts.first)
+        XCTAssertNil(port.host)
+        XCTAssertEqual(port.target, HostwrightPortSpan(start: 8080, end: 8082))
+        XCTAssertEqual(port.protocolName, .udp)
+        XCTAssertTrue(
+            try ManifestCanonicalEncoder.encode(manifest).contains(
+                #"target: "8080-8082""#
+            )
         )
     }
 

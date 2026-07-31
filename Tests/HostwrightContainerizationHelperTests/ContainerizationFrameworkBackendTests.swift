@@ -3,6 +3,7 @@ import CryptoKit
 import Darwin
 import Foundation
 import HostwrightCore
+import HostwrightNetworking
 import HostwrightRuntime
 import XCTest
 
@@ -20,6 +21,7 @@ final class ContainerizationFrameworkBackendTests: XCTestCase {
                 .processControl,
                 .streaming,
                 .images,
+                .networks,
                 .cancellation,
                 .timeouts,
                 .errors,
@@ -28,7 +30,7 @@ final class ContainerizationFrameworkBackendTests: XCTestCase {
         )
         XCTAssertEqual(
             Set(snapshot.features.filter { $0.state == .unavailable }.map(\.feature)),
-            Set([.networks, .storage])
+            Set([.storage])
         )
         XCTAssertTrue(
             snapshot.features.filter { $0.state == .available }
@@ -37,6 +39,382 @@ final class ContainerizationFrameworkBackendTests: XCTestCase {
         XCTAssertTrue(
             snapshot.features.filter { $0.state == .unavailable }
                 .allSatisfy { $0.reason == .notImplemented }
+        )
+    }
+
+    func testNetworkContractAdvertisesExactContainerizationOperations() async throws {
+        let parent = try makePrivateParent()
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let store = try ContainerizationHelperStateStore(
+            rootURL: parent.appendingPathComponent("state", isDirectory: true)
+        )
+        let backend = try ContainerizationFrameworkBackend(
+            snapshot: snapshot(),
+            store: store,
+            driver: RecordingContainerizationDriver()
+        )
+
+        let capabilities = try await backend.networkCapabilities()
+        XCTAssertEqual(capabilities.providerID, .appleContainerization)
+        XCTAssertEqual(capabilities.modes, [.hostOnly, .nat])
+        XCTAssertEqual(capabilities.ipv4AddressModes, [.cidr])
+        XCTAssertEqual(capabilities.ipv6AddressModes, [.cidr, .disabled])
+        XCTAssertEqual(capabilities.attachmentTiming, .containerCreateOnly)
+        XCTAssertEqual(capabilities.status(for: .create)?.state, .available)
+        XCTAssertEqual(capabilities.status(for: .inspect)?.state, .available)
+        XCTAssertEqual(capabilities.status(for: .delete)?.state, .available)
+        XCTAssertEqual(capabilities.status(for: .attach)?.state, .unavailable)
+        XCTAssertEqual(capabilities.status(for: .detach)?.state, .unavailable)
+
+        let identity = try RuntimeNetworkIdentity(
+            logicalName: "backend",
+            projectUUID: "22222222-2222-4222-8222-222222222222"
+        )
+        do {
+            _ = try await backend.networkInspect(.init(identity: identity))
+            XCTFail("Expected an absent managed network to be rejected.")
+        } catch let error as ContainerizationHelperBackendError {
+            guard case .rejected = error else {
+                return XCTFail("Expected rejected, got \(error)")
+            }
+        }
+        XCTAssertTrue(try store.loadRecords().isEmpty)
+        let observation = try await backend.observe(.init())
+        XCTAssertEqual(observation.networks, [])
+    }
+
+    func testOwnedNetworkCreateInspectAndDeleteVerifyFence() async throws {
+        let parent = try makePrivateParent()
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let store = try ContainerizationHelperStateStore(
+            rootURL: parent.appendingPathComponent("state", isDirectory: true)
+        )
+        let driver = RecordingContainerizationDriver()
+        let backend = try ContainerizationFrameworkBackend(
+            snapshot: snapshot(),
+            store: store,
+            driver: driver
+        )
+        let identity = try RuntimeNetworkIdentity(
+            logicalName: "backend",
+            projectUUID: "22222222-2222-4222-8222-222222222222"
+        )
+        let context = networkMutationContext(identity: identity)
+        let request = RuntimeNetworkCreateRequest(
+            identity: identity,
+            mode: .hostOnly,
+            ipv4: .cidr("192.168.240.0/24"),
+            ipv6: .cidr("fd00:7:1::/64"),
+            labels: ["purpose": "gate-one"]
+        )
+
+        let created = try await backend.networkCreate(request, context: context)
+        XCTAssertEqual(created.state, .present)
+        XCTAssertEqual(created.observedNetwork?.kind, "vmnet:hostOnly")
+        XCTAssertEqual(created.observedNetwork?.addresses.first, "192.168.240.0/24")
+        XCTAssertEqual(created.observedNetwork?.ownership?.resourceUUID, identity.resourceUUID)
+        XCTAssertEqual(created.observedNetwork?.ownership?.fencingToken, context.fencingToken)
+
+        let inspected = try await backend.networkInspect(.init(identity: identity))
+        XCTAssertEqual(inspected.observedNetwork, created.observedNetwork)
+
+        let stale = networkMutationContext(
+            identity: identity,
+            fencingToken: "55555555-5555-4555-8555-555555555555"
+        )
+        await XCTAssertThrowsErrorAsync {
+            _ = try await backend.networkDelete(
+                .init(identity: identity),
+                context: stale
+            )
+        }
+        let stillPresent = try await backend.networkInspect(.init(identity: identity))
+        XCTAssertEqual(stillPresent.state, .present)
+
+        let deleted = try await backend.networkDelete(
+            .init(identity: identity),
+            context: context
+        )
+        XCTAssertEqual(deleted.state, .missing)
+        await XCTAssertThrowsErrorAsync {
+            _ = try await backend.networkInspect(.init(identity: identity))
+        }
+        let networkOperations = await driver.operations()
+        XCTAssertEqual(networkOperations, ["network-create", "network-delete"])
+    }
+
+    func testNetworkDeleteAcceptsExactPriorOwnershipWithFreshOperationFenceAndRejectsMismatch()
+        async throws
+    {
+        let parent = try makePrivateParent()
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let store = try ContainerizationHelperStateStore(
+            rootURL: parent.appendingPathComponent(
+                "state",
+                isDirectory: true
+            )
+        )
+        let driver = RecordingContainerizationDriver()
+        let backend = try ContainerizationFrameworkBackend(
+            snapshot: snapshot(),
+            store: store,
+            driver: driver
+        )
+        let identity = try RuntimeNetworkIdentity(
+            logicalName: "backend",
+            projectUUID:
+                "22222222-2222-4222-8222-222222222222"
+        )
+        let createContext = networkMutationContext(
+            identity: identity
+        )
+        let created = try await backend.networkCreate(
+            RuntimeNetworkCreateRequest(
+                identity: identity,
+                mode: .hostOnly,
+                ipv4: .cidr("192.168.240.0/24"),
+                ipv6: .cidr("fd00:7:1::/64")
+            ),
+            context: createContext
+        )
+        let priorOwnership = try XCTUnwrap(
+            created.observedNetwork?.ownership
+        )
+        let deleteContext = networkMutationContext(
+            identity: identity,
+            operationID: "network-operation-2",
+            resourceGeneration:
+                priorOwnership.resourceGeneration + 1,
+            fencingToken:
+                "66666666-6666-4666-8666-666666666666"
+        )
+        let mismatchedOwnership = RuntimeInventoryOwnershipEvidence(
+            resourceUUID: priorOwnership.resourceUUID,
+            projectUUID: priorOwnership.projectUUID,
+            resourceGeneration: priorOwnership.resourceGeneration,
+            projectGeneration: priorOwnership.projectGeneration,
+            providerID: priorOwnership.providerID,
+            providerGeneration: priorOwnership.providerGeneration,
+            fencingToken:
+                "77777777-7777-4777-8777-777777777777"
+        )
+
+        await XCTAssertThrowsErrorAsync {
+            _ = try await backend.networkDelete(
+                RuntimeNetworkDeleteRequest(
+                    identity: identity,
+                    expectedOwnership: mismatchedOwnership
+                ),
+                context: deleteContext
+            )
+        }
+        let rejectedOperations = await driver.operations()
+        XCTAssertEqual(rejectedOperations, ["network-create"])
+
+        let deleted = try await backend.networkDelete(
+            RuntimeNetworkDeleteRequest(
+                identity: identity,
+                expectedOwnership: priorOwnership
+            ),
+            context: deleteContext
+        )
+        XCTAssertEqual(deleted.state, .missing)
+        XCTAssertTrue(deleted.verified)
+        let operations = await driver.operations()
+        XCTAssertEqual(
+            operations,
+            ["network-create", "network-delete"]
+        )
+    }
+
+    func testAutomaticIPv4NetworkCreateIsRejected() async throws {
+        let parent = try makePrivateParent()
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let store = try ContainerizationHelperStateStore(
+            rootURL: parent.appendingPathComponent("state", isDirectory: true)
+        )
+        let driver = RecordingContainerizationDriver()
+        let backend = try ContainerizationFrameworkBackend(
+            snapshot: snapshot(),
+            store: store,
+            driver: driver
+        )
+        let identity = try RuntimeNetworkIdentity(
+            logicalName: "automatic",
+            projectUUID: "22222222-2222-4222-8222-222222222222"
+        )
+        let context = networkMutationContext(identity: identity)
+        do {
+            _ = try await backend.networkCreate(
+                RuntimeNetworkCreateRequest(
+                    identity: identity,
+                    mode: .nat,
+                    ipv4: .automatic,
+                    ipv6: .disabled
+                ),
+                context: context
+            )
+            XCTFail("Expected automatic IPv4 network creation to be unavailable.")
+        } catch let ContainerizationHelperBackendError.unavailable(message) {
+            XCTAssertEqual(
+                message,
+                "Containerization 0.35.0 VmnetNetwork does not expose a qualified automatic IPv4 subnet allocator."
+            )
+        } catch {
+            XCTFail("Expected unavailable, got \(error)")
+        }
+    }
+
+    func testDisabledIPv6NetworkCreateProducesVerifiedIPv4OnlyNetwork() async throws {
+        let parent = try makePrivateParent()
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let store = try ContainerizationHelperStateStore(
+            rootURL: parent.appendingPathComponent("state", isDirectory: true)
+        )
+        let driver = RecordingContainerizationDriver()
+        let backend = try ContainerizationFrameworkBackend(
+            snapshot: snapshot(),
+            store: store,
+            driver: driver
+        )
+        let identity = try RuntimeNetworkIdentity(
+            logicalName: "ipv6-disabled",
+            projectUUID: "22222222-2222-4222-8222-222222222222"
+        )
+        let context = networkMutationContext(identity: identity)
+
+        let created = try await backend.networkCreate(
+            RuntimeNetworkCreateRequest(
+                identity: identity,
+                mode: .nat,
+                ipv4: .cidr("192.168.240.0/24"),
+                ipv6: .disabled
+            ),
+            context: context
+        )
+        XCTAssertTrue(created.verified)
+        XCTAssertFalse(
+            try XCTUnwrap(created.observedNetwork).addresses.contains {
+                $0.contains(":")
+            }
+        )
+        let operations = await driver.operations()
+        XCTAssertEqual(operations, ["network-create"])
+    }
+
+    func testIPv6OnlyNetworkCreateIsRejectedBeforeDriverMutation() async throws {
+        let parent = try makePrivateParent()
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let store = try ContainerizationHelperStateStore(
+            rootURL: parent.appendingPathComponent("state", isDirectory: true)
+        )
+        let driver = RecordingContainerizationDriver()
+        let backend = try ContainerizationFrameworkBackend(
+            snapshot: snapshot(),
+            store: store,
+            driver: driver
+        )
+        let identity = try RuntimeNetworkIdentity(
+            logicalName: "ipv6-only",
+            projectUUID: "22222222-2222-4222-8222-222222222222"
+        )
+
+        await XCTAssertThrowsErrorAsync {
+            _ = try await backend.networkCreate(
+                RuntimeNetworkCreateRequest(
+                    identity: identity,
+                    mode: .nat,
+                    ipv4: .disabled,
+                    ipv6: .cidr("fd00:7:4::/64")
+                ),
+                context: networkMutationContext(identity: identity)
+            )
+        }
+        let operations = await driver.operations()
+        XCTAssertEqual(operations, [])
+    }
+
+    func testCreateTimeNetworkAttachmentIsObservedAndBlocksNetworkDelete() async throws {
+        let parent = try makePrivateParent()
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let store = try ContainerizationHelperStateStore(
+            rootURL: parent.appendingPathComponent("state", isDirectory: true)
+        )
+        let driver = RecordingContainerizationDriver()
+        let backend = try ContainerizationFrameworkBackend(
+            snapshot: snapshot(),
+            store: store,
+            driver: driver
+        )
+        let identity = try RuntimeNetworkIdentity(
+            logicalName: "backend",
+            projectUUID: "22222222-2222-4222-8222-222222222222"
+        )
+        let networkContext = networkMutationContext(identity: identity)
+        _ = try await backend.networkCreate(
+            RuntimeNetworkCreateRequest(
+                identity: identity,
+                mode: .nat,
+                ipv4: .cidr("192.168.240.0/24"),
+                ipv6: .cidr("fd00:7:1::/64")
+            ),
+            context: networkContext
+        )
+        let attachment = try RuntimeDesiredNetworkAttachment(
+            network: identity,
+            aliases: ["api"]
+        )
+        let workloadContext = mutationContext()
+        let create = try createRequest(
+            context: workloadContext,
+            networks: [attachment]
+        )
+        _ = try await backend.create(create, context: workloadContext)
+
+        let inventory = try await backend.observe(.init()).validatedInventory()
+        XCTAssertEqual(inventory.networks.count, 1)
+        XCTAssertEqual(inventory.containers.count, 1)
+        XCTAssertEqual(
+            inventory.containers[0].networks.map(\.networkID),
+            [identity.runtimeIdentifier]
+        )
+        let mutation = ContainerizationHelperMutationPayload(
+            resourceIdentifier: create.resourceIdentifier,
+            resourceUUID: create.resourceUUID
+        )
+        _ = try await backend.start(mutation, context: workloadContext)
+        _ = try await backend.stop(mutation, context: workloadContext)
+        _ = try await backend.start(mutation, context: workloadContext)
+        let restartedInventory = try await backend.observe(.init()).validatedInventory()
+        XCTAssertEqual(
+            restartedInventory.containers[0].networks.map(\.networkID),
+            [identity.runtimeIdentifier]
+        )
+        await XCTAssertThrowsErrorAsync {
+            _ = try await backend.networkDelete(
+                .init(identity: identity),
+                context: networkContext
+            )
+        }
+
+        _ = try await backend.delete(
+            ContainerizationHelperMutationPayload(
+                resourceIdentifier: create.resourceIdentifier,
+                resourceUUID: create.resourceUUID
+            ),
+            context: workloadContext
+        )
+        _ = try await backend.networkDelete(
+            .init(identity: identity),
+            context: networkContext
+        )
+        let operations = await driver.operations()
+        XCTAssertEqual(
+            operations,
+            [
+                "network-create", "resolve", "create", "images", "start", "stop", "start",
+                "usage", "images", "delete", "network-delete"
+            ]
         )
     }
 
@@ -87,6 +465,198 @@ final class ContainerizationFrameworkBackendTests: XCTestCase {
             operations,
             ["resolve", "create", "start", "stop", "start", "restart", "usage", "images", "delete"]
         )
+    }
+
+    func testExplicitNetworkPolicyIsRejectedBeforeRuntimeMutationWhenDriverCannotEnforce()
+        async throws
+    {
+        let parent = try makePrivateParent()
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let store = try ContainerizationHelperStateStore(
+            rootURL: parent.appendingPathComponent("state", isDirectory: true)
+        )
+        let driver = RecordingContainerizationDriver()
+        let backend = try ContainerizationFrameworkBackend(
+            snapshot: snapshot(),
+            store: store,
+            driver: driver
+        )
+        let context = mutationContext()
+        let request = try createRequest(
+            context: context,
+            networkPolicy: HostwrightServiceNetworkPolicy()
+        )
+
+        do {
+            _ = try await backend.create(request, context: context)
+            XCTFail("Expected unavailable guest policy enforcement.")
+        } catch let ContainerizationHelperBackendError.unavailable(message) {
+            XCTAssertEqual(
+                message,
+                "Containerization guest network-policy enforcement is unavailable"
+            )
+        } catch {
+            XCTFail("Expected unavailable, got \(error)")
+        }
+
+        XCTAssertTrue(try store.loadRecords().isEmpty)
+        let operations = await driver.operations()
+        XCTAssertEqual(operations, [])
+    }
+
+    func testAvailableNetworkPolicyPersistsEvidenceAndRepairsRuleLoss()
+        async throws
+    {
+        let parent = try makePrivateParent()
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let store = try ContainerizationHelperStateStore(
+            rootURL: parent.appendingPathComponent("state", isDirectory: true)
+        )
+        let driver = RecordingContainerizationDriver(
+            networkPolicyAvailable: true
+        )
+        let backend = try ContainerizationFrameworkBackend(
+            snapshot: snapshot(),
+            store: store,
+            driver: driver
+        )
+        let context = mutationContext()
+        let request = try createRequest(
+            context: context,
+            networkPolicy: HostwrightServiceNetworkPolicy()
+        )
+        let mutation = ContainerizationHelperMutationPayload(
+            resourceIdentifier: request.resourceIdentifier,
+            resourceUUID: request.resourceUUID
+        )
+
+        _ = try await backend.create(request, context: context)
+        var record = try XCTUnwrap(store.loadRecords().first)
+        XCTAssertEqual(record.networkPolicyGeneration, 1)
+        XCTAssertEqual(
+            record.networkPolicySHA256,
+            String(repeating: "e", count: 64)
+        )
+        XCTAssertEqual(record.networkPolicyVerified, false)
+
+        _ = try await backend.start(mutation, context: context)
+        record = try XCTUnwrap(store.loadRecords().first)
+        XCTAssertEqual(record.networkPolicyGeneration, 1)
+        XCTAssertEqual(record.networkPolicyVerified, true)
+        let firstApplyCount = await driver.policyApplyCount(
+            resourceIdentifier: request.resourceIdentifier
+        )
+        XCTAssertGreaterThan(firstApplyCount, 0)
+
+        await driver.simulatePolicyRuleLoss(
+            resourceIdentifier: request.resourceIdentifier
+        )
+        _ = try await backend.restart(mutation, context: context)
+        record = try XCTUnwrap(store.loadRecords().first)
+        XCTAssertEqual(record.networkPolicyVerified, true)
+        let repairedApplyCount = await driver.policyApplyCount(
+            resourceIdentifier: request.resourceIdentifier
+        )
+        XCTAssertEqual(
+            repairedApplyCount,
+            firstApplyCount + 1
+        )
+
+        _ = try await backend.delete(mutation, context: context)
+        XCTAssertTrue(try store.loadRecords().isEmpty)
+        let hasAppliedPolicy = await driver.hasAppliedPolicy(
+            resourceIdentifier: request.resourceIdentifier
+        )
+        XCTAssertFalse(hasAppliedPolicy)
+    }
+
+    func testPolicyReconcileFailureAfterStartStopsResourceWithoutFalseSuccess()
+        async throws
+    {
+        let parent = try makePrivateParent()
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let store = try ContainerizationHelperStateStore(
+            rootURL: parent.appendingPathComponent("state", isDirectory: true)
+        )
+        let driver = RecordingContainerizationDriver(
+            networkPolicyAvailable: true,
+            policyFailureCalls: [4]
+        )
+        let backend = try ContainerizationFrameworkBackend(
+            snapshot: snapshot(),
+            store: store,
+            driver: driver
+        )
+        let context = mutationContext()
+        let request = try createRequest(
+            context: context,
+            networkPolicy: HostwrightServiceNetworkPolicy()
+        )
+        let mutation = ContainerizationHelperMutationPayload(
+            resourceIdentifier: request.resourceIdentifier,
+            resourceUUID: request.resourceUUID
+        )
+
+        _ = try await backend.create(request, context: context)
+        await XCTAssertThrowsErrorAsync {
+            _ = try await backend.start(mutation, context: context)
+        }
+
+        let record = try XCTUnwrap(store.loadRecords().first)
+        XCTAssertEqual(record.phase, .stopped)
+        XCTAssertEqual(record.failureCategory, "start-failed")
+        let operations = await driver.operations()
+        XCTAssertEqual(
+            Array(operations.suffix(2)),
+            ["policy-reconcile", "stop"]
+        )
+        let hasAppliedPolicy = await driver.hasAppliedPolicy(
+            resourceIdentifier: request.resourceIdentifier
+        )
+        XCTAssertFalse(hasAppliedPolicy)
+    }
+
+    func testPolicyReconcileCancellationAfterStartStopsResourceWithoutFalseSuccess()
+        async throws
+    {
+        let parent = try makePrivateParent()
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let store = try ContainerizationHelperStateStore(
+            rootURL: parent.appendingPathComponent("state", isDirectory: true)
+        )
+        let driver = RecordingContainerizationDriver(
+            networkPolicyAvailable: true,
+            policyCancellationCalls: [4]
+        )
+        let backend = try ContainerizationFrameworkBackend(
+            snapshot: snapshot(),
+            store: store,
+            driver: driver
+        )
+        let context = mutationContext()
+        let request = try createRequest(
+            context: context,
+            networkPolicy: HostwrightServiceNetworkPolicy()
+        )
+        let mutation = ContainerizationHelperMutationPayload(
+            resourceIdentifier: request.resourceIdentifier,
+            resourceUUID: request.resourceUUID
+        )
+
+        _ = try await backend.create(request, context: context)
+        await XCTAssertThrowsErrorAsync {
+            _ = try await backend.start(mutation, context: context)
+        }
+
+        let record = try XCTUnwrap(store.loadRecords().first)
+        XCTAssertEqual(record.phase, .stopped)
+        XCTAssertEqual(record.failureCategory, "cancelled")
+        let operations = await driver.operations()
+        XCTAssertEqual(Array(operations.suffix(2)), ["policy-reconcile", "stop"])
+        let hasAppliedPolicy = await driver.hasAppliedPolicy(
+            resourceIdentifier: request.resourceIdentifier
+        )
+        XCTAssertFalse(hasAppliedPolicy)
     }
 
     func testLogSnapshotsAndCursorsPreserveCompleteAndEmptyLines() async throws {
@@ -335,6 +905,7 @@ final class ContainerizationFrameworkBackendTests: XCTestCase {
             resourceIdentifier: valid.resourceIdentifier,
             resourceUUID: valid.resourceUUID,
             projectUUID: valid.projectUUID,
+            logicalServiceName: valid.logicalServiceName,
             image: valid.image,
             command: valid.command,
             environment: valid.environment,
@@ -475,18 +1046,23 @@ final class ContainerizationFrameworkBackendTests: XCTestCase {
     }
 
     private func createRequest(
-        context: RuntimeMutationContext
+        context: RuntimeMutationContext,
+        networks: [RuntimeDesiredNetworkAttachment] = [],
+        networkPolicy: HostwrightServiceNetworkPolicy? = nil
     ) throws -> ContainerizationHelperCreatePayload {
         let identity = RuntimeServiceIdentity(projectName: "demo", serviceName: "api")
         return ContainerizationHelperCreatePayload(
             resourceIdentifier: RuntimeManagedResourceIdentity.resourceIdentifier(for: identity),
             resourceUUID: context.resourceUUID,
             projectUUID: context.projectResourceUUID,
+            logicalServiceName: identity.serviceName,
             image: RecordingContainerizationDriver.image,
             command: ["/bin/sleep", "30"],
             environment: [RuntimeInventoryEnvironmentEntry(name: "MODE", value: "test")],
             labels: try RuntimeManagedResourceIdentity.labels(for: identity, context: context)
-                .map { RuntimeInventoryLabel(key: $0.key, value: $0.value) }
+                .map { RuntimeInventoryLabel(key: $0.key, value: $0.value) },
+            networks: networks,
+            networkPolicy: networkPolicy
         )
     }
 
@@ -500,6 +1076,25 @@ final class ContainerizationFrameworkBackendTests: XCTestCase {
             resourceUUID: "11111111-1111-4111-8111-111111111111",
             resourceGeneration: 1,
             projectResourceUUID: "22222222-2222-4222-8222-222222222222",
+            projectGeneration: 1,
+            providerGeneration: 1,
+            fencingToken: fencingToken
+        )
+    }
+
+    private func networkMutationContext(
+        identity: RuntimeNetworkIdentity,
+        operationID: String = "network-operation-1",
+        resourceGeneration: Int = 1,
+        fencingToken: String = "44444444-4444-4444-8444-444444444444"
+    ) -> RuntimeMutationContext {
+        RuntimeMutationContext(
+            providerID: .appleContainerization,
+            capabilitySHA256: String(repeating: "a", count: 64),
+            operationID: operationID,
+            resourceUUID: identity.resourceUUID,
+            resourceGeneration: resourceGeneration,
+            projectResourceUUID: identity.projectUUID,
             projectGeneration: 1,
             providerGeneration: 1,
             fencingToken: fencingToken
@@ -593,9 +1188,27 @@ private actor RecordingContainerizationDriver: ContainerizationHelperRuntimeDriv
 
     private var events: [String] = []
     private let localImageError: ContainerizationError?
+    private var networks: [String: ContainerizationHelperRuntimeNetworkRecord] = [:]
+    private var desiredContainerNetworks: [String: [RuntimeDesiredNetworkAttachment]] = [:]
+    private var containerNetworks: [String: [RuntimeInventoryNetworkAttachment]] = [:]
+    private let networkPolicyAvailable: Bool
+    private let policyFailureCalls: Set<Int>
+    private let policyCancellationCalls: Set<Int>
+    private var policyReconcileCalls = 0
+    private var runningResources = Set<String>()
+    private var appliedPolicies = Set<String>()
+    private var policyApplyCounts: [String: Int] = [:]
 
-    init(localImageError: ContainerizationError? = nil) {
+    init(
+        localImageError: ContainerizationError? = nil,
+        networkPolicyAvailable: Bool = false,
+        policyFailureCalls: Set<Int> = [],
+        policyCancellationCalls: Set<Int> = []
+    ) {
         self.localImageError = localImageError
+        self.networkPolicyAvailable = networkPolicyAvailable
+        self.policyFailureCalls = policyFailureCalls
+        self.policyCancellationCalls = policyCancellationCalls
     }
 
     func resolveProcess(
@@ -620,11 +1233,209 @@ private actor RecordingContainerizationDriver: ContainerizationHelperRuntimeDriv
         return [ContainerizationHelperImageRecord(evidence: Self.image, references: [Self.image.reference])]
     }
 
-    func create(_ record: ContainerizationHelperPersistedRecord) async throws { events.append("create") }
-    func start(_ record: ContainerizationHelperPersistedRecord) async throws { events.append("start") }
-    func restart(_ record: ContainerizationHelperPersistedRecord) async throws { events.append("restart") }
-    func stop(_ record: ContainerizationHelperPersistedRecord) async throws { events.append("stop") }
-    func delete(_ record: ContainerizationHelperPersistedRecord) async throws { events.append("delete") }
+    func listNetworks() async throws -> [ContainerizationHelperRuntimeNetworkRecord] {
+        networks.values.sorted {
+            $0.identity.runtimeIdentifier < $1.identity.runtimeIdentifier
+        }
+    }
+
+    func inspectNetwork(
+        _ identity: RuntimeNetworkIdentity
+    ) async throws -> ContainerizationHelperRuntimeNetworkRecord? {
+        guard let record = networks[identity.runtimeIdentifier],
+              record.identity == identity else {
+            return nil
+        }
+        return record
+    }
+
+    func createNetwork(
+        _ request: RuntimeNetworkCreateRequest,
+        labels: [String: String]
+    ) async throws -> ContainerizationHelperRuntimeNetworkRecord {
+        guard networks[request.identity.runtimeIdentifier] == nil else {
+            throw ContainerizationHelperBackendError.conflict("network already exists")
+        }
+        let ipv4: String
+        switch request.ipv4 {
+        case .automatic:
+            ipv4 = "192.168.250.0/24"
+        case .cidr(let value):
+            ipv4 = value
+        case .disabled:
+            throw ContainerizationHelperBackendError.unavailable("IPv4 is required")
+        }
+        let ipv6: String?
+        switch request.ipv6 {
+        case .disabled:
+            ipv6 = nil
+        case .cidr(let value):
+            ipv6 = value
+        case .automatic:
+            throw ContainerizationHelperBackendError.unavailable(
+                "automatic IPv6 is unavailable"
+            )
+        }
+        let record = ContainerizationHelperRuntimeNetworkRecord(
+            identity: request.identity,
+            mode: request.mode,
+            ipv4Subnet: ipv4,
+            ipv4Gateway: "192.168.250.1",
+            ipv6Prefix: ipv6,
+            ipv6Gateway: ipv6 == nil ? nil : "fd00::1",
+            labels: labels
+        )
+        networks[request.identity.runtimeIdentifier] = record
+        events.append("network-create")
+        return record
+    }
+
+    func deleteNetwork(_ identity: RuntimeNetworkIdentity) async throws {
+        let attached = containerNetworks.values.joined().contains {
+            $0.networkID == identity.runtimeIdentifier
+        }
+        guard !attached else {
+            throw ContainerizationHelperBackendError.conflict(
+                "network still has managed container attachments"
+            )
+        }
+        guard networks.removeValue(forKey: identity.runtimeIdentifier) != nil else {
+            throw ContainerizationHelperBackendError.rejected("network is not managed")
+        }
+        events.append("network-delete")
+    }
+
+    func networkAttachments(
+        resourceIdentifier: String
+    ) async throws -> [RuntimeInventoryNetworkAttachment] {
+        containerNetworks[resourceIdentifier] ?? []
+    }
+
+    func networkPolicyCapabilities()
+        async -> RuntimeNetworkPolicyProviderCapabilities {
+        guard networkPolicyAvailable else {
+            return .unavailable
+        }
+        return RuntimeNetworkPolicyProviderCapabilities(
+            state: .available,
+            reason: .implemented,
+            directions: HostwrightNetworkPolicyDirection.allCases,
+            enforcesExactIdentity: true,
+            enforcesCIDR: true,
+            enforcesDNS: true,
+            appliesAtomicGenerations: true,
+            observesRuleDigest: true
+        )
+    }
+
+    func reconcileNetworkPolicies(
+        records: [ContainerizationHelperPersistedRecord]
+    ) async throws -> [String: ContainerizationGuestNetworkPolicyEvidence] {
+        guard networkPolicyAvailable ||
+                records.contains(where: { $0.networkPolicy != nil }) ||
+                !appliedPolicies.isEmpty else {
+            return [:]
+        }
+        policyReconcileCalls += 1
+        events.append("policy-reconcile")
+        if policyFailureCalls.contains(policyReconcileCalls) {
+            throw ContainerizationHelperBackendError.executionFailed(
+                "injected guest policy reconcile failure"
+            )
+        }
+        if policyCancellationCalls.contains(policyReconcileCalls) {
+            throw CancellationError()
+        }
+        let protected = records.filter { $0.networkPolicy != nil }
+        let protectedIdentifiers = Set(protected.map(\.resourceIdentifier))
+        appliedPolicies.formIntersection(protectedIdentifiers)
+
+        var evidence:
+            [String: ContainerizationGuestNetworkPolicyEvidence] = [:]
+        for record in protected {
+            let isRunning = runningResources.contains(
+                record.resourceIdentifier
+            )
+            if isRunning {
+                appliedPolicies.insert(record.resourceIdentifier)
+                policyApplyCounts[record.resourceIdentifier, default: 0] += 1
+            }
+            evidence[record.resourceIdentifier] =
+                ContainerizationGuestNetworkPolicyEvidence(
+                    generation: record.networkPolicyGeneration ?? 1,
+                    sha256: String(repeating: "e", count: 64),
+                    verified:
+                        isRunning &&
+                        appliedPolicies.contains(record.resourceIdentifier)
+                )
+        }
+        return evidence
+    }
+
+    func create(
+        _ record: ContainerizationHelperPersistedRecord,
+        networks attachments: [RuntimeDesiredNetworkAttachment]
+    ) async throws {
+        desiredContainerNetworks[record.resourceIdentifier] = attachments
+        try observeAttachments(record: record, attachments: attachments)
+        events.append("create")
+    }
+
+    func start(_ record: ContainerizationHelperPersistedRecord) async throws {
+        try observeAttachments(
+            record: record,
+            attachments: desiredContainerNetworks[record.resourceIdentifier] ?? []
+        )
+        runningResources.insert(record.resourceIdentifier)
+        events.append("start")
+    }
+
+    func restart(_ record: ContainerizationHelperPersistedRecord) async throws {
+        try observeAttachments(
+            record: record,
+            attachments: desiredContainerNetworks[record.resourceIdentifier] ?? []
+        )
+        runningResources.insert(record.resourceIdentifier)
+        events.append("restart")
+    }
+
+    func stop(_ record: ContainerizationHelperPersistedRecord) async throws {
+        containerNetworks.removeValue(forKey: record.resourceIdentifier)
+        runningResources.remove(record.resourceIdentifier)
+        appliedPolicies.remove(record.resourceIdentifier)
+        events.append("stop")
+    }
+
+    func delete(_ record: ContainerizationHelperPersistedRecord) async throws {
+        desiredContainerNetworks.removeValue(forKey: record.resourceIdentifier)
+        containerNetworks.removeValue(forKey: record.resourceIdentifier)
+        runningResources.remove(record.resourceIdentifier)
+        appliedPolicies.remove(record.resourceIdentifier)
+        events.append("delete")
+    }
+
+    private func observeAttachments(
+        record: ContainerizationHelperPersistedRecord,
+        attachments: [RuntimeDesiredNetworkAttachment]
+    ) throws {
+        var observed: [RuntimeInventoryNetworkAttachment] = []
+        for attachment in attachments {
+            guard let network = networks[attachment.networkRuntimeIdentifier],
+                  network.identity.resourceUUID == attachment.networkResourceUUID else {
+                throw ContainerizationHelperBackendError.rejected(
+                    "network attachment ownership changed"
+                )
+            }
+            observed.append(
+                RuntimeInventoryNetworkAttachment(
+                    networkID: attachment.networkRuntimeIdentifier,
+                    addresses: ["192.168.250.2/24"],
+                    gateway: network.ipv4Gateway
+                )
+            )
+        }
+        containerNetworks[record.resourceIdentifier] = observed
+    }
 
     func usage(resourceIdentifier: String) async throws -> ContainerizationHelperResourceUsage {
         events.append("usage")
@@ -643,6 +1454,15 @@ private actor RecordingContainerizationDriver: ContainerizationHelperRuntimeDriv
 
     func shutdown() async {}
     func operations() -> [String] { events }
+    func simulatePolicyRuleLoss(resourceIdentifier: String) {
+        appliedPolicies.remove(resourceIdentifier)
+    }
+    func policyApplyCount(resourceIdentifier: String) -> Int {
+        policyApplyCounts[resourceIdentifier, default: 0]
+    }
+    func hasAppliedPolicy(resourceIdentifier: String) -> Bool {
+        appliedPolicies.contains(resourceIdentifier)
+    }
 }
 
 private func XCTAssertThrowsErrorAsync(

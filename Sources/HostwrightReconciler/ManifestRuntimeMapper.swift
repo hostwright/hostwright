@@ -7,10 +7,26 @@ import HostwrightSecrets
 
 public struct ManifestRuntimeMappingResult: Equatable, Sendable {
     public let desiredState: DesiredRuntimeState
+    public let certificates:
+        [String: HostwrightCertificateDeclaration]
+    public let ingress: [String: HostwrightIngressListener]
+    public let tunnelDeclarations:
+        [String: HostwrightTunnelDeclaration]
     public let issues: [PlanIssue]
 
-    public init(desiredState: DesiredRuntimeState, issues: [PlanIssue] = []) {
+    public init(
+        desiredState: DesiredRuntimeState,
+        certificates:
+            [String: HostwrightCertificateDeclaration] = [:],
+        ingress: [String: HostwrightIngressListener] = [:],
+        tunnelDeclarations:
+            [String: HostwrightTunnelDeclaration] = [:],
+        issues: [PlanIssue] = []
+    ) {
         self.desiredState = desiredState
+        self.certificates = certificates
+        self.ingress = ingress
+        self.tunnelDeclarations = tunnelDeclarations
         self.issues = issues.sorted { $0.orderingKey < $1.orderingKey }
     }
 }
@@ -19,12 +35,32 @@ public enum ManifestRuntimeMapper {
     public static func map(
         _ manifest: HostwrightManifest,
         policy: PlanningPolicy = .default,
+        projectResourceUUID: String? = nil,
         bindMountBaseDirectory: String? = nil,
+        unixSocketRootDirectory: String? = nil,
         namedVolumeSources: [String: String] = [:]
     ) -> ManifestRuntimeMappingResult {
         let projectName = manifest.project ?? ""
+        let resolvedProjectUUID = projectResourceUUID ??
+            HostwrightResourceUUID.legacy(
+                kind: "project",
+                identifier: "project-\(projectName)"
+            )
+        let resolvedSocketRoot = unixSocketRootDirectory ??
+            (try? HostwrightLocalPathResolver.resolve()
+                .layout.publishedSocketDirectory)
         var issues: [PlanIssue] = []
 
+        let networks = manifest.networks
+            .sorted { $0.key < $1.key }
+            .compactMap { name, definition in
+                map(
+                    definition,
+                    name: name,
+                    projectResourceUUID: resolvedProjectUUID,
+                    issues: &issues
+                )
+            }
         let services = manifest.services
             .sorted { $0.name < $1.name }
             .flatMap { service in
@@ -33,8 +69,11 @@ public enum ManifestRuntimeMapper {
                         service,
                         replicaIndex: replicaIndex,
                         projectName: projectName,
+                        projectResourceUUID: resolvedProjectUUID,
+                        networkDefinitions: manifest.networks,
                         policy: policy,
                         bindMountBaseDirectory: bindMountBaseDirectory,
+                        unixSocketRootDirectory: resolvedSocketRoot,
                         namedVolumeSources: namedVolumeSources,
                         issues: &issues
                     )
@@ -42,7 +81,14 @@ public enum ManifestRuntimeMapper {
             }
 
         return ManifestRuntimeMappingResult(
-            desiredState: DesiredRuntimeState(projectName: projectName, services: services),
+            desiredState: DesiredRuntimeState(
+                projectName: projectName,
+                networks: networks,
+                services: services
+            ),
+            certificates: manifest.certificates,
+            ingress: manifest.ingress,
+            tunnelDeclarations: manifest.tunnels,
             issues: issues
         )
     }
@@ -51,8 +97,11 @@ public enum ManifestRuntimeMapper {
         _ service: HostwrightService,
         replicaIndex: Int,
         projectName: String,
+        projectResourceUUID: String,
+        networkDefinitions: [String: HostwrightNetworkDefinition],
         policy: PlanningPolicy,
         bindMountBaseDirectory: String?,
+        unixSocketRootDirectory: String?,
         namedVolumeSources: [String: String],
         issues: inout [PlanIssue]
     ) -> DesiredRuntimeService {
@@ -61,7 +110,32 @@ public enum ManifestRuntimeMapper {
             serviceName: service.name,
             instanceName: replicaIndex == 0 ? nil : "replica-\(replicaIndex)"
         )
-        let ports = service.ports.compactMap { parsePort($0, identity: identity, issues: &issues) }
+        appendUnsupportedLegacyPortIssues(
+            service,
+            identity: identity,
+            issues: &issues
+        )
+        let ports = service.publishedPorts.flatMap {
+            map($0, identity: identity, issues: &issues)
+        }
+        let publishedSockets = service.publishedSockets.compactMap {
+            map(
+                $0,
+                identity: identity,
+                projectResourceUUID: projectResourceUUID,
+                rootDirectory: unixSocketRootDirectory,
+                issues: &issues
+            )
+        }
+        let networks = service.networks.compactMap { attachment in
+            map(
+                attachment,
+                projectResourceUUID: projectResourceUUID,
+                networkDefinitions: networkDefinitions,
+                identity: identity,
+                issues: &issues
+            )
+        }
         let mounts = service.mounts.compactMap {
             parseMount(
                 $0,
@@ -90,6 +164,30 @@ public enum ManifestRuntimeMapper {
                     secretReference: reference
                 )
             }
+        var labels = service.labels
+        if !networks.isEmpty || !service.hostAccess.isEmpty {
+            do {
+                labels.merge(
+                    try RuntimeProjectDNSContract.workloadLabels(
+                        projectUUID: projectResourceUUID
+                    )
+                ) { _, internalValue in
+                    internalValue
+                }
+            } catch {
+                issues.append(
+                    PlanIssue(
+                        kind: .invalidDesiredIdentity,
+                        severity: .blocker,
+                        identity: identity,
+                        message:
+                            "Project DNS identity could not be derived from the exact project UUID.",
+                        stableDetailKey:
+                            "project-dns:\(projectResourceUUID)"
+                    )
+                )
+            }
+        }
 
         let duplicateEnvironmentKeys = Set(service.env.keys).intersection(Set(service.secretEnv.keys)).sorted()
         for key in duplicateEnvironmentKeys {
@@ -128,8 +226,12 @@ public enum ManifestRuntimeMapper {
                     )
                 },
             environment: (literalEnvironment + secretEnvironment).sorted { $0.name < $1.name },
-            labels: service.labels,
+            labels: labels,
             ports: ports,
+            publishedSockets: publishedSockets,
+            hostAccess: service.hostAccess,
+            networkPolicy: service.networkPolicy,
+            networks: networks,
             mounts: mounts,
             healthCheck: mapHealthCheck(service),
             probes: RuntimeProbeManifestMapper.map(service.probes),
@@ -149,6 +251,101 @@ public enum ManifestRuntimeMapper {
             readOnlyRootFilesystem: service.readOnlyRootFilesystem,
             sharedMemoryBytes: service.shmSize.flatMap(parseSizeBytes)
         )
+    }
+
+    private static func map(
+        _ definition: HostwrightNetworkDefinition,
+        name: String,
+        projectResourceUUID: String,
+        issues: inout [PlanIssue]
+    ) -> DesiredRuntimeNetwork? {
+        let resourceUUID = HostwrightNetworkIdentity.resourceUUID(
+            projectUUID: projectResourceUUID,
+            networkName: name
+        )
+        do {
+            return DesiredRuntimeNetwork(
+                identity: try RuntimeNetworkIdentity(
+                    logicalName: name,
+                    resourceUUID: resourceUUID,
+                    projectUUID: projectResourceUUID
+                ),
+                mode: definition.driver == .nat ? .nat : .hostOnly,
+                ipv4: map(definition.ipv4),
+                ipv6: map(definition.ipv6)
+            )
+        } catch {
+            issues.append(
+                PlanIssue(
+                    kind: .invalidDesiredIdentity,
+                    severity: .blocker,
+                    identity: nil,
+                    message: "Network '\(name)' could not be mapped to an exact project-scoped runtime identity.",
+                    stableDetailKey: name
+                )
+            )
+            return nil
+        }
+    }
+
+    private static func map(
+        _ attachment: HostwrightServiceNetworkAttachment,
+        projectResourceUUID: String,
+        networkDefinitions: [String: HostwrightNetworkDefinition],
+        identity: RuntimeServiceIdentity,
+        issues: inout [PlanIssue]
+    ) -> RuntimeDesiredNetworkAttachment? {
+        guard networkDefinitions[attachment.network] != nil else {
+            issues.append(
+                PlanIssue(
+                    kind: .unsupportedFeature,
+                    severity: .blocker,
+                    identity: identity,
+                    message: "Network attachment '\(attachment.network)' does not reference a declared project network.",
+                    stableDetailKey: attachment.network
+                )
+            )
+            return nil
+        }
+        let resourceUUID = HostwrightNetworkIdentity.resourceUUID(
+            projectUUID: projectResourceUUID,
+            networkName: attachment.network
+        )
+        do {
+            let networkIdentity = try RuntimeNetworkIdentity(
+                logicalName: attachment.network,
+                resourceUUID: resourceUUID,
+                projectUUID: projectResourceUUID
+            )
+            return try RuntimeDesiredNetworkAttachment(
+                network: networkIdentity,
+                aliases: attachment.aliases
+            )
+        } catch {
+            issues.append(
+                PlanIssue(
+                    kind: .invalidDesiredIdentity,
+                    severity: .blocker,
+                    identity: identity,
+                    message: "Network attachment '\(attachment.network)' could not be mapped to an exact runtime identity.",
+                    stableDetailKey: attachment.network
+                )
+            )
+            return nil
+        }
+    }
+
+    private static func map(
+        _ request: HostwrightNetworkAddressRequest
+    ) -> RuntimeNetworkAddressRequest {
+        switch request {
+        case .auto:
+            return .automatic
+        case .disabled:
+            return .disabled
+        case .cidr(let value):
+            return .cidr(value)
+        }
     }
 
     private static func mapHealthCheck(_ service: HostwrightService) -> RuntimeHealthCheckSpec? {
@@ -195,12 +392,211 @@ public enum ManifestRuntimeMapper {
         }
     }
 
-    private static func parsePort(_ value: String, identity: RuntimeServiceIdentity, issues: inout [PlanIssue]) -> RuntimePortMapping? {
-        let parts = value.split(separator: ":", omittingEmptySubsequences: false)
-        guard parts.count == 2,
-              let hostPort = Int(parts[0]),
-              let containerPort = Int(parts[1])
-        else {
+    private static func map(
+        _ port: HostwrightPublishedPort,
+        identity: RuntimeServiceIdentity,
+        issues: inout [PlanIssue]
+    ) -> [RuntimePortMapping] {
+        let protocolName: RuntimePortProtocol = switch port.protocolName {
+        case .tcp:
+            .tcp
+        case .udp:
+            .udp
+        }
+
+        let exposure = port.effectiveExposure
+        if exposure.scope == .localhost &&
+            !NetworkBindAddressPolicy.isLocalhost(port.effectiveBindAddress) {
+            issues.append(
+                PlanIssue(
+                    kind: .unsafeExposure,
+                    severity: .blocker,
+                    identity: identity,
+                    message: "Published port bind address '\(port.effectiveBindAddress)' is outside the localhost-only runtime boundary.",
+                    stableDetailKey: port.effectiveBindAddress
+                )
+            )
+        } else if !isSupportedTunnelPortExposure(
+            exposure,
+            bindAddress: port.effectiveBindAddress
+        ) && exposure.scope != .localhost {
+            issues.append(
+                PlanIssue(
+                    kind: .unsupportedFeature,
+                    severity: .blocker,
+                    identity: identity,
+                    message: "Published port exposure scope '\(exposure.scope.rawValue)' requires a qualified secure listener provider before mutation.",
+                    stableDetailKey: exposureStableKey(exposure)
+                )
+            )
+        }
+
+        guard let host = port.host else {
+            guard port.target.start <= port.target.end else {
+                issues.append(
+                    unsupportedPortIssue(port, identity: identity)
+                )
+                return []
+            }
+            return (0..<port.target.count).map { offset in
+                RuntimePortMapping(
+                    hostPort: nil,
+                    containerPort: port.target.start + offset,
+                    protocolName: protocolName,
+                    bindAddress: port.effectiveBindAddress,
+                    allocation: .dynamic,
+                    exposurePolicy: exposure
+                )
+            }
+        }
+
+        guard host.start <= host.end,
+              port.target.start <= port.target.end,
+              host.count == port.target.count else {
+            issues.append(
+                unsupportedPortIssue(port, identity: identity)
+            )
+            return []
+        }
+
+        return (0..<host.count).map { offset in
+            RuntimePortMapping(
+                hostPort: host.start + offset,
+                containerPort: port.target.start + offset,
+                protocolName: protocolName,
+                bindAddress: port.effectiveBindAddress,
+                allocation: .fixed,
+                exposurePolicy: exposure
+            )
+        }
+    }
+
+    private static func isSupportedTunnelPortExposure(
+        _ exposure: HostwrightPortExposurePolicy,
+        bindAddress: String
+    ) -> Bool {
+        exposure.scope == .tunnel &&
+            NetworkBindAddressPolicy.isLocalhost(bindAddress) &&
+            exposure.authentication == .authenticatedTunnel
+    }
+
+    private static func exposureStableKey(
+        _ exposure: HostwrightPortExposurePolicy
+    ) -> String {
+        [
+            exposure.scope.rawValue,
+            exposure.authentication.rawValue,
+            exposure.interfaces.joined(separator: ","),
+            exposure.networkClasses.map(\.rawValue).joined(separator: ","),
+            exposure.allowedCIDRs.joined(separator: ",")
+        ].joined(separator: "|")
+    }
+
+    private static func unsupportedPortIssue(
+        _ port: HostwrightPublishedPort,
+        identity: RuntimeServiceIdentity
+    ) -> PlanIssue {
+        let host = port.host?.canonicalString ?? "dynamic"
+        let key = "\(port.effectiveBindAddress):\(host):\(port.target.canonicalString)/\(port.protocolName.rawValue)"
+        return PlanIssue(
+            kind: .unsupportedFeature,
+            severity: .blocker,
+            identity: identity,
+            message: "Published port '\(key)' cannot be mapped to a supported runtime port.",
+            stableDetailKey: key
+        )
+    }
+
+    private static func map(
+        _ socket: HostwrightPublishedSocket,
+        identity: RuntimeServiceIdentity,
+        projectResourceUUID: String,
+        rootDirectory: String?,
+        issues: inout [PlanIssue]
+    ) -> RuntimeUnixSocketPublication? {
+        guard let rootDirectory else {
+            issues.append(
+                PlanIssue(
+                    kind: .unsupportedFeature,
+                    severity: .blocker,
+                    identity: identity,
+                    message:
+                        "Unix socket publication requires a valid private Hostwright Application Support socket root.",
+                    stableDetailKey: socket.containerPath
+                )
+            )
+            return nil
+        }
+        let defaultName = HostwrightResourceUUID.legacy(
+            kind: "published-socket",
+            identifier: [
+                projectResourceUUID,
+                identity.displayName,
+                socket.containerPath
+            ].joined(separator: "|")
+        ).replacingOccurrences(of: "-", with: "") + ".sock"
+        let fileName = socket.hostName ?? defaultName
+        do {
+            let normalizedRoot = try HostwrightLocalPathResolver
+                .normalizedAbsolutePath(
+                    rootDirectory,
+                    role: "published socket root"
+                )
+            let hostPath = try HostwrightLocalPathResolver
+                .normalizedAbsolutePath(
+                    URL(
+                        fileURLWithPath: normalizedRoot,
+                        isDirectory: true
+                    ).appendingPathComponent(fileName).path,
+                    role: "published socket host path"
+            )
+            guard hostPath.hasPrefix(normalizedRoot + "/"),
+                  !hostPath.contains(":"),
+                  hostPath.utf8.count <= 103 else {
+                throw HostwrightLocalPathError.invalidPath(
+                    role: "published socket host path",
+                    path: hostPath,
+                    reason:
+                        "the path must remain inside Hostwright's private socket root and fit the macOS Unix-domain socket limit"
+                )
+            }
+            let mode: RuntimeUnixSocketMode =
+                socket.mode == .ownerAndGroup
+                ? .ownerAndGroup
+                : .ownerOnly
+            return RuntimeUnixSocketPublication(
+                hostPath: hostPath,
+                containerPath: socket.containerPath,
+                mode: mode
+            )
+        } catch {
+            issues.append(
+                PlanIssue(
+                    kind: .unsupportedFeature,
+                    severity: .blocker,
+                    identity: identity,
+                    message:
+                        "Unix socket publication path '\(fileName)' is unsafe or exceeds the platform path limit.",
+                    stableDetailKey: fileName
+                )
+            )
+            return nil
+        }
+    }
+
+    private static func appendUnsupportedLegacyPortIssues(
+        _ service: HostwrightService,
+        identity: RuntimeServiceIdentity,
+        issues: inout [PlanIssue]
+    ) {
+        let containsLegacyPublishedPorts = service.publishedPorts.contains {
+            $0.legacyLiteral != nil
+        }
+        guard service.publishedPorts.isEmpty || containsLegacyPublishedPorts else {
+            return
+        }
+
+        for value in service.ports where HostwrightPublishedPort.legacy(value) == nil {
             issues.append(
                 PlanIssue(
                     kind: .unsupportedFeature,
@@ -210,14 +606,7 @@ public enum ManifestRuntimeMapper {
                     stableDetailKey: value
                 )
             )
-            return nil
         }
-
-        return RuntimePortMapping(
-            hostPort: hostPort,
-            containerPort: containerPort,
-            bindAddress: NetworkBindAddressPolicy.localhostBindAddress
-        )
     }
 
     private static func parseMount(

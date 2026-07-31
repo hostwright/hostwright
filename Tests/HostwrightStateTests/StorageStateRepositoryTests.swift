@@ -26,10 +26,10 @@ final class StorageStateRepositoryTests: XCTestCase {
                 try store.schemaVersion(),
                 HostwrightContractVersions.stateSchema
             )
-            XCTAssertEqual(HostwrightContractVersions.stateSchema, 15)
+            XCTAssertEqual(HostwrightContractVersions.stateSchema, 16)
             XCTAssertEqual(
                 try migrationVersions(store),
-                Array(1...15)
+                Array(1...HostwrightContractVersions.stateSchema)
             )
             XCTAssertEqual(
                 Set(try tableNames(store).filter {
@@ -1020,7 +1020,7 @@ final class StorageStateRepositoryTests: XCTestCase {
                     INSERT INTO schema_migrations (
                         version, description, checksum, applied_at
                     ) VALUES (
-                        16, 'future storage schema',
+                        17, 'future storage schema',
                         'future-checksum', '2026-07-25T12:00:00Z'
                     )
                     """
@@ -1038,8 +1038,8 @@ final class StorageStateRepositoryTests: XCTestCase {
                         "Expected downgrade refusal, got \(error)."
                     )
                 }
-                XCTAssertEqual(found, 16)
-                XCTAssertEqual(supported, 15)
+                XCTAssertEqual(found, 17)
+                XCTAssertEqual(supported, 16)
             }
         }
     }

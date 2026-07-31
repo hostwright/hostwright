@@ -13,6 +13,7 @@ public enum LifecyclePersistedIntentCodec {
         let schemaVersion: Int
         let planBase64: String
         let planSHA256: String
+        let capabilitySHA256: String?
         let recoveryStateBase64: String?
     }
 
@@ -45,6 +46,7 @@ public enum LifecyclePersistedIntentCodec {
                 schemaVersion: schemaVersion,
                 planBase64: planData.base64EncodedString(),
                 planSHA256: plan.planSHA256,
+                capabilitySHA256: plan.capabilitySHA256,
                 recoveryStateBase64: recoveryStateBase64
             )
         ), let encoded = String(data: value, encoding: .utf8) else {
@@ -63,7 +65,9 @@ public enum LifecyclePersistedIntentCodec {
                   LifecyclePlan.self,
                   from: planData
               ),
-              plan.planSHA256 == envelope.planSHA256 else {
+              plan.planSHA256 == envelope.planSHA256,
+              envelope.capabilitySHA256 == nil ||
+                envelope.capabilitySHA256 == plan.capabilitySHA256 else {
             throw LifecyclePersistedIntentCodecError.decodingFailed
         }
         return plan
@@ -199,6 +203,12 @@ public protocol LifecycleSagaEffects: Sendable {
     ) async -> LifecycleSagaCompensationOutcome
 }
 
+public protocol LifecycleSagaFinalizing: Sendable {
+    func finalize(
+        context: LifecycleSagaContext
+    ) async throws
+}
+
 public protocol LifecycleSagaClock: Sendable {
     func now() -> String
 }
@@ -287,19 +297,22 @@ public struct LifecycleSagaExecutor: Sendable {
     private let validator: any LifecycleSagaContextValidating
     private let clock: any LifecycleSagaClock
     private let recoveryStateJSONRedacted: String?
+    private let finalizer: (any LifecycleSagaFinalizing)?
 
     public init(
         store: SQLiteStateStore,
         effects: any LifecycleSagaEffects,
         validator: any LifecycleSagaContextValidating,
         clock: any LifecycleSagaClock = LifecycleSystemClock(),
-        recoveryStateJSONRedacted: String? = nil
+        recoveryStateJSONRedacted: String? = nil,
+        finalizer: (any LifecycleSagaFinalizing)? = nil
     ) {
         self.store = store
         self.effects = effects
         self.validator = validator
         self.clock = clock
         self.recoveryStateJSONRedacted = recoveryStateJSONRedacted
+        self.finalizer = finalizer
     }
 
     public func execute(
@@ -330,6 +343,24 @@ public struct LifecycleSagaExecutor: Sendable {
             allowFailedSafeHoldResume: allowFailedSafeHoldResume
         )
         if group.status == .succeeded {
+            if let finalizer {
+                do {
+                    try await finalizer.finalize(
+                        context: LifecycleSagaContext(
+                            plan: plan,
+                            operationID:
+                                operationID.lowercased(),
+                            groupID: group.id,
+                            fencingToken: normalizedFence,
+                            attempt: 1
+                        )
+                    )
+                } catch {
+                    throw LifecycleSagaError.stateFailure(
+                        "Succeeded lifecycle finalizer recovery failed for the exact persisted group."
+                    )
+                }
+            }
             return result(
                 status: .alreadySucceeded,
                 plan: plan,
@@ -399,6 +430,38 @@ public struct LifecycleSagaExecutor: Sendable {
             }
         }
 
+        if let finalizer,
+           group.checkpoint != "finalizer:verified" {
+            try finalizerCheckpoint(
+                group: group,
+                checkpoint: "finalizer:started"
+            )
+            do {
+                try await finalizer.finalize(
+                    context: LifecycleSagaContext(
+                        plan: plan,
+                        operationID: operationID.lowercased(),
+                        groupID: group.id,
+                        fencingToken: normalizedFence,
+                        attempt: 1
+                    )
+                )
+            } catch {
+                return try interrupt(
+                    plan: plan,
+                    group: group,
+                    completed: completed,
+                    checkpoint: "finalizer:failed",
+                    hint:
+                        "Resume the exact fenced operation after inspecting the lifecycle finalizer."
+                )
+            }
+            try finalizerCheckpoint(
+                group: group,
+                checkpoint: "finalizer:verified"
+            )
+        }
+
         let finishedAt = clock.now()
         try store.operationGroups.finish(
             groupID: group.id,
@@ -420,6 +483,29 @@ public struct LifecycleSagaExecutor: Sendable {
             checkpoint: "verified",
             completed: completed,
             hint: ""
+        )
+    }
+
+    private func finalizerCheckpoint(
+        group: OperationGroupRecord,
+        checkpoint: String
+    ) throws {
+        guard let lockOwner = group.lockOwner else {
+            throw LifecycleSagaError.stateFailure(
+                "Lifecycle operation lost its finite lease owner before finalization."
+            )
+        }
+        let now = clock.now()
+        try store.operationGroups.recordCheckpointRenewingLease(
+            groupID: group.id,
+            expectedFencingToken: group.fencingToken,
+            expectedLockOwner: lockOwner,
+            checkpoint: checkpoint,
+            verificationJSONRedacted: try jsonObject([
+                "checkpoint": checkpoint
+            ]),
+            lockExpiresAt: try Self.leaseExpiration(after: now),
+            updatedAt: now
         )
     }
 

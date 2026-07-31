@@ -16,6 +16,8 @@ public struct CLIEnvironment: @unchecked Sendable {
     public var localPathResolution: (String?) throws -> HostwrightLocalPathResolution
     public var runtimeAdapter: @Sendable () -> any RuntimeAdapter
     public var runtimeAdapterForProvider: @Sendable (RuntimeProviderID) throws -> any RuntimeAdapter
+    public var networkProviderForProvider:
+        @Sendable (RuntimeProviderID) throws -> any RuntimeNetworkProvider
     public var runtimeProviderProbes: @Sendable () async -> [RuntimeProviderProbeResult]
     public var secretStore: () -> any SecretStore
     public var secretResolver: () -> any HostwrightSecretResolving
@@ -60,6 +62,8 @@ public struct CLIEnvironment: @unchecked Sendable {
         },
         runtimeAdapter: @escaping @Sendable () -> any RuntimeAdapter = { RuntimeAdapterFactory.defaultLocal() },
         runtimeAdapterForProvider: (@Sendable (RuntimeProviderID) throws -> any RuntimeAdapter)? = nil,
+        networkProviderForProvider:
+            (@Sendable (RuntimeProviderID) throws -> any RuntimeNetworkProvider)? = nil,
         runtimeProviderProbes: (@Sendable () async -> [RuntimeProviderProbeResult])? = nil,
         secretStore: @escaping () -> any SecretStore = { UnavailableKeychainSecretStore() },
         secretResolver: (() -> any HostwrightSecretResolving)? = nil,
@@ -131,6 +135,14 @@ public struct CLIEnvironment: @unchecked Sendable {
             }
             return runtimeAdapter()
         }
+        self.networkProviderForProvider =
+            networkProviderForProvider ?? { providerID in
+                guard providerID == .appleContainerCLI else {
+                    throw RuntimeProviderSelectionError
+                        .providerUnavailable(providerID)
+                }
+                return AppleContainerNetworkAdapter()
+            }
         self.runtimeProviderProbes = runtimeProviderProbes ?? {
             do {
                 return [
@@ -198,6 +210,20 @@ public struct CLIEnvironment: @unchecked Sendable {
                 )
             }
             throw RuntimeProviderSelectionError.providerUnavailable(providerID)
+        },
+        networkProviderForProvider: { providerID in
+            if providerID == .appleContainerCLI {
+                return AppleContainerNetworkAdapter()
+            }
+            if providerID == .appleContainerization {
+                return ContainerizationHelperClient(
+                    configuration:
+                        try ContainerizationHelperClientConfiguration
+                            .installed()
+                )
+            }
+            throw RuntimeProviderSelectionError
+                .providerUnavailable(providerID)
         },
         runtimeProviderProbes: {
             await RuntimeProviderDiscovery.liveProbe()

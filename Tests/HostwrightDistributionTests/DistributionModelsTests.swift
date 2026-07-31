@@ -24,6 +24,24 @@ final class DistributionModelsTests: XCTestCase {
         )
         XCTAssertNoThrow(try prior.validate())
 
+        let phaseSix = DistributionInstallManifest(
+            schemaVersion: 3,
+            artifactID:
+                "hostwright-0.0.2-macos-arm64-\(sourceCommit.prefix(12))",
+            sourceCommit: sourceCommit,
+            packageVersion: "0.0.2",
+            files: DistributionLayout.legacyPayloadModesV3.keys.sorted().map {
+                DistributionFileRecord(
+                    path: $0,
+                    sha256: String(repeating: "b", count: 64),
+                    sizeBytes: 1,
+                    mode: DistributionLayout.legacyPayloadModesV3[$0]!
+                )
+            },
+            createdDirectories: []
+        )
+        XCTAssertNoThrow(try phaseSix.validate())
+
         let current = DistributionInstallManifest(
             artifact: DistributionArtifactManifest(
                 artifactID:
@@ -44,11 +62,16 @@ final class DistributionModelsTests: XCTestCase {
             ),
             createdDirectories: []
         )
-        XCTAssertEqual(current.schemaVersion, 3)
+        XCTAssertEqual(current.schemaVersion, 4)
         XCTAssertNoThrow(try current.validate())
         XCTAssertTrue(
             current.files.contains {
                 $0.path == "bin/hostwright-storage-helper"
+            }
+        )
+        XCTAssertTrue(
+            current.files.contains {
+                $0.path == "bin/hostwright-network-provider-worker"
             }
         )
     }
@@ -107,6 +130,34 @@ final class DistributionModelsTests: XCTestCase {
             files: manifest.files
         )
         XCTAssertThrowsError(try mismatchedCommitPrefix.validate())
+    }
+
+    func testArtifactSchemaOnePreservesPublishedPhaseTwoLayout() throws {
+        let manifest = DistributionArtifactManifest(
+            schemaVersion: 1,
+            artifactID: "hostwright-0.0.2-dev.12-macos-arm64-\(commit.prefix(12))",
+            packageVersion: "0.0.2-dev.12",
+            sourceCommit: commit,
+            sourceDirty: false,
+            architecture: "arm64",
+            createdAt: "2026-07-25T12:00:00Z",
+            files: DistributionLayout.legacyTrustedPayloadModesV1.keys.sorted().map {
+                DistributionFileRecord(
+                    path: $0,
+                    sha256: digest,
+                    sizeBytes: 1,
+                    mode: DistributionLayout.legacyTrustedPayloadModesV1[$0]!
+                )
+            }
+        )
+
+        XCTAssertNoThrow(try manifest.validate())
+        XCTAssertEqual(
+            DistributionLayout.executableNames(
+                payloadPaths: Set(manifest.files.map(\.path))
+            ),
+            DistributionLayout.legacyTrustedExecutableNamesV1
+        )
     }
 
     func testPathPolicyRejectsAbsoluteTraversalControlAndNestedFileNames() {

@@ -264,7 +264,7 @@ Result JSON is schema version 1 and includes the provider, provider version, ope
 
 ## `hostwright volume ...`
 
-Provides schema-v15 inspection, capacity, health, recovery, exact deletion/prune, snapshot, and verified backup/restore operations through Storage Provider API v1. The shipped `hostwright-local` provider stores exact Hostwright-owned resources on one Mac. `list`, `inspect`, `capacity`, and `health` are read-only. `recover` requires the persisted idempotency key for the exact interrupted volume operation.
+Provides current schema-v16 inspection, capacity, health, recovery, exact deletion/prune, snapshot, and verified backup/restore operations through Storage Provider API v1. The shipped `hostwright-local` provider stores exact Hostwright-owned resources on one Mac. `list`, `inspect`, `capacity`, and `health` are read-only. `recover` requires the persisted idempotency key for the exact interrupted volume operation.
 
 Every destructive operation requires exactly one `--dry-run` or `--confirm-plan <sha256>`. Confirmation binds provider and capability identity, project/resource UUIDs, generation, fence, ownership, attachments, holds, reclaim policy, protection evidence, and current observation. Changed or ambiguous evidence fails before provider mutation. `prune` never invokes global or name-based cleanup.
 
@@ -498,7 +498,7 @@ Command semantics:
 - `rm` removes only verified Hostwright-owned resources in safe reverse dependency order;
 - `update` performs the declared rolling or recreate transition, health-gates promotion, retains the prior revision until success, and restores the last verified revision when exact compensation is provable.
 
-Manifest-declared ports publish only to localhost. Guarded binds, tmpfs, and declared `hostwright-local` named volumes execute through the Phase 06 storage boundary. Custom networks and other Phase 07 capabilities still fail before mutation. Secret references are resolved only when the configured backend is available and never enter plan output, state, logs, or diagnostics.
+Legacy manifest port strings publish to localhost by default. Structured Phase 07 networking executes through exact Hostwright-owned project networks, DNS, ingress, host-access, certificate, policy, and tunnel boundaries; unsupported providers or unavailable exposure modes still fail before mutation. Guarded binds, tmpfs, and declared `hostwright-local` named volumes continue to execute through the Phase 06 storage boundary. Secret references are resolved only when the configured backend is available and never enter plan output, state, logs, or diagnostics.
 
 ## Interactive and streaming commands
 

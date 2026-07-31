@@ -1,5 +1,6 @@
 import XCTest
 @testable import HostwrightCore
+@testable import HostwrightNetworking
 @testable import HostwrightReconciler
 @testable import HostwrightRuntime
 @testable import HostwrightSecrets
@@ -409,7 +410,55 @@ final class LifecycleUpdatePlannerTests: XCTestCase {
         XCTAssertFalse(decoded.environment.description.contains(reference.rawValue))
     }
 
+    func testRevisionCodecPersistsExposurePolicyAndChangesDigest() throws {
+        let localhost = service(
+            "web",
+            image: "local/web@sha256:new",
+            ports: [
+                RuntimePortMapping(
+                    hostPort: 8_443,
+                    containerPort: 9_443
+                )
+            ]
+        )
+        let lanExposure = HostwrightPortExposurePolicy(
+            scope: .lan,
+            interfaces: ["en0"],
+            networkClasses: [.privateLAN],
+            allowedCIDRs: ["192.168.1.0/24"],
+            authentication: .tls
+        )
+        let lan = service(
+            "web",
+            image: "local/web@sha256:new",
+            ports: [
+                RuntimePortMapping(
+                    hostPort: 8_443,
+                    containerPort: 9_443,
+                    protocolName: .tcp,
+                    bindAddress: "192.168.1.10",
+                    allocation: .fixed,
+                    exposurePolicy: lanExposure
+                )
+            ]
+        )
+
+        let encoded = try LifecycleRevisionCodec.redactedDesiredJSON(for: lan)
+        let decoded = try LifecycleRevisionCodec.decodeRedactedDesiredJSON(encoded)
+
+        XCTAssertEqual(decoded, lan)
+        XCTAssertEqual(decoded.ports.first?.exposurePolicy, lanExposure)
+        XCTAssertNotEqual(
+            try LifecycleRevisionCodec.revisionSHA256(for: localhost),
+            try LifecycleRevisionCodec.revisionSHA256(for: lan)
+        )
+    }
+
     func testRevisionCodecRoundTripPreservesEveryNonSecretExecutableField() throws {
+        let network = try RuntimeNetworkIdentity(
+            logicalName: "mesh",
+            projectUUID: "22222222-2222-4222-8222-222222222222"
+        )
         let original = DesiredRuntimeService(
             identity: RuntimeServiceIdentity(
                 projectName: "demo",
@@ -464,6 +513,37 @@ final class LifecycleUpdatePlannerTests: XCTestCase {
                     containerPort: 9443,
                     protocolName: .udp,
                     bindAddress: "127.0.0.1"
+                )
+            ],
+            publishedSockets: [
+                RuntimeUnixSocketPublication(
+                    hostPath: "/tmp/hostwright-test/worker.sock",
+                    containerPath: "/run/worker.sock",
+                    mode: .ownerAndGroup
+                )
+            ],
+            networkPolicy: HostwrightServiceNetworkPolicy(
+                ingress: [
+                    HostwrightNetworkPolicyRule(
+                        project: "demo",
+                        service: "gateway",
+                        protocolName: .tcp,
+                        port: 9_000
+                    )
+                ],
+                egress: [
+                    HostwrightNetworkPolicyRule(
+                        protocolName: .tcp,
+                        address: "10.42.0.0/24",
+                        port: 443,
+                        dns: "registry.example.test"
+                    )
+                ]
+            ),
+            networks: [
+                try RuntimeDesiredNetworkAttachment(
+                    network: network,
+                    aliases: ["api", "backend"]
                 )
             ],
             mounts: [

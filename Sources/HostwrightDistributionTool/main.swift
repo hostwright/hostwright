@@ -155,6 +155,8 @@ enum HostwrightDistributionCLI {
             let required = [
                 "--hostwright-binary", "--hostwright-control-binary",
                 "--hostwright-containerization-helper-binary",
+                "--hostwright-network-helper-binary",
+                "--hostwright-network-provider-worker-binary",
                 "--hostwright-storage-helper-binary",
                 "--hostwright-dist-binary",
                 "--hostwrightd-binary", "--containerization-asset-root",
@@ -176,6 +178,12 @@ enum HostwrightDistributionCLI {
                     hostwrightControlBinary: fileURL(options["--hostwright-control-binary"]!),
                     hostwrightContainerizationHelperBinary: fileURL(
                         options["--hostwright-containerization-helper-binary"]!
+                    ),
+                    hostwrightNetworkHelperBinary: fileURL(
+                        options["--hostwright-network-helper-binary"]!
+                    ),
+                    hostwrightNetworkProviderWorkerBinary: fileURL(
+                        options["--hostwright-network-provider-worker-binary"]!
                     ),
                     hostwrightStorageHelperBinary: fileURL(
                         options["--hostwright-storage-helper-binary"]!
@@ -612,7 +620,7 @@ enum HostwrightDistributionCLI {
       hostwright-dist homebrew-formula --release-dir <path> --team-id <10-char> --artifact-url <immutable-https-url> --output <Formula/hostwright.rb> [--format text|json]
       HOSTWRIGHT_CONTAINERIZATION_ASSET_ROOT=<verified-root> hostwright-dist build --source-root <path> --output-dir <path> --expected-commit <40-hex>
       hostwright-dist --version
-      hostwright-dist assemble --hostwright-binary <path> --hostwright-control-binary <path> --hostwright-containerization-helper-binary <path> --hostwright-storage-helper-binary <path> --hostwright-dist-binary <path> --hostwrightd-binary <path> --containerization-asset-root <verified-root> --example-manifest <path> --license <path> --readme <path> --output-dir <path> --version <semver> --source-commit <40-hex> --source-dirty <true|false> --architecture arm64
+      hostwright-dist assemble --hostwright-binary <path> --hostwright-control-binary <path> --hostwright-containerization-helper-binary <path> --hostwright-network-helper-binary <path> --hostwright-network-provider-worker-binary <path> --hostwright-storage-helper-binary <path> --hostwright-dist-binary <path> --hostwrightd-binary <path> --containerization-asset-root <verified-root> --example-manifest <path> --license <path> --readme <path> --output-dir <path> --version <semver> --source-commit <40-hex> --source-dirty <true|false> --architecture arm64
       hostwright-dist verify --distribution-dir <path>
       hostwright-dist install --trusted-release-dir <path> --team-id <10-char> --prefix <path> [--state-db <path>] --output json
       hostwright-dist install --developer-distribution-dir <path> --prefix <path> [--state-db <path>] --output json

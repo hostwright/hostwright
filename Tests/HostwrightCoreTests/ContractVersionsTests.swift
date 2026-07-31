@@ -15,8 +15,9 @@ final class ContractVersionsTests: XCTestCase {
         XCTAssertEqual(HostwrightContractVersions.controlAPI, 2)
         XCTAssertEqual(HostwrightContractVersions.runtimeProviderAPI, 2)
         XCTAssertEqual(HostwrightContractVersions.storageProviderAPI, 1)
+        XCTAssertEqual(HostwrightContractVersions.networkProviderSPI, 1)
         XCTAssertEqual(HostwrightContractVersions.pluginABI, 1)
-        XCTAssertEqual(HostwrightContractVersions.stateSchema, 15)
+        XCTAssertEqual(HostwrightContractVersions.stateSchema, 16)
     }
 
     func testCapabilityCatalogIsDeterministicUniqueAndCoversEveryRoadmapPhase() {
@@ -97,6 +98,17 @@ final class ContractVersionsTests: XCTestCase {
             Set([130, 131, 140])
         )
 
+        guard let ingress = report.capabilities.first(where: {
+            $0.identifier == "networking.ingress"
+        }) else {
+            return XCTFail("Ingress capability is missing.")
+        }
+        XCTAssertEqual(ingress.state, .stable)
+        XCTAssertEqual(ingress.phase, 7)
+        XCTAssertEqual(ingress.issue, 172)
+        XCTAssertTrue(ingress.reason.contains("HTTP/1.1"))
+        XCTAssertTrue(ingress.reason.contains("WebSocket"))
+
         guard let persistentStorage = report.capabilities.first(where: {
             $0.identifier == "storage.persistent"
         }) else {
@@ -164,6 +176,7 @@ final class ContractVersionsTests: XCTestCase {
             let controlAPI: Int
             let runtimeProviderAPI: Int
             let storageProviderAPI: Int
+            let networkProviderSPI: Int
             let pluginABI: Int
             let stateSchema: Int
         }
@@ -178,6 +191,10 @@ final class ContractVersionsTests: XCTestCase {
         XCTAssertEqual(
             golden.storageProviderAPI,
             HostwrightContractVersions.storageProviderAPI
+        )
+        XCTAssertEqual(
+            golden.networkProviderSPI,
+            HostwrightContractVersions.networkProviderSPI
         )
         XCTAssertEqual(golden.pluginABI, HostwrightContractVersions.pluginABI)
         XCTAssertEqual(golden.stateSchema, HostwrightContractVersions.stateSchema)

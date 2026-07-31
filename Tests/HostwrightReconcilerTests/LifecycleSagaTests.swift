@@ -103,6 +103,67 @@ final class LifecyclePlanTests: XCTestCase {
         XCTAssertThrowsError(try plan(nodes: nodes, fence: fence, parallelism: 33))
     }
 
+    func testPersistedIntentBindsTopLevelCapabilityDigestToPlan() throws {
+        let fence = HostwrightResourceUUID.generate()
+        let value = try plan(
+            nodes: [try node(key: "create-web", fence: fence)],
+            fence: fence
+        )
+        let encoded = try LifecyclePersistedIntentCodec.encode(value)
+        let encodedData = try XCTUnwrap(encoded.data(using: .utf8))
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encodedData) as? [String: Any]
+        )
+
+        XCTAssertEqual(
+            object["capabilitySHA256"] as? String,
+            value.capabilitySHA256
+        )
+
+        object["capabilitySHA256"] = String(repeating: "d", count: 64)
+        let tamperedData = try JSONSerialization.data(
+            withJSONObject: object,
+            options: [.sortedKeys]
+        )
+        let tampered = try XCTUnwrap(
+            String(data: tamperedData, encoding: .utf8)
+        )
+        XCTAssertThrowsError(
+            try LifecyclePersistedIntentCodec.decode(tampered)
+        ) { error in
+            XCTAssertEqual(
+                error as? LifecyclePersistedIntentCodecError,
+                .decodingFailed
+            )
+        }
+    }
+
+    func testPersistedIntentDecodesLegacyEnvelopeWithoutTopLevelCapabilityDigest() throws {
+        let fence = HostwrightResourceUUID.generate()
+        let value = try plan(
+            nodes: [try node(key: "create-web", fence: fence)],
+            fence: fence
+        )
+        let encoded = try LifecyclePersistedIntentCodec.encode(value)
+        let encodedData = try XCTUnwrap(encoded.data(using: .utf8))
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encodedData) as? [String: Any]
+        )
+        object.removeValue(forKey: "capabilitySHA256")
+        let legacyData = try JSONSerialization.data(
+            withJSONObject: object,
+            options: [.sortedKeys]
+        )
+        let legacy = try XCTUnwrap(
+            String(data: legacyData, encoding: .utf8)
+        )
+
+        XCTAssertEqual(
+            try LifecyclePersistedIntentCodec.decode(legacy),
+            value
+        )
+    }
+
     private func plan(
         nodes: [LifecyclePlanNode],
         fence: String,
@@ -155,6 +216,81 @@ final class LifecyclePlanTests: XCTestCase {
 }
 
 final class LifecycleSagaExecutorTests: XCTestCase {
+    func testFinalizerRunsUnderActiveGroupAndResumesSameFence()
+        async throws
+    {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+        let finalizer = FailOnceLifecycleFinalizer(
+            store: fixture.store
+        )
+        let first = LifecycleSagaExecutor(
+            store: fixture.store,
+            effects: InspectingLifecycleEffects(
+                store: fixture.store
+            ),
+            validator: ExactLifecycleValidator(),
+            clock: FixedLifecycleClock(),
+            finalizer: finalizer
+        )
+        let interrupted = try await first.execute(
+            plan: fixture.plan,
+            operationID: fixture.operationID,
+            groupID: fixture.groupID,
+            fencingToken: fixture.fence,
+            lockOwner: "lifecycle-finalizer-test"
+        )
+        XCTAssertEqual(interrupted.status, .interrupted)
+        XCTAssertEqual(
+            try fixture.store.operationGroups.load(
+                id: fixture.groupID
+            )?.checkpoint,
+            "finalizer:failed"
+        )
+
+        let resumed = LifecycleSagaExecutor(
+            store: fixture.store,
+            effects: InspectingLifecycleEffects(
+                store: fixture.store
+            ),
+            validator: ExactLifecycleValidator(),
+            clock: FixedLifecycleClock(),
+            finalizer: finalizer
+        )
+        let result = try await resumed.execute(
+            plan: fixture.plan,
+            operationID: fixture.operationID,
+            groupID: fixture.groupID,
+            fencingToken: fixture.fence,
+            lockOwner: "lifecycle-finalizer-resume"
+        )
+        XCTAssertEqual(result.status, .succeeded)
+        let resumedCallCount = await finalizer.callCount()
+        let activeOnly =
+            await finalizer.onlyObservedActiveGroups()
+        XCTAssertEqual(resumedCallCount, 2)
+        XCTAssertTrue(activeOnly)
+        XCTAssertEqual(
+            try fixture.store.operationGroups.load(
+                id: fixture.groupID
+            )?.status,
+            .succeeded
+        )
+        let repeated = try await resumed.execute(
+            plan: fixture.plan,
+            operationID: fixture.operationID,
+            groupID: fixture.groupID,
+            fencingToken: fixture.fence,
+            lockOwner: "lifecycle-finalizer-reobserve"
+        )
+        XCTAssertEqual(repeated.status, .alreadySucceeded)
+        let repeatedCallCount = await finalizer.callCount()
+        let expectedGroups =
+            await finalizer.onlyObservedExpectedGroups()
+        XCTAssertEqual(repeatedCallCount, 3)
+        XCTAssertTrue(expectedGroups)
+    }
+
     func testIntentIsDurableBeforeEffectAndSuccessfulNodesCheckpoint() async throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
@@ -193,6 +329,16 @@ final class LifecycleSagaExecutorTests: XCTestCase {
         XCTAssertEqual(
             persistedPlan.nodes.map(\.idempotencyKey),
             fixture.plan.nodes.map(\.idempotencyKey)
+        )
+        let intentData = try XCTUnwrap(
+            group.intentJSONRedacted.data(using: .utf8)
+        )
+        let intentObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: intentData) as? [String: Any]
+        )
+        XCTAssertEqual(
+            intentObject["capabilitySHA256"] as? String,
+            fixture.plan.capabilitySHA256
         )
         XCTAssertFalse(group.intentJSONRedacted.contains("keychain://"))
         XCTAssertFalse(group.intentJSONRedacted.contains("demo/api"))
@@ -1136,6 +1282,45 @@ final class LifecycleSagaExecutorTests: XCTestCase {
             diagnostic: "scripted failure",
             guidance: "follow recorded recovery"
         )
+    }
+}
+
+private actor FailOnceLifecycleFinalizer:
+    LifecycleSagaFinalizing
+{
+    private struct ExpectedFailure: Error {}
+    let store: SQLiteStateStore
+    private var calls = 0
+    private var observedStatuses: [OperationGroupStatus] = []
+
+    init(store: SQLiteStateStore) {
+        self.store = store
+    }
+
+    func finalize(
+        context: LifecycleSagaContext
+    ) async throws {
+        calls += 1
+        if let status = try store.operationGroups.load(
+            id: context.groupID
+        )?.status {
+            observedStatuses.append(status)
+        }
+        if calls == 1 {
+            throw ExpectedFailure()
+        }
+    }
+
+    func callCount() -> Int {
+        calls
+    }
+
+    func onlyObservedActiveGroups() -> Bool {
+        Array(observedStatuses.prefix(2)) == [.active, .active]
+    }
+
+    func onlyObservedExpectedGroups() -> Bool {
+        observedStatuses == [.active, .active, .succeeded]
     }
 }
 

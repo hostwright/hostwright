@@ -1,5 +1,6 @@
 import Foundation
 import HostwrightCore
+import HostwrightNetworking
 import HostwrightSecrets
 import Yams
 
@@ -284,7 +285,8 @@ private struct ManifestNodeDecoder {
             path: "$",
             allowed: [
                 "version", "project", "imagePolicy", "imageTrust", "imageSBOM",
-                "imageVulnerability", "imageProvenance", "volumes", "services"
+                "imageVulnerability", "imageProvenance", "volumes", "networks",
+                "certificates", "ingress", "tunnels", "services"
             ]
         )
         let version = try values["version"].map(versionInteger)
@@ -316,6 +318,18 @@ private struct ManifestNodeDecoder {
         let volumes = try values["volumes"].map {
             try decodeVolumeDeclarations($0, path: "$.volumes")
         } ?? [:]
+        let networks = try values["networks"].map {
+            try decodeNetworkDefinitions($0, path: "$.networks")
+        } ?? [:]
+        let certificates = try values["certificates"].map {
+            try decodeCertificateDeclarations($0, path: "$.certificates")
+        } ?? [:]
+        let ingress = try values["ingress"].map {
+            try decodeIngressListeners($0, path: "$.ingress")
+        } ?? [:]
+        let tunnels = try values["tunnels"].map {
+            try decodeTunnelDeclarations($0, path: "$.tunnels")
+        } ?? [:]
         let services = try values["services"].map(decodeServices) ?? []
         return HostwrightManifest(
             version: version,
@@ -326,8 +340,500 @@ private struct ManifestNodeDecoder {
             imageVulnerability: imageVulnerability,
             imageProvenance: imageProvenance,
             volumes: volumes,
+            networks: networks,
+            certificates: certificates,
+            ingress: ingress,
+            tunnels: tunnels,
             services: services
         )
+    }
+
+    private func decodeTunnelDeclarations(
+        _ node: Node,
+        path: String
+    ) throws -> [String: HostwrightTunnelDeclaration] {
+        let entries = try rawMapping(node, path: path)
+        guard entries.count <= HostwrightTunnelDeclaration.maximumDeclarations else {
+            throw ManifestParser.failure(
+                "Tunnels accepts at most \(HostwrightTunnelDeclaration.maximumDeclarations) declarations.",
+                code: .manifestValidationFailed,
+                node: node,
+                path: path
+            )
+        }
+        var result: [String: HostwrightTunnelDeclaration] = [:]
+        for pair in entries {
+            let name = try keyString(pair.key, path: path)
+            let declarationPath = "\(path).\(name)"
+            let values = try mapping(
+                pair.value,
+                path: declarationPath,
+                allowed: [
+                    "targetService", "targetPort", "peerUUID",
+                    "role", "trust", "bindEndpoint", "authenticatedEndpoints",
+                    "relayEndpoint", "bonjourDiscovery"
+                ]
+            )
+            let targetService = try requiredString(
+                values["targetService"],
+                path: "\(declarationPath).targetService",
+                message: "Tunnel targetService is required."
+            )
+            let targetPort = try requiredInteger(
+                values["targetPort"],
+                path: "\(declarationPath).targetPort",
+                message: "Tunnel targetPort is required."
+            )
+            let peerUUID = try requiredString(
+                values["peerUUID"],
+                path: "\(declarationPath).peerUUID",
+                message: "Tunnel peerUUID is required."
+            )
+            guard HostwrightResourceUUID.isValid(peerUUID),
+                  peerUUID == peerUUID.lowercased() else {
+                throw ManifestParser.failure(
+                    "Tunnel peerUUID must be a canonical lowercase Hostwright UUID.",
+                    code: .manifestValidationFailed,
+                    node: values["peerUUID"],
+                    path: "\(declarationPath).peerUUID"
+                )
+            }
+            let roleRaw = try values["role"].map {
+                try string($0, path: "\(declarationPath).role")
+            } ?? HostwrightTunnelRole.localLoopback.rawValue
+            guard let role = HostwrightTunnelRole(rawValue: roleRaw) else {
+                throw ManifestParser.failure(
+                    "Tunnel role must be one of: local-loopback, listener, dialer.",
+                    code: .manifestValidationFailed,
+                    node: values["role"],
+                    path: "\(declarationPath).role"
+                )
+            }
+            let trust = try values["trust"].map {
+                try decodeTunnelTrust($0, path: "\(declarationPath).trust")
+            }
+            let bindEndpoint = try values["bindEndpoint"].map {
+                try decodeTunnelBindEndpoint($0, path: "\(declarationPath).bindEndpoint")
+            }
+            let endpoints = try values["authenticatedEndpoints"].map {
+                try decodeTunnelEndpoints(
+                    $0,
+                    path: "\(declarationPath).authenticatedEndpoints"
+                )
+            } ?? []
+            let relayEndpoint = try values["relayEndpoint"].map {
+                try decodeTunnelEndpoint($0, path: "\(declarationPath).relayEndpoint")
+            }
+            let bonjourDiscovery = try values["bonjourDiscovery"].map {
+                try boolean($0, path: "\(declarationPath).bonjourDiscovery")
+            } ?? true
+            result[name] = HostwrightTunnelDeclaration(
+                targetService: targetService,
+                targetPort: targetPort,
+                peerUUID: peerUUID,
+                role: role,
+                trust: trust,
+                bindEndpoint: bindEndpoint,
+                authenticatedEndpoints: endpoints,
+                relayEndpoint: relayEndpoint,
+                bonjourDiscovery: bonjourDiscovery
+            )
+        }
+        return result
+    }
+
+    private func decodeTunnelTrust(
+        _ node: Node,
+        path: String
+    ) throws -> HostwrightTunnelTrust {
+        let values = try mapping(
+            node,
+            path: path,
+            allowed: [
+                "wireRouteUUID", "wireGeneration",
+                "localIdentitySHA256", "peerTrustAnchorSHA256",
+                "peerCertificateSHA256", "peerDNSName", "peerIdentityURI"
+            ]
+        )
+        return HostwrightTunnelTrust(
+            wireRouteUUID: try requiredString(
+                values["wireRouteUUID"],
+                path: "\(path).wireRouteUUID",
+                message: "Tunnel trust wireRouteUUID is required."
+            ),
+            wireGeneration: Int64(try requiredInteger(
+                values["wireGeneration"],
+                path: "\(path).wireGeneration",
+                message: "Tunnel trust wireGeneration is required."
+            )),
+            localIdentitySHA256: try requiredString(
+                values["localIdentitySHA256"],
+                path: "\(path).localIdentitySHA256",
+                message: "Tunnel trust localIdentitySHA256 is required."
+            ),
+            peerTrustAnchorSHA256: try requiredString(
+                values["peerTrustAnchorSHA256"],
+                path: "\(path).peerTrustAnchorSHA256",
+                message: "Tunnel trust peerTrustAnchorSHA256 is required."
+            ),
+            peerCertificateSHA256: try requiredString(
+                values["peerCertificateSHA256"],
+                path: "\(path).peerCertificateSHA256",
+                message: "Tunnel trust peerCertificateSHA256 is required."
+            ),
+            peerDNSName: try values["peerDNSName"].map {
+                try string($0, path: "\(path).peerDNSName")
+            },
+            peerIdentityURI: try values["peerIdentityURI"].map {
+                try string($0, path: "\(path).peerIdentityURI")
+            }
+        )
+    }
+
+    private func decodeTunnelBindEndpoint(
+        _ node: Node,
+        path: String
+    ) throws -> HostwrightTunnelBindEndpoint {
+        let values = try mapping(node, path: path, allowed: ["host", "port"])
+        let host = try requiredString(
+            values["host"],
+            path: "\(path).host",
+            message: "Tunnel bindEndpoint host is required."
+        )
+        guard HostwrightTunnelManifestEndpoint.canonicalHost(host) == host else {
+            throw ManifestParser.failure(
+                "Tunnel bindEndpoint host must be a canonical hostname, IPv4 address, or IPv6 address.",
+                code: .manifestValidationFailed,
+                node: values["host"],
+                path: "\(path).host"
+            )
+        }
+        return HostwrightTunnelBindEndpoint(
+            host: host,
+            port: try requiredInteger(
+                values["port"],
+                path: "\(path).port",
+                message: "Tunnel bindEndpoint port is required."
+            )
+        )
+    }
+
+    private func decodeTunnelEndpoints(
+        _ node: Node,
+        path: String
+    ) throws -> [HostwrightTunnelManifestEndpoint] {
+        guard case .sequence(let sequence) = node,
+              sequence.count <= HostwrightTunnelDeclaration.maximumAuthenticatedEndpoints else {
+            throw ManifestParser.failure(
+                "Tunnel authenticatedEndpoints must be a sequence of at most \(HostwrightTunnelDeclaration.maximumAuthenticatedEndpoints) entries.",
+                code: .manifestValidationFailed,
+                node: node,
+                path: path
+            )
+        }
+        return try sequence.enumerated().map {
+            try decodeTunnelEndpoint($0.element, path: "\(path)[\($0.offset)]")
+        }
+    }
+
+    private func decodeTunnelEndpoint(
+        _ node: Node,
+        path: String
+    ) throws -> HostwrightTunnelManifestEndpoint {
+        let values = try mapping(node, path: path, allowed: ["scheme", "host", "port"])
+        let schemeRaw = try values["scheme"].map { try string($0, path: "\(path).scheme") }
+            ?? HostwrightTunnelEndpointScheme.tls.rawValue
+        guard let scheme = HostwrightTunnelEndpointScheme(rawValue: schemeRaw) else {
+            throw ManifestParser.failure(
+                "Tunnel endpoint scheme must be tls.",
+                code: .manifestValidationFailed,
+                node: values["scheme"],
+                path: "\(path).scheme"
+            )
+        }
+        let host = try requiredString(values["host"], path: "\(path).host", message: "Tunnel endpoint host is required.")
+        guard HostwrightTunnelManifestEndpoint.canonicalHost(host) == host else {
+            throw ManifestParser.failure(
+                "Tunnel endpoint host must be a canonical hostname, IPv4 address, or IPv6 address.",
+                code: .manifestValidationFailed,
+                node: values["host"],
+                path: "\(path).host"
+            )
+        }
+        return HostwrightTunnelManifestEndpoint(
+            scheme: scheme,
+            host: host,
+            port: try requiredInteger(values["port"], path: "\(path).port", message: "Tunnel endpoint port is required.")
+        )
+    }
+
+    private func decodeCertificateDeclarations(
+        _ node: Node,
+        path: String
+    ) throws -> [String: HostwrightCertificateDeclaration] {
+        let entries = try rawMapping(node, path: path)
+        guard entries.count <= HostwrightCertificateDeclaration.maximumCertificates else {
+            throw ManifestParser.failure("Certificates accepts at most \(HostwrightCertificateDeclaration.maximumCertificates) declarations.", code: .manifestValidationFailed, node: node, path: path)
+        }
+        var result: [String: HostwrightCertificateDeclaration] = [:]
+        for pair in entries {
+            let name = try keyString(pair.key, path: path)
+            let declarationPath = "\(path).\(name)"
+            let values = try mapping(pair.value, path: declarationPath, allowed: ["source", "identitySHA256", "issuer", "renewBeforeSeconds", "validitySeconds", "statusPolicy"])
+            let sourceRaw = try requiredString(values["source"], path: "\(declarationPath).source", message: "Certificate source is required.")
+            guard let source = HostwrightCertificateSourceKind(rawValue: sourceRaw) else {
+                throw ManifestParser.failure("Certificate source must be one of: imported, localCA, provider.", code: .manifestValidationFailed, node: values["source"], path: "\(declarationPath).source")
+            }
+            let identitySHA256 = try values["identitySHA256"].map { try string($0, path: "\(declarationPath).identitySHA256") }
+            let issuer = try values["issuer"].map { try string($0, path: "\(declarationPath).issuer") }
+            let renewBeforeSeconds = try values["renewBeforeSeconds"].map { try integer($0, path: "\(declarationPath).renewBeforeSeconds") } ?? HostwrightCertificateDeclaration.defaultRenewBeforeSeconds
+            let validitySeconds = try values["validitySeconds"].map { try integer($0, path: "\(declarationPath).validitySeconds") } ?? HostwrightCertificateDeclaration.defaultValiditySeconds
+            let statusRaw = try values["statusPolicy"].map { try string($0, path: "\(declarationPath).statusPolicy") } ?? HostwrightCertificateStatusPolicy.ifAvailable.rawValue
+            guard let statusPolicy = HostwrightCertificateStatusPolicy(rawValue: statusRaw) else {
+                throw ManifestParser.failure("Certificate statusPolicy must be one of: disabled, ifAvailable, required.", code: .manifestValidationFailed, node: values["statusPolicy"], path: "\(declarationPath).statusPolicy")
+            }
+            switch source {
+            case .imported:
+                guard identitySHA256?.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil else {
+                    throw ManifestParser.failure("Imported certificate requires a lowercase 64-hex identitySHA256.", code: .manifestValidationFailed, node: values["identitySHA256"], path: "\(declarationPath).identitySHA256")
+                }
+                guard issuer == nil else { throw ManifestParser.failure("Imported certificate must not declare issuer.", code: .manifestValidationFailed, node: values["issuer"], path: "\(declarationPath).issuer") }
+            case .localCA:
+                guard identitySHA256 == nil, issuer == nil else { throw ManifestParser.failure("localCA certificate must not declare identitySHA256 or issuer.", code: .manifestValidationFailed, node: pair.value, path: declarationPath) }
+            case .provider:
+                guard identitySHA256 == nil else { throw ManifestParser.failure("Provider certificate must not declare identitySHA256.", code: .manifestValidationFailed, node: values["identitySHA256"], path: "\(declarationPath).identitySHA256") }
+                guard let issuer, HostwrightNetworkIdentity.isValidManifestName(issuer) else { throw ManifestParser.failure("Provider certificate requires a valid exact issuer ID.", code: .manifestValidationFailed, node: values["issuer"], path: "\(declarationPath).issuer") }
+            }
+            result[name] = HostwrightCertificateDeclaration(source: source, identitySHA256: identitySHA256, issuer: issuer, renewBeforeSeconds: renewBeforeSeconds, validitySeconds: validitySeconds, statusPolicy: statusPolicy)
+        }
+        return result
+    }
+
+    private func decodeIngressListeners(
+        _ node: Node,
+        path: String
+    ) throws -> [String: HostwrightIngressListener] {
+        let entries = try rawMapping(node, path: path)
+        guard entries.count <= HostwrightIngressListener.maximumListeners else {
+            throw ManifestParser.failure(
+                "Ingress accepts at most \(HostwrightIngressListener.maximumListeners) listeners.",
+                code: .manifestValidationFailed,
+                node: node,
+                path: path
+            )
+        }
+        var result: [String: HostwrightIngressListener] = [:]
+        for pair in entries {
+            let name = try keyString(pair.key, path: path)
+            let listenerPath = "\(path).\(name)"
+            let values = try mapping(
+                pair.value,
+                path: listenerPath,
+                allowed: ["bind", "certificate", "exposure", "peers", "port", "routes"]
+            )
+            let bindAddress = try values["bind"].map {
+                try string($0, path: "\(listenerPath).bind")
+            } ?? NetworkBindAddressPolicy.localhostBindAddress
+            let port = try requiredInteger(
+                values["port"],
+                path: "\(listenerPath).port",
+                message: "Ingress listener port is required."
+            )
+            let exposure = try values["exposure"].map {
+                try decodePortExposure(
+                    $0,
+                    path: "\(listenerPath).exposure"
+                )
+            } ?? .localhost
+            let certificate = try values["certificate"].map {
+                try string($0, path: "\(listenerPath).certificate")
+            }
+            let peers = try values["peers"].map {
+                try decodeIngressPeers($0, path: "\(listenerPath).peers")
+            } ?? []
+            guard let routesNode = values["routes"] else {
+                throw ManifestParser.failure(
+                    "Ingress listener routes are required.",
+                    code: .manifestValidationFailed,
+                    node: pair.value,
+                    path: "\(listenerPath).routes"
+                )
+            }
+            let routes = try decodeIngressRoutes(
+                routesNode,
+                path: "\(listenerPath).routes"
+            )
+            result[name] = HostwrightIngressListener(
+                bindAddress: bindAddress,
+                port: port,
+                exposure: exposure,
+                certificate: certificate,
+                peers: peers,
+                routes: routes
+            )
+        }
+        return result
+    }
+
+    private func decodeIngressPeers(_ node: Node, path: String) throws -> [HostwrightIngressPeerSelector] {
+        guard case .sequence(let sequence) = node,
+              sequence.count <= HostwrightIngressListener.maximumPeers else {
+            throw ManifestParser.failure("Ingress peers must be a sequence of at most \(HostwrightIngressListener.maximumPeers) entries.", code: .manifestValidationFailed, node: node, path: path)
+        }
+        return try sequence.enumerated().map { index, entry in
+            let entryPath = "\(path)[\(index)]"
+            let values = try mapping(entry, path: entryPath, allowed: ["service", "role"])
+            let service = try requiredString(values["service"], path: "\(entryPath).service", message: "Ingress peer service is required.")
+            let roleRaw = try requiredString(values["role"], path: "\(entryPath).role", message: "Ingress peer role is required.")
+            guard let role = HostwrightIdentityRole(rawValue: roleRaw) else {
+                throw ManifestParser.failure("Ingress peer role must be one of: workload, ingress, tunnel, node.", code: .manifestValidationFailed, node: values["role"], path: "\(entryPath).role")
+            }
+            return HostwrightIngressPeerSelector(service: service, role: role)
+        }
+    }
+
+    private func decodeIngressRoutes(
+        _ node: Node,
+        path: String
+    ) throws -> [HostwrightIngressRoute] {
+        guard case .sequence(let sequence) = node else {
+            throw ManifestParser.failure(
+                "Ingress routes must be a sequence.",
+                code: .manifestValidationFailed,
+                node: node,
+                path: path
+            )
+        }
+        guard sequence.count <= HostwrightIngressListener.maximumRoutes else {
+            throw ManifestParser.failure(
+                "Ingress accepts at most \(HostwrightIngressListener.maximumRoutes) routes per listener.",
+                code: .manifestValidationFailed,
+                node: node,
+                path: path
+            )
+        }
+        return try sequence.enumerated().map { index, child in
+            let routePath = "\(path)[\(index)]"
+            let values = try mapping(
+                child,
+                path: routePath,
+                allowed: [
+                    "hostname", "methods", "pathPrefix", "protocol",
+                    "targetPort", "targetService"
+                ]
+            )
+            let hostname = try requiredString(
+                values["hostname"],
+                path: "\(routePath).hostname",
+                message: "Ingress route hostname is required."
+            )
+            let pathPrefix = try values["pathPrefix"].map {
+                try string($0, path: "\(routePath).pathPrefix")
+            } ?? "/"
+            let methods = try values["methods"].map {
+                try strings($0, path: "\(routePath).methods")
+            } ?? ["GET"]
+            let protocolRaw = try values["protocol"].map {
+                try string($0, path: "\(routePath).protocol")
+            } ?? HostwrightIngressRouteProtocol.http.rawValue
+            guard let protocolName = HostwrightIngressRouteProtocol(
+                rawValue: protocolRaw
+            ) else {
+                throw ManifestParser.failure(
+                    "Ingress route protocol must be one of: http, websocket.",
+                    code: .manifestValidationFailed,
+                    node: values["protocol"],
+                    path: "\(routePath).protocol"
+                )
+            }
+            let targetService = try requiredString(
+                values["targetService"],
+                path: "\(routePath).targetService",
+                message: "Ingress route targetService is required."
+            )
+            let targetPort = try requiredInteger(
+                values["targetPort"],
+                path: "\(routePath).targetPort",
+                message: "Ingress route targetPort is required."
+            )
+            return HostwrightIngressRoute(
+                hostname: hostname,
+                pathPrefix: pathPrefix,
+                methods: methods,
+                protocolName: protocolName,
+                targetService: targetService,
+                targetPort: targetPort
+            )
+        }.sorted(by: HostwrightIngressRoute.canonicalPrecedes)
+    }
+
+    private func decodeNetworkDefinitions(
+        _ node: Node,
+        path: String
+    ) throws -> [String: HostwrightNetworkDefinition] {
+        var result: [String: HostwrightNetworkDefinition] = [:]
+        for pair in try rawMapping(node, path: path) {
+            let name = try keyString(pair.key, path: path)
+            let definitionPath = "\(path).\(name)"
+            let values = try mapping(
+                pair.value,
+                path: definitionPath,
+                allowed: ["driver", "ipv4", "ipv6"]
+            )
+            let driverRaw = try values["driver"].map {
+                try string($0, path: "\(definitionPath).driver")
+            } ?? HostwrightNetworkDriver.nat.rawValue
+            guard let driver = HostwrightNetworkDriver(rawValue: driverRaw) else {
+                throw ManifestParser.failure(
+                    "Network driver must be one of: nat, hostOnly.",
+                    code: .manifestValidationFailed,
+                    node: values["driver"],
+                    path: "\(definitionPath).driver"
+                )
+            }
+            let ipv4 = try decodeNetworkAddressRequest(
+                values["ipv4"],
+                default: .auto,
+                ipv6: false,
+                path: "\(definitionPath).ipv4"
+            )
+            let ipv6 = try decodeNetworkAddressRequest(
+                values["ipv6"],
+                default: .auto,
+                ipv6: true,
+                path: "\(definitionPath).ipv6"
+            )
+            result[name] = HostwrightNetworkDefinition(
+                name: name,
+                driver: driver,
+                ipv4: ipv4,
+                ipv6: ipv6
+            )
+        }
+        return result
+    }
+
+    private func decodeNetworkAddressRequest(
+        _ node: Node?,
+        default defaultValue: HostwrightNetworkAddressRequest,
+        ipv6: Bool,
+        path: String
+    ) throws -> HostwrightNetworkAddressRequest {
+        guard let node else { return defaultValue }
+        let raw = try string(node, path: path)
+        guard let value = HostwrightNetworkAddressRequest(manifestValue: raw) else {
+            throw ManifestParser.failure(
+                "Network address request must be auto, disabled, or a CIDR.",
+                code: .manifestValidationFailed,
+                node: node,
+                path: path
+            )
+        }
+        if case .cidr(let cidr) = value,
+           let normalized = ManifestValidator.normalizedNetworkCIDR(cidr, ipv6: ipv6) {
+            return .cidr(normalized)
+        }
+        return value
     }
 
     private func decodeVolumeDeclarations(
@@ -778,7 +1284,7 @@ private struct ManifestNodeDecoder {
             allowed: [
                 "image", "replicas", "platform", "resources", "user", "group", "workdir",
                 "entrypoint", "command", "init", "dependsOn", "env", "secretEnv", "labels",
-                "ports", "volumes", "health", "probes", "restart", "update", "hooks",
+                "ports", "hostAccess", "networks", "networkPolicy", "volumes", "health", "probes", "restart", "update", "hooks",
                 "rosetta", "virtualization", "readOnlyRootFilesystem", "shmSize"
             ]
         )
@@ -797,7 +1303,21 @@ private struct ManifestNodeDecoder {
         let env = try values["env"].map { try stringMap($0, path: "\(path).env") } ?? [:]
         let secretEnv = try values["secretEnv"].map { try secrets($0, path: "\(path).secretEnv") } ?? [:]
         let labels = try values["labels"].map { try stringMap($0, path: "\(path).labels") } ?? [:]
-        let ports = try values["ports"].map { try strings($0, path: "\(path).ports") } ?? []
+        let publishedEndpoints = try values["ports"].map {
+            try decodePublishedEndpoints($0, path: "\(path).ports")
+        } ?? (ports: [], sockets: [])
+        let publishedPorts = publishedEndpoints.ports
+        let publishedSockets = publishedEndpoints.sockets
+        let hostAccess = try values["hostAccess"].map {
+            try decodeHostAccess($0, path: "\(path).hostAccess")
+        } ?? []
+        let ports = publishedPorts.compactMap(\.canonicalLegacyLiteral)
+        let networks = try values["networks"].map {
+            try decodeServiceNetworks($0, path: "\(path).networks")
+        } ?? []
+        let networkPolicy = try values["networkPolicy"].map {
+            try decodeNetworkPolicy($0, path: "\(path).networkPolicy")
+        }
         let decodedVolumes = try values["volumes"].map { try decodeMounts($0, path: "\(path).volumes") }
         let volumes = decodedVolumes?.legacyVolumes ?? []
         let mounts = decodedVolumes?.mounts ?? []
@@ -845,6 +1365,11 @@ private struct ManifestNodeDecoder {
             secretEnv: secretEnv,
             labels: labels,
             ports: ports,
+            publishedPorts: publishedPorts,
+            publishedSockets: publishedSockets,
+            hostAccess: hostAccess,
+            networks: networks,
+            networkPolicy: networkPolicy,
             volumes: volumes,
             mounts: mounts,
             probes: probes,
@@ -857,6 +1382,428 @@ private struct ManifestNodeDecoder {
             readOnlyRootFilesystem: readOnlyRoot,
             shmSize: shmSize
         )
+    }
+
+    private func decodeNetworkPolicy(
+        _ node: Node,
+        path: String
+    ) throws -> HostwrightServiceNetworkPolicy {
+        let values = try mapping(node, path: path, allowed: ["ingress", "egress"])
+        let ingress = try values["ingress"].map {
+            try decodeNetworkPolicyRules($0, path: "\(path).ingress")
+        } ?? []
+        let egress = try values["egress"].map {
+            try decodeNetworkPolicyRules($0, path: "\(path).egress")
+        } ?? []
+        return HostwrightServiceNetworkPolicy(ingress: ingress, egress: egress)
+    }
+
+    private func decodeNetworkPolicyRules(
+        _ node: Node,
+        path: String
+    ) throws -> [HostwrightNetworkPolicyRule] {
+        guard case .sequence(let sequence) = node else {
+            throw ManifestParser.failure("Expected a sequence.", node: node, path: path)
+        }
+
+        return try sequence.enumerated().map { index, child in
+            let itemPath = "\(path)[\(index)]"
+            let values = try mapping(
+                child,
+                path: itemPath,
+                allowed: ["project", "service", "identity", "protocol", "address", "port", "dns"]
+            )
+            let protocolName = try values["protocol"].map { value -> HostwrightNetworkPolicyProtocol in
+                let raw = try string(value, path: "\(itemPath).protocol")
+                guard let protocolName = HostwrightNetworkPolicyProtocol(rawValue: raw) else {
+                    throw ManifestParser.failure(
+                        "Network policy protocol must be one of: tcp, udp.",
+                        code: .manifestValidationFailed,
+                        node: value,
+                        path: "\(itemPath).protocol"
+                    )
+                }
+                return protocolName
+            }
+            return HostwrightNetworkPolicyRule(
+                project: try values["project"].map { try string($0, path: "\(itemPath).project") },
+                service: try values["service"].map { try string($0, path: "\(itemPath).service") },
+                identity: try values["identity"].map { try string($0, path: "\(itemPath).identity") },
+                protocolName: protocolName,
+                address: try values["address"].map { try string($0, path: "\(itemPath).address") },
+                port: try values["port"].map { try integer($0, path: "\(itemPath).port") },
+                dns: try values["dns"].map { try string($0, path: "\(itemPath).dns") }
+            )
+        }
+        .sorted { $0.canonicalKey < $1.canonicalKey }
+    }
+
+    private func decodeHostAccess(
+        _ node: Node,
+        path: String
+    ) throws -> [HostwrightHostAccessEndpoint] {
+        guard case .sequence(let sequence) = node else {
+            throw ManifestParser.failure(
+                "Expected a sequence.",
+                node: node,
+                path: path
+            )
+        }
+        return try sequence.enumerated().map { index, child in
+            let itemPath = "\(path)[\(index)]"
+            let values = try mapping(
+                child,
+                path: itemPath,
+                allowed: [
+                    "hostname", "protocol", "addressClass", "port"
+                ]
+            )
+            let hostname = try requiredString(
+                values["hostname"],
+                path: "\(itemPath).hostname",
+                message: "Host access endpoint hostname is required."
+            )
+            let rawProtocol = try requiredString(
+                values["protocol"],
+                path: "\(itemPath).protocol",
+                message: "Host access endpoint protocol is required."
+            )
+            guard let protocolName = HostwrightHostAccessProtocol(
+                rawValue: rawProtocol
+            ) else {
+                throw ManifestParser.failure(
+                    "Host access protocol must be one of: tcp, udp.",
+                    code: .manifestValidationFailed,
+                    node: values["protocol"],
+                    path: "\(itemPath).protocol"
+                )
+            }
+            let rawAddressClass = try requiredString(
+                values["addressClass"],
+                path: "\(itemPath).addressClass",
+                message: "Host access endpoint addressClass is required."
+            )
+            guard let addressClass =
+                    HostwrightHostAccessAddressClass(
+                        rawValue: rawAddressClass
+                    ) else {
+                throw ManifestParser.failure(
+                    "Host access addressClass must be one of: loopback, interface.",
+                    code: .manifestValidationFailed,
+                    node: values["addressClass"],
+                    path: "\(itemPath).addressClass"
+                )
+            }
+            let port = try values["port"].map {
+                try integer($0, path: "\(itemPath).port")
+            }
+            guard let port else {
+                throw ManifestParser.failure(
+                    "Host access endpoint port is required.",
+                    code: .manifestValidationFailed,
+                    node: child,
+                    path: "\(itemPath).port"
+                )
+            }
+            return HostwrightHostAccessEndpoint(
+                hostname: hostname,
+                protocolName: protocolName,
+                addressClass: addressClass,
+                port: port
+            )
+        }.sorted(by: HostwrightHostAccessPolicy.canonicalPrecedes)
+    }
+
+    private func decodePublishedEndpoints(
+        _ node: Node,
+        path: String
+    ) throws -> (
+        ports: [HostwrightPublishedPort],
+        sockets: [HostwrightPublishedSocket]
+    ) {
+        guard case .sequence(let sequence) = node else {
+            throw ManifestParser.failure("Expected a sequence.", node: node, path: path)
+        }
+
+        var ports: [HostwrightPublishedPort] = []
+        var sockets: [HostwrightPublishedSocket] = []
+        for (index, child) in sequence.enumerated() {
+            let itemPath = "\(path)[\(index)]"
+            switch child {
+            case .scalar:
+                let literal = try string(child, path: itemPath)
+                guard let publishedPort = HostwrightPublishedPort.legacy(literal) else {
+                    throw ManifestParser.failure(
+                        "Port must use legacy \"host:container\" or a structured mapping.",
+                        node: child,
+                        path: itemPath
+                    )
+                }
+                ports.append(publishedPort)
+
+            case .mapping:
+                let values = try mapping(
+                    child,
+                    path: itemPath,
+                    allowed: ["bind", "exposure", "host", "mode", "protocol", "target"]
+                )
+                let rawProtocol = try values["protocol"].map {
+                    try string($0, path: "\(itemPath).protocol")
+                } ?? HostwrightPortProtocol.tcp.rawValue
+                if rawProtocol == "unix" {
+                    guard values["bind"] == nil else {
+                        throw ManifestParser.failure(
+                            "Unix socket publication does not accept bind.",
+                            code: .manifestValidationFailed,
+                            node: values["bind"],
+                            path: "\(itemPath).bind"
+                        )
+                    }
+                    guard values["exposure"] == nil else {
+                        throw ManifestParser.failure(
+                            "Unix socket publication does not accept exposure.",
+                            code: .manifestValidationFailed,
+                            node: values["exposure"],
+                            path: "\(itemPath).exposure"
+                        )
+                    }
+                    let target = try requiredString(
+                        values["target"],
+                        path: "\(itemPath).target",
+                        message: "Unix socket publication requires an absolute container target."
+                    )
+                    let hostName = try values["host"].map {
+                        try string($0, path: "\(itemPath).host")
+                    }
+                    let rawMode = try values["mode"].map {
+                        try string($0, path: "\(itemPath).mode")
+                    } ?? HostwrightPublishedSocketMode.ownerOnly.rawValue
+                    guard let mode = HostwrightPublishedSocketMode(
+                        rawValue: rawMode
+                    ) else {
+                        throw ManifestParser.failure(
+                            "Unix socket mode must be one of: 0600, 0660.",
+                            code: .manifestValidationFailed,
+                            node: values["mode"],
+                            path: "\(itemPath).mode"
+                        )
+                    }
+                    sockets.append(
+                        HostwrightPublishedSocket(
+                            hostName: hostName,
+                            containerPath: target,
+                            mode: mode
+                        )
+                    )
+                    continue
+                }
+                guard let protocolName = HostwrightPortProtocol(
+                    rawValue: rawProtocol
+                ) else {
+                    throw ManifestParser.failure(
+                        "protocol must be one of: tcp, udp, unix.",
+                        code: .manifestValidationFailed,
+                        node: values["protocol"],
+                        path: "\(itemPath).protocol"
+                    )
+                }
+                guard values["mode"] == nil else {
+                    throw ManifestParser.failure(
+                        "TCP and UDP port publication does not accept mode.",
+                        code: .manifestValidationFailed,
+                        node: values["mode"],
+                        path: "\(itemPath).mode"
+                    )
+                }
+                let target = try decodePortSpan(
+                    values["target"],
+                    path: "\(itemPath).target",
+                    message: "Structured port mapping requires target."
+                )
+                let host = try values["host"].map { try decodePortSpanValue($0, path: "\(itemPath).host") }
+                let bindAddress = try values["bind"].map { try string($0, path: "\(itemPath).bind") }
+                let exposure = try values["exposure"].map { try decodePortExposure($0, path: "\(itemPath).exposure") }
+
+                ports.append(
+                    HostwrightPublishedPort(
+                        host: host,
+                        target: target,
+                        protocolName: protocolName,
+                        bindAddress: bindAddress ?? HostwrightPublishedPort.localhostBindAddress,
+                        exposure: exposure
+                    )
+                )
+
+            default:
+                throw ManifestParser.failure(
+                    "Port must use legacy \"host:container\" or a structured mapping.",
+                    node: child,
+                    path: itemPath
+                )
+            }
+        }
+        return (ports, sockets)
+    }
+
+    private func decodePortExposure(_ node: Node, path: String) throws -> HostwrightPortExposurePolicy {
+        let values = try mapping(
+            node,
+            path: path,
+            allowed: ["allowedCIDRs", "authentication", "interfaces", "networkClasses", "scope"]
+        )
+        let scopeRaw = try requiredString(values["scope"], path: "\(path).scope", message: "Port exposure requires scope.")
+        guard let scope = NetworkExposureScope(rawValue: scopeRaw), scope != .project else {
+            throw ManifestParser.failure("Port exposure scope must be one of: localhost, lan, tunnel, public.", code: .manifestValidationFailed, node: values["scope"], path: "\(path).scope")
+        }
+        let authenticationRaw = try requiredString(values["authentication"], path: "\(path).authentication", message: "Port exposure requires authentication.")
+        guard let authentication = NetworkExposureAuthentication(rawValue: authenticationRaw) else {
+            throw ManifestParser.failure("Port exposure authentication must be one of: none, tls, mtls, authenticated-tunnel.", code: .manifestValidationFailed, node: values["authentication"], path: "\(path).authentication")
+        }
+        let interfaces = try values["interfaces"].map { try strings($0, path: "\(path).interfaces") } ?? []
+        let classValues = try values["networkClasses"].map { try strings($0, path: "\(path).networkClasses") } ?? []
+        let networkClasses = try classValues.enumerated().map { index, raw -> HostwrightNetworkClass in
+            guard let value = HostwrightNetworkClass(rawValue: raw) else {
+                throw ManifestParser.failure("Port exposure networkClasses must contain: private, vpn, public.", code: .manifestValidationFailed, node: values["networkClasses"], path: "\(path).networkClasses[\(index)]")
+            }
+            return value
+        }
+        let cidrs = try values["allowedCIDRs"].map { try strings($0, path: "\(path).allowedCIDRs") } ?? []
+        for (index, cidr) in cidrs.enumerated() {
+            guard NetworkExposurePolicyValidation.canonicalCIDR(cidr) == cidr else {
+                throw ManifestParser.failure("Port exposure allowedCIDRs must contain canonical IPv4 or IPv6 CIDRs.", code: .manifestValidationFailed, node: values["allowedCIDRs"], path: "\(path).allowedCIDRs[\(index)]")
+            }
+        }
+        guard Set(interfaces).count == interfaces.count,
+              Set(networkClasses).count == networkClasses.count,
+              Set(cidrs).count == cidrs.count else {
+            throw ManifestParser.failure("Port exposure arrays must not contain duplicates.", code: .manifestValidationFailed, node: node, path: path)
+        }
+        guard interfaces.count <=
+                HostwrightPortExposurePolicy.maximumInterfaceSelectors,
+              cidrs.count <=
+                HostwrightPortExposurePolicy.maximumAllowedCIDRs else {
+            throw ManifestParser.failure(
+                "Port exposure accepts at most 8 interfaces and 32 allowed CIDRs.",
+                code: .manifestValidationFailed,
+                node: node,
+                path: path
+            )
+        }
+        return HostwrightPortExposurePolicy(scope: scope, interfaces: interfaces, networkClasses: networkClasses, allowedCIDRs: cidrs, authentication: authentication)
+    }
+
+    private func decodePortSpan(
+        _ node: Node?,
+        path: String,
+        message: String
+    ) throws -> HostwrightPortSpan {
+        guard let node else {
+            throw ManifestParser.failure(message, code: .manifestValidationFailed, path: path)
+        }
+        return try decodePortSpanValue(node, path: path)
+    }
+
+    private func decodePortSpanValue(
+        _ node: Node,
+        path: String
+    ) throws -> HostwrightPortSpan {
+        guard case .scalar(let scalar) = node else {
+            throw ManifestParser.failure(
+                "Port must be an integer or a range string like \"8000-8003\".",
+                node: node,
+                path: path
+            )
+        }
+        if node.tag.rawValue == Tag.Name.int.rawValue {
+            guard let port = Int(scalar.string) else {
+                throw ManifestParser.failure("Port exceeds supported integer range.", node: node, path: path)
+            }
+            return HostwrightPortSpan(start: port)
+        }
+        guard node.tag.rawValue == Tag.Name.str.rawValue,
+              let span = parsePortSpan(scalar.string) else {
+            throw ManifestParser.failure(
+                "Port must be an integer or a range string like \"8000-8003\".",
+                node: node,
+                path: path
+            )
+        }
+        return span
+    }
+
+    private func decodePortProtocol(
+        _ node: Node,
+        path: String
+    ) throws -> HostwrightPortProtocol {
+        let value = try string(node, path: path)
+        guard let protocolName = HostwrightPortProtocol(rawValue: value) else {
+            throw ManifestParser.failure(
+                "protocol must be one of: tcp, udp.",
+                code: .manifestValidationFailed,
+                node: node,
+                path: path
+            )
+        }
+        return protocolName
+    }
+
+    private func parsePortSpan(_ value: String) -> HostwrightPortSpan? {
+        let fields = value.split(separator: "-", omittingEmptySubsequences: false)
+        switch fields.count {
+        case 1:
+            guard let port = Int(fields[0]) else { return nil }
+            return HostwrightPortSpan(start: port)
+        case 2:
+            guard let start = Int(fields[0]),
+                  let end = Int(fields[1]) else {
+                return nil
+            }
+            return HostwrightPortSpan(start: start, end: end)
+        default:
+            return nil
+        }
+    }
+
+    private func decodeServiceNetworks(
+        _ node: Node,
+        path: String
+    ) throws -> [HostwrightServiceNetworkAttachment] {
+        guard case .sequence(let sequence) = node else {
+            throw ManifestParser.failure("Expected a sequence.", node: node, path: path)
+        }
+
+        return try sequence.enumerated().map { index, child in
+            let itemPath = "\(path)[\(index)]"
+            if case .scalar = child {
+                return HostwrightServiceNetworkAttachment(
+                    network: try string(child, path: itemPath)
+                )
+            }
+
+            let values = try mapping(
+                child,
+                path: itemPath,
+                allowed: ["network", "aliases"]
+            )
+            let network = try requiredString(
+                values["network"],
+                path: "\(itemPath).network",
+                message: "Service network attachment requires network."
+            )
+            let aliases = try values["aliases"].map {
+                try strings($0, path: "\(itemPath).aliases")
+            } ?? []
+            return HostwrightServiceNetworkAttachment(
+                network: network,
+                aliases: aliases.sorted()
+            )
+        }
+        .sorted {
+            if $0.network != $1.network {
+                return $0.network < $1.network
+            }
+            return $0.aliases.lexicographicallyPrecedes($1.aliases)
+        }
     }
 
     private func decodePlatform(_ node: Node, path: String) throws -> HostwrightPlatform {
@@ -1175,6 +2122,12 @@ private struct ManifestNodeDecoder {
                     context = "top-level manifest"
                 } else if path.contains(".volumes.") {
                     context = "top-level volume"
+                } else if path.contains(".networks."), !path.contains(".services.") {
+                    context = "top-level network"
+                } else if path.contains(".ingress.") {
+                    context = "ingress"
+                } else if path.contains(".hostAccess[") {
+                    context = "hostAccess"
                 } else if path.hasSuffix(".health") {
                     context = "health"
                 } else if path.hasSuffix(".restart") {

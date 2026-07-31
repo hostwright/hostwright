@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 public enum AppleContainerObservationParser {
@@ -76,12 +77,19 @@ public enum AppleContainerObservationParser {
         for service in services {
             try rejectUnknownKeys(
                 Set(service.keys),
-                allowed: ["name", "instance", "resourceIdentifier", "image", "lifecycle", "health", "observedAt", "ports", "networks", "mounts"],
+                allowed: ["name", "instance", "resourceIdentifier", "image", "lifecycle", "health", "observedAt", "ports", "sockets", "networks", "mounts"],
                 context: "service"
             )
 
             for port in service["ports"] as? [[String: Any]] ?? [] {
                 try rejectUnknownKeys(Set(port.keys), allowed: ["host", "container", "protocol", "bind"], context: "port")
+            }
+            for socket in service["sockets"] as? [[String: Any]] ?? [] {
+                try rejectUnknownKeys(
+                    Set(socket.keys),
+                    allowed: ["hostPath", "containerPath", "mode"],
+                    context: "socket"
+                )
             }
 
             for network in service["networks"] as? [[String: Any]] ?? [] {
@@ -172,6 +180,17 @@ public enum AppleContainerObservationParser {
                 }
                 return port
             }
+            let sockets = try requiredArrayIfPresent(
+                configuration["publishedSockets"],
+                context: "published sockets"
+            ).map { value -> [String: Any] in
+                guard let socket = value as? [String: Any] else {
+                    throw RuntimeAdapterError.outputParseFailed(
+                        "Apple container published sockets contained a partial entry."
+                    )
+                }
+                return socket
+            }
             let networks = try requiredArrayIfPresent(
                 status["networks"],
                 context: "networks"
@@ -185,6 +204,11 @@ public enum AppleContainerObservationParser {
                     lifecycleState: lifecycleState,
                     healthState: .unknown,
                     ports: try parsePublishedPorts(ports),
+                    publishedSockets: try parsePublishedSockets(
+                        sockets,
+                        expected:
+                            desiredByContainerID[id]?.publishedSockets ?? []
+                    ),
                     networks: try parseRealNetworks(networks),
                     mounts: [],
                     observedAt: observedAt
@@ -315,6 +339,120 @@ public enum AppleContainerObservationParser {
         }
     }
 
+    private static func parsePublishedSockets(
+        _ sockets: [[String: Any]],
+        expected: [RuntimeUnixSocketPublication]
+    ) throws -> [RuntimeUnixSocketPublication] {
+        var expectedByPath: [String: RuntimeUnixSocketPublication] = [:]
+        for publication in expected {
+            guard expectedByPath[publication.hostPath] == nil else {
+                throw RuntimeAdapterError.outputParseFailed(
+                    "Desired runtime state contained duplicate Unix socket host paths."
+                )
+            }
+            expectedByPath[publication.hostPath] = publication
+        }
+        let publications = try sockets.map { socket in
+            guard let hostPath = socket["hostPath"] as? String,
+                  let containerPath = socket["containerPath"] as? String,
+                  hostPath.hasPrefix("/"),
+                  containerPath.hasPrefix("/") else {
+                throw RuntimeAdapterError.outputParseFailed(
+                    "Unsupported Apple container published socket shape."
+                )
+            }
+            let configuredMode = try socketMode(
+                socket["permissions"],
+                defaultMode: .ownerOnly
+            )
+            let mode: RuntimeUnixSocketMode
+            if let expected = expectedByPath[hostPath] {
+                guard expected.containerPath == containerPath else {
+                    throw RuntimeAdapterError.outputParseFailed(
+                        "Apple container published socket target conflicted with the exact desired path."
+                    )
+                }
+                mode = try observedSocketMode(
+                    hostPath: hostPath,
+                    fallback: expected.mode
+                )
+            } else {
+                mode = configuredMode
+            }
+            return RuntimeUnixSocketPublication(
+                hostPath: hostPath,
+                containerPath: containerPath,
+                mode: mode
+            )
+        }
+        guard Set(publications.map(\.hostPath)).count == publications.count,
+              Set(publications.map(\.containerPath)).count == publications.count else {
+            throw RuntimeAdapterError.outputParseFailed(
+                "Apple container observation contained duplicate published Unix socket paths."
+            )
+        }
+        return publications.sorted {
+            ($0.hostPath, $0.containerPath, $0.mode.rawValue) <
+                ($1.hostPath, $1.containerPath, $1.mode.rawValue)
+        }
+    }
+
+    private static func socketMode(
+        _ rawValue: Any?,
+        defaultMode: RuntimeUnixSocketMode
+    ) throws -> RuntimeUnixSocketMode {
+        guard let rawValue else { return defaultMode }
+        let value: UInt16?
+        if let number = rawValue as? NSNumber {
+            value = UInt16(exactly: number.uint64Value)
+        } else if let string = rawValue as? String {
+            value = UInt16(string)
+        } else {
+            value = nil
+        }
+        switch value {
+        case 0o600:
+            return .ownerOnly
+        case 0o660:
+            return .ownerAndGroup
+        default:
+            throw RuntimeAdapterError.outputParseFailed(
+                "Apple container published socket permissions are unsupported."
+            )
+        }
+    }
+
+    private static func observedSocketMode(
+        hostPath: String,
+        fallback: RuntimeUnixSocketMode
+    ) throws -> RuntimeUnixSocketMode {
+        var metadata = stat()
+        guard lstat(hostPath, &metadata) == 0 else {
+            if errno == ENOENT {
+                return fallback
+            }
+            throw RuntimeAdapterError.outputParseFailed(
+                "Apple container published socket metadata could not be observed."
+            )
+        }
+        guard metadata.st_mode & S_IFMT == S_IFSOCK,
+              metadata.st_uid == getuid() else {
+            throw RuntimeAdapterError.outputParseFailed(
+                "Apple container published socket path is not an owned Unix socket."
+            )
+        }
+        switch metadata.st_mode & 0o777 {
+        case 0o600:
+            return .ownerOnly
+        case 0o660:
+            return .ownerAndGroup
+        default:
+            throw RuntimeAdapterError.outputParseFailed(
+                "Apple container published socket has unsafe permissions."
+            )
+        }
+    }
+
     private static func parseRealNetworks(_ networks: [Any]) throws -> [RuntimeNetworkAttachment] {
         try networks.map { rawNetwork in
             guard let network = rawNetwork as? [String: Any] else {
@@ -372,6 +510,7 @@ private struct ServiceFixture: Decodable {
     let health: String?
     let observedAt: String?
     let ports: [PortFixture]?
+    let sockets: [SocketFixture]?
     let networks: [NetworkFixture]?
     let mounts: [MountFixture]?
 
@@ -391,6 +530,17 @@ private struct ServiceFixture: Decodable {
         }
 
         let identity = RuntimeServiceIdentity(projectName: projectName, serviceName: name, instanceName: instance)
+        let publishedSockets = try (sockets ?? []).map {
+            try $0.runtimeSocketPublication()
+        }
+        guard Set(publishedSockets.map(\.hostPath)).count ==
+                publishedSockets.count,
+              Set(publishedSockets.map(\.containerPath)).count ==
+                publishedSockets.count else {
+            throw RuntimeAdapterError.outputParseFailed(
+                "Fixture observation contained duplicate published Unix socket paths."
+            )
+        }
         return ObservedRuntimeService(
             identity: identity,
             resourceIdentifier: resourceIdentifier ?? identity.managedResourceIdentifier,
@@ -398,9 +548,39 @@ private struct ServiceFixture: Decodable {
             lifecycleState: lifecycleState,
             healthState: healthState,
             ports: try (ports ?? []).map { try $0.runtimePortMapping() },
+            publishedSockets: publishedSockets.sorted {
+                ($0.hostPath, $0.containerPath, $0.mode.rawValue) <
+                    ($1.hostPath, $1.containerPath, $1.mode.rawValue)
+            },
             networks: try (networks ?? []).map { try $0.runtimeNetworkAttachment() },
             mounts: try (mounts ?? []).map { try $0.runtimeMountReference() },
             observedAt: observedAt
+        )
+    }
+}
+
+private struct SocketFixture: Decodable {
+    let hostPath: String
+    let containerPath: String
+    let mode: String?
+
+    func runtimeSocketPublication() throws
+        -> RuntimeUnixSocketPublication {
+        let parsedMode: RuntimeUnixSocketMode
+        if let mode {
+            guard let value = RuntimeUnixSocketMode(rawValue: mode) else {
+                throw RuntimeAdapterError.outputParseFailed(
+                    "Unsupported socket mode '\(mode)'."
+                )
+            }
+            parsedMode = value
+        } else {
+            parsedMode = .ownerOnly
+        }
+        return RuntimeUnixSocketPublication(
+            hostPath: hostPath,
+            containerPath: containerPath,
+            mode: parsedMode
         )
     }
 }

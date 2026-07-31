@@ -22,11 +22,28 @@ public enum DistributionLayout {
         "hostwright",
         "hostwright-control",
         "hostwright-containerization-helper",
+        "hostwright-network-helper",
+        "hostwright-network-provider-worker",
         "hostwright-storage-helper",
         "hostwright-dist",
         "hostwrightd"
     ]
     public static let shippedBinaryPaths = shippedExecutableNames.map { "bin/\($0)" }
+    static let legacyTrustedExecutableNamesV1 = [
+        "hostwright",
+        "hostwright-control",
+        "hostwright-dist",
+        "hostwrightd"
+    ]
+    static let legacyTrustedPayloadModesV1: [String: Int] = [
+        "bin/hostwright": 0o755,
+        "bin/hostwright-control": 0o755,
+        "bin/hostwright-dist": 0o755,
+        "bin/hostwrightd": 0o755,
+        "share/hostwright/examples/hostwright.yaml": 0o644,
+        "share/doc/hostwright/LICENSE": 0o644,
+        "share/doc/hostwright/README.md": 0o644
+    ]
     static let legacyPayloadModesV1: [String: Int] = [
         "bin/hostwright": 0o755,
         "bin/hostwright-control": 0o755,
@@ -47,8 +64,7 @@ public enum DistributionLayout {
     ].merging(DistributionContainerizationAssets.payloadModes) { _, _ in
         preconditionFailure("duplicate legacy distribution payload path")
     }
-
-    public static let payloadModes: [String: Int] = [
+    static let legacyPayloadModesV3: [String: Int] = [
         "bin/hostwright": 0o755,
         "bin/hostwright-control": 0o755,
         "bin/hostwright-containerization-helper": 0o755,
@@ -59,7 +75,80 @@ public enum DistributionLayout {
         "share/doc/hostwright/LICENSE": 0o644,
         "share/doc/hostwright/README.md": 0o644
     ].merging(DistributionContainerizationAssets.payloadModes) { _, _ in
+        preconditionFailure("duplicate legacy distribution payload path")
+    }
+
+    public static let payloadModes: [String: Int] = [
+        "bin/hostwright": 0o755,
+        "bin/hostwright-control": 0o755,
+        "bin/hostwright-containerization-helper": 0o755,
+        "bin/hostwright-network-helper": 0o755,
+        "bin/hostwright-network-provider-worker": 0o755,
+        "bin/hostwright-storage-helper": 0o755,
+        "bin/hostwright-dist": 0o755,
+        "bin/hostwrightd": 0o755,
+        "share/hostwright/examples/hostwright.yaml": 0o644,
+        "share/doc/hostwright/LICENSE": 0o644,
+        "share/doc/hostwright/README.md": 0o644
+    ].merging(DistributionContainerizationAssets.payloadModes) { _, _ in
         preconditionFailure("duplicate distribution payload path")
+    }
+
+    static func artifactPayloadModes(
+        schemaVersion: Int,
+        paths: Set<String>
+    ) -> [String: Int]? {
+        switch schemaVersion {
+        case 1:
+            return [
+                legacyTrustedPayloadModesV1,
+                legacyPayloadModesV2,
+                legacyPayloadModesV3
+            ].first { Set($0.keys) == paths }
+        case 2:
+            return Set(payloadModes.keys) == paths ? payloadModes : nil
+        default:
+            return nil
+        }
+    }
+
+    static func trustedPayloadModes(schemaVersion: Int) -> [String: Int]? {
+        switch schemaVersion {
+        case 1:
+            legacyTrustedPayloadModesV1
+        case 2:
+            payloadModes
+        default:
+            nil
+        }
+    }
+
+    static func executableNames(payloadPaths: Set<String>) -> [String]? {
+        if payloadPaths == Set(legacyTrustedPayloadModesV1.keys) {
+            return legacyTrustedExecutableNamesV1
+        }
+        if payloadPaths == Set(legacyPayloadModesV2.keys) {
+            return [
+                "hostwright",
+                "hostwright-control",
+                "hostwright-containerization-helper",
+                "hostwright-dist",
+                "hostwrightd"
+            ]
+        }
+        if payloadPaths == Set(legacyPayloadModesV3.keys) {
+            return [
+                "hostwright",
+                "hostwright-control",
+                "hostwright-containerization-helper",
+                "hostwright-storage-helper",
+                "hostwright-dist",
+                "hostwrightd"
+            ]
+        }
+        return payloadPaths == Set(payloadModes.keys)
+            ? shippedExecutableNames
+            : nil
     }
 }
 
@@ -342,7 +431,7 @@ public struct DistributionArtifactManifest: Codable, Equatable, Sendable {
     public let files: [DistributionFileRecord]
 
     public init(
-        schemaVersion: Int = 1,
+        schemaVersion: Int = 2,
         artifactID: String,
         packageVersion: String,
         sourceCommit: String,
@@ -364,7 +453,7 @@ public struct DistributionArtifactManifest: Codable, Equatable, Sendable {
     }
 
     public func validate() throws {
-        guard schemaVersion == 1 else {
+        guard schemaVersion == 1 || schemaVersion == 2 else {
             throw DistributionError.invalidManifest("unsupported schema version \(schemaVersion)")
         }
         guard sourceCommit.range(of: "^[a-f0-9]{40}$", options: .regularExpression) != nil,
@@ -379,16 +468,20 @@ public struct DistributionArtifactManifest: Codable, Equatable, Sendable {
               ISO8601DateFormatter().date(from: createdAt) != nil else {
             throw DistributionError.invalidManifest("artifact identity, platform, architecture, or timestamp is invalid")
         }
-        guard files.map(\.path) == files.map(\.path).sorted(),
+        guard let expectedModes = DistributionLayout.artifactPayloadModes(
+            schemaVersion: schemaVersion,
+            paths: Set(files.map(\.path))
+        ),
+              files.map(\.path) == files.map(\.path).sorted(),
               Set(files.map(\.path)).count == files.count,
-              Set(files.map(\.path)) == Set(DistributionLayout.payloadModes.keys) else {
+              Set(files.map(\.path)) == Set(expectedModes.keys) else {
             throw DistributionError.invalidManifest("payload file set must exactly match the supported archive layout")
         }
         for file in files {
             guard DistributionPathPolicy.isSafeRelativePath(file.path),
                   file.sha256.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil,
                   file.sizeBytes > 0,
-                  DistributionLayout.payloadModes[file.path] == file.mode else {
+                  expectedModes[file.path] == file.mode else {
                 throw DistributionError.invalidManifest("payload metadata is invalid for \(file.path)")
             }
         }
@@ -750,7 +843,10 @@ public struct DistributionProvenanceStatement: Codable, Equatable, Sendable {
               subject == [ProvenanceSubject(name: archive.fileName, digest: ["sha256": archive.sha256])],
               predicate.buildDefinition.buildType == "urn:hostwright:buildtype:swiftpm-archive:v1",
               predicate.buildDefinition.externalParameters.configuration == "release",
-              predicate.buildDefinition.externalParameters.products == DistributionLayout.shippedExecutableNames,
+              predicate.buildDefinition.externalParameters.products
+                == DistributionLayout.executableNames(
+                    payloadPaths: Set(manifest.files.map(\.path))
+                ),
               predicate.buildDefinition.externalParameters.platform == manifest.platform,
               predicate.buildDefinition.externalParameters.architecture == manifest.architecture,
               predicate.buildDefinition.internalParameters.sourceDirty == manifest.sourceDirty,
@@ -781,7 +877,7 @@ public struct DistributionInstallManifest: Codable, Equatable, Sendable {
     public let createdDirectories: [String]
 
     public init(artifact: DistributionArtifactManifest, createdDirectories: [String]) {
-        self.schemaVersion = 3
+        self.schemaVersion = 4
         self.artifactID = artifact.artifactID
         self.sourceCommit = artifact.sourceCommit
         self.packageVersion = artifact.packageVersion
@@ -813,6 +909,17 @@ public struct DistributionInstallManifest: Codable, Equatable, Sendable {
         case 2:
             expectedModes = DistributionLayout.legacyPayloadModesV2
         case 3:
+            let paths = Set(files.map(\.path))
+            guard let legacyModes = [
+                DistributionLayout.legacyTrustedPayloadModesV1,
+                DistributionLayout.legacyPayloadModesV3
+            ].first(where: { Set($0.keys) == paths }) else {
+                throw DistributionError.invalidManifest(
+                    "install ownership manifest schema is unsupported"
+                )
+            }
+            expectedModes = legacyModes
+        case 4:
             expectedModes = DistributionLayout.payloadModes
         default:
             throw DistributionError.invalidManifest("install ownership manifest schema is unsupported")

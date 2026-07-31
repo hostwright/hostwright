@@ -15,8 +15,64 @@ final class HostwrightManifestTests: XCTestCase {
         XCTAssertEqual(manifest.services.count, 1)
         XCTAssertEqual(manifest.services[0].name, "api")
         XCTAssertEqual(manifest.services[0].ports, ["8080:8080"])
+        XCTAssertEqual(
+            manifest.services[0].publishedPorts,
+            [
+                HostwrightPublishedPort(
+                    host: HostwrightPortSpan(start: 8080),
+                    target: HostwrightPortSpan(start: 8080),
+                    protocolName: .tcp,
+                    bindAddress: HostwrightPublishedPort.localhostBindAddress,
+                    legacyLiteral: "8080:8080"
+                )
+            ]
+        )
         XCTAssertEqual(manifest.services[0].health?.interval, "10s")
         XCTAssertEqual(manifest.services[0].restart?.policy, "on-failure")
+    }
+
+    func testLegacyPortsCanonicalizeToStructuredMappings() throws {
+        let manifest = try ManifestValidator.validated(Self.validManifest)
+        let canonical = try ManifestCanonicalEncoder.encode(manifest)
+
+        XCTAssertTrue(canonical.contains("ports:\n      - bind: \"127.0.0.1\""))
+        XCTAssertTrue(canonical.contains("host: 8080"))
+        XCTAssertTrue(canonical.contains("target: 8080"))
+        XCTAssertTrue(canonical.contains("protocol: \"tcp\""))
+        XCTAssertEqual(try ManifestValidator.validated(canonical), manifest)
+    }
+
+    func testStructuredPortsParseAndValidate() throws {
+        let manifest = try ManifestValidator.validated(
+            """
+            version: 2
+            project: demo
+            services:
+              api:
+                image: local/api:latest
+                ports:
+                  - bind: 127.0.0.1
+                    host: 18080
+                    target: 8080
+                    protocol: tcp
+                  - bind: "::1"
+                    host: "19090-19091"
+                    target: "9090-9091"
+                    protocol: udp
+            """
+        )
+
+        let publishedPorts = manifest.services[0].publishedPorts
+        XCTAssertEqual(publishedPorts.count, 2)
+        XCTAssertEqual(publishedPorts[0].hostPort, 18_080)
+        XCTAssertEqual(publishedPorts[0].containerPort, 8_080)
+        XCTAssertEqual(publishedPorts[0].protocolName, .tcp)
+        XCTAssertEqual(publishedPorts[0].effectiveBindAddress, "127.0.0.1")
+        XCTAssertEqual(publishedPorts[1].hostPortRange, 19_090 ... 19_091)
+        XCTAssertEqual(publishedPorts[1].containerPortRange, 9_090 ... 9_091)
+        XCTAssertEqual(publishedPorts[1].protocolName, .udp)
+        XCTAssertEqual(publishedPorts[1].effectiveBindAddress, "::1")
+        XCTAssertEqual(manifest.services[0].ports, ["18080:8080"])
     }
 
     func testSecretEnvironmentReferencesParseAndValidate() throws {
@@ -1672,7 +1728,7 @@ final class HostwrightManifestTests: XCTestCase {
     }
 
     func testUnsupportedNetworkingAndDiscoveryFieldsFailClosed() {
-        for field in ["dns", "dns_search", "domainname", "hostname", "network_mode", "networks", "aliases", "expose", "extra_hosts"] {
+        for field in ["dns", "dns_search", "domainname", "hostname", "network_mode", "aliases", "expose", "extra_hosts"] {
             assertManifestFailure(
                 """
                 version: 2
@@ -1783,7 +1839,8 @@ final class HostwrightManifestTests: XCTestCase {
             Set(properties.keys),
             [
                 "version", "project", "imagePolicy", "imageTrust", "imageSBOM",
-                "imageVulnerability", "imageProvenance", "volumes", "services"
+                "imageVulnerability", "imageProvenance", "volumes", "networks",
+                "certificates", "ingress", "tunnels", "services"
             ]
         )
         let required = try XCTUnwrap(schemaJSON["required"] as? [String])
@@ -2078,7 +2135,8 @@ final class HostwrightManifestTests: XCTestCase {
             [
                 "image", "replicas", "platform", "resources", "user", "group", "workdir",
                 "entrypoint", "command", "init", "dependsOn", "env", "secretEnv", "labels",
-                "ports", "volumes", "health", "probes", "restart", "update", "hooks",
+                "ports", "hostAccess", "networks", "volumes", "health", "probes",
+                "networkPolicy", "restart", "update", "hooks",
                 "rosetta", "virtualization", "readOnlyRootFilesystem", "shmSize"
             ]
         )
@@ -2138,7 +2196,55 @@ final class HostwrightManifestTests: XCTestCase {
         }
         let ports = try XCTUnwrap(serviceProperties["ports"] as? [String: Any])
         let portItems = try XCTUnwrap(ports["items"] as? [String: Any])
-        XCTAssertEqual(portItems["pattern"] as? String, #"^[0-9]{1,5}:[0-9]{1,5}$"#)
+        let portChoices = try XCTUnwrap(portItems["oneOf"] as? [[String: Any]])
+        XCTAssertEqual(portChoices.count, 3)
+        XCTAssertEqual(portChoices[0]["pattern"] as? String, #"^[0-9]{1,5}:[0-9]{1,5}$"#)
+        let structuredPort = portChoices[1]
+        XCTAssertEqual(structuredPort["type"] as? String, "object")
+        XCTAssertEqual(structuredPort["required"] as? [String], ["target"])
+        let structuredPortProperties = try XCTUnwrap(structuredPort["properties"] as? [String: Any])
+        XCTAssertEqual((structuredPortProperties["protocol"] as? [String: Any])?["enum"] as? [String], ["tcp", "udp"])
+        let unixSocket = portChoices[2]
+        XCTAssertEqual(unixSocket["type"] as? String, "object")
+        XCTAssertEqual(
+            unixSocket["required"] as? [String],
+            ["target", "protocol"]
+        )
+        let unixSocketProperties = try XCTUnwrap(
+            unixSocket["properties"] as? [String: Any]
+        )
+        XCTAssertEqual(
+            (unixSocketProperties["protocol"] as? [String: Any])?["const"]
+                as? String,
+            "unix"
+        )
+        XCTAssertEqual(
+            (unixSocketProperties["mode"] as? [String: Any])?["enum"]
+                as? [String],
+            ["0600", "0660"]
+        )
+        let hostAccess = try XCTUnwrap(
+            serviceProperties["hostAccess"] as? [String: Any]
+        )
+        XCTAssertEqual(hostAccess["maxItems"] as? Int, 64)
+        XCTAssertEqual(
+            (hostAccess["items"] as? [String: Any])?["$ref"] as? String,
+            "#/$defs/hostAccessEndpoint"
+        )
+        let hostAccessEndpoint = try XCTUnwrap(
+            definitions["hostAccessEndpoint"] as? [String: Any]
+        )
+        XCTAssertEqual(
+            hostAccessEndpoint["required"] as? [String],
+            ["hostname", "protocol", "addressClass", "port"]
+        )
+        let serviceNetworks = try XCTUnwrap(
+            serviceProperties["networks"] as? [String: Any]
+        )
+        XCTAssertEqual(
+            (serviceNetworks["items"] as? [String: Any])?["$ref"] as? String,
+            "#/$defs/serviceNetworkAttachment"
+        )
         let serviceVolumes = try XCTUnwrap(serviceProperties["volumes"] as? [String: Any])
         let volumeItems = try XCTUnwrap(serviceVolumes["items"] as? [String: Any])
         let volumeChoices = try XCTUnwrap(volumeItems["oneOf"] as? [[String: Any]])

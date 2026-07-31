@@ -4,6 +4,7 @@ import HostwrightExtensions
 import HostwrightHealth
 import HostwrightImport
 import HostwrightManifest
+import HostwrightNetworking
 import HostwrightPolicy
 import HostwrightReconciler
 import HostwrightRuntime
@@ -28,6 +29,22 @@ func hostwrightWaitForAsync<T: Sendable>(_ operation: @escaping @Sendable () asy
 
 final class CLIAsyncResultBox<T: Sendable>: @unchecked Sendable {
     var result: Result<T, Error>?
+}
+
+func hostwrightObservedServicesByLogicalName(
+    _ observed: ObservedRuntimeState
+) -> [String: [ObservedRuntimeService]] {
+    Dictionary(grouping: observed.services, by: \.identity.serviceName)
+        .mapValues { services in
+            services.sorted {
+                let lhsInstance = $0.identity.instanceName ?? ""
+                let rhsInstance = $1.identity.instanceName ?? ""
+                if lhsInstance != rhsInstance {
+                    return lhsInstance < rhsInstance
+                }
+                return $0.resourceIdentifier < $1.resourceIdentifier
+            }
+        }
 }
 
 struct HostwrightSelectedRuntimeProvider {
@@ -255,6 +272,7 @@ func hostwrightDesiredStateWithOwnershipHints(
 ) throws -> DesiredRuntimeState {
     DesiredRuntimeState(
         projectName: desiredState.projectName,
+        networks: desiredState.networks,
         services: desiredState.services,
         ownedResourceHints: try store.ownership.runtimeHints(
             projectID: projectID,
@@ -357,6 +375,7 @@ private extension ObservedRuntimeService {
             lifecycleState: lifecycleState,
             healthState: healthState,
             ports: ports,
+            publishedSockets: publishedSockets,
             networks: networks,
             mounts: mounts,
             observedAt: observedAt
@@ -768,9 +787,28 @@ enum CLIJSON {
         manifest: HostwrightManifest,
         observed: ObservedRuntimeState,
         plan: ReconciliationPlan,
-        imageDigestLocks: [ImageDigestLockRecord]
+        imageDigestLocks: [ImageDigestLockRecord],
+        portReservations: [NetworkPortReservationRecord],
+        networks: [NetworkStateResourceRecord],
+        projectDNS: ProjectDNSStateRecord? = nil
     ) -> String {
-        let observedByName = Dictionary(uniqueKeysWithValues: observed.services.map { ($0.identity.serviceName, $0) })
+        let observedByName = hostwrightObservedServicesByLogicalName(observed)
+        let ingressState: [String: Any]? =
+            manifest.ingress.isEmpty
+            ? nil
+            : projectDNS.map { record in
+                [
+                    "id": record.id,
+                    "generation": record.generation,
+                    "providerID": record.providerID,
+                    "providerGeneration": record.providerGeneration,
+                    "desiredSHA256": record.desiredSHA256,
+                    "observedSHA256": record.observedSHA256 as Any,
+                    "lifecycle": record.lifecycleState.rawValue,
+                    "finalizer": record.finalizerState.rawValue,
+                    "operationGroupID": record.operationGroupID
+                ].compactNilValues()
+            }
         return render([
             "kind": "status",
             "manifest": [
@@ -818,43 +856,102 @@ enum CLIJSON {
                         record.observationSHA256 as Any
                 ].compactNilValues()
             },
-            "services": manifest.services.sorted { $0.name < $1.name }.map { service in
-                let observedService = observedByName[service.name]
-                return [
-                    "name": service.name,
-                    "desiredImage": service.image as Any,
-                    "observed": observedService.map { observed in
-                        [
-                            "resourceIdentifier": observed.resourceIdentifier,
-                            "image": observed.image as Any,
-                            "lifecycle": observed.lifecycleState.rawValue,
-                            "health": observed.healthState.rawValue,
-                            "ports": observed.ports.map { port in
-                                [
-                                    "bindAddress": port.bindAddress as Any,
-                                    "hostPort": port.hostPort as Any,
-                                    "containerPort": port.containerPort,
-                                    "protocol": port.protocolName.rawValue
-                                ].compactNilValues()
-                            },
-                            "networks": observed.networks.map { network in
-                                [
-                                    "name": network.name,
-                                    "kind": network.kind as Any,
-                                    "address": network.address as Any,
-                                    "gateway": network.gateway as Any,
-                                    "interface": network.interfaceName as Any,
-                                    "hostname": network.hostname as Any,
-                                    "ipv4Address": network.ipv4Address as Any,
-                                    "ipv4Gateway": network.ipv4Gateway as Any,
-                                    "ipv6Address": network.ipv6Address as Any,
-                                    "macAddress": network.macAddress as Any,
-                                    "mtu": network.mtu as Any
-                                ].compactNilValues()
-                            }
-                        ].compactNilValues()
-                    } as Any
+            "portReservations": portReservations.map { record in
+                [
+                    "id": record.id,
+                    "resourceUUID": record.resourceUUID,
+                    "service": record.serviceName,
+                    "generation": record.generation,
+                    "providerID": record.providerID,
+                    "providerGeneration": record.providerGeneration,
+                    "bindAddress": record.bindAddress,
+                    "hostPort": record.hostPort,
+                    "containerPort": record.containerPort,
+                    "protocol": record.protocolName.rawValue,
+                    "allocation": record.allocationKind.rawValue,
+                    "lifecycle": record.lifecycleState.rawValue,
+                    "desiredSHA256": record.desiredSHA256,
+                    "observedSHA256": record.observedSHA256 as Any
                 ].compactNilValues()
+            },
+            "networks": networks.sorted {
+                ($0.name, $0.id) < ($1.name, $1.id)
+            }.map { record in
+                [
+                    "id": record.id,
+                    "name": record.name,
+                    "runtimeName": record.runtimeName,
+                    "generation": record.generation,
+                    "providerID": record.providerID,
+                    "providerGeneration":
+                        record.providerGeneration,
+                    "driver": record.driver.rawValue,
+                    "requestedIPv4":
+                        statusNetworkAddress(record.requestedIPv4),
+                    "requestedIPv6":
+                        statusNetworkAddress(record.requestedIPv6),
+                    "observedIPv4": record.observedIPv4,
+                    "observedIPv6": record.observedIPv6,
+                    "lifecycle": record.lifecycleState.rawValue,
+                    "finalizer": record.finalizerState.rawValue,
+                    "desiredSHA256": record.desiredSHA256,
+                    "observedSHA256":
+                        record.observedSHA256 as Any
+                ].compactNilValues()
+            },
+            "ingress": manifest.ingress.sorted {
+                $0.key < $1.key
+            }.map { name, listener in
+                [
+                    "name": name,
+                    "bindAddress": listener.bindAddress,
+                    "port": listener.port,
+                    "exposure": listener.exposure.scope.rawValue,
+                    "routes": listener.routes.sorted(
+                        by: HostwrightIngressRoute.canonicalPrecedes
+                    ).map { route in
+                        let service = manifest.services.first {
+                            $0.name == route.targetService
+                        }
+                        let ready = (
+                            observedByName[route.targetService] ?? []
+                        ).filter {
+                            $0.healthState == .healthy ||
+                                (
+                                    service?.probes.readiness == nil &&
+                                        $0.lifecycleState == .running &&
+                                        (
+                                            $0.healthState == .notConfigured ||
+                                                $0.healthState == .unknown
+                                        )
+                                )
+                        }.count
+                        return [
+                            "hostname": route.hostname,
+                            "pathPrefix": route.pathPrefix,
+                            "methods": route.methods.sorted(),
+                            "protocol": route.protocolName.rawValue,
+                            "targetService": route.targetService,
+                            "targetPort": route.targetPort,
+                            "readyBackends": ready
+                        ] as [String: Any]
+                    }
+                ] as [String: Any]
+            },
+            "ingressState": ingressState as Any,
+            "services": manifest.services.sorted { $0.name < $1.name }.map { service in
+                let observedServices = observedByName[service.name] ?? []
+                var payload: [String: Any] = [
+                    "name": service.name,
+                    "desiredImage": service.image as Any
+                ].compactNilValues()
+                if let primary = observedServices.first {
+                    payload["observed"] = statusObservedService(primary)
+                }
+                if observedServices.count > 1 {
+                    payload["instances"] = observedServices.map(statusObservedService)
+                }
+                return payload
             },
             "drift": plan.drift.map { drift in
                 [
@@ -874,6 +971,65 @@ enum CLIJSON {
                 ]
             }
         ].compactNilValues())
+    }
+
+    private static func statusNetworkAddress(
+        _ request: NetworkStateAddressRequest
+    ) -> String {
+        switch request {
+        case .auto:
+            return "auto"
+        case .disabled:
+            return "disabled"
+        case .cidr(let value):
+            return value
+        }
+    }
+
+    private static func statusObservedService(
+        _ observed: ObservedRuntimeService
+    ) -> [String: Any] {
+        [
+            "identity": observed.identity.displayName,
+            "instance": observed.identity.instanceName as Any,
+            "resourceIdentifier": observed.resourceIdentifier,
+            "image": observed.image as Any,
+            "lifecycle": observed.lifecycleState.rawValue,
+            "health": observed.healthState.rawValue,
+            "ports": observed.ports.map { port in
+                [
+                    "bindAddress": port.bindAddress as Any,
+                    "hostPort": port.hostPort as Any,
+                    "containerPort": port.containerPort,
+                    "protocol": port.protocolName.rawValue
+                ].compactNilValues()
+            },
+            "sockets": observed.publishedSockets.sorted {
+                ($0.hostPath, $0.containerPath, $0.mode.rawValue) <
+                    ($1.hostPath, $1.containerPath, $1.mode.rawValue)
+            }.map { socket in
+                [
+                    "containerPath": socket.containerPath,
+                    "hostPath": socket.hostPath,
+                    "mode": socket.mode.rawValue
+                ]
+            },
+            "networks": observed.networks.map { network in
+                [
+                    "name": network.name,
+                    "kind": network.kind as Any,
+                    "address": network.address as Any,
+                    "gateway": network.gateway as Any,
+                    "interface": network.interfaceName as Any,
+                    "hostname": network.hostname as Any,
+                    "ipv4Address": network.ipv4Address as Any,
+                    "ipv4Gateway": network.ipv4Gateway as Any,
+                    "ipv6Address": network.ipv6Address as Any,
+                    "macAddress": network.macAddress as Any,
+                    "mtu": network.mtu as Any
+                ].compactNilValues()
+            }
+        ].compactNilValues()
     }
 }
 

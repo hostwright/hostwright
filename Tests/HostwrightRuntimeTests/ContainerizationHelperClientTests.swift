@@ -597,11 +597,20 @@ final class ContainerizationHelperClientTests: XCTestCase {
         let negotiated = try await adapter.capabilitySnapshot()
         let identity = RuntimeServiceIdentity(projectName: "demo", serviceName: "api")
         let context = mutationContext(digest: negotiated.canonicalSHA256)
+        let network = try RuntimeNetworkIdentity(
+            logicalName: "backend",
+            projectUUID: projectUUID
+        )
+        let attachment = try RuntimeDesiredNetworkAttachment(
+            network: network,
+            aliases: ["api"]
+        )
         let service = DesiredRuntimeService(
             identity: identity,
             image: "example.local/demo:latest",
             command: ["/bin/demo"],
-            environment: [RuntimeEnvironmentValue(name: "MODE", value: "test")]
+            environment: [RuntimeEnvironmentValue(name: "MODE", value: "test")],
+            networks: [attachment]
         )
         let createAction = PlannedRuntimeAction(
             kind: .create,
@@ -625,6 +634,7 @@ final class ContainerizationHelperClientTests: XCTestCase {
         XCTAssertEqual(createPayload.resourceUUID, resourceUUID)
         XCTAssertEqual(createPayload.projectUUID, projectUUID)
         XCTAssertEqual(createPayload.environment, [RuntimeInventoryEnvironmentEntry(name: "MODE", value: "test")])
+        XCTAssertEqual(createPayload.networks, [attachment])
         let labels = Dictionary(uniqueKeysWithValues: createPayload.labels.map { ($0.key, $0.value) })
         XCTAssertEqual(labels[RuntimeManagedResourceIdentity.providerIDLabel], RuntimeProviderID.appleContainerization.rawValue)
         XCTAssertEqual(labels[RuntimeManagedResourceIdentity.fencingTokenLabel], fencingToken)
@@ -1342,6 +1352,66 @@ private actor ScriptedHelper {
                 peerPID: peerProcessID,
                 responseID: responseRequestID
             )
+        case .networkCapabilities:
+            let request = try request(ContainerizationHelperEmptyPayload.self, payload)
+            return try await respond(
+                request,
+                result: RuntimeNetworkProviderCapabilities.appleContainerizationUnavailable,
+                peerPID: peerProcessID,
+                responseID: responseRequestID
+            )
+        case .networkInspect:
+            let request = try request(RuntimeNetworkInspectRequest.self, payload)
+            return try await respond(
+                request,
+                result: networkResult(
+                    request.payload.identity,
+                    operation: .inspect,
+                    state: .present
+                ),
+                peerPID: peerProcessID,
+                responseID: responseRequestID
+            )
+        case .networkCreate:
+            let request = try request(RuntimeNetworkCreateRequest.self, payload)
+            return try await respond(
+                request,
+                result: networkResult(
+                    request.payload.identity,
+                    operation: .create,
+                    state: .present
+                ),
+                peerPID: peerProcessID,
+                responseID: responseRequestID
+            )
+        case .networkAttach, .networkDetach:
+            let request = try request(RuntimeNetworkAttachmentRequest.self, payload)
+            return try await respond(
+                request,
+                result: RuntimeNetworkOperationResult(
+                    providerID: .appleContainerization,
+                    operation: operation == .networkAttach ? .attach : .detach,
+                    networkRuntimeIdentifier: request.payload.networkRuntimeIdentifier,
+                    networkResourceUUID: request.payload.networkResourceUUID,
+                    attachmentUUID: request.payload.attachmentUUID,
+                    state: operation == .networkAttach ? .attached : .detached,
+                    verified: true
+                ),
+                peerPID: peerProcessID,
+                responseID: responseRequestID
+            )
+        case .networkDelete:
+            let request = try request(RuntimeNetworkDeleteRequest.self, payload)
+            return try await respond(
+                request,
+                result: networkResult(
+                    request.payload.identity,
+                    operation: .delete,
+                    state: .missing
+                ),
+                peerPID: peerProcessID,
+                responseID: responseRequestID
+            )
         case .create:
             let request = try request(ContainerizationHelperCreatePayload.self, payload)
             createPayloads.append(request.payload)
@@ -1384,6 +1454,21 @@ private actor ScriptedHelper {
                 responseID: responseRequestID
             )
         }
+    }
+
+    private func networkResult(
+        _ identity: RuntimeNetworkIdentity,
+        operation: RuntimeNetworkProviderOperation,
+        state: RuntimeNetworkResultState
+    ) -> RuntimeNetworkOperationResult {
+        RuntimeNetworkOperationResult(
+            providerID: .appleContainerization,
+            operation: operation,
+            networkRuntimeIdentifier: identity.runtimeIdentifier,
+            networkResourceUUID: identity.resourceUUID,
+            state: state,
+            verified: true
+        )
     }
 
     private func request<Payload: Codable & Sendable>(

@@ -31,9 +31,13 @@ public enum DistributionContainerizationAssets {
     static let initConfigurationDigest =
         ContainerizationRuntimeAssetContract.initImageConfigurationDigest
     static let initLayerDigest = ContainerizationRuntimeAssetContract.initImageLayerDigest
+    static let guestNetworkPolicyLoaderPayloadPath =
+        ContainerizationRuntimeAssetContract
+        .guestNetworkPolicyLoaderInstallationRelativePath
 
     public static let payloadModes: [String: Int] = [
         "share/hostwright/containerization/kernel/\(kernelFileName)": 0o644,
+        guestNetworkPolicyLoaderPayloadPath: 0o755,
         "share/hostwright/containerization/vminit/oci-layout": 0o644,
         "share/hostwright/containerization/vminit/index.json": 0o644,
         "share/hostwright/containerization/vminit/blobs/sha256/\(initIndexDigest)": 0o644,
@@ -45,6 +49,8 @@ public enum DistributionContainerizationAssets {
     static let rootRelativePathsByPayloadPath: [String: String] = [
         "share/hostwright/containerization/kernel/\(kernelFileName)":
             "kernel/\(kernelFileName)",
+        guestNetworkPolicyLoaderPayloadPath:
+            "guest/\(ContainerizationRuntimeAssetContract.guestNetworkPolicyLoaderFileName)",
         "share/hostwright/containerization/vminit/oci-layout": "vminit/oci-layout",
         "share/hostwright/containerization/vminit/index.json": "vminit/index.json",
         "share/hostwright/containerization/vminit/blobs/sha256/\(initIndexDigest)":
@@ -160,7 +166,12 @@ public enum DistributionContainerizationAssets {
                         "Containerization asset size differs: \(relativePath)"
                     )
                 }
-                if let maximumSize = metadataMaximumSize(payloadPath: payloadPath) {
+                if payloadPath == guestNetworkPolicyLoaderPayloadPath {
+                    try validateLinuxARM64Executable(
+                        descriptor: descriptor,
+                        size: openedMetadata.st_size
+                    )
+                } else if let maximumSize = metadataMaximumSize(payloadPath: payloadPath) {
                     guard openedMetadata.st_size <= maximumSize else {
                         throw DistributionError.invalidArtifact(
                             "Containerization asset metadata is oversized: \(relativePath)"
@@ -378,6 +389,39 @@ public enum DistributionContainerizationAssets {
         case "share/hostwright/containerization/vminit/oci-layout": 4_096
         case "share/hostwright/containerization/vminit/index.json": 64 * 1_024
         default: nil
+        }
+    }
+
+    private static func validateLinuxARM64Executable(
+        descriptor: Int32,
+        size: off_t
+    ) throws {
+        guard size >= 20,
+              size <= 64 * 1_024 * 1_024 else {
+            throw DistributionError.invalidArtifact(
+                "Guest network-policy loader size is invalid."
+            )
+        }
+        var header = [UInt8](repeating: 0, count: 20)
+        let count = header.withUnsafeMutableBytes {
+            Darwin.pread(descriptor, $0.baseAddress, $0.count, 0)
+        }
+        let fileType =
+            UInt16(header[16]) |
+            (UInt16(header[17]) << 8)
+        let machine =
+            UInt16(header[18]) |
+            (UInt16(header[19]) << 8)
+        guard count == header.count,
+              Array(header[0...3]) == [0x7f, 0x45, 0x4c, 0x46],
+              header[4] == 2,
+              header[5] == 1,
+              header[6] == 1,
+              fileType == 2 || fileType == 3,
+              machine == 183 else {
+            throw DistributionError.invalidArtifact(
+                "Guest network-policy loader must be one Linux ARM64 ELF executable."
+            )
         }
     }
 

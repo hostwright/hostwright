@@ -1,4 +1,5 @@
 import HostwrightManifest
+import HostwrightNetworking
 import HostwrightPolicy
 import HostwrightRuntime
 import XCTest
@@ -85,6 +86,43 @@ final class HostwrightPolicySmoke: XCTestCase {
 
         XCTAssertEqual(first, second)
         XCTAssertEqual(first.map(\.orderingKey), second.map(\.orderingKey))
+    }
+
+    func testDeclaredLANExposureFailsClosedUntilSecureListenerIsQualified() {
+        let exposure = HostwrightPortExposurePolicy(
+            scope: .lan,
+            interfaces: ["en0"],
+            networkClasses: [.privateLAN],
+            allowedCIDRs: ["192.168.1.0/24"],
+            authentication: .tls
+        )
+        let desired = desiredState(
+            services: [
+                desiredService(
+                    ports: [
+                        RuntimePortMapping(
+                            hostPort: 8_443,
+                            containerPort: 9_443,
+                            protocolName: .tcp,
+                            bindAddress: "192.168.1.10",
+                            allocation: .fixed,
+                            exposurePolicy: exposure
+                        )
+                    ]
+                )
+            ]
+        )
+
+        let decisions = LocalPolicyEvaluator.default.evaluate(
+            desiredState: desired
+        )
+
+        XCTAssertTrue(decisions.contains {
+            $0.reasonCode == .secureExposureUnsupported &&
+                $0.severity == .blocker &&
+                $0.message ==
+                    "Desired lan exposure requires a qualified secure listener provider."
+        })
     }
 
     func testImagePolicyExplainsDigestRequirementWithoutRegistryCalls() {

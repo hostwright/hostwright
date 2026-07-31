@@ -29,6 +29,8 @@ struct ContainerizationHelperConfiguration: Codable, Equatable, Sendable {
     let initImageDescriptorDigest: String
     let initImageVariantDigest: String
     let rootfsSizeBytes: UInt64
+    let guestNetworkPolicyLoaderPath: String?
+    let guestNetworkPolicyLoaderSHA256: String?
 
     var dataRootURL: URL { URL(fileURLWithPath: dataRootPath, isDirectory: true) }
     var runtimeDirectoryURL: URL {
@@ -38,9 +40,46 @@ struct ContainerizationHelperConfiguration: Codable, Equatable, Sendable {
     var initImageLayoutURL: URL {
         URL(fileURLWithPath: initImageLayoutPath, isDirectory: true)
     }
+    var guestNetworkPolicyLoaderURL: URL? {
+        guestNetworkPolicyLoaderPath.map {
+            URL(fileURLWithPath: $0, isDirectory: false)
+        }
+    }
     var initfsCacheFileName: String {
         let variant = String(initImageVariantDigest.dropFirst("sha256:".count))
         return "initfs-\(framework)-\(variant).ext4"
+    }
+
+    init(
+        schema: Int,
+        framework: String,
+        dataRootPath: String,
+        runtimeDirectoryPath: String,
+        kernelPath: String,
+        kernelSHA256: String,
+        initImageLayoutPath: String,
+        initImageReference: String,
+        initImageDescriptorDigest: String,
+        initImageVariantDigest: String,
+        rootfsSizeBytes: UInt64,
+        guestNetworkPolicyLoaderPath: String? = nil,
+        guestNetworkPolicyLoaderSHA256: String? = nil
+    ) {
+        self.schema = schema
+        self.framework = framework
+        self.dataRootPath = dataRootPath
+        self.runtimeDirectoryPath = runtimeDirectoryPath
+        self.kernelPath = kernelPath
+        self.kernelSHA256 = kernelSHA256
+        self.initImageLayoutPath = initImageLayoutPath
+        self.initImageReference = initImageReference
+        self.initImageDescriptorDigest = initImageDescriptorDigest
+        self.initImageVariantDigest = initImageVariantDigest
+        self.rootfsSizeBytes = rootfsSizeBytes
+        self.guestNetworkPolicyLoaderPath =
+            guestNetworkPolicyLoaderPath
+        self.guestNetworkPolicyLoaderSHA256 =
+            guestNetworkPolicyLoaderSHA256
     }
 
     static func defaultConfigurationURL(
@@ -88,6 +127,11 @@ struct ContainerizationHelperConfiguration: Codable, Equatable, Sendable {
         try Self.validateNormalizedAbsolute(runtimeDirectoryURL)
         try Self.validateNormalizedAbsolute(kernelURL)
         try Self.validateNormalizedAbsolute(initImageLayoutURL)
+        if let guestNetworkPolicyLoaderURL {
+            try Self.validateNormalizedAbsolute(
+                guestNetworkPolicyLoaderURL
+            )
+        }
         guard dataRootURL.path != runtimeDirectoryURL.path,
               dataRootURL.path != initImageLayoutURL.path,
               runtimeDirectoryURL.path != initImageLayoutURL.path,
@@ -101,9 +145,22 @@ struct ContainerizationHelperConfiguration: Codable, Equatable, Sendable {
               rootfsSizeBytes <= 64 * 1_024 * 1_024 * 1_024 else {
             throw ContainerizationHelperConfigurationError.configurationInvalid
         }
+        guard (guestNetworkPolicyLoaderPath == nil) ==
+                (guestNetworkPolicyLoaderSHA256 == nil),
+              guestNetworkPolicyLoaderSHA256.map(Self.validSHA256) ??
+                true else {
+            throw ContainerizationHelperConfigurationError.configurationInvalid
+        }
 
         try Self.requireSafeAsset(kernelURL, expectedDigest: kernelSHA256)
         try Self.requireSafeDirectory(initImageLayoutURL)
+        if let guestNetworkPolicyLoaderURL,
+           let guestNetworkPolicyLoaderSHA256 {
+            try Self.requireSafeAsset(
+                guestNetworkPolicyLoaderURL,
+                expectedDigest: guestNetworkPolicyLoaderSHA256
+            )
+        }
     }
 
     private static func requireSafeAsset(_ url: URL, expectedDigest: String) throws {

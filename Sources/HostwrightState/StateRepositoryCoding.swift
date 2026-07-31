@@ -460,7 +460,27 @@ func portJSON(_ port: RuntimePortMapping) -> [String: Any] {
         "hostPort": port.hostPort.map { $0 as Any } ?? NSNull(),
         "containerPort": port.containerPort,
         "protocol": port.protocolName.rawValue,
-        "bindAddress": port.bindAddress ?? NSNull()
+        "bindAddress": port.bindAddress ?? NSNull(),
+        "allocation": port.allocation.rawValue,
+        "exposure": [
+            "allowedCIDRs": port.exposurePolicy.allowedCIDRs,
+            "accessMode": port.exposurePolicy.authentication.rawValue,
+            "interfaces": port.exposurePolicy.interfaces,
+            "networkClasses":
+                port.exposurePolicy.networkClasses.map(\.rawValue),
+            "scope": port.exposurePolicy.scope.rawValue
+        ]
+    ]
+}
+
+func socketJSON(
+    _ socket: RuntimeUnixSocketPublication
+) -> [String: Any] {
+    [
+        "containerPath": socket.containerPath,
+        "hostPath": socket.hostPath,
+        "mode": socket.mode.rawValue,
+        "protocol": "unix"
     ]
 }
 

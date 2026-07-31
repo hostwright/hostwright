@@ -1,5 +1,6 @@
 import Foundation
 import HostwrightCore
+import HostwrightNetworking
 import HostwrightSecrets
 
 public struct RuntimeServiceIdentity: Equatable, Hashable, Sendable {
@@ -138,17 +139,91 @@ public enum RuntimePortProtocol: String, Equatable, Sendable {
     case udp
 }
 
+public enum RuntimeHostPortAllocation: String, Equatable, Sendable {
+    case fixed
+    case dynamic
+}
+
 public struct RuntimePortMapping: Equatable, Sendable {
     public let hostPort: Int?
     public let containerPort: Int
     public let protocolName: RuntimePortProtocol
     public let bindAddress: String?
+    public let allocation: RuntimeHostPortAllocation
+    public let exposurePolicy: HostwrightPortExposurePolicy
 
-    public init(hostPort: Int?, containerPort: Int, protocolName: RuntimePortProtocol = .tcp, bindAddress: String? = nil) {
+    public init(
+        hostPort: Int?,
+        containerPort: Int,
+        protocolName: RuntimePortProtocol = .tcp,
+        bindAddress: String? = nil,
+        allocation: RuntimeHostPortAllocation = .fixed
+    ) {
+        self.init(
+            hostPort: hostPort,
+            containerPort: containerPort,
+            protocolName: protocolName,
+            bindAddress: bindAddress,
+            allocation: allocation,
+            exposurePolicy: .localhost
+        )
+    }
+
+    public init(
+        hostPort: Int?,
+        containerPort: Int,
+        protocolName: RuntimePortProtocol,
+        bindAddress: String?,
+        allocation: RuntimeHostPortAllocation,
+        exposurePolicy: HostwrightPortExposurePolicy
+    ) {
         self.hostPort = hostPort
         self.containerPort = containerPort
         self.protocolName = protocolName
         self.bindAddress = bindAddress
+        self.allocation = allocation
+        self.exposurePolicy = exposurePolicy
+    }
+}
+
+public enum RuntimeUnixSocketMode:
+    String,
+    Codable,
+    Equatable,
+    Hashable,
+    Sendable
+{
+    case ownerOnly = "0600"
+    case ownerAndGroup = "0660"
+
+    public var fileMode: UInt16 {
+        switch self {
+        case .ownerOnly:
+            return 0o600
+        case .ownerAndGroup:
+            return 0o660
+        }
+    }
+}
+
+public struct RuntimeUnixSocketPublication:
+    Codable,
+    Equatable,
+    Hashable,
+    Sendable
+{
+    public let hostPath: String
+    public let containerPath: String
+    public let mode: RuntimeUnixSocketMode
+
+    public init(
+        hostPath: String,
+        containerPath: String,
+        mode: RuntimeUnixSocketMode = .ownerOnly
+    ) {
+        self.hostPath = hostPath
+        self.containerPath = containerPath
+        self.mode = mode
     }
 }
 
@@ -455,6 +530,10 @@ public struct DesiredRuntimeService: Equatable, Sendable {
     public let environment: [RuntimeEnvironmentValue]
     public let labels: [String: String]
     public let ports: [RuntimePortMapping]
+    public let publishedSockets: [RuntimeUnixSocketPublication]
+    public let hostAccess: [HostwrightHostAccessEndpoint]
+    public let networkPolicy: HostwrightServiceNetworkPolicy?
+    public let networks: [RuntimeDesiredNetworkAttachment]
     public let mounts: [RuntimeMountReference]
     public let healthCheck: RuntimeHealthCheckSpec?
     public let probes: RuntimeProbeSet
@@ -486,6 +565,81 @@ public struct DesiredRuntimeService: Equatable, Sendable {
         environment: [RuntimeEnvironmentValue] = [],
         labels: [String: String] = [:],
         ports: [RuntimePortMapping] = [],
+        publishedSockets: [RuntimeUnixSocketPublication] = [],
+        hostAccess: [HostwrightHostAccessEndpoint] = [],
+        networkPolicy: HostwrightServiceNetworkPolicy? = nil,
+        mounts: [RuntimeMountReference] = [],
+        healthCheck: RuntimeHealthCheckSpec? = nil,
+        probes: RuntimeProbeSet = RuntimeProbeSet(),
+        restartPolicy: RuntimeRestartPolicy = .no,
+        updatePolicy: RuntimeUpdatePolicy = RuntimeUpdatePolicy(),
+        hooks: RuntimeLifecycleHooks = RuntimeLifecycleHooks(),
+        rosetta: Bool = false,
+        virtualization: Bool = false,
+        readOnlyRootFilesystem: Bool = false,
+        sharedMemoryBytes: UInt64? = nil
+    ) {
+        self.init(
+            identity: identity,
+            logicalServiceName: logicalServiceName,
+            replicaIndex: replicaIndex,
+            image: image,
+            imageLock: imageLock,
+            platformOperatingSystem: platformOperatingSystem,
+            platformArchitecture: platformArchitecture,
+            cpuCount: cpuCount,
+            memoryBytes: memoryBytes,
+            userID: userID,
+            groupID: groupID,
+            workingDirectory: workingDirectory,
+            entrypoint: entrypoint,
+            command: command,
+            initProcess: initProcess,
+            dependencies: dependencies,
+            environment: environment,
+            labels: labels,
+            ports: ports,
+            publishedSockets: publishedSockets,
+            hostAccess: hostAccess,
+            networkPolicy: networkPolicy,
+            networks: [],
+            mounts: mounts,
+            healthCheck: healthCheck,
+            probes: probes,
+            restartPolicy: restartPolicy,
+            updatePolicy: updatePolicy,
+            hooks: hooks,
+            rosetta: rosetta,
+            virtualization: virtualization,
+            readOnlyRootFilesystem: readOnlyRootFilesystem,
+            sharedMemoryBytes: sharedMemoryBytes
+        )
+    }
+
+    public init(
+        identity: RuntimeServiceIdentity,
+        logicalServiceName: String? = nil,
+        replicaIndex: Int = 0,
+        image: String,
+        imageLock: RuntimeImageDigestLock? = nil,
+        platformOperatingSystem: String = "linux",
+        platformArchitecture: String = "arm64",
+        cpuCount: Int? = nil,
+        memoryBytes: UInt64? = nil,
+        userID: UInt32? = nil,
+        groupID: UInt32? = nil,
+        workingDirectory: String? = nil,
+        entrypoint: [String] = [],
+        command: [String] = [],
+        initProcess: Bool = false,
+        dependencies: [RuntimeServiceDependency] = [],
+        environment: [RuntimeEnvironmentValue] = [],
+        labels: [String: String] = [:],
+        ports: [RuntimePortMapping] = [],
+        publishedSockets: [RuntimeUnixSocketPublication] = [],
+        hostAccess: [HostwrightHostAccessEndpoint] = [],
+        networkPolicy: HostwrightServiceNetworkPolicy? = nil,
+        networks: [RuntimeDesiredNetworkAttachment],
         mounts: [RuntimeMountReference] = [],
         healthCheck: RuntimeHealthCheckSpec? = nil,
         probes: RuntimeProbeSet = RuntimeProbeSet(),
@@ -516,6 +670,12 @@ public struct DesiredRuntimeService: Equatable, Sendable {
         self.environment = environment
         self.labels = labels
         self.ports = ports
+        self.publishedSockets = publishedSockets
+        self.hostAccess = hostAccess.sorted(
+            by: HostwrightHostAccessPolicy.canonicalPrecedes
+        )
+        self.networkPolicy = networkPolicy
+        self.networks = networks
         self.mounts = mounts
         self.healthCheck = healthCheck
         self.probes = probes
@@ -772,6 +932,7 @@ public struct ObservedRuntimeService: Equatable, Sendable {
     public let lifecycleState: RuntimeLifecycleState
     public let healthState: RuntimeHealthState
     public let ports: [RuntimePortMapping]
+    public let publishedSockets: [RuntimeUnixSocketPublication]
     public let networks: [RuntimeNetworkAttachment]
     public let mounts: [RuntimeMountReference]
     public let observedAt: String?
@@ -783,6 +944,7 @@ public struct ObservedRuntimeService: Equatable, Sendable {
         lifecycleState: RuntimeLifecycleState = .unknown,
         healthState: RuntimeHealthState = .unknown,
         ports: [RuntimePortMapping] = [],
+        publishedSockets: [RuntimeUnixSocketPublication] = [],
         networks: [RuntimeNetworkAttachment] = [],
         mounts: [RuntimeMountReference] = [],
         observedAt: String? = nil
@@ -793,6 +955,7 @@ public struct ObservedRuntimeService: Equatable, Sendable {
         self.lifecycleState = lifecycleState
         self.healthState = healthState
         self.ports = ports
+        self.publishedSockets = publishedSockets
         self.networks = networks
         self.mounts = mounts
         self.observedAt = observedAt
@@ -801,6 +964,7 @@ public struct ObservedRuntimeService: Equatable, Sendable {
 
 public struct DesiredRuntimeState: Equatable, Sendable {
     public let projectName: String
+    public let networks: [DesiredRuntimeNetwork]
     public let services: [DesiredRuntimeService]
     public let ownedResourceHints: [RuntimeOwnedResourceHint]
 
@@ -809,7 +973,22 @@ public struct DesiredRuntimeState: Equatable, Sendable {
         services: [DesiredRuntimeService],
         ownedResourceHints: [RuntimeOwnedResourceHint] = []
     ) {
+        self.init(
+            projectName: projectName,
+            networks: [],
+            services: services,
+            ownedResourceHints: ownedResourceHints
+        )
+    }
+
+    public init(
+        projectName: String,
+        networks: [DesiredRuntimeNetwork],
+        services: [DesiredRuntimeService],
+        ownedResourceHints: [RuntimeOwnedResourceHint] = []
+    ) {
         self.projectName = projectName
+        self.networks = networks
         self.services = services
         self.ownedResourceHints = ownedResourceHints
     }
@@ -929,6 +1108,7 @@ public enum RuntimeCapability: String, Codable, Equatable, Hashable, Sendable {
     case cleanup
     case volumeInspection
     case networkInspection
+    case networkLifecycle
 }
 
 public struct RuntimeAdapterMetadata: Codable, Equatable, Sendable {

@@ -419,7 +419,7 @@ public enum HostwrightCLI {
 
     private static func renderCapabilities(_ report: HostwrightCapabilityReport) -> String {
         let header = "Hostwright \(report.productVersion) (target \(report.releaseTarget))\n"
-        let contracts = "Contracts: manifest v\(report.contracts.manifest), control API v\(report.contracts.controlAPI), runtime provider API v\(report.contracts.runtimeProviderAPI), storage provider API v\(report.contracts.storageProviderAPI), plugin ABI v\(report.contracts.pluginABI), state schema v\(report.contracts.stateSchema)\n"
+        let contracts = "Contracts: manifest v\(report.contracts.manifest), control API v\(report.contracts.controlAPI), runtime provider API v\(report.contracts.runtimeProviderAPI), storage provider API v\(report.contracts.storageProviderAPI), network provider SPI v\(report.contracts.networkProviderSPI), plugin ABI v\(report.contracts.pluginABI), state schema v\(report.contracts.stateSchema)\n"
         let rows = report.capabilities.map {
             "\($0.identifier)\t\($0.state.rawValue)\tphase \(String(format: "%02d", $0.phase))\t#\($0.issue)\t\($0.title)"
         }.joined(separator: "\n")

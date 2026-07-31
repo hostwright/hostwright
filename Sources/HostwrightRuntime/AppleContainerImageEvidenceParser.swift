@@ -19,27 +19,42 @@ public enum AppleContainerImageEvidenceParser {
             let expectedDescriptorDigest = try expectedDescriptorDigest(
                 in: expectedReference
             )
-            let matches = images.filter {
-                matchesExpectedReference(
+            let candidates = images.filter {
+                matchesExpectedRepository(
                     $0.configuration,
                     expectedReference: expectedReference,
-                    expectedDescriptorDigest: expectedDescriptorDigest
+                    digestPinned: expectedDescriptorDigest != nil
                 )
             }
-            guard !matches.isEmpty else {
+            let normalizedMatches = try candidates
+                .map(normalizedEvidence)
+                .filter {
+                    guard let expectedDescriptorDigest else {
+                        return true
+                    }
+                    return $0.descriptorDigest ==
+                        expectedDescriptorDigest ||
+                        $0.variants.contains {
+                            $0.digest == expectedDescriptorDigest
+                        }
+                }
+            guard !normalizedMatches.isEmpty else {
                 throw RuntimeAdapterError.capabilityUnavailable(.lifecycleMutation)
             }
-            let normalizedMatches = try matches.map(normalizedEvidence)
             guard let image = normalizedMatches.first,
-                  normalizedMatches.dropFirst().allSatisfy({ $0 == image }),
-                  expectedDescriptorDigest.map({ $0 == image.descriptorDigest }) ?? true else {
+                  normalizedMatches.dropFirst().allSatisfy({ $0 == image }) else {
                 throw RuntimeAdapterError.outputParseFailed(
                     "Local image aliases contained conflicting descriptor or variant evidence."
                 )
             }
-            let preferredVariants = image.variants.filter {
-                $0.architecture == preferredArchitecture
+            let digestPinnedVariants = image.variants.filter {
+                $0.digest == expectedDescriptorDigest
             }
+            let preferredVariants = (
+                digestPinnedVariants.isEmpty
+                    ? image.variants
+                    : digestPinnedVariants
+            ).filter { $0.architecture == preferredArchitecture }
             let variant: NormalizedVariant
             if preferredVariants.count == 1, let preferred = preferredVariants.first {
                 variant = preferred
@@ -92,20 +107,19 @@ public enum AppleContainerImageEvidenceParser {
         return String(parts[1])
     }
 
-    private static func matchesExpectedReference(
+    private static func matchesExpectedRepository(
         _ configuration: Configuration,
         expectedReference: String,
-        expectedDescriptorDigest: String?
+        digestPinned: Bool
     ) -> Bool {
         if configuration.name == expectedReference {
             return true
         }
-        guard let expectedDescriptorDigest,
-              configuration.descriptor.digest == expectedDescriptorDigest,
-              repository(of: configuration.name) == repository(of: expectedReference) else {
+        guard digestPinned else {
             return false
         }
-        return true
+        return repository(of: configuration.name) ==
+            repository(of: expectedReference)
     }
 
     private static func normalizedEvidence(

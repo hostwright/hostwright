@@ -1,10 +1,10 @@
 # Secure Exposure Research
 
-> **Historical research, promoted to implementation:** v0.0.2 Phase 07 owns networks, DNS, ingress, TLS/mTLS, policy, Hostwright tunnels, and third-party provider SPI. The fail-closed current boundary remains until executable security and cleanup evidence passes.
+> **Historical research, promoted to implementation:** v0.0.2 Phase 07 now provides the narrow qualified networks, project DNS, ingress, TLS/mTLS, policy, Hostwright tunnel, and signed provider-SPI boundaries. The provider comparisons and rejected broad integrations below remain the historical decision record.
 
 Status: research-only decision record for Phase 23.
 
-Hostwright does not currently support tunnels, public exposure, cloud exposure, local reverse proxy mutation, DNS management, WireGuard setup, Cloudflare integration, Tailscale integration, mTLS provisioning, or a cloud control plane. This document records boundaries that must exist before any later implementation issue starts.
+At the time of Phase 23, Hostwright did not support these surfaces. Phase 07 later implemented only UUID-owned project DNS, local ingress, local TLS/mTLS, authenticated Hostwright service tunnels, and a restricted signed provider SPI. Hostwright still does not configure unmanaged host DNS, WireGuard, Cloudflare, Tailscale, a general VPN, unauthenticated public exposure, or a cloud control plane.
 
 ## Source Review
 

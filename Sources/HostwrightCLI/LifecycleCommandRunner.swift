@@ -1,5 +1,6 @@
 import Foundation
 import HostwrightCore
+import HostwrightNetworking
 import HostwrightReconciler
 import HostwrightRuntime
 import HostwrightState
@@ -159,6 +160,11 @@ public struct LifecycleCommandPreparation: Sendable {
     public let manifestBaseDirectory: String
     public let mappingIssues: [PlanIssue]
     public let desiredState: DesiredRuntimeState
+    public let certificates:
+        [String: HostwrightCertificateDeclaration]
+    public let ingress: [String: HostwrightIngressListener]
+    public let tunnelDeclarations:
+        [String: HostwrightTunnelDeclaration]
     public let previousDesiredState: DesiredRuntimeState?
     public let observedState: ObservedRuntimeState
     public let observationSHA256: String
@@ -177,6 +183,11 @@ public struct LifecycleCommandPreparation: Sendable {
         manifestBaseDirectory: String,
         mappingIssues: [PlanIssue] = [],
         desiredState: DesiredRuntimeState,
+        certificates:
+            [String: HostwrightCertificateDeclaration] = [:],
+        ingress: [String: HostwrightIngressListener] = [:],
+        tunnelDeclarations:
+            [String: HostwrightTunnelDeclaration] = [:],
         previousDesiredState: DesiredRuntimeState? = nil,
         observedState: ObservedRuntimeState,
         observationSHA256: String,
@@ -194,6 +205,9 @@ public struct LifecycleCommandPreparation: Sendable {
         self.manifestBaseDirectory = manifestBaseDirectory
         self.mappingIssues = mappingIssues
         self.desiredState = desiredState
+        self.certificates = certificates
+        self.ingress = ingress
+        self.tunnelDeclarations = tunnelDeclarations
         self.previousDesiredState = previousDesiredState
         self.observedState = observedState
         self.observationSHA256 = observationSHA256
@@ -418,6 +432,7 @@ enum LifecycleImageLockBinder {
             )
             previousDesiredState = DesiredRuntimeState(
                 projectName: previous.projectName,
+                networks: previous.networks,
                 services: previousServices,
                 ownedResourceHints: previous.ownedResourceHints
             )
@@ -431,10 +446,13 @@ enum LifecycleImageLockBinder {
             mappingIssues: preparation.mappingIssues,
             desiredState: DesiredRuntimeState(
                 projectName: preparation.desiredState.projectName,
+                networks: preparation.desiredState.networks,
                 services: services,
                 ownedResourceHints:
                     preparation.desiredState.ownedResourceHints
             ),
+            ingress: preparation.ingress,
+            tunnelDeclarations: preparation.tunnelDeclarations,
             previousDesiredState: previousDesiredState,
             observedState: preparation.observedState,
             observationSHA256: preparation.observationSHA256,
@@ -475,6 +493,10 @@ enum LifecycleImageLockBinder {
             environment: service.environment,
             labels: service.labels,
             ports: service.ports,
+            publishedSockets: service.publishedSockets,
+            hostAccess: service.hostAccess,
+            networkPolicy: service.networkPolicy,
+            networks: service.networks,
             mounts: service.mounts,
             healthCheck: service.healthCheck,
             probes: service.probes,
@@ -1139,6 +1161,7 @@ public struct LifecycleCommandPlanCompiler: Sendable {
         let identities = Set(services.map(\.identity))
         return DesiredRuntimeState(
             projectName: state.projectName,
+            networks: state.networks,
             services: services,
             ownedResourceHints: state.ownedResourceHints.filter {
                 identities.contains($0.identity)
@@ -1178,6 +1201,7 @@ public struct LifecycleCommandPlanCompiler: Sendable {
         }
         return DesiredRuntimeState(
             projectName: state.projectName,
+            networks: state.networks,
             services: state.services,
             ownedResourceHints: Dictionary(
                 hints.map { ("\($0.identity.displayName)|\($0.resourceIdentifier)", $0) },
@@ -1199,6 +1223,7 @@ public struct LifecycleCommandPlanCompiler: Sendable {
             .standardizedFileURL
         return DesiredRuntimeState(
             projectName: state.projectName,
+            networks: state.networks,
             services: try state.services.map { service in
                 let mounts = try service.mounts.map { mount -> RuntimeMountReference in
                     if mount.kind == .tmpfs {
@@ -1643,6 +1668,10 @@ public struct LifecycleCommandPlanCompiler: Sendable {
             environment: service.environment,
             labels: service.labels,
             ports: service.ports,
+            publishedSockets: service.publishedSockets,
+            hostAccess: service.hostAccess,
+            networkPolicy: service.networkPolicy,
+            networks: service.networks,
             mounts: mounts,
             healthCheck: service.healthCheck,
             probes: service.probes,

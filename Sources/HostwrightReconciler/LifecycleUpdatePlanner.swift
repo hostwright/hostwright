@@ -1,5 +1,6 @@
 import Foundation
 import HostwrightCore
+import HostwrightNetworking
 import HostwrightRuntime
 
 public enum LifecycleUpdatePlanningError: Error, Equatable, Sendable {
@@ -191,20 +192,46 @@ public enum LifecycleRevisionCodec {
                 $0.hostPort ?? -1,
                 $0.containerPort,
                 $0.protocolName.rawValue,
-                $0.bindAddress ?? ""
+                $0.bindAddress ?? "",
+                $0.allocation.rawValue,
+                exposureSortKey($0.exposurePolicy)
             ) < (
                 $1.hostPort ?? -1,
                 $1.containerPort,
                 $1.protocolName.rawValue,
-                $1.bindAddress ?? ""
+                $1.bindAddress ?? "",
+                $1.allocation.rawValue,
+                exposureSortKey($1.exposurePolicy)
             )
+        }.map { port -> [String: Any] in
+            [
+                "allocation": port.allocation.rawValue,
+                "bindAddress": port.bindAddress.map { $0 as Any } ?? NSNull(),
+                "containerPort": port.containerPort,
+                "exposure": exposureDocument(port.exposurePolicy),
+                "hostPort": port.hostPort.map { $0 as Any } ?? NSNull(),
+                "protocol": port.protocolName.rawValue
+            ]
+        }
+        let publishedSockets = service.publishedSockets.sorted {
+            ($0.hostPath, $0.containerPath, $0.mode.rawValue) <
+                ($1.hostPath, $1.containerPath, $1.mode.rawValue)
         }.map {
             [
-                "bindAddress": $0.bindAddress.map { $0 as Any } ?? NSNull(),
-                "containerPort": $0.containerPort,
-                "hostPort": $0.hostPort.map { $0 as Any } ?? NSNull(),
-                "protocol": $0.protocolName.rawValue
+                "containerPath": $0.containerPath,
+                "hostPath": $0.hostPath,
+                "mode": $0.mode.rawValue
             ]
+        }
+        let hostAccess = service.hostAccess.sorted(
+            by: HostwrightHostAccessPolicy.canonicalPrecedes
+        ).map {
+            [
+                "addressClass": $0.addressClass.rawValue,
+                "hostname": $0.hostname,
+                "port": $0.port,
+                "protocol": $0.protocolName.rawValue
+            ] as [String: Any]
         }
         let mounts = service.mounts.sorted {
             ($0.target, $0.source, $0.access.rawValue) <
@@ -214,6 +241,25 @@ public enum LifecycleRevisionCodec {
                 "access": $0.access.rawValue,
                 "source": $0.source,
                 "target": $0.target
+            ]
+        }
+        let networks = service.networks.sorted {
+            if $0.networkRuntimeIdentifier !=
+                $1.networkRuntimeIdentifier {
+                return $0.networkRuntimeIdentifier <
+                    $1.networkRuntimeIdentifier
+            }
+            if $0.networkResourceUUID !=
+                $1.networkResourceUUID {
+                return $0.networkResourceUUID <
+                    $1.networkResourceUUID
+            }
+            return $0.aliases.lexicographicallyPrecedes($1.aliases)
+        }.map {
+            [
+                "aliases": $0.aliases,
+                "networkResourceUUID": $0.networkResourceUUID,
+                "networkRuntimeIdentifier": $0.networkRuntimeIdentifier
             ]
         }
         var probeObject: [String: Any] = [:]
@@ -243,6 +289,7 @@ public enum LifecycleRevisionCodec {
             "environment": environment,
             "groupID": service.groupID.map { String($0) as Any } ?? NSNull(),
             "healthCheck": health,
+            "hostAccess": hostAccess,
             "hooks": [
                 "postStart": service.hooks.postStart.map { $0 as Any } ?? NSNull(),
                 "preStop": service.hooks.preStop.map { $0 as Any } ?? NSNull()
@@ -258,11 +305,17 @@ public enum LifecycleRevisionCodec {
             "logicalServiceName": service.logicalServiceName,
             "memoryBytes": service.memoryBytes.map { String($0) as Any } ?? NSNull(),
             "mounts": mounts,
+            "networkPolicy":
+                service.networkPolicy.map {
+                    networkPolicyDocument($0) as Any
+                } ?? NSNull(),
+            "networks": networks,
             "platform": [
                 "architecture": service.platformArchitecture,
                 "operatingSystem": service.platformOperatingSystem
             ],
             "ports": ports,
+            "publishedSockets": publishedSockets,
             "probes": probeObject,
             "readOnlyRootFilesystem": service.readOnlyRootFilesystem,
             "replicaIndex": service.replicaIndex,
@@ -303,6 +356,54 @@ public enum LifecycleRevisionCodec {
             throw LifecyclePlanError.encodingFailed
         }
         return try LifecycleCanonicalJSON.canonicalObjectJSON(json)
+    }
+
+    private static func exposureSortKey(
+        _ exposure: HostwrightPortExposurePolicy
+    ) -> String {
+        [
+            exposure.scope.rawValue,
+            exposure.authentication.rawValue,
+            exposure.interfaces.joined(separator: ","),
+            exposure.networkClasses.map(\.rawValue).joined(separator: ","),
+            exposure.allowedCIDRs.joined(separator: ",")
+        ].joined(separator: "|")
+    }
+
+    private static func exposureDocument(
+        _ exposure: HostwrightPortExposurePolicy
+    ) -> [String: Any] {
+        [
+            "allowedCIDRs": exposure.allowedCIDRs,
+            "accessMode": exposure.authentication.rawValue,
+            "interfaces": exposure.interfaces,
+            "networkClasses": exposure.networkClasses.map(\.rawValue),
+            "scope": exposure.scope.rawValue
+        ]
+    }
+
+    private static func networkPolicyDocument(
+        _ policy: HostwrightServiceNetworkPolicy
+    ) -> [String: Any] {
+        [
+            "egress": policy.egress.map(networkPolicyRuleDocument),
+            "ingress": policy.ingress.map(networkPolicyRuleDocument)
+        ]
+    }
+
+    private static func networkPolicyRuleDocument(
+        _ rule: HostwrightNetworkPolicyRule
+    ) -> [String: Any] {
+        [
+            "address": rule.address.map { $0 as Any } ?? NSNull(),
+            "dns": rule.dns.map { $0 as Any } ?? NSNull(),
+            "identity": rule.identity.map { $0 as Any } ?? NSNull(),
+            "port": rule.port.map { $0 as Any } ?? NSNull(),
+            "project": rule.project.map { $0 as Any } ?? NSNull(),
+            "protocol":
+                rule.protocolName.map { $0.rawValue as Any } ?? NSNull(),
+            "service": rule.service.map { $0 as Any } ?? NSNull()
+        ]
     }
 
     public static func revisionSHA256(
@@ -419,6 +520,7 @@ public enum LifecycleRevisionCodec {
         let groupID: String?
         let healthCheck: HealthDocument?
         let hooks: HooksDocument
+        let hostAccess: [HostAccessDocument]
         let identity: IdentityDocument
         let image: String
         let imageLock: ImageLockDocument?
@@ -427,8 +529,11 @@ public enum LifecycleRevisionCodec {
         let logicalServiceName: String
         let memoryBytes: String?
         let mounts: [MountDocument]
+        let networkPolicy: NetworkPolicyDocument?
+        let networks: [NetworkDocument]
         let platform: PlatformDocument
         let ports: [PortDocument]
+        let publishedSockets: [SocketDocument]
         let probes: ProbesDocument
         let readOnlyRootFilesystem: Bool
         let replicaIndex: Int
@@ -448,12 +553,15 @@ public enum LifecycleRevisionCodec {
                     "command", "cpuCount", "dependencies", "entrypoint",
                     "environment", "groupID", "healthCheck", "hooks", "identity",
                     "image", "init", "labels", "logicalServiceName",
-                    "memoryBytes", "mounts", "platform", "ports", "probes",
+                    "memoryBytes", "mounts", "networks", "platform", "ports", "probes",
                     "readOnlyRootFilesystem", "replicaIndex", "restartPolicy",
                     "rosetta", "sharedMemoryBytes", "updatePolicy", "userID",
                     "virtualization", "workingDirectory"
                 ],
-                optional: ["imageLock"],
+                optional: [
+                    "hostAccess", "imageLock", "networkPolicy",
+                    "publishedSockets"
+                ],
                 path: ""
             )
             command = try container.decode([String].self, forKey: "command")
@@ -473,6 +581,10 @@ public enum LifecycleRevisionCodec {
                 forKey: "healthCheck"
             )
             hooks = try container.decode(HooksDocument.self, forKey: "hooks")
+            hostAccess = try container.decodeIfPresent(
+                [HostAccessDocument].self,
+                forKey: "hostAccess"
+            ) ?? []
             identity = try container.decode(IdentityDocument.self, forKey: "identity")
             image = try container.decode(String.self, forKey: "image")
             imageLock = try container.decodeIfPresent(
@@ -490,8 +602,20 @@ public enum LifecycleRevisionCodec {
                 forKey: "memoryBytes"
             )
             mounts = try container.decode([MountDocument].self, forKey: "mounts")
+            networkPolicy = try container.decodeIfPresent(
+                NetworkPolicyDocument.self,
+                forKey: "networkPolicy"
+            )
+            networks = try container.decode(
+                [NetworkDocument].self,
+                forKey: "networks"
+            )
             platform = try container.decode(PlatformDocument.self, forKey: "platform")
             ports = try container.decode([PortDocument].self, forKey: "ports")
+            publishedSockets = try container.decodeIfPresent(
+                [SocketDocument].self,
+                forKey: "publishedSockets"
+            ) ?? []
             probes = try container.decode(ProbesDocument.self, forKey: "probes")
             readOnlyRootFilesystem = try container.decode(
                 Bool.self,
@@ -556,6 +680,12 @@ public enum LifecycleRevisionCodec {
                 environment: try environment.map { try $0.value },
                 labels: labels,
                 ports: try ports.map { try $0.value },
+                publishedSockets: try publishedSockets.map {
+                    try $0.value
+                },
+                hostAccess: try hostAccess.map { try $0.value },
+                networkPolicy: try networkPolicy?.value,
+                networks: try networks.map { try $0.value },
                 mounts: try mounts.map { try $0.value },
                 healthCheck: healthCheck?.value,
                 probes: try probes.value,
@@ -807,12 +937,15 @@ public enum LifecycleRevisionCodec {
         let containerPort: Int
         let hostPort: Int?
         let protocolName: String
+        let allocation: String
+        let exposure: ExposureDocument?
 
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: RevisionCodingKey.self)
             try LifecycleRevisionCodec.validateKeys(
                 container,
                 required: ["bindAddress", "containerPort", "hostPort", "protocol"],
+                optional: ["allocation", "exposure"],
                 path: "ports"
             )
             bindAddress = try container.decodeIfPresent(
@@ -822,6 +955,14 @@ public enum LifecycleRevisionCodec {
             containerPort = try container.decode(Int.self, forKey: "containerPort")
             hostPort = try container.decodeIfPresent(Int.self, forKey: "hostPort")
             protocolName = try container.decode(String.self, forKey: "protocol")
+            allocation = try container.decodeIfPresent(
+                String.self,
+                forKey: "allocation"
+            ) ?? RuntimeHostPortAllocation.fixed.rawValue
+            exposure = try container.decodeIfPresent(
+                ExposureDocument.self,
+                forKey: "exposure"
+            )
         }
 
         var value: RuntimePortMapping {
@@ -829,12 +970,334 @@ public enum LifecycleRevisionCodec {
                 guard let decoded = RuntimePortProtocol(rawValue: protocolName) else {
                     throw LifecycleRevisionCodec.invalidEnum("ports.protocol")
                 }
+                guard let decodedAllocation =
+                        RuntimeHostPortAllocation(rawValue: allocation) else {
+                    throw LifecycleRevisionCodec.invalidEnum(
+                        "ports.allocation"
+                    )
+                }
                 return RuntimePortMapping(
                     hostPort: hostPort,
                     containerPort: containerPort,
                     protocolName: decoded,
-                    bindAddress: bindAddress
+                    bindAddress: bindAddress,
+                    allocation: decodedAllocation,
+                    exposurePolicy: try exposure?.value ?? .localhost
                 )
+            }
+        }
+    }
+
+    private struct ExposureDocument: Decodable {
+        let allowedCIDRs: [String]
+        let accessMode: String
+        let interfaces: [String]
+        let networkClasses: [String]
+        let scope: String
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(
+                keyedBy: RevisionCodingKey.self
+            )
+            try LifecycleRevisionCodec.validateKeys(
+                container,
+                required: [
+                    "allowedCIDRs",
+                    "accessMode",
+                    "interfaces",
+                    "networkClasses",
+                    "scope"
+                ],
+                optional: [],
+                path: "ports.exposure"
+            )
+            allowedCIDRs = try container.decode(
+                [String].self,
+                forKey: "allowedCIDRs"
+            )
+            accessMode = try container.decode(
+                String.self,
+                forKey: "accessMode"
+            )
+            interfaces = try container.decode(
+                [String].self,
+                forKey: "interfaces"
+            )
+            networkClasses = try container.decode(
+                [String].self,
+                forKey: "networkClasses"
+            )
+            scope = try container.decode(String.self, forKey: "scope")
+        }
+
+        var value: HostwrightPortExposurePolicy {
+            get throws {
+                guard let decodedScope = NetworkExposureScope(rawValue: scope),
+                      let decodedAuthentication =
+                        NetworkExposureAuthentication(rawValue: accessMode)
+                else {
+                    throw LifecycleRevisionCodec.invalidEnum(
+                        "ports.exposure"
+                    )
+                }
+                let decodedClasses = try networkClasses.map { value in
+                    guard let decoded = HostwrightNetworkClass(rawValue: value)
+                    else {
+                        throw LifecycleRevisionCodec.invalidEnum(
+                            "ports.exposure.networkClasses"
+                        )
+                    }
+                    return decoded
+                }
+                let decoded = HostwrightPortExposurePolicy(
+                    scope: decodedScope,
+                    interfaces: interfaces,
+                    networkClasses: decodedClasses,
+                    allowedCIDRs: allowedCIDRs,
+                    authentication: decodedAuthentication
+                )
+                guard decoded.interfaces == interfaces,
+                      decoded.networkClasses.map(\.rawValue) == networkClasses,
+                      decoded.allowedCIDRs == allowedCIDRs,
+                      interfaces.count <=
+                        HostwrightPortExposurePolicy.maximumInterfaceSelectors,
+                      allowedCIDRs.count <=
+                        HostwrightPortExposurePolicy.maximumAllowedCIDRs,
+                      interfaces.allSatisfy(
+                        NetworkExposurePolicyValidation
+                            .isValidInterfaceSelector
+                      ),
+                      allowedCIDRs.allSatisfy({
+                        NetworkExposurePolicyValidation.canonicalCIDR($0) == $0
+                      })
+                else {
+                    throw LifecycleRevisionCodecError.invalidField(
+                        "ports.exposure"
+                    )
+                }
+                return decoded
+            }
+        }
+    }
+
+    private struct SocketDocument: Decodable {
+        let containerPath: String
+        let hostPath: String
+        let mode: String
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(
+                keyedBy: RevisionCodingKey.self
+            )
+            try LifecycleRevisionCodec.validateKeys(
+                container,
+                required: ["containerPath", "hostPath", "mode"],
+                path: "publishedSockets"
+            )
+            containerPath = try container.decode(
+                String.self,
+                forKey: "containerPath"
+            )
+            hostPath = try container.decode(
+                String.self,
+                forKey: "hostPath"
+            )
+            mode = try container.decode(String.self, forKey: "mode")
+        }
+
+        var value: RuntimeUnixSocketPublication {
+            get throws {
+                guard let decoded = RuntimeUnixSocketMode(
+                    rawValue: mode
+                ) else {
+                    throw LifecycleRevisionCodec.invalidEnum(
+                        "publishedSockets.mode"
+                    )
+                }
+                return RuntimeUnixSocketPublication(
+                    hostPath: hostPath,
+                    containerPath: containerPath,
+                    mode: decoded
+                )
+            }
+        }
+    }
+
+    private struct HostAccessDocument: Decodable {
+        let addressClass: String
+        let hostname: String
+        let port: Int
+        let protocolName: String
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(
+                keyedBy: RevisionCodingKey.self
+            )
+            try LifecycleRevisionCodec.validateKeys(
+                container,
+                required: [
+                    "addressClass", "hostname", "port", "protocol"
+                ],
+                path: "hostAccess"
+            )
+            addressClass = try container.decode(
+                String.self,
+                forKey: "addressClass"
+            )
+            hostname = try container.decode(
+                String.self,
+                forKey: "hostname"
+            )
+            port = try container.decode(Int.self, forKey: "port")
+            protocolName = try container.decode(
+                String.self,
+                forKey: "protocol"
+            )
+        }
+
+        var value: HostwrightHostAccessEndpoint {
+            get throws {
+                guard HostwrightHostAccessPolicy.isValidHostname(hostname),
+                      (1...65_535).contains(port),
+                      let protocolValue = HostwrightHostAccessProtocol(
+                        rawValue: protocolName
+                      ),
+                      let addressClassValue =
+                        HostwrightHostAccessAddressClass(
+                            rawValue: addressClass
+                        ) else {
+                    throw LifecycleRevisionCodecError.invalidField(
+                        "hostAccess"
+                    )
+                }
+                return HostwrightHostAccessEndpoint(
+                    hostname: hostname,
+                    protocolName: protocolValue,
+                    addressClass: addressClassValue,
+                    port: port
+                )
+            }
+        }
+    }
+
+    private struct NetworkPolicyDocument: Decodable {
+        let ingress: [NetworkPolicyRuleDocument]
+        let egress: [NetworkPolicyRuleDocument]
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(
+                keyedBy: RevisionCodingKey.self
+            )
+            try LifecycleRevisionCodec.validateKeys(
+                container,
+                required: ["egress", "ingress"],
+                path: "networkPolicy"
+            )
+            ingress = try container.decode(
+                [NetworkPolicyRuleDocument].self,
+                forKey: "ingress"
+            )
+            egress = try container.decode(
+                [NetworkPolicyRuleDocument].self,
+                forKey: "egress"
+            )
+        }
+
+        var value: HostwrightServiceNetworkPolicy {
+            get throws {
+                let policy = HostwrightServiceNetworkPolicy(
+                    ingress: try ingress.map { try $0.value },
+                    egress: try egress.map { try $0.value }
+                )
+                if let issue = HostwrightNetworkPolicyValidation.issue(
+                    in: policy
+                ) {
+                    throw LifecycleRevisionCodecError.invalidField(
+                        "networkPolicy: \(issue)"
+                    )
+                }
+                return policy
+            }
+        }
+    }
+
+    private struct NetworkPolicyRuleDocument: Decodable {
+        let project: String?
+        let service: String?
+        let identity: String?
+        let protocolName: String?
+        let address: String?
+        let port: Int?
+        let dns: String?
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(
+                keyedBy: RevisionCodingKey.self
+            )
+            try LifecycleRevisionCodec.validateKeys(
+                container,
+                required: [
+                    "address", "dns", "identity", "port", "project",
+                    "protocol", "service"
+                ],
+                path: "networkPolicy.rule"
+            )
+            project = try container.decodeIfPresent(
+                String.self,
+                forKey: "project"
+            )
+            service = try container.decodeIfPresent(
+                String.self,
+                forKey: "service"
+            )
+            identity = try container.decodeIfPresent(
+                String.self,
+                forKey: "identity"
+            )
+            protocolName = try container.decodeIfPresent(
+                String.self,
+                forKey: "protocol"
+            )
+            address = try container.decodeIfPresent(
+                String.self,
+                forKey: "address"
+            )
+            port = try container.decodeIfPresent(Int.self, forKey: "port")
+            dns = try container.decodeIfPresent(String.self, forKey: "dns")
+        }
+
+        var value: HostwrightNetworkPolicyRule {
+            get throws {
+                let decodedProtocol: HostwrightNetworkPolicyProtocol?
+                if let protocolName {
+                    guard let value = HostwrightNetworkPolicyProtocol(
+                        rawValue: protocolName
+                    ) else {
+                        throw LifecycleRevisionCodec.invalidEnum(
+                            "networkPolicy.protocol"
+                        )
+                    }
+                    decodedProtocol = value
+                } else {
+                    decodedProtocol = nil
+                }
+                let rule = HostwrightNetworkPolicyRule(
+                    project: project,
+                    service: service,
+                    identity: identity,
+                    protocolName: decodedProtocol,
+                    address: address,
+                    port: port,
+                    dns: dns
+                )
+                if let issue = HostwrightNetworkPolicyValidation.issue(
+                    in: rule
+                ) {
+                    throw LifecycleRevisionCodecError.invalidField(
+                        "networkPolicy.rule: \(issue)"
+                    )
+                }
+                return rule
             }
         }
     }
@@ -865,6 +1328,44 @@ public enum LifecycleRevisionCodec {
                     source: source,
                     target: target,
                     access: decoded
+                )
+            }
+        }
+    }
+
+    private struct NetworkDocument: Decodable {
+        let aliases: [String]
+        let networkResourceUUID: String
+        let networkRuntimeIdentifier: String
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: RevisionCodingKey.self)
+            try LifecycleRevisionCodec.validateKeys(
+                container,
+                required: [
+                    "aliases",
+                    "networkResourceUUID",
+                    "networkRuntimeIdentifier"
+                ],
+                path: "networks"
+            )
+            aliases = try container.decode([String].self, forKey: "aliases")
+            networkResourceUUID = try container.decode(
+                String.self,
+                forKey: "networkResourceUUID"
+            )
+            networkRuntimeIdentifier = try container.decode(
+                String.self,
+                forKey: "networkRuntimeIdentifier"
+            )
+        }
+
+        var value: RuntimeDesiredNetworkAttachment {
+            get throws {
+                return try RuntimeDesiredNetworkAttachment(
+                    networkRuntimeIdentifier: networkRuntimeIdentifier,
+                    networkResourceUUID: networkResourceUUID,
+                    aliases: aliases
                 )
             }
         }

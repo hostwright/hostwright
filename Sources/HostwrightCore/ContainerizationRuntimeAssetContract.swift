@@ -36,6 +36,10 @@ public enum ContainerizationRuntimeAssetContract {
         "\(installationRelativeRoot)/kernel/\(kernelFileName)"
     public static let initImageLayoutInstallationRelativePath =
         "\(installationRelativeRoot)/vminit"
+    public static let guestNetworkPolicyLoaderFileName =
+        "hostwright-netfilter"
+    public static let guestNetworkPolicyLoaderInstallationRelativePath =
+        "\(installationRelativeRoot)/guest/\(guestNetworkPolicyLoaderFileName)"
 
     public static var initImageDescriptorDigest: String {
         "sha256:\(initImageIndexDigest)"

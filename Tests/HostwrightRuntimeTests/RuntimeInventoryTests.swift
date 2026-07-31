@@ -3,6 +3,23 @@ import XCTest
 @testable import HostwrightRuntime
 
 final class RuntimeInventoryTests: XCTestCase {
+    func testContainerDecodesOlderInventoryWithoutPublishedSockets() throws {
+        let encoded = try JSONEncoder().encode(
+            makeContainer(runtimeID: "container-a", name: "api")
+        )
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        object.removeValue(forKey: "publishedSockets")
+
+        let decoded = try JSONDecoder().decode(
+            RuntimeInventoryContainer.self,
+            from: JSONSerialization.data(withJSONObject: object)
+        )
+
+        XCTAssertEqual(decoded.publishedSockets, [])
+    }
+
     func testCompleteInventoryIsTypedSortedAndSemanticallyRepeatable() throws {
         let containerB = makeContainer(
             runtimeID: "container-b",
@@ -252,6 +269,50 @@ final class RuntimeInventoryTests: XCTestCase {
 
         assertInventoryError(.duplicateIdentity) {
             try self.build(containers: [first, first])
+        }
+    }
+
+    func testInitArgumentsAllowMultilineObservedCommandText() throws {
+        let container = makeContainer(
+            runtimeID: "container-a",
+            name: "udp-echo",
+            initConfiguration: RuntimeInventoryInitConfiguration(
+                executable: "python",
+                arguments: [
+                    "-c",
+                    "import socket; s=socket.socket();\nwhile True:\n pass"
+                ],
+                environment: [],
+                workingDirectory: "/",
+                user: "0:0",
+                terminal: false
+            )
+        )
+
+        let inventory = try build(containers: [container])
+
+        XCTAssertEqual(
+            inventory.containers.first?.initConfiguration.arguments[1],
+            "import socket; s=socket.socket();\nwhile True:\n pass"
+        )
+    }
+
+    func testInitArgumentsStillRejectUnsafeControlCharacters() throws {
+        let container = makeContainer(
+            runtimeID: "container-a",
+            name: "unsafe-command",
+            initConfiguration: RuntimeInventoryInitConfiguration(
+                executable: "python",
+                arguments: ["-c", "print('ok')\u{001b}"],
+                environment: [],
+                workingDirectory: "/",
+                user: "0:0",
+                terminal: false
+            )
+        )
+
+        XCTAssertThrowsError(try build(containers: [container])) {
+            XCTAssertEqual($0 as? RuntimeInventoryError, .malformedRecord)
         }
     }
 

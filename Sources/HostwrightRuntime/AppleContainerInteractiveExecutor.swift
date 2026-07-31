@@ -1249,11 +1249,16 @@ private final class RuntimeStreamDelivery: @unchecked Sendable {
             return true
         }
         guard shouldStart else { return }
+        let ready = DispatchSemaphore(value: 0)
         group.enter()
         DispatchQueue.global(qos: .userInitiated).async { [self] in
             defer { group.leave() }
             do {
-                while let envelope = try queue.dequeue() {
+                var isFirstDequeue = true
+                while let envelope = try queue.dequeue(
+                    onReady: isFirstDequeue ? { ready.signal() } : nil
+                ) {
+                    isFirstDequeue = false
                     try sink(envelope)
                 }
             } catch {
@@ -1262,6 +1267,7 @@ private final class RuntimeStreamDelivery: @unchecked Sendable {
                 queue.cancel()
             }
         }
+        ready.wait()
     }
 
     func enqueue(_ envelope: RuntimeStreamEnvelope) throws {

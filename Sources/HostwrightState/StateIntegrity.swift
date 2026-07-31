@@ -630,12 +630,26 @@ public struct StateIntegrityService: Sendable {
             let invalidStorageContent =
                 try StorageStateRepository
                     .invalidStoredRecordCount(on: connection)
+            let invalidNetworkContent =
+                try NetworkStateRepository
+                    .invalidStoredRecordCount(on: connection)
+            let invalidProjectDNSContent =
+                try ProjectDNSStateRepository
+                    .invalidStoredRecordCount(on: connection)
+            let invalidCertificateContent =
+                try CertificateStateRepository
+                    .invalidStoredRecordCount(on: connection)
+            let invalidServiceTunnelContent =
+                try ServiceTunnelStateRepository
+                    .invalidStoredRecordCount(on: connection)
             let authoritativeProblems = sqlAuthoritativeProblems +
                 invalidIdentityProblems + invalidReferrerContent +
                 invalidImageTrustContent + invalidImageSBOMContent +
                 invalidImageVulnerabilityContent +
                 invalidImageProvenanceContent +
-                invalidStorageContent
+                invalidStorageContent + invalidNetworkContent
+                + invalidProjectDNSContent + invalidCertificateContent
+                + invalidServiceTunnelContent
             if authoritativeProblems == 0 {
                 checks.append(.init(identifier: "hostwright.authoritative-records", status: .passed, message: "Authoritative state records satisfy the v\(MigrationRunner.latestSchemaVersion) logical contract."))
             } else {
@@ -779,6 +793,34 @@ public struct StateIntegrityService: Sendable {
             UNION ALL SELECT id FROM image_provenance_records
             UNION ALL SELECT evidence_discovery_id FROM image_provenance_records
             UNION ALL SELECT operation_group_id FROM image_provenance_records
+            UNION ALL SELECT id FROM network_resources
+            UNION ALL SELECT project_uuid FROM network_resources
+            UNION ALL SELECT fencing_token FROM network_resources
+            UNION ALL SELECT operation_group_id FROM network_resources
+            UNION ALL SELECT id FROM network_attachments
+            UNION ALL SELECT network_uuid FROM network_attachments
+            UNION ALL SELECT project_uuid FROM network_attachments
+            UNION ALL SELECT resource_uuid FROM network_attachments
+            UNION ALL SELECT fencing_token FROM network_attachments
+            UNION ALL SELECT operation_group_id FROM network_attachments
+            UNION ALL SELECT id FROM network_dns_instances
+            UNION ALL SELECT project_uuid FROM network_dns_instances
+            UNION ALL SELECT fencing_token FROM network_dns_instances
+            UNION ALL SELECT operation_group_id FROM network_dns_instances
+            UNION ALL SELECT id FROM network_port_reservations
+            UNION ALL SELECT project_uuid FROM network_port_reservations
+            UNION ALL SELECT resource_uuid FROM network_port_reservations
+            UNION ALL SELECT fencing_token FROM network_port_reservations
+            UNION ALL SELECT operation_group_id FROM network_port_reservations
+            UNION ALL SELECT id FROM network_certificates
+            UNION ALL SELECT project_uuid FROM network_certificates
+            UNION ALL SELECT fencing_token FROM network_certificates
+            UNION ALL SELECT operation_group_id FROM network_certificates
+            UNION ALL SELECT id FROM service_tunnel_sessions
+            UNION ALL SELECT project_uuid FROM service_tunnel_sessions
+            UNION ALL SELECT peer_uuid FROM service_tunnel_sessions
+            UNION ALL SELECT fencing_token FROM service_tunnel_sessions
+            UNION ALL SELECT operation_group_id FROM service_tunnel_sessions
             """
         ).compactMap { $0.first ?? nil }
         return identities.filter { !HostwrightResourceUUID.isValid($0) }.count
@@ -1769,7 +1811,13 @@ public struct StateIntegrityService: Sendable {
         "storage_orphans",
         "storage_capacity_samples",
         "storage_quotas",
-        "storage_capacity_admissions"
+        "storage_capacity_admissions",
+        "network_resources",
+        "network_attachments",
+        "network_dns_instances",
+        "network_port_reservations",
+        "network_certificates",
+        "service_tunnel_sessions"
     ]
 
     private static let requiredIndexes = [
@@ -1851,6 +1899,24 @@ public struct StateIntegrityService: Sendable {
         "storage_quotas_resource_idx",
         "storage_quotas_operation_idx",
         "storage_capacity_admissions_operation_idx",
-        "storage_capacity_admissions_sample_idx"
+        "storage_capacity_admissions_sample_idx",
+        "network_resources_project_idx",
+        "network_resources_provider_idx",
+        "network_resources_operation_idx",
+        "network_attachments_network_idx",
+        "network_attachments_resource_idx",
+        "network_attachments_operation_idx",
+        "network_dns_instances_project_idx",
+        "network_dns_instances_operation_idx",
+        "network_port_reservations_active_idx",
+        "network_port_reservations_project_idx",
+        "network_port_reservations_resource_idx",
+        "network_port_reservations_operation_idx",
+        "network_certificates_project_idx",
+        "network_certificates_provider_idx",
+        "network_certificates_operation_idx",
+        "service_tunnel_active_peer_idx",
+        "service_tunnel_operation_idx",
+        "service_tunnel_recovery_idx"
     ]
 }

@@ -2531,6 +2531,616 @@ public struct MigrationRunner: Sendable {
                 "CREATE INDEX IF NOT EXISTS storage_capacity_admissions_operation_idx ON storage_capacity_admissions(operation_id, attempt DESC)",
                 "CREATE INDEX IF NOT EXISTS storage_capacity_admissions_sample_idx ON storage_capacity_admissions(sample_id, created_at)"
             ]
+        ),
+        SchemaMigration(
+            version: 16,
+            description: "Fenced project network, attachment, DNS, and service tunnel state",
+            statements: [
+                """
+                CREATE TABLE IF NOT EXISTS network_resources (
+                    id TEXT PRIMARY KEY,
+                    project_uuid TEXT NOT NULL
+                        REFERENCES projects(resource_uuid)
+                        ON DELETE RESTRICT,
+                    name TEXT NOT NULL,
+                    runtime_name TEXT NOT NULL,
+                    generation INTEGER NOT NULL CHECK (
+                        generation >= 1
+                    ),
+                    provider_id TEXT NOT NULL CHECK (
+                        provider_id IN (
+                            'apple-container-cli',
+                            'apple-containerization'
+                        )
+                    ),
+                    provider_generation INTEGER NOT NULL CHECK (
+                        provider_generation >= 1
+                    ),
+                    fencing_token TEXT NOT NULL,
+                    driver TEXT NOT NULL CHECK (
+                        driver IN ('nat', 'host-only')
+                    ),
+                    requested_ipv4 TEXT NOT NULL,
+                    requested_ipv6 TEXT NOT NULL,
+                    observed_ipv4_json TEXT NOT NULL,
+                    observed_ipv6_json TEXT NOT NULL,
+                    desired_sha256 TEXT NOT NULL,
+                    observed_sha256 TEXT,
+                    lifecycle_state TEXT NOT NULL CHECK (
+                        lifecycle_state IN (
+                            'creating', 'available', 'deleting',
+                            'deleted', 'faulted'
+                        )
+                    ),
+                    finalizer_state TEXT NOT NULL CHECK (
+                        finalizer_state IN (
+                            'pending', 'active', 'releasing',
+                            'released', 'quarantined'
+                        )
+                    ),
+                    operation_group_id TEXT NOT NULL
+                        REFERENCES operation_groups(id)
+                        ON DELETE RESTRICT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(project_uuid, name),
+                    UNIQUE(provider_id, runtime_name),
+                    CHECK (
+                        length(id) = 36
+                        AND substr(id, 9, 1) = '-'
+                        AND substr(id, 14, 1) = '-'
+                        AND substr(id, 19, 1) = '-'
+                        AND substr(id, 24, 1) = '-'
+                        AND replace(id, '-', '')
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        length(project_uuid) = 36
+                        AND substr(project_uuid, 9, 1) = '-'
+                        AND substr(project_uuid, 14, 1) = '-'
+                        AND substr(project_uuid, 19, 1) = '-'
+                        AND substr(project_uuid, 24, 1) = '-'
+                        AND replace(project_uuid, '-', '')
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        length(name) BETWEEN 1 AND 63
+                        AND name NOT GLOB '*[^a-z0-9-]*'
+                        AND substr(name, 1, 1) GLOB '[a-z0-9]'
+                        AND substr(name, -1, 1) GLOB '[a-z0-9]'
+                    ),
+                    CHECK (
+                        length(runtime_name) BETWEEN 1 AND 128
+                        AND runtime_name
+                            NOT GLOB '*[^A-Za-z0-9._-]*'
+                        AND substr(runtime_name, 1, 1)
+                            GLOB '[A-Za-z0-9]'
+                    ),
+                    CHECK (
+                        length(fencing_token) = 36
+                        AND substr(fencing_token, 9, 1) = '-'
+                        AND substr(fencing_token, 14, 1) = '-'
+                        AND substr(fencing_token, 19, 1) = '-'
+                        AND substr(fencing_token, 24, 1) = '-'
+                        AND replace(fencing_token, '-', '')
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        length(requested_ipv4) BETWEEN 3 AND 128
+                        AND requested_ipv4 NOT GLOB '*[^ -~]*'
+                        AND length(requested_ipv6) BETWEEN 3 AND 128
+                        AND requested_ipv6 NOT GLOB '*[^ -~]*'
+                    ),
+                    CHECK (
+                        json_valid(observed_ipv4_json)
+                        AND json_type(observed_ipv4_json) = 'array'
+                        AND length(observed_ipv4_json) <= 16384
+                        AND json_valid(observed_ipv6_json)
+                        AND json_type(observed_ipv6_json) = 'array'
+                        AND length(observed_ipv6_json) <= 16384
+                    ),
+                    CHECK (
+                        length(desired_sha256) = 64
+                        AND desired_sha256
+                            NOT GLOB '*[^0-9a-f]*'
+                        AND (
+                            observed_sha256 IS NULL
+                            OR (
+                                length(observed_sha256) = 64
+                                AND observed_sha256
+                                    NOT GLOB '*[^0-9a-f]*'
+                            )
+                        )
+                    ),
+                    CHECK (
+                        (lifecycle_state = 'creating'
+                            AND finalizer_state = 'pending')
+                        OR (lifecycle_state = 'available'
+                            AND finalizer_state = 'active'
+                            AND observed_sha256 IS NOT NULL)
+                        OR (lifecycle_state = 'deleting'
+                            AND finalizer_state = 'releasing')
+                        OR (lifecycle_state = 'deleted'
+                            AND finalizer_state = 'released'
+                            AND observed_sha256 IS NOT NULL)
+                        OR (lifecycle_state = 'faulted'
+                            AND finalizer_state IN (
+                                'active', 'releasing', 'quarantined'
+                            ))
+                    ),
+                    CHECK (
+                        created_at != '' AND updated_at != ''
+                        AND julianday(created_at) IS NOT NULL
+                        AND julianday(updated_at) IS NOT NULL
+                        AND julianday(updated_at)
+                            >= julianday(created_at)
+                    )
+                )
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS network_attachments (
+                    id TEXT PRIMARY KEY,
+                    network_uuid TEXT NOT NULL
+                        REFERENCES network_resources(id)
+                        ON DELETE RESTRICT,
+                    project_uuid TEXT NOT NULL
+                        REFERENCES projects(resource_uuid)
+                        ON DELETE RESTRICT,
+                    resource_uuid TEXT NOT NULL,
+                    generation INTEGER NOT NULL CHECK (
+                        generation >= 1
+                    ),
+                    provider_id TEXT NOT NULL CHECK (
+                        provider_id IN (
+                            'apple-container-cli',
+                            'apple-containerization'
+                        )
+                    ),
+                    provider_generation INTEGER NOT NULL CHECK (
+                        provider_generation >= 1
+                    ),
+                    fencing_token TEXT NOT NULL,
+                    desired_sha256 TEXT NOT NULL,
+                    observed_sha256 TEXT,
+                    lifecycle_state TEXT NOT NULL CHECK (
+                        lifecycle_state IN (
+                            'attaching', 'attached', 'detaching',
+                            'detached', 'faulted'
+                        )
+                    ),
+                    finalizer_state TEXT NOT NULL CHECK (
+                        finalizer_state IN (
+                            'pending', 'active', 'releasing',
+                            'released', 'quarantined'
+                        )
+                    ),
+                    operation_group_id TEXT NOT NULL
+                        REFERENCES operation_groups(id)
+                        ON DELETE RESTRICT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(network_uuid, resource_uuid),
+                    CHECK (
+                        length(id) = 36
+                        AND substr(id, 9, 1) = '-'
+                        AND substr(id, 14, 1) = '-'
+                        AND substr(id, 19, 1) = '-'
+                        AND substr(id, 24, 1) = '-'
+                        AND replace(id, '-', '')
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        length(network_uuid) = 36
+                        AND substr(network_uuid, 9, 1) = '-'
+                        AND substr(network_uuid, 14, 1) = '-'
+                        AND substr(network_uuid, 19, 1) = '-'
+                        AND substr(network_uuid, 24, 1) = '-'
+                        AND replace(network_uuid, '-', '')
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        length(project_uuid) = 36
+                        AND substr(project_uuid, 9, 1) = '-'
+                        AND substr(project_uuid, 14, 1) = '-'
+                        AND substr(project_uuid, 19, 1) = '-'
+                        AND substr(project_uuid, 24, 1) = '-'
+                        AND replace(project_uuid, '-', '')
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        length(resource_uuid) = 36
+                        AND substr(resource_uuid, 9, 1) = '-'
+                        AND substr(resource_uuid, 14, 1) = '-'
+                        AND substr(resource_uuid, 19, 1) = '-'
+                        AND substr(resource_uuid, 24, 1) = '-'
+                        AND replace(resource_uuid, '-', '')
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        length(fencing_token) = 36
+                        AND substr(fencing_token, 9, 1) = '-'
+                        AND substr(fencing_token, 14, 1) = '-'
+                        AND substr(fencing_token, 19, 1) = '-'
+                        AND substr(fencing_token, 24, 1) = '-'
+                        AND replace(fencing_token, '-', '')
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        length(desired_sha256) = 64
+                        AND desired_sha256
+                            NOT GLOB '*[^0-9a-f]*'
+                        AND (
+                            observed_sha256 IS NULL
+                            OR (
+                                length(observed_sha256) = 64
+                                AND observed_sha256
+                                    NOT GLOB '*[^0-9a-f]*'
+                            )
+                        )
+                    ),
+                    CHECK (
+                        (lifecycle_state = 'attaching'
+                            AND finalizer_state = 'pending')
+                        OR (lifecycle_state = 'attached'
+                            AND finalizer_state = 'active'
+                            AND observed_sha256 IS NOT NULL)
+                        OR (lifecycle_state = 'detaching'
+                            AND finalizer_state = 'releasing')
+                        OR (lifecycle_state = 'detached'
+                            AND finalizer_state = 'released'
+                            AND observed_sha256 IS NOT NULL)
+                        OR (lifecycle_state = 'faulted'
+                            AND finalizer_state IN (
+                                'active', 'releasing', 'quarantined'
+                            ))
+                    ),
+                    CHECK (
+                        created_at != '' AND updated_at != ''
+                        AND julianday(created_at) IS NOT NULL
+                        AND julianday(updated_at) IS NOT NULL
+                        AND julianday(updated_at)
+                            >= julianday(created_at)
+                    )
+                )
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS network_dns_instances (
+                    id TEXT PRIMARY KEY,
+                    project_uuid TEXT NOT NULL
+                        REFERENCES projects(resource_uuid)
+                        ON DELETE RESTRICT,
+                    generation INTEGER NOT NULL CHECK (
+                        generation >= 1
+                    ),
+                    provider_id TEXT NOT NULL CHECK (
+                        provider_id IN (
+                            'apple-container-cli',
+                            'apple-containerization'
+                        )
+                    ),
+                    provider_generation INTEGER NOT NULL CHECK (
+                        provider_generation >= 1
+                    ),
+                    fencing_token TEXT NOT NULL,
+                    desired_sha256 TEXT NOT NULL,
+                    observed_sha256 TEXT,
+                    lifecycle_state TEXT NOT NULL CHECK (
+                        lifecycle_state IN (
+                            'creating', 'available', 'deleting',
+                            'deleted', 'faulted'
+                        )
+                    ),
+                    finalizer_state TEXT NOT NULL CHECK (
+                        finalizer_state IN (
+                            'pending', 'active', 'releasing',
+                            'released', 'quarantined'
+                        )
+                    ),
+                    last_ready_record_sha256 TEXT,
+                    operation_group_id TEXT NOT NULL
+                        REFERENCES operation_groups(id)
+                        ON DELETE RESTRICT,
+                    UNIQUE(project_uuid),
+                    CHECK (
+                        length(id) = 36
+                        AND substr(id, 9, 1) = '-'
+                        AND substr(id, 14, 1) = '-'
+                        AND substr(id, 19, 1) = '-'
+                        AND substr(id, 24, 1) = '-'
+                        AND replace(id, '-', '')
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        length(project_uuid) = 36
+                        AND substr(project_uuid, 9, 1) = '-'
+                        AND substr(project_uuid, 14, 1) = '-'
+                        AND substr(project_uuid, 19, 1) = '-'
+                        AND substr(project_uuid, 24, 1) = '-'
+                        AND replace(project_uuid, '-', '')
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        length(fencing_token) = 36
+                        AND substr(fencing_token, 9, 1) = '-'
+                        AND substr(fencing_token, 14, 1) = '-'
+                        AND substr(fencing_token, 19, 1) = '-'
+                        AND substr(fencing_token, 24, 1) = '-'
+                        AND replace(fencing_token, '-', '')
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        length(desired_sha256) = 64
+                        AND desired_sha256
+                            NOT GLOB '*[^0-9a-f]*'
+                        AND (
+                            observed_sha256 IS NULL
+                            OR (
+                                length(observed_sha256) = 64
+                                AND observed_sha256
+                                    NOT GLOB '*[^0-9a-f]*'
+                            )
+                        )
+                        AND (
+                            last_ready_record_sha256 IS NULL
+                            OR (
+                                length(last_ready_record_sha256) = 64
+                                AND last_ready_record_sha256
+                                    NOT GLOB '*[^0-9a-f]*'
+                            )
+                        )
+                    ),
+                    CHECK (
+                        (lifecycle_state = 'creating'
+                            AND finalizer_state = 'pending'
+                            AND observed_sha256 IS NULL
+                            AND last_ready_record_sha256 IS NULL)
+                        OR (lifecycle_state = 'available'
+                            AND finalizer_state = 'active'
+                            AND observed_sha256 IS NOT NULL
+                            AND last_ready_record_sha256 IS NOT NULL)
+                        OR (lifecycle_state = 'deleting'
+                            AND finalizer_state = 'releasing')
+                        OR (lifecycle_state = 'deleted'
+                            AND finalizer_state = 'released'
+                            AND observed_sha256 IS NOT NULL)
+                        OR (lifecycle_state = 'faulted'
+                            AND finalizer_state IN (
+                                'active', 'releasing', 'quarantined'
+                            ))
+                    )
+                )
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS network_port_reservations (
+                    id TEXT PRIMARY KEY,
+                    project_uuid TEXT NOT NULL
+                        REFERENCES projects(resource_uuid)
+                        ON DELETE RESTRICT,
+                    resource_uuid TEXT NOT NULL,
+                    service_name TEXT NOT NULL,
+                    generation INTEGER NOT NULL CHECK (
+                        generation >= 1
+                    ),
+                    provider_id TEXT NOT NULL CHECK (
+                        provider_id IN (
+                            'apple-container-cli',
+                            'apple-containerization'
+                        )
+                    ),
+                    provider_generation INTEGER NOT NULL CHECK (
+                        provider_generation >= 1
+                    ),
+                    fencing_token TEXT NOT NULL,
+                    bind_address TEXT NOT NULL CHECK (
+                        length(bind_address) BETWEEN 2 AND 45
+                        AND bind_address NOT GLOB '*[^0-9A-Fa-f:.]*'
+                    ),
+                    host_port INTEGER NOT NULL CHECK (
+                        host_port BETWEEN 1024 AND 65535
+                    ),
+                    container_port INTEGER NOT NULL CHECK (
+                        container_port BETWEEN 1 AND 65535
+                    ),
+                    protocol TEXT NOT NULL CHECK (
+                        protocol IN ('tcp', 'udp')
+                    ),
+                    allocation_kind TEXT NOT NULL CHECK (
+                        allocation_kind IN ('fixed', 'dynamic')
+                    ),
+                    desired_sha256 TEXT NOT NULL,
+                    observed_sha256 TEXT,
+                    lifecycle_state TEXT NOT NULL CHECK (
+                        lifecycle_state IN (
+                            'reserved', 'active', 'releasing',
+                            'released', 'faulted'
+                        )
+                    ),
+                    finalizer_state TEXT NOT NULL CHECK (
+                        finalizer_state IN (
+                            'active', 'releasing', 'released',
+                            'quarantined'
+                        )
+                    ),
+                    operation_group_id TEXT NOT NULL
+                        REFERENCES operation_groups(id)
+                        ON DELETE RESTRICT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    CHECK (
+                        length(id) = 36
+                        AND substr(id, 9, 1) = '-'
+                        AND substr(id, 14, 1) = '-'
+                        AND substr(id, 19, 1) = '-'
+                        AND substr(id, 24, 1) = '-'
+                        AND replace(id, '-', '')
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        length(project_uuid) = 36
+                        AND substr(project_uuid, 9, 1) = '-'
+                        AND substr(project_uuid, 14, 1) = '-'
+                        AND substr(project_uuid, 19, 1) = '-'
+                        AND substr(project_uuid, 24, 1) = '-'
+                        AND replace(project_uuid, '-', '')
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        length(resource_uuid) = 36
+                        AND substr(resource_uuid, 9, 1) = '-'
+                        AND substr(resource_uuid, 14, 1) = '-'
+                        AND substr(resource_uuid, 19, 1) = '-'
+                        AND substr(resource_uuid, 24, 1) = '-'
+                        AND replace(resource_uuid, '-', '')
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        length(fencing_token) = 36
+                        AND substr(fencing_token, 9, 1) = '-'
+                        AND substr(fencing_token, 14, 1) = '-'
+                        AND substr(fencing_token, 19, 1) = '-'
+                        AND substr(fencing_token, 24, 1) = '-'
+                        AND replace(fencing_token, '-', '')
+                            NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    CHECK (
+                        length(service_name) BETWEEN 1 AND 255
+                        AND service_name NOT GLOB '*[^ -~]*'
+                    ),
+                    CHECK (
+                        allocation_kind != 'dynamic'
+                        OR host_port BETWEEN 49152 AND 65535
+                    ),
+                    CHECK (
+                        length(desired_sha256) = 64
+                        AND desired_sha256
+                            NOT GLOB '*[^0-9a-f]*'
+                        AND (
+                            observed_sha256 IS NULL
+                            OR (
+                                length(observed_sha256) = 64
+                                AND observed_sha256
+                                    NOT GLOB '*[^0-9a-f]*'
+                            )
+                        )
+                    ),
+                    CHECK (
+                        (lifecycle_state = 'reserved'
+                            AND finalizer_state = 'active'
+                            AND observed_sha256 IS NULL)
+                        OR (lifecycle_state = 'active'
+                            AND finalizer_state = 'active'
+                            AND observed_sha256 IS NOT NULL)
+                        OR (lifecycle_state = 'releasing'
+                            AND finalizer_state = 'releasing')
+                        OR (lifecycle_state = 'released'
+                            AND finalizer_state = 'released'
+                            AND observed_sha256 IS NOT NULL)
+                        OR (lifecycle_state = 'faulted'
+                            AND finalizer_state IN (
+                                'active', 'releasing', 'quarantined'
+                            ))
+                    ),
+                    CHECK (
+                        created_at != '' AND updated_at != ''
+                        AND julianday(created_at) IS NOT NULL
+                        AND julianday(updated_at) IS NOT NULL
+                        AND julianday(updated_at)
+                            >= julianday(created_at)
+                    )
+                )
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS network_certificates (
+                    id TEXT PRIMARY KEY, project_uuid TEXT NOT NULL REFERENCES projects(resource_uuid) ON DELETE RESTRICT,
+                    manifest_name TEXT NOT NULL, generation INTEGER NOT NULL CHECK (generation >= 1), provider_id TEXT NOT NULL,
+                    provider_generation INTEGER NOT NULL CHECK (provider_generation >= 1), fencing_token TEXT NOT NULL,
+                    source_kind TEXT NOT NULL CHECK (source_kind IN ('imported','local-ca','provider')),
+                    ownership_kind TEXT NOT NULL CHECK (ownership_kind IN ('external','managed')),
+                    leaf_sha256 TEXT NOT NULL, issuer_sha256 TEXT,
+                    san_json TEXT NOT NULL, eku_json TEXT NOT NULL, not_before TEXT NOT NULL, not_after TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK (status IN ('creating','available','revoking','revoked','released','faulted')),
+                    revocation_status TEXT NOT NULL CHECK (revocation_status IN ('unknown','good','revoked','not-applicable')),
+                    status_checked_at TEXT, desired_sha256 TEXT NOT NULL, observed_sha256 TEXT,
+                    lifecycle_state TEXT NOT NULL CHECK (lifecycle_state IN ('creating','available','deleting','deleted','faulted')),
+                    finalizer_state TEXT NOT NULL CHECK (finalizer_state IN ('pending','active','releasing','released','quarantined')),
+                    prior_leaf_sha256 TEXT,
+                    operation_group_id TEXT NOT NULL REFERENCES operation_groups(id) ON DELETE RESTRICT,
+                    created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(project_uuid, manifest_name),
+                    CHECK (length(id) = 36 AND replace(id, '-', '') NOT GLOB '*[^0-9a-f]*'),
+                    CHECK (length(project_uuid) = 36 AND replace(project_uuid, '-', '') NOT GLOB '*[^0-9a-f]*'),
+                    CHECK (length(fencing_token) = 36 AND replace(fencing_token, '-', '') NOT GLOB '*[^0-9a-f]*'),
+                    CHECK (length(manifest_name) BETWEEN 1 AND 63 AND manifest_name NOT GLOB '*[^a-z0-9-]*'),
+                    CHECK (length(leaf_sha256) = 64 AND leaf_sha256 NOT GLOB '*[^0-9a-f]*'), CHECK (issuer_sha256 IS NULL OR (length(issuer_sha256) = 64 AND issuer_sha256 NOT GLOB '*[^0-9a-f]*')),
+                    CHECK (prior_leaf_sha256 IS NULL OR (length(prior_leaf_sha256) = 64 AND prior_leaf_sha256 NOT GLOB '*[^0-9a-f]*')),
+                    CHECK (length(desired_sha256) = 64 AND desired_sha256 NOT GLOB '*[^0-9a-f]*'), CHECK (observed_sha256 IS NULL OR (length(observed_sha256) = 64 AND observed_sha256 NOT GLOB '*[^0-9a-f]*')),
+                    CHECK (json_valid(san_json) AND json_type(san_json) = 'array' AND length(san_json) <= 16384), CHECK (json_valid(eku_json) AND json_type(eku_json) = 'array' AND length(eku_json) <= 16384),
+                    CHECK (julianday(not_before) IS NOT NULL AND julianday(not_after) IS NOT NULL AND julianday(not_after) > julianday(not_before)), CHECK (status_checked_at IS NULL OR julianday(status_checked_at) IS NOT NULL),
+                    CHECK ((source_kind = 'imported' AND ownership_kind = 'external') OR (source_kind IN ('local-ca','provider') AND ownership_kind = 'managed')),
+                    CHECK ((lifecycle_state = 'creating' AND finalizer_state = 'pending' AND status = 'creating' AND observed_sha256 IS NULL) OR (lifecycle_state = 'available' AND finalizer_state = 'active' AND status = 'available' AND observed_sha256 IS NOT NULL) OR (lifecycle_state = 'deleting' AND finalizer_state = 'releasing' AND ((ownership_kind = 'external' AND status = 'available') OR (ownership_kind = 'managed' AND status = 'revoking'))) OR (lifecycle_state = 'deleted' AND finalizer_state = 'released' AND ((ownership_kind = 'external' AND status = 'released') OR (ownership_kind = 'managed' AND status = 'revoked'))) OR (lifecycle_state = 'faulted' AND finalizer_state IN ('active','releasing','quarantined') AND status = 'faulted')),
+                    CHECK (julianday(created_at) IS NOT NULL AND julianday(updated_at) IS NOT NULL AND julianday(updated_at) >= julianday(created_at))
+                )
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS service_tunnel_sessions (
+                    id TEXT PRIMARY KEY,
+                    project_uuid TEXT NOT NULL REFERENCES projects(resource_uuid) ON DELETE RESTRICT,
+                    peer_uuid TEXT NOT NULL,
+                    generation INTEGER NOT NULL CHECK (generation >= 1),
+                    provider_id TEXT NOT NULL,
+                    provider_generation INTEGER NOT NULL CHECK (provider_generation >= 1),
+                    fencing_token TEXT NOT NULL,
+                    operation_group_id TEXT NOT NULL REFERENCES operation_groups(id) ON DELETE RESTRICT,
+                    desired_sha256 TEXT NOT NULL,
+                    observed_sha256 TEXT,
+                    route_json TEXT NOT NULL,
+                    route_json_sha256 TEXT NOT NULL,
+                    lifecycle_state TEXT NOT NULL CHECK (lifecycle_state IN ('intended','connecting','active','draining','closed','faulted')),
+                    finalizer_state TEXT NOT NULL CHECK (finalizer_state IN ('pending','active','releasing','released','quarantined')),
+                    selected_transport TEXT CHECK (selected_transport IS NULL OR selected_transport IN ('direct','relay')),
+                    key_epoch INTEGER NOT NULL CHECK (key_epoch >= 1),
+                    reconnect_attempt INTEGER NOT NULL CHECK (reconnect_attempt BETWEEN 0 AND 8),
+                    created_at_ms INTEGER NOT NULL CHECK (created_at_ms >= 0),
+                    updated_at_ms INTEGER NOT NULL CHECK (updated_at_ms >= created_at_ms),
+                    CHECK (length(id) = 36 AND replace(id, '-', '') NOT GLOB '*[^0-9a-f]*'),
+                    CHECK (length(project_uuid) = 36 AND replace(project_uuid, '-', '') NOT GLOB '*[^0-9a-f]*'),
+                    CHECK (length(peer_uuid) = 36 AND replace(peer_uuid, '-', '') NOT GLOB '*[^0-9a-f]*'),
+                    CHECK (length(fencing_token) = 36 AND replace(fencing_token, '-', '') NOT GLOB '*[^0-9a-f]*'),
+                    CHECK (length(desired_sha256) = 64 AND desired_sha256 NOT GLOB '*[^0-9a-f]*'),
+                    CHECK (observed_sha256 IS NULL OR (length(observed_sha256) = 64 AND observed_sha256 NOT GLOB '*[^0-9a-f]*')),
+                    CHECK (json_valid(route_json) AND json_type(route_json) = 'object' AND length(route_json) <= 65536),
+                    CHECK (length(route_json_sha256) = 64 AND route_json_sha256 NOT GLOB '*[^0-9a-f]*'),
+                    CHECK (
+                        (lifecycle_state = 'intended' AND finalizer_state = 'pending' AND observed_sha256 IS NULL)
+                        OR (lifecycle_state = 'connecting' AND (
+                            (finalizer_state = 'pending' AND observed_sha256 IS NULL)
+                            OR (finalizer_state = 'active' AND observed_sha256 IS NOT NULL)
+                        ))
+                        OR (lifecycle_state = 'active' AND finalizer_state = 'active' AND observed_sha256 IS NOT NULL)
+                        OR (lifecycle_state = 'draining' AND finalizer_state = 'releasing')
+                        OR (lifecycle_state = 'closed' AND finalizer_state = 'released' AND observed_sha256 IS NOT NULL)
+                        OR (lifecycle_state = 'faulted' AND finalizer_state = 'quarantined')
+                    )
+                )
+                """,
+                "CREATE INDEX IF NOT EXISTS network_resources_project_idx ON network_resources(project_uuid, lifecycle_state, name, id)",
+                "CREATE INDEX IF NOT EXISTS network_resources_provider_idx ON network_resources(provider_id, runtime_name, lifecycle_state)",
+                "CREATE INDEX IF NOT EXISTS network_resources_operation_idx ON network_resources(operation_group_id, updated_at)",
+                "CREATE INDEX IF NOT EXISTS network_attachments_network_idx ON network_attachments(network_uuid, lifecycle_state, resource_uuid, id)",
+                "CREATE INDEX IF NOT EXISTS network_attachments_resource_idx ON network_attachments(project_uuid, resource_uuid, lifecycle_state, network_uuid)",
+                "CREATE INDEX IF NOT EXISTS network_attachments_operation_idx ON network_attachments(operation_group_id, updated_at)",
+                "CREATE INDEX IF NOT EXISTS network_dns_instances_project_idx ON network_dns_instances(project_uuid, lifecycle_state, id)",
+                "CREATE INDEX IF NOT EXISTS network_dns_instances_operation_idx ON network_dns_instances(operation_group_id, generation)",
+                "CREATE INDEX IF NOT EXISTS network_certificates_project_idx ON network_certificates(project_uuid, lifecycle_state, manifest_name, id)",
+                "CREATE INDEX IF NOT EXISTS network_certificates_provider_idx ON network_certificates(provider_id, provider_generation, lifecycle_state)",
+                "CREATE INDEX IF NOT EXISTS network_certificates_operation_idx ON network_certificates(operation_group_id, generation)",
+                "CREATE UNIQUE INDEX IF NOT EXISTS network_port_reservations_active_idx ON network_port_reservations(bind_address, host_port, protocol) WHERE lifecycle_state != 'released'",
+                "CREATE INDEX IF NOT EXISTS network_port_reservations_project_idx ON network_port_reservations(project_uuid, lifecycle_state, service_name, host_port)",
+                "CREATE INDEX IF NOT EXISTS network_port_reservations_resource_idx ON network_port_reservations(resource_uuid, lifecycle_state, host_port)",
+                "CREATE INDEX IF NOT EXISTS network_port_reservations_operation_idx ON network_port_reservations(operation_group_id, updated_at)",
+                "CREATE UNIQUE INDEX IF NOT EXISTS service_tunnel_active_peer_idx ON service_tunnel_sessions(project_uuid, peer_uuid) WHERE lifecycle_state != 'closed'",
+                "CREATE INDEX IF NOT EXISTS service_tunnel_operation_idx ON service_tunnel_sessions(operation_group_id, generation)",
+                "CREATE INDEX IF NOT EXISTS service_tunnel_recovery_idx ON service_tunnel_sessions(lifecycle_state, updated_at_ms)"
+            ]
         )
     ]
 }

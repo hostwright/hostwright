@@ -421,8 +421,16 @@ public final class RuntimeStreamBackpressureQueue: @unchecked Sendable {
     public func dequeue(
         waitUntil deadline: Date? = nil
     ) throws -> RuntimeStreamEnvelope? {
+        try dequeue(waitUntil: deadline, onReady: nil)
+    }
+
+    func dequeue(
+        waitUntil deadline: Date? = nil,
+        onReady: (() -> Void)?
+    ) throws -> RuntimeStreamEnvelope? {
         condition.lock()
         defer { condition.unlock() }
+        onReady?()
         while frames.isEmpty, !closed {
             if let deadline {
                 if !condition.wait(until: deadline), frames.isEmpty {

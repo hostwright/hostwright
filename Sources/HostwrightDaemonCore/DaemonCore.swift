@@ -284,6 +284,7 @@ public struct DaemonLoopRunner {
             let projectID = "project-\(mapping.desiredState.projectName)"
             let observationDesiredState = DesiredRuntimeState(
                 projectName: mapping.desiredState.projectName,
+                networks: mapping.desiredState.networks,
                 services: mapping.desiredState.services,
                 ownedResourceHints: try store.ownership.runtimeHints(
                     projectID: projectID,
@@ -555,6 +556,7 @@ public struct DaemonLoopRunner {
                 lifecycleState: service.lifecycleState,
                 healthState: healthState,
                 ports: service.ports,
+                publishedSockets: service.publishedSockets,
                 networks: service.networks,
                 mounts: service.mounts,
                 observedAt: service.observedAt

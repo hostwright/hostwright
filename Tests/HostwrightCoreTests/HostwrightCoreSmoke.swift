@@ -149,7 +149,7 @@ final class HostwrightCoreTests: XCTestCase {
         XCTAssertFalse(install.localizedCaseInsensitiveContains("available today through homebrew"))
     }
 
-    func testSecureExposureResearchKeepsCurrentSupportUnsupported() throws {
+    func testSecureExposureResearchKeepsBroadProvidersUnsupported() throws {
         let root = try packageRoot()
         let decision = try read("docs/architecture/secure-exposure-research.md", root: root)
         let networking = try read("docs/architecture/networking-boundary.md", root: root)
@@ -165,11 +165,11 @@ final class HostwrightCoreTests: XCTestCase {
         XCTAssertTrue(decision.contains("| Cloud control plane | Reject for current core |"))
         XCTAssertTrue(decision.contains("No provider integration is implemented by this research phase."))
         XCTAssertTrue(networking.contains("See [Secure Exposure Research](secure-exposure-research.md)"))
-        XCTAssertTrue(limitations.contains("Cloudflare Tunnel, Tailscale Serve/Funnel, WireGuard, mTLS provisioning, or reverse proxy setup."))
+        XCTAssertTrue(limitations.contains("Built-in Cloudflare Tunnel, Tailscale Serve/Funnel, or WireGuard setup"))
 
-        XCTAssertTrue(securityPolicy.contains("No tunnel, DNS, cloud, CRI, Kubernetes, or Docker API behavior exists."))
+        XCTAssertTrue(securityPolicy.contains("Phase 07 networking is limited to exact UUID-owned project DNS"))
         XCTAssertTrue(securityPolicy.contains("Destructive mutation is limited to ownership-scoped cleanup delete"))
-        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright supports tunnels"))
+        XCTAssertTrue(networking.contains("authenticated Hostwright service tunnels"))
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright supports cloud exposure"))
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright supports Cloudflare"))
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright supports Tailscale"))
@@ -832,7 +832,7 @@ final class HostwrightCoreTests: XCTestCase {
         XCTAssertTrue(architecture.contains("Status: Phase 33 declaration policy plus Phase 41 reviewed-local handshake host."))
         XCTAssertTrue(architecture.contains("fixed `hostwright-extension-handshake-v1` protocol operation"))
         XCTAssertTrue(architecture.contains("A passing check proves only that the exact reviewed file completed this protocol handshake."))
-        XCTAssertTrue(architecture.contains("| Tunnel provider | Current core blocks tunnels, DNS, reverse proxy setup, and public exposure. |"))
+        XCTAssertTrue(architecture.contains("| Tunnel provider | The general extension host blocks tunnel authority; Phase 07's separate SPI grants only exact brokered origins, secret references, identities, and routes. |"))
         XCTAssertTrue(policy.contains("Extension declarations can be evaluated as local data."))
         XCTAssertTrue(limitations.contains("`hostwright extension check`"))
         XCTAssertTrue(security.contains("## Extension Boundary"))

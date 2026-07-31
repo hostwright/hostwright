@@ -1,4 +1,6 @@
+import Darwin
 import Foundation
+import HostwrightCore
 
 public enum RuntimeCommandClassification: String, Equatable, Sendable {
     case readOnly
@@ -18,6 +20,7 @@ public enum RuntimeMutationCommandKind: String, Equatable, Sendable {
     case restartManagedService
     case deleteManagedContainer
     case imageLifecycle
+    case networkLifecycle
 }
 
 public enum RuntimeCommandExitStatusPolicy: Equatable, Sendable {
@@ -262,16 +265,21 @@ public enum RuntimeCommandPolicy {
             RuntimeManagedResourceIdentity.providerGenerationLabel,
             RuntimeManagedResourceIdentity.fencingTokenLabel
         ]
-        let expectedKeys = Set(RuntimeManagedResourceIdentity.labels(for: identity).keys)
-            .union(ownershipKeys)
+        let expectedKeys = Set(
+            RuntimeManagedResourceIdentity.labels(for: identity).keys
+        ).union(ownershipKeys)
         let hostwrightKeys = Set(
             labels.keys.filter { $0.hasPrefix("dev.hostwright.") }
+        )
+        let projectDNSKeys = hostwrightKeys.intersection(
+            RuntimeProjectDNSContract.internalLabelKeys
         )
         let userLabels = labels.filter {
             !$0.key.hasPrefix("dev.hostwright.")
         }
-        guard ownership != nil,
-              hostwrightKeys == expectedKeys,
+        guard let ownership,
+              hostwrightKeys ==
+                expectedKeys.union(projectDNSKeys),
               labels.count <= RuntimeInventoryLimits.maximumLabelsPerResource,
               userLabels.allSatisfy({
                   !$0.key.isEmpty &&
@@ -283,7 +291,113 @@ public enum RuntimeCommandPolicy {
                 message: "Create-missing-service command specs require complete ownership labels bound to the exact container identifier."
             )
         }
+        let dnsRequirement: RuntimeProjectDNSRequirement?
+        do {
+            dnsRequirement = try RuntimeProjectDNSContract.requirement(
+                from: labels,
+                projectUUID: ownership.projectUUID
+            )
+        } catch {
+            throw RuntimeAdapterError.commandRejected(
+                classification: spec.classification,
+                message:
+                    "Create-missing-service project DNS labels are incomplete or invalid."
+            )
+        }
+        let dnsServers = values(
+            for: "--dns",
+            in: spec.arguments,
+            before: imageIndex
+        )
+        let searchDomains = values(
+            for: "--dns-search",
+            in: spec.arguments,
+            before: imageIndex
+        )
+        if let dnsRequirement,
+           !RuntimeProjectDNSContract.isInfrastructure(labels) {
+            guard !dnsServers.isEmpty,
+                  dnsServers.count <=
+                    RuntimeInventoryLimits
+                        .maximumAddressesPerNetwork,
+                  Set(dnsServers).count == dnsServers.count,
+                  dnsServers == dnsServers.sorted(),
+                  dnsServers.allSatisfy(isIPAddress),
+                  searchDomains == [dnsRequirement.zone] else {
+                throw RuntimeAdapterError.commandRejected(
+                    classification: spec.classification,
+                    message:
+                        "Create-missing-service project DNS requires unique observed IP addresses and its exact project search zone."
+                )
+            }
+        } else {
+            guard dnsServers.isEmpty,
+                  searchDomains.isEmpty else {
+                throw RuntimeAdapterError.commandRejected(
+                    classification: spec.classification,
+                    message:
+                        "Create-missing-service DNS options require an exact non-infrastructure project DNS binding."
+                )
+            }
+        }
 
+        let socketValues = values(
+            for: "--publish-socket",
+            in: spec.arguments,
+            before: imageIndex
+        )
+        if !socketValues.isEmpty {
+            let socketRoot = try? HostwrightLocalPathResolver.resolve()
+                .layout.publishedSocketDirectory
+            guard let socketRoot,
+                  socketValues == socketValues.sorted(),
+                  Set(socketValues).count == socketValues.count,
+                  socketValues.allSatisfy({ value in
+                      let fields = value.split(
+                          separator: ":",
+                          omittingEmptySubsequences: false
+                      )
+                      guard fields.count == 2 else { return false }
+                      let hostPath = String(fields[0])
+                      let containerPath = String(fields[1])
+                      return
+                          (try? HostwrightLocalPathResolver
+                              .normalizedAbsolutePath(
+                                  hostPath,
+                                  role:
+                                      "published socket host path"
+                              )) == hostPath &&
+                          (try? HostwrightLocalPathResolver
+                              .normalizedAbsolutePath(
+                                  containerPath,
+                                  role:
+                                      "published socket container path"
+                              )) == containerPath &&
+                          hostPath.hasPrefix(socketRoot + "/") &&
+                          hostPath.utf8.count <= 103 &&
+                          containerPath.hasPrefix("/") &&
+                          containerPath.utf8.count <= 107
+                  }) else {
+                throw RuntimeAdapterError.commandRejected(
+                    classification: spec.classification,
+                    message:
+                        "Create-missing-service Unix socket arguments require unique sorted Hostwright-private host paths and normalized container paths."
+                )
+            }
+        }
+
+        var networkIdentifiers = Set<String>()
+        for index in createArguments where spec.arguments[index] == "--network" {
+            let valueIndex = spec.arguments.index(after: index)
+            guard valueIndex < imageIndex,
+                  RuntimeNetworkIdentity.isRuntimeIdentifier(spec.arguments[valueIndex]),
+                  networkIdentifiers.insert(spec.arguments[valueIndex]).inserted else {
+                throw RuntimeAdapterError.commandRejected(
+                    classification: spec.classification,
+                    message: "Create-missing-service network attachments require unique exact Hostwright network identifiers."
+                )
+            }
+        }
     }
 
     public static func validateSupportedMutation(_ spec: RuntimeCommandSpec) throws {
@@ -298,6 +412,8 @@ public enum RuntimeCommandPolicy {
             try validateDeleteManagedContainerMutation(spec)
         case .imageLifecycle:
             try validateImageLifecycleMutation(spec)
+        case .networkLifecycle:
+            try validateNetworkLifecycleMutation(spec)
         case nil:
             throw RuntimeAdapterError.commandRejected(
                 classification: spec.classification,
@@ -408,6 +524,111 @@ public enum RuntimeCommandPolicy {
             classification: spec.classification,
             message: "Image lifecycle mutation command shape is not part of the qualified Apple CLI contract."
         )
+    }
+
+    public static func validateNetworkLifecycleMutation(_ spec: RuntimeCommandSpec) throws {
+        guard spec.executableResolution == .resolvedByRuntimeExecutableResolver,
+              spec.classification == .mutating,
+              spec.mutationKind == .networkLifecycle,
+              spec.exitStatusPolicy == .zeroOnly,
+              spec.environment.isEmpty,
+              spec.sensitiveValues.isEmpty,
+              spec.arguments.count >= 3,
+              spec.arguments[0] == "network",
+              !spec.arguments.contains("--all"),
+              !spec.arguments.contains("-a"),
+              !spec.arguments.contains("--plugin"),
+              !spec.arguments.contains("--option"),
+              !spec.arguments.contains("--debug"),
+              !spec.arguments.contains("prune") else {
+            throw RuntimeAdapterError.commandRejected(
+                classification: spec.classification,
+                message: "Network lifecycle mutation requires one resolved, exact, credential-free network command."
+            )
+        }
+
+        switch spec.arguments[1] {
+        case "delete":
+            guard spec.arguments.count == 3,
+                  RuntimeNetworkIdentity.isRuntimeIdentifier(spec.arguments[2]) else {
+                throw RuntimeAdapterError.commandRejected(
+                    classification: spec.classification,
+                    message: "Network deletion requires one exact Hostwright network identifier."
+                )
+            }
+        case "create":
+            guard let identifier = spec.arguments.last,
+                  RuntimeNetworkIdentity.isRuntimeIdentifier(identifier),
+                  spec.arguments.filter({ $0 == "--label" }).count >= 9 else {
+                throw RuntimeAdapterError.commandRejected(
+                    classification: spec.classification,
+                    message: "Network creation requires one exact Hostwright network identifier and complete ownership labels."
+                )
+            }
+            let labels = try networkCreateLabels(spec.arguments)
+            guard labels[RuntimeManagedResourceIdentity.managedLabel] == "true",
+                  labels[RuntimeManagedResourceIdentity.resourceIdentifierLabel] == identifier,
+                  labels[RuntimeNetworkOwnership.resourceKindLabel] ==
+                    RuntimeNetworkOwnership.resourceKind,
+                  let provider = labels[RuntimeManagedResourceIdentity.providerIDLabel],
+                  provider == RuntimeProviderID.appleContainerCLI.rawValue,
+                  (try? RuntimeManagedResourceIdentity.ownershipEvidence(
+                      from: labels,
+                      expectedProviderID: .appleContainerCLI
+                  )) != nil else {
+                throw RuntimeAdapterError.commandRejected(
+                    classification: spec.classification,
+                    message: "Network creation requires complete UUID ownership and fencing labels."
+                )
+            }
+        default:
+            throw RuntimeAdapterError.commandRejected(
+                classification: spec.classification,
+                message: "Network lifecycle mutation accepts only exact create or delete commands."
+            )
+        }
+    }
+
+    private static func networkCreateLabels(_ arguments: [String]) throws -> [String: String] {
+        var labels: [String: String] = [:]
+        var index = 2
+        while index < arguments.count - 1 {
+            let argument = arguments[index]
+            switch argument {
+            case "--internal":
+                index += 1
+            case "--label", "--subnet", "--subnet-v6":
+                guard index + 1 < arguments.count - 1 else {
+                    throw RuntimeAdapterError.commandRejected(
+                        classification: .mutating,
+                        message: "Network create option is missing its value."
+                    )
+                }
+                if argument == "--label" {
+                    let pair = arguments[index + 1].split(
+                        separator: "=",
+                        maxSplits: 1,
+                        omittingEmptySubsequences: false
+                    )
+                    guard pair.count == 2,
+                          !pair[0].isEmpty,
+                          labels[String(pair[0])] == nil else {
+                        throw RuntimeAdapterError.commandRejected(
+                            classification: .mutating,
+                            message: "Network create contains an invalid or duplicate label."
+                        )
+                    }
+                    labels[String(pair[0])] = String(pair[1])
+                }
+                index += 2
+            default:
+                throw RuntimeAdapterError.commandRejected(
+                    classification: .mutating,
+                    message: "Network create contains an unsupported option."
+                )
+            }
+        }
+        return labels
     }
 
     private static func rejectNonReadOnlyCommand(_ spec: RuntimeCommandSpec) throws {
@@ -742,6 +963,10 @@ public enum RuntimeCommandPolicy {
         "--label",
         "--env",
         "--publish",
+        "--publish-socket",
+        "--network",
+        "--dns",
+        "--dns-search",
         "--os",
         "--arch",
         "--cpus",
@@ -765,12 +990,38 @@ public enum RuntimeCommandPolicy {
 
     private static let rejectedCreateFlags: Set<String> = [
         "--rm",
-        "--network",
-        "--dns",
         "--privileged",
         "--cap-add",
         "--cap-drop"
     ]
+
+    private static func values(
+        for flag: String,
+        in arguments: [String],
+        before limit: Int
+    ) -> [String] {
+        arguments.indices.compactMap { index in
+            guard index < limit,
+                  arguments[index] == flag,
+                  index + 1 < limit else {
+                return nil
+            }
+            return arguments[index + 1]
+        }
+    }
+
+    private static func isIPAddress(_ value: String) -> Bool {
+        var ipv4 = in_addr()
+        if value.withCString({
+            inet_pton(AF_INET, $0, &ipv4)
+        }) == 1 {
+            return true
+        }
+        var ipv6 = in6_addr()
+        return value.withCString({
+            inet_pton(AF_INET6, $0, &ipv6)
+        }) == 1
+    }
 }
 
 public protocol RuntimeProcessRunning: Sendable {

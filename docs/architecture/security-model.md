@@ -8,7 +8,7 @@ Hostwright has narrow runtime mutation gates through `RuntimeAdapter`: create-mi
 
 All production subprocess call sites now use the Phase 02 secure process boundary: direct argv, root-owned named executable resolution, minimal non-inherited environment, descriptor-pinned working directories, bounded I/O/time, cancellation, fenced session process-group cleanup, and typed caller-normalized errors. The exact flow and native-code containment boundary are documented in [Secure Process Execution](../reference/process-execution.md).
 
-Local state defaults to the private per-user Application Support layout and safely migrates compatible legacy state through a resumable identity journal. No general lifecycle mutation, user-facing stop/restart command, broad cleanup, image deletion, volume deletion, unmanaged deletion, privileged helper, service installer, launch agent, DNS behavior, tunnel behavior, cloud integration, or unattended daemon mutation exists.
+Local state defaults to the private per-user Application Support layout and safely migrates compatible legacy state through resumable journals. Confirmed lifecycle, image, storage, and Phase 07 networking mutations use exact UUID ownership, provider generation, fencing, and durable intent. Hostwright still has no unmanaged deletion, privileged helper, service installer, launch agent, cloud integration, or unattended daemon mutation.
 
 ## Requirements
 

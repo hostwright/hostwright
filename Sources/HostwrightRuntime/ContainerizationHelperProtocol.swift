@@ -12,6 +12,12 @@ public enum ContainerizationHelperOperation: String, Codable, CaseIterable, Equa
     case localImageEvidence
     case resourceUsage
     case logs
+    case networkCapabilities
+    case networkInspect
+    case networkCreate
+    case networkAttach
+    case networkDetach
+    case networkDelete
     case create
     case start
     case stop

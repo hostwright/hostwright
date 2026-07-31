@@ -60,6 +60,8 @@ public enum AppleContainerCommand {
         desiredService: DesiredRuntimeService,
         mutationContext: RuntimeMutationContext,
         resourceIdentifier: String? = nil,
+        dnsServers: [String] = [],
+        dnsSearchDomains: [String] = [],
         timeout: RuntimeCommandTimeout = RuntimeCommandTimeout()
     ) throws -> RuntimeCommandSpec {
         RuntimeCommandSpec(
@@ -68,7 +70,9 @@ public enum AppleContainerCommand {
                 for: kind,
                 desiredService: desiredService,
                 mutationContext: mutationContext,
-                resourceIdentifier: resourceIdentifier
+                resourceIdentifier: resourceIdentifier,
+                dnsServers: dnsServers,
+                dnsSearchDomains: dnsSearchDomains
             ),
             environment: inheritedSensitiveEnvironment(for: desiredService),
             sensitiveValues: desiredService.environment.filter(\.isSensitive).map(\.value),
@@ -87,6 +91,8 @@ public enum AppleContainerCommand {
         desiredService: DesiredRuntimeService,
         mutationContext: RuntimeMutationContext,
         resourceIdentifier: String? = nil,
+        dnsServers: [String] = [],
+        dnsSearchDomains: [String] = [],
         timeout: RuntimeCommandTimeout = RuntimeCommandTimeout()
     ) throws -> RuntimeCommandSpec {
         RuntimeCommandSpec(
@@ -96,6 +102,8 @@ public enum AppleContainerCommand {
                 desiredService: desiredService,
                 mutationContext: mutationContext,
                 resourceIdentifier: resourceIdentifier,
+                dnsServers: dnsServers,
+                dnsSearchDomains: dnsSearchDomains,
                 codec: codec
             ),
             environment: inheritedSensitiveEnvironment(for: desiredService),
@@ -178,13 +186,17 @@ public enum AppleContainerCommand {
         for kind: MutatingKind,
         desiredService: DesiredRuntimeService,
         mutationContext: RuntimeMutationContext,
-        resourceIdentifier: String? = nil
+        resourceIdentifier: String? = nil,
+        dnsServers: [String] = [],
+        dnsSearchDomains: [String] = []
     ) throws -> [String] {
         try arguments(
             for: kind,
             desiredService: desiredService,
             mutationContext: mutationContext,
             resourceIdentifier: resourceIdentifier,
+            dnsServers: dnsServers,
+            dnsSearchDomains: dnsSearchDomains,
             codec: .v1_1_0
         )
     }
@@ -194,6 +206,8 @@ public enum AppleContainerCommand {
         desiredService: DesiredRuntimeService,
         mutationContext: RuntimeMutationContext,
         resourceIdentifier: String? = nil,
+        dnsServers: [String] = [],
+        dnsSearchDomains: [String] = [],
         codec: AppleContainerCLICodec
     ) throws -> [String] {
         switch kind {
@@ -248,9 +262,47 @@ public enum AppleContainerCommand {
                 arguments += ["--env", argument]
             }
             for port in desiredService.ports.sorted(by: stablePortOrdering) {
-                if let hostPort = port.hostPort {
-                    arguments += ["--publish", publishSpec(for: port, hostPort: hostPort)]
+                guard let hostPort = port.hostPort else {
+                    throw RuntimeAdapterError.commandRejected(
+                        classification: .mutating,
+                        message:
+                            "Apple container create requires dynamic host ports to be durably resolved before mutation."
+                    )
                 }
+                arguments += [
+                    "--publish",
+                    publishSpec(for: port, hostPort: hostPort)
+                ]
+            }
+            for socket in desiredService.publishedSockets.sorted(by: {
+                ($0.hostPath, $0.containerPath, $0.mode.rawValue) <
+                    ($1.hostPath, $1.containerPath, $1.mode.rawValue)
+            }) {
+                guard unixSocketGuestPathFits(
+                    resourceIdentifier: resourceIdentifier,
+                    containerPath: socket.containerPath
+                ) else {
+                    throw RuntimeAdapterError.commandRejected(
+                        classification: .mutating,
+                        message:
+                            "Apple container Unix socket publication exceeds the guest relay path limit after applying the runtime resource prefix."
+                    )
+                }
+                arguments += [
+                    "--publish-socket",
+                    "\(socket.hostPath):\(socket.containerPath)"
+                ]
+            }
+            for network in desiredService.networks.sorted(by: {
+                $0.networkRuntimeIdentifier < $1.networkRuntimeIdentifier
+            }) {
+                arguments += ["--network", network.networkRuntimeIdentifier]
+            }
+            for server in dnsServers.sorted() {
+                arguments += ["--dns", server]
+            }
+            for domain in dnsSearchDomains.sorted() {
+                arguments += ["--dns-search", domain]
             }
             for mount in desiredService.mounts.sorted(by: stableMountOrdering) {
                 arguments += try mountArguments(for: mount, codec: codec)
@@ -369,18 +421,29 @@ public enum AppleContainerCommand {
         identity.managedResourceIdentifier
     }
 
+    static func unixSocketGuestPathFits(
+        resourceIdentifier: String,
+        containerPath: String
+    ) -> Bool {
+        let guestPath =
+            "/run/container/\(resourceIdentifier)/rootfs\(containerPath)"
+        return guestPath.utf8.count <= 107
+    }
+
     private static func stablePortOrdering(_ lhs: RuntimePortMapping, _ rhs: RuntimePortMapping) -> Bool {
         [
             lhs.hostPort.map(String.init) ?? "",
             String(lhs.containerPort),
             lhs.bindAddress ?? "",
-            lhs.protocolName.rawValue
+            lhs.protocolName.rawValue,
+            lhs.allocation.rawValue
         ].joined(separator: ":") <
         [
             rhs.hostPort.map(String.init) ?? "",
             String(rhs.containerPort),
             rhs.bindAddress ?? "",
-            rhs.protocolName.rawValue
+            rhs.protocolName.rawValue,
+            rhs.allocation.rawValue
         ].joined(separator: ":")
     }
 

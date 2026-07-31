@@ -1,4 +1,5 @@
 import Foundation
+import HostwrightNetworking
 
 public enum ManifestCanonicalEncoder {
     public static func encode(_ manifest: HostwrightManifest) throws -> String {
@@ -123,6 +124,10 @@ public enum ManifestCanonicalEncoder {
             lines.append("  requireReproducible: \(imageProvenance.requireReproducible)")
         }
         appendVolumeDeclarations(manifest.volumes, to: &lines)
+        appendNetworkDefinitions(manifest.networks, to: &lines)
+        appendCertificateDeclarations(manifest.certificates, to: &lines)
+        appendIngress(manifest.ingress, to: &lines)
+        appendTunnels(manifest.tunnels, to: &lines)
         lines.append("services:")
 
         for service in manifest.services.sorted(by: { $0.name < $1.name }) {
@@ -173,7 +178,14 @@ public enum ManifestCanonicalEncoder {
                 to: &lines
             )
             appendStringMap(service.labels, key: "labels", to: &lines)
-            appendBlockArray(service.ports, key: "ports", to: &lines)
+            appendPublishedEndpoints(
+                ports: service.publishedPorts,
+                sockets: service.publishedSockets,
+                to: &lines
+            )
+            appendHostAccess(service.hostAccess, to: &lines)
+            appendServiceNetworks(service.networks, to: &lines)
+            appendNetworkPolicy(service.networkPolicy, to: &lines)
             appendMounts(service.mounts, to: &lines)
 
             let probes = canonicalProbes(for: service)
@@ -234,6 +246,218 @@ public enum ManifestCanonicalEncoder {
                 lines.append("    reclaimPolicy: \(quote(volume.reclaimPolicy.rawValue))")
             }
             appendStringMap(volume.labels, key: "labels", indent: 4, to: &lines)
+        }
+    }
+
+    private static func appendNetworkDefinitions(
+        _ networks: [String: HostwrightNetworkDefinition],
+        to lines: inout [String]
+    ) {
+        guard !networks.isEmpty else { return }
+        lines.append("networks:")
+        for (name, network) in networks.sorted(by: { $0.key < $1.key }) {
+            lines.append("  \(quote(name)):")
+            let usesDefaults =
+                network.driver == .nat &&
+                network.ipv4 == .auto &&
+                network.ipv6 == .auto
+            if usesDefaults {
+                lines.append("    {}")
+                continue
+            }
+            if network.driver != .nat {
+                lines.append("    driver: \(quote(network.driver.rawValue))")
+            }
+            if network.ipv4 != .auto {
+                lines.append(
+                    "    ipv4: \(quote(canonicalNetworkAddress(network.ipv4, ipv6: false)))"
+                )
+            }
+            if network.ipv6 != .auto {
+                lines.append(
+                    "    ipv6: \(quote(canonicalNetworkAddress(network.ipv6, ipv6: true)))"
+                )
+            }
+        }
+    }
+
+    private static func appendIngress(
+        _ ingress: [String: HostwrightIngressListener],
+        to lines: inout [String]
+    ) {
+        guard !ingress.isEmpty else { return }
+        lines.append("ingress:")
+        for (name, listener) in ingress.sorted(by: { $0.key < $1.key }) {
+            lines.append("  \(quote(name)):")
+            if listener.bindAddress !=
+                NetworkBindAddressPolicy.localhostBindAddress {
+                lines.append(
+                    "    bind: \(quote(listener.bindAddress))"
+                )
+            }
+            if !listener.exposure.isDefaultLocalhost {
+                lines.append("    exposure:")
+                lines.append(
+                    "      scope: \(quote(listener.exposure.scope.rawValue))"
+                )
+                lines.append(
+                    "      interfaces: \(array(listener.exposure.interfaces))"
+                )
+                lines.append(
+                    "      networkClasses: \(array(listener.exposure.networkClasses.map(\.rawValue)))"
+                )
+                lines.append(
+                    "      allowedCIDRs: \(array(listener.exposure.allowedCIDRs))"
+                )
+                lines.append(
+                    "      authentication: \(quote(listener.exposure.authentication.rawValue))"
+                )
+            }
+            if let certificate = listener.certificate {
+                lines.append("    certificate: \(quote(certificate))")
+            }
+            if !listener.peers.isEmpty {
+                lines.append("    peers:")
+                for peer in listener.peers.sorted(by: { ($0.service, $0.role.rawValue) < ($1.service, $1.role.rawValue) }) {
+                    lines.append("      - service: \(quote(peer.service))")
+                    lines.append("        role: \(quote(peer.role.rawValue))")
+                }
+            }
+            lines.append("    port: \(listener.port)")
+            lines.append("    routes:")
+            for route in listener.routes.sorted(
+                by: HostwrightIngressRoute.canonicalPrecedes
+            ) {
+                lines.append(
+                    "      - hostname: \(quote(route.hostname))"
+                )
+                lines.append(
+                    "        pathPrefix: \(quote(route.pathPrefix))"
+                )
+                lines.append(
+                    "        methods: \(array(route.methods.sorted()))"
+                )
+                lines.append(
+                    "        protocol: \(quote(route.protocolName.rawValue))"
+                )
+                lines.append(
+                    "        targetService: \(quote(route.targetService))"
+                )
+                lines.append("        targetPort: \(route.targetPort)")
+            }
+        }
+    }
+
+    private static func appendTunnels(
+        _ tunnels: [String: HostwrightTunnelDeclaration],
+        to lines: inout [String]
+    ) {
+        guard !tunnels.isEmpty else { return }
+        lines.append("tunnels:")
+        for (name, tunnel) in tunnels.sorted(by: { $0.key < $1.key }) {
+            lines.append("  \(quote(name)):")
+            lines.append("    targetService: \(quote(tunnel.targetService))")
+            lines.append("    targetPort: \(tunnel.targetPort)")
+            lines.append("    peerUUID: \(quote(tunnel.peerUUID))")
+            if tunnel.role != .localLoopback {
+                lines.append("    role: \(quote(tunnel.role.rawValue))")
+            }
+            if let trust = tunnel.trust {
+                lines.append("    trust:")
+                lines.append(
+                    "      wireRouteUUID: \(quote(trust.wireRouteUUID))"
+                )
+                lines.append(
+                    "      wireGeneration: \(trust.wireGeneration)"
+                )
+                lines.append(
+                    "      localIdentitySHA256: \(quote(trust.localIdentitySHA256))"
+                )
+                lines.append(
+                    "      peerTrustAnchorSHA256: \(quote(trust.peerTrustAnchorSHA256))"
+                )
+                lines.append(
+                    "      peerCertificateSHA256: \(quote(trust.peerCertificateSHA256))"
+                )
+                if let peerDNSName = trust.peerDNSName {
+                    lines.append(
+                        "      peerDNSName: \(quote(peerDNSName))"
+                    )
+                }
+                if let peerIdentityURI = trust.peerIdentityURI {
+                    lines.append(
+                        "      peerIdentityURI: \(quote(peerIdentityURI))"
+                    )
+                }
+            }
+            if let bind = tunnel.bindEndpoint {
+                lines.append("    bindEndpoint:")
+                lines.append("      host: \(quote(bind.host))")
+                lines.append("      port: \(bind.port)")
+            }
+            if !tunnel.authenticatedEndpoints.isEmpty {
+                lines.append("    authenticatedEndpoints:")
+                for endpoint in tunnel.authenticatedEndpoints {
+                    lines.append("      - scheme: \(quote(endpoint.scheme.rawValue))")
+                    lines.append("        host: \(quote(endpoint.host))")
+                    lines.append("        port: \(endpoint.port)")
+                }
+            }
+            if let relay = tunnel.relayEndpoint {
+                lines.append("    relayEndpoint:")
+                lines.append("      scheme: \(quote(relay.scheme.rawValue))")
+                lines.append("      host: \(quote(relay.host))")
+                lines.append("      port: \(relay.port)")
+            }
+            if !tunnel.bonjourDiscovery {
+                lines.append("    bonjourDiscovery: false")
+            }
+        }
+    }
+
+    private static func appendCertificateDeclarations(_ certificates: [String: HostwrightCertificateDeclaration], to lines: inout [String]) {
+        guard !certificates.isEmpty else { return }
+        lines.append("certificates:")
+        for (name, certificate) in certificates.sorted(by: { $0.key < $1.key }) {
+            lines.append("  \(quote(name)):")
+            lines.append("    source: \(quote(certificate.source.rawValue))")
+            if let identitySHA256 = certificate.identitySHA256 { lines.append("    identitySHA256: \(quote(identitySHA256))") }
+            if let issuer = certificate.issuer { lines.append("    issuer: \(quote(issuer))") }
+            lines.append("    renewBeforeSeconds: \(certificate.renewBeforeSeconds)")
+            lines.append("    validitySeconds: \(certificate.validitySeconds)")
+            lines.append("    statusPolicy: \(quote(certificate.statusPolicy.rawValue))")
+        }
+    }
+
+    private static func canonicalNetworkAddress(
+        _ request: HostwrightNetworkAddressRequest,
+        ipv6: Bool
+    ) -> String {
+        guard case .cidr(let rawValue) = request else {
+            return request.manifestValue
+        }
+        return ManifestValidator.normalizedNetworkCIDR(rawValue, ipv6: ipv6) ?? rawValue
+    }
+
+    private static func appendServiceNetworks(
+        _ networks: [HostwrightServiceNetworkAttachment],
+        to lines: inout [String]
+    ) {
+        guard !networks.isEmpty else { return }
+        lines.append("    networks:")
+        for attachment in networks.sorted(by: {
+            if $0.network != $1.network {
+                return $0.network < $1.network
+            }
+            return $0.aliases.lexicographicallyPrecedes($1.aliases)
+        }) {
+            lines.append("      - network: \(quote(attachment.network))")
+            let aliases = attachment.aliases.sorted()
+            guard !aliases.isEmpty else { continue }
+            lines.append("        aliases:")
+            for alias in aliases {
+                lines.append("          - \(quote(alias))")
+            }
         }
     }
 
@@ -313,12 +537,113 @@ public enum ManifestCanonicalEncoder {
         }
     }
 
+    private static func appendHostAccess(
+        _ endpoints: [HostwrightHostAccessEndpoint],
+        to lines: inout [String]
+    ) {
+        guard !endpoints.isEmpty else { return }
+        lines.append("    hostAccess:")
+        for endpoint in endpoints.sorted(
+            by: HostwrightHostAccessPolicy.canonicalPrecedes
+        ) {
+            lines.append(
+                "      - hostname: \(quote(endpoint.hostname))"
+            )
+            lines.append(
+                "        protocol: \(quote(endpoint.protocolName.rawValue))"
+            )
+            lines.append(
+                "        addressClass: \(quote(endpoint.addressClass.rawValue))"
+            )
+            lines.append("        port: \(endpoint.port)")
+        }
+    }
+
+    private static func appendNetworkPolicy(
+        _ policy: HostwrightServiceNetworkPolicy?,
+        to lines: inout [String]
+    ) {
+        guard let policy else { return }
+        lines.append("    networkPolicy:")
+        appendNetworkPolicyRules(policy.ingress, direction: "ingress", to: &lines)
+        appendNetworkPolicyRules(policy.egress, direction: "egress", to: &lines)
+    }
+
+    private static func appendNetworkPolicyRules(
+        _ rules: [HostwrightNetworkPolicyRule],
+        direction: String,
+        to lines: inout [String]
+    ) {
+        guard !rules.isEmpty else {
+            lines.append("      \(direction): []")
+            return
+        }
+        lines.append("      \(direction):")
+        for rule in rules.sorted(by: { $0.canonicalKey < $1.canonicalKey }) {
+            var fields: [(String, String)] = []
+            if let project = rule.project { fields.append(("project", quote(project))) }
+            if let service = rule.service { fields.append(("service", quote(service))) }
+            if let identity = rule.identity { fields.append(("identity", quote(identity))) }
+            if let protocolName = rule.protocolName { fields.append(("protocol", quote(protocolName.rawValue))) }
+            if let address = rule.address { fields.append(("address", quote(address))) }
+            if let port = rule.port { fields.append(("port", "\(port)")) }
+            if let dns = rule.dns { fields.append(("dns", quote(dns))) }
+            guard let first = fields.first else { continue }
+            lines.append("        - \(first.0): \(first.1)")
+            for field in fields.dropFirst() {
+                lines.append("          \(field.0): \(field.1)")
+            }
+        }
+    }
+
     private static func appendBlockArray(_ values: [String], key: String, to lines: inout [String]) {
         guard !values.isEmpty else { return }
         lines.append("    \(key):")
         for value in values {
             lines.append("      - \(quote(value))")
         }
+    }
+
+    private static func appendPublishedEndpoints(
+        ports: [HostwrightPublishedPort],
+        sockets: [HostwrightPublishedSocket],
+        to lines: inout [String]
+    ) {
+        guard !ports.isEmpty || !sockets.isEmpty else { return }
+        lines.append("    ports:")
+        for value in ports {
+            lines.append("      - bind: \(quote(value.effectiveBindAddress))")
+            if let host = value.host {
+                lines.append("        host: \(canonicalPortSpan(host))")
+            }
+            lines.append("        target: \(canonicalPortSpan(value.target))")
+            lines.append("        protocol: \(quote(value.protocolName.rawValue))")
+            if let exposure = value.exposure, !exposure.isDefaultLocalhost {
+                lines.append("        exposure:")
+                lines.append("          scope: \(quote(exposure.scope.rawValue))")
+                lines.append("          interfaces: \(array(exposure.interfaces))")
+                lines.append("          networkClasses: \(array(exposure.networkClasses.map(\.rawValue)))")
+                lines.append("          allowedCIDRs: \(array(exposure.allowedCIDRs))")
+                lines.append("          authentication: \(quote(exposure.authentication.rawValue))")
+            }
+        }
+        for value in sockets {
+            if let hostName = value.hostName {
+                lines.append("      - host: \(quote(hostName))")
+                lines.append("        target: \(quote(value.containerPath))")
+            } else {
+                lines.append("      - target: \(quote(value.containerPath))")
+            }
+            lines.append("        protocol: \"unix\"")
+            lines.append("        mode: \(quote(value.mode.rawValue))")
+        }
+    }
+
+    private static func canonicalPortSpan(_ value: HostwrightPortSpan) -> String {
+        if value.isSingle {
+            return String(value.start)
+        }
+        return quote(value.canonicalString)
     }
 
     private static func appendMounts(_ mounts: [HostwrightMountSpec], to lines: inout [String]) {

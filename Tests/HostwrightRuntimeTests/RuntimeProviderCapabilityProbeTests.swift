@@ -48,12 +48,12 @@ final class RuntimeProviderCapabilityProbeTests: XCTestCase {
                 available,
                 [
                     .observation, .lifecycle, .processControl, .streaming, .images,
-                    .cancellation, .timeouts, .errors, .cleanup
+                    .networks, .cancellation, .timeouts, .errors, .cleanup
                 ]
             )
             XCTAssertEqual(
                 snapshot.features.filter { $0.state == .unavailable }.map(\.feature),
-                [.networks, .storage]
+                [.storage]
             )
         }
     }

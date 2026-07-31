@@ -1,3 +1,5 @@
+import HostwrightCore
+import HostwrightNetworking
 import HostwrightRuntime
 import HostwrightSecrets
 import XCTest
@@ -6,7 +8,10 @@ final class RuntimeCreateSubsetPolicyTests: XCTestCase {
     private static let containerizationUnsupportedMessage =
         "Containerization 0.35.0 create does not qualify the requested Phase 04 service options; select the Apple CLI provider or remove unsupported fields before mutation."
 
-    func testAppleContainerCLIAcceptsCompleteExecutablePhase04Subset() {
+    func testAppleContainerCLIAcceptsCompleteExecutablePhase04Subset()
+        throws {
+        let socketRoot = try HostwrightLocalPathResolver.resolve()
+            .layout.publishedSocketDirectory
         let service = makeService(
             platformArchitecture: "amd64",
             cpuCount: 2,
@@ -30,6 +35,13 @@ final class RuntimeCreateSubsetPolicyTests: XCTestCase {
                     hostPort: 18_080,
                     containerPort: 8_080,
                     bindAddress: "127.0.0.1"
+                )
+            ],
+            publishedSockets: [
+                RuntimeUnixSocketPublication(
+                    hostPath: "\(socketRoot)/api.sock",
+                    containerPath: "/run/api.sock",
+                    mode: .ownerAndGroup
                 )
             ],
             mounts: [
@@ -85,6 +97,75 @@ final class RuntimeCreateSubsetPolicyTests: XCTestCase {
                 providerID: .appleContainerCLI
             )
         )
+    }
+
+    func testAppleContainerCLIRejectsSocketPathThatExceedsEffectiveGuestRelayLimit()
+        throws
+    {
+        let socketRoot = try HostwrightLocalPathResolver.resolve()
+            .layout.publishedSocketDirectory
+        let service = makeService(
+            publishedSockets: [
+                RuntimeUnixSocketPublication(
+                    hostPath: "\(socketRoot)/api.sock",
+                    containerPath: "/\(String(repeating: "s", count: 70))"
+                )
+            ]
+        )
+
+        XCTAssertThrowsError(
+            try RuntimeCreateSubsetPolicy.validate(
+                service,
+                providerID: .appleContainerCLI
+            )
+        ) { error in
+            guard case RuntimeAdapterError.commandRejected(
+                classification: .mutating,
+                message: let message
+            ) = error else {
+                return XCTFail("Expected path-limit rejection, got \(error)")
+            }
+            XCTAssertTrue(message.contains("effective guest relay path limit"))
+        }
+    }
+
+    func testAppleContainerCLIRejectsDeclaredLANExposureBeforeMutation() {
+        let service = makeService(
+            ports: [
+                RuntimePortMapping(
+                    hostPort: 8_443,
+                    containerPort: 9_443,
+                    protocolName: .tcp,
+                    bindAddress: "192.168.1.10",
+                    allocation: .fixed,
+                    exposurePolicy: HostwrightPortExposurePolicy(
+                        scope: .lan,
+                        interfaces: ["en0"],
+                        networkClasses: [.privateLAN],
+                        allowedCIDRs: ["192.168.1.0/24"],
+                        authentication: .tls
+                    )
+                )
+            ]
+        )
+
+        XCTAssertThrowsError(
+            try RuntimeCreateSubsetPolicy.validate(
+                service,
+                providerID: .appleContainerCLI
+            )
+        ) { error in
+            guard case RuntimeAdapterError.commandRejected(
+                classification: .mutating,
+                message: let message
+            ) = error else {
+                return XCTFail("Expected secure-listener rejection, got \(error)")
+            }
+            XCTAssertEqual(
+                message,
+                "Create-only apply requires a qualified secure listener provider for non-localhost exposure."
+            )
+        }
     }
 
     func testAppleContainerCLIRejectsInvalidPlatformAndPortCombinations() {
@@ -181,6 +262,63 @@ final class RuntimeCreateSubsetPolicyTests: XCTestCase {
         )
     }
 
+    func testBothProvidersRequireCanonicalGuardedHostAccessBeforeMutation()
+        throws
+    {
+        let projectUUID =
+            "11111111-1111-4111-8111-111111111111"
+        let network = try RuntimeNetworkIdentity(
+            logicalName: "backend",
+            projectUUID: projectUUID
+        )
+        let attachment = try RuntimeDesiredNetworkAttachment(
+            network: network
+        )
+        let endpoint = HostwrightHostAccessEndpoint(
+            hostname: "host-api.internal",
+            protocolName: .tcp,
+            addressClass: .loopback,
+            port: 18_080
+        )
+        for provider in RuntimeProviderID.knownValues {
+            XCTAssertNoThrow(
+                try RuntimeCreateSubsetPolicy.validate(
+                    makeService(
+                        hostAccess: [endpoint],
+                        networks: [attachment]
+                    ),
+                    providerID: provider
+                )
+            )
+            XCTAssertThrowsError(
+                try RuntimeCreateSubsetPolicy.validate(
+                    makeService(hostAccess: [endpoint]),
+                    providerID: provider
+                )
+            )
+            var invalid = endpoint
+            invalid.hostname = "metadata"
+            XCTAssertThrowsError(
+                try RuntimeCreateSubsetPolicy.validate(
+                    makeService(
+                        hostAccess: [invalid],
+                        networks: [attachment]
+                    ),
+                    providerID: provider
+                )
+            )
+            XCTAssertThrowsError(
+                try RuntimeCreateSubsetPolicy.validate(
+                    makeService(
+                        hostAccess: [endpoint, endpoint],
+                        networks: [attachment]
+                    ),
+                    providerID: provider
+                )
+            )
+        }
+    }
+
     func testContainerizationRejectsEveryUnsupportedPhase04FieldWithStableError() throws {
         let secretReference = try HostwrightSecretReference(
             service: "hostwright-test",
@@ -211,6 +349,17 @@ final class RuntimeCreateSubsetPolicyTests: XCTestCase {
                             hostPort: 18_080,
                             containerPort: 8_080,
                             bindAddress: "127.0.0.1"
+                        )
+                    ]
+                )
+            ),
+            (
+                "published-sockets",
+                makeService(
+                    publishedSockets: [
+                        RuntimeUnixSocketPublication(
+                            hostPath: "/tmp/hostwright-api.sock",
+                            containerPath: "/run/api.sock"
                         )
                     ]
                 )
@@ -314,6 +463,9 @@ final class RuntimeCreateSubsetPolicyTests: XCTestCase {
         ],
         labels: [String: String] = [:],
         ports: [RuntimePortMapping] = [],
+        publishedSockets: [RuntimeUnixSocketPublication] = [],
+        hostAccess: [HostwrightHostAccessEndpoint] = [],
+        networks: [RuntimeDesiredNetworkAttachment] = [],
         mounts: [RuntimeMountReference] = [],
         healthCheck: RuntimeHealthCheckSpec? = nil,
         probes: RuntimeProbeSet = RuntimeProbeSet(),
@@ -352,6 +504,9 @@ final class RuntimeCreateSubsetPolicyTests: XCTestCase {
             environment: environment,
             labels: labels,
             ports: ports,
+            publishedSockets: publishedSockets,
+            hostAccess: hostAccess,
+            networks: networks,
             mounts: mounts,
             healthCheck: healthCheck,
             probes: probes,

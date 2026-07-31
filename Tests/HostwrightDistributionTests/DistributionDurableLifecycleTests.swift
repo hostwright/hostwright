@@ -942,7 +942,7 @@ final class DistributionDurableLifecycleTests: XCTestCase {
 
             let repaired = try lifecycle.install(artifact: artifact, prefix: prefix)
             XCTAssertEqual(repaired.generation, 2)
-            XCTAssertEqual(repaired.installedManifest.schemaVersion, 3)
+            XCTAssertEqual(repaired.installedManifest.schemaVersion, 4)
             XCTAssertTrue(try DistributionFileSystem.isRegularNonSymlink(
                 prefix.appendingPathComponent("bin/hostwright-dist")
             ))
@@ -1057,7 +1057,7 @@ final class DistributionDurableLifecycleTests: XCTestCase {
                 artifact: candidate,
                 prefix: prefix
             )
-            XCTAssertEqual(upgraded.installedManifest.schemaVersion, 3)
+            XCTAssertEqual(upgraded.installedManifest.schemaVersion, 4)
             XCTAssertTrue(try DistributionFileSystem.isRegularNonSymlink(
                 prefix.appendingPathComponent(
                     "bin/hostwright-storage-helper"
@@ -2636,6 +2636,16 @@ final class DistributionDurableLifecycleTests: XCTestCase {
                 hostwrightBinary: binary,
                 hostwrightControlBinary: binary,
                 hostwrightContainerizationHelperBinary: binary,
+                hostwrightNetworkHelperBinary: try contractHelperFixture(
+                    root: root,
+                    name: "hostwright-network-helper",
+                    version: "network-helper-protocol-v1"
+                ),
+                hostwrightNetworkProviderWorkerBinary: try contractHelperFixture(
+                    root: root,
+                    name: "hostwright-network-provider-worker",
+                    version: "network-provider-spi-v1"
+                ),
                 hostwrightStorageHelperBinary: try storageHelperFixture(
                     root: root,
                     version: LocalStorageProviderContract.providerVersion
@@ -2668,11 +2678,23 @@ final class DistributionDurableLifecycleTests: XCTestCase {
         root: URL,
         version: String
     ) throws -> URL {
+        try contractHelperFixture(
+            root: root,
+            name: "hostwright-storage-helper",
+            version: version
+        )
+    }
+
+    private func contractHelperFixture(
+        root: URL,
+        name: String,
+        version: String
+    ) throws -> URL {
         let source = root.appendingPathComponent(
-            "storage-helper-fixture.swift"
+            "\(name)-fixture.swift"
         )
         let binary = root.appendingPathComponent(
-            "hostwright-storage-helper"
+            name
         )
         if DistributionFileSystem.entryExists(binary) {
             return binary

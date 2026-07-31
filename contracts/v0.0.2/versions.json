@@ -5,6 +5,7 @@
   "controlAPI": 2,
   "runtimeProviderAPI": 2,
   "storageProviderAPI": 1,
+  "networkProviderSPI": 1,
   "pluginABI": 1,
-  "stateSchema": 15
+  "stateSchema": 16
 }

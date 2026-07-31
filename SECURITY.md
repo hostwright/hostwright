@@ -9,7 +9,7 @@ Hostwright is not yet production ready. Security-sensitive behavior must be desi
 - `hostwrightd --foreground` observes, plans, records events, and runs bounded health checks without unattended runtime mutation.
 - No privileged helper exists.
 - No launch agent or service installer exists.
-- No tunnel, DNS, cloud, CRI, Kubernetes, or Docker API behavior exists.
+- Phase 07 networking is limited to exact UUID-owned project DNS, ingress, certificate, policy, authenticated service-tunnel, and restricted provider-SPI boundaries. No unmanaged host DNS, general VPN, unauthenticated public exposure, cloud, CRI, Kubernetes, or Docker API behavior exists.
 - Internal planning/source-material binaries are not required in the public tree.
 
 ## Security Requirements

@@ -3,8 +3,9 @@ public enum HostwrightContractVersions {
     public static let controlAPI = 2
     public static let runtimeProviderAPI = 2
     public static let storageProviderAPI = 1
+    public static let networkProviderSPI = 1
     public static let pluginABI = 1
-    public static let stateSchema = 15
+    public static let stateSchema = 16
 }
 
 public struct HostwrightContractSnapshot: Codable, Equatable, Sendable {
@@ -12,6 +13,7 @@ public struct HostwrightContractSnapshot: Codable, Equatable, Sendable {
     public let controlAPI: Int
     public let runtimeProviderAPI: Int
     public let storageProviderAPI: Int
+    public let networkProviderSPI: Int
     public let pluginABI: Int
     public let stateSchema: Int
 
@@ -21,6 +23,8 @@ public struct HostwrightContractSnapshot: Codable, Equatable, Sendable {
         runtimeProviderAPI: Int = HostwrightContractVersions.runtimeProviderAPI,
         storageProviderAPI: Int =
             HostwrightContractVersions.storageProviderAPI,
+        networkProviderSPI: Int =
+            HostwrightContractVersions.networkProviderSPI,
         pluginABI: Int = HostwrightContractVersions.pluginABI,
         stateSchema: Int = HostwrightContractVersions.stateSchema
     ) {
@@ -28,6 +32,7 @@ public struct HostwrightContractSnapshot: Codable, Equatable, Sendable {
         self.controlAPI = controlAPI
         self.runtimeProviderAPI = runtimeProviderAPI
         self.storageProviderAPI = storageProviderAPI
+        self.networkProviderSPI = networkProviderSPI
         self.pluginABI = pluginABI
         self.stateSchema = stateSchema
     }

@@ -25,7 +25,9 @@ Replicas and service dependencies expand into deterministic nodes. `started`, `r
 
 Node starts, attempts, provider results, observations, health results, supply-chain authorization events, and checkpoints are durable. After timeout, cancellation, crash, or ambiguous provider output, Hostwright observes before deciding whether to retry, compensate, or hold. Recovery revalidates current signature, SBOM, vulnerability, and provenance evidence and rebinds that authorization to any derived rollback plan. Retry is capped at three attempts and allowed only by normalized retry safety.
 
-`hostwrightd --foreground` and the exact managed `--service` mode run the same non-mutating reconciliation loop. They read the explicit config path, observe through `RuntimeAdapter`, compute a plan, and record daemon events and operation records to the selected state database (Application Support by default). Neither mode calls `RuntimeAdapter.execute` at Gate 1; `hostwright daemon` owns only the LaunchAgent lifecycle, while unattended mutation remains Gate 2.
+`hostwrightd --foreground` and the exact managed `--service` mode run the same level-triggered reconciliation loop. Healthy scheduling begins immediately and repeats within five seconds without a filesystem event. The daemon validates the explicit config, observes through `RuntimeAdapter`, computes health and restart inputs, and invokes the existing CLI lifecycle compiler/live driver/saga for `up`. An empty DAG records convergence; a nonempty DAG requires fresh observation, exact confirmation, one project lease, durable intent, fencing, bounded execution, and verification. Compensation, interruption, ambiguity, or safe hold remains visible and triggers bounded backoff rather than a success claim.
+
+The daemon does not maintain a second executor. CLI and daemon execution therefore share provider selection, image binding, network/storage preflight, operation groups, checkpoints, compensation, and cleanup behavior. The outer daemon loop does not publish a candidate manifest over the authoritative healthy desired revision before the saga has recorded mutation intent.
 
 ## Drift Cases
 

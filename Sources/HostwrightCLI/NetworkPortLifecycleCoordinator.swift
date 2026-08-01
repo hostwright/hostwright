@@ -372,9 +372,12 @@ enum NetworkPortLifecycleCoordinator {
             group: group,
             store: store
         )
+        let exactServiceNames = Set([
+            service.identity.displayName,
+            service.logicalServiceName,
+        ])
         guard node.action == .create,
-              node.serviceName ==
-                service.identity.displayName,
+              node.serviceName.map(exactServiceNames.contains) == true,
               service.identity.projectName == plan.projectName else {
             throw conflict(
                 "Port reservation requires the exact lifecycle create node and service."

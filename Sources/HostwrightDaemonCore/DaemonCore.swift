@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import HostwrightCore
 import HostwrightManifest
@@ -25,6 +26,7 @@ public struct DaemonConfiguration: Equatable, Sendable {
     public let cadenceSeconds: Int
     public let jitterSeconds: Int
     public let maxBackoffSeconds: Int
+    public let maximumParallelism: Int
     public let maxIterations: Int?
 
     public init(
@@ -32,9 +34,10 @@ public struct DaemonConfiguration: Equatable, Sendable {
         configPath: String,
         stateDatabasePath: String,
         lockFilePath: String? = nil,
-        cadenceSeconds: Int = 30,
-        jitterSeconds: Int = 5,
+        cadenceSeconds: Int = 5,
+        jitterSeconds: Int = 0,
         maxBackoffSeconds: Int = 300,
+        maximumParallelism: Int = min(4, max(1, ProcessInfo.processInfo.activeProcessorCount)),
         maxIterations: Int? = nil
     ) {
         self.mode = mode
@@ -44,6 +47,7 @@ public struct DaemonConfiguration: Equatable, Sendable {
         self.cadenceSeconds = cadenceSeconds
         self.jitterSeconds = jitterSeconds
         self.maxBackoffSeconds = maxBackoffSeconds
+        self.maximumParallelism = maximumParallelism
         self.maxIterations = maxIterations
     }
 
@@ -52,9 +56,10 @@ public struct DaemonConfiguration: Equatable, Sendable {
         configPath: String,
         stateStoreConfiguration: StateStoreConfiguration,
         lockFilePath: String,
-        cadenceSeconds: Int = 30,
-        jitterSeconds: Int = 5,
+        cadenceSeconds: Int = 5,
+        jitterSeconds: Int = 0,
         maxBackoffSeconds: Int = 300,
+        maximumParallelism: Int = min(4, max(1, ProcessInfo.processInfo.activeProcessorCount)),
         maxIterations: Int? = nil
     ) {
         self.mode = mode
@@ -64,6 +69,7 @@ public struct DaemonConfiguration: Equatable, Sendable {
         self.cadenceSeconds = cadenceSeconds
         self.jitterSeconds = jitterSeconds
         self.maxBackoffSeconds = maxBackoffSeconds
+        self.maximumParallelism = maximumParallelism
         self.maxIterations = maxIterations
     }
 
@@ -109,6 +115,14 @@ public struct DaemonConfiguration: Equatable, Sendable {
         }
         guard maxBackoffSeconds >= cadenceSeconds else {
             throw DaemonError.invalidConfiguration("--max-backoff must be greater than or equal to --interval.")
+        }
+        guard (1...32).contains(maximumParallelism) else {
+            throw DaemonError.invalidConfiguration("--parallelism must be between 1 and 32.")
+        }
+        if cadenceSeconds + jitterSeconds > 5 {
+            throw DaemonError.invalidConfiguration(
+                "--interval plus --jitter must not exceed five seconds."
+            )
         }
         if let maxIterations, maxIterations <= 0 {
             throw DaemonError.invalidConfiguration("--max-iterations must be a positive integer when provided.")
@@ -183,6 +197,7 @@ public struct DaemonLoopRunner {
 
     private let configuration: DaemonConfiguration
     private let runtimeAdapter: any RuntimeAdapter
+    private let reconciliationDriver: any DaemonReconciliationDriving
     private let healthChecker: any RuntimeHealthChecking
     private let clock: any DaemonClock
     private let instanceLock: any DaemonInstanceLock
@@ -191,6 +206,7 @@ public struct DaemonLoopRunner {
     public init(
         configuration: DaemonConfiguration,
         runtimeAdapter: any RuntimeAdapter,
+        reconciliationDriver: any DaemonReconciliationDriving,
         healthChecker: any RuntimeHealthChecking = BoundedRuntimeHealthChecker(),
         clock: any DaemonClock,
         instanceLock: any DaemonInstanceLock,
@@ -201,6 +217,7 @@ public struct DaemonLoopRunner {
     ) {
         self.configuration = configuration
         self.runtimeAdapter = runtimeAdapter
+        self.reconciliationDriver = reconciliationDriver
         self.healthChecker = healthChecker
         self.clock = clock
         self.instanceLock = instanceLock
@@ -306,11 +323,15 @@ public struct DaemonLoopRunner {
 
     private func runIteration(iteration: Int, store: SQLiteStateStore) async throws -> IterationResult {
         let startedAt = clock.timestamp()
+        var currentProjectID: String?
+        var currentPlanHash = "unavailable"
+        var enteredLifecycleDriver = false
         do {
             let manifestText = try readConfig(configuration.configPath)
             let manifest = try ManifestValidator.validated(manifestText)
             let mapping = ManifestRuntimeMapper.map(manifest)
             let projectID = "project-\(mapping.desiredState.projectName)"
+            currentProjectID = projectID
             let observationDesiredState = DesiredRuntimeState(
                 projectName: mapping.desiredState.projectName,
                 networks: mapping.desiredState.networks,
@@ -323,15 +344,6 @@ public struct DaemonLoopRunner {
             let observed = try await runtimeAdapter.observe(desiredState: observationDesiredState)
             let adapterName = observed.adapterMetadata?.adapterName ?? "runtime-adapter"
 
-            try store.desiredStates.saveManifestSnapshot(
-                projectID: projectID,
-                manifestPath: configuration.configPath,
-                manifestHash: stableHash(manifestText),
-                desiredGeneration: iteration,
-                manifest: manifest,
-                timestamp: startedAt
-            )
-
             let healthResults = try await runHealthChecks(
                 desiredState: mapping.desiredState,
                 observedState: observed,
@@ -339,27 +351,61 @@ public struct DaemonLoopRunner {
                 projectID: projectID,
                 timestamp: startedAt
             )
-            try persistHealthResults(healthResults, store: store, projectID: projectID, checkedAt: startedAt)
             let observedWithHealth = observedState(observed, applying: healthResults)
-            try upsertRestartPolicyStates(
+            let restartPolicyRecords = try restartPolicyStates(
                 desiredState: mapping.desiredState,
                 observedState: observedWithHealth,
                 store: store,
                 projectID: projectID,
                 timestamp: startedAt
             )
-            let restartPolicyStates = try restartPolicyStateMap(
-                store: store,
-                projectID: projectID,
-                projectName: mapping.desiredState.projectName
+            let restartPolicyStateMap = Dictionary(
+                restartPolicyRecords.map { state in
+                    (
+                        RuntimeServiceIdentity(
+                            projectName: mapping.desiredState.projectName,
+                            serviceName: state.serviceName
+                        ),
+                        state
+                    )
+                },
+                uniquingKeysWith: { first, _ in first }
             )
             let plan = ReconciliationPlanner().plan(
                 manifest: manifest,
                 observedState: observedWithHealth,
-                restartPolicyStates: restartPolicyStates,
+                restartPolicyStates: restartPolicyStateMap,
                 currentTimestamp: startedAt
             )
-
+            currentPlanHash = plan.planHash
+            guard !plan.includesBlockers else {
+                throw HostwrightDiagnostic(
+                    code: .unsafeExposure,
+                    message: "The unattended reconciliation plan contains blocking issues. No runtime mutation was admitted."
+                )
+            }
+            enteredLifecycleDriver = true
+            let reconciliation = try await reconciliationDriver.reconcile(
+                request: try DaemonReconciliationRequest(
+                    manifestPath: configuration.configPath,
+                    manifestSHA256: sha256(manifestText),
+                    stateDatabasePath: configuration.stateDatabasePath,
+                    projectID: projectID,
+                    maximumParallelism: configuration.maximumParallelism
+                )
+            )
+            try persistHealthResults(
+                healthResults,
+                store: store,
+                projectID: projectID,
+                checkedAt: startedAt
+            )
+            try persistRestartPolicyStates(
+                restartPolicyRecords,
+                store: store,
+                projectID: projectID,
+                timestamp: startedAt
+            )
             try store.observedStates.saveSnapshot(
                 snapshotID: idGenerator("daemon-snapshot"),
                 projectID: projectID,
@@ -370,6 +416,7 @@ public struct DaemonLoopRunner {
                 redactedSummary: PlanRenderer.render(plan, mode: .compact),
                 observedAt: startedAt
             )
+            let iterationSucceeded = reconciliation.status.isSuccessfulIteration
             try store.operations.record(
                 OperationRecord(
                     id: idGenerator("operation-daemon"),
@@ -378,15 +425,20 @@ public struct DaemonLoopRunner {
                     plannedActionType: "daemon.reconcile",
                     projectID: projectID,
                     serviceName: nil,
-                    status: .succeeded,
+                    status: iterationSucceeded ? .succeeded : .failed,
                     idempotencyKey: "daemon:\(iteration)",
                     planHash: plan.planHash,
                     payloadJSONRedacted: payload([
                         "actions": plan.actions.count,
                         "drift": plan.drift.count,
                         "healthChecks": healthResults.count,
-                        "mutationAttempted": false,
+                        "checkpoint": reconciliation.checkpoint,
+                        "completedNodes": reconciliation.completedNodeCount,
+                        "lifecyclePlanSHA256": reconciliation.planSHA256,
+                        "mutationAttempted": reconciliation.runtimeMutationAttempted,
+                        "nodes": reconciliation.nodeCount,
                         "planHash": plan.planHash,
+                        "reasonCode": reconciliation.reasonCode.rawValue,
                         "restartPolicyBlocked": plan.issues.filter { $0.kind == .restartPolicyBlocked }.count
                     ])
                 )
@@ -395,42 +447,56 @@ public struct DaemonLoopRunner {
                 EventRecord(
                     id: idGenerator("event-daemon"),
                     timestamp: startedAt,
-                    severity: .info,
-                    type: "daemon.reconcile.succeeded",
+                    severity: iterationSucceeded ? .info : .warning,
+                    type: reconciliation.reasonCode.rawValue,
                     source: "hostwrightd",
                     projectID: projectID,
                     serviceName: nil,
                     runtimeAdapter: adapterName,
-                    message: "Daemon reconciliation observed \(observedWithHealth.services.count) service(s), recorded \(healthResults.count) health check result(s), planned \(plan.actions.count) action(s), and attempted no runtime mutation.",
+                    message: "Daemon reconciliation \(reconciliation.status.rawValue): observed \(observedWithHealth.services.count) service(s), recorded \(healthResults.count) health check result(s), planned \(reconciliation.nodeCount) lifecycle node(s), and completed \(reconciliation.completedNodeCount).",
                     payloadJSONRedacted: payload([
                         "actions": plan.actions.count,
                         "drift": plan.drift.count,
                         "healthChecks": healthResults.count,
-                        "mutationAttempted": false,
+                        "checkpoint": reconciliation.checkpoint,
+                        "completedNodes": reconciliation.completedNodeCount,
+                        "lifecyclePlanSHA256": reconciliation.planSHA256,
+                        "mutationAttempted": reconciliation.runtimeMutationAttempted,
+                        "nodes": reconciliation.nodeCount,
                         "planHash": plan.planHash,
+                        "reasonCode": reconciliation.reasonCode.rawValue,
                         "restartPolicyBlocked": plan.issues.filter { $0.kind == .restartPolicyBlocked }.count
                     ])
                 )
             ])
-            return .success
+            return iterationSucceeded ? .success : .failure
         } catch {
             let diagnostic = daemonDiagnostic(for: error)
             let message = RuntimeRedactionPolicy.default.redact(diagnostic.message)
+            let evidenceProjectID: String?
+            if let currentProjectID,
+               (try? store.desiredStates.loadProject(id: currentProjectID)) != nil {
+                evidenceProjectID = currentProjectID
+            } else {
+                evidenceProjectID = nil
+            }
             try store.operations.record(
                 OperationRecord(
                     id: idGenerator("operation-daemon"),
                     createdAt: startedAt,
                     updatedAt: startedAt,
                     plannedActionType: "daemon.reconcile",
-                    projectID: nil,
+                    projectID: evidenceProjectID,
                     serviceName: nil,
                     status: .failed,
                     idempotencyKey: "daemon:\(iteration)",
-                    planHash: "unavailable",
+                    planHash: currentPlanHash,
                     payloadJSONRedacted: payload([
                         "error": message,
                         "errorCode": diagnostic.code.rawValue,
-                        "mutationAttempted": false
+                        "mutationOutcome": enteredLifecycleDriver
+                            ? "inspect-lifecycle-ledger"
+                            : "not-admitted"
                     ])
                 )
             )
@@ -441,14 +507,18 @@ public struct DaemonLoopRunner {
                     severity: .error,
                     type: "daemon.reconcile.failed",
                     source: "hostwrightd",
-                    projectID: nil,
+                    projectID: evidenceProjectID,
                     serviceName: nil,
                     runtimeAdapter: nil,
-                    message: "Daemon reconciliation failed without runtime mutation: \(diagnostic.code.rawValue): \(message)",
+                    message: enteredLifecycleDriver
+                        ? "Daemon reconciliation failed; inspect the fenced lifecycle ledger before retry: \(diagnostic.code.rawValue): \(message)"
+                        : "Daemon reconciliation failed before lifecycle admission: \(diagnostic.code.rawValue): \(message)",
                     payloadJSONRedacted: payload([
                         "error": message,
                         "errorCode": diagnostic.code.rawValue,
-                        "mutationAttempted": false
+                        "mutationOutcome": enteredLifecycleDriver
+                            ? "inspect-lifecycle-ledger"
+                            : "not-admitted"
                     ])
                 )
             ])
@@ -600,13 +670,13 @@ public struct DaemonLoopRunner {
         )
     }
 
-    private func upsertRestartPolicyStates(
+    private func restartPolicyStates(
         desiredState: DesiredRuntimeState,
         observedState: ObservedRuntimeState,
         store: SQLiteStateStore,
         projectID: String,
         timestamp: String
-    ) throws {
+    ) throws -> [RestartPolicyStateRecord] {
         let observedByIdentity = Dictionary(
             observedState.services.map { (normalizedIdentity($0.identity), $0) },
             uniquingKeysWith: { first, _ in first }
@@ -615,7 +685,7 @@ public struct DaemonLoopRunner {
             try store.restartPolicies.loadProject(projectID: projectID).map { ($0.serviceName, $0) },
             uniquingKeysWith: { first, _ in first }
         )
-        var events: [EventRecord] = []
+        var records: [RestartPolicyStateRecord] = []
 
         for desired in desiredState.services.sorted(by: { $0.identity.displayName < $1.identity.displayName }) {
             let observed = observedByIdentity[normalizedIdentity(desired.identity)]
@@ -627,9 +697,21 @@ public struct DaemonLoopRunner {
                 projectID: projectID,
                 timestamp: timestamp
             )
-            try store.restartPolicies.upsert(state)
+            records.append(state)
+        }
+        return records
+    }
 
-            events.append(
+    private func persistRestartPolicyStates(
+        _ records: [RestartPolicyStateRecord],
+        store: SQLiteStateStore,
+        projectID: String,
+        timestamp: String
+    ) throws {
+        for record in records {
+            try store.restartPolicies.upsert(record)
+        }
+        try store.events.append(records.map { state in
                 EventRecord(
                     id: idGenerator("event-restart-policy"),
                     timestamp: timestamp,
@@ -637,15 +719,12 @@ public struct DaemonLoopRunner {
                     type: "restart.policy.state",
                     source: "hostwrightd",
                     projectID: projectID,
-                    serviceName: desired.identity.serviceName,
+                    serviceName: state.serviceName,
                     runtimeAdapter: nil,
-                    message: "Restart policy state for \(desired.identity.displayName) is \(state.status.rawValue); daemon attempted no runtime mutation.",
+                    message: "Restart policy state for \(projectID)/\(state.serviceName) is \(state.status.rawValue) after lifecycle reconciliation.",
                     payloadJSONRedacted: state.metadataJSONRedacted
                 )
-            )
-        }
-
-        try store.events.append(events)
+        })
     }
 
     private func restartPolicyState(
@@ -703,24 +782,11 @@ public struct DaemonLoopRunner {
                 "healthState": observed?.healthState.rawValue ?? "unknown",
                 "lifecycleState": observed?.lifecycleState.rawValue ?? "missing",
                 "maxAttempts": maxAttempts,
-                "mutationAttempted": false,
+                "mutationPhase": "pre-lifecycle",
                 "policy": desired.restartPolicy.rawValue,
                 "status": status.rawValue
             ])
         )
-    }
-
-    private func restartPolicyStateMap(
-        store: SQLiteStateStore,
-        projectID: String,
-        projectName: String
-    ) throws -> [RuntimeServiceIdentity: RestartPolicyStateRecord] {
-        Dictionary(try store.restartPolicies.loadProject(projectID: projectID).map { state in
-            (
-                RuntimeServiceIdentity(projectName: projectName, serviceName: state.serviceName),
-                state
-            )
-        }, uniquingKeysWith: { first, _ in first })
     }
 
     private func normalizedIdentity(_ identity: RuntimeServiceIdentity) -> RuntimeServiceIdentity {
@@ -829,6 +895,12 @@ private func stableHash(_ value: String) -> String {
         hash &*= 0x100000001b3
     }
     return String(format: "%016llx", hash)
+}
+
+private func sha256(_ value: String) -> String {
+    SHA256.hash(data: Data(value.utf8))
+        .map { String(format: "%02x", $0) }
+        .joined()
 }
 
 private func payload(_ object: [String: Any]) -> String {

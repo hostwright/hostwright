@@ -141,9 +141,9 @@ Phase 8A is a required preflight before this mutation gate. It proves real read-
 | --- | --- | --- | --- |
 | HW-DAEMON-001, HW-DAEMON-002 | `hostwrightd` requires `--foreground` and `--config <path>` before running; `--state-db <path>` is an optional override of the secure default. | Automated | Daemon command parser XCTest cases. |
 | HW-DAEMON-003 | The loop supports manual-clock cadence, deterministic jitter, repeated-error backoff, shutdown, real single-instance lock refusal, and sleep/wake resume events. | Automated | Daemon core XCTest cases. |
-| HW-DAEMON-004, HW-RUNTIME-001, HW-RUNTIME-002 | Foreground daemon reconciliation observes through `RuntimeAdapter`, computes a plan, records state/events/operations, and never calls `RuntimeAdapter.execute`. | Automated + manual | Daemon XCTest no-execute assertion; targeted runtime-boundary scans. |
+| HW-DAEMON-004, HW-RUNTIME-001, HW-RUNTIME-002 | At the Phase 15 checkpoint, foreground daemon reconciliation observed through `RuntimeAdapter`, computed a plan, recorded state/events/operations, and never called `RuntimeAdapter.execute`. Phase 08 Gate 2 supersedes only that historical mutation prohibition. | Automated + manual | Historical daemon no-execute evidence and targeted runtime-boundary scans. |
 | HW-STATE-001, HW-STATE-003, HW-OBS-001 | Successful daemon attempts persist desired state, observed snapshots, event records, and operation records to the secure selected state database; failed attempts persist failed operation and event records with redacted diagnostic codes. | Automated | Daemon foreground loop persistence and failure-classification XCTest cases. |
-| HW-DOCS-002, HW-SAFE-001 | Phase 15 evidence distinguishes the foreground non-mutating loop from then-unimplemented background lifecycle; current docs separately define the Phase 08 managed lifecycle without claiming unattended mutation. | Manual | Daemon architecture, limitations, CLI reference, security-safety, and README review. |
+| HW-DOCS-002, HW-SAFE-001 | Phase 15 evidence distinguishes its then-non-mutating foreground loop from later Phase 08 LaunchAgent and unattended-reconciliation contracts. | Manual | Historical Phase 15 evidence plus current daemon architecture and requirements review. |
 
 ## Phase 08 Gate 1: Complete LaunchAgent Lifecycle
 
@@ -155,6 +155,16 @@ Phase 8A is a required preflight before this mutation gate. It proves real read-
 | HW-DAEMON-007, HW-SAFE-004 | Loaded Homebrew records and unmanaged or deleted-executable `hostwrightd` processes are reported without adoption, termination, plist change, or cleanup. | Automated + live runtime | Scripted conflict tests and built `hostwright daemon status --json` orphan-process refusal. |
 | HW-DAEMON-006, HW-DOCS-002 | Clean install through reboot/login/crash/upgrade/rollback/disable/repair/uninstall leaves exact before/after state and no duplicate process. Blocked or isolated-only evidence cannot pass. | Attended live runtime | Dedicated current-user macOS qualification with no pre-existing unmanaged daemon. |
 
+## Phase 08 Gate 2: Level-Triggered Unattended Reconciliation
+
+| Requirement IDs | Acceptance criteria | Verification type | Verification command or review |
+| --- | --- | --- | --- |
+| HW-DAEMON-003, HW-DAEMON-004, HW-RECON-001 | Both daemon modes start reconciliation immediately and repeat healthy level-triggered observation within five seconds without a filesystem event edge. | Automated + local integration | Manual-clock repeated-loop tests and real SQLite/subprocess daemon cells. |
+| HW-DAEMON-004, HW-RECON-002, HW-RECON-004 | Daemon and CLI use the same lifecycle compiler, live driver, exact plan confirmation, provider capability binding, bounded DAG parallelism, and three-attempt node retry limit. | Automated + architecture review | Shared unattended-driver parity tests, lifecycle compiler/saga suites, and dependency-boundary scan. |
+| HW-STATE-003, HW-STATE-005, HW-RECON-005 | Mutation acquires one project-scoped active operation group and records durable intent, fencing, checkpoints, re-observation, compensation, verification, or a precise safe hold. Candidate reads cannot replace the authoritative healthy desired revision before saga intent. | Automated + migration + resilience | Operation-group contention/resume suites, daemon ordering tests, schema-v16 upgrade/future-version refusal, stale observation, process interruption, and recovery cells. |
+| HW-OBS-001, HW-SAFE-004 | Versioned reason codes distinguish convergence, verified mutation, compensation, interruption, safe hold, and failure; failures are redacted and never fabricate no-mutation or success evidence. | Automated + security assessment | Daemon result validation, failure/backoff, safe-hold, and secret-scan tests plus `hostwright events` inspection. |
+| HW-RUNTIME-001, HW-SAFE-002, HW-SAFE-003 | Live create/update/recovery and cleanup use only supported `RuntimeAdapter` lifecycle paths and exact Hostwright ownership; unmanaged or ambiguous resources fail closed. | Live runtime + exact cleanup | Qualified Apple runtime lifecycle cells with before/after inventory and retained operation evidence. |
+
 ## Phase 16 Gate: Health Checks And Restart Policy Expansion
 
 | Requirement IDs | Acceptance criteria | Verification type | Verification command or review |
@@ -162,7 +172,7 @@ Phase 8A is a required preflight before this mutation gate. It proves real read-
 | HW-HEALTH-002, HW-SAFE-004 | Health checks execute only as in-process loopback probes or direct true/false probes after allowlisted command-shape validation, map failures/timeouts to health results, and redact stdout/stderr/commands. | Automated | Runtime bounded health checker XCTest cases. |
 | HW-HEALTH-004, HW-STATE-001, HW-STATE-003 | Health check results are persisted append-only with redacted command, stdout, stderr, and metadata surfaces. | Automated | State and daemon health-result XCTest cases. |
 | HW-HEALTH-003, HW-HEALTH-005, HW-RECON-004 | Restart decisions include restart policy state, max attempts, backoff, preexisting operator hold, manual-disable, and crash-loop blocking before exposing a managed start action. | Automated | Reconciler restart-state XCTest cases and CLI restart-state XCTest cases. |
-| HW-DAEMON-004, HW-DAEMON-005 | Foreground daemon records health results and restart policy state but never calls `RuntimeAdapter.execute` or performs unattended restart mutation. | Automated + manual | Daemon XCTest no-execute assertions and targeted runtime-boundary scans. |
+| HW-DAEMON-004, HW-DAEMON-005 | At the Phase 16 checkpoint, foreground daemon recorded health results and restart policy state without unattended mutation. Phase 08 Gate 2 later admits only shared-saga lifecycle work after those blockers. | Automated + manual | Historical Phase 16 no-execute evidence plus current daemon admission tests. |
 | HW-DOCS-002, HW-SAFE-004 | Docs describe in-process loopback health checks, redacted health events, restart-state blocking, and the absence of aggressive restart loops or production readiness. | Manual | Manifest, daemon, limitations, security-safety, requirements, and build-status docs review. |
 
 ## Phase 17 Gate: Managed Restart

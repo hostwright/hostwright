@@ -1,5 +1,7 @@
+import CryptoKit
 import Foundation
 import HostwrightCore
+import HostwrightDaemonCore
 import HostwrightReconciler
 import HostwrightRuntime
 import HostwrightSecrets
@@ -234,6 +236,179 @@ struct LifecycleCommandRunnerTests {
             driver.snapshot() ==
                 DriverSnapshot(imageChecks: 1, revalidations: 1, executions: 1)
         )
+    }
+
+    @Test
+    func unattendedReconciliationUsesTheExactSharedPlanAndSagaOnce() async throws {
+        let manifest = "version: 2\nproject: demo\nservices:\n  api:\n    image: example.invalid/api:latest\n"
+        let prepared = try preparation(desired: [service()])
+        let driver = ScriptedLifecycleCommandDriver(preparation: prepared)
+        let reconciler = UnattendedLifecycleReconciler(
+            readManifest: { _ in manifest },
+            makeDriver: { _ in driver }
+        )
+        let result = try await reconciler.reconcile(
+            request: try DaemonReconciliationRequest(
+                manifestPath: "/private/tmp/hostwright.yaml",
+                manifestSHA256: SHA256.hash(data: Data(manifest.utf8))
+                    .map { String(format: "%02x", $0) }
+                    .joined(),
+                stateDatabasePath: "/private/tmp/state.sqlite",
+                projectID: "project-demo",
+                maximumParallelism: 4
+            )
+        )
+
+        #expect(result.status == .mutated)
+        #expect(result.reasonCode == .mutationVerified)
+        #expect(result.nodeCount == result.completedNodeCount)
+        #expect(result.nodeCount == 2)
+        #expect(
+            driver.snapshot() == DriverSnapshot(
+                imageChecks: 1,
+                revalidations: 1,
+                executions: 1
+            )
+        )
+    }
+
+    @Test
+    func unattendedReconciliationReportsAnEmptySharedDAGAsConverged() async throws {
+        let manifest = "version: 2\nproject: demo\nservices:\n  api:\n    image: example.invalid/api:latest\n"
+        let desired = service()
+        let observed = ObservedRuntimeService(
+            identity: desired.identity,
+            resourceIdentifier: desired.identity.managedResourceIdentifier,
+            image: desired.image,
+            lifecycleState: .running,
+            healthState: .healthy
+        )
+        let prepared = try preparation(
+            desired: [desired],
+            observed: [observed],
+            bindings: [try resourceBinding(for: observed)]
+        )
+        let driver = ScriptedLifecycleCommandDriver(preparation: prepared)
+        let reconciler = UnattendedLifecycleReconciler(
+            readManifest: { _ in manifest },
+            makeDriver: { _ in driver }
+        )
+        let result = try await reconciler.reconcile(
+            request: try DaemonReconciliationRequest(
+                manifestPath: "/private/tmp/hostwright.yaml",
+                manifestSHA256: SHA256.hash(data: Data(manifest.utf8))
+                    .map { String(format: "%02x", $0) }
+                    .joined(),
+                stateDatabasePath: "/private/tmp/state.sqlite",
+                projectID: "project-demo",
+                maximumParallelism: 4
+            )
+        )
+
+        #expect(result.status == .converged)
+        #expect(result.nodeCount == 0)
+        #expect(driver.snapshot().executions == 0)
+    }
+
+    @Test
+    func unattendedReconciliationReportsVerificationOnlyDAGAsConverged() async throws {
+        let manifest = "version: 2\nproject: demo\nservices:\n  api:\n    image: example.invalid/api:latest\n"
+        let desired = service(probes: allProbes())
+        let observed = ObservedRuntimeService(
+            identity: desired.identity,
+            resourceIdentifier: desired.identity.managedResourceIdentifier,
+            image: desired.image,
+            lifecycleState: .running,
+            healthState: .healthy
+        )
+        let prepared = try preparation(
+            desired: [desired],
+            observed: [observed],
+            bindings: [try resourceBinding(for: observed)]
+        )
+        let driver = ScriptedLifecycleCommandDriver(preparation: prepared)
+        let reconciler = UnattendedLifecycleReconciler(
+            readManifest: { _ in manifest },
+            makeDriver: { _ in driver }
+        )
+        let result = try await reconciler.reconcile(
+            request: try DaemonReconciliationRequest(
+                manifestPath: "/private/tmp/hostwright.yaml",
+                manifestSHA256: SHA256.hash(data: Data(manifest.utf8))
+                    .map { String(format: "%02x", $0) }
+                    .joined(),
+                stateDatabasePath: "/private/tmp/state.sqlite",
+                projectID: "project-demo",
+                maximumParallelism: 4
+            )
+        )
+
+        #expect(result.status == .converged)
+        #expect(result.reasonCode == .converged)
+        #expect(result.nodeCount > 0)
+        #expect(result.nodeCount == result.completedNodeCount)
+        #expect(driver.snapshot().executions == 1)
+    }
+
+    @Test
+    func unattendedReconciliationRejectsChangedManifestBytesBeforePlanning() async throws {
+        let approved = "version: 2\nproject: demo\nservices:\n  api:\n    image: approved\n"
+        let changed = approved.replacingOccurrences(of: "approved", with: "changed")
+        let driver = ScriptedLifecycleCommandDriver(
+            preparation: try preparation(desired: [service()])
+        )
+        let reconciler = UnattendedLifecycleReconciler(
+            readManifest: { _ in changed },
+            makeDriver: { _ in driver }
+        )
+        do {
+            _ = try await reconciler.reconcile(
+                request: try DaemonReconciliationRequest(
+                    manifestPath: "/private/tmp/hostwright.yaml",
+                    manifestSHA256: SHA256.hash(data: Data(approved.utf8))
+                        .map { String(format: "%02x", $0) }
+                        .joined(),
+                    stateDatabasePath: "/private/tmp/state.sqlite",
+                    projectID: "project-demo",
+                    maximumParallelism: 4
+                )
+            )
+            Issue.record("Expected exact manifest confirmation refusal.")
+        } catch let diagnostic as HostwrightDiagnostic {
+            #expect(diagnostic.code == .confirmationMismatch)
+        }
+        #expect(driver.snapshot().executions == 0)
+    }
+
+    @Test
+    func unattendedReconciliationHonorsCancellationBeforePlanning() async throws {
+        let manifest = "version: 2\nproject: demo\nservices:\n  api:\n    image: approved\n"
+        let driver = ScriptedLifecycleCommandDriver(
+            preparation: try preparation(desired: [service()])
+        )
+        let reconciler = UnattendedLifecycleReconciler(
+            readManifest: { _ in manifest },
+            makeDriver: { _ in driver }
+        )
+        let request = try DaemonReconciliationRequest(
+            manifestPath: "/private/tmp/hostwright.yaml",
+            manifestSHA256: SHA256.hash(data: Data(manifest.utf8))
+                .map { String(format: "%02x", $0) }
+                .joined(),
+            stateDatabasePath: "/private/tmp/state.sqlite",
+            projectID: "project-demo",
+            maximumParallelism: 4
+        )
+        let task = Task {
+            try await reconciler.reconcile(request: request)
+        }
+        task.cancel()
+        do {
+            _ = try await task.value
+            Issue.record("Expected cancellation.")
+        } catch is CancellationError {
+        }
+        #expect(driver.snapshot().executions == 0)
     }
 
     @Test

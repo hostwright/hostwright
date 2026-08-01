@@ -18,7 +18,7 @@ Supported application mutation requires an exact lifecycle plan hash and one dur
 
 Phase 04 workload lifecycle remains separate from Phase 05 image preparation, Phase 06 storage, and the exact Phase 07 networking boundary. Image commands implement strict Apple CLI pull/build/push/tag/load/save/inspect plus exact Hostwright-owned delete/prune. Storage commands implement exact Hostwright-owned named volumes, snapshots, verified backup/restore, quotas, reclaim, and orphan recovery. Networking commands implement exact owned networks, DNS, ingress, certificates, policy, and tunnels; none of these surfaces add unattended daemon mutation or broad/unmanaged cleanup.
 
-Restart policy state can block managed restart through backoff, operator hold, manual disable, and crash-loop protection. The foreground daemon records restart state but does not start or restart services by itself.
+Restart policy state can block managed restart through backoff, operator hold, manual disable, and crash-loop protection. The daemon computes that state before lifecycle admission and refuses a blocking reconciliation plan; supported admitted work executes only through the shared fenced lifecycle saga.
 
 ## LaunchAgent Boundary
 
@@ -26,7 +26,7 @@ The Phase 08 daemon lifecycle owns one current-user label and plist: `dev.hostwr
 
 Lifecycle mutation is serialized by a non-blocking advisory lock on the exact validated home-directory inode, then intent is atomically exclusive and durable before launchctl or plist effects. Completion requires exact launchctl path/program/state/PID plus single-process executable proof. Deleted-executable processes are detected through bounded kernel process arguments when `proc_pidpath` is unavailable. Changed plist bytes, linked files, symlinks, unsafe permissions, duplicate controllers, an unowned persistent disable override, a loaded `homebrew.mxcl.hostwright`, or any unmanaged `hostwrightd` fail closed. No lifecycle error authorizes process termination or ownership inference.
 
-Disable state is changed only through `launchctl enable|disable` for the exact managed target. Uninstall removes only hash-bound lifecycle files after bootout and clears that exact disabled override; it preserves configuration, SQLite state, distribution payload, external Homebrew records, and unrelated files. The daemon remains read-only with respect to runtime resources until the unattended-mutation gate separately passes.
+Disable state is changed only through `launchctl enable|disable` for the exact managed target. Uninstall removes only hash-bound lifecycle files after bootout and clears that exact disabled override; it preserves configuration, SQLite state, distribution payload, external Homebrew records, and unrelated files. Daemon workload mutation is separate from LaunchAgent lifecycle and requires exact provider capability, plan confirmation, ownership, project generation, durable intent, fencing, and post-effect verification.
 
 New runtime resources use collision-resistant v2 identifiers and exact labels for managed state, identity version, project, service, optional instance, and resource identifier. Mutation plans retain the exact observed identifier. State-backed legacy identifiers remain readable for upgrade continuity, but labels or ownership records may not be inferred from a Hostwright-looking name.
 
@@ -233,7 +233,7 @@ The current development build does not yet include the following. Their v0.0.2 i
 
 - privileged helper;
 - supported/qualified installer channel or launch agent;
-- unattended daemon mutation;
+- daemon mutation outside the shared local lifecycle saga or without exact ownership and fencing;
 - arbitrary DNS mutation or unmanaged tunnel management;
 - cloud control plane;
 - Kubernetes, CRI, Docker API, or Docker Compose compatibility;

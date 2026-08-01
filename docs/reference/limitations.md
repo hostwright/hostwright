@@ -28,7 +28,7 @@ The remainder of this file preserves the detailed pre-v0.0.2 capability inventor
 
 ## Retained Pre-v0.0.2 Capability Inventory
 
-Hostwright `v0.1.0-alpha.1` can model and attempt read-only runtime observation through `RuntimeAdapter`, persist desired and observed state to an explicit SQLite database path, compute deterministic desired-vs-observed plans, produce local advisory scheduling recommendations from declared inputs, expose a one-shot local JSON process for five existing command contracts, execute one tightly gated create-missing-service mutation, execute one restart-policy-allowed managed start, execute one restart-policy-allowed managed restart for an exact Hostwright-owned running/unhealthy service, read bounded logs, render and filter state events, write a local redacted diagnostics bundle, run foreground or exact per-user LaunchAgent daemon modes with in-process loopback health probes and restart-state blocking, and delete exact cleanup-eligible Hostwright-owned stopped/created/exited containers through `RuntimeAdapter`. The managed daemon remains runtime-read-only until the unattended-reconciliation gate passes.
+Hostwright `v0.1.0-alpha.1` can model and attempt read-only runtime observation through `RuntimeAdapter`, persist desired and observed state to an explicit SQLite database path, compute deterministic desired-vs-observed plans, produce local advisory scheduling recommendations from declared inputs, expose a one-shot local JSON process for five existing command contracts, execute lifecycle mutations through the shared fenced saga, read bounded logs, render and filter state events, write a local redacted diagnostics bundle, run foreground or exact per-user LaunchAgent daemon modes with level-triggered unattended reconciliation, in-process loopback health probes, and restart-state blocking, and delete exact cleanup-eligible Hostwright-owned stopped/created/exited containers through `RuntimeAdapter`.
 
 Hostwright is not production ready.
 
@@ -56,7 +56,7 @@ Hostwright is not production ready.
 - `hostwright events --state-db <path>` for persisted event ledger records, with project/type/service/severity/limit/sort filtering.
 - `hostwright diagnostics --state-db <path> --bundle <path>` for a local redacted JSON bundle from existing state rows.
 - `hostwright cleanup` dry-run classification and exact token-confirmed deletion of eligible Hostwright-owned stopped/created/exited containers.
-- `hostwrightd --foreground|--service --config <path> --state-db <path>` for local foreground or exact managed-per-user loops that currently observe, plan, and record daemon events without unattended runtime mutation.
+- `hostwrightd --foreground|--service --config <path> --state-db <path>` for local foreground or exact managed-per-user loops that observe and reconcile supported drift through the same bounded lifecycle saga as the CLI.
 - `hostwright daemon status|install|validate|bootstrap|start|stop|kickstart|upgrade|rollback|disable|repair|uninstall` for the exact `dev.hostwright.daemon` LaunchAgent lifecycle; loaded Homebrew records and unmanaged processes are refused rather than adopted or terminated.
 - In-process loopback health checks from `health.command` for allowlisted probe command shapes and arguments, with redacted result/event persistence.
 - Restart policy state with max attempts, backoff, manual-disable from `restart.policy: no`, preexisting operator hold state, and crash-loop blocking before managed start or managed restart is exposed as executable.
@@ -134,7 +134,7 @@ Hostwright is not production ready.
 - Runtime mutation beyond create-missing-service, managed start, managed restart, and exact cleanup-eligible container delete.
 - Container-exec or interactive health checks.
 - Aggressive restart loops or daemon-enforced restart mutation.
-- Privileged/system-wide daemon service, automatic LaunchAgent installation, or unattended runtime mutation. The exact per-user LaunchAgent exists only after explicit `hostwright daemon install`.
+- Privileged/system-wide daemon service, automatic LaunchAgent installation, daemon-specific mutation bypasses, or unattended mutation of unmanaged resources. The exact per-user LaunchAgent exists only after explicit `hostwright daemon install`.
 - Broad cleanup, teardown, destructive garbage collection, volume deletion, or unmanaged image/container deletion.
 - Hidden global state writes.
 - GA durability SLO, generalized file-pressure/disk-fault qualification, and long-soak evidence; authoritative-row or arbitrary-page salvage remains forbidden.
@@ -224,4 +224,4 @@ Accelerator work is research-only. Current Hostwright core does not expose Apple
 
 The SQLite store uses the private standard Application Support path unless an explicit safe `--state-db` path selects another location. Foreground commands may use the documented local-path environment overrides; managed service mode ignores inherited overrides. Hostwright never chooses a repository-relative or global database path.
 
-Hostwright persists adapter-shaped observed state and can consume runtime-shaped observed state in memory for planning. Apply, status, logs, events, diagnostics, cleanup, and both `hostwrightd` modes use the same secure local-path resolver. The managed daemon has a background lifecycle but still performs no unattended runtime mutation, broad cleanup, external telemetry, or production durability claim.
+Hostwright persists adapter-shaped observed state and can consume runtime-shaped observed state in memory for planning. Apply, status, logs, events, diagnostics, cleanup, and both `hostwrightd` modes use the same secure local-path resolver. The managed daemon may reconcile only supported owned drift through the existing lifecycle saga; it still provides no broad cleanup, external telemetry, Phase 09 listener, multi-host authority, or unsupported production claim.

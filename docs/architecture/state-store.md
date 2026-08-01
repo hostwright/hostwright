@@ -45,17 +45,17 @@ Implemented:
 - recovery at every restore publication checkpoint, including the torn window before a publication checkpoint is durable
 - executable pre-repair rollback when a committed repair database becomes unrecoverable
 - atomic operation-group acquisition coverage across concurrent stores
-- foreground and exact managed daemon loop event and operation records
+- foreground and exact managed daemon level-trigger events, operations, desired/observed state, health, restart state, and shared lifecycle operation-group/checkpoint records
 
 Not implemented:
 
-- multi-action `hostwright apply`
-- runtime mutation beyond create-missing-service, restart-policy-allowed managed start, restart-policy-allowed managed restart, and exact cleanup-eligible managed container delete
+- runtime mutation outside the implemented lifecycle, image, storage, network, and exact cleanup authorities
 - broad cleanup, image cleanup, volume cleanup, or unmanaged cleanup
 - drift planner
 - GA lifecycle-count, extended hardware-fault, and long-soak qualification
 - arbitrary SQLite page salvage or automatic repair of authoritative records
-- launch agent or background daemon service
+
+Daemon candidate reads do not publish over the authoritative healthy desired revision. The lifecycle saga records the exact desired revision and durable operation-group intent before its first effect. The outer daemon loop persists health, restart, observed-state, event, and reconciliation operation evidence only after the typed saga result. A thrown driver error directs operators to the lifecycle ledger instead of claiming that mutation did not begin.
 
 ## Requirements
 

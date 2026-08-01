@@ -102,7 +102,7 @@ In a source checkout, replace `hostwright` with `swift run hostwright`. The [Man
 | `hostwright image`, `registry`, `secret`, `volume` | Manage provider images, registry authentication and OCI evidence, typed local secret references, and exact Hostwright-owned named-volume, snapshot, backup, quota, reclaim, and orphan workflows. |
 | `hostwright status`, `events`, `recovery`, `state`, `cleanup`, `doctor`, `diagnostics` | Observe workloads, inspect and maintain local state, recover fenced operations, and remove verified Hostwright-owned resources. |
 | `hostwright-control` | Accept one bounded local JSON request, return one JSON response, and exit. It opens no socket or HTTP listener. |
-| `hostwright daemon`, `hostwrightd` | Control the exact current-user `dev.hostwright.daemon` LaunchAgent or run the foreground loop. Both daemon modes remain runtime-read-only until unattended reconciliation passes its separate gate. |
+| `hostwright daemon`, `hostwrightd` | Control the exact current-user `dev.hostwright.daemon` LaunchAgent or run the foreground loop. Both daemon modes level-trigger supported drift through the shared fenced lifecycle saga. |
 | `hostwright-dist` | Build, verify, install, upgrade, repair, roll back, and uninstall Hostwright distributions through explicit paths. |
 
 Run `hostwright help` or read the [CLI reference](docs/reference/cli.md) for arguments, JSON contracts, and exit codes.
@@ -142,7 +142,7 @@ Architecture references:
 - The manifest parser accepts the documented Hostwright YAML subset. It rejects unsupported YAML, unknown Kubernetes or Compose fields, and unsafe paths.
 - Hostwright has no Kubernetes or CRI compatibility, Docker API, full Compose compatibility, GUI, or cloud service.
 - Hostwright supports exact Hostwright-owned named volumes, guarded mounts, snapshots, verified online backup/restore, quota and pressure accounting, reclaim policy, orphan quarantine/GC, UUID-owned project networks, project DNS/service aliases, explicit localhost or LAN ingress with TLS/mTLS policy, guarded host access, and authenticated service tunnels. Unsupported providers or unqualified exposure modes fail before mutation.
-- `hostwright-control` has no persistent listener. `hostwright daemon` installs only the exact per-user LaunchAgent after explicit invocation; `hostwrightd` still performs no unattended runtime mutation.
+- `hostwright-control` has no persistent listener. `hostwright daemon` installs only the exact per-user LaunchAgent after explicit invocation; `hostwrightd` has no network API and reconciles only through the existing local lifecycle/provider boundaries.
 - Cleanup and image pruning require exact ownership and confirmation. Hostwright does not delete unmanaged resources or run global garbage collection.
 - Hostwright is not production-ready and has no support SLA.
 

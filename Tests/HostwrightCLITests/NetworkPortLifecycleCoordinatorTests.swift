@@ -9,6 +9,33 @@ import XCTest
 @testable import HostwrightState
 
 final class NetworkPortLifecycleCoordinatorTests: XCTestCase {
+    func testUpdateCreateNodeReservesForExactLogicalServiceName() throws {
+        let fixture = try makeFixture(
+            ports: [
+                RuntimePortMapping(
+                    hostPort: 18_080,
+                    containerPort: 8_080,
+                    protocolName: .tcp,
+                    bindAddress: "127.0.0.1"
+                ),
+            ],
+            nodeServiceName: "api"
+        )
+        defer { fixture.cleanup() }
+
+        let reserved = try NetworkPortLifecycleCoordinator.reserve(
+            service: try resolvedService(fixture),
+            node: fixture.node,
+            plan: fixture.plan,
+            group: fixture.group,
+            inventory: try inventory(fixture: fixture),
+            store: fixture.store
+        )
+
+        XCTAssertEqual(reserved.records.count, 1)
+        XCTAssertEqual(reserved.records[0].hostPort, 18_080)
+    }
+
     func testNonLocalExactBindPlansOnlyAfterExposureApproval()
         throws
     {
@@ -740,7 +767,8 @@ private struct NetworkPortCoordinatorFixture {
 
 private func makeFixture(
     ports: [RuntimePortMapping],
-    publishedSockets: [RuntimeUnixSocketPublication] = []
+    publishedSockets: [RuntimeUnixSocketPublication] = [],
+    nodeServiceName: String? = nil
 ) throws -> NetworkPortCoordinatorFixture {
     let root = FileManager.default.temporaryDirectory
         .appendingPathComponent(
@@ -797,7 +825,7 @@ private func makeFixture(
     let node = try LifecyclePlanNode(
         key: "api-create",
         action: .create,
-        serviceName: identity.displayName,
+        serviceName: nodeServiceName ?? identity.displayName,
         resourceIdentifier:
             identity.managedResourceIdentifier,
         resourceUUID: resourceUUID,

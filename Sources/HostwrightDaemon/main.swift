@@ -1,6 +1,7 @@
 import Darwin
 import Dispatch
 import Foundation
+import HostwrightCLI
 import HostwrightCore
 import HostwrightDaemonCore
 import HostwrightRuntime
@@ -33,7 +34,8 @@ struct HostwrightDaemonEntrypoint {
 
         let result = await HostwrightDaemonMain.run(
             arguments: arguments,
-            runtimeAdapter: RuntimeAdapterFactory.defaultReadOnlyLocal(),
+            runtimeAdapter: RuntimeAdapterFactory.defaultLocal(),
+            reconciliationDriver: UnattendedLifecycleReconciler(),
             shutdownToken: shutdownToken
         )
 

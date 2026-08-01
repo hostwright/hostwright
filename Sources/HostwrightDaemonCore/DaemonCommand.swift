@@ -25,9 +25,10 @@ public enum DaemonCommand: Equatable, Sendable {
         var configPath: String?
         var stateDatabasePath: String?
         var lockFilePath: String?
-        var cadenceSeconds = 30
-        var jitterSeconds = 5
+        var cadenceSeconds = 5
+        var jitterSeconds = 0
         var maxBackoffSeconds = 300
+        var maximumParallelism = min(4, max(1, ProcessInfo.processInfo.activeProcessorCount))
         var maxIterations: Int?
         var index = 0
 
@@ -68,6 +69,9 @@ public enum DaemonCommand: Equatable, Sendable {
             case "--max-backoff":
                 maxBackoffSeconds = try positiveInteger(after: argument, in: arguments, at: index)
                 index += 2
+            case "--parallelism":
+                maximumParallelism = try positiveInteger(after: argument, in: arguments, at: index)
+                index += 2
             case "--max-iterations":
                 maxIterations = try positiveInteger(after: argument, in: arguments, at: index)
                 index += 2
@@ -106,6 +110,7 @@ public enum DaemonCommand: Equatable, Sendable {
             cadenceSeconds: cadenceSeconds,
             jitterSeconds: jitterSeconds,
             maxBackoffSeconds: maxBackoffSeconds,
+            maximumParallelism: maximumParallelism,
             maxIterations: maxIterations
         )
         try configuration.validate()
@@ -199,9 +204,10 @@ public enum HostwrightDaemonMain {
       --config <path>           Explicit Hostwright manifest/config path.
 
     Options:
-      --interval <seconds>      Base reconciliation cadence. Default: 30.
-      --jitter <seconds>        Deterministic jitter cap. Default: 5.
+      --interval <seconds>      Base reconciliation cadence. Default: 5.
+      --jitter <seconds>        Deterministic jitter cap. Default: 0.
       --max-backoff <seconds>   Maximum retry backoff. Default: 300.
+      --parallelism <count>     Lifecycle DAG parallelism from 1 through 32. Default: min(4, CPUs).
       --max-iterations <count>  Stop after count loop iterations; intended for tests/dev proof.
       --state-db <path>         Optional SQLite override; defaults to Application Support.
       --lock-file <path>        Optional lock override; defaults to Application Support/run.
@@ -209,15 +215,16 @@ public enum HostwrightDaemonMain {
       --help                    Show this help.
 
     Safety:
-      This phase observes, plans, and records daemon loop attempts only.
+      Each healthy loop validates, observes, plans, and reconciles through the shared lifecycle saga.
       LaunchAgent lifecycle is controlled by hostwright daemon; hostwrightd does not self-install.
-      Gate 1 does not perform unattended runtime mutation.
+      Mutations require exact provider capability, ownership, plan confirmation, and durable fencing.
 
     """
 
     public static func run(
         arguments: [String],
         runtimeAdapter: any RuntimeAdapter,
+        reconciliationDriver: any DaemonReconciliationDriving,
         shutdownToken: DaemonShutdownToken = DaemonShutdownToken()
     ) async -> DaemonProcessResult {
         do {
@@ -242,6 +249,7 @@ public enum HostwrightDaemonMain {
                 let runner = DaemonLoopRunner(
                     configuration: configuration,
                     runtimeAdapter: runtimeAdapter,
+                    reconciliationDriver: reconciliationDriver,
                     clock: clock,
                     instanceLock: FileDaemonInstanceLock(path: configuration.lockFilePath),
                     shutdownToken: shutdownToken,

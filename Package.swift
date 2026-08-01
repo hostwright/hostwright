@@ -118,6 +118,7 @@ let package = Package(
         .executableTarget(
             name: "HostwrightDaemon",
             dependencies: [
+                "HostwrightCLI",
                 "HostwrightCore",
                 "HostwrightDaemonCore",
                 "HostwrightRuntime"

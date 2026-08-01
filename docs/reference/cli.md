@@ -750,15 +750,16 @@ Runs the foreground development daemon loop or the exact managed service loop. E
 
 Options:
 
-- `--interval <seconds>`: base reconciliation cadence; default `30`.
-- `--jitter <seconds>`: deterministic jitter cap; default `5`.
+- `--interval <seconds>`: base reconciliation cadence; default `5`.
+- `--jitter <seconds>`: deterministic jitter cap; default `0`. Healthy interval plus jitter cannot exceed five seconds.
 - `--max-backoff <seconds>`: repeated-error backoff cap; default `300`.
+- `--parallelism <count>`: lifecycle DAG parallelism from `1` through `32`; default `min(4, CPUs)`.
 - `--max-iterations <count>`: stop after a bounded number of iterations for development proof.
 - `--state-db <path>`: optional absolute state override.
 - `--lock-file <path>`: optional absolute lock override. Default state uses `run/hostwrightd.lock`; an explicit/environment state uses a stable hashed lock beneath `run`.
 
 Each iteration validates the manifest, observes runtime through `RuntimeAdapter`, computes a plan, and records daemon events plus operation records in the selected state database. Before the loop, the daemon creates/validates the private runtime layout and acquires the validated `0600` single-instance lock.
 
-Gate 1 does not call `RuntimeAdapter.execute` and does not perform unattended runtime mutation. LaunchAgent creation and lifecycle belong to `hostwright daemon`, not the daemon executable itself.
+The loop starts immediately and repeats within five healthy seconds without an event edge. It invokes the same `up` lifecycle planner, exact confirmation, live driver, project operation-group lease, checkpoints, fencing, compensation, and verification as the CLI. LaunchAgent creation and lifecycle still belong to `hostwright daemon`, not the daemon executable itself.
 
 Shell completion remains research-only in Phase 12. Hostwright does not install shell completions or mutate shell profile files.

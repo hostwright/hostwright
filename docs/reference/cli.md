@@ -758,7 +758,7 @@ Options:
 - `--state-db <path>`: optional absolute state override.
 - `--lock-file <path>`: optional absolute lock override. Default state uses `run/hostwrightd.lock`; an explicit/environment state uses a stable hashed lock beneath `run`.
 
-Each iteration validates the manifest, observes runtime through `RuntimeAdapter`, computes a plan, and records daemon events plus operation records in the selected state database. Before the loop, the daemon creates/validates the private runtime layout and acquires the validated `0600` single-instance lock.
+Each iteration securely validates the explicit manifest and its declared local trust/provenance key files, observes runtime through `RuntimeAdapter`, computes a plan, and records daemon events plus operation records in the selected state database. Parent-directory changes wake the loop early and are coalesced; a five-second level-triggered scan remains the missed-event fallback. Invalid or partial reloads record one fingerprinted rejection and retain the last accepted desired state. Before the loop, the daemon creates/validates the private runtime layout and acquires the validated `0600` single-instance lock.
 
 The loop starts immediately and repeats within five healthy seconds without an event edge. It invokes the same `up` lifecycle planner, exact confirmation, live driver, project operation-group lease, checkpoints, fencing, compensation, and verification as the CLI. LaunchAgent creation and lifecycle still belong to `hostwright daemon`, not the daemon executable itself.
 

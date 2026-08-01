@@ -13,6 +13,7 @@ public enum DaemonMode: String, Equatable, Sendable {
 
 public enum DaemonWakeReason: String, Equatable, Sendable {
     case scheduled
+    case configurationChanged
     case systemWake
     case shutdownRequested
 }
@@ -192,6 +193,11 @@ public struct DaemonRunSummary: Equatable, Sendable {
 
 public struct DaemonLoopRunner {
     public var readConfig: (String) throws -> String
+    public var readConfiguration: (
+        String,
+        DaemonConfigurationTargetKind,
+        DaemonConfigurationTarget?
+    ) throws -> DaemonConfigurationSnapshot
     public var idGenerator: (String) -> String
     public var jitterProvider: (Int, Int) -> Int
 
@@ -202,6 +208,7 @@ public struct DaemonLoopRunner {
     private let clock: any DaemonClock
     private let instanceLock: any DaemonInstanceLock
     private let shutdownToken: DaemonShutdownToken
+    private let configurationMonitor: DaemonConfigurationChangeMonitor?
 
     public init(
         configuration: DaemonConfiguration,
@@ -211,7 +218,13 @@ public struct DaemonLoopRunner {
         clock: any DaemonClock,
         instanceLock: any DaemonInstanceLock,
         shutdownToken: DaemonShutdownToken = DaemonShutdownToken(),
+        configurationMonitor: DaemonConfigurationChangeMonitor? = nil,
         readConfig: @escaping (String) throws -> String,
+        readConfiguration: ((
+            String,
+            DaemonConfigurationTargetKind,
+            DaemonConfigurationTarget?
+        ) throws -> DaemonConfigurationSnapshot)? = nil,
         idGenerator: @escaping (String) -> String = { "\(String($0))-\(UUID().uuidString)" },
         jitterProvider: @escaping (Int, Int) -> Int = DaemonLoopRunner.deterministicJitter
     ) {
@@ -222,7 +235,30 @@ public struct DaemonLoopRunner {
         self.clock = clock
         self.instanceLock = instanceLock
         self.shutdownToken = shutdownToken
+        self.configurationMonitor = configurationMonitor
         self.readConfig = readConfig
+        self.readConfiguration = readConfiguration ?? { path, kind, expected in
+            let text = try readConfig(path)
+            let data = Data(text.utf8)
+            let digest = SHA256.hash(data: data)
+                .map { String(format: "%02x", $0) }
+                .joined()
+            let target = try DaemonConfigurationTarget(
+                kind: kind,
+                path: URL(fileURLWithPath: path).standardizedFileURL.path,
+                contentSHA256: digest,
+                byteCount: data.count,
+                device: 1,
+                inode: 1
+            )
+            if let expected, expected != target {
+                throw HostwrightDiagnostic(
+                    code: .confirmationMismatch,
+                    message: "A watched configuration target changed after validation; a fresh generation is required."
+                )
+            }
+            return DaemonConfigurationSnapshot(target: target, text: text)
+        }
         self.idGenerator = idGenerator
         self.jitterProvider = jitterProvider
     }
@@ -234,6 +270,7 @@ public struct DaemonLoopRunner {
             throw DaemonError.lockUnavailable(path: configuration.lockFilePath)
         }
         defer { instanceLock.release() }
+        defer { configurationMonitor?.stop() }
 
         let store = SQLiteStateStore(configuration: configuration.stateStoreConfiguration)
         try store.migrate()
@@ -286,6 +323,8 @@ public struct DaemonLoopRunner {
             switch wakeReason {
             case .scheduled:
                 break
+            case .configurationChanged:
+                break
             case .systemWake:
                 try recordLifecycleEvent(
                     store: store,
@@ -326,9 +365,26 @@ public struct DaemonLoopRunner {
         var currentProjectID: String?
         var currentPlanHash = "unavailable"
         var enteredLifecycleDriver = false
+        var configurationValidated = false
         do {
-            let manifestText = try readConfig(configuration.configPath)
+            let manifestPath = URL(fileURLWithPath: configuration.configPath).standardizedFileURL.path
+            let manifestSnapshot = try readConfiguration(manifestPath, .manifest, nil)
+            let manifestText = manifestSnapshot.text
             let manifest = try ManifestValidator.validated(manifestText)
+            let configurationTargets = try DaemonConfigurationTargetResolver.paths(
+                manifestPath: manifestPath,
+                manifest: manifest
+            ).map { kind, path in
+                if kind == .manifest && path == manifestSnapshot.target.path {
+                    return manifestSnapshot.target
+                }
+                return try readConfiguration(path, kind, nil).target
+            }.sorted {
+                ($0.kind.rawValue, $0.path) < ($1.kind.rawValue, $1.path)
+            }
+            let configurationSetSHA256 = DaemonConfigurationSetDigest.sha256(configurationTargets)
+            try configurationMonitor?.replace(paths: configurationTargets.map(\.path))
+            configurationValidated = true
             let mapping = ManifestRuntimeMapper.map(manifest)
             let projectID = "project-\(mapping.desiredState.projectName)"
             currentProjectID = projectID
@@ -387,8 +443,10 @@ public struct DaemonLoopRunner {
             enteredLifecycleDriver = true
             let reconciliation = try await reconciliationDriver.reconcile(
                 request: try DaemonReconciliationRequest(
-                    manifestPath: configuration.configPath,
-                    manifestSHA256: sha256(manifestText),
+                    manifestPath: manifestPath,
+                    manifestSHA256: manifestSnapshot.target.contentSHA256,
+                    configurationSetSHA256: configurationSetSHA256,
+                    configurationTargets: configurationTargets,
                     stateDatabasePath: configuration.stateDatabasePath,
                     projectID: projectID,
                     maximumParallelism: configuration.maximumParallelism
@@ -417,6 +475,16 @@ public struct DaemonLoopRunner {
                 observedAt: startedAt
             )
             let iterationSucceeded = reconciliation.status.isSuccessfulIteration
+            if iterationSucceeded {
+                try recordConfigurationAccepted(
+                    store: store,
+                    projectID: projectID,
+                    configurationSetSHA256: configurationSetSHA256,
+                    manifestSHA256: manifestSnapshot.target.contentSHA256,
+                    targetCount: configurationTargets.count,
+                    timestamp: startedAt
+                )
+            }
             try store.operations.record(
                 OperationRecord(
                     id: idGenerator("operation-daemon"),
@@ -473,6 +541,13 @@ public struct DaemonLoopRunner {
         } catch {
             let diagnostic = daemonDiagnostic(for: error)
             let message = RuntimeRedactionPolicy.default.redact(diagnostic.message)
+            if !configurationValidated {
+                try recordConfigurationRejected(
+                    store: store,
+                    diagnostic: diagnostic,
+                    timestamp: startedAt
+                )
+            }
             let evidenceProjectID: String?
             if let currentProjectID,
                (try? store.desiredStates.loadProject(id: currentProjectID)) != nil {
@@ -524,6 +599,89 @@ public struct DaemonLoopRunner {
             ])
             return .failure
         }
+    }
+
+    private func recordConfigurationAccepted(
+        store: SQLiteStateStore,
+        projectID: String,
+        configurationSetSHA256: String,
+        manifestSHA256: String,
+        targetCount: Int,
+        timestamp: String
+    ) throws {
+        let pathSHA256 = sha256(
+            URL(fileURLWithPath: configuration.configPath).standardizedFileURL.path
+        )
+        let pathFragment = #""configurationPathSHA256":"\#(pathSHA256)""#
+        let priorCount = try store.events.count(
+            type: "daemon.configuration.accepted",
+            source: "hostwrightd",
+            payloadContains: pathFragment
+        )
+        if try store.events.contains(
+            type: "daemon.configuration.accepted",
+            source: "hostwrightd",
+            payloadContains: #""configurationSetSHA256":"\#(configurationSetSHA256)""#
+        ) {
+            return
+        }
+        try store.events.append([
+            EventRecord(
+                id: idGenerator("event-daemon-configuration"),
+                timestamp: timestamp,
+                severity: .info,
+                type: "daemon.configuration.accepted",
+                source: "hostwrightd",
+                projectID: projectID,
+                serviceName: nil,
+                runtimeAdapter: nil,
+                message: "Validated daemon configuration generation \(priorCount + 1) became authoritative.",
+                payloadJSONRedacted: payload([
+                    "configurationGeneration": priorCount + 1,
+                    "configurationPathSHA256": pathSHA256,
+                    "configurationSetSHA256": configurationSetSHA256,
+                    "manifestSHA256": manifestSHA256,
+                    "targetCount": targetCount
+                ])
+            )
+        ])
+    }
+
+    private func recordConfigurationRejected(
+        store: SQLiteStateStore,
+        diagnostic: HostwrightDiagnostic,
+        timestamp: String
+    ) throws {
+        let pathSHA256 = sha256(
+            URL(fileURLWithPath: configuration.configPath).standardizedFileURL.path
+        )
+        let fingerprint = sha256("\(pathSHA256)\u{1f}\(diagnostic.code.rawValue)\u{1f}\(diagnostic.message)")
+        if try store.events.contains(
+            type: "daemon.configuration.rejected",
+            source: "hostwrightd",
+            payloadContains: #""fingerprint":"\#(fingerprint)""#
+        ) {
+            return
+        }
+        try store.events.append([
+            EventRecord(
+                id: idGenerator("event-daemon-configuration"),
+                timestamp: timestamp,
+                severity: .warning,
+                type: "daemon.configuration.rejected",
+                source: "hostwrightd",
+                projectID: nil,
+                serviceName: nil,
+                runtimeAdapter: nil,
+                message: "Rejected daemon configuration; the prior authoritative desired generation was retained.",
+                payloadJSONRedacted: payload([
+                    "configurationPathSHA256": pathSHA256,
+                    "errorCode": diagnostic.code.rawValue,
+                    "fingerprint": fingerprint,
+                    "priorGenerationRetained": true
+                ])
+            )
+        ])
     }
 
     private func runHealthChecks(
@@ -863,10 +1021,15 @@ public struct DaemonLoopRunner {
 
 public final class SystemDaemonClock: DaemonClock {
     private let shutdownToken: DaemonShutdownToken
+    private let configurationMonitor: DaemonConfigurationChangeMonitor?
     private let formatter = ISO8601DateFormatter()
 
-    public init(shutdownToken: DaemonShutdownToken) {
+    public init(
+        shutdownToken: DaemonShutdownToken,
+        configurationMonitor: DaemonConfigurationChangeMonitor? = nil
+    ) {
         self.shutdownToken = shutdownToken
+        self.configurationMonitor = configurationMonitor
     }
 
     public func timestamp() -> String {
@@ -875,14 +1038,22 @@ public final class SystemDaemonClock: DaemonClock {
 
     public func sleep(seconds: Int) async throws -> DaemonWakeReason {
         guard seconds > 0 else {
+            if configurationMonitor?.consumePendingChange() == true {
+                return .configurationChanged
+            }
             return shutdownToken.isShutdownRequested ? .shutdownRequested : .scheduled
         }
 
         for _ in 0..<seconds {
-            if shutdownToken.isShutdownRequested {
-                return .shutdownRequested
+            for _ in 0..<10 {
+                if shutdownToken.isShutdownRequested {
+                    return .shutdownRequested
+                }
+                if configurationMonitor?.consumePendingChange() == true {
+                    return .configurationChanged
+                }
+                try await Task.sleep(nanoseconds: 100_000_000)
             }
-            try await Task.sleep(nanoseconds: 1_000_000_000)
         }
         return shutdownToken.isShutdownRequested ? .shutdownRequested : .scheduled
     }
@@ -929,6 +1100,10 @@ private func redactJSONValue(_ value: Any) -> Any {
 }
 
 private func daemonDiagnostic(for error: Error) -> HostwrightDiagnostic {
+    if let diagnostic = error as? HostwrightDiagnostic {
+        return diagnostic
+    }
+
     if let manifestError = error as? ManifestParseError {
         let issues = manifestError.issues
         let code = issues.first?.code ?? .manifestValidationFailed

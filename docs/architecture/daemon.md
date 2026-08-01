@@ -62,22 +62,28 @@ If `--state-db` is omitted, the daemon uses `~/Library/Application Support/Hostw
 
 ## Loop Contract
 
+The declared configuration set is versioned and content-bound. It always contains the explicit Manifest v2 file and includes only external trust or provenance policy-key paths explicitly referenced by that manifest. Relative policy paths resolve against the manifest directory. Hostwright does not search for profiles, infer filenames, or load remote configuration. Team workflow profiles remain explicit CLI inputs and are not daemon approval inputs.
+
+Every target is opened with `O_NOFOLLOW` after validating the complete parent chain. Targets must be bounded NUL-free UTF-8, root- or current-user-owned regular single-link files without group/other writes. Device, inode, ownership, mode, link count, size, and modification metadata must remain exact across the read. The request binds the sorted target records, each content SHA-256, and one configuration-set SHA-256. The lifecycle driver securely reopens every exact target before planning, before revalidation, and immediately before execution; any identity or byte drift refuses the stale plan.
+
+The daemon monitors only the parent directories of that validated set so atomic rename is observable. Events are coalesced into one pending bit, and the existing five-second level trigger remains authoritative if an event is missed. A change wakes the scheduler early without changing the cadence or retry contract. Replacing the same bytes does not create a new accepted content generation, while an identity change during an admitted reconciliation still forces a fresh iteration.
+
 Each iteration:
 
-1. Reads and validates the explicit manifest/config path.
+1. Securely reads and validates the complete declared configuration set.
 2. Maps the manifest into desired runtime state.
 3. Observes runtime state through `RuntimeAdapter`.
 4. Runs bounded in-process loopback health checks for configured running services.
 5. Computes health and restart-policy inputs without replacing the authoritative desired revision.
 6. Computes a deterministic reconciliation plan with restart-state blocking and refuses blockers.
-7. Calls the shared lifecycle driver with the exact manifest SHA-256, state path, project identity, and bounded parallelism.
+7. Calls the shared lifecycle driver with every exact configuration target, the configuration-set and manifest SHA-256 values, state path, project identity, and bounded parallelism.
 8. The lifecycle driver freshly observes, compiles `up`, binds local image evidence, confirms the exact plan, revalidates, and executes through `LifecycleSagaExecutor`.
 9. The saga acquires one project-scoped active operation group, persists intent and compensation, fences effects, re-observes ambiguous results, and verifies, compensates, interrupts, or enters a safe hold.
 10. Only after the saga result, persists daemon health, restart, observed-state, operation, and event evidence, then sleeps according to cadence or bounded failure backoff.
 
 The shared saga is the only daemon path that publishes the authoritative desired revision before effects. The outer loop never overwrites the last healthy revision merely because it read a new manifest. An empty lifecycle DAG records convergence. Verified execution records mutation. Compensation, interruption, safe hold, or a thrown error is a failed loop iteration and cannot be reported as convergence.
 
-The daemon records `daemon.started`, `daemon.reconcile.converged`, `daemon.reconcile.mutated`, `daemon.reconcile.compensated`, `daemon.reconcile.interrupted`, `daemon.reconcile.safe-hold`, `daemon.reconcile.failed`, `daemon.backoff`, `daemon.sleep_wake_resumed`, `daemon.stopped`, `health.check.*`, and `restart.policy.state` events. Event payloads and matching `daemon.reconcile` operation records expose the versioned reason code, reconciliation and lifecycle plan hashes, node counts, checkpoint, and whether the plan contained mutation nodes.
+The daemon records `daemon.started`, `daemon.configuration.accepted`, `daemon.configuration.rejected`, `daemon.reconcile.converged`, `daemon.reconcile.mutated`, `daemon.reconcile.compensated`, `daemon.reconcile.interrupted`, `daemon.reconcile.safe-hold`, `daemon.reconcile.failed`, `daemon.backoff`, `daemon.sleep_wake_resumed`, `daemon.stopped`, `health.check.*`, and `restart.policy.state` events. One accepted event is persisted for each new content-bound configuration set. Repeated observation of the same invalid input is fingerprint-deduplicated; its raw bytes and path are not recorded, and the prior authoritative desired state remains unchanged. Event payloads and matching `daemon.reconcile` operation records expose bounded hashes, the accepted generation, versioned reason code, reconciliation and lifecycle plan hashes, node counts, checkpoint, and whether the plan contained mutation nodes.
 
 Those events and daemon operation records are local forensic inputs for `hostwright events`, `hostwright recovery`, and `hostwright diagnostics`. The daemon does not export or upload them.
 

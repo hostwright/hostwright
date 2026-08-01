@@ -51,6 +51,65 @@ public struct EventLedger: Sendable {
             return try rows.map(eventRecord(from:))
         }
     }
+
+    public func count(
+        type: String,
+        source: String,
+        payloadContains fragment: String
+    ) throws -> Int {
+        try validateLookup(type: type, source: source, fragment: fragment)
+        return try store.withValidatedConnection(readOnly: true) { connection in
+            let rows = try connection.query(
+                """
+                SELECT COUNT(*)
+                FROM event_ledger
+                WHERE type = ? AND source = ? AND instr(payload_json_redacted, ?) > 0
+                """,
+                bindings: [.text(type), .text(source), .text(fragment)]
+            )
+            guard let value = rows.first?.first ?? nil,
+                  let count = Int(value),
+                  count >= 0 else {
+                throw StateStoreError.invalidRecord("Event count query returned invalid evidence.")
+            }
+            return count
+        }
+    }
+
+    public func contains(
+        type: String,
+        source: String,
+        payloadContains fragment: String
+    ) throws -> Bool {
+        try validateLookup(type: type, source: source, fragment: fragment)
+        return try store.withValidatedConnection(readOnly: true) { connection in
+            let rows = try connection.query(
+                """
+                SELECT 1
+                FROM event_ledger
+                WHERE type = ? AND source = ? AND instr(payload_json_redacted, ?) > 0
+                LIMIT 1
+                """,
+                bindings: [.text(type), .text(source), .text(fragment)]
+            )
+            return !rows.isEmpty
+        }
+    }
+
+    private func validateLookup(
+        type: String,
+        source: String,
+        fragment: String
+    ) throws {
+        guard !type.isEmpty,
+              type.utf8.count <= 128,
+              !source.isEmpty,
+              source.utf8.count <= 128,
+              !fragment.isEmpty,
+              fragment.utf8.count <= 512 else {
+            throw StateStoreError.invalidRecord("Event lookup fields must be non-empty and bounded.")
+        }
+    }
 }
 
 public struct OperationLedger: Sendable {

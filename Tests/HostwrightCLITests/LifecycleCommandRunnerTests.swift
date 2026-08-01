@@ -248,7 +248,7 @@ struct LifecycleCommandRunnerTests {
             makeDriver: { _ in driver }
         )
         let result = try await reconciler.reconcile(
-            request: try DaemonReconciliationRequest(
+            request: try makeDaemonReconciliationRequest(
                 manifestPath: "/private/tmp/hostwright.yaml",
                 manifestSHA256: SHA256.hash(data: Data(manifest.utf8))
                     .map { String(format: "%02x", $0) }
@@ -294,7 +294,7 @@ struct LifecycleCommandRunnerTests {
             makeDriver: { _ in driver }
         )
         let result = try await reconciler.reconcile(
-            request: try DaemonReconciliationRequest(
+            request: try makeDaemonReconciliationRequest(
                 manifestPath: "/private/tmp/hostwright.yaml",
                 manifestSHA256: SHA256.hash(data: Data(manifest.utf8))
                     .map { String(format: "%02x", $0) }
@@ -332,7 +332,7 @@ struct LifecycleCommandRunnerTests {
             makeDriver: { _ in driver }
         )
         let result = try await reconciler.reconcile(
-            request: try DaemonReconciliationRequest(
+            request: try makeDaemonReconciliationRequest(
                 manifestPath: "/private/tmp/hostwright.yaml",
                 manifestSHA256: SHA256.hash(data: Data(manifest.utf8))
                     .map { String(format: "%02x", $0) }
@@ -363,7 +363,7 @@ struct LifecycleCommandRunnerTests {
         )
         do {
             _ = try await reconciler.reconcile(
-                request: try DaemonReconciliationRequest(
+                request: try makeDaemonReconciliationRequest(
                     manifestPath: "/private/tmp/hostwright.yaml",
                     manifestSHA256: SHA256.hash(data: Data(approved.utf8))
                         .map { String(format: "%02x", $0) }
@@ -381,6 +381,84 @@ struct LifecycleCommandRunnerTests {
     }
 
     @Test
+    func unattendedReconciliationRejectsChangedPolicyTargetBeforeExecution() async throws {
+        let manifest = "version: 2\nproject: demo\nservices:\n  api:\n    image: approved\n"
+        let manifestPath = "/private/tmp/hostwright.yaml"
+        let policyPath = "/private/tmp/hostwright-policy.pem"
+        let manifestDigest = SHA256.hash(data: Data(manifest.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+        let approvedPolicy = "approved-policy"
+        let changedPolicy = "changed-policy"
+        let approvedPolicyDigest = SHA256.hash(data: Data(approvedPolicy.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+        let changedPolicyDigest = SHA256.hash(data: Data(changedPolicy.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+        let manifestTarget = try DaemonConfigurationTarget(
+            kind: .manifest,
+            path: manifestPath,
+            contentSHA256: manifestDigest,
+            byteCount: manifest.utf8.count,
+            device: 1,
+            inode: 1
+        )
+        let policyTarget = try DaemonConfigurationTarget(
+            kind: .policy,
+            path: policyPath,
+            contentSHA256: approvedPolicyDigest,
+            byteCount: approvedPolicy.utf8.count,
+            device: 2,
+            inode: 2
+        )
+        let targets = [manifestTarget, policyTarget]
+        let request = try DaemonReconciliationRequest(
+            manifestPath: manifestPath,
+            manifestSHA256: manifestDigest,
+            configurationSetSHA256: DaemonConfigurationSetDigest.sha256(targets),
+            configurationTargets: targets,
+            stateDatabasePath: "/private/tmp/state.sqlite",
+            projectID: "project-demo",
+            maximumParallelism: 4
+        )
+        let driver = ScriptedLifecycleCommandDriver(
+            preparation: try preparation(desired: [service()])
+        )
+        let policyReads = LockedReadCounter()
+        let reconciler = UnattendedLifecycleReconciler(
+            readManifest: { _ in manifest },
+            readConfiguration: { path, _, _ in
+                if path == manifestPath {
+                    return DaemonConfigurationSnapshot(target: manifestTarget, text: manifest)
+                }
+                if policyReads.increment() == 1 {
+                    return DaemonConfigurationSnapshot(target: policyTarget, text: approvedPolicy)
+                }
+                let changedTarget = try DaemonConfigurationTarget(
+                    kind: .policy,
+                    path: policyPath,
+                    contentSHA256: changedPolicyDigest,
+                    byteCount: changedPolicy.utf8.count,
+                    device: 3,
+                    inode: 3
+                )
+                return DaemonConfigurationSnapshot(target: changedTarget, text: changedPolicy)
+            },
+            makeDriver: { _ in driver }
+        )
+
+        do {
+            _ = try await reconciler.reconcile(request: request)
+            Issue.record("Expected policy target confirmation refusal.")
+        } catch let diagnostic as HostwrightDiagnostic {
+            #expect(diagnostic.code == .confirmationMismatch)
+        }
+        #expect(policyReads.value == 2)
+        #expect(driver.snapshot().executions == 0)
+    }
+
+    @Test
     func unattendedReconciliationHonorsCancellationBeforePlanning() async throws {
         let manifest = "version: 2\nproject: demo\nservices:\n  api:\n    image: approved\n"
         let driver = ScriptedLifecycleCommandDriver(
@@ -390,7 +468,7 @@ struct LifecycleCommandRunnerTests {
             readManifest: { _ in manifest },
             makeDriver: { _ in driver }
         )
-        let request = try DaemonReconciliationRequest(
+        let request = try makeDaemonReconciliationRequest(
             manifestPath: "/private/tmp/hostwright.yaml",
             manifestSHA256: SHA256.hash(data: Data(manifest.utf8))
                 .map { String(format: "%02x", $0) }
@@ -1485,6 +1563,49 @@ struct LifecycleCommandRunnerTests {
                 identifier: observed.identity.displayName
             )
         )
+    }
+}
+
+private func makeDaemonReconciliationRequest(
+    manifestPath: String,
+    manifestSHA256: String,
+    stateDatabasePath: String,
+    projectID: String,
+    maximumParallelism: Int
+) throws -> DaemonReconciliationRequest {
+    let normalizedPath = URL(fileURLWithPath: manifestPath).standardizedFileURL.path
+    let target = try DaemonConfigurationTarget(
+        kind: .manifest,
+        path: normalizedPath,
+        contentSHA256: manifestSHA256,
+        byteCount: 0,
+        device: 1,
+        inode: 1
+    )
+    return try DaemonReconciliationRequest(
+        manifestPath: normalizedPath,
+        manifestSHA256: manifestSHA256,
+        configurationSetSHA256: DaemonConfigurationSetDigest.sha256([target]),
+        configurationTargets: [target],
+        stateDatabasePath: stateDatabasePath,
+        projectID: projectID,
+        maximumParallelism: maximumParallelism
+    )
+}
+
+private final class LockedReadCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+
+    var value: Int {
+        lock.withLock { count }
+    }
+
+    func increment() -> Int {
+        lock.withLock {
+            count += 1
+            return count
+        }
     }
 }
 

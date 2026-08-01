@@ -6,6 +6,11 @@ import HostwrightReconciler
 
 public struct UnattendedLifecycleReconciler: DaemonReconciliationDriving {
     private let readManifest: @Sendable (String) throws -> String
+    private let readConfiguration: @Sendable (
+        String,
+        DaemonConfigurationTargetKind,
+        DaemonConfigurationTarget?
+    ) throws -> DaemonConfigurationSnapshot
     private let makeDriver: @Sendable (
         LifecycleCLIOptions
     ) -> any LifecycleCommandDriving
@@ -14,6 +19,7 @@ public struct UnattendedLifecycleReconciler: DaemonReconciliationDriving {
         self.readManifest = { path in
             try environment.readTextFile(path)
         }
+        self.readConfiguration = SecureDaemonConfigurationReader.read
         self.makeDriver = { options in
             LifecycleLiveDriver(environment: environment, options: options)
         }
@@ -21,11 +27,38 @@ public struct UnattendedLifecycleReconciler: DaemonReconciliationDriving {
 
     init(
         readManifest: @escaping @Sendable (String) throws -> String,
+        readConfiguration: (@Sendable (
+            String,
+            DaemonConfigurationTargetKind,
+            DaemonConfigurationTarget?
+        ) throws -> DaemonConfigurationSnapshot)? = nil,
         makeDriver: @escaping @Sendable (
             LifecycleCLIOptions
         ) -> any LifecycleCommandDriving
     ) {
         self.readManifest = readManifest
+        self.readConfiguration = readConfiguration ?? { path, kind, expected in
+            let text = try readManifest(path)
+            let data = Data(text.utf8)
+            let digest = SHA256.hash(data: data)
+                .map { String(format: "%02x", $0) }
+                .joined()
+            let target = try DaemonConfigurationTarget(
+                kind: kind,
+                path: URL(fileURLWithPath: path).standardizedFileURL.path,
+                contentSHA256: digest,
+                byteCount: expected?.byteCount ?? data.count,
+                device: expected?.device ?? 1,
+                inode: expected?.inode ?? 1
+            )
+            if let expected, target != expected {
+                throw HostwrightDiagnostic(
+                    code: .confirmationMismatch,
+                    message: "A watched daemon configuration target changed after validation."
+                )
+            }
+            return DaemonConfigurationSnapshot(target: target, text: text)
+        }
         self.makeDriver = makeDriver
     }
 
@@ -33,7 +66,7 @@ public struct UnattendedLifecycleReconciler: DaemonReconciliationDriving {
         request: DaemonReconciliationRequest
     ) async throws -> DaemonReconciliationResult {
         try Task.checkCancellation()
-        try requireExpectedManifest(request)
+        try requireExpectedConfiguration(request)
 
         let planningOptions = LifecycleCLIOptions(
             command: .up,
@@ -72,7 +105,7 @@ public struct UnattendedLifecycleReconciler: DaemonReconciliationDriving {
 
         if compiled.plan.nodes.isEmpty {
             try Task.checkCancellation()
-            try requireExpectedManifest(request)
+            try requireExpectedConfiguration(request)
             return try DaemonReconciliationResult(
                 status: .converged,
                 reasonCode: .converged,
@@ -95,12 +128,12 @@ public struct UnattendedLifecycleReconciler: DaemonReconciliationDriving {
         )
         let executionDriver = makeDriver(executionOptions)
         try Task.checkCancellation()
-        try requireExpectedManifest(request)
+        try requireExpectedConfiguration(request)
         try executionDriver.revalidate(
             compiled: compiled,
             preparation: preparation
         )
-        try requireExpectedManifest(request)
+        try requireExpectedConfiguration(request)
         try Task.checkCancellation()
         let result = try executionDriver.execute(
             compiled: compiled,
@@ -142,18 +175,24 @@ public struct UnattendedLifecycleReconciler: DaemonReconciliationDriving {
         )
     }
 
-    private func requireExpectedManifest(
+    private func requireExpectedConfiguration(
         _ request: DaemonReconciliationRequest
     ) throws {
-        let text = try readManifest(request.manifestPath)
-        let digest = SHA256.hash(data: Data(text.utf8))
-            .map { String(format: "%02x", $0) }
-            .joined()
-        guard digest == request.manifestSHA256 else {
-            throw HostwrightDiagnostic(
-                code: .confirmationMismatch,
-                message: "The daemon manifest bytes changed during unattended reconciliation. A fresh level-triggered iteration is required; no stale plan was admitted."
-            )
+        for target in request.configurationTargets {
+            do {
+                let snapshot = try readConfiguration(target.path, target.kind, target)
+                guard snapshot.target == target else {
+                    throw HostwrightDiagnostic(
+                        code: .confirmationMismatch,
+                        message: "A watched daemon configuration target changed after validation."
+                    )
+                }
+            } catch {
+                throw HostwrightDiagnostic(
+                    code: .confirmationMismatch,
+                    message: "A watched daemon configuration target changed during unattended reconciliation. A fresh level-triggered iteration is required; no stale plan was admitted."
+                )
+            }
         }
     }
 }

@@ -1,4 +1,5 @@
 import Darwin
+import CryptoKit
 import Foundation
 import XCTest
 @testable import HostwrightDaemonCore
@@ -752,6 +753,71 @@ final class HostwrightDaemonCoreTests: XCTestCase {
             XCTAssertTrue(failed.message.contains("HW-MANIFEST-004"))
             XCTAssertFalse(failed.message.contains("fake-secret"))
             XCTAssertFalse(failed.payloadJSONRedacted.contains("fake-secret"))
+        }
+    }
+
+    func testInvalidReloadIsRejectedOnceAndRetainsLastGoodDesiredState() async throws {
+        try await withTemporaryDirectory { directory in
+            let databasePath = directory.appendingPathComponent("state.sqlite").path
+            let store = SQLiteStateStore(path: databasePath)
+            try store.migrate()
+            let manifest = try ManifestValidator.validated(Self.singleServiceManifest)
+            let manifestHash = SHA256.hash(data: Data(Self.singleServiceManifest.utf8))
+                .map { String(format: "%02x", $0) }
+                .joined()
+            try store.desiredStates.saveManifestSnapshot(
+                projectID: "project-demo",
+                manifestPath: "/private/tmp/hostwright.yaml",
+                manifestHash: manifestHash,
+                desiredGeneration: 1,
+                manifest: manifest,
+                timestamp: "2026-08-01T00:00:00Z"
+            )
+            var reads = 0
+            let driver = ScriptedDaemonReconciliationDriver(results: [
+                .success(
+                    try DaemonReconciliationResult(
+                        status: .converged,
+                        reasonCode: .converged,
+                        planSHA256: String(repeating: "c", count: 64),
+                        nodeCount: 0,
+                        completedNodeCount: 0,
+                        runtimeMutationAttempted: false,
+                        checkpoint: "observed-converged"
+                    )
+                )
+            ])
+            let runner = DaemonLoopRunner(
+                configuration: DaemonConfiguration(
+                    configPath: "/private/tmp/hostwright.yaml",
+                    stateDatabasePath: databasePath,
+                    maxIterations: 3
+                ),
+                runtimeAdapter: CountingRuntimeAdapter(
+                    observedServices: [Self.observedService()]
+                ),
+                reconciliationDriver: driver,
+                clock: ManualDaemonClock(),
+                instanceLock: ScriptedDaemonLock(),
+                readConfig: { _ in
+                    defer { reads += 1 }
+                    return reads == 0
+                        ? Self.singleServiceManifest
+                        : "version: 2\nproject: demo\nservices: {}\n"
+                },
+                idGenerator: DeterministicIDs().next
+            )
+
+            let summary = try await runner.run()
+
+            XCTAssertEqual(summary.successfulIterations, 1)
+            XCTAssertEqual(summary.failedIterations, 2)
+            XCTAssertEqual(driver.requests.count, 1)
+            let events = try store.events.loadAll()
+            XCTAssertEqual(events.filter { $0.type == "daemon.configuration.accepted" }.count, 1)
+            XCTAssertEqual(events.filter { $0.type == "daemon.configuration.rejected" }.count, 1)
+            let retained = try store.desiredStates.loadProject(id: "project-demo")
+            XCTAssertEqual(retained.manifestHash, manifestHash)
         }
     }
 

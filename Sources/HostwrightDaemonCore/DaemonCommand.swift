@@ -245,7 +245,11 @@ public enum HostwrightDaemonMain {
             case .version:
                 return DaemonProcessResult(standardOutput: "\(HostwrightIdentity.version)\n")
             case .run(let configuration):
-                let clock = SystemDaemonClock(shutdownToken: shutdownToken)
+                let configurationMonitor = DaemonConfigurationChangeMonitor()
+                let clock = SystemDaemonClock(
+                    shutdownToken: shutdownToken,
+                    configurationMonitor: configurationMonitor
+                )
                 let runner = DaemonLoopRunner(
                     configuration: configuration,
                     runtimeAdapter: runtimeAdapter,
@@ -253,7 +257,9 @@ public enum HostwrightDaemonMain {
                     clock: clock,
                     instanceLock: FileDaemonInstanceLock(path: configuration.lockFilePath),
                     shutdownToken: shutdownToken,
-                    readConfig: { try String(contentsOfFile: $0, encoding: .utf8) }
+                    configurationMonitor: configurationMonitor,
+                    readConfig: { try String(contentsOfFile: $0, encoding: .utf8) },
+                    readConfiguration: SecureDaemonConfigurationReader.read
                 )
                 let summary = try await runner.run()
                 return DaemonProcessResult(

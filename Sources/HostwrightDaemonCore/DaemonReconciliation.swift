@@ -26,6 +26,8 @@ public struct DaemonReconciliationRequest: Codable, Equatable, Sendable {
     public let schemaVersion: Int
     public let manifestPath: String
     public let manifestSHA256: String
+    public let configurationSetSHA256: String
+    public let configurationTargets: [DaemonConfigurationTarget]
     public let stateDatabasePath: String
     public let projectID: String
     public let maximumParallelism: Int
@@ -34,6 +36,8 @@ public struct DaemonReconciliationRequest: Codable, Equatable, Sendable {
         schemaVersion: Int = 1,
         manifestPath: String,
         manifestSHA256: String,
+        configurationSetSHA256: String,
+        configurationTargets: [DaemonConfigurationTarget],
         stateDatabasePath: String,
         projectID: String,
         maximumParallelism: Int
@@ -44,6 +48,20 @@ public struct DaemonReconciliationRequest: Codable, Equatable, Sendable {
                   of: "^[a-f0-9]{64}$",
                   options: .regularExpression
               ) != nil,
+              configurationSetSHA256.range(
+                  of: "^[a-f0-9]{64}$",
+                  options: .regularExpression
+              ) != nil,
+              !configurationTargets.isEmpty,
+              configurationTargets == configurationTargets.sorted(by: {
+                  ($0.kind.rawValue, $0.path) < ($1.kind.rawValue, $1.path)
+              }),
+              Set(configurationTargets.map(\.path)).count == configurationTargets.count,
+              configurationTargets.first(where: {
+                  $0.kind == .manifest && $0.path == manifestPath &&
+                      $0.contentSHA256 == manifestSHA256
+              }) != nil,
+              DaemonConfigurationSetDigest.sha256(configurationTargets) == configurationSetSHA256,
               !stateDatabasePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               projectID.range(
                   of: "^project-[A-Za-z0-9](?:[A-Za-z0-9._-]{0,126}[A-Za-z0-9])?$",
@@ -58,9 +76,40 @@ public struct DaemonReconciliationRequest: Codable, Equatable, Sendable {
         self.schemaVersion = schemaVersion
         self.manifestPath = manifestPath
         self.manifestSHA256 = manifestSHA256
+        self.configurationSetSHA256 = configurationSetSHA256
+        self.configurationTargets = configurationTargets
         self.stateDatabasePath = stateDatabasePath
         self.projectID = projectID
         self.maximumParallelism = maximumParallelism
+    }
+
+    init(
+        schemaVersion: Int = 1,
+        manifestPath: String,
+        manifestSHA256: String,
+        stateDatabasePath: String,
+        projectID: String,
+        maximumParallelism: Int
+    ) throws {
+        let normalizedPath = URL(fileURLWithPath: manifestPath).standardizedFileURL.path
+        let target = try DaemonConfigurationTarget(
+            kind: .manifest,
+            path: normalizedPath,
+            contentSHA256: manifestSHA256,
+            byteCount: 0,
+            device: 1,
+            inode: 1
+        )
+        try self.init(
+            schemaVersion: schemaVersion,
+            manifestPath: normalizedPath,
+            manifestSHA256: manifestSHA256,
+            configurationSetSHA256: DaemonConfigurationSetDigest.sha256([target]),
+            configurationTargets: [target],
+            stateDatabasePath: stateDatabasePath,
+            projectID: projectID,
+            maximumParallelism: maximumParallelism
+        )
     }
 }
 

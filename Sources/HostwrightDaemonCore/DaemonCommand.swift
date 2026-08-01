@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import HostwrightCore
 import HostwrightRuntime
@@ -20,7 +21,7 @@ public enum DaemonCommand: Equatable, Sendable {
             return .version
         }
 
-        var foreground = false
+        var mode: DaemonMode?
         var configPath: String?
         var stateDatabasePath: String?
         var lockFilePath: String?
@@ -34,7 +35,20 @@ public enum DaemonCommand: Equatable, Sendable {
             let argument = arguments[index]
             switch argument {
             case "--foreground":
-                foreground = true
+                guard mode == nil else {
+                    throw DaemonError.invalidConfiguration(
+                        "Select exactly one of --foreground or --service."
+                    )
+                }
+                mode = .foregroundDev
+                index += 1
+            case "--service":
+                guard mode == nil else {
+                    throw DaemonError.invalidConfiguration(
+                        "Select exactly one of --foreground or --service."
+                    )
+                }
+                mode = .managedService
                 index += 1
             case "--config":
                 configPath = try value(after: argument, in: arguments, at: index)
@@ -62,8 +76,10 @@ public enum DaemonCommand: Equatable, Sendable {
             }
         }
 
-        guard foreground else {
-            throw DaemonError.invalidConfiguration("--foreground is required; launch agent installation is not implemented.")
+        guard let mode else {
+            throw DaemonError.invalidConfiguration(
+                "Select exactly one of --foreground or --service."
+            )
         }
 
         let resolution: HostwrightLocalPathResolution
@@ -71,7 +87,7 @@ public enum DaemonCommand: Equatable, Sendable {
             resolution = try HostwrightLocalPathResolver.resolve(
                 explicitStateDatabasePath: stateDatabasePath,
                 homeDirectory: homeDirectory,
-                environment: environment
+                environment: mode == .managedService ? [:] : environment
             )
         } catch {
             throw DaemonError.invalidConfiguration(String(describing: error))
@@ -83,6 +99,7 @@ public enum DaemonCommand: Equatable, Sendable {
             throw DaemonError.invalidConfiguration(String(describing: error))
         }
         let configuration = DaemonConfiguration(
+            mode: mode,
             configPath: configPath ?? "",
             stateStoreConfiguration: StateStoreConfiguration(localPathResolution: resolution),
             lockFilePath: resolvedLockPath,
@@ -93,6 +110,43 @@ public enum DaemonCommand: Equatable, Sendable {
         )
         try configuration.validate()
         return .run(configuration)
+    }
+
+    package static func managedServiceEnvironment(
+        homeDirectory: String
+    ) -> [String: String] {
+        [
+            "HOME": homeDirectory,
+            "LANG": "C",
+            "LC_ALL": "C",
+            "PATH": SecureSubprocessEnvironment.trustedSystemPath
+        ]
+    }
+
+    package static func currentUserHomeDirectory(
+        userID: uid_t = geteuid()
+    ) throws -> String {
+        guard let record = getpwuid(userID), let directory = record.pointee.pw_dir else {
+            throw DaemonError.invalidConfiguration(
+                "managed service current-user home could not be resolved."
+            )
+        }
+        do {
+            return try SecureExecutableResolver.verifyWorkingDirectory(
+                path: String(cString: directory)
+            )
+        } catch {
+            throw DaemonError.invalidConfiguration(
+                "managed service current-user home is unsafe."
+            )
+        }
+    }
+
+    package static func managedServiceEnvironmentRequiresReexec(
+        inheritedEnvironment: [String: String],
+        homeDirectory: String
+    ) -> Bool {
+        inheritedEnvironment != managedServiceEnvironment(homeDirectory: homeDirectory)
     }
 
     private static func value(after flag: String, in arguments: [String], at index: Int) throws -> String {
@@ -133,13 +187,15 @@ public struct DaemonProcessResult: Equatable, Sendable {
 
 public enum HostwrightDaemonMain {
     public static let helpText = """
-    hostwrightd foreground development loop
+    hostwrightd reconciliation service
 
     Usage:
       hostwrightd --foreground --config <hostwright.yaml> [--state-db <path>] [options]
+      hostwrightd --service --config <absolute-hostwright.yaml> [--state-db <path>] [options]
 
     Required:
       --foreground              Run in foreground development mode.
+      --service                 Run as the managed per-user LaunchAgent.
       --config <path>           Explicit Hostwright manifest/config path.
 
     Options:
@@ -154,7 +210,8 @@ public enum HostwrightDaemonMain {
 
     Safety:
       This phase observes, plans, and records daemon loop attempts only.
-      It does not install a launch agent and does not perform unattended runtime mutation.
+      LaunchAgent lifecycle is controlled by hostwright daemon; hostwrightd does not self-install.
+      Gate 1 does not perform unattended runtime mutation.
 
     """
 
@@ -164,7 +221,18 @@ public enum HostwrightDaemonMain {
         shutdownToken: DaemonShutdownToken = DaemonShutdownToken()
     ) async -> DaemonProcessResult {
         do {
-            switch try DaemonCommand.parse(arguments: arguments) {
+            let isManagedService = arguments.contains("--service")
+            let homeDirectory = isManagedService
+                ? try DaemonCommand.currentUserHomeDirectory()
+                : FileManager.default.homeDirectoryForCurrentUser.path
+            let environment = isManagedService
+                ? DaemonCommand.managedServiceEnvironment(homeDirectory: homeDirectory)
+                : ProcessInfo.processInfo.environment
+            switch try DaemonCommand.parse(
+                arguments: arguments,
+                homeDirectory: homeDirectory,
+                environment: environment
+            ) {
             case .help:
                 return DaemonProcessResult(standardOutput: helpText)
             case .version:
@@ -182,7 +250,7 @@ public enum HostwrightDaemonMain {
                 let summary = try await runner.run()
                 return DaemonProcessResult(
                     standardOutput: """
-                    hostwrightd foreground dev loop stopped
+                    hostwrightd \(configuration.mode.rawValue) loop stopped
                     Iterations: \(summary.iterations)
                     Successful: \(summary.successfulIterations)
                     Failed: \(summary.failedIterations)

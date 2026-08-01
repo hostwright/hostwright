@@ -7,6 +7,7 @@ import HostwrightState
 
 public enum DaemonMode: String, Equatable, Sendable {
     case foregroundDev = "foreground-dev"
+    case managedService = "managed-service"
 }
 
 public enum DaemonWakeReason: String, Equatable, Sendable {
@@ -69,6 +70,27 @@ public struct DaemonConfiguration: Equatable, Sendable {
     public func validate() throws {
         guard !configPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw DaemonError.invalidConfiguration("--config <path> is required.")
+        }
+        if mode == .managedService {
+            do {
+                guard try HostwrightLocalPathResolver.normalizedAbsolutePath(
+                    configPath,
+                    role: "managed daemon configuration"
+                ) == configPath else {
+                    throw DaemonError.invalidConfiguration(
+                        "managed service configuration must be an absolute normalized path."
+                    )
+                }
+            } catch let error as DaemonError {
+                throw error
+            } catch {
+                throw DaemonError.invalidConfiguration(String(describing: error))
+            }
+            guard maxIterations == nil else {
+                throw DaemonError.invalidConfiguration(
+                    "--max-iterations is available only in foreground development mode."
+                )
+            }
         }
         do {
             try stateStoreConfiguration.validate()
@@ -198,7 +220,12 @@ public struct DaemonLoopRunner {
 
         let store = SQLiteStateStore(configuration: configuration.stateStoreConfiguration)
         try store.migrate()
-        try recordLifecycleEvent(store: store, type: "daemon.started", severity: .info, message: "hostwrightd foreground dev loop started.")
+        try recordLifecycleEvent(
+            store: store,
+            type: "daemon.started",
+            severity: .info,
+            message: "hostwrightd \(configuration.mode.rawValue) loop started."
+        )
 
         var iterations = 0
         var successfulIterations = 0
@@ -259,7 +286,9 @@ public struct DaemonLoopRunner {
             store: store,
             type: "daemon.stopped",
             severity: .info,
-            message: stoppedByShutdown ? "hostwrightd foreground dev loop stopped after shutdown request." : "hostwrightd foreground dev loop stopped."
+            message: stoppedByShutdown
+                ? "hostwrightd \(configuration.mode.rawValue) loop stopped after shutdown request."
+                : "hostwrightd \(configuration.mode.rawValue) loop stopped."
         )
 
         return DaemonRunSummary(

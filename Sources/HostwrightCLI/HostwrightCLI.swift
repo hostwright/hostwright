@@ -1,5 +1,6 @@
 import Foundation
 import HostwrightCore
+import HostwrightDaemonCore
 import HostwrightExtensions
 import HostwrightHealth
 import HostwrightImport
@@ -129,6 +130,11 @@ public enum HostwrightCLI {
             return try StorageCommandRunner(
                 options: options,
                 environment: environment
+            ).run()
+        case .daemon(let options):
+            return try DaemonLifecycleCommandRunner(
+                options: options,
+                controller: environment.daemonLifecycleController()
             ).run()
         case .migrateManifestPreview(let path, let output):
             let source = try hostwrightReadManifestText(path: path, environment: environment)
@@ -327,6 +333,10 @@ public enum HostwrightCLI {
       hostwright volume prune (--dry-run|--confirm-plan <sha256>) [--state-db <path>] [--json|--output text|json]
       hostwright volume snapshot create|list|inspect|retain|export|restore|delete ...
       hostwright volume backup create|list|inspect|verify|retain|restore|delete ...
+      hostwright daemon status [--json|--output text|json]
+      hostwright daemon install --daemon-executable <absolute-hostwrightd> --config <absolute-hostwright.yaml> [--json|--output text|json]
+      hostwright daemon validate|bootstrap|start|stop|kickstart|rollback|disable|repair|uninstall [--json|--output text|json]
+      hostwright daemon upgrade --daemon-executable <absolute-hostwrightd> --config <absolute-hostwright.yaml> [--json|--output text|json]
       hostwright image pull|push <reference> [--platform linux/arm64|linux/amd64] [--offline] [--progress none|plain] [--state-db <path>] [--runtime-provider auto|apple-cli|containerization] [--json|--output text|json]
       hostwright image tag <source> <target> [--state-db <path>] [--runtime-provider auto|apple-cli|containerization] [--json|--output text|json]
       hostwright image load --input <absolute-path> --reference <expected-reference>... [--state-db <path>] [--runtime-provider auto|apple-cli|containerization] [--json|--output text|json]

@@ -25,7 +25,7 @@ Replicas and service dependencies expand into deterministic nodes. `started`, `r
 
 Node starts, attempts, provider results, observations, health results, supply-chain authorization events, and checkpoints are durable. After timeout, cancellation, crash, or ambiguous provider output, Hostwright observes before deciding whether to retry, compensate, or hold. Recovery revalidates current signature, SBOM, vulnerability, and provenance evidence and rebinds that authorization to any derived rollback plan. Retry is capped at three attempts and allowed only by normalized retry safety.
 
-`hostwrightd --foreground` runs a non-mutating reconciliation loop. It reads the explicit config path, observes through `RuntimeAdapter`, computes a plan, and records daemon events and operation records to the selected state database (Application Support by default). It does not call `RuntimeAdapter.execute`.
+`hostwrightd --foreground` and the exact managed `--service` mode run the same non-mutating reconciliation loop. They read the explicit config path, observe through `RuntimeAdapter`, compute a plan, and record daemon events and operation records to the selected state database (Application Support by default). Neither mode calls `RuntimeAdapter.execute` at Gate 1; `hostwright daemon` owns only the LaunchAgent lifecycle, while unattended mutation remains Gate 2.
 
 ## Drift Cases
 

@@ -1,5 +1,6 @@
 import Foundation
 import HostwrightCore
+import HostwrightDaemonCore
 import HostwrightRuntime
 import HostwrightSecrets
 import HostwrightState
@@ -56,6 +57,30 @@ public struct SecretCLIOptions: Equatable, Sendable {
     }
 }
 
+public enum DaemonCLIAction: Equatable, Sendable {
+    case status
+    case lifecycle(DaemonLifecycleOperation)
+}
+
+public struct DaemonCLIOptions: Equatable, Sendable {
+    public let action: DaemonCLIAction
+    public let daemonExecutablePath: String?
+    public let configPath: String?
+    public let output: CLIOutputFormat
+
+    public init(
+        action: DaemonCLIAction,
+        daemonExecutablePath: String?,
+        configPath: String?,
+        output: CLIOutputFormat
+    ) {
+        self.action = action
+        self.daemonExecutablePath = daemonExecutablePath
+        self.configPath = configPath
+        self.output = output
+    }
+}
+
 public enum CLICommand: Equatable, Sendable {
     case version
     case capabilities(output: CLIOutputFormat)
@@ -67,6 +92,7 @@ public enum CLICommand: Equatable, Sendable {
     case registry(options: RegistryCLIOptions)
     case image(options: ImageCLIOptions)
     case volume(options: StorageCLIOptions)
+    case daemon(options: DaemonCLIOptions)
     case migrateManifestPreview(path: String, output: CLIOutputFormat)
     case initManifest
     case importStack(path: String, output: CLIOutputFormat, teamProfilePath: String?)
@@ -131,6 +157,8 @@ public enum CLICommand: Equatable, Sendable {
             return .image(options: try ImageCLIParser.parse(arguments: arguments))
         case "volume":
             return .volume(options: try StorageCLIParser.parse(arguments: arguments))
+        case "daemon":
+            return try daemonCommand(arguments: arguments)
         case "migrate":
             return try migrateCommand(arguments: arguments)
         case "init":
@@ -181,6 +209,100 @@ public enum CLICommand: Equatable, Sendable {
             return nil
         }
         return CLIOutputFormat(rawValue: arguments[arguments.index(after: outputIndex)])
+    }
+
+    private static func daemonCommand(arguments: [String]) throws -> CLICommand {
+        guard arguments.count >= 2 else {
+            throw CLIUsageError(
+                "daemon requires status, install, validate, bootstrap, start, stop, kickstart, upgrade, rollback, disable, repair, or uninstall."
+            )
+        }
+        let action: DaemonCLIAction
+        if arguments[1] == "status" {
+            action = .status
+        } else if let operation = DaemonLifecycleOperation(rawValue: arguments[1]) {
+            action = .lifecycle(operation)
+        } else {
+            throw CLIUsageError("daemon does not support operation '\(arguments[1])'.")
+        }
+
+        var daemonExecutablePath: String?
+        var configPath: String?
+        var output: CLIOutputFormat = .text
+        var outputSelected = false
+        var index = 2
+        while index < arguments.count {
+            switch arguments[index] {
+            case "--daemon-executable":
+                guard daemonExecutablePath == nil, index + 1 < arguments.count else {
+                    throw CLIUsageError(
+                        "daemon \(arguments[1]) accepts one value after --daemon-executable."
+                    )
+                }
+                daemonExecutablePath = arguments[index + 1]
+                index += 2
+            case "--config":
+                guard configPath == nil, index + 1 < arguments.count else {
+                    throw CLIUsageError(
+                        "daemon \(arguments[1]) accepts one value after --config."
+                    )
+                }
+                configPath = arguments[index + 1]
+                index += 2
+            case "--json":
+                guard !outputSelected else {
+                    throw CLIUsageError("daemon \(arguments[1]) accepts one output selector.")
+                }
+                output = .json
+                outputSelected = true
+                index += 1
+            case "--output":
+                guard !outputSelected else {
+                    throw CLIUsageError("daemon \(arguments[1]) accepts one output selector.")
+                }
+                output = try parseOutputValue(
+                    arguments: arguments,
+                    index: index,
+                    commandName: "daemon \(arguments[1])"
+                )
+                outputSelected = true
+                index += 2
+            default:
+                throw CLIUsageError(
+                    "daemon \(arguments[1]) does not support argument '\(arguments[index])'."
+                )
+            }
+        }
+
+        let acceptsInputs: Bool
+        switch action {
+        case .lifecycle(.install), .lifecycle(.upgrade):
+            acceptsInputs = true
+        default:
+            acceptsInputs = false
+        }
+        if acceptsInputs {
+            guard let daemonExecutablePath,
+                  daemonExecutablePath.hasPrefix("/"),
+                  let configPath,
+                  configPath.hasPrefix("/") else {
+                throw CLIUsageError(
+                    "daemon \(arguments[1]) requires --daemon-executable <absolute-path> and --config <absolute-path>."
+                )
+            }
+        } else if daemonExecutablePath != nil || configPath != nil {
+            throw CLIUsageError(
+                "daemon \(arguments[1]) does not accept --daemon-executable or --config."
+            )
+        }
+        return .daemon(
+            options: DaemonCLIOptions(
+                action: action,
+                daemonExecutablePath: daemonExecutablePath,
+                configPath: configPath,
+                output: output
+            )
+        )
     }
 
     private static func capabilitiesCommand(arguments: [String]) throws -> CLICommand {
@@ -1820,6 +1942,14 @@ public enum CLIExitCode: Int32, Equatable, Sendable {
              .storagePartialEffect:
             return .partialFailure
         case .storageDenied:
+            return .unsafeOperation
+        case .daemonInvalid:
+            return .validation
+        case .daemonUnavailable:
+            return .runtimeUnavailable
+        case .daemonConflict, .daemonCancelled, .daemonPartialEffect:
+            return .partialFailure
+        case .daemonDenied:
             return .unsafeOperation
         case .unsupportedArchitecture, .unsupportedMacOSVersion:
             return .validation

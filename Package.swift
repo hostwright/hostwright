@@ -81,6 +81,7 @@ let package = Package(
             name: "HostwrightCLI",
             dependencies: [
                 "HostwrightCore",
+                "HostwrightDaemonCore",
                 "HostwrightExtensions",
                 "HostwrightHealth",
                 "HostwrightImport",
@@ -443,6 +444,7 @@ let package = Package(
             name: "HostwrightCLITests",
             dependencies: [
                 "HostwrightCLI",
+                "HostwrightDaemonCore",
                 "HostwrightManifest",
                 "HostwrightReconciler",
                 "HostwrightRegistry",

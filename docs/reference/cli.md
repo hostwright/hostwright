@@ -102,7 +102,8 @@ hostwright extension check --declaration <absolute-path> --executable <absolute-
 hostwright doctor [--state-db <path>] [--json | --output text|json]
 hostwright-control --version
 hostwright-control --manifest <absolute-path> [--state-db <absolute-path>] [--team-profile <absolute-path>]
-hostwrightd --foreground --config <hostwright.yaml> [--state-db <path>] [options]
+hostwright daemon status|install|validate|bootstrap|start|stop|kickstart|upgrade|rollback|disable|repair|uninstall [options]
+hostwrightd --foreground|--service --config <hostwright.yaml> [--state-db <path>] [options]
 hostwright-dist --version
 hostwright-dist install <artifact-source> --prefix <path> [--state-db <path>] --output json
 hostwright-dist upgrade <artifact-source> --prefix <path> [--state-db <path>] --output json
@@ -206,7 +207,7 @@ These commands produced and independently verified the immutable dev.11 and dev.
 
 The installed lifecycle accepts either the fully verified trusted release plus its exact team identifier or a verified developer distribution. It exposes `install`, `upgrade`, `repair`, `status`, `adopt-legacy`, `recover`, `rollback`, `uninstall-plan`, and `uninstall`; all require structured JSON output. Upgrade is strict SemVer, repair requires the exact installed version and commit, arbitrary downgrade is refused, and rollback accepts only the one verified immediately prior generation retained by a successful upgrade.
 
-Lifecycle status is `not-installed`, `ready`, or `recovery-required`. A pending durable journal must be resolved with `recover` before another mutation. `uninstall --data-policy preserve` requires no confirmation and retains the bound state database. `remove` requires the exact current plan token and removes only the verified active SQLite file set in addition to owned installed payload. The lifecycle creates no LaunchAgent; it stops/restores only an exact existing Homebrew launchd record and refuses a running unmanaged installed `hostwrightd` rather than terminating it.
+Distribution lifecycle status is `not-installed`, `ready`, or `recovery-required`. A pending durable journal must be resolved with `recover` before another mutation. `uninstall --data-policy preserve` requires no confirmation and retains the bound state database. `remove` requires the exact current plan token and removes only the verified active SQLite file set in addition to owned installed payload. `hostwright-dist` creates no LaunchAgent; it stops/restores only an exact existing Homebrew launchd record and refuses a running unmanaged installed `hostwrightd` rather than terminating it. The separate `hostwright daemon` surface owns `dev.hostwright.daemon` and never adopts the Homebrew record.
 
 The complete artifact-source grammar, prefix policy, JSON contracts, durable checkpoint flow, state behavior, legacy adoption, recovery actions, cleanup boundary, and troubleshooting are in [Installed Distribution Lifecycle](installed-lifecycle.md).
 
@@ -726,9 +727,26 @@ JSON shape:
 
 Doctor never creates or migrates state. Existing state must be checkpointed and free of rollback journals and nonempty WAL data; it is opened as an immutable read-only SQLite snapshot, using an existing Hostwright fence without creating one. Identity, content fingerprint, and checkpoint state are revalidated after inspection so concurrent change fails as a retryable inspection error. See [Doctor Checks](doctor-checks.md) for the complete classification, safety boundary, and remediation flow.
 
-## `hostwrightd --foreground --config <path> [--state-db <path>] [options]`
+## `hostwright daemon ...`
 
-Runs the foreground development daemon loop. It requires an explicit config path. State uses the standard Application Support default unless overridden.
+Controls the exact current-user `dev.hostwright.daemon` LaunchAgent. Text is the default; `--json` and `--output text|json` select versioned machine output.
+
+```text
+hostwright daemon status
+hostwright daemon install --daemon-executable <absolute-hostwrightd> --config <absolute-hostwright.yaml>
+hostwright daemon validate|bootstrap|start|stop|kickstart|rollback|disable|repair|uninstall
+hostwright daemon upgrade --daemon-executable <absolute-hostwrightd> --config <absolute-hostwright.yaml>
+```
+
+Install/upgrade accept no PATH lookup: both paths must be absolute, canonical, securely owned, and securely revalidated immediately before bootstrap. Other operations accept no executable/config override. Pending durable intent makes every mutation except `repair` fail with recovery-required status.
+
+Readiness is `not-installed`, `stopped`, `running`, `disabled`, or `recovery-required`. JSON schema v1 reports the exact label/domain/plist, executable/config generation, process ID when proven, pending operation, changed flag, and stable reason code. Errors use `HW-DAEMON-101` through `HW-DAEMON-106`; unsafe ownership/external-process refusals exit `71`, while incomplete or ambiguous effects exit `72`.
+
+The command never manages the Homebrew service record, project state, distribution payload, runtime resources, or an unmanaged process. See [Daemon](../architecture/daemon.md) for plist, checkpoint, rollback, security, recovery, and cleanup contracts.
+
+## `hostwrightd --foreground|--service --config <path> [--state-db <path>] [options]`
+
+Runs the foreground development daemon loop or the exact managed service loop. Exactly one mode is required. `--service` requires an absolute normalized config and does not accept `--max-iterations`. Foreground mode accepts the documented state environment overrides. Managed service mode ignores inherited environment overrides and, before runtime construction, re-executes the revalidated same binary once when necessary with an exact initial environment containing only `HOME`, a fixed C locale, and the trusted system `PATH`. It uses the standard Application Support state default unless an explicit argument overrides it.
 
 Options:
 
@@ -741,6 +759,6 @@ Options:
 
 Each iteration validates the manifest, observes runtime through `RuntimeAdapter`, computes a plan, and records daemon events plus operation records in the selected state database. Before the loop, the daemon creates/validates the private runtime layout and acquires the validated `0600` single-instance lock.
 
-It does not call `RuntimeAdapter.execute`, does not install a launch agent, and does not perform unattended runtime mutation.
+Gate 1 does not call `RuntimeAdapter.execute` and does not perform unattended runtime mutation. LaunchAgent creation and lifecycle belong to `hostwright daemon`, not the daemon executable itself.
 
 Shell completion remains research-only in Phase 12. Hostwright does not install shell completions or mutate shell profile files.

@@ -45,7 +45,7 @@ Implemented:
 - recovery at every restore publication checkpoint, including the torn window before a publication checkpoint is durable
 - executable pre-repair rollback when a committed repair database becomes unrecoverable
 - atomic operation-group acquisition coverage across concurrent stores
-- foreground daemon loop event and operation records
+- foreground and exact managed daemon loop event and operation records
 
 Not implemented:
 

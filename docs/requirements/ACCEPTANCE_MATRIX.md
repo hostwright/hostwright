@@ -143,7 +143,17 @@ Phase 8A is a required preflight before this mutation gate. It proves real read-
 | HW-DAEMON-003 | The loop supports manual-clock cadence, deterministic jitter, repeated-error backoff, shutdown, real single-instance lock refusal, and sleep/wake resume events. | Automated | Daemon core XCTest cases. |
 | HW-DAEMON-004, HW-RUNTIME-001, HW-RUNTIME-002 | Foreground daemon reconciliation observes through `RuntimeAdapter`, computes a plan, records state/events/operations, and never calls `RuntimeAdapter.execute`. | Automated + manual | Daemon XCTest no-execute assertion; targeted runtime-boundary scans. |
 | HW-STATE-001, HW-STATE-003, HW-OBS-001 | Successful daemon attempts persist desired state, observed snapshots, event records, and operation records to the secure selected state database; failed attempts persist failed operation and event records with redacted diagnostic codes. | Automated | Daemon foreground loop persistence and failure-classification XCTest cases. |
-| HW-DOCS-002, HW-SAFE-001 | Docs distinguish foreground non-mutating daemon behavior from unsupported launch agent, background service, restart loop, and unattended mutation behavior. | Manual | Daemon architecture, limitations, CLI reference, security-safety, and README review. |
+| HW-DOCS-002, HW-SAFE-001 | Phase 15 evidence distinguishes the foreground non-mutating loop from then-unimplemented background lifecycle; current docs separately define the Phase 08 managed lifecycle without claiming unattended mutation. | Manual | Daemon architecture, limitations, CLI reference, security-safety, and README review. |
+
+## Phase 08 Gate 1: Complete LaunchAgent Lifecycle
+
+| Requirement IDs | Acceptance criteria | Verification type | Verification command or review |
+| --- | --- | --- | --- |
+| HW-DAEMON-001, HW-DAEMON-002, HW-DAEMON-006 | `hostwright daemon` exposes versioned text/JSON status plus install, validate, bootstrap, start, stop, kickstart, upgrade, rollback, disable, repair, and uninstall; `hostwrightd --foreground` remains supported and `--service` requires an absolute config. | Automated + built binary | `DaemonLifecycleContractTests`, `DaemonLifecycleCLITests`, built command parser/status cells. |
+| HW-DAEMON-006, HW-SAFE-001, HW-SAFE-002 | Plist/status/journal/rollback/log paths require exact current-user ownership, safe regular files/directories, no symlink/hard-link or access-granting ACL, private modes, atomic publication, and exact hash verification. | Automated + security assessment | Path/permission/link/change/refusal lifecycle tests and focused diff review. |
+| HW-DAEMON-006, HW-STATE-012 | Every lifecycle checkpoint leaves compensated state or a valid repairable forward journal; upgrade retains exactly one verified prior generation and arbitrary rollback is refused. | Automated + resilience | Complete install checkpoint matrix, cancellation recovery, upgrade/rollback, missing-plist repair, and changed-record refusal tests. |
+| HW-DAEMON-007, HW-SAFE-004 | Loaded Homebrew records and unmanaged or deleted-executable `hostwrightd` processes are reported without adoption, termination, plist change, or cleanup. | Automated + live runtime | Scripted conflict tests and built `hostwright daemon status --json` orphan-process refusal. |
+| HW-DAEMON-006, HW-DOCS-002 | Clean install through reboot/login/crash/upgrade/rollback/disable/repair/uninstall leaves exact before/after state and no duplicate process. Blocked or isolated-only evidence cannot pass. | Attended live runtime | Dedicated current-user macOS qualification with no pre-existing unmanaged daemon. |
 
 ## Phase 16 Gate: Health Checks And Restart Policy Expansion
 

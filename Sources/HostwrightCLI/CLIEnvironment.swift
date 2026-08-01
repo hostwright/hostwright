@@ -1,6 +1,7 @@
 import Darwin
 import Foundation
 import HostwrightCore
+import HostwrightDaemonCore
 import HostwrightHealth
 import HostwrightRegistry
 import HostwrightRuntime
@@ -48,6 +49,7 @@ public struct CLIEnvironment: @unchecked Sendable {
     public var benchmarkSleep: (TimeInterval) -> Void
     public var benchmarkUUID: () -> UUID
     public var benchmarkNotice: (String) -> Void
+    public var daemonLifecycleController: () -> DaemonLifecycleController
 
     public init(
         fileExists: @escaping (String) -> Bool,
@@ -120,7 +122,10 @@ public struct CLIEnvironment: @unchecked Sendable {
         benchmarkMonotonicNanoseconds: @escaping () -> UInt64 = { DispatchTime.now().uptimeNanoseconds },
         benchmarkSleep: @escaping (TimeInterval) -> Void = { Thread.sleep(forTimeInterval: $0) },
         benchmarkUUID: @escaping () -> UUID = { UUID() },
-        benchmarkNotice: @escaping (String) -> Void = { _ in }
+        benchmarkNotice: @escaping (String) -> Void = { _ in },
+        daemonLifecycleController: @escaping () -> DaemonLifecycleController = {
+            DaemonLifecycleController()
+        }
     ) {
         self.fileExists = fileExists
         self.readTextFile = readTextFile
@@ -185,6 +190,7 @@ public struct CLIEnvironment: @unchecked Sendable {
         self.benchmarkSleep = benchmarkSleep
         self.benchmarkUUID = benchmarkUUID
         self.benchmarkNotice = benchmarkNotice
+        self.daemonLifecycleController = daemonLifecycleController
     }
 
     public static let live = CLIEnvironment(

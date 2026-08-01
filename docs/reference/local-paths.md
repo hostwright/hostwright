@@ -1,6 +1,6 @@
 # Local Paths, Permissions, and Legacy Migration
 
-Status: implemented for the `0.0.2-dev` single-Mac path, SQLite hardening, state maintenance, and explicit-prefix installed distribution lifecycle. Autonomous service installation and release-wide soak qualification remain later gates.
+Status: implemented for the `0.0.2-dev` single-Mac path, SQLite hardening, state maintenance, explicit-prefix distribution lifecycle, and exact per-user LaunchAgent lifecycle. Unattended reconciliation and release-wide soak qualification remain later gates.
 
 ## Default Layout
 
@@ -13,10 +13,12 @@ Hostwright uses macOS-native per-user locations. A state-writing command creates
 | SQLite state | `~/Library/Application Support/Hostwright/state/state.sqlite` | Production default for state-backed commands. |
 | Runtime files | `~/Library/Application Support/Hostwright/run` | Contains daemon locks and the reserved local-control socket path. |
 | Runtime metadata | `~/Library/Application Support/Hostwright/metadata` | Contains the legacy migration journal, state access/writer fences, and pending state-maintenance journal. |
+| Daemon lifecycle metadata | `~/Library/Application Support/Hostwright/daemon` | Contains exact schema-v1 ownership, pending lifecycle intent, and one-generation rollback records. |
 | Backups | `~/Library/Application Support/Hostwright/backups` | Verified online state-backup catalogs. |
 | Cache | `~/Library/Caches/Hostwright` | Private cache root. Provider-managed image bytes remain in the selected runtime; Hostwright stores bounded content accounting, pins, and fenced leases in schema-v16 SQLite state. |
 | Local storage provider | `~/Library/Application Support/Hostwright/storage/providers/hostwright-local` | Private Hostwright-owned volume, snapshot, backup, journal, and metadata root. |
-| Logs | `~/Library/Logs/Hostwright` | Private log root; structured daemon logging is implemented in Phase 08. |
+| Logs | `~/Library/Logs/Hostwright` | Private daemon stdout/stderr root; structured OSLog is a later Phase 08 gate. |
+| LaunchAgent | `~/Library/LaunchAgents/dev.hostwright.daemon.plist` | Exact current-user managed plist, created only by explicit `hostwright daemon install`. |
 | Daemon lock | `~/Library/Application Support/Hostwright/run/hostwrightd.lock` | Real `0600` non-symlink lock for the default state database. |
 | Control socket | `~/Library/Application Support/Hostwright/run/control-v2.sock` | Canonical reserved path; the current one-shot control process does not create a socket. |
 
@@ -50,6 +52,8 @@ The selected origin is `explicit`, `environment`, or `application-support-defaul
 
 Controlled installations may relocate the layout roots with absolute `HOSTWRIGHT_APPLICATION_SUPPORT_DIR`, `HOSTWRIGHT_CACHE_DIR`, and `HOSTWRIGHT_LOG_DIR` values. Invalid, relative, traversal-containing, empty, or overlong values fail closed. With an explicit or environment-selected state database, the daemon uses a deterministic hashed lock name beneath the selected Application Support `run` directory so independent databases do not share one lock.
 
+Managed `hostwrightd --service` does not accept inherited path overrides. It re-executes with an exact minimal environment and uses the standard Application Support database unless an explicit command argument selects another safe path. Foreground mode retains the precedence above.
+
 An explicit state parent must already exist and pass the same path policy. Hostwright does not silently create arbitrary caller-selected parent directories.
 
 For an explicit or environment-selected database, state-maintenance paths are identity-derived hidden siblings of that database: `.hostwright-<digest>-access-v1.lock`, `.hostwright-<digest>-maintenance-v1.json`, and `.hostwright-<digest>-backups/`. This prevents unrelated explicit databases in one directory from sharing a fence, journal, or catalog.
@@ -65,6 +69,8 @@ Each state-access fence also has a private `.writer` companion. Readers share th
 `validate`, `plan`, `migrate preview`, `capabilities`, and `paths` do not create local state.
 
 `hostwright-control` uses the same CLI default for `status`, `events`, and `recovery` when its launch configuration omits `--state-db`. Request data can never choose or override a path.
+
+`hostwright daemon status` is read-only. Its lifecycle mutations create or update only the exact plist, lifecycle records, and private log files listed above; uninstall validates and removes only those owned files and leaves unrelated state, distribution payloads, Homebrew records, and directory contents intact.
 
 ## Path Security Policy
 

@@ -66,6 +66,12 @@ public enum HostwrightErrorCode: String, Sendable {
     case storageDenied = "HW-STORAGE-004"
     case storageCancelled = "HW-STORAGE-005"
     case storagePartialEffect = "HW-STORAGE-006"
+    case daemonInvalid = "HW-DAEMON-101"
+    case daemonUnavailable = "HW-DAEMON-102"
+    case daemonConflict = "HW-DAEMON-103"
+    case daemonDenied = "HW-DAEMON-104"
+    case daemonCancelled = "HW-DAEMON-105"
+    case daemonPartialEffect = "HW-DAEMON-106"
 }
 
 public struct HostwrightDiagnostic: Error, Equatable, Sendable {

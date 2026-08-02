@@ -154,6 +154,27 @@ public struct OwnershipCLIOptions: Equatable, Sendable {
     }
 }
 
+public enum MetricsCLIAction: Equatable, Sendable {
+    case snapshot
+    case export(outputPath: String, confirmationSHA256: String)
+}
+
+public struct MetricsCLIOptions: Equatable, Sendable {
+    public let action: MetricsCLIAction
+    public let stateDatabasePath: String?
+    public let output: CLIOutputFormat
+
+    public init(
+        action: MetricsCLIAction,
+        stateDatabasePath: String?,
+        output: CLIOutputFormat
+    ) {
+        self.action = action
+        self.stateDatabasePath = stateDatabasePath
+        self.output = output
+    }
+}
+
 public enum CLICommand: Equatable, Sendable {
     case version
     case capabilities(output: CLIOutputFormat)
@@ -170,6 +191,7 @@ public enum CLICommand: Equatable, Sendable {
     case restartBudget(options: RestartBudgetCLIOptions)
     case maintenance(options: MaintenanceCLIOptions)
     case ownership(options: OwnershipCLIOptions)
+    case metrics(options: MetricsCLIOptions)
     case migrateManifestPreview(path: String, output: CLIOutputFormat)
     case initManifest
     case importStack(path: String, output: CLIOutputFormat, teamProfilePath: String?)
@@ -250,6 +272,8 @@ public enum CLICommand: Equatable, Sendable {
             return try maintenanceCommand(arguments: arguments)
         case "ownership":
             return try ownershipCommand(arguments: arguments)
+        case "metrics":
+            return try metricsCommand(arguments: arguments)
         case "migrate":
             return try migrateCommand(arguments: arguments)
         case "init":
@@ -1783,6 +1807,91 @@ public enum CLICommand: Equatable, Sendable {
             tail: tail,
             stateDatabasePath: stateDatabasePath
         )
+    }
+
+    private static func metricsCommand(arguments: [String]) throws -> CLICommand {
+        guard arguments.count >= 2, ["snapshot", "export"].contains(arguments[1]) else {
+            throw CLIUsageError("metrics requires exactly one action: snapshot or export.")
+        }
+        let actionName = arguments[1]
+        var stateDatabasePath: String?
+        var outputPath: String?
+        var confirmationSHA256: String?
+        var output: CLIOutputFormat = .text
+        var outputSelected = false
+        var index = 2
+        while index < arguments.count {
+            switch arguments[index] {
+            case "--state-db":
+                guard stateDatabasePath == nil, index + 1 < arguments.count else {
+                    throw CLIUsageError("metrics accepts exactly one value after --state-db.")
+                }
+                stateDatabasePath = arguments[index + 1]
+                index += 2
+            case "--output-path":
+                guard outputPath == nil, index + 1 < arguments.count else {
+                    throw CLIUsageError("metrics export accepts exactly one value after --output-path.")
+                }
+                let candidate = arguments[index + 1]
+                guard candidate.hasPrefix("/"),
+                      URL(fileURLWithPath: candidate).standardizedFileURL.path == candidate,
+                      (candidate as NSString).lastPathComponent != ".",
+                      (candidate as NSString).lastPathComponent != ".." else {
+                    throw CLIUsageError("metrics export --output-path requires one normalized absolute file path.")
+                }
+                outputPath = candidate
+                index += 2
+            case "--confirm-snapshot":
+                guard confirmationSHA256 == nil, index + 1 < arguments.count else {
+                    throw CLIUsageError("metrics export accepts exactly one value after --confirm-snapshot.")
+                }
+                let candidate = arguments[index + 1]
+                guard candidate.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil else {
+                    throw CLIUsageError("metrics export --confirm-snapshot requires 64 lowercase hexadecimal characters.")
+                }
+                confirmationSHA256 = candidate
+                index += 2
+            case "--output":
+                guard !outputSelected else {
+                    throw CLIUsageError("metrics output format may be selected only once.")
+                }
+                output = try parseOutputValue(
+                    arguments: arguments,
+                    index: index,
+                    commandName: "metrics"
+                )
+                outputSelected = true
+                index += 2
+            default:
+                throw CLIUsageError("metrics supports only --state-db, --output, --output-path, and --confirm-snapshot.")
+            }
+        }
+
+        switch actionName {
+        case "snapshot":
+            guard outputPath == nil, confirmationSHA256 == nil else {
+                throw CLIUsageError("metrics snapshot does not accept export confirmation or output-path flags.")
+            }
+            return .metrics(options: MetricsCLIOptions(
+                action: .snapshot,
+                stateDatabasePath: stateDatabasePath,
+                output: output
+            ))
+        case "export":
+            guard let outputPath, let confirmationSHA256 else {
+                throw CLIUsageError("metrics export requires --output-path and --confirm-snapshot.")
+            }
+            return .metrics(options: MetricsCLIOptions(
+                action: .export(
+                    outputPath: outputPath,
+                    confirmationSHA256: confirmationSHA256
+                ),
+                stateDatabasePath: stateDatabasePath,
+                output: output
+            ))
+        default:
+            preconditionFailure("validated metrics action")
+        }
     }
 
     private static func eventsCommand(arguments: [String]) throws -> CLICommand {

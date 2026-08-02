@@ -235,6 +235,17 @@ JSON is the machine-readable current-support source. The command performs no run
 
 Reports the schema-v1 local OSLog contract: subsystem, fixed categories, enabled/minimum-level collection policy, field and payload limits, the SQLite durable authority, macOS rotation authority, and the no-upload policy. It is read-only and creates no state or log file. JSON is stable machine-readable status; see [Local Observability](observability.md) for inspection, privacy, and troubleshooting boundaries.
 
+## `hostwright metrics snapshot|export`
+
+```bash
+hostwright metrics snapshot [--state-db <path>] [--output text|json]
+hostwright metrics export --output-path <absolute-new-path> --confirm-snapshot <sha256> [--state-db <path>] [--output text|json]
+```
+
+`snapshot` is a schema-v1 read-only projection over one existing compatible schema-v17 database. It reports the fixed 59-series catalog, bounded histogram/summary values, three minimum-sample SLO results, source database identity, dropped-sample accounting, retention authority, and `snapshotSHA256`. It does not create, migrate, repair, sample, inspect runtime, listen, or upload.
+
+`export` recomputes the snapshot, requires the exact current hash, and creates one canonical new mode-`0600` file under an existing private current-user directory. It refuses overwrite, stale confirmation, symlink/parent/path/hard-link races, cancellation, or unverifiable bytes. The result remains operator-owned and is never uploaded or automatically removed. See [Bounded Local Metrics and SLOs](metrics.md).
+
 ## `hostwright secret ...`
 
 Manages only Hostwright-owned `keychain://<service>/<account>` generic-password items. `create` and `update` read a bounded UTF-8 value from stdin or an attended no-echo terminal; secret values are never accepted in argv. `list` and `check` return metadata only. `delete` verifies exact ownership and item identity before removal.
@@ -367,7 +378,7 @@ hostwright state compact hostwright.yaml --dry-run --json
 hostwright state compact hostwright.yaml --confirm-compact <confirmationToken> --json
 ```
 
-`state retention` is read-only. Its schema-v1 report lists all ten declared classes, producer availability, current/candidate/held/recovery-critical counts, bounded candidate identity digests, database pressure, blockers, and any pending compaction plan. Logs, metrics, traces, and support evidence report zero with `producerAvailable: false` until their owning Phase 08 gates exist; Hostwright does not fabricate them.
+`state retention` is read-only. Its schema-v1 report lists all ten declared classes, producer availability, current/candidate/held/recovery-critical counts, bounded candidate identity digests, database pressure, blockers, and any pending compaction plan. Metrics report `producerAvailable: true` with zero separate sample records because they project retained authoritative rows. Logs, traces, and support evidence remain zero with `producerAvailable: false` until their owning Phase 08 gates exist; Hostwright does not fabricate them.
 
 `state compact --dry-run` deterministically applies age, count, recovery-horizon, minimum-record, and exact hold rules. Confirmation binds the policy, current database, complete non-backup safety counts, exact candidate identities, and blockers. Execution first creates a verified private online backup, revalidates under the exclusive state fence, records a strict private journal, deletes database candidates in one transaction, atomically stages exact catalog deletions, compacts free pages, and reruns complete integrity checks. Eligible operation history includes terminal unreferenced ledger rows and only succeeded unreferenced operation groups; the latter removes its exact child steps in the same transaction. Every durable and torn-commit checkpoint resumes only with the same exact token. Missing, referenced, active, interrupted, failed, ambiguous, held, future-dated, finalizer-incomplete, or identity-changed records remain untouched.
 

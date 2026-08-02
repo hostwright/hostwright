@@ -46,7 +46,12 @@ final class StateRetentionTests: XCTestCase {
             XCTAssertEqual(status(.operations, in: first).candidateRecords, 0)
             XCTAssertEqual(status(.operations, in: first).recoveryCriticalRecords, 1)
             XCTAssertFalse(status(.logs, in: first).producerAvailable)
-            XCTAssertFalse(status(.metrics, in: first).producerAvailable)
+            XCTAssertTrue(status(.metrics, in: first).producerAvailable)
+            XCTAssertEqual(status(.metrics, in: first).currentRecords, 0)
+            XCTAssertEqual(
+                status(.metrics, in: first).note,
+                "read-only projection; authoritative source rows retain under their owning classes"
+            )
             XCTAssertTrue(first.executable)
         }
     }

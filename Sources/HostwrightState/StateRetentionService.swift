@@ -342,7 +342,10 @@ public struct StateRetentionService {
             case .tombstones:
                 rows = try tombstoneRows(connection, at: date)
                 available = true
-            case .logs, .metrics, .traces, .supportEvidence:
+            case .metrics:
+                rows = []
+                available = true
+            case .logs, .traces, .supportEvidence:
                 rows = []
                 available = false
             }
@@ -365,7 +368,9 @@ public struct StateRetentionService {
                 heldRecords: selection.held,
                 recoveryCriticalRecords: selection.recoveryCritical,
                 candidateIdentitySHA256: candidateDigest(selection.candidates),
-                note: available
+                note: retentionClass == .metrics
+                    ? "read-only projection; authoritative source rows retain under their owning classes"
+                    : available
                     ? (selection.truncated ? "bounded candidate page; repeat with a fresh exact plan" : "producer available")
                     : "producer unavailable until its owning Phase 08 gate"
             ))

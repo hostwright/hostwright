@@ -579,30 +579,35 @@ public struct DaemonLoopRunner {
                     timestamp: startedAt
                 )
             }
+            let completedAt = clock.timestamp()
+            var reconciliationPayload: [String: Any] = [
+                "actions": plan.actions.count,
+                "drift": plan.drift.count,
+                "healthChecks": healthResults.count,
+                "checkpoint": reconciliation.checkpoint,
+                "completedNodes": reconciliation.completedNodeCount,
+                "lifecyclePlanSHA256": reconciliation.planSHA256,
+                "mutationAttempted": reconciliation.runtimeMutationAttempted,
+                "nodes": reconciliation.nodeCount,
+                "planHash": plan.planHash,
+                "reasonCode": reconciliation.reasonCode.rawValue,
+                "restartPolicyBlocked": plan.issues.filter { $0.kind == .restartPolicyBlocked }.count
+            ]
+            if let duration = durationMilliseconds(from: startedAt, to: completedAt) {
+                reconciliationPayload["durationMilliseconds"] = duration
+            }
             try store.operations.record(
                 OperationRecord(
                     id: idGenerator("operation-daemon"),
                     createdAt: startedAt,
-                    updatedAt: startedAt,
+                    updatedAt: completedAt,
                     plannedActionType: "daemon.reconcile",
                     projectID: projectID,
                     serviceName: nil,
                     status: iterationSucceeded ? .succeeded : .failed,
                     idempotencyKey: "daemon:\(iteration)",
                     planHash: plan.planHash,
-                    payloadJSONRedacted: payload([
-                        "actions": plan.actions.count,
-                        "drift": plan.drift.count,
-                        "healthChecks": healthResults.count,
-                        "checkpoint": reconciliation.checkpoint,
-                        "completedNodes": reconciliation.completedNodeCount,
-                        "lifecyclePlanSHA256": reconciliation.planSHA256,
-                        "mutationAttempted": reconciliation.runtimeMutationAttempted,
-                        "nodes": reconciliation.nodeCount,
-                        "planHash": plan.planHash,
-                        "reasonCode": reconciliation.reasonCode.rawValue,
-                        "restartPolicyBlocked": plan.issues.filter { $0.kind == .restartPolicyBlocked }.count
-                    ])
+                    payloadJSONRedacted: payload(reconciliationPayload)
                 )
             )
             try store.events.append([
@@ -616,19 +621,7 @@ public struct DaemonLoopRunner {
                     serviceName: nil,
                     runtimeAdapter: adapterName,
                     message: "Daemon reconciliation \(reconciliation.status.rawValue): observed \(observedWithHealth.services.count) service(s), recorded \(healthResults.count) health check result(s), planned \(reconciliation.nodeCount) lifecycle node(s), and completed \(reconciliation.completedNodeCount).",
-                    payloadJSONRedacted: payload([
-                        "actions": plan.actions.count,
-                        "drift": plan.drift.count,
-                        "healthChecks": healthResults.count,
-                        "checkpoint": reconciliation.checkpoint,
-                        "completedNodes": reconciliation.completedNodeCount,
-                        "lifecyclePlanSHA256": reconciliation.planSHA256,
-                        "mutationAttempted": reconciliation.runtimeMutationAttempted,
-                        "nodes": reconciliation.nodeCount,
-                        "planHash": plan.planHash,
-                        "reasonCode": reconciliation.reasonCode.rawValue,
-                        "restartPolicyBlocked": plan.issues.filter { $0.kind == .restartPolicyBlocked }.count
-                    ])
+                    payloadJSONRedacted: payload(reconciliationPayload)
                 )
             ])
             return iterationSucceeded ? .success : .failure
@@ -649,24 +642,29 @@ public struct DaemonLoopRunner {
             } else {
                 evidenceProjectID = nil
             }
+            let completedAt = clock.timestamp()
+            var failurePayload: [String: Any] = [
+                "error": message,
+                "errorCode": diagnostic.code.rawValue,
+                "mutationOutcome": enteredLifecycleDriver
+                    ? "inspect-lifecycle-ledger"
+                    : "not-admitted"
+            ]
+            if let duration = durationMilliseconds(from: startedAt, to: completedAt) {
+                failurePayload["durationMilliseconds"] = duration
+            }
             try store.operations.record(
                 OperationRecord(
                     id: idGenerator("operation-daemon"),
                     createdAt: startedAt,
-                    updatedAt: startedAt,
+                    updatedAt: completedAt,
                     plannedActionType: "daemon.reconcile",
                     projectID: evidenceProjectID,
                     serviceName: nil,
                     status: .failed,
                     idempotencyKey: "daemon:\(iteration)",
                     planHash: currentPlanHash,
-                    payloadJSONRedacted: payload([
-                        "error": message,
-                        "errorCode": diagnostic.code.rawValue,
-                        "mutationOutcome": enteredLifecycleDriver
-                            ? "inspect-lifecycle-ledger"
-                            : "not-admitted"
-                    ])
+                    payloadJSONRedacted: payload(failurePayload)
                 )
             )
             try store.events.append([
@@ -682,13 +680,7 @@ public struct DaemonLoopRunner {
                     message: enteredLifecycleDriver
                         ? "Daemon reconciliation failed; inspect the fenced lifecycle ledger before retry: \(diagnostic.code.rawValue): \(message)"
                         : "Daemon reconciliation failed before lifecycle admission: \(diagnostic.code.rawValue): \(message)",
-                    payloadJSONRedacted: payload([
-                        "error": message,
-                        "errorCode": diagnostic.code.rawValue,
-                        "mutationOutcome": enteredLifecycleDriver
-                            ? "inspect-lifecycle-ledger"
-                            : "not-admitted"
-                    ])
+                    payloadJSONRedacted: payload(failurePayload)
                 )
             ])
             return .failure
@@ -1541,6 +1533,19 @@ private func sha256(_ value: String) -> String {
     SHA256.hash(data: Data(value.utf8))
         .map { String(format: "%02x", $0) }
         .joined()
+}
+
+private func durationMilliseconds(from startedAt: String, to completedAt: String) -> Int? {
+    let fractional = ISO8601DateFormatter()
+    fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    let whole = ISO8601DateFormatter()
+    guard let start = fractional.date(from: startedAt) ?? whole.date(from: startedAt),
+          let end = fractional.date(from: completedAt) ?? whole.date(from: completedAt) else {
+        return nil
+    }
+    let milliseconds = Int(end.timeIntervalSince(start) * 1_000)
+    guard (0...86_400_000).contains(milliseconds) else { return nil }
+    return milliseconds
 }
 
 private func payload(_ object: [String: Any]) -> String {

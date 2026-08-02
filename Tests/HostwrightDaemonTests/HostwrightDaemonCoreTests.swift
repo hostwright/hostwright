@@ -1069,6 +1069,19 @@ final class HostwrightDaemonCoreTests: XCTestCase {
 
             let operations = try store.operations.loadAll()
             XCTAssertEqual(operations.filter { $0.plannedActionType == "daemon.reconcile" }.map(\.status), [.succeeded])
+            let reconciliation = try XCTUnwrap(
+                operations.first { $0.plannedActionType == "daemon.reconcile" }
+            )
+            let evidence = try XCTUnwrap(
+                JSONSerialization.jsonObject(
+                    with: Data(reconciliation.payloadJSONRedacted.utf8)
+                ) as? [String: Any]
+            )
+            XCTAssertGreaterThanOrEqual(
+                try XCTUnwrap(evidence["durationMilliseconds"] as? Int),
+                0
+            )
+            XCTAssertNotEqual(reconciliation.createdAt, reconciliation.updatedAt)
             XCTAssertEqual(try store.desiredStates.loadProject(id: "project-demo").name, "demo")
             XCTAssertEqual(try store.observedStates.loadSnapshots(projectID: "project-demo").count, 1)
         }

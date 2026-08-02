@@ -104,7 +104,7 @@ public enum HostwrightCLI {
         let supported = Set([
             "apply", "benchmark", "capabilities", "cleanup", "daemon", "diagnostics",
             "doctor", "events", "extension", "help", "image", "init", "interactive",
-            "lifecycle", "logs", "network", "paths", "plan", "recovery", "registry",
+            "lifecycle", "logs", "metrics", "network", "paths", "plan", "recovery", "registry",
             "observability", "runtime", "secret", "state", "status", "storage", "validate", "version"
         ])
         guard let first = arguments.first else { return "help" }
@@ -285,6 +285,15 @@ public enum HostwrightCLI {
                     environment: environment
                 )
             ).run()
+        case .metrics(let options):
+            return try MetricsCommandRunner(
+                options: options,
+                stateStoreConfiguration: try hostwrightStateStoreConfiguration(
+                    explicitPath: options.stateDatabasePath,
+                    environment: environment
+                ),
+                environment: environment
+            ).run()
         case .migrateManifestPreview(let path, let output):
             let source = try hostwrightReadManifestText(path: path, environment: environment)
             let preview = try ManifestMigrator.previewV2(source)
@@ -432,6 +441,8 @@ public enum HostwrightCLI {
       hostwright --version
       hostwright capabilities [--json|--output text|json]
       hostwright observability status [--json|--output text|json]
+      hostwright metrics snapshot [--state-db <path>] [--output text|json]
+      hostwright metrics export --output-path <absolute-new-path> --confirm-snapshot <sha256> [--state-db <path>] [--output text|json]
       hostwright runtime providers [--json]
       hostwright runtime migrate [path] --to apple-cli|containerization --dry-run [--state-db <path>] [--json|--output text|json]
       hostwright runtime migrate [path] --to apple-cli|containerization --confirm-migration <token> [--state-db <path>] [--json|--output text|json]

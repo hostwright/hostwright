@@ -58,6 +58,8 @@ These controls prevent Hostwright from crossing filesystem trust boundaries. The
 
 Event cursors bind only a validated non-secret event identifier and SHA-256 of the complete stored redacted row. Cursor input is canonical and size-bounded; modified retained rows fail integrity and deleted anchors produce an explicit retention gap. Watches are local read-only long polls with bounded filters, page size, timeout, and synchronous output backpressure. They create no listener, credential, state row, file, socket, or runtime resource. The SQLite ledger remains authoritative; OSLog is only a best-effort local mirror. See [Durable Events and Local Watches](events.md) and [Local Observability](observability.md).
 
+Metrics use only fixed catalog-owned names, label keys, and label values. No project, service, resource, operation, provider, path, endpoint, host, error text, secret, credential, or PII becomes a label or raw-row export. Snapshot is a shared-fenced read of existing schema-v17 authority and creates no sample store or listener. Export requires an exact recomputed confirmation hash and a canonical current-user private parent; an `openat`-bound exclusive/no-follow mode-`0600` file is revalidated by descriptor and path identity before success. Cancellation or failure removes only the exact created incomplete file. There is no automatic upload. See [Bounded Local Metrics and SLOs](metrics.md).
+
 ## Policy Boundary
 
 Policy evaluation is local, deterministic, and non-mutating. `HostwrightPolicy` explains allow/warning/blocker decisions for planner safety checks, cleanup classification, image policy, env/secrets, lifecycle requests, secure exposure requests, untrusted manifests, accelerator placeholders, and extension declarations.

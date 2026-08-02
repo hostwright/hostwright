@@ -58,6 +58,8 @@ public struct CLIEnvironment: @unchecked Sendable {
     public var eventWatchMonotonicNow: () -> UInt64
     public var eventWatchSleep: (TimeInterval) -> Void
     public var eventWatchCancelled: () -> Bool
+    public var metricsDate: @Sendable () -> Date
+    public var metricsCancelled: () -> Bool
 
     public init(
         fileExists: @escaping (String) -> Bool,
@@ -145,7 +147,9 @@ public struct CLIEnvironment: @unchecked Sendable {
         eventWatchSleep: @escaping (TimeInterval) -> Void = { interval in
             Thread.sleep(forTimeInterval: interval)
         },
-        eventWatchCancelled: @escaping () -> Bool = { false }
+        eventWatchCancelled: @escaping () -> Bool = { false },
+        metricsDate: @escaping @Sendable () -> Date = Date.init,
+        metricsCancelled: @escaping () -> Bool = { false }
     ) {
         self.fileExists = fileExists
         self.readTextFile = readTextFile
@@ -217,6 +221,8 @@ public struct CLIEnvironment: @unchecked Sendable {
         self.eventWatchMonotonicNow = eventWatchMonotonicNow
         self.eventWatchSleep = eventWatchSleep
         self.eventWatchCancelled = eventWatchCancelled
+        self.metricsDate = metricsDate
+        self.metricsCancelled = metricsCancelled
     }
 
     public static let live = CLIEnvironment(

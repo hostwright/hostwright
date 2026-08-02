@@ -263,12 +263,14 @@ final class SQLiteConnection {
         var began = false
         var commitAttempted = false
         do {
-            try executeInternalTransactionControl("BEGIN IMMEDIATE TRANSACTION")
+            try executeInternalTransactionControl(
+                readOnly ? "BEGIN TRANSACTION" : "BEGIN IMMEDIATE TRANSACTION"
+            )
             began = true
             managedTransactionActive = true
             guard sqlite3_get_autocommit(handle) == 0 else {
                 throw StateStoreError.transactionInvariantViolation(
-                    message: "BEGIN IMMEDIATE did not establish a write transaction"
+                    message: "BEGIN did not establish a managed transaction"
                 )
             }
 
@@ -288,7 +290,7 @@ final class SQLiteConnection {
             managedTransactionActive = false
             guard sqlite3_get_autocommit(handle) != 0 else {
                 throw StateStoreError.transactionInvariantViolation(
-                    message: "COMMIT returned without closing the write transaction"
+                    message: "COMMIT returned without closing the managed transaction"
                 )
             }
             return value

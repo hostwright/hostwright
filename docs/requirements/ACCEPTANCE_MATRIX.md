@@ -244,6 +244,14 @@ Phase 8A is a required preflight before this mutation gate. It proves real read-
 | HW-OBS-006, HW-STATE-009 | Retained cursors survive authoritative `VACUUM`; a deleted cursor reports an explicit retention gap plus earliest/latest recovery cursors, and a changed retained record fails integrity. Existing v16 events project after the sole v16→v17 migration with no v18. | Migration + resilience | Cursor/VACUUM, compaction-gap, tamper, restart, v16 upgrade, future-version refusal, and state-integrity cells. |
 | HW-OBS-003, HW-SAFE-004 | Filters, cursor tokens, pages, polling, timeouts, and operation references are strict and bounded. A watch returns one synchronous page, advances across filtered rows, handles timeout/cancellation explicitly, and creates no network listener, state mutation, or upload. | Security + live runtime | Adversarial parser/cursor tests, 1,001-event backpressure page, cancellation/timeout cells, local CLI subprocess watch/resume, scope scan, and security review. |
 
+## Phase 08 Gate 13: Bounded Metrics And SLOs
+
+| Requirement IDs | Acceptance criteria | Verification type | Verification command or review |
+| --- | --- | --- | --- |
+| HW-OBS-007, HW-STATE-003 | One explicit local snapshot projects an existing compatible schema-v17 database into exactly the fixed catalog under 128 series, with closed label values, fixed duration buckets, bounded summaries, source identity, and deterministic confirmation hash. Missing/old/future state is never created or silently migrated. | Unit contract + local integration + migration | Observability catalog tests, state projection/SLO tests, v16 refusal then explicit v17 upgrade, future-version refusal, reopen, and real SQLite 10,000-cycle cells. |
+| HW-OBS-007, HW-SAFE-004 | User-controlled project/service/resource/path/error/secret/credential/PII values cannot become labels or raw rows. Invalid, unsupported-duration, overflow, and series-budget evidence is counted only under fixed reasons. | Security assessment + adversarial tests | Catalog/cardinality/value-shape attacks, legacy duration accounting, secret/credential/PII scans, fixed-output bounds, and security review. |
+| HW-OBS-007, HW-STATE-009 | SLOs require 20 eligible samples and remain observational. Export requires the exact recomputed snapshot hash and one new canonical private `0600` file; overwrite, path/symlink/hard-link races, cancellation, or byte mismatch fail with exact incomplete-file cleanup. Metrics have no separate sample store and retention stays with source rows. | Live runtime + resilience | CLI snapshot/export subprocess, confirmation/race/cancellation/write-failure cells, retention status, 10,000 source cycles, representative qualified runtime mutation/cleanup, and exact artifact inventory. |
+
 ## Phase 21 Gate: GUI Control Surface Requirements And API Boundary
 
 | Requirement IDs | Acceptance criteria | Verification type | Verification command or review |

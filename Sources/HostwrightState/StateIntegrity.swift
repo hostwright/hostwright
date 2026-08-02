@@ -265,6 +265,40 @@ public struct StateIntegrityService: Sendable {
                         OR length(policy_sha256) != 64 OR policy_sha256 GLOB '*[^0-9a-f]*'
                         OR (hold_token IS NOT NULL AND (length(hold_token) != 64 OR hold_token GLOB '*[^0-9a-f]*'))
                         OR json_type(CASE WHEN json_valid(metadata_json_redacted) THEN metadata_json_redacted ELSE 'null' END) != 'object')
+                  + (SELECT COUNT(*) FROM peer_identities
+                     WHERE subject_id = '' OR user_id < 0 OR signing_identifier = '' OR generation < 1
+                        OR length(code_directory_hash) NOT IN (40, 64)
+                        OR code_directory_hash GLOB '*[^0-9a-f]*'
+                        OR validation_mode NOT IN ('installedRequirement', 'pinnedAdHoc')
+                        OR (validation_mode = 'installedRequirement' AND team_identifier IS NULL)
+                        OR (validation_mode = 'pinnedAdHoc' AND team_identifier IS NOT NULL)
+                        OR (credential_id IS NULL) != (credential_public_key_base64 IS NULL)
+                        OR julianday(declared_at) IS NULL OR julianday(updated_at) IS NULL)
+                  + (SELECT COUNT(*) FROM control_sessions
+                     WHERE session_id = '' OR subject_id = '' OR daemon_generation < 1
+                        OR length(server_nonce_sha256) != 64 OR server_nonce_sha256 GLOB '*[^0-9a-f]*'
+                        OR socket_device < 0 OR socket_inode < 1 OR euid < 0 OR egid < 0
+                        OR pid < 1 OR pid_version < 0 OR audit_session_id < 0
+                        OR length(code_directory_hash) NOT IN (40, 64)
+                        OR code_directory_hash GLOB '*[^0-9a-f]*'
+                        OR julianday(created_at) IS NULL OR julianday(expires_at) IS NULL
+                        OR julianday(expires_at) <= julianday(created_at) OR julianday(updated_at) IS NULL)
+                  + (SELECT COUNT(*) FROM identity_revocations
+                     WHERE revocation_id = '' OR target_identifier = '' OR reason = ''
+                        OR target_kind NOT IN ('subject', 'credential', 'codeHash', 'session')
+                        OR (target_kind = 'codeHash' AND (length(target_identifier) NOT IN (40, 64) OR target_identifier GLOB '*[^0-9a-f]*'))
+                        OR actor_subject_id = '' OR julianday(revoked_at) IS NULL)
+                  + (SELECT COUNT(*) FROM control_requests
+                     WHERE request_id = '' OR subject_id = ''
+                        OR length(request_digest_sha256) != 64 OR request_digest_sha256 GLOB '*[^0-9a-f]*'
+                        OR status NOT IN ('accepted', 'completed', 'rejected', 'error')
+                        OR julianday(created_at) IS NULL OR julianday(updated_at) IS NULL)
+                  + (SELECT COUNT(*) FROM idempotency_records
+                     WHERE subject_id = '' OR idempotency_key = '' OR request_id = ''
+                        OR length(request_digest_sha256) != 64 OR request_digest_sha256 GLOB '*[^0-9a-f]*'
+                        OR status NOT IN ('accepted', 'completed', 'rejected', 'error')
+                        OR julianday(created_at) IS NULL OR julianday(expires_at) IS NULL
+                        OR julianday(expires_at) <= julianday(created_at))
                   + (SELECT COUNT(*) FROM restart_recovery_records
                      WHERE id = '' OR operation_id = '' OR service_name = '' OR resource_identifier = ''
                         OR plan_hash = '' OR created_at = '' OR updated_at = ''
@@ -1840,7 +1874,12 @@ public struct StateIntegrityService: Sendable {
         "network_dns_instances",
         "network_port_reservations",
         "network_certificates",
-        "service_tunnel_sessions"
+        "service_tunnel_sessions",
+        "peer_identities",
+        "control_sessions",
+        "identity_revocations",
+        "control_requests",
+        "idempotency_records"
     ]
 
     private static let requiredIndexes = [
@@ -1855,6 +1894,15 @@ public struct StateIntegrityService: Sendable {
         "restart_attempt_history_project_idx",
         "restart_attempt_history_workload_idx",
         "restart_attempt_history_operation_idx",
+        "peer_identities_code_hash_idx",
+        "peer_identities_active_code_idx",
+        "peer_identities_active_credential_idx",
+        "control_sessions_subject_idx",
+        "control_sessions_code_hash_idx",
+        "identity_revocations_target_idx",
+        "control_requests_subject_idempotency_idx",
+        "control_requests_subject_status_idx",
+        "idempotency_records_request_idx",
         "restart_recovery_operation_idx",
         "restart_recovery_project_idx",
         "operation_groups_operation_idx",

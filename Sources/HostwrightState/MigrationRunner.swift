@@ -3206,6 +3206,114 @@ public struct MigrationRunner: Sendable {
                 "CREATE INDEX restart_attempt_history_workload_idx ON restart_attempt_history(project_id, service_name, occurred_at, id)",
                 "CREATE INDEX restart_attempt_history_operation_idx ON restart_attempt_history(operation_id) WHERE operation_id IS NOT NULL"
             ]
-        )
+        ),
+        SchemaMigration(
+          version: 18,
+          description:
+            "Persistent local control identities, sessions, revocations, and request foundations",
+          statements: [
+            """
+            CREATE TABLE peer_identities (
+                subject_id TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL CHECK (user_id >= 0),
+                signing_identifier TEXT NOT NULL CHECK (length(signing_identifier) BETWEEN 1 AND 128 AND signing_identifier NOT GLOB '*[^ -~]*'),
+                team_identifier TEXT,
+                code_directory_hash TEXT NOT NULL CHECK (length(code_directory_hash) IN (40, 64) AND code_directory_hash NOT GLOB '*[^0-9a-f]*'),
+                validation_mode TEXT NOT NULL CHECK (validation_mode IN ('installedRequirement','pinnedAdHoc')),
+                generation INTEGER NOT NULL CHECK (generation >= 1),
+                credential_id TEXT,
+                credential_public_key_base64 TEXT,
+                declared_by_subject_id TEXT NOT NULL REFERENCES peer_identities(subject_id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED,
+                declared_at TEXT NOT NULL CHECK (julianday(declared_at) IS NOT NULL),
+                credential_expires_at TEXT CHECK (credential_expires_at IS NULL OR julianday(credential_expires_at) IS NOT NULL),
+                revoked_at TEXT CHECK (revoked_at IS NULL OR julianday(revoked_at) IS NOT NULL),
+                updated_at TEXT NOT NULL CHECK (julianday(updated_at) IS NOT NULL),
+                CHECK (length(subject_id) BETWEEN 1 AND 128 AND subject_id NOT GLOB '*[^ -~]*'),
+                CHECK (length(declared_by_subject_id) BETWEEN 1 AND 128 AND declared_by_subject_id NOT GLOB '*[^ -~]*'),
+                CHECK ((credential_id IS NULL AND credential_public_key_base64 IS NULL) OR (credential_id IS NOT NULL AND credential_public_key_base64 IS NOT NULL)),
+                CHECK (credential_id IS NULL OR (length(credential_id) BETWEEN 1 AND 128 AND credential_id NOT GLOB '*[^ -~]*')),
+                CHECK (credential_public_key_base64 IS NULL OR length(credential_public_key_base64) BETWEEN 1 AND 512),
+                CHECK ((validation_mode = 'installedRequirement' AND team_identifier IS NOT NULL AND length(team_identifier) = 10 AND team_identifier NOT GLOB '*[^A-Z0-9]*') OR (validation_mode = 'pinnedAdHoc' AND team_identifier IS NULL)),
+                CHECK (credential_expires_at IS NULL OR julianday(credential_expires_at) > julianday(declared_at))
+            )
+            """,
+            """
+            CREATE TABLE control_sessions (
+                session_id TEXT PRIMARY KEY,
+                subject_id TEXT NOT NULL REFERENCES peer_identities(subject_id) ON DELETE RESTRICT,
+                daemon_generation INTEGER NOT NULL CHECK (daemon_generation > 0),
+                server_nonce_sha256 TEXT NOT NULL CHECK (length(server_nonce_sha256) = 64 AND server_nonce_sha256 NOT GLOB '*[^0-9a-f]*'),
+                socket_device INTEGER NOT NULL CHECK (socket_device >= 0),
+                socket_inode INTEGER NOT NULL CHECK (socket_inode > 0),
+                euid INTEGER NOT NULL CHECK (euid >= 0),
+                egid INTEGER NOT NULL CHECK (egid >= 0),
+                pid INTEGER NOT NULL CHECK (pid > 0),
+                pid_version INTEGER NOT NULL CHECK (pid_version >= 0),
+                audit_session_id INTEGER NOT NULL CHECK (audit_session_id >= 0),
+                code_directory_hash TEXT NOT NULL CHECK (length(code_directory_hash) IN (40, 64) AND code_directory_hash NOT GLOB '*[^0-9a-f]*'),
+                credential_id TEXT,
+                created_at TEXT NOT NULL CHECK (julianday(created_at) IS NOT NULL),
+                expires_at TEXT NOT NULL CHECK (julianday(expires_at) IS NOT NULL),
+                revoked_at TEXT CHECK (revoked_at IS NULL OR julianday(revoked_at) IS NOT NULL),
+                updated_at TEXT NOT NULL CHECK (julianday(updated_at) IS NOT NULL),
+                CHECK (length(session_id) BETWEEN 1 AND 128 AND session_id NOT GLOB '*[^ -~]*'),
+                CHECK (credential_id IS NULL OR (length(credential_id) BETWEEN 1 AND 128 AND credential_id NOT GLOB '*[^ -~]*')),
+                CHECK (julianday(expires_at) > julianday(created_at))
+            )
+            """,
+            """
+            CREATE TABLE identity_revocations (
+                revocation_id TEXT PRIMARY KEY,
+                target_kind TEXT NOT NULL CHECK (target_kind IN ('subject','credential','codeHash','session')),
+                target_identifier TEXT NOT NULL,
+                reason TEXT NOT NULL CHECK (length(reason) BETWEEN 1 AND 512 AND reason NOT GLOB '*[^ -~]*'),
+                actor_subject_id TEXT NOT NULL REFERENCES peer_identities(subject_id) ON DELETE RESTRICT,
+                revoked_at TEXT NOT NULL CHECK (julianday(revoked_at) IS NOT NULL),
+                CHECK (length(revocation_id) BETWEEN 1 AND 128 AND revocation_id NOT GLOB '*[^ -~]*'),
+                CHECK (length(target_identifier) BETWEEN 1 AND 128 AND target_identifier NOT GLOB '*[^ -~]*'),
+                CHECK (target_kind != 'codeHash' OR (length(target_identifier) IN (40, 64) AND target_identifier NOT GLOB '*[^0-9a-f]*')),
+                UNIQUE (target_kind, target_identifier)
+            )
+            """,
+            """
+            CREATE TABLE control_requests (
+                request_id TEXT PRIMARY KEY,
+                subject_id TEXT NOT NULL REFERENCES peer_identities(subject_id) ON DELETE RESTRICT,
+                idempotency_key TEXT,
+                request_digest_sha256 TEXT NOT NULL CHECK (length(request_digest_sha256) = 64 AND request_digest_sha256 NOT GLOB '*[^0-9a-f]*'),
+                status TEXT NOT NULL CHECK (status IN ('accepted','completed','rejected','error')),
+                operation_reference TEXT,
+                created_at TEXT NOT NULL CHECK (julianday(created_at) IS NOT NULL),
+                updated_at TEXT NOT NULL CHECK (julianday(updated_at) IS NOT NULL),
+                CHECK (length(request_id) BETWEEN 1 AND 128 AND request_id NOT GLOB '*[^ -~]*'),
+                CHECK (idempotency_key IS NULL OR (length(idempotency_key) BETWEEN 1 AND 256 AND idempotency_key NOT GLOB '*[^ -~]*')),
+                CHECK (operation_reference IS NULL OR (length(operation_reference) BETWEEN 1 AND 128 AND operation_reference NOT GLOB '*[^ -~]*'))
+            )
+            """,
+            """
+            CREATE TABLE idempotency_records (
+                subject_id TEXT NOT NULL REFERENCES peer_identities(subject_id) ON DELETE RESTRICT,
+                idempotency_key TEXT NOT NULL,
+                request_id TEXT NOT NULL REFERENCES control_requests(request_id) ON DELETE RESTRICT,
+                request_digest_sha256 TEXT NOT NULL CHECK (length(request_digest_sha256) = 64 AND request_digest_sha256 NOT GLOB '*[^0-9a-f]*'),
+                status TEXT NOT NULL CHECK (status IN ('accepted','completed','rejected','error')),
+                created_at TEXT NOT NULL CHECK (julianday(created_at) IS NOT NULL),
+                expires_at TEXT NOT NULL CHECK (julianday(expires_at) IS NOT NULL),
+                PRIMARY KEY (subject_id, idempotency_key),
+                CHECK (length(idempotency_key) BETWEEN 1 AND 256 AND idempotency_key NOT GLOB '*[^ -~]*'),
+                CHECK (julianday(expires_at) > julianday(created_at))
+            )
+            """,
+            "CREATE INDEX peer_identities_code_hash_idx ON peer_identities(code_directory_hash, revoked_at, subject_id)",
+            "CREATE UNIQUE INDEX peer_identities_active_code_idx ON peer_identities(user_id, code_directory_hash) WHERE revoked_at IS NULL",
+            "CREATE UNIQUE INDEX peer_identities_active_credential_idx ON peer_identities(credential_id) WHERE credential_id IS NOT NULL AND revoked_at IS NULL",
+            "CREATE INDEX control_sessions_subject_idx ON control_sessions(subject_id, revoked_at, expires_at, session_id)",
+            "CREATE INDEX control_sessions_code_hash_idx ON control_sessions(code_directory_hash, revoked_at, session_id)",
+            "CREATE INDEX identity_revocations_target_idx ON identity_revocations(target_kind, target_identifier, revoked_at)",
+            "CREATE UNIQUE INDEX control_requests_subject_idempotency_idx ON control_requests(subject_id, idempotency_key) WHERE idempotency_key IS NOT NULL",
+            "CREATE INDEX control_requests_subject_status_idx ON control_requests(subject_id, status, created_at, request_id)",
+            "CREATE INDEX idempotency_records_request_idx ON idempotency_records(request_id)",
+          ]
+        ),
     ]
 }

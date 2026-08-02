@@ -29,18 +29,34 @@ final class StateUpgradeTests: XCTestCase {
                 )
             }
 
-            try store.migrate()
-
+            try MigrationRunner().apply(to: store, throughVersion: 17)
             XCTAssertEqual(try store.schemaVersion(), 17)
-            let state = try XCTUnwrap(
-                store.restartPolicies.load(projectID: "project-demo", serviceName: "api")
+            try store.withConnection(createIfNeeded: false, readOnly: true) { connection in
+                let row = try XCTUnwrap(
+                    connection.query(
+                        """
+                        SELECT reason_class, window_started_at, window_seconds,
+                               project_max_attempts, release_generation, policy_sha256
+                        FROM restart_policy_state WHERE id = 'restart-api'
+                        """
+                    ).first)
+                XCTAssertEqual(
+                    row.compactMap { $0 },
+                    [
+                        "unknown", "2026-08-01T12:00:00Z", "300", "10", "0",
+                        String(repeating: "0", count: 64),
+                    ]
+                )
+                XCTAssertEqual(
+                    try connection.query("SELECT id FROM restart_attempt_history"),
+                    []
+                )
+            }
+            try store.migrate()
+            XCTAssertEqual(
+                try store.schemaVersion(),
+                HostwrightContractVersions.stateSchema
             )
-            XCTAssertEqual(state.reasonClass, .unknown)
-            XCTAssertEqual(state.windowStartedAt, "2026-08-01T12:00:00Z")
-            XCTAssertEqual(state.windowSeconds, 300)
-            XCTAssertEqual(state.projectMaxAttempts, 10)
-            XCTAssertEqual(state.releaseGeneration, 0)
-            XCTAssertEqual(state.policySHA256, String(repeating: "0", count: 64))
             XCTAssertEqual(try store.restartAttempts.loadProject("project-demo"), [])
         }
     }
@@ -357,6 +373,37 @@ final class StateUpgradeTests: XCTestCase {
             )
             XCTAssertEqual(try store.schemaVersion(), MigrationRunner.latestSchemaVersion)
             XCTAssertEqual(try StateMaintenanceFileSupport.fingerprint(store.path).sha256, currentDigest)
+        }
+    }
+
+    func testV17SnapshotMigratesToV18AndRestoresExactV17() throws {
+        try withTemporaryStore(throughVersion: 17) { store, directory in
+            let rollback = directory.appendingPathComponent("rollback", isDirectory: true)
+            try FileManager.default.createDirectory(
+                at: rollback,
+                withIntermediateDirectories: false,
+                attributes: [.posixPermissions: 0o700]
+            )
+            let service = StateUpgradeService(store: store)
+            let snapshot = try service.createVerifiedSnapshot(
+                at: rollback.appendingPathComponent("state.sqlite").path
+            )
+            XCTAssertEqual(snapshot.stateSchemaVersion, 17)
+            XCTAssertEqual(try service.migrateToLatest().toSchemaVersion, 18)
+            XCTAssertEqual(try store.schemaVersion(), 18)
+
+            XCTAssertEqual(
+                try service.restoreVerifiedSnapshot(
+                    snapshot,
+                    operationID: "00000000-0000-0000-0000-000000000018"
+                ),
+                17
+            )
+            XCTAssertEqual(try store.schemaVersion(), 17)
+            XCTAssertEqual(
+                try StateMaintenanceFileSupport.fingerprint(store.path).sha256,
+                snapshot.databaseSHA256
+            )
         }
     }
 

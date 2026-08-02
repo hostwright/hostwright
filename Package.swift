@@ -30,6 +30,10 @@ let package = Package(
             name: "hostwright-tunnel-qualification",
             targets: ["HostwrightTunnelQualificationTool"]
         ),
+        .executable(
+            name: "hostwright-control-security-qualification",
+            targets: ["HostwrightControlSecurityQualificationTool"]
+        ),
         .executable(name: "hostwrightd", targets: ["HostwrightDaemon"]),
         .executable(name: "hostwright-dist", targets: ["HostwrightDistributionTool"]),
         .executable(
@@ -38,6 +42,7 @@ let package = Package(
         ),
         .library(name: "HostwrightCore", targets: ["HostwrightCore"]),
         .library(name: "HostwrightControlPlane", targets: ["HostwrightControlPlane"]),
+        .library(name: "HostwrightControlSecurity", targets: ["HostwrightControlSecurity"]),
         .library(name: "HostwrightControl", targets: ["HostwrightControl"]),
         .library(name: "HostwrightManifest", targets: ["HostwrightManifest"]),
         .library(name: "HostwrightRuntime", targets: ["HostwrightRuntime"]),
@@ -172,6 +177,14 @@ let package = Package(
             dependencies: ["HostwrightCore"]
         ),
         .target(
+            name: "HostwrightControlSecurity",
+            dependencies: ["HostwrightControlPlane", "HostwrightCore"],
+            linkerSettings: [
+                .linkedFramework("Security"),
+                .linkedLibrary("bsm"),
+            ]
+        ),
+        .target(
             name: "HostwrightControl",
             dependencies: [
                 "HostwrightCLI",
@@ -215,6 +228,8 @@ let package = Package(
         .target(
             name: "HostwrightState",
             dependencies: [
+                "HostwrightControlPlane",
+                "HostwrightControlSecurity",
                 "HostwrightCore",
                 "HostwrightManifest",
                 "HostwrightObservability",
@@ -354,9 +369,29 @@ let package = Package(
             ],
             path: "Tests/HostwrightTunnelQualificationTool"
         ),
+        .executableTarget(
+            name: "HostwrightControlSecurityQualificationTool",
+            dependencies: [
+                "HostwrightControlPlane",
+                "HostwrightControlSecurity",
+                "HostwrightState"
+            ],
+            linkerSettings: [
+                .linkedFramework("Security"),
+                .linkedLibrary("bsm"),
+            ]
+        ),
         .testTarget(
             name: "HostwrightControlPlaneTests",
             dependencies: ["HostwrightControlPlane"]
+        ),
+        .testTarget(
+            name: "HostwrightControlSecurityTests",
+            dependencies: ["HostwrightControlSecurity", "HostwrightControlPlane"]
+        ),
+        .testTarget(
+            name: "HostwrightControlSecurityQualificationToolTests",
+            dependencies: ["HostwrightControlSecurityQualificationTool"]
         ),
         .testTarget(
             name: "HostwrightControlTests",
@@ -431,6 +466,8 @@ let package = Package(
         .testTarget(
             name: "HostwrightStateTests",
             dependencies: [
+                "HostwrightControlPlane",
+                "HostwrightControlSecurity",
                 "HostwrightManifest",
                 "HostwrightObservability",
                 "HostwrightRegistry",

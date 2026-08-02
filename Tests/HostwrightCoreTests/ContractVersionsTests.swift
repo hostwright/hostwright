@@ -17,7 +17,7 @@ final class ContractVersionsTests: XCTestCase {
         XCTAssertEqual(HostwrightContractVersions.storageProviderAPI, 1)
         XCTAssertEqual(HostwrightContractVersions.networkProviderSPI, 1)
         XCTAssertEqual(HostwrightContractVersions.pluginABI, 1)
-        XCTAssertEqual(HostwrightContractVersions.stateSchema, 17)
+        XCTAssertEqual(HostwrightContractVersions.stateSchema, 18)
     }
 
     func testCapabilityCatalogIsDeterministicUniqueAndCoversEveryRoadmapPhase() {
@@ -34,6 +34,7 @@ final class ContractVersionsTests: XCTestCase {
         XCTAssertTrue(report.capabilities.allSatisfy { !$0.title.isEmpty && !$0.reason.isEmpty })
         XCTAssertTrue(report.capabilities.allSatisfy { $0.issue > 0 })
         XCTAssertTrue(identifiers.contains("state.sqlite-v17"))
+        XCTAssertTrue(identifiers.contains("state.control-identities-v18"))
         XCTAssertFalse(identifiers.contains("state.sqlite-v16"))
 
         let states = Set(report.capabilities.map(\.state))

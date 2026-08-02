@@ -45,6 +45,10 @@ public struct SQLiteStateStore: StateStore {
         EventLedger(store: self)
     }
 
+    public var controlIdentities: ControlIdentityRepository {
+        ControlIdentityRepository(store: self)
+    }
+
     public var operations: OperationLedger {
         OperationLedger(store: self)
     }

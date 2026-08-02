@@ -81,7 +81,7 @@ The normative path table, environment hooks, command creation semantics, status 
 
 `SQLiteStateStore.migrate()` is the only explicit migration path. Repository reads and writes validate the already-applied schema before accessing tables; they do not create a missing database, create `schema_migrations`, or apply migrations as a side effect.
 
-Schema version 17 is the latest supported state schema. A database migrated by a newer Hostwright release fails closed with an incompatible-schema error. Hostwright does not downgrade state databases or silently convert provider ownership. Migration v16→v17 is additive, backup-compatible, and is the only Phase 08 schema migration; no v18 migration is introduced during this phase. Metrics, traces, and support bundles reuse bounded projections and event authority in this schema. Support-bundle creation/deletion receipts use the independent `supportEvidence` retention class, while a private adjacent file-effect journal carries the exact output path and device/inode identity during recovery; bundle content and paths never enter SQLite.
+Schema version 18 is the latest supported state schema. A database migrated by a newer Hostwright release fails closed with an incompatible-schema error. Hostwright does not downgrade state databases or silently convert provider ownership. Migration v16→v17 remains the additive, backup-compatible Phase 08 migration. Phase 09 migration v17→v18 is also additive and adds only peer identities, control sessions, revocations, and request/idempotency foundations. Every upgrade uses the verified pre-migration snapshot path; rollback restores that snapshot instead of down-migrating. Metrics, traces, and support bundles continue to reuse bounded projections and event authority. Support-bundle creation/deletion receipts use the independent `supportEvidence` retention class, while a private adjacent file-effect journal carries the exact output path and device/inode identity during recovery; bundle content and paths never enter SQLite.
 
 Gate 12 adds no table or migration. Existing event rows project into schema-v1 stream records at read time. An opaque cursor binds the exact event identifier and SHA-256 of the stored redacted row, then resolves the row's current SQLite append position during each shared read lock. Retained cursors therefore survive authoritative `VACUUM`; deleted anchors become explicit retention gaps and modified anchors fail integrity. Cursor/watch reads do not create, migrate, repair, or compact state. See [Durable Events and Local Watches](../reference/events.md).
 
@@ -150,7 +150,7 @@ Desired environment snapshots never store resolved secret values. `secretEnv` en
 
 `hostwright state integrity` classifies the selected database as:
 
-- `healthy`: SQLite structure, foreign keys, schema v17 ledger/checksums, required tables and indexes, resource/fencing UUIDs, authoritative enums/JSON contracts, and reconstructible projections all pass;
+- `healthy`: SQLite structure, foreign keys, schema v18 ledger/checksums, required tables and indexes, resource/fencing UUIDs, authoritative enums/JSON contracts, and reconstructible projections all pass;
 - `degraded`: authoritative state is valid, but runtime-observation or health projections contain invalid enum/JSON/identity data that can be re-observed safely;
 - `unrecoverable`: SQLite structure, foreign keys, migrations, required schema objects, or authoritative desired/ownership/operation/audit records are invalid.
 

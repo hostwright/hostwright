@@ -25,6 +25,7 @@ public enum ManifestValidator {
         validateImageProvenance(manifest, issues: &issues)
         validateProjectRestartBudget(manifest.restartBudget, issues: &issues)
         validateMaintenance(manifest.maintenance, issues: &issues)
+        validateRetention(manifest.retention, issues: &issues)
         validateVolumeDeclarations(manifest.volumes, issues: &issues)
         validateNetworkDefinitions(manifest.networks, issues: &issues)
         validateCertificateDeclarations(manifest.certificates, issues: &issues)
@@ -2635,6 +2636,119 @@ public enum ManifestValidator {
            service.probes.readiness == nil,
            service.probes.liveness == nil {
             issues.append(issue(service, "update.stableObservation requires a readiness or liveness probe."))
+        }
+    }
+
+    private static func validateRetention(
+        _ policy: HostwrightRetentionPolicy?,
+        issues: inout [ManifestIssue]
+    ) {
+        guard let policy else { return }
+        if !(60...31_536_000).contains(policy.recoveryHorizon) {
+            issues.append(ManifestIssue(
+                code: .manifestValidationFailed,
+                message: "retention.recoveryHorizon must be between 60s and 365 days.",
+                path: "$.retention.recoveryHorizon"
+            ))
+        }
+        let databaseBounds = 1_048_576...1_099_511_627_776
+        if !databaseBounds.contains(policy.maximumDatabaseBytes) {
+            issues.append(ManifestIssue(
+                code: .manifestValidationFailed,
+                message: "retention.maximumDatabaseBytes must be between 1 MiB and 1 TiB.",
+                path: "$.retention.maximumDatabaseBytes"
+            ))
+        }
+        if !databaseBounds.contains(policy.targetDatabaseBytes) ||
+            policy.targetDatabaseBytes > policy.maximumDatabaseBytes {
+            issues.append(ManifestIssue(
+                code: .manifestValidationFailed,
+                message: "retention.targetDatabaseBytes must be between 1 MiB and maximumDatabaseBytes.",
+                path: "$.retention.targetDatabaseBytes"
+            ))
+        }
+        if Set(policy.classes.keys) != Set(HostwrightRetentionClass.allCases) {
+            issues.append(ManifestIssue(
+                code: .manifestValidationFailed,
+                message: "retention.classes must declare exactly the ten supported classes.",
+                path: "$.retention.classes"
+            ))
+        }
+        for retentionClass in HostwrightRetentionClass.allCases {
+            guard let classPolicy = policy.classes[retentionClass] else { continue }
+            let path = "$.retention.classes.\(retentionClass.rawValue)"
+            if classPolicy.maxAge < policy.recoveryHorizon || classPolicy.maxAge > 315_360_000 {
+                issues.append(ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "Retention maxAge must be between recoveryHorizon and ten years.",
+                    path: "\(path).maxAge"
+                ))
+            }
+            if !(1...10_000_000).contains(classPolicy.maxRecords) {
+                issues.append(ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "Retention maxRecords must be between 1 and 10000000.",
+                    path: "\(path).maxRecords"
+                ))
+            }
+            if !(0...classPolicy.maxRecords).contains(classPolicy.minimumRecords) {
+                issues.append(ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "Retention minimumRecords must be between zero and maxRecords.",
+                    path: "\(path).minimumRecords"
+                ))
+            }
+        }
+        if policy.holds.count > HostwrightRetentionPolicy.maximumHolds {
+            issues.append(ManifestIssue(
+                code: .manifestValidationFailed,
+                message: "retention.holds must contain at most 64 holds.",
+                path: "$.retention.holds"
+            ))
+        }
+        let ids = policy.holds.map(\.id)
+        if Set(ids).count != ids.count {
+            issues.append(ManifestIssue(
+                code: .manifestValidationFailed,
+                message: "Retention hold ids must be unique.",
+                path: "$.retention.holds"
+            ))
+        }
+        let formatter = ISO8601DateFormatter()
+        for (index, hold) in policy.holds.enumerated() {
+            let path = "$.retention.holds[\(index)]"
+            if hold.id.range(of: "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$", options: .regularExpression) == nil {
+                issues.append(ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "Retention hold ids must use bounded lowercase names.",
+                    path: "\(path).id"
+                ))
+            }
+            if hold.selector.count > 256 ||
+                hold.selector.range(of: "^(?:\\*|[A-Za-z0-9][A-Za-z0-9._:/@-]{0,255})$", options: .regularExpression) == nil {
+                issues.append(ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "Retention hold selectors must be '*' or one bounded exact identity.",
+                    path: "\(path).selector"
+                ))
+            }
+            if hold.reason.isEmpty || hold.reason.count > 512 ||
+                hold.reason != hold.reason.trimmingCharacters(in: .whitespacesAndNewlines) ||
+                hold.reason.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) {
+                issues.append(ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "Retention hold reasons must be bounded, trimmed, control-free text.",
+                    path: "\(path).reason"
+                ))
+            }
+            if let expiresAt = hold.expiresAt,
+               formatter.date(from: expiresAt).map(formatter.string(from:)) != expiresAt {
+                issues.append(ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "Retention hold expiresAt must be canonical RFC3339 UTC.",
+                    path: "\(path).expiresAt"
+                ))
+            }
         }
     }
 

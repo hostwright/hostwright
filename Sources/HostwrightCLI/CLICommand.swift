@@ -932,11 +932,11 @@ public enum CLICommand: Equatable, Sendable {
 
     private static func stateCommand(arguments: [String]) throws -> CLICommand {
         guard arguments.count >= 2 else {
-            throw CLIUsageError("state requires integrity, backup, backups, restore, repair, or recover.")
+            throw CLIUsageError("state requires integrity, backup, backups, restore, repair, recover, retention, or compact.")
         }
         let operation = arguments[1]
-        guard ["integrity", "backup", "backups", "restore", "repair", "recover"].contains(operation) else {
-            throw CLIUsageError("state supports integrity, backup, backups, restore, repair, and recover.")
+        guard ["integrity", "backup", "backups", "restore", "repair", "recover", "retention", "compact"].contains(operation) else {
+            throw CLIUsageError("state supports integrity, backup, backups, restore, repair, recover, retention, and compact.")
         }
 
         var stateDatabasePath: String?
@@ -945,7 +945,16 @@ public enum CLICommand: Equatable, Sendable {
         var backupID: String?
         var dryRun = false
         var confirmationToken: String?
+        var manifestPath: String?
         var index = 2
+        if operation == "retention" || operation == "compact" {
+            guard index < arguments.count,
+                  !arguments[index].hasPrefix("-") else {
+                throw CLIUsageError("state \(operation) requires one manifest path.")
+            }
+            manifestPath = arguments[index]
+            index += 1
+        }
         while index < arguments.count {
             switch arguments[index] {
             case "--state-db":
@@ -987,7 +996,7 @@ public enum CLICommand: Equatable, Sendable {
                 backupID = value
                 index += 2
             case "--dry-run":
-                guard operation == "restore" || operation == "repair", !dryRun else {
+                guard operation == "restore" || operation == "repair" || operation == "compact", !dryRun else {
                     throw CLIUsageError("state \(operation) accepts --dry-run at most once.")
                 }
                 dryRun = true
@@ -1010,6 +1019,15 @@ public enum CLICommand: Equatable, Sendable {
                     flag: "--confirm-repair"
                 )
                 index += 2
+            case "--confirm-compact":
+                guard operation == "compact", confirmationToken == nil, index + 1 < arguments.count else {
+                    throw CLIUsageError("state compact accepts one value after --confirm-compact.")
+                }
+                confirmationToken = try parseStateConfirmationToken(
+                    arguments[index + 1],
+                    flag: "--confirm-compact"
+                )
+                index += 2
             default:
                 throw CLIUsageError("state \(operation) does not support argument '\(arguments[index])'.")
             }
@@ -1028,6 +1046,19 @@ public enum CLICommand: Equatable, Sendable {
             action = .backups
         case "recover":
             action = .recover
+        case "retention":
+            guard let manifestPath, !dryRun, confirmationToken == nil else {
+                throw CLIUsageError("state retention is read-only and accepts one manifest path.")
+            }
+            action = .retention(manifestPath: manifestPath)
+        case "compact":
+            guard let manifestPath, dryRun != (confirmationToken != nil) else {
+                throw CLIUsageError("state compact requires a manifest and exactly one of --dry-run or --confirm-compact <token>.")
+            }
+            action = .compact(
+                manifestPath: manifestPath,
+                confirmation: dryRun ? .dryRun : .confirmed(token: confirmationToken ?? "")
+            )
         case "restore":
             guard let backupID else {
                 throw CLIUsageError("state restore requires --backup <id>.")
@@ -2322,6 +2353,8 @@ public enum StateCLIAction: Equatable, Sendable {
     case restore(backupID: String, confirmation: StateMutationConfirmation)
     case repair(confirmation: StateMutationConfirmation)
     case recover
+    case retention(manifestPath: String)
+    case compact(manifestPath: String, confirmation: StateMutationConfirmation)
 }
 
 public enum StateMutationConfirmation: Equatable, Sendable {

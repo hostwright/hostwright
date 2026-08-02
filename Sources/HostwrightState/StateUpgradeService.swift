@@ -94,10 +94,16 @@ public struct StateUpgradeService: Sendable {
         self.testInterruption = testInterruption
     }
 
-    public func withExclusiveLifecycleFence<T>(_ body: () throws -> T) throws -> T {
+    public func withExclusiveLifecycleFence<T>(
+        allowPendingMaintenance: Bool = false,
+        _ body: () throws -> T
+    ) throws -> T {
         try store.configuration.prepareStateAccessFoundation()
         return try StateAccessCoordinator(configuration: store.configuration)
-            .withExclusiveLifecycleFence(body)
+            .withExclusiveLifecycleFence(
+                allowPendingMaintenance: allowPendingMaintenance,
+                body
+            )
     }
 
     public func createVerifiedSnapshot(at snapshotPath: String) throws -> StateUpgradeSnapshot {

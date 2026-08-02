@@ -1987,7 +1987,7 @@ final class HostwrightManifestTests: XCTestCase {
                 "version", "project", "imagePolicy", "imageTrust", "imageSBOM",
                 "imageVulnerability", "imageProvenance", "volumes", "networks",
                 "certificates", "ingress", "tunnels", "restartBudget",
-                "maintenance", "services"
+                "maintenance", "retention", "services"
             ]
         )
         let required = try XCTUnwrap(schemaJSON["required"] as? [String])
@@ -2008,6 +2008,8 @@ final class HostwrightManifestTests: XCTestCase {
         XCTAssertEqual(imageProvenance["$ref"] as? String, "#/$defs/imageProvenance")
         let maintenanceRef = try XCTUnwrap(properties["maintenance"] as? [String: Any])
         XCTAssertEqual(maintenanceRef["$ref"] as? String, "#/$defs/maintenance")
+        let retentionRef = try XCTUnwrap(properties["retention"] as? [String: Any])
+        XCTAssertEqual(retentionRef["$ref"] as? String, "#/$defs/retention")
         let volumes = try XCTUnwrap(properties["volumes"] as? [String: Any])
         XCTAssertEqual(volumes["$ref"] as? String, "#/$defs/volumeDeclarations")
         let services = try XCTUnwrap(properties["services"] as? [String: Any])
@@ -2453,6 +2455,18 @@ final class HostwrightManifestTests: XCTestCase {
             definitions["oneShotMaintenanceWindow"] as? [String: Any]
         )
         XCTAssertEqual(oneShotMaintenanceWindow["additionalProperties"] as? Bool, false)
+        let retention = try XCTUnwrap(definitions["retention"] as? [String: Any])
+        XCTAssertEqual(
+            retention["required"] as? [String],
+            ["recoveryHorizon", "maximumDatabaseBytes", "targetDatabaseBytes", "classes"]
+        )
+        XCTAssertEqual(retention["additionalProperties"] as? Bool, false)
+        let retentionClasses = try XCTUnwrap(definitions["retentionClasses"] as? [String: Any])
+        XCTAssertEqual((retentionClasses["required"] as? [String])?.count, 10)
+        XCTAssertEqual(retentionClasses["additionalProperties"] as? Bool, false)
+        let retentionHold = try XCTUnwrap(definitions["retentionHold"] as? [String: Any])
+        XCTAssertEqual(retentionHold["required"] as? [String], ["id", "class", "selector", "reason"])
+        XCTAssertEqual(retentionHold["additionalProperties"] as? Bool, false)
 
         let mount = try XCTUnwrap(definitions["mount"] as? [String: Any])
         XCTAssertEqual((mount["oneOf"] as? [[String: Any]])?.count, 3)

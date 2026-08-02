@@ -241,6 +241,7 @@ public enum StateMaintenanceError: Error, Equatable, CustomStringConvertible, Se
     case backupNotRestorable(id: String, reason: String)
     case confirmationMismatch
     case unsafeRepair(String)
+    case unsafeCompaction(String)
     case operationInProgress(String)
     case cancelled
     case io(path: String, message: String)
@@ -259,6 +260,8 @@ public enum StateMaintenanceError: Error, Equatable, CustomStringConvertible, Se
             return "State changed after the dry-run plan or the confirmation token is invalid. Generate a new plan."
         case .unsafeRepair(let reason):
             return "State repair refused: \(reason)"
+        case .unsafeCompaction(let reason):
+            return "State compaction refused: \(reason)"
         case .operationInProgress(let journal):
             return "State maintenance is already in progress: \(journal)"
         case .cancelled:

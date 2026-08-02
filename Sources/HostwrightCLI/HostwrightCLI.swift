@@ -109,7 +109,8 @@ public enum HostwrightCLI {
                     environment: environment
                 ),
                 action: action,
-                output: output
+                output: output,
+                environment: environment
             ).run()
         case .secret(let options):
             return try SecretCommandRunner(
@@ -315,6 +316,9 @@ public enum HostwrightCLI {
       hostwright state repair --dry-run [--state-db <path>] [--json|--output text|json]
       hostwright state repair --confirm-repair <token> [--state-db <path>] [--json|--output text|json]
       hostwright state recover [--state-db <path>] [--json|--output text|json]
+      hostwright state retention <manifest> [--state-db <path>] [--json|--output text|json]
+      hostwright state compact <manifest> --dry-run [--state-db <path>] [--json|--output text|json]
+      hostwright state compact <manifest> --confirm-compact <token> [--state-db <path>] [--json|--output text|json]
       hostwright secret create <keychain-reference> [--state-db <path>] [--json|--output text|json]
       hostwright secret update <keychain-reference> [--state-db <path>] [--json|--output text|json]
       hostwright secret list [--json|--output text|json]
@@ -420,6 +424,8 @@ public enum HostwrightCLI {
     state restore and repair require a dry-run token bound to the exact state fingerprint and planned effects.
     state repair clears only reconstructible runtime-observation and health projections; it never invents authoritative state.
     state recover completes or rolls back a journaled maintenance operation before ordinary state access resumes.
+    state retention reports bounded class, hold, recovery-horizon, and pressure decisions without mutation.
+    state compact requires an exact dry-run token, creates a verified backup, and deletes only revalidated eligible records.
     secret create and update read values only from stdin or an attended no-echo TTY; command arguments, output, and state contain metadata only.
     registry login reads its secret through the same protected input boundary and persists only an exact endpoint-bound Hostwright Keychain item. status also supports guarded Docker and OCI credential stores and never emits credentials.
     registry referrers discovers, verifies, caches, copies, publishes, retains, recovers, and exactly cleans opaque subject-bound OCI artifacts. Offline reads use only complete verified cache records; prune requires exact Hostwright ownership, no active lease, and plan confirmation.
@@ -450,6 +456,7 @@ public enum HostwrightCLI {
       hostwright state integrity --json
       hostwright state backup --json
       hostwright state backups --json
+      hostwright state retention hostwright.yaml --json
       hostwright status --output json
       hostwright events --project api-local --output json
       hostwright recovery --output json

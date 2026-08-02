@@ -14,6 +14,9 @@ hostwright paths [--state-db <path>] [--json | --output text|json]
 hostwright state integrity [--state-db <path>] [--json | --output text|json]
 hostwright state backup [--state-db <path>] [--json | --output text|json]
 hostwright state backups [--state-db <path>] [--json | --output text|json]
+hostwright state retention <manifest> [--state-db <path>] [--json | --output text|json]
+hostwright state compact <manifest> --dry-run [--state-db <path>] [--json | --output text|json]
+hostwright state compact <manifest> --confirm-compact <token> [--state-db <path>] [--json | --output text|json]
 hostwright state restore --backup <id> --dry-run [--state-db <path>] [--json | --output text|json]
 hostwright state restore --backup <id> --confirm-restore <token> [--state-db <path>] [--json | --output text|json]
 hostwright state repair --dry-run [--state-db <path>] [--json | --output text|json]
@@ -348,6 +351,20 @@ It is available only when integrity is `degraded` exclusively in `observed_servi
 ### `state recover`
 
 Resolves a pending restore/repair maintenance journal under the exclusive state fence. Depending on the durable checkpoint, it removes an unpublished stage, restores the displaced original, verifies and finalizes the published replacement, or relies on SQLite transaction rollback. Invalid/tampered journal fields or filesystem state fail closed and preserve evidence. With no journal, the command is idempotent and returns `recovered: false` plus current health.
+
+### `state retention` and `state compact`
+
+```bash
+hostwright state retention hostwright.yaml --json
+hostwright state compact hostwright.yaml --dry-run --json
+hostwright state compact hostwright.yaml --confirm-compact <confirmationToken> --json
+```
+
+`state retention` is read-only. Its schema-v1 report lists all ten declared classes, producer availability, current/candidate/held/recovery-critical counts, bounded candidate identity digests, database pressure, blockers, and any pending compaction plan. Logs, metrics, traces, and support evidence report zero with `producerAvailable: false` until their owning Phase 08 gates exist; Hostwright does not fabricate them.
+
+`state compact --dry-run` deterministically applies age, count, recovery-horizon, minimum-record, and exact hold rules. Confirmation binds the policy, current database, complete non-backup safety counts, exact candidate identities, and blockers. Execution first creates a verified private online backup, revalidates under the exclusive state fence, records a strict private journal, deletes database candidates in one transaction, atomically stages exact catalog deletions, compacts free pages, and reruns complete integrity checks. Eligible operation history includes terminal unreferenced ledger rows and only succeeded unreferenced operation groups; the latter removes its exact child steps in the same transaction. Every durable and torn-commit checkpoint resumes only with the same exact token. Missing, referenced, active, interrupted, failed, ambiguous, held, future-dated, finalizer-incomplete, or identity-changed records remain untouched.
+
+Retention never calls the Apple runtime, a native/global prune, or wildcard deletion. A pressure hold means the already-eligible safe candidates cannot prove the configured target; it does not shorten recovery or bypass ownership, finalizers, leases, foreign keys, or holds.
 
 Do not confuse `hostwright state recover` with `hostwright recovery`: the former repairs the state-database maintenance saga; the latter is read-only inspection of workload operation recovery records.
 

@@ -1,4 +1,6 @@
+import Foundation
 import HostwrightCore
+import HostwrightManifest
 import HostwrightRuntime
 import HostwrightState
 
@@ -6,6 +8,7 @@ struct StateMaintenanceCommandRunner {
     let stateStoreConfiguration: StateStoreConfiguration
     let action: StateCLIAction
     let output: CLIOutputFormat
+    let environment: CLIEnvironment
 
     func run() -> CLIRunResult {
         do {
@@ -82,6 +85,35 @@ struct StateMaintenanceCommandRunner {
                         ? CLIJSON.codable(result)
                         : render(result)
                 )
+            case .retention(let manifestPath):
+                let policy = try retentionPolicy(manifestPath)
+                let report = try StateRetentionService(store: store).status(policy: policy)
+                return CLIRunResult(
+                    standardOutput: output == .json
+                        ? CLIJSON.codable(report)
+                        : render(report)
+                )
+            case .compact(let manifestPath, let confirmation):
+                let policy = try retentionPolicy(manifestPath)
+                switch confirmation {
+                case .dryRun:
+                    let plan = try StateRetentionService(store: store).compactionPlan(policy: policy)
+                    return CLIRunResult(
+                        standardOutput: output == .json
+                            ? CLIJSON.codable(plan)
+                            : render(plan)
+                    )
+                case .confirmed(let token):
+                    let result = try StateRetentionService(store: store).compact(
+                        policy: policy,
+                        confirmationToken: token
+                    )
+                    return CLIRunResult(
+                        standardOutput: output == .json
+                            ? CLIJSON.codable(result)
+                            : render(result)
+                    )
+                }
             }
         } catch StateMaintenanceError.confirmationMismatch {
             return failure(
@@ -90,7 +122,7 @@ struct StateMaintenanceCommandRunner {
             )
         } catch let error as StateMaintenanceError {
             switch error {
-            case .unsafeRepair:
+            case .unsafeRepair, .unsafeCompaction:
                 return failure(code: .unsafeExposure, message: error.description)
             default:
                 return failure(code: .stateStoreUnavailable, message: error.description)
@@ -210,6 +242,91 @@ struct StateMaintenanceCommandRunner {
         Recovered: \(result.recovered)
         Action: \(result.action)
         Health: \(result.health?.rawValue ?? "unknown")
+
+        """
+    }
+
+    private func retentionPolicy(_ manifestPath: String) throws -> StateRetentionPolicy {
+        let manifest = try ManifestValidator.validated(environment.readTextFile(manifestPath))
+        guard let retention = manifest.retention else {
+            throw StateMaintenanceError.unsafeCompaction(
+                "the validated manifest does not declare a retention policy"
+            )
+        }
+        let classes = Dictionary(uniqueKeysWithValues: retention.classes.map { key, value in
+            (
+                StateRetentionClass(rawValue: key.rawValue)!,
+                StateRetentionClassPolicy(
+                    maxAgeSeconds: value.maxAge,
+                    maxRecords: value.maxRecords,
+                    minimumRecords: value.minimumRecords
+                )
+            )
+        })
+        return StateRetentionPolicy(
+            recoveryHorizonSeconds: retention.recoveryHorizon,
+            maximumDatabaseBytes: UInt64(retention.maximumDatabaseBytes),
+            targetDatabaseBytes: UInt64(retention.targetDatabaseBytes),
+            classes: classes,
+            holds: retention.holds.map {
+                StateRetentionHold(
+                    id: $0.id,
+                    retentionClass: StateRetentionClass(rawValue: $0.retentionClass.rawValue)!,
+                    selector: $0.selector,
+                    reason: $0.reason,
+                    expiresAt: $0.expiresAt
+                )
+            }
+        )
+    }
+
+    private func render(_ report: StateRetentionStatus) -> String {
+        var lines = [
+            "Hostwright state retention",
+            "Policy SHA-256: \(report.policySHA256)",
+            "Database bytes: \(report.databaseBytes)",
+            "Pressure: \(report.pressure.rawValue)",
+            ""
+        ]
+        lines += report.classes.map {
+            "- \($0.retentionClass.rawValue): available=\($0.producerAvailable) current=\($0.currentRecords) candidates=\($0.candidateRecords) held=\($0.heldRecords) recoveryCritical=\($0.recoveryCriticalRecords)"
+        }
+        lines += report.blockers.map { "Blocker: \($0)" }
+        if let pending = report.pendingCompactionPlanSHA256 {
+            lines.append("Pending compaction: \(pending)")
+        }
+        lines.append("")
+        return lines.joined(separator: "\n")
+    }
+
+    private func render(_ plan: StateCompactionPlan) -> String {
+        var lines = [
+            "Hostwright state compaction dry-run",
+            "Policy SHA-256: \(plan.policySHA256)",
+            "Database bytes: \(plan.databaseBytes)",
+            "Pressure: \(plan.pressure.rawValue)",
+            "Candidate records: \(plan.candidateRecords)",
+            "Candidate bytes: \(plan.candidateBytes)",
+            "Executable: \(plan.executable)"
+        ]
+        lines += plan.blockers.map { "Blocker: \($0)" }
+        lines.append("Confirmation token: \(plan.confirmationToken)")
+        lines.append("")
+        return lines.joined(separator: "\n")
+    }
+
+    private func render(_ result: StateCompactionResult) -> String {
+        let counts = result.deletedRecords.keys.sorted(by: { $0.rawValue < $1.rawValue })
+            .map { "\($0.rawValue)=\(result.deletedRecords[$0] ?? 0)" }
+            .joined(separator: ", ")
+        return """
+        Hostwright state compaction complete
+        Plan SHA-256: \(result.planSHA256)
+        Pre-compaction backup: \(result.preCompactionBackupID)
+        Deleted records: \(counts)
+        Database bytes: \(result.databaseBytesBefore) -> \(result.databaseBytesAfter)
+        Integrity: \(result.integrityHealth.rawValue)
+        Resumed: \(result.resumed)
 
         """
     }

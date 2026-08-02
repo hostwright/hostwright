@@ -286,7 +286,8 @@ private struct ManifestNodeDecoder {
             allowed: [
                 "version", "project", "imagePolicy", "imageTrust", "imageSBOM",
                 "imageVulnerability", "imageProvenance", "volumes", "networks",
-                "certificates", "ingress", "tunnels", "restartBudget", "maintenance", "services"
+                "certificates", "ingress", "tunnels", "restartBudget", "maintenance", "retention",
+                "services"
             ]
         )
         let version = try values["version"].map(versionInteger)
@@ -321,6 +322,9 @@ private struct ManifestNodeDecoder {
         let maintenance = try values["maintenance"].map {
             try decodeMaintenance($0, path: "$.maintenance")
         }
+        let retention = try values["retention"].map {
+            try decodeRetention($0, path: "$.retention")
+        }
         let volumes = try values["volumes"].map {
             try decodeVolumeDeclarations($0, path: "$.volumes")
         } ?? [:]
@@ -347,6 +351,7 @@ private struct ManifestNodeDecoder {
             imageProvenance: imageProvenance,
             restartBudget: restartBudget,
             maintenance: maintenance,
+            retention: retention,
             volumes: volumes,
             networks: networks,
             certificates: certificates,
@@ -2106,6 +2111,154 @@ private struct ManifestNodeDecoder {
             id: try string(idNode, path: "\(path).id"),
             actions: actions.sorted { $0.rawValue < $1.rawValue },
             schedule: schedule
+        )
+    }
+
+    private func decodeRetention(
+        _ node: Node,
+        path: String
+    ) throws -> HostwrightRetentionPolicy {
+        let values = try mapping(
+            node,
+            path: path,
+            allowed: [
+                "recoveryHorizon", "maximumDatabaseBytes", "targetDatabaseBytes",
+                "classes", "holds"
+            ]
+        )
+        guard let recoveryNode = values["recoveryHorizon"],
+              let maximumNode = values["maximumDatabaseBytes"],
+              let targetNode = values["targetDatabaseBytes"],
+              let classesNode = values["classes"] else {
+            throw ManifestParser.failure(
+                "retention requires recoveryHorizon, maximumDatabaseBytes, targetDatabaseBytes, and classes.",
+                code: .manifestValidationFailed,
+                node: node,
+                path: path
+            )
+        }
+
+        let classNames = Set(HostwrightRetentionClass.allCases.map(\.rawValue))
+        let classValues = try mapping(classesNode, path: "\(path).classes", allowed: classNames)
+        guard classValues.count == HostwrightRetentionClass.allCases.count else {
+            throw ManifestParser.failure(
+                "retention.classes must declare all ten bounded retention classes.",
+                code: .manifestValidationFailed,
+                node: classesNode,
+                path: "\(path).classes"
+            )
+        }
+        var classes: [HostwrightRetentionClass: HostwrightRetentionClassPolicy] = [:]
+        for retentionClass in HostwrightRetentionClass.allCases {
+            guard let classNode = classValues[retentionClass.rawValue] else {
+                throw ManifestParser.failure(
+                    "retention.classes.\(retentionClass.rawValue) is required.",
+                    code: .manifestValidationFailed,
+                    node: classesNode,
+                    path: "\(path).classes.\(retentionClass.rawValue)"
+                )
+            }
+            classes[retentionClass] = try decodeRetentionClassPolicy(
+                classNode,
+                path: "\(path).classes.\(retentionClass.rawValue)"
+            )
+        }
+
+        let holds: [HostwrightRetentionHold]
+        if let holdsNode = values["holds"] {
+            guard case .sequence(let sequence) = holdsNode else {
+                throw ManifestParser.failure(
+                    "retention.holds must be a sequence.",
+                    code: .manifestValidationFailed,
+                    node: holdsNode,
+                    path: "\(path).holds"
+                )
+            }
+            holds = try sequence.enumerated().map { index, child in
+                try decodeRetentionHold(child, path: "\(path).holds[\(index)]")
+            }.sorted { $0.id < $1.id }
+        } else {
+            holds = []
+        }
+
+        return HostwrightRetentionPolicy(
+            recoveryHorizon: try seconds(
+                try string(recoveryNode, path: "\(path).recoveryHorizon"),
+                node: recoveryNode,
+                path: "\(path).recoveryHorizon"
+            ),
+            maximumDatabaseBytes: try integer(maximumNode, path: "\(path).maximumDatabaseBytes"),
+            targetDatabaseBytes: try integer(targetNode, path: "\(path).targetDatabaseBytes"),
+            classes: classes,
+            holds: holds
+        )
+    }
+
+    private func decodeRetentionClassPolicy(
+        _ node: Node,
+        path: String
+    ) throws -> HostwrightRetentionClassPolicy {
+        let values = try mapping(
+            node,
+            path: path,
+            allowed: ["maxAge", "maxRecords", "minimumRecords"]
+        )
+        guard let maxAgeNode = values["maxAge"],
+              let maxRecordsNode = values["maxRecords"],
+              let minimumRecordsNode = values["minimumRecords"] else {
+            throw ManifestParser.failure(
+                "A retention class requires maxAge, maxRecords, and minimumRecords.",
+                code: .manifestValidationFailed,
+                node: node,
+                path: path
+            )
+        }
+        return HostwrightRetentionClassPolicy(
+            maxAge: try seconds(
+                try string(maxAgeNode, path: "\(path).maxAge"),
+                node: maxAgeNode,
+                path: "\(path).maxAge"
+            ),
+            maxRecords: try integer(maxRecordsNode, path: "\(path).maxRecords"),
+            minimumRecords: try integer(minimumRecordsNode, path: "\(path).minimumRecords")
+        )
+    }
+
+    private func decodeRetentionHold(
+        _ node: Node,
+        path: String
+    ) throws -> HostwrightRetentionHold {
+        let values = try mapping(
+            node,
+            path: path,
+            allowed: ["id", "class", "selector", "reason", "expiresAt"]
+        )
+        guard let idNode = values["id"],
+              let classNode = values["class"],
+              let selectorNode = values["selector"],
+              let reasonNode = values["reason"] else {
+            throw ManifestParser.failure(
+                "A retention hold requires id, class, selector, and reason.",
+                code: .manifestValidationFailed,
+                node: node,
+                path: path
+            )
+        }
+        let rawClass = try string(classNode, path: "\(path).class")
+        guard let retentionClass = HostwrightRetentionClass(rawValue: rawClass) else {
+            throw ManifestParser.failure(
+                "A retention hold class must name one declared retention class.",
+                code: .manifestValidationFailed,
+                node: classNode,
+                path: "\(path).class"
+            )
+        }
+        return HostwrightRetentionHold(
+            id: try string(idNode, path: "\(path).id"),
+            retentionClass: retentionClass,
+            selector: try string(selectorNode, path: "\(path).selector"),
+            reason: try string(reasonNode, path: "\(path).reason"),
+            expiresAt: try values["expiresAt"].map { try string($0, path: "\(path).expiresAt") }
         )
     }
 

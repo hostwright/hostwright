@@ -44,6 +44,32 @@ public enum ManifestCanonicalEncoder {
                 }
             }
         }
+        if let retention = manifest.retention {
+            lines.append("retention:")
+            lines.append("  recoveryHorizon: \(quote("\(retention.recoveryHorizon)s"))")
+            lines.append("  maximumDatabaseBytes: \(retention.maximumDatabaseBytes)")
+            lines.append("  targetDatabaseBytes: \(retention.targetDatabaseBytes)")
+            lines.append("  classes:")
+            for retentionClass in HostwrightRetentionClass.allCases.sorted(by: { $0.rawValue < $1.rawValue }) {
+                guard let policy = retention.classes[retentionClass] else { continue }
+                lines.append("    \(retentionClass.rawValue):")
+                lines.append("      maxAge: \(quote("\(policy.maxAge)s"))")
+                lines.append("      maxRecords: \(policy.maxRecords)")
+                lines.append("      minimumRecords: \(policy.minimumRecords)")
+            }
+            if !retention.holds.isEmpty {
+                lines.append("  holds:")
+                for hold in retention.holds.sorted(by: { $0.id < $1.id }) {
+                    lines.append("    - id: \(quote(hold.id))")
+                    lines.append("      class: \(quote(hold.retentionClass.rawValue))")
+                    lines.append("      selector: \(quote(hold.selector))")
+                    lines.append("      reason: \(quote(hold.reason))")
+                    if let expiresAt = hold.expiresAt {
+                        lines.append("      expiresAt: \(quote(expiresAt))")
+                    }
+                }
+            }
+        }
         if let imagePolicy = manifest.imagePolicy {
             lines.append("imagePolicy: \(quote(imagePolicy.rawValue))")
         }

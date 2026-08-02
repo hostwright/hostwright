@@ -15,6 +15,7 @@ public struct HostwrightManifest: Equatable, Sendable {
     public var imageProvenance: HostwrightImageProvenancePolicy?
     public var restartBudget: HostwrightProjectRestartBudget?
     public var maintenance: HostwrightMaintenancePolicy?
+    public var retention: HostwrightRetentionPolicy?
     public var volumes: [String: HostwrightVolumeDeclaration]
     public var networks: [String: HostwrightNetworkDefinition]
     public var certificates: [String: HostwrightCertificateDeclaration]
@@ -101,6 +102,7 @@ public struct HostwrightManifest: Equatable, Sendable {
         imageProvenance: HostwrightImageProvenancePolicy? = nil,
         restartBudget: HostwrightProjectRestartBudget?,
         maintenance: HostwrightMaintenancePolicy? = nil,
+        retention: HostwrightRetentionPolicy? = nil,
         volumes: [String: HostwrightVolumeDeclaration] = [:],
         services: [HostwrightService]
     ) {
@@ -114,6 +116,7 @@ public struct HostwrightManifest: Equatable, Sendable {
             imageProvenance: imageProvenance,
             restartBudget: restartBudget,
             maintenance: maintenance,
+            retention: retention,
             volumes: volumes,
             networks: [:],
             certificates: [:],
@@ -166,6 +169,7 @@ public struct HostwrightManifest: Equatable, Sendable {
         imageProvenance: HostwrightImageProvenancePolicy? = nil,
         restartBudget: HostwrightProjectRestartBudget?,
         maintenance: HostwrightMaintenancePolicy? = nil,
+        retention: HostwrightRetentionPolicy? = nil,
         volumes: [String: HostwrightVolumeDeclaration] = [:],
         networks: [String: HostwrightNetworkDefinition],
         certificates: [String: HostwrightCertificateDeclaration],
@@ -182,6 +186,7 @@ public struct HostwrightManifest: Equatable, Sendable {
         self.imageProvenance = imageProvenance
         self.restartBudget = restartBudget
         self.maintenance = maintenance
+        self.retention = retention
         self.volumes = volumes
         self.networks = networks
         self.certificates = certificates
@@ -1176,6 +1181,77 @@ public struct HostwrightMaintenancePolicy: Equatable, Sendable {
         self.timezone = timezone
         self.maximumDeferral = maximumDeferral
         self.windows = windows
+    }
+}
+
+public enum HostwrightRetentionClass: String, CaseIterable, Codable, Equatable, Hashable, Sendable {
+    case operations
+    case observations
+    case events
+    case logs
+    case metrics
+    case traces
+    case audits
+    case supportEvidence
+    case backups
+    case tombstones
+}
+
+public struct HostwrightRetentionClassPolicy: Equatable, Sendable {
+    public var maxAge: Int
+    public var maxRecords: Int
+    public var minimumRecords: Int
+
+    public init(maxAge: Int, maxRecords: Int, minimumRecords: Int) {
+        self.maxAge = maxAge
+        self.maxRecords = maxRecords
+        self.minimumRecords = minimumRecords
+    }
+}
+
+public struct HostwrightRetentionHold: Equatable, Sendable {
+    public var id: String
+    public var retentionClass: HostwrightRetentionClass
+    public var selector: String
+    public var reason: String
+    public var expiresAt: String?
+
+    public init(
+        id: String,
+        retentionClass: HostwrightRetentionClass,
+        selector: String,
+        reason: String,
+        expiresAt: String? = nil
+    ) {
+        self.id = id
+        self.retentionClass = retentionClass
+        self.selector = selector
+        self.reason = reason
+        self.expiresAt = expiresAt
+    }
+}
+
+public struct HostwrightRetentionPolicy: Equatable, Sendable {
+    public static let maximumHolds = 64
+
+    public var recoveryHorizon: Int
+    public var maximumDatabaseBytes: Int
+    public var targetDatabaseBytes: Int
+    public var classes: [HostwrightRetentionClass: HostwrightRetentionClassPolicy]
+    public var holds: [HostwrightRetentionHold]
+
+    public init(
+        recoveryHorizon: Int,
+        maximumDatabaseBytes: Int,
+        targetDatabaseBytes: Int,
+        classes: [HostwrightRetentionClass: HostwrightRetentionClassPolicy],
+        holds: [HostwrightRetentionHold] = []
+    ) {
+        self.recoveryHorizon = recoveryHorizon
+        self.maximumDatabaseBytes = maximumDatabaseBytes
+        self.targetDatabaseBytes = targetDatabaseBytes
+        self.classes = classes
+        self.holds = holds
     }
 }
 

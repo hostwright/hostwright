@@ -273,13 +273,29 @@ run_live_qualification() {
   /bin/cp "$tool" "$signed"; /bin/cp "$tool" "$adhoc"
   codesign --force --sign "$signing_fingerprint" --identifier "$signing_identifier" "$signed"
   codesign --force --sign - --identifier "$signing_identifier" "$adhoc"
-  result="$("$tool" server --signed-client "$signed" --adhoc-client "$adhoc" --state-db "$state" --socket-root "$socket_root")"
+  local tool_status=0
+  if result="$("$tool" server --signed-client "$signed" --adhoc-client "$adhoc" --state-db "$state" --socket-root "$socket_root")"; then
+    tool_status=0
+  else
+    tool_status=$?
+  fi
+  record_live_artifact_inventory "$runtime"
+  cleanup_socket_root "$socket_root"
+  if [[ "$tool_status" != 0 ]]; then
+    cleanup_live_runtime "$runtime"
+    printf '%s\n' 'live qualification executable failed.' >&2
+    return "$tool_status"
+  fi
+  if [[ -z "$result" ]]; then
+    cleanup_live_runtime "$runtime"
+    printf '%s\n' 'live qualification executable returned an empty result.' >&2
+    return 70
+  fi
   [[ "${#result}" -le 1048576 ]] || die 'live result exceeds the frozen response bound.' 70
   canonical="$(printf '%s' "$result" | /usr/bin/jq -cS .)"
   [[ "$canonical" == "$result" ]] || die 'live result is not canonical JSON.' 70
   printf '%s' "$result" | /usr/bin/jq -e 'keys == ["adHoc","qualification","signed"] and .qualification == "phase09-gate2-live-v1" and (.signed.mode == "signed") and (.adHoc.mode == "adHoc") and ([.signed,.adHoc][] | (.subjectID | test("^[A-Za-z0-9._:-]{1,128}$")) and (.sessionID | test("^[0-9A-Fa-f-]{36}$")) and (.nativeCDHashLength == 20 or .nativeCDHashLength == 32) and .revocationStatus == "inactive")' >/dev/null
   record_live_artifact_inventory "$runtime"
-  cleanup_socket_root "$socket_root"
   printf '%s\n' "$result"
   cleanup_live_runtime "$runtime"
 }
@@ -332,7 +348,7 @@ run() {
   for cell in 1 2 3 4 5 6; do
     command="$(cell_command "$cell")"; stdout="$root/cell-$(printf '%02d' "$cell").stdout.log"; stderr="$root/cell-$(printf '%02d' "$cell").stderr.log"
     [[ ! -e "$stdout" && ! -e "$stderr" ]] || die 'Cell logs already exist; preserve this root and do not rerun evidence.' 73
-    started="$(now)"; set +e; run_cell "$cell" > "$stdout" 2> "$stderr"; status=$?; set -e; chmod 600 "$stdout" "$stderr"; stdout_sha="$(sha256_file "$stdout")"; stderr_sha="$(sha256_file "$stderr")"; finished="$(now)"
+    started="$(now)"; set +e; (set -e; run_cell "$cell") > "$stdout" 2> "$stderr"; status=$?; set -e; chmod 600 "$stdout" "$stderr"; stdout_sha="$(sha256_file "$stdout")"; stderr_sha="$(sha256_file "$stderr")"; finished="$(now)"
     if [[ "$status" != 0 ]]; then append_state "$cell" failed "$started" "$finished" "$stdout_sha" "$stderr_sha"; append_failure "$cell" "$status" "$command" "$stdout_sha" "$stderr_sha"; write_manifest failed "$finished"; die "Gate 2 cell $cell failed; progress is frozen and active locks are preserved." "$status"; fi
     append_state "$cell" pass "$started" "$finished" "$stdout_sha" "$stderr_sha"
   done

@@ -363,6 +363,7 @@ enum ControlSecurityQualificationRunner {
       )
       binding = try authenticator.completeAuthentication(prepared, response: response).binding
     } catch {
+      writeAuthenticationDiagnostic(error)
       throw ControlSecurityQualificationError.authenticationFailed
     }
     try authenticator.validateSession(binding, daemonGeneration: daemonGeneration)
@@ -515,7 +516,7 @@ enum ControlSecurityQualificationRunner {
     }
     process.arguments = arguments
     process.standardOutput = FileHandle.nullDevice
-    process.standardError = FileHandle.nullDevice
+    process.standardError = FileHandle.standardError
     process.environment = [:]
     do {
       try process.run()
@@ -613,6 +614,20 @@ enum ControlSecurityQualificationRunner {
 
   private static func serverNonce() -> String {
     Data(UUID().uuidString.utf8).base64EncodedString()
+  }
+
+  private static func writeAuthenticationDiagnostic(_ error: Error) {
+    let reason: String
+    if let error = error as? ControlPeerAuthenticationError {
+      reason = String(describing: error)
+    } else if let error = error as? ControlSecurityQualificationError {
+      reason = error.rawValue
+    } else {
+      reason = "internalFailure"
+    }
+    FileHandle.standardError.write(
+      Data("phase09 gate2 authentication detail: \(reason)\n".utf8)
+    )
   }
 }
 
@@ -802,8 +817,9 @@ enum AuthenticationFrameCodec {
   ) throws {
     var entry = pollfd(fd: descriptor, events: events, revents: 0)
     let outcome = Darwin.poll(&entry, 1, try deadline.remainingMilliseconds())
-    let failures = Int16(POLLERR | POLLHUP | POLLNVAL)
-    guard outcome > 0, (entry.revents & failures) == 0,
+    let fatalEvents = Int16(POLLERR | POLLNVAL)
+    let closedForWrite = events == Int16(POLLOUT) && (entry.revents & Int16(POLLHUP)) != 0
+    guard outcome > 0, (entry.revents & fatalEvents) == 0, !closedForWrite,
       (entry.revents & events) != 0
     else {
       throw ControlSecurityQualificationError.authenticationHandshakeFailed

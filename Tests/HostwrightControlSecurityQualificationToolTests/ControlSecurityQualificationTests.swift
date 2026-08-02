@@ -76,6 +76,32 @@ final class ControlSecurityQualificationTests: XCTestCase {
     }
   }
 
+  func testFrameReadConsumesBufferedPayloadAfterPeerHalfClose() throws {
+    var descriptors = [Int32](repeating: -1, count: 2)
+    XCTAssertEqual(socketpair(AF_UNIX, SOCK_STREAM, 0, &descriptors), 0)
+    defer {
+      if descriptors[0] >= 0 { _ = Darwin.close(descriptors[0]) }
+      if descriptors[1] >= 0 { _ = Darwin.close(descriptors[1]) }
+    }
+    let payload = Data("authentication-response".utf8)
+    try AuthenticationFrameCodec.write(
+      payload,
+      kind: .request,
+      descriptor: descriptors[0],
+      deadline: AuthenticationFrameDeadline()
+    )
+    XCTAssertEqual(Darwin.close(descriptors[0]), 0)
+    descriptors[0] = -1
+    XCTAssertEqual(
+      try AuthenticationFrameCodec.read(
+        kind: .request,
+        descriptor: descriptors[1],
+        deadline: AuthenticationFrameDeadline()
+      ),
+      payload
+    )
+  }
+
   func testClientHandshakeBindingRejectsSocketPidAndCodeHashSubstitution() throws {
     let identity = CodeIdentity(
       signingIdentifier: "hostwright-control",

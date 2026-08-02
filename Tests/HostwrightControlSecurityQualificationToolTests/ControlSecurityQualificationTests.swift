@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import HostwrightControlPlane
 import XCTest
 
 @testable import HostwrightControlSecurityQualificationTool
@@ -39,11 +40,95 @@ final class ControlSecurityQualificationTests: XCTestCase {
   func testClientAcceptsOnlyOneAbsoluteSocketPath() throws {
     XCTAssertEqual(
       try ControlSecurityQualificationCommand.parse(["client", "/tmp/control.sock"]),
-      .client(socketPath: "/tmp/control.sock")
+      .client(socketPath: "/tmp/control.sock", credentialFilePath: nil)
+    )
+    XCTAssertEqual(
+      try ControlSecurityQualificationCommand.parse([
+        "client", "/tmp/control.sock", "--credential-file", "/tmp/credential.p256",
+      ]),
+      .client(socketPath: "/tmp/control.sock", credentialFilePath: "/tmp/credential.p256")
     )
     XCTAssertThrowsError(try ControlSecurityQualificationCommand.parse(["client", "socket.sock"]))
     XCTAssertThrowsError(
       try ControlSecurityQualificationCommand.parse(["client", "/tmp/a", "/tmp/b"]))
+    XCTAssertThrowsError(
+      try ControlSecurityQualificationCommand.parse([
+        "client", "/tmp/control.sock", "--credential", "/tmp/credential.p256",
+      ]))
+  }
+
+  func testHandshakeFramesRejectOversizeDeclaredLengthsBeforeAllocation() {
+    XCTAssertNoThrow(
+      try AuthenticationFrameCodec.validateDeclaredLength(
+        UInt32(ControlPlaneContract.maximumRequestBytes),
+        kind: .request
+      ))
+    XCTAssertThrowsError(
+      try AuthenticationFrameCodec.validateDeclaredLength(
+        UInt32(ControlPlaneContract.maximumRequestBytes + 1),
+        kind: .request
+      )
+    ) { error in
+      XCTAssertEqual(
+        error as? ControlSecurityQualificationError,
+        .authenticationHandshakeFailed
+      )
+    }
+  }
+
+  func testClientHandshakeBindingRejectsSocketPidAndCodeHashSubstitution() throws {
+    let identity = CodeIdentity(
+      signingIdentifier: "hostwright-control",
+      codeDirectoryHash: String(repeating: "a", count: 40),
+      validationMode: .pinnedAdHoc
+    )
+    let socket = SocketIdentity(device: 17, inode: 19)
+    let challenge = authenticationChallenge(identity: identity, socket: socket, pid: 41)
+    XCTAssertNoThrow(
+      try ClientHandshakeBindingValidation.validate(
+        challenge: challenge,
+        pinnedSocket: socket,
+        currentSocket: socket,
+        clientIdentity: identity,
+        effectiveUID: 501,
+        effectiveGID: 20,
+        processID: 41
+      ))
+    XCTAssertThrowsError(
+      try ClientHandshakeBindingValidation.validate(
+        challenge: challenge,
+        pinnedSocket: socket,
+        currentSocket: SocketIdentity(device: 17, inode: 23),
+        clientIdentity: identity,
+        effectiveUID: 501,
+        effectiveGID: 20,
+        processID: 41
+      ))
+    XCTAssertThrowsError(
+      try ClientHandshakeBindingValidation.validate(
+        challenge: challenge,
+        pinnedSocket: socket,
+        currentSocket: socket,
+        clientIdentity: identity,
+        effectiveUID: 501,
+        effectiveGID: 20,
+        processID: 42
+      ))
+    let substitutedIdentity = CodeIdentity(
+      signingIdentifier: "hostwright-control",
+      codeDirectoryHash: String(repeating: "b", count: 40),
+      validationMode: .pinnedAdHoc
+    )
+    XCTAssertThrowsError(
+      try ClientHandshakeBindingValidation.validate(
+        challenge: challenge,
+        pinnedSocket: socket,
+        currentSocket: socket,
+        clientIdentity: substitutedIdentity,
+        effectiveUID: 501,
+        effectiveGID: 20,
+        processID: 41
+      ))
   }
 
   func testResultIsBoundedCanonicalAndDoesNotExposeSocketOrNonceFields() throws {
@@ -53,6 +138,7 @@ final class ControlSecurityQualificationTests: XCTestCase {
         subjectID: "phase09-gate2-signed-0123456789abcdef",
         sessionID: "21D62DAE-7B7E-479A-B915-8CFC23F4CD8D",
         nativeCDHashLength: 20,
+        credentialProof: "verified",
         revocationStatus: "inactive"
       ),
       adHoc: ControlSecurityQualificationModeResult(
@@ -60,6 +146,7 @@ final class ControlSecurityQualificationTests: XCTestCase {
         subjectID: "phase09-gate2-adHoc-0123456789abcdef",
         sessionID: "D249B8D3-5127-49E4-B6BC-3AF6AAE42107",
         nativeCDHashLength: 32,
+        credentialProof: "not-required",
         revocationStatus: "inactive"
       )
     )
@@ -176,5 +263,28 @@ final class ControlSecurityQualificationTests: XCTestCase {
 
   private func currentExecutablePath() throws -> String {
     try canonicalPath(CommandLine.arguments[0])
+  }
+
+  private func authenticationChallenge(
+    identity: CodeIdentity,
+    socket: SocketIdentity,
+    pid: Int32
+  ) -> ControlPeerCredentialChallenge {
+    ControlPeerCredentialChallenge(
+      subjectID: "phase09-gate2-adHoc-\(identity.codeDirectoryHash.prefix(16))",
+      serverNonce: "MDEyMzQ1Njc4OWFiY2RlZg==",
+      daemonGeneration: 1,
+      socketDevice: socket.device,
+      socketInode: socket.inode,
+      peer: UnixPeerIdentity(
+        effectiveUID: 501,
+        effectiveGID: 20,
+        pid: pid,
+        pidVersion: 1,
+        auditSessionID: 1,
+        codeIdentity: identity
+      ),
+      credentialProofRequired: false
+    )
   }
 }

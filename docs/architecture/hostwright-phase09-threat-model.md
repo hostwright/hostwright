@@ -73,7 +73,7 @@ signature, Keychain access controls, or a P-256 signature without its key.
 | ID | Boundary / attack path | Impact | Existing control anchor | Phase 09 mitigation and gate | Residual risk |
 | --- | --- | --- | --- | --- | --- |
 | P09-T01 | Socket path replacement or peer spoof | Unauthorized daemon control | private per-user path; helper `getpeereid`/`LOCAL_PEERPID` checks | 0700/0600, reject links/special modes, device/inode pinning, peer token/audit token and `SecTask`/`SecCode` validation (G2–G3) | Same-user attacker with a valid trusted identity remains an authorized-subject concern. |
-| P09-T02 | PID reuse, stale session replay, or transformed code identity | Identity confusion | helper live-process validation | bind PID version, audit token, daemon generation, socket identity, nonce, and the untransformed native 20- or 32-byte CDHash; revoke active sessions (G2) | Kernel identity collection failure denies service. |
+| P09-T02 | PID reuse, stale session/proof replay, omitted credential proof, or transformed code identity | Identity confusion | helper live-process validation | bind PID version, audit token, daemon generation, socket identity, fresh server nonce, proof-required flag, and the untransformed native 20- or 32-byte CDHash in one canonical server-first challenge; accept one strict response within five seconds and revoke active sessions (G2–G3) | Kernel identity collection or handshake failure denies service. |
 | P09-T03 | Oversized frame, slowloris, request flood | Memory/FD exhaustion | one-shot adapter has bounded payloads | pre-allocation length rejection, 64 KiB/1 MiB caps, deadline and 64/32 concurrency caps, drain/cancel (G3, G8) | A same-user client can consume its own assigned quota. |
 | P09-T04 | RBAC binding or delegation escalation | Unauthorized resource action | current local policy approvals | fixed resources/verbs/scopes, AND-only conditions, deny overrides, subset-only expiring delegation, last-owner check (G5) | Owners retain broad authority by design. |
 | P09-T05 | Admission mutation or stale approval bypass | Effective intent exceeds request | current plan/confirmation gates | fixed two-pass ordering, canonical conflict deny, effective-intent auth, plan-hash/expiry-bound exception (G6) | Faulty policy logic fails closed for security-sensitive actions. |
@@ -92,6 +92,9 @@ hardening:
 
 - A forged or stale local peer, PID reuse, peer-token mismatch, insecure socket
   path, or invalid code identity is rejected before authorization.
+- A credential proof cannot be omitted, partially populated, replayed against a
+  new nonce/generation/socket/peer, supplied when not required, or retried after
+  one response; failure never persists a session or enters the request pipeline.
 - A malformed, over-limit, duplicate, replayed, or slow frame is bounded and
   rejected/cancelled without allocating beyond the frozen limit.
 - A deny rule, expired or owner delegation, cross-scope binding, or confused

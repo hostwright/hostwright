@@ -134,6 +134,70 @@ final class ControlPeerAuthenticatorTests: XCTestCase {
     XCTAssertEqual(fixture.sessions.persisted.count, 1)
   }
 
+  func testWireChallengePersistsNoSessionUntilOneShotResponseCompletes() throws {
+    let fixture = Fixture(credential: Fixture.credential)
+    let prepared = try fixture.prepare()
+    XCTAssertTrue(prepared.challenge.credentialProofRequired)
+    XCTAssertTrue(fixture.sessions.persisted.isEmpty)
+
+    let signature = try Fixture.credential.privateKey.signature(
+      for: prepared.challenge.canonicalData()
+    )
+    let response = ControlAuthenticationResponse(
+      credentialProof: ControlPeerCredentialProof(
+        credentialID: "device-key",
+        signatureDERBase64: signature.derRepresentation.base64EncodedString()
+      )
+    )
+    let authenticated = try fixture.authenticator.completeAuthentication(
+      prepared,
+      response: response
+    )
+    XCTAssertEqual(authenticated.binding.subject.identifier, "local-owner")
+    XCTAssertEqual(fixture.sessions.persisted.count, 1)
+    XCTAssertThrowsError(
+      try fixture.authenticator.completeAuthentication(prepared, response: response)
+    ) { error in
+      XCTAssertEqual(
+        error as? ControlPeerAuthenticationError,
+        .authenticationAttemptConsumed
+      )
+    }
+    XCTAssertEqual(fixture.sessions.persisted.count, 1)
+  }
+
+  func testInvalidWireResponseConsumesAttemptWithoutPersistingSession() throws {
+    let fixture = Fixture(credential: Fixture.credential)
+    let prepared = try fixture.prepare()
+
+    XCTAssertThrowsError(
+      try fixture.authenticator.completeAuthentication(
+        prepared,
+        response: ControlAuthenticationResponse()
+      )
+    )
+    XCTAssertTrue(fixture.sessions.persisted.isEmpty)
+
+    let signature = try Fixture.credential.privateKey.signature(
+      for: prepared.challenge.canonicalData()
+    )
+    let valid = ControlAuthenticationResponse(
+      credentialProof: ControlPeerCredentialProof(
+        credentialID: "device-key",
+        signatureDERBase64: signature.derRepresentation.base64EncodedString()
+      )
+    )
+    XCTAssertThrowsError(
+      try fixture.authenticator.completeAuthentication(prepared, response: valid)
+    ) { error in
+      XCTAssertEqual(
+        error as? ControlPeerAuthenticationError,
+        .authenticationAttemptConsumed
+      )
+    }
+    XCTAssertTrue(fixture.sessions.persisted.isEmpty)
+  }
+
   func testRejectsWrongCredentialID() throws {
     let fixture = Fixture(credential: Fixture.credential)
     var proof = try fixture.proof()
@@ -269,6 +333,20 @@ private final class Fixture: @unchecked Sendable {
     )
   }
 
+  func prepare(
+    daemonGeneration: UInt64 = 1,
+    serverNonce: String = "MDEyMzQ1Njc4OWFiY2RlZg=="
+  ) throws -> PreparedControlPeerAuthentication {
+    (authenticator.credentialReader as! TestCredentialReader).credentials = credentials
+    return try authenticator.prepareAuthentication(
+      descriptor: 11,
+      daemonGeneration: daemonGeneration,
+      serverNonce: serverNonce,
+      socketDevice: 23,
+      socketInode: 29
+    )
+  }
+
   func proof(
     daemonGeneration: UInt64 = 1,
     serverNonce: String = "MDEyMzQ1Njc4OWFiY2RlZg=="
@@ -277,7 +355,7 @@ private final class Fixture: @unchecked Sendable {
     let challenge = try ControlPeerCredentialChallenge(
       subjectID: "local-owner", serverNonce: serverNonce,
       daemonGeneration: daemonGeneration,
-      socketDevice: 23, socketInode: 29, peer: peer
+      socketDevice: 23, socketInode: 29, peer: peer, credentialProofRequired: true
     ).canonicalData()
     let signature = try Self.credential.privateKey.signature(for: challenge)
     return ControlPeerCredentialProof(

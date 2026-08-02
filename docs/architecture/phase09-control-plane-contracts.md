@@ -49,6 +49,20 @@ progress through a stream. Mutating acceptance persists request identity,
 idempotency key, authorization and admission decisions, operation reference,
 and audit record before acknowledgement.
 
+Every accepted connection completes one bounded authentication handshake before
+normal request framing. The server sends a canonical, response-sized
+`authentication-challenge` containing revision 2.1, the resolved subject, a
+fresh nonce, daemon generation, pinned socket device/inode, the kernel peer
+identity projection, native CDHash, and whether a credential proof is required.
+The client has five seconds to return one request-sized
+`authentication-response`. That response contains either both the declared
+credential identifier and canonical DER P-256 signature in base64, or neither;
+the challenge decides which form is valid. The signature covers the complete
+canonical challenge. Unknown, duplicate, missing, mismatched, replayed, late,
+or partially populated handshake fields close the unauthenticated connection
+without entering the request pipeline. Kernel credentials and strict code
+identity are collected before the challenge and remain authoritative.
+
 The normal CLI is a client of this API. Local help/version rendering may remain
 local. The Bootstrap API v2.1 is limited to `daemon install`, `daemon repair`,
 and `daemon uninstall`; every daemon-ready read or mutation uses the persistent

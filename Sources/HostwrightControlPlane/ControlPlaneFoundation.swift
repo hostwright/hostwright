@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 public enum ControlPlaneContract {
@@ -7,6 +8,7 @@ public enum ControlPlaneContract {
   public static let maximumStreams = 32
   public static let maximumOutstandingUnary = 64
   public static let maximumUnaryDeadlineMilliseconds = 300_000
+  public static let maximumAuthenticationHandshakeMilliseconds = 5_000
   public static func validateRequestByteCount(_ value: Int) throws {
     guard (1...maximumRequestBytes).contains(value) else {
       throw ContractValidationError.outOfBounds("request bytes")
@@ -127,6 +129,185 @@ public enum ControlPlaneCanonicalJSON {
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
     return try encoder.encode(value)
+  }
+}
+
+public enum ControlAuthenticationWireKind: String, Codable, CaseIterable, Sendable {
+  case challenge = "authentication-challenge"
+  case response = "authentication-response"
+}
+
+public struct ControlPeerCredentialProof: Codable, Equatable, Sendable {
+  public let credentialID: String
+  public let signatureDERBase64: String
+
+  public init(credentialID: String, signatureDERBase64: String) {
+    self.credentialID = credentialID
+    self.signatureDERBase64 = signatureDERBase64
+  }
+
+  public func validate() throws {
+    guard Self.safeIdentifier(credentialID, maximumLength: 128),
+      signatureDERBase64.utf8.count <= 256,
+      let signature = Data(base64Encoded: signatureDERBase64),
+      (8...128).contains(signature.count),
+      signature.base64EncodedString() == signatureDERBase64,
+      (try? P256.Signing.ECDSASignature(derRepresentation: signature)) != nil
+    else {
+      throw ContractValidationError.invalid("credential proof")
+    }
+  }
+
+  private static func safeIdentifier(_ value: String, maximumLength: Int) -> Bool {
+    guard !value.isEmpty, value.utf8.count <= maximumLength else { return false }
+    return value.range(of: "^[A-Za-z0-9._:-]+$", options: .regularExpression) != nil
+  }
+}
+
+public struct ControlPeerCredentialChallenge: Codable, Equatable, Sendable {
+  public let apiVersion: Int
+  public let protocolRevision: ControlProtocolRevision
+  public let kind: ControlAuthenticationWireKind
+  public let credentialProofRequired: Bool
+  public let protocolLabel: String
+  public let subjectID: String
+  public let serverNonce: String
+  public let daemonGeneration: UInt64
+  public let socketDevice: UInt64
+  public let socketInode: UInt64
+  public let peerUID: UInt32
+  public let peerGID: UInt32
+  public let peerPID: Int32
+  public let peerPIDVersion: UInt32
+  public let peerAuditSessionID: UInt32
+  public let codeDirectoryHash: String
+
+  public init(
+    subjectID: String,
+    serverNonce: String,
+    daemonGeneration: UInt64,
+    socketDevice: UInt64,
+    socketInode: UInt64,
+    peer: UnixPeerIdentity,
+    credentialProofRequired: Bool
+  ) {
+    apiVersion = ControlPlaneContract.apiVersion
+    protocolRevision = .current
+    kind = .challenge
+    self.credentialProofRequired = credentialProofRequired
+    protocolLabel = "hostwright-control-credential-proof-v2.1"
+    self.subjectID = subjectID
+    self.serverNonce = serverNonce
+    self.daemonGeneration = daemonGeneration
+    self.socketDevice = socketDevice
+    self.socketInode = socketInode
+    peerUID = peer.effectiveUID
+    peerGID = peer.effectiveGID
+    peerPID = peer.pid
+    peerPIDVersion = peer.pidVersion
+    peerAuditSessionID = peer.auditSessionID
+    codeDirectoryHash = peer.codeIdentity.codeDirectoryHash
+  }
+
+  public func validate() throws {
+    guard apiVersion == ControlPlaneContract.apiVersion, protocolRevision == .current,
+      kind == .challenge,
+      protocolLabel == "hostwright-control-credential-proof-v2.1",
+      Self.safeIdentifier(subjectID, maximumLength: 128),
+      (16...128).contains(serverNonce.utf8.count),
+      let nonce = Data(base64Encoded: serverNonce),
+      (16...96).contains(nonce.count),
+      nonce.base64EncodedString() == serverNonce,
+      daemonGeneration > 0, socketDevice > 0, socketInode > 0,
+      peerPID > 0, peerPIDVersion > 0, peerAuditSessionID > 0,
+      codeDirectoryHash.range(
+        of: "^(?:[a-f0-9]{40}|[a-f0-9]{64})$", options: .regularExpression) != nil
+    else {
+      throw ContractValidationError.invalid("authentication challenge")
+    }
+  }
+
+  public func canonicalData() throws -> Data {
+    try validate()
+    return try ControlPlaneCanonicalJSON.encode(self)
+  }
+
+  private static func safeIdentifier(_ value: String, maximumLength: Int) -> Bool {
+    guard !value.isEmpty, value.utf8.count <= maximumLength else { return false }
+    return value.range(of: "^[A-Za-z0-9._:-]+$", options: .regularExpression) != nil
+  }
+}
+
+public struct ControlAuthenticationResponse: Codable, Equatable, Sendable {
+  public let apiVersion: Int
+  public let protocolRevision: ControlProtocolRevision
+  public let kind: ControlAuthenticationWireKind
+  public let credentialID: String?
+  public let signatureDERBase64: String?
+
+  public init(credentialProof: ControlPeerCredentialProof? = nil) {
+    apiVersion = ControlPlaneContract.apiVersion
+    protocolRevision = .current
+    kind = .response
+    credentialID = credentialProof?.credentialID
+    signatureDERBase64 = credentialProof?.signatureDERBase64
+  }
+
+  public var credentialProof: ControlPeerCredentialProof? {
+    guard let credentialID, let signatureDERBase64 else { return nil }
+    return ControlPeerCredentialProof(
+      credentialID: credentialID,
+      signatureDERBase64: signatureDERBase64
+    )
+  }
+
+  public func validate(for challenge: ControlPeerCredentialChallenge) throws {
+    try challenge.validate()
+    guard apiVersion == ControlPlaneContract.apiVersion, protocolRevision == .current,
+      kind == .response,
+      (credentialID == nil) == (signatureDERBase64 == nil),
+      challenge.credentialProofRequired == (credentialID != nil)
+    else {
+      throw ContractValidationError.invalid("authentication response")
+    }
+    try credentialProof?.validate()
+  }
+}
+
+public enum ControlAuthenticationWireContract {
+  public static let challengeAllowedKeys: Set<String> = [
+    "apiVersion", "protocolRevision", "kind", "credentialProofRequired", "protocolLabel",
+    "subjectID", "serverNonce", "daemonGeneration", "socketDevice", "socketInode", "peerUID",
+    "peerGID", "peerPID", "peerPIDVersion", "peerAuditSessionID", "codeDirectoryHash",
+  ]
+  public static let responseAllowedKeys: Set<String> = [
+    "apiVersion", "protocolRevision", "kind", "credentialID", "signatureDERBase64",
+  ]
+
+  public static func decodeChallenge(_ data: Data) throws -> ControlPeerCredentialChallenge {
+    let value = try Phase09StrictDecoder.decode(
+      ControlPeerCredentialChallenge.self,
+      from: data,
+      allowedKeys: challengeAllowedKeys,
+      requiredKeys: challengeAllowedKeys
+    )
+    try value.validate()
+    return value
+  }
+
+  public static func decodeResponse(
+    _ data: Data,
+    for challenge: ControlPeerCredentialChallenge
+  ) throws -> ControlAuthenticationResponse {
+    let required: Set<String> = ["apiVersion", "protocolRevision", "kind"]
+    let value = try Phase09StrictDecoder.decode(
+      ControlAuthenticationResponse.self,
+      from: data,
+      allowedKeys: responseAllowedKeys,
+      requiredKeys: required
+    )
+    try value.validate(for: challenge)
+    return value
   }
 }
 

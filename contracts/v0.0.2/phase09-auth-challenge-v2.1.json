@@ -1,0 +1,18 @@
+{
+  "apiVersion": 2,
+  "protocolRevision": "2.1",
+  "kind": "authentication-challenge",
+  "credentialProofRequired": true,
+  "protocolLabel": "hostwright-control-credential-proof-v2.1",
+  "subjectID": "local-owner",
+  "serverNonce": "MDEyMzQ1Njc4OWFiY2RlZg==",
+  "daemonGeneration": 1,
+  "socketDevice": 23,
+  "socketInode": 29,
+  "peerUID": 501,
+  "peerGID": 20,
+  "peerPID": 8123,
+  "peerPIDVersion": 44,
+  "peerAuditSessionID": 7,
+  "codeDirectoryHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+}

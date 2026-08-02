@@ -26,7 +26,8 @@ final class ControlPlaneContractTests: XCTestCase {
         ControlPlaneContract.maximumRequestBytes, ControlPlaneContract.maximumResponseOrFrameBytes,
         ControlPlaneContract.maximumStreams, ControlPlaneContract.maximumOutstandingUnary,
         ControlPlaneContract.maximumUnaryDeadlineMilliseconds,
-      ], [65_536, 1_048_576, 32, 64, 300_000])
+        ControlPlaneContract.maximumAuthenticationHandshakeMilliseconds,
+      ], [65_536, 1_048_576, 32, 64, 300_000, 5_000])
     XCTAssertEqual(
       [
         WASILimits.default.moduleBytes, WASILimits.default.inputBytes,
@@ -51,6 +52,181 @@ final class ControlPlaneContractTests: XCTestCase {
       ]))
     XCTAssertEqual(
       String(decoding: canonical, as: UTF8.self), "{\"float\":1.5,\"integer\":1,\"url\":\"/a/b\"}")
+  }
+
+  func testAuthenticationHandshakeIsCanonicalStrictAndProofBound() throws {
+    let hash = String(repeating: "a", count: 40)
+    let peer = UnixPeerIdentity(
+      effectiveUID: 501, effectiveGID: 20, pid: 42, pidVersion: 7, auditSessionID: 9,
+      codeIdentity: CodeIdentity(
+        teamIdentifier: "993YC3JY4Q", signingIdentifier: "hostwright",
+        codeDirectoryHash: hash, validationMode: .installedRequirement
+      )
+    )
+    let challenge = ControlPeerCredentialChallenge(
+      subjectID: "owner", serverNonce: "MDEyMzQ1Njc4OWFiY2RlZg==", daemonGeneration: 2,
+      socketDevice: 3, socketInode: 5, peer: peer, credentialProofRequired: true
+    )
+    let challengeData = try challenge.canonicalData()
+    XCTAssertLessThanOrEqual(challengeData.count, ControlPlaneContract.maximumResponseOrFrameBytes)
+    XCTAssertEqual(try ControlAuthenticationWireContract.decodeChallenge(challengeData), challenge)
+
+    let proof = ControlPeerCredentialProof(
+      credentialID: "owner-key",
+      signatureDERBase64:
+        "MEUCIQCJEZNLJFhnUeauqx63oJcbAK7DvW/1J3E/S3vGBpgMsgIgFX5SLGa03gkrRzSSf6R4IUj2P8u5TTohLGdBhvsUQT4="
+    )
+    let response = ControlAuthenticationResponse(credentialProof: proof)
+    let responseData = try ControlPlaneCanonicalJSON.encode(response)
+    XCTAssertLessThanOrEqual(responseData.count, ControlPlaneContract.maximumRequestBytes)
+    XCTAssertEqual(
+      try ControlAuthenticationWireContract.decodeResponse(responseData, for: challenge),
+      response
+    )
+    XCTAssertThrowsError(
+      try ControlAuthenticationResponse().validate(for: challenge)
+    )
+
+    var object = try XCTUnwrap(
+      JSONSerialization.jsonObject(with: responseData) as? [String: Any]
+    )
+    object["unexpected"] = true
+    let unknown = try JSONSerialization.data(withJSONObject: object)
+    XCTAssertThrowsError(
+      try ControlAuthenticationWireContract.decodeResponse(unknown, for: challenge)
+    )
+  }
+
+  func testAuthenticationWireProofRequirementIsSymmetricAndRejectsPartialProof() throws {
+    let required = authenticationChallenge(proofRequired: true)
+    let optional = authenticationChallenge(proofRequired: false)
+    let proof = authenticationProof()
+    let encodedProof = try ControlPlaneCanonicalJSON.encode(
+      ControlAuthenticationResponse(credentialProof: proof))
+    let encodedAbsent = try ControlPlaneCanonicalJSON.encode(ControlAuthenticationResponse())
+
+    XCTAssertEqual(
+      try ControlAuthenticationWireContract.decodeResponse(encodedProof, for: required),
+      ControlAuthenticationResponse(credentialProof: proof))
+    XCTAssertEqual(
+      try ControlAuthenticationWireContract.decodeResponse(encodedAbsent, for: optional),
+      ControlAuthenticationResponse())
+    XCTAssertThrowsError(
+      try ControlAuthenticationWireContract.decodeResponse(encodedAbsent, for: required))
+    XCTAssertThrowsError(
+      try ControlAuthenticationWireContract.decodeResponse(encodedProof, for: optional))
+
+    for partial in [
+      "{\"apiVersion\":2,\"protocolRevision\":\"2.1\",\"kind\":\"authentication-response\",\"credentialID\":\"owner-key\"}",
+      "{\"apiVersion\":2,\"protocolRevision\":\"2.1\",\"kind\":\"authentication-response\",\"signatureDERBase64\":\"AQEBAQEBAQE=\"}",
+    ] {
+      XCTAssertThrowsError(
+        try ControlAuthenticationWireContract.decodeResponse(Data(partial.utf8), for: required))
+      XCTAssertThrowsError(
+        try ControlAuthenticationWireContract.decodeResponse(Data(partial.utf8), for: optional))
+    }
+  }
+
+  func testAuthenticationWireRejectsUnknownDuplicateAndMissingFields() throws {
+    let challenge = authenticationChallenge(proofRequired: true)
+    let challengeData = try challenge.canonicalData()
+    let responseData = try ControlPlaneCanonicalJSON.encode(
+      ControlAuthenticationResponse(credentialProof: authenticationProof()))
+
+    var unknownChallenge = try XCTUnwrap(
+      JSONSerialization.jsonObject(with: challengeData) as? [String: Any])
+    unknownChallenge["unexpected"] = true
+    XCTAssertThrowsError(
+      try ControlAuthenticationWireContract.decodeChallenge(
+        JSONSerialization.data(withJSONObject: unknownChallenge)))
+
+    var unknownResponse = try XCTUnwrap(
+      JSONSerialization.jsonObject(with: responseData) as? [String: Any])
+    unknownResponse["unexpected"] = true
+    XCTAssertThrowsError(
+      try ControlAuthenticationWireContract.decodeResponse(
+        JSONSerialization.data(withJSONObject: unknownResponse), for: challenge))
+
+    var missingChallenge = try XCTUnwrap(
+      JSONSerialization.jsonObject(with: challengeData) as? [String: Any])
+    missingChallenge.removeValue(forKey: "peerPID")
+    XCTAssertThrowsError(
+      try ControlAuthenticationWireContract.decodeChallenge(
+        JSONSerialization.data(withJSONObject: missingChallenge)))
+    XCTAssertThrowsError(
+      try ControlAuthenticationWireContract.decodeResponse(
+        Data("{\"apiVersion\":2,\"protocolRevision\":\"2.1\"}".utf8), for: challenge))
+
+    XCTAssertThrowsError(
+      try ControlAuthenticationWireContract.decodeChallenge(
+        Data(
+          "{\"apiVersion\":2,\"apiVersion\":2,\"protocolRevision\":\"2.1\",\"kind\":\"authentication-challenge\"}"
+            .utf8)))
+    XCTAssertThrowsError(
+      try ControlAuthenticationWireContract.decodeResponse(
+        Data(
+          "{\"apiVersion\":2,\"protocolRevision\":\"2.1\",\"kind\":\"authentication-response\",\"kind\":\"authentication-response\"}"
+            .utf8), for: challenge))
+  }
+
+  func testAuthenticationWireRejectsWrongVersionKindNonceHashAndBounds() throws {
+    let challenge = authenticationChallenge(proofRequired: true)
+    let response = ControlAuthenticationResponse(credentialProof: authenticationProof())
+    let challengeData = try challenge.canonicalData()
+    let responseData = try ControlPlaneCanonicalJSON.encode(response)
+
+    for mutation: (String, Any) in [
+      ("apiVersion", 3),
+      ("kind", "authentication-response"),
+      ("serverNonce", "not-base64!"),
+      ("serverNonce", Data(repeating: 1, count: 15).base64EncodedString()),
+      ("codeDirectoryHash", String(repeating: "A", count: 40)),
+      ("codeDirectoryHash", String(repeating: "a", count: 41)),
+      ("daemonGeneration", 0),
+      ("socketDevice", 0),
+      ("socketInode", 0),
+      ("peerPID", 0),
+      ("peerPIDVersion", 0),
+      ("peerAuditSessionID", 0),
+    ] {
+      var object = try XCTUnwrap(
+        JSONSerialization.jsonObject(with: challengeData) as? [String: Any])
+      object[mutation.0] = mutation.1
+      XCTAssertThrowsError(
+        try ControlAuthenticationWireContract.decodeChallenge(
+          JSONSerialization.data(withJSONObject: object)),
+        "mutation of \(mutation.0) must be rejected")
+    }
+
+    for mutation: (String, Any) in [
+      ("apiVersion", 3),
+      ("kind", "authentication-challenge"),
+      ("credentialID", "invalid credential"),
+      ("signatureDERBase64", "not-base64!"),
+      ("signatureDERBase64", Data(repeating: 1, count: 7).base64EncodedString()),
+    ] {
+      var object = try XCTUnwrap(JSONSerialization.jsonObject(with: responseData) as? [String: Any])
+      object[mutation.0] = mutation.1
+      XCTAssertThrowsError(
+        try ControlAuthenticationWireContract.decodeResponse(
+          JSONSerialization.data(withJSONObject: object), for: challenge),
+        "mutation of \(mutation.0) must be rejected")
+    }
+  }
+
+  func testAuthenticationWireCanonicalRoundTrips() throws {
+    let challenge = authenticationChallenge(proofRequired: true)
+    let challengeData = try challenge.canonicalData()
+    let decodedChallenge = try ControlAuthenticationWireContract.decodeChallenge(challengeData)
+    XCTAssertEqual(decodedChallenge, challenge)
+    XCTAssertEqual(try decodedChallenge.canonicalData(), challengeData)
+
+    let response = ControlAuthenticationResponse(credentialProof: authenticationProof())
+    let responseData = try ControlPlaneCanonicalJSON.encode(response)
+    let decodedResponse = try ControlAuthenticationWireContract.decodeResponse(
+      responseData, for: decodedChallenge)
+    XCTAssertEqual(decodedResponse, response)
+    XCTAssertEqual(try ControlPlaneCanonicalJSON.encode(decodedResponse), responseData)
   }
 
   func testClientEnvelopeHasNoIdentityAndLegacyRevisionCompatibility() throws {
@@ -319,6 +495,14 @@ final class ControlPlaneContractTests: XCTestCase {
       ["apiVersion", "protocolRevision", "requestID", "status", "reasonCode", "result"])
     try response.validate()
     XCTAssertEqual(try roundTrip(response), response)
+    let challenge = try ControlAuthenticationWireContract.decodeChallenge(
+      data("phase09-auth-challenge-v2.1.json")
+    )
+    let authenticationResponse = try ControlAuthenticationWireContract.decodeResponse(
+      data("phase09-auth-response-v2.1.json"),
+      for: challenge
+    )
+    XCTAssertNotNil(authenticationResponse.credentialProof)
     let frame = try strict(
       StreamFrame.self, data("phase09-stream-frame-v2.1.json"),
       [
@@ -406,5 +590,24 @@ final class ControlPlaneContractTests: XCTestCase {
   }
   private func roundTrip<T: Codable & Equatable>(_ value: T) throws -> T {
     try decoder.decode(T.self, from: encoder.encode(value))
+  }
+  private func authenticationChallenge(proofRequired: Bool) -> ControlPeerCredentialChallenge {
+    let hash = String(repeating: "a", count: 40)
+    return ControlPeerCredentialChallenge(
+      subjectID: "owner", serverNonce: "MDEyMzQ1Njc4OWFiY2RlZg==", daemonGeneration: 2,
+      socketDevice: 3, socketInode: 5,
+      peer: UnixPeerIdentity(
+        effectiveUID: 501, effectiveGID: 20, pid: 42, pidVersion: 7, auditSessionID: 9,
+        codeIdentity: CodeIdentity(
+          teamIdentifier: "993YC3JY4Q", signingIdentifier: "hostwright",
+          codeDirectoryHash: hash, validationMode: .installedRequirement)),
+      credentialProofRequired: proofRequired)
+  }
+  private func authenticationProof() -> ControlPeerCredentialProof {
+    ControlPeerCredentialProof(
+      credentialID: "owner-key",
+      signatureDERBase64:
+        "MEUCIQCJEZNLJFhnUeauqx63oJcbAK7DvW/1J3E/S3vGBpgMsgIgFX5SLGa03gkrRzSSf6R4IUj2P8u5TTohLGdBhvsUQT4="
+    )
   }
 }

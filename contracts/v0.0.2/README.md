@@ -19,6 +19,8 @@ lifecycle is already implemented.
 
 - `phase09-control-request-v2.1.json`: revision 2.1 persistent Control API request.
 - `phase09-control-response-v2.1.json`: revision 2.1 response and reason-code envelope.
+- `phase09-auth-challenge-v2.1.json`: server-first local authentication challenge.
+- `phase09-auth-response-v2.1.json`: credential-bearing client authentication response.
 - `phase09-stream-frame-v2.1.json`: revision 2.1 stream frame.
 - `phase09-rbac-v2.1.json`: scoped RBAC rule vocabulary.
 - `phase09-default-role-matrix.json`: frozen default-role permission matrix.

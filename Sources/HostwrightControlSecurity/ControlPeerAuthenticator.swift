@@ -37,6 +37,8 @@ public enum ControlPeerAuthenticationError: Error, Equatable, Sendable {
   case credentialProofRejected
   case invalidServerNonce
   case invalidSocketBinding
+  case authenticationAttemptConsumed
+  case authenticationAttemptMismatch
   case sessionPersistenceFailed
   case sessionInactive
   case daemonGenerationChanged
@@ -338,61 +340,44 @@ public protocol ControlSessionBindingStoring: Sendable {
   func isActive(sessionID: String, daemonGeneration: UInt64) throws -> Bool
 }
 
-public struct ControlPeerCredentialProof: Sendable, Equatable {
-  public let credentialID: String
-  public let signatureDERBase64: String
-
-  public init(credentialID: String, signatureDERBase64: String) {
-    self.credentialID = credentialID
-    self.signatureDERBase64 = signatureDERBase64
-  }
-}
-
-public struct ControlPeerCredentialChallenge: Sendable, Encodable {
-  public let protocolLabel = "hostwright-control-credential-proof-v2.1"
-  public let subjectID: String
-  public let serverNonce: String
-  public let daemonGeneration: UInt64
-  public let socketDevice: UInt64
-  public let socketInode: UInt64
-  public let peerUID: UInt32
-  public let peerGID: UInt32
-  public let peerPID: Int32
-  public let peerPIDVersion: UInt32
-  public let peerAuditSessionID: UInt32
-  public let codeDirectoryHash: String
-
-  public init(
-    subjectID: String,
-    serverNonce: String,
-    daemonGeneration: UInt64,
-    socketDevice: UInt64,
-    socketInode: UInt64,
-    peer: UnixPeerIdentity
-  ) {
-    self.subjectID = subjectID
-    self.serverNonce = serverNonce
-    self.daemonGeneration = daemonGeneration
-    self.socketDevice = socketDevice
-    self.socketInode = socketInode
-    peerUID = peer.effectiveUID
-    peerGID = peer.effectiveGID
-    peerPID = peer.pid
-    peerPIDVersion = peer.pidVersion
-    peerAuditSessionID = peer.auditSessionID
-    codeDirectoryHash = peer.codeIdentity.codeDirectoryHash
-  }
-
-  public func canonicalData() throws -> Data {
-    try ControlPlaneCanonicalJSON.encode(self)
-  }
-}
-
 public struct AuthenticatedControlPeer: Sendable, Equatable {
   public let binding: ControlSessionBinding
 
   public init(binding: ControlSessionBinding) {
     self.binding = binding
+  }
+}
+
+public final class PreparedControlPeerAuthentication: @unchecked Sendable {
+  public let challenge: ControlPeerCredentialChallenge
+  fileprivate let declaredSubject: DeclaredControlSubject
+  fileprivate let peer: UnixPeerIdentity
+  fileprivate let authenticatorID: UUID
+  private let lock = NSLock()
+  private var consumed = false
+
+  fileprivate init(
+    challenge: ControlPeerCredentialChallenge,
+    declaredSubject: DeclaredControlSubject,
+    peer: UnixPeerIdentity,
+    authenticatorID: UUID
+  ) {
+    self.challenge = challenge
+    self.declaredSubject = declaredSubject
+    self.peer = peer
+    self.authenticatorID = authenticatorID
+  }
+
+  fileprivate func consume(by owner: UUID) throws {
+    lock.lock()
+    defer { lock.unlock() }
+    guard owner == authenticatorID else {
+      throw ControlPeerAuthenticationError.authenticationAttemptMismatch
+    }
+    guard !consumed else {
+      throw ControlPeerAuthenticationError.authenticationAttemptConsumed
+    }
+    consumed = true
   }
 }
 
@@ -402,6 +387,7 @@ public final class ControlPeerAuthenticator: @unchecked Sendable {
   private let codeValidator: any ControlPeerCodeValidating
   private let subjectResolver: any DeclaredControlSubjectResolving
   private let sessionStore: any ControlSessionBindingStoring
+  private let authenticatorID = UUID()
 
   public init(
     policy: ControlPeerTrustPolicy,
@@ -425,6 +411,23 @@ public final class ControlPeerAuthenticator: @unchecked Sendable {
     socketInode: UInt64,
     credentialProof: ControlPeerCredentialProof?
   ) throws -> AuthenticatedControlPeer {
+    let prepared = try prepareAuthentication(
+      descriptor: descriptor,
+      daemonGeneration: daemonGeneration,
+      serverNonce: serverNonce,
+      socketDevice: socketDevice,
+      socketInode: socketInode
+    )
+    return try completeAuthentication(prepared, credentialProof: credentialProof)
+  }
+
+  public func prepareAuthentication(
+    descriptor: Int32,
+    daemonGeneration: UInt64,
+    serverNonce: String,
+    socketDevice: UInt64,
+    socketInode: UInt64
+  ) throws -> PreparedControlPeerAuthentication {
     try policy.validate()
     try validateBindingInputs(
       daemonGeneration: daemonGeneration, serverNonce: serverNonce, socketDevice: socketDevice,
@@ -441,15 +444,61 @@ public final class ControlPeerAuthenticator: @unchecked Sendable {
       userID: peer.effectiveUID, codeIdentity: codeIdentity
     )
     try validate(declaredSubject: declaredSubject, peer: peer)
+    let challenge = ControlPeerCredentialChallenge(
+      subjectID: declaredSubject.localSubject.identifier,
+      serverNonce: serverNonce,
+      daemonGeneration: daemonGeneration,
+      socketDevice: socketDevice,
+      socketInode: socketInode,
+      peer: peer,
+      credentialProofRequired: declaredSubject.credential != nil
+    )
+    try challenge.validate()
+    return PreparedControlPeerAuthentication(
+      challenge: challenge,
+      declaredSubject: declaredSubject,
+      peer: peer,
+      authenticatorID: authenticatorID
+    )
+  }
+
+  public func completeAuthentication(
+    _ prepared: PreparedControlPeerAuthentication,
+    response: ControlAuthenticationResponse
+  ) throws -> AuthenticatedControlPeer {
+    try prepared.consume(by: authenticatorID)
+    try response.validate(for: prepared.challenge)
+    return try persistAuthentication(prepared, credentialProof: response.credentialProof)
+  }
+
+  public func completeAuthentication(
+    _ prepared: PreparedControlPeerAuthentication,
+    credentialProof: ControlPeerCredentialProof?
+  ) throws -> AuthenticatedControlPeer {
+    try prepared.consume(by: authenticatorID)
+    return try persistAuthentication(prepared, credentialProof: credentialProof)
+  }
+
+  private func persistAuthentication(
+    _ prepared: PreparedControlPeerAuthentication,
+    credentialProof: ControlPeerCredentialProof?
+  ) throws -> AuthenticatedControlPeer {
+    let challenge = prepared.challenge
     try validateCredential(
-      credentialProof, declaredSubject: declaredSubject, peer: peer, serverNonce: serverNonce,
-      daemonGeneration: daemonGeneration, socketDevice: socketDevice, socketInode: socketInode
+      credentialProof,
+      declaredSubject: prepared.declaredSubject,
+      peer: prepared.peer,
+      serverNonce: challenge.serverNonce,
+      daemonGeneration: challenge.daemonGeneration,
+      socketDevice: challenge.socketDevice,
+      socketInode: challenge.socketInode
     )
     let binding = ControlSessionBinding(
-      sessionID: UUID().uuidString.lowercased(), daemonGeneration: daemonGeneration,
-      serverNonce: serverNonce,
-      socketDevice: socketDevice, socketInode: socketInode, peer: peer,
-      subject: declaredSubject.localSubject
+      sessionID: UUID().uuidString.lowercased(), daemonGeneration: challenge.daemonGeneration,
+      serverNonce: challenge.serverNonce,
+      socketDevice: challenge.socketDevice, socketInode: challenge.socketInode,
+      peer: prepared.peer,
+      subject: prepared.declaredSubject.localSubject
     )
     do {
       try sessionStore.persist(binding)
@@ -589,7 +638,7 @@ public final class ControlPeerAuthenticator: @unchecked Sendable {
     let challenge = try ControlPeerCredentialChallenge(
       subjectID: declaredSubject.localSubject.identifier, serverNonce: serverNonce,
       daemonGeneration: daemonGeneration, socketDevice: socketDevice, socketInode: socketInode,
-      peer: peer
+      peer: peer, credentialProofRequired: true
     ).canonicalData()
     guard publicKey.isValidSignature(signature, for: challenge) else {
       throw ControlPeerAuthenticationError.credentialProofRejected

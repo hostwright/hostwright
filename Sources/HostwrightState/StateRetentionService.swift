@@ -349,7 +349,10 @@ public struct StateRetentionService {
             case .traces:
                 rows = try traceRows(connection)
                 available = true
-            case .logs, .supportEvidence:
+            case .supportEvidence:
+                rows = try supportEvidenceRows(connection)
+                available = true
+            case .logs:
                 rows = []
                 available = false
             }
@@ -609,17 +612,45 @@ public struct StateRetentionService {
                    length(message) + length(payload_json_redacted)
             FROM event_ledger
             WHERE NOT (type = ? AND source = ?)
+              AND source != ?
             ORDER BY timestamp DESC, rowid DESC
             """,
             bindings: [
                 .text(HostwrightTraceContract.eventType),
-                .text(HostwrightTraceContract.source)
+                .text(HostwrightTraceContract.source),
+                .text(HostwrightSupportBundleContract.source)
             ]
         ).compactMap { row in
             guard row.count == 5, let id = row[0], let timestamp = row[1],
                   let type = row[2], let source = row[3] else { return nil }
             let audit = EventAuditClassifier.isAudit(type: type, source: source)
             guard audit == audits else { return nil }
+            return retentionRow(
+                table: "event_ledger", id: id, timestamp: timestamp,
+                identity: [type, source], bytes: row[4], safe: true
+            )
+        }
+    }
+
+    private func supportEvidenceRows(_ connection: SQLiteConnection) throws -> [StateRetentionRow] {
+        try connection.query(
+            """
+            SELECT id, timestamp, type, source,
+                   length(message) + length(payload_json_redacted)
+            FROM event_ledger
+            WHERE source = ?
+              AND type IN (?, ?, ?)
+            ORDER BY timestamp DESC, rowid DESC
+            """,
+            bindings: [
+                .text(HostwrightSupportBundleContract.source),
+                .text(HostwrightSupportBundleContract.createdEventType),
+                .text(HostwrightSupportBundleContract.deletedEventType),
+                .text(HostwrightSupportBundleContract.failedEventType)
+            ]
+        ).compactMap { row in
+            guard row.count == 5, let id = row[0], let timestamp = row[1],
+                  let type = row[2], let source = row[3] else { return nil }
             return retentionRow(
                 table: "event_ledger", id: id, timestamp: timestamp,
                 identity: [type, source], bytes: row[4], safe: true
@@ -1124,7 +1155,7 @@ public struct StateRetentionService {
             case "operation_ledger": validClasses = [.operations]
             case "operation_groups": validClasses = [.operations]
             case "observed_runtime_snapshots", "health_check_results": validClasses = [.observations]
-            case "event_ledger": validClasses = [.events, .audits, .traces]
+            case "event_ledger": validClasses = [.events, .audits, .traces, .supportEvidence]
             case "network_attachments", "network_port_reservations", "network_certificates", "network_resources":
                 validClasses = [.tombstones]
             case StateRetentionCandidate.backupTable: validClasses = [.backups]

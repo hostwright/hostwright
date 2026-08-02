@@ -681,6 +681,22 @@ Example:
 hostwright diagnostics --bundle ./hostwright-diagnostics.json --project api-local
 ```
 
+## `hostwright diagnostics support status|preview|create|delete|recover`
+
+The additive schema-v1 support workflow preserves the diagnostics command above and adds:
+
+```text
+hostwright diagnostics support status [--state-db <path>] [--output text|json]
+hostwright diagnostics support preview [--state-db <path>] [--project <name>] [--manifest <path>] [--output text|json]
+hostwright diagnostics support create [--state-db <path>] [--project <name>] [--manifest <path>] --output-path <absolute-new-path> --confirm-preview <sha256> [--encrypt-recipient <keychain-certificate-reference>] [--output text|json]
+hostwright diagnostics support delete [--state-db <path>] --bundle <absolute-path> --confirm-bundle <sha256> [--output text|json]
+hostwright diagnostics support recover [--state-db <path>] [--output text|json]
+```
+
+Preview reports the fixed bounded section inventory, dropped counts, byte counts, total estimate, bundle ID, and exact confirmation hash. Create recomputes it, refuses stale evidence, writes one new private single-link file, and optionally performs macOS CMS encryption before disk. Status exposes only retained receipt count and pending recovery phase. Delete requires an unchanged file plus the retained creation receipt for its exact path and content hash. Recover finalizes a proven effect, records a proven no-effect case, or safe-holds identity drift.
+
+No support command reads raw credential stores, accepts secret values, uploads a bundle, creates a listener, overwrites output, or discovers files to delete. Domain failures use `HW-SUPPORT-001` through `HW-SUPPORT-013`. See [Privacy-Safe Support Bundles](support-bundles.md) for content, limits, encryption, path policy, retention, recovery, and exact cleanup.
+
 ## `hostwright cleanup [path] [--state-db <path>] --dry-run [--team-profile <path>]`
 
 Plans cleanup candidates only. A candidate is eligible only when all of these are true:

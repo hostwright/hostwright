@@ -62,6 +62,10 @@ public struct CLIEnvironment: @unchecked Sendable {
     public var metricsCancelled: () -> Bool
     public var traceDate: @Sendable () -> Date
     public var traceCancelled: () -> Bool
+    public var supportDate: @Sendable () -> Date
+    public var supportCancelled: () -> Bool
+    public var supportLogs: @Sendable () -> HostwrightSupportLogCollection
+    public var supportEncrypt: @Sendable (Data, String) throws -> Data
 
     public init(
         fileExists: @escaping (String) -> Bool,
@@ -153,7 +157,13 @@ public struct CLIEnvironment: @unchecked Sendable {
         metricsDate: @escaping @Sendable () -> Date = Date.init,
         metricsCancelled: @escaping () -> Bool = { false },
         traceDate: @escaping @Sendable () -> Date = Date.init,
-        traceCancelled: @escaping () -> Bool = { false }
+        traceCancelled: @escaping () -> Bool = { false },
+        supportDate: @escaping @Sendable () -> Date = Date.init,
+        supportCancelled: @escaping () -> Bool = { false },
+        supportLogs: @escaping @Sendable () -> HostwrightSupportLogCollection = { .unavailable },
+        supportEncrypt: @escaping @Sendable (Data, String) throws -> Data = { _, _ in
+            throw HostwrightSupportBundleError.encryptionUnavailable
+        }
     ) {
         self.fileExists = fileExists
         self.readTextFile = readTextFile
@@ -229,6 +239,10 @@ public struct CLIEnvironment: @unchecked Sendable {
         self.metricsCancelled = metricsCancelled
         self.traceDate = traceDate
         self.traceCancelled = traceCancelled
+        self.supportDate = supportDate
+        self.supportCancelled = supportCancelled
+        self.supportLogs = supportLogs
+        self.supportEncrypt = supportEncrypt
     }
 
     public static let live = CLIEnvironment(
@@ -319,7 +333,11 @@ public struct CLIEnvironment: @unchecked Sendable {
             FileHandle.standardError.write(Data((message + "\n").utf8))
         },
         observabilitySink: HostwrightOSLogSink(),
-        observabilityStatus: { HostwrightObservabilityStatus(configuration: .live) }
+        observabilityStatus: { HostwrightObservabilityStatus(configuration: .live) },
+        supportLogs: { SupportBundleOSLogCollector.collect() },
+        supportEncrypt: { data, recipient in
+            try SupportBundlePlatformEncryptor.encrypt(data, recipientReference: recipient)
+        }
     )
 }
 

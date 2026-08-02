@@ -32,4 +32,4 @@ Export requires a complete trace, exact recomputed confirmation, a canonical cur
 
 Trace-span rows have the independent Manifest-v2 `traces` retention class. Ordinary `events` and `audits` selection excludes them, while `hostwright events` may still display their durable rows. Compaction remains confirmation-bound, creates a verified backup, honors holds and recovery horizons, and deletes only exact eligible trace event identities.
 
-Support bundles and aggregate soak qualification remain owned by Gates 15 and 16. The `observability.telemetry` capability remains `experimental` until Gate 16 passes.
+Privacy-safe support bundles consume this same bounded trace projection without adding raw trace rows, an exporter, or automatic upload; see [Privacy-Safe Support Bundles](support-bundles.md). Aggregate soak qualification remains owned by Gate 16, and the `observability.telemetry` capability remains `experimental` until that gate passes.

@@ -193,6 +193,36 @@ public struct TraceCLIOptions: Equatable, Sendable {
     }
 }
 
+public enum SupportBundleCLIAction: Equatable, Sendable {
+    case status
+    case preview
+    case create(outputPath: String, confirmationSHA256: String, recipientReference: String?)
+    case delete(bundlePath: String, confirmationSHA256: String)
+    case recover
+}
+
+public struct SupportBundleCLIOptions: Equatable, Sendable {
+    public let action: SupportBundleCLIAction
+    public let stateDatabasePath: String?
+    public let projectName: String?
+    public let manifestPath: String?
+    public let output: CLIOutputFormat
+
+    public init(
+        action: SupportBundleCLIAction,
+        stateDatabasePath: String?,
+        projectName: String?,
+        manifestPath: String?,
+        output: CLIOutputFormat
+    ) {
+        self.action = action
+        self.stateDatabasePath = stateDatabasePath
+        self.projectName = projectName
+        self.manifestPath = manifestPath
+        self.output = output
+    }
+}
+
 public enum CLICommand: Equatable, Sendable {
     case version
     case capabilities(output: CLIOutputFormat)
@@ -211,6 +241,7 @@ public enum CLICommand: Equatable, Sendable {
     case ownership(options: OwnershipCLIOptions)
     case metrics(options: MetricsCLIOptions)
     case traces(options: TraceCLIOptions)
+    case supportBundle(options: SupportBundleCLIOptions)
     case migrateManifestPreview(path: String, output: CLIOutputFormat)
     case initManifest
     case importStack(path: String, output: CLIOutputFormat, teamProfilePath: String?)
@@ -2581,6 +2612,9 @@ public enum CLICommand: Equatable, Sendable {
     }
 
     private static func diagnosticsCommand(arguments: [String]) throws -> CLICommand {
+        if arguments.count >= 2, arguments[1] == "support" {
+            return try supportBundleCommand(arguments: arguments)
+        }
         var stateDatabasePath: String?
         var bundlePath: String?
         var projectName: String?
@@ -2622,6 +2656,122 @@ public enum CLICommand: Equatable, Sendable {
             throw CLIUsageError("diagnostics requires --bundle <path>.")
         }
         return .diagnostics(stateDatabasePath: stateDatabasePath, bundlePath: bundlePath, projectName: projectName, manifestPath: manifestPath)
+    }
+
+    private static func supportBundleCommand(arguments: [String]) throws -> CLICommand {
+        guard arguments.count >= 3 else {
+            throw CLIUsageError("diagnostics support requires status, preview, create, delete, or recover.")
+        }
+        let verb = arguments[2]
+        guard ["status", "preview", "create", "delete", "recover"].contains(verb) else {
+            throw CLIUsageError("diagnostics support requires status, preview, create, delete, or recover.")
+        }
+        var stateDatabasePath: String?
+        var projectName: String?
+        var manifestPath: String?
+        var outputPath: String?
+        var bundlePath: String?
+        var previewSHA256: String?
+        var bundleSHA256: String?
+        var recipientReference: String?
+        var output = CLIOutputFormat.text
+        var seen = Set<String>()
+        var index = 3
+
+        func requireUnique(_ flag: String) throws {
+            guard seen.insert(flag).inserted else {
+                throw CLIUsageError("diagnostics support does not accept duplicate \(flag).")
+            }
+        }
+        while index < arguments.count {
+            let flag = arguments[index]
+            switch flag {
+            case "--json":
+                try requireUnique("--output")
+                output = .json
+                index += 1
+            case "--output":
+                try requireUnique("--output")
+                guard index + 1 < arguments.count,
+                      let parsed = CLIOutputFormat(rawValue: arguments[index + 1]) else {
+                    throw CLIUsageError("diagnostics support --output supports only text or json.")
+                }
+                output = parsed
+                index += 2
+            case "--state-db", "--project", "--manifest", "--output-path", "--bundle",
+                 "--confirm-preview", "--confirm-bundle", "--encrypt-recipient":
+                try requireUnique(flag)
+                guard index + 1 < arguments.count else {
+                    throw CLIUsageError("diagnostics support requires a value after \(flag).")
+                }
+                let value = arguments[index + 1]
+                guard !value.isEmpty else {
+                    throw CLIUsageError("diagnostics support requires a non-empty value after \(flag).")
+                }
+                switch flag {
+                case "--state-db": stateDatabasePath = value
+                case "--project": projectName = value
+                case "--manifest": manifestPath = value
+                case "--output-path": outputPath = value
+                case "--bundle": bundlePath = value
+                case "--confirm-preview": previewSHA256 = value
+                case "--confirm-bundle": bundleSHA256 = value
+                case "--encrypt-recipient": recipientReference = value
+                default: break
+                }
+                index += 2
+            default:
+                throw CLIUsageError("diagnostics support received an unsupported option: \(flag).")
+            }
+        }
+
+        let action: SupportBundleCLIAction
+        switch verb {
+        case "status":
+            guard projectName == nil, manifestPath == nil, outputPath == nil, bundlePath == nil,
+                  previewSHA256 == nil, bundleSHA256 == nil, recipientReference == nil else {
+                throw CLIUsageError("diagnostics support status supports only --state-db and --output.")
+            }
+            action = .status
+        case "preview":
+            guard outputPath == nil, bundlePath == nil, previewSHA256 == nil,
+                  bundleSHA256 == nil, recipientReference == nil else {
+                throw CLIUsageError("diagnostics support preview supports only --state-db, --project, --manifest, and --output.")
+            }
+            action = .preview
+        case "create":
+            guard let outputPath, let previewSHA256,
+                  HostwrightSupportBundleContract.isValidSHA256(previewSHA256),
+                  bundlePath == nil, bundleSHA256 == nil else {
+                throw CLIUsageError("diagnostics support create requires --output-path and a 64-character --confirm-preview SHA-256.")
+            }
+            action = .create(
+                outputPath: outputPath,
+                confirmationSHA256: previewSHA256,
+                recipientReference: recipientReference
+            )
+        case "delete":
+            guard let bundlePath, let bundleSHA256,
+                  HostwrightSupportBundleContract.isValidSHA256(bundleSHA256),
+                  projectName == nil, manifestPath == nil, outputPath == nil,
+                  previewSHA256 == nil, recipientReference == nil else {
+                throw CLIUsageError("diagnostics support delete requires --bundle and a 64-character --confirm-bundle SHA-256.")
+            }
+            action = .delete(bundlePath: bundlePath, confirmationSHA256: bundleSHA256)
+        default:
+            guard projectName == nil, manifestPath == nil, outputPath == nil, bundlePath == nil,
+                  previewSHA256 == nil, bundleSHA256 == nil, recipientReference == nil else {
+                throw CLIUsageError("diagnostics support recover supports only --state-db and --output.")
+            }
+            action = .recover
+        }
+        return .supportBundle(options: SupportBundleCLIOptions(
+            action: action,
+            stateDatabasePath: stateDatabasePath,
+            projectName: projectName,
+            manifestPath: manifestPath,
+            output: output
+        ))
     }
 }
 
@@ -2779,6 +2929,18 @@ public enum CLIExitCode: Int32, Equatable, Sendable {
             return .partialFailure
         case .daemonDenied:
             return .unsafeOperation
+        case .supportInvalidContract, .supportSectionLimitExceeded,
+             .supportPlaintextLimitExceeded, .supportInvalidRecipientReference:
+            return .validation
+        case .supportPreviewChanged:
+            return .confirmationMismatch
+        case .supportUnsafeOutputPath, .supportReceiptUnavailable,
+             .supportBundleIdentityChanged, .supportRecoverySafeHold:
+            return .unsafeOperation
+        case .supportEncryptionUnavailable:
+            return .runtimeUnavailable
+        case .supportEncryptionFailed, .supportRecoveryRequired, .supportCancelled:
+            return .partialFailure
         case .unsupportedArchitecture, .unsupportedMacOSVersion:
             return .validation
         }

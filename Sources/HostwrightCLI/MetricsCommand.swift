@@ -112,6 +112,7 @@ struct MetricsCommandRunner {
 struct SecureLocalExportReceipt {
     let outputSHA256: String
     let outputBytes: UInt64
+    let fileIdentity: HostwrightSupportBundleFileIdentity
 }
 
 enum SecureLocalExportWriter {
@@ -120,11 +121,11 @@ enum SecureLocalExportWriter {
         to path: String,
         maximumBytes: Int,
         isCancelled: () -> Bool,
-        unsafeError: any Error
+        unsafeError: any Error,
+        onPersist: (HostwrightSupportBundleFileIdentity) throws -> Void = { _ in }
     ) throws -> SecureLocalExportReceipt {
         guard data.count <= maximumBytes else { throw unsafeError }
-        guard path.hasPrefix("/"),
-              URL(fileURLWithPath: path).standardizedFileURL.path == path else {
+        guard isNormalizedAbsolutePath(path) else {
             throw unsafeError
         }
         let parent = (path as NSString).deletingLastPathComponent
@@ -271,10 +272,226 @@ enum SecureLocalExportWriter {
         let outputSHA256 = SHA256.hash(data: observed)
             .map { String(format: "%02x", $0) }
             .joined()
+        let identity = HostwrightSupportBundleFileIdentity(
+            device: UInt64(created.st_dev),
+            inode: UInt64(created.st_ino),
+            sha256: outputSHA256,
+            bytes: UInt64(data.count)
+        )
+        try onPersist(identity)
+        var persistedPath = stat()
+        let persistedPathMatches = filename.withCString {
+            Darwin.fstatat(parentDescriptor, $0, &persistedPath, AT_SYMLINK_NOFOLLOW) == 0
+        }
+        guard persistedPathMatches,
+              persistedPath.st_dev == created.st_dev,
+              persistedPath.st_ino == created.st_ino,
+              persistedPath.st_nlink == 1 else {
+            throw unsafeError
+        }
         completed = true
         return SecureLocalExportReceipt(
             outputSHA256: outputSHA256,
-            outputBytes: UInt64(data.count)
+            outputBytes: UInt64(data.count),
+            fileIdentity: identity
         )
+    }
+
+    static func inspect(
+        _ path: String,
+        maximumBytes: Int,
+        unsafeError: any Error
+    ) throws -> HostwrightSupportBundleFileIdentity? {
+        let opened = try openExisting(path, maximumBytes: maximumBytes, unsafeError: unsafeError)
+        guard let opened else { return nil }
+        defer {
+            Darwin.close(opened.descriptor)
+            Darwin.close(opened.parentDescriptor)
+        }
+        return try identity(
+            descriptor: opened.descriptor,
+            metadata: opened.metadata,
+            maximumBytes: maximumBytes,
+            unsafeError: unsafeError
+        )
+    }
+
+    static func delete(
+        _ path: String,
+        expectedIdentity: HostwrightSupportBundleFileIdentity,
+        maximumBytes: Int,
+        isCancelled: () -> Bool,
+        unsafeError: any Error,
+        onDeleted: () throws -> Void = {}
+    ) throws {
+        guard !isCancelled() else {
+            throw StateStoreError.operationCancelled(path: path)
+        }
+        guard let opened = try openExisting(path, maximumBytes: maximumBytes, unsafeError: unsafeError) else {
+            throw unsafeError
+        }
+        defer {
+            Darwin.close(opened.descriptor)
+            Darwin.close(opened.parentDescriptor)
+        }
+        let observed = try identity(
+            descriptor: opened.descriptor,
+            metadata: opened.metadata,
+            maximumBytes: maximumBytes,
+            unsafeError: unsafeError
+        )
+        guard observed == expectedIdentity, !isCancelled() else {
+            if isCancelled() { throw StateStoreError.operationCancelled(path: path) }
+            throw unsafeError
+        }
+        var current = stat()
+        let stillMatches = opened.filename.withCString {
+            Darwin.fstatat(opened.parentDescriptor, $0, &current, AT_SYMLINK_NOFOLLOW) == 0
+        }
+        guard stillMatches,
+              UInt64(current.st_dev) == expectedIdentity.device,
+              UInt64(current.st_ino) == expectedIdentity.inode,
+              current.st_nlink == 1,
+              opened.filename.withCString({ Darwin.unlinkat(opened.parentDescriptor, $0, 0) }) == 0,
+              Darwin.fsync(opened.parentDescriptor) == 0 else {
+            throw unsafeError
+        }
+        var absent = stat()
+        let stillPresent = opened.filename.withCString {
+            Darwin.fstatat(opened.parentDescriptor, $0, &absent, AT_SYMLINK_NOFOLLOW) == 0
+        }
+        guard !stillPresent, errno == ENOENT else {
+            throw unsafeError
+        }
+        try onDeleted()
+    }
+
+    private struct ExistingFile {
+        let parentDescriptor: Int32
+        let descriptor: Int32
+        let filename: String
+        let metadata: stat
+    }
+
+    private static func openExisting(
+        _ path: String,
+        maximumBytes: Int,
+        unsafeError: any Error
+    ) throws -> ExistingFile? {
+        guard isNormalizedAbsolutePath(path), maximumBytes > 0 else { throw unsafeError }
+        let parent = (path as NSString).deletingLastPathComponent
+        let filename = (path as NSString).lastPathComponent
+        guard !parent.isEmpty, !filename.isEmpty, filename != ".", filename != "..",
+              filename.utf8.count <= 255,
+              let resolved = realpath(parent, nil) else { throw unsafeError }
+        defer { free(resolved) }
+        guard String(cString: resolved) == parent else { throw unsafeError }
+        let parentDescriptor = Darwin.open(parent, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        guard parentDescriptor >= 0 else { throw unsafeError }
+        var parentMetadata = stat()
+        guard fstat(parentDescriptor, &parentMetadata) == 0,
+              parentMetadata.st_mode & S_IFMT == S_IFDIR,
+              parentMetadata.st_uid == geteuid(),
+              parentMetadata.st_mode & 0o077 == 0 else {
+            Darwin.close(parentDescriptor)
+            throw unsafeError
+        }
+        do {
+            try HostwrightLocalFilesystemPolicy.validateNoAccessGrantingACL(
+                fileDescriptor: parentDescriptor,
+                path: parent,
+                role: "local export parent"
+            )
+        } catch {
+            Darwin.close(parentDescriptor)
+            throw error
+        }
+        let descriptor = filename.withCString {
+            Darwin.openat(parentDescriptor, $0, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+        }
+        if descriptor < 0, errno == ENOENT {
+            Darwin.close(parentDescriptor)
+            return nil
+        }
+        guard descriptor >= 0 else {
+            Darwin.close(parentDescriptor)
+            throw unsafeError
+        }
+        var metadata = stat()
+        guard fstat(descriptor, &metadata) == 0,
+              metadata.st_mode & S_IFMT == S_IFREG,
+              metadata.st_uid == geteuid(),
+              metadata.st_nlink == 1,
+              metadata.st_mode & 0o7777 == S_IRUSR | S_IWUSR,
+              metadata.st_size >= 0,
+              metadata.st_size <= maximumBytes else {
+            Darwin.close(descriptor)
+            Darwin.close(parentDescriptor)
+            throw unsafeError
+        }
+        var pathMetadata = stat()
+        let pathMatches = filename.withCString {
+            Darwin.fstatat(parentDescriptor, $0, &pathMetadata, AT_SYMLINK_NOFOLLOW) == 0
+        }
+        guard pathMatches,
+              pathMetadata.st_dev == metadata.st_dev,
+              pathMetadata.st_ino == metadata.st_ino,
+              pathMetadata.st_nlink == 1 else {
+            Darwin.close(descriptor)
+            Darwin.close(parentDescriptor)
+            throw unsafeError
+        }
+        return ExistingFile(
+            parentDescriptor: parentDescriptor,
+            descriptor: descriptor,
+            filename: filename,
+            metadata: metadata
+        )
+    }
+
+    private static func identity(
+        descriptor: Int32,
+        metadata: stat,
+        maximumBytes: Int,
+        unsafeError: any Error
+    ) throws -> HostwrightSupportBundleFileIdentity {
+        let count = Int(metadata.st_size)
+        guard count <= maximumBytes else { throw unsafeError }
+        var data = Data(count: count)
+        var offset = 0
+        while offset < count {
+            let readCount = data.withUnsafeMutableBytes { bytes in
+                Darwin.pread(
+                    descriptor,
+                    bytes.baseAddress!.advanced(by: offset),
+                    count - offset,
+                    off_t(offset)
+                )
+            }
+            if readCount < 0, errno == EINTR { continue }
+            guard readCount > 0 else { throw unsafeError }
+            offset += readCount
+        }
+        var final = stat()
+        guard fstat(descriptor, &final) == 0,
+              final.st_dev == metadata.st_dev,
+              final.st_ino == metadata.st_ino,
+              final.st_nlink == 1,
+              final.st_size == metadata.st_size else { throw unsafeError }
+        let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        return HostwrightSupportBundleFileIdentity(
+            device: UInt64(metadata.st_dev),
+            inode: UInt64(metadata.st_ino),
+            sha256: digest,
+            bytes: UInt64(count)
+        )
+    }
+
+    private static func isNormalizedAbsolutePath(_ path: String) -> Bool {
+        guard path.hasPrefix("/"), !path.hasSuffix("/") else { return false }
+        let components = path.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
+        return !components.isEmpty &&
+            components.allSatisfy { !$0.isEmpty && $0 != "." && $0 != ".." } &&
+            "/" + components.joined(separator: "/") == path
     }
 }

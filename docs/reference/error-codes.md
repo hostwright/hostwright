@@ -47,6 +47,19 @@ Stable error codes are used for CLI and manifest diagnostics.
 | `HW-IMAGE-004` | Image ownership, filesystem identity, or destructive-operation policy denied the operation. | Implemented with exit code 71 |
 | `HW-IMAGE-005` | Image execution was cancelled and exact compensation was attempted. | Implemented with exit code 72 |
 | `HW-IMAGE-006` | An image provider or durable checkpoint has a partial or ambiguous effect requiring recovery. | Implemented with exit code 72 |
+| `HW-SUPPORT-001` | Support-bundle contract input or durable evidence is invalid. | Implemented with exit code 65 |
+| `HW-SUPPORT-002` | The selected support evidence changed after preview. | Implemented with exit code 70; create no output and confirm a fresh preview |
+| `HW-SUPPORT-003` | The requested support-bundle output path is not a new canonical private file path. | Implemented with exit code 71 |
+| `HW-SUPPORT-004` | One support-bundle section or the combined section payload exceeded its fixed limit. | Implemented with exit code 65 before output |
+| `HW-SUPPORT-005` | The plaintext support bundle exceeded its fixed total limit. | Implemented with exit code 65 before output |
+| `HW-SUPPORT-006` | The non-secret platform-encryption recipient reference is invalid. | Implemented with exit code 65 |
+| `HW-SUPPORT-007` | macOS CMS or the exact recipient certificate is unavailable. | Implemented with exit code 69 and no output |
+| `HW-SUPPORT-008` | Platform encryption failed without a valid bounded encrypted result. | Implemented with exit code 72 and no plaintext file |
+| `HW-SUPPORT-009` | No retained Hostwright creation receipt proves ownership of the exact selected file. | Implemented with exit code 71; the file is preserved |
+| `HW-SUPPORT-010` | The selected bundle's device, inode, link count, mode, size, or hash changed. | Implemented with exit code 71; the file is preserved |
+| `HW-SUPPORT-011` | A private support-bundle journal must be recovered before another mutation. | Implemented with exit code 72 |
+| `HW-SUPPORT-012` | Recovery cannot prove the exact external file identity. | Implemented as an exit-71 safe hold that preserves the journal and file |
+| `HW-SUPPORT-013` | The support-bundle operation was cancelled without an unacknowledged file effect. | Implemented with exit code 72 and no output-path disclosure |
 
 ## Process Exit Codes
 
@@ -54,12 +67,12 @@ Stable error codes are used for CLI and manifest diagnostics.
 | ---: | --- | --- |
 | `0` | Success | Completed command. |
 | `64` | Usage | Invalid arguments, unsupported flags, missing required confirmation arguments, refused overwrite, local non-manifest file I/O failure, or invalid distribution path/command shape. |
-| `65` | Validation | Missing/unreadable manifest, manifest/profile/approval validation failure, unsupported manifest/import feature, stack-file import rejection, compatibility validation failure, invalid distribution source/artifact evidence, downgrade refusal, or installed/candidate version conflict. |
+| `65` | Validation | Missing/unreadable manifest, manifest/profile/approval validation failure, unsupported manifest/import feature, stack-file import rejection, compatibility validation failure, invalid support-bundle contract/limits/recipient, invalid distribution source/artifact evidence, downgrade refusal, or installed/candidate version conflict. |
 | `66` | State unavailable | Selected state database resolution, path policy, legacy migration, schema compatibility, locking, corruption, or read/write failed. |
 | `69` | Runtime/tool unavailable or evidence blocked | Runtime or required local/distribution tool execution failed, a benchmark dimension remains blocked, or unsigned distribution work completed without required trust stages. |
-| `70` | Confirmation mismatch | Confirmed plan hash, cleanup token, approval scope, or approval hash binding does not match the current operation. |
-| `71` | Unsafe operation | Planner/apply safety policy blocked mutation or distribution ownership validation refused replacement, repair, or removal. |
-| `72` | Partial failure | Mixed cleanup outcome, failed benchmark command/identity/cleanup evidence, or installed distribution lifecycle/recovery could not complete safely. |
+| `70` | Confirmation mismatch | Confirmed plan hash, cleanup token, support preview, approval scope, or approval hash binding does not match the current operation. |
+| `71` | Unsafe operation | Planner/apply safety policy blocked mutation, support-bundle path/ownership/identity proof failed, or distribution ownership validation refused replacement, repair, or removal. |
+| `72` | Partial failure | Mixed cleanup outcome, support-bundle encryption/recovery remained incomplete, failed benchmark command/identity/cleanup evidence, or installed distribution lifecycle/recovery could not complete safely. |
 
 JSON mode uses the same process exit codes. Classified CLI, manifest, import, state, and runtime failures use a JSON error envelope on stderr. Installed-lifecycle `hostwright-dist` commands require `--output json` and use this schema-1 stderr envelope:
 

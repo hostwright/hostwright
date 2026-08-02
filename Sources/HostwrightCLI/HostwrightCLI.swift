@@ -143,6 +143,9 @@ public enum HostwrightCLI {
             return try run(command: command, environment: environment)
         } catch let error as HostwrightDiagnostic {
             return failure(code: error.code, message: error.message, output: outputHint)
+        } catch let error as HostwrightSupportBundleError {
+            let diagnostic = error.diagnostic
+            return failure(code: diagnostic.code, message: diagnostic.message, output: outputHint)
         } catch let error as CLIUsageError {
             return failure(code: .commandUsage, message: "\(error.message)\n\n\(helpText)", output: outputHint)
         } catch let error as ManifestParseError {
@@ -349,6 +352,15 @@ public enum HostwrightCLI {
             ).run()
         case .traces(let options):
             return try TraceCommandRunner(
+                options: options,
+                stateStoreConfiguration: try hostwrightStateStoreConfiguration(
+                    explicitPath: options.stateDatabasePath,
+                    environment: environment
+                ),
+                environment: environment
+            ).run()
+        case .supportBundle(let options):
+            return try SupportBundleCommandRunner(
                 options: options,
                 stateStoreConfiguration: try hostwrightStateStoreConfiguration(
                     explicitPath: options.stateDatabasePath,
@@ -615,6 +627,11 @@ public enum HostwrightCLI {
       hostwright cleanup [path] [--state-db <path>] --dry-run [--team-profile <path>]
       hostwright cleanup [path] [--state-db <path>] --confirm-cleanup <token> [--team-profile <path> --approval-record <path>]
       hostwright diagnostics [--state-db <path>] --bundle <path> [--project <name>] [--manifest <path>]
+      hostwright diagnostics support status [--state-db <path>] [--output text|json]
+      hostwright diagnostics support preview [--state-db <path>] [--project <name>] [--manifest <path>] [--output text|json]
+      hostwright diagnostics support create [--state-db <path>] [--project <name>] [--manifest <path>] --output-path <absolute-new-path> --confirm-preview <sha256> [--encrypt-recipient <keychain-certificate-reference>] [--output text|json]
+      hostwright diagnostics support delete [--state-db <path>] --bundle <absolute-path> --confirm-bundle <sha256> [--output text|json]
+      hostwright diagnostics support recover [--state-db <path>] [--output text|json]
       hostwright benchmark --image <local-image> --samples <3-10> --report <path> --source-commit <40-hex> --source-dirty <true|false> --expected-container-version <version> [--attended-sleep-wake-seconds <15-300>] --confirm-live
       hostwright extension check --declaration <absolute-path> --executable <absolute-path> [--output text|json]
       hostwright doctor [--state-db <path>] [--json|--output text|json]
@@ -645,8 +662,8 @@ public enum HostwrightCLI {
     Apply is a compatibility entry point for an exact confirmed up lifecycle plan. Generate its hash with up --dry-run; execution uses the same durable DAG and saga as up.
     Lifecycle dry-runs emit deterministic plans; confirmed up, down, run, start, stop, restart, rm, and update executions emit deterministic per-resource outcomes. Every lifecycle command supports --json or --output json.
     Cleanup deletes only exact cleanup-eligible Hostwright-owned stopped/created/exited containers after dry-run token confirmation.
-    Diagnostics writes a local redacted JSON bundle only. It never uploads telemetry.
-    JSON output is supported for capabilities, paths, migrate preview, restart-budget, maintenance, ownership, every state, secret, registry, and image subcommand, import-stack, plan, status, every lifecycle command, events, recovery, extension check, doctor, and errors when --json or --output json is present.
+    Diagnostics-v1 remains a local redacted JSON export. Support bundles add bounded preview, confirmation-bound local creation, optional Keychain CMS encryption, durable recovery, and exact receipt-proven deletion. Neither workflow uploads telemetry.
+    JSON output is supported for capabilities, paths, migrate preview, restart-budget, maintenance, ownership, metrics, traces, support bundles, every state, secret, registry, and image subcommand, import-stack, plan, status, every lifecycle command, events, recovery, extension check, doctor, and errors when --json or --output json is present.
     Team profiles and approvals are loaded only from explicit local paths. Profile-aware mutations require an approval bound to the exact profile, manifest, and plan or cleanup token.
     Benchmark runs are explicit local hardware evidence. They refuse image pulls and broad cleanup, use bounded disposable Hostwright-owned resources, and write only the requested non-existing report path.
     Extension check executes one reviewed-local protocol handshake from explicit absolute paths. The protocol grants no Hostwright capability, but the reviewed executable still has the invoking macOS account's ambient privileges; it is not sandboxed.
@@ -664,6 +681,7 @@ public enum HostwrightCLI {
       hostwright events --project api-local --output json
       hostwright recovery --output json
       hostwright diagnostics --bundle ./hostwright-diagnostics.json
+      hostwright diagnostics support preview --output json
       hostwright benchmark --image docker.io/library/python:alpine --samples 3 --report /tmp/hostwright-benchmark.json --source-commit 0123456789012345678901234567890123456789 --source-dirty true --expected-container-version 1.0.0 --confirm-live
       hostwright extension check --declaration /tmp/extension.json --executable /tmp/extension --output json
       hostwright doctor --output json

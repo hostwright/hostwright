@@ -72,6 +72,19 @@ public enum HostwrightErrorCode: String, Sendable {
     case daemonDenied = "HW-DAEMON-104"
     case daemonCancelled = "HW-DAEMON-105"
     case daemonPartialEffect = "HW-DAEMON-106"
+    case supportInvalidContract = "HW-SUPPORT-001"
+    case supportPreviewChanged = "HW-SUPPORT-002"
+    case supportUnsafeOutputPath = "HW-SUPPORT-003"
+    case supportSectionLimitExceeded = "HW-SUPPORT-004"
+    case supportPlaintextLimitExceeded = "HW-SUPPORT-005"
+    case supportInvalidRecipientReference = "HW-SUPPORT-006"
+    case supportEncryptionUnavailable = "HW-SUPPORT-007"
+    case supportEncryptionFailed = "HW-SUPPORT-008"
+    case supportReceiptUnavailable = "HW-SUPPORT-009"
+    case supportBundleIdentityChanged = "HW-SUPPORT-010"
+    case supportRecoveryRequired = "HW-SUPPORT-011"
+    case supportRecoverySafeHold = "HW-SUPPORT-012"
+    case supportCancelled = "HW-SUPPORT-013"
 }
 
 public struct HostwrightDiagnostic: Error, Equatable, Sendable {

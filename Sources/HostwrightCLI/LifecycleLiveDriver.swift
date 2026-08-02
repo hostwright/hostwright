@@ -1004,7 +1004,10 @@ private struct LifecycleRecoveryDeadline: Sendable {
     }
 }
 
-private struct LifecycleRecoveryDeadlineEffects: LifecycleSagaEffects {
+private struct LifecycleRecoveryDeadlineEffects:
+    LifecycleSagaEffects,
+    LifecycleSagaCompensationVerifying
+{
     let base: any LifecycleSagaEffects
     let deadline: LifecycleRecoveryDeadline
 
@@ -1043,6 +1046,44 @@ private struct LifecycleRecoveryDeadlineEffects: LifecycleSagaEffects {
             }
         } catch {
             return .failed(timeoutFailure(context: context))
+        }
+    }
+
+    func verifyCompensation(
+        plan: LifecyclePlan,
+        context: LifecycleSagaContext
+    ) async -> LifecycleSagaCompensationVerification {
+        guard plan.command == .update else {
+            return .verified(
+                LifecycleNodeVerification(
+                    summaryRedacted: "No update revision restoration was required."
+                )
+            )
+        }
+        guard let verifier = base as? any LifecycleSagaCompensationVerifying else {
+            return .safeHold(
+                reasonCode:
+                    LifecycleRecoverySafeHoldReason.restoredHealthFailed.rawValue,
+                hintRedacted:
+                    "The bounded recovery path cannot verify the restored revision. " +
+                    "Preserve the exact recovery checkpoint."
+            )
+        }
+        do {
+            return try await deadline.run {
+                await verifier.verifyCompensation(
+                    plan: plan,
+                    context: context
+                )
+            }
+        } catch {
+            return .safeHold(
+                reasonCode:
+                    LifecycleRecoverySafeHoldReason.restoredHealthFailed.rawValue,
+                hintRedacted:
+                    "The bounded restored-revision health verification timed out. " +
+                    "Preserve the exact recovery checkpoint."
+            )
         }
     }
 
@@ -2358,6 +2399,7 @@ struct LifecyclePersistedRecoveryDriver {
         guard unsafeFailures.isEmpty else {
             throw LifecyclePersistedRecoveryError.safeHold(
                 LifecycleRecoverySafeHold(
+                    reasonCode: .ambiguousEffect,
                     reason:
                         "A failed update step has ambiguous or partial effects.",
                     affectedNodeKeys: unsafeFailures.map(\.stepKey)
@@ -2418,6 +2460,7 @@ struct LifecyclePersistedRecoveryDriver {
             guard unsafeNodeKeys.isEmpty else {
                 throw LifecyclePersistedRecoveryError.safeHold(
                     LifecycleRecoverySafeHold(
+                        reasonCode: .ambiguousEffect,
                         reason:
                             "Interrupted update effects are ambiguous or partial; " +
                             "exact compensation cannot be proven.",
@@ -2472,6 +2515,7 @@ struct LifecyclePersistedRecoveryDriver {
                 }) else {
                     throw LifecyclePersistedRecoveryError.safeHold(
                         LifecycleRecoverySafeHold(
+                            reasonCode: .healthyRevisionUnavailable,
                             reason:
                                 "The persisted update does not prove the exact prior revision was healthy.",
                             affectedNodeKeys: [node.key]
@@ -2728,7 +2772,7 @@ actor LifecycleRuntimeExecutionState {
     let desiredState: DesiredRuntimeState
     var observedState: ObservedRuntimeState
     var bindingsByResourceUUID: [String: LifecycleResourceBinding]
-    let desiredByNode: [String: DesiredRuntimeService]
+    var desiredByNode: [String: DesiredRuntimeService]
     var specialEvidenceByNodeKey: [String: LifecycleSpecialNodeEvidence] = [:]
 
     init(
@@ -2800,6 +2844,13 @@ actor LifecycleRuntimeExecutionState {
 
     func desiredService(for nodeKey: String) -> DesiredRuntimeService? {
         desiredByNode[nodeKey]
+    }
+
+    func setDesiredService(
+        _ service: DesiredRuntimeService,
+        for nodeKey: String
+    ) {
+        desiredByNode[nodeKey] = service
     }
 
     func recordSpecialEvidence(
@@ -3064,7 +3115,10 @@ struct LifecycleLiveValidator: LifecycleSagaContextValidating {
     }
 }
 
-struct LifecycleLiveEffects: LifecycleSagaEffects {
+struct LifecycleLiveEffects:
+    LifecycleSagaEffects,
+    LifecycleSagaCompensationVerifying
+{
     let adapter: any RuntimeAdapter
     let state: LifecycleRuntimeExecutionState
     let store: SQLiteStateStore
@@ -4111,6 +4165,183 @@ struct LifecycleLiveEffects: LifecycleSagaEffects {
         case .waiting, .executing, .succeeding, .failing:
             return .noEffect(
                 "Checkpointed \(kind.rawValue) probe is resumable."
+            )
+        }
+    }
+
+    func verifyCompensation(
+        plan: LifecyclePlan,
+        context: LifecycleSagaContext
+    ) async -> LifecycleSagaCompensationVerification {
+        guard plan.command == .update else {
+            return .verified(
+                LifecycleNodeVerification(
+                    summaryRedacted: "No update revision restoration was required."
+                )
+            )
+        }
+        let priorNodes = plan.nodes.filter { $0.action == .retire }
+            .sorted { $0.key < $1.key }
+        guard !priorNodes.isEmpty else {
+            return .verified(
+                LifecycleNodeVerification(
+                    summaryRedacted: "The update had no prior revision to restore."
+                )
+            )
+        }
+        do {
+            let capability = try await adapter.capabilitySnapshot()
+            guard capability.descriptor.providerID == plan.providerID,
+                  capability.canonicalSHA256 == plan.capabilitySHA256 else {
+                throw LifecycleSpecialExecutionError.staleCapability
+            }
+            var finalVerification = LifecycleNodeVerification(
+                summaryRedacted: "Exact prior revisions were restored and verified healthy."
+            )
+            for prior in priorNodes {
+                let desired = try LifecycleRevisionCodec
+                    .decodeRedactedDesiredJSON(
+                        prior.desiredSpecificationJSONRedacted
+                    )
+                let revisionSHA256 = try LifecycleRevisionCodec
+                    .revisionSHA256(for: desired)
+                guard prior.preconditions.contains(where: {
+                    $0.kind == "old-revision-verified-healthy" &&
+                        $0.expectedValue == revisionSHA256
+                }) else {
+                    throw StateStoreError.invalidRecord(
+                        "The compensated update lacks exact prior healthy-revision proof."
+                    )
+                }
+                let allRecords = try store.ownership.loadAll()
+                let records = allRecords.filter { record in
+                    record.resourceUUID == prior.resourceUUID &&
+                        record.resourceIdentifier == prior.resourceIdentifier &&
+                        record.resourceGeneration == prior.resourceGeneration &&
+                        record.projectResourceUUID == plan.projectResourceUUID &&
+                        record.projectGeneration == plan.projectGeneration &&
+                        record.providerGeneration == plan.providerGeneration &&
+                        RuntimeProviderBinding.stableID(for: record.runtimeAdapter) ==
+                            plan.providerID
+                }
+                guard records.count == 1,
+                      let binding = await state.binding(
+                          resourceUUID: prior.resourceUUID,
+                          resourceIdentifier: prior.resourceIdentifier
+                      ),
+                      binding.resourceUUID == prior.resourceUUID,
+                      binding.resourceGeneration == prior.resourceGeneration else {
+                    throw StateStoreError.invalidRecord(
+                        "The compensated update lacks one exact restored ownership binding."
+                    )
+                }
+                let checks = restoredHealthChecks(for: desired)
+                var finalNode: LifecyclePlanNode?
+                for check in checks {
+                    let key = String(
+                        "rollback-verify-\(prior.key)-\(check.suffix)".prefix(127)
+                    )
+                    let verificationNode = try LifecyclePlanNode(
+                        key: key,
+                        action: .verify,
+                        serviceName: prior.serviceName,
+                        resourceIdentifier: prior.resourceIdentifier,
+                        resourceUUID: prior.resourceUUID,
+                        resourceGeneration: prior.resourceGeneration,
+                        fencingToken: context.fencingToken,
+                        dependencies: [],
+                        preconditions: [
+                            LifecyclePlanCondition(
+                                kind: "rollback-restored-revision",
+                                subject: desired.identity.displayName,
+                                expectedValue: revisionSHA256
+                            )
+                        ],
+                        postconditions: [check.condition],
+                        timeoutSeconds: prior.timeoutSeconds,
+                        compensation: nil,
+                        desiredSpecificationJSONRedacted:
+                            prior.desiredSpecificationJSONRedacted
+                    )
+                    await state.setDesiredService(desired, for: key)
+                    guard case .accepted = await apply(
+                        node: verificationNode,
+                        context: context
+                    ) else {
+                        throw StateStoreError.invalidRecord(
+                            "A restored revision did not pass its bounded \(check.suffix) health check."
+                        )
+                    }
+                    guard case .satisfied(let verification) = await observe(
+                        node: verificationNode,
+                        context: context
+                    ) else {
+                        throw StateStoreError.invalidRecord(
+                            "A restored revision lacks exact structured \(check.suffix) health proof."
+                        )
+                    }
+                    finalVerification = verification
+                    finalNode = verificationNode
+                }
+                guard let finalNode else {
+                    throw StateStoreError.invalidRecord(
+                        "Restored revision verification produced no health check."
+                    )
+                }
+                try await markHealthyRevision(
+                    node: finalNode,
+                    context: context,
+                    identity: desired.identity,
+                    observedAt: hostwrightTimestamp(),
+                    desiredService: desired
+                )
+            }
+            return .verified(finalVerification)
+        } catch {
+            let diagnostic = RuntimeRedactionPolicy.default.redact(
+                String(describing: error)
+            )
+            return .safeHold(
+                reasonCode:
+                    LifecycleRecoverySafeHoldReason.restoredHealthFailed.rawValue,
+                hintRedacted:
+                    "Restored revision health could not be proven: \(diagnostic) " +
+                    "Inspect with `hostwright recovery --output json`; retry only the exact group " +
+                    "with `hostwright recovery rollback --group \(context.groupID) " +
+                    "--confirm-plan \(plan.planSHA256)`."
+            )
+        }
+    }
+
+    private func restoredHealthChecks(
+        for desired: DesiredRuntimeService
+    ) -> [(suffix: String, condition: LifecyclePlanCondition)] {
+        if desired.probes.configuredKinds.isEmpty {
+            return [
+                (
+                    "running",
+                    LifecyclePlanCondition(
+                        kind: "lifecycle",
+                        subject: desired.identity.displayName,
+                        expectedValue: RuntimeLifecycleState.running.rawValue
+                    )
+                )
+            ]
+        }
+        return desired.probes.configuredKinds.map { kind in
+            let expected: String
+            switch kind {
+            case .startup: expected = "succeeded"
+            case .readiness: expected = "ready"
+            case .liveness: expected = "healthy"
+            }
+            return (
+                kind.rawValue,
+                LifecyclePlanCondition(
+                    kind: "probe-\(kind.rawValue)",
+                    subject: desired.identity.displayName,
+                    expectedValue: expected
+                )
             )
         }
     }
@@ -5823,6 +6054,11 @@ struct LifecycleLiveEffects: LifecycleSagaEffects {
             )
         }
         let marksHealthyRevision = node.action == .promote ||
+            (context.plan.command == .rollback &&
+                node.action == .verify &&
+                node.preconditions.contains(where: {
+                    $0.kind == "rollback-restored-revision"
+                })) ||
             (context.plan.command != .update &&
                 node.action == .verify &&
                 node.postconditions.contains(where: {
@@ -5874,7 +6110,8 @@ struct LifecycleLiveEffects: LifecycleSagaEffects {
         node: LifecyclePlanNode,
         context: LifecycleSagaContext,
         identity: RuntimeServiceIdentity,
-        observedAt: String
+        observedAt: String,
+        desiredService: DesiredRuntimeService? = nil
     ) async throws {
         guard let current = try store.ownership.loadAll().first(where: {
             $0.resourceUUID == node.resourceUUID &&
@@ -5885,9 +6122,14 @@ struct LifecycleLiveEffects: LifecycleSagaEffects {
                 "Verified healthy revision is missing exact ownership state."
             )
         }
+        let resolvedDesiredService = if let desiredService {
+            desiredService
+        } else {
+            await state.desiredService(for: node.key)
+        }
         let metadata = try lifecycleOwnershipMetadataJSON(
             identity: identity,
-            desiredService: await state.desiredService(for: node.key),
+            desiredService: resolvedDesiredService,
             healthy: true,
             capabilitySHA256: context.plan.capabilitySHA256,
             planSHA256: context.plan.planSHA256

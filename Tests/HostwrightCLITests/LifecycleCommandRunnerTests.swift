@@ -954,7 +954,8 @@ struct LifecycleCommandRunnerTests {
             planSHA256: plan.planSHA256,
             checkpoint: "\(completed.key):safe-hold",
             completedNodeKeys: [completed.key],
-            recoveryHintRedacted: "Preserve the exact safe-hold checkpoint."
+            recoveryHintRedacted: "Preserve the exact safe-hold checkpoint.",
+            recoveryReasonCode: "rollback.restored-health-failed"
         )
         let driver = ScriptedLifecycleCommandDriver(
             preparation: preparation,
@@ -993,7 +994,8 @@ struct LifecycleCommandRunnerTests {
             "completedNodeKeys": [completed.key],
             "nodeCount": plan.nodes.count,
             "resourceOutcomes": resourceOutcomes,
-            "recoveryHint": execution.recoveryHintRedacted
+            "recoveryHint": execution.recoveryHintRedacted,
+            "recoveryReasonCode": "rollback.restored-health-failed"
         ])
         #expect(result.exitCode == CLIExitCode.partialFailure.rawValue)
         #expect(result.standardOutput.isEmpty)

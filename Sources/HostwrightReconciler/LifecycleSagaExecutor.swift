@@ -203,6 +203,18 @@ public protocol LifecycleSagaEffects: Sendable {
     ) async -> LifecycleSagaCompensationOutcome
 }
 
+public enum LifecycleSagaCompensationVerification: Equatable, Sendable {
+    case verified(LifecycleNodeVerification)
+    case safeHold(reasonCode: String, hintRedacted: String)
+}
+
+public protocol LifecycleSagaCompensationVerifying: Sendable {
+    func verifyCompensation(
+        plan: LifecyclePlan,
+        context: LifecycleSagaContext
+    ) async -> LifecycleSagaCompensationVerification
+}
+
 public protocol LifecycleSagaFinalizing: Sendable {
     func finalize(
         context: LifecycleSagaContext
@@ -237,6 +249,7 @@ public struct LifecycleSagaExecutionResult: Equatable, Sendable {
     public let checkpoint: String
     public let completedNodeKeys: [String]
     public let recoveryHintRedacted: String
+    public let recoveryReasonCode: String?
 
     public init(
         status: LifecycleSagaExecutionStatus,
@@ -245,7 +258,8 @@ public struct LifecycleSagaExecutionResult: Equatable, Sendable {
         planSHA256: String,
         checkpoint: String,
         completedNodeKeys: [String],
-        recoveryHintRedacted: String
+        recoveryHintRedacted: String,
+        recoveryReasonCode: String? = nil
     ) {
         self.status = status
         self.operationID = operationID
@@ -254,6 +268,7 @@ public struct LifecycleSagaExecutionResult: Equatable, Sendable {
         self.checkpoint = checkpoint
         self.completedNodeKeys = completedNodeKeys
         self.recoveryHintRedacted = recoveryHintRedacted
+        self.recoveryReasonCode = recoveryReasonCode
     }
 }
 
@@ -581,7 +596,8 @@ public struct LifecycleSagaExecutor: Sendable {
                     group: group,
                     completed: completedAfterRecovery,
                     checkpoint: "\(ambiguous.key):ambiguous-after-resume",
-                    hint: "Runtime observation could not prove whether the interrupted effect occurred."
+                    hint: "Runtime observation could not prove whether the interrupted effect occurred.",
+                    reasonCode: LifecycleRecoverySafeHoldReason.ambiguousEffect.rawValue
                 )
             )
         }
@@ -669,7 +685,8 @@ public struct LifecycleSagaExecutor: Sendable {
                         completed: completed.union(advanced),
                         checkpoint: "\(stale.node.key):context-stale",
                         hint:
-                            "Provider identity, generation, capabilities, ownership, or fencing changed before mutation."
+                            "Provider identity, generation, capabilities, ownership, or fencing changed before mutation.",
+                        reasonCode: LifecycleRecoverySafeHoldReason.missingOwnership.rawValue
                     )
                 )
             }
@@ -807,6 +824,31 @@ public struct LifecycleSagaExecutor: Sendable {
             }
 
             let completedAfterAttempts = completed.union(advanced)
+            let restoredHealthFailures = (
+                ambiguousNodes + acceptedWithoutEffectNodes +
+                    effectPresentNodes + definitiveFailures
+            ).filter {
+                plan.command == .rollback &&
+                    $0.action == .verify &&
+                    $0.preconditions.contains {
+                        $0.kind == "rollback-restored-revision"
+                    }
+            }
+            if let failedHealth = restoredHealthFailures.sorted(
+                by: { $0.key < $1.key }
+            ).first {
+                return .terminal(
+                    try safeHold(
+                        plan: plan,
+                        group: group,
+                        completed: completedAfterAttempts,
+                        checkpoint: "\(failedHealth.key):restored-health-safe-hold",
+                        hint:
+                            "Rollback effects completed, but the exact restored revision did not prove healthy. Preserve all owned resources and inspect the recorded probe evidence.",
+                        reasonCode: "rollback.restored-health-failed"
+                    )
+                )
+            }
             if let ambiguous = (ambiguousNodes + acceptedWithoutEffectNodes)
                 .sorted(by: { $0.key < $1.key })
                 .first {
@@ -826,7 +868,8 @@ public struct LifecycleSagaExecutor: Sendable {
                         group: group,
                         completed: completedAfterAttempts,
                         checkpoint: checkpoint,
-                        hint: hint
+                        hint: hint,
+                        reasonCode: LifecycleRecoverySafeHoldReason.ambiguousEffect.rawValue
                     )
                 )
             }
@@ -1281,6 +1324,17 @@ public struct LifecycleSagaExecutor: Sendable {
     ) async throws -> LifecycleSagaExecutionResult {
         let affectedKeys = completed.union(currentNodes.map(\.key))
         let affected = plan.nodes.filter { affectedKeys.contains($0.key) }
+        if let irreversible = affected.first(where: { $0.action == .runHook }) {
+            return try safeHold(
+                plan: plan,
+                group: group,
+                completed: completed,
+                checkpoint: "\(irreversible.key):irreversible-effect-safe-hold",
+                hint:
+                    "\(reason) Hook \(irreversible.key) completed and its external effects cannot be inverted safely.",
+                reasonCode: LifecycleRecoverySafeHoldReason.irreversibleEffect.rawValue
+            )
+        }
         let rollbackStepsByKey = Dictionary(
             grouping: try store.operationGroupSteps.load(groupID: group.id)
                 .filter { $0.direction == .rollback },
@@ -1293,7 +1347,8 @@ public struct LifecycleSagaExecutor: Sendable {
                     group: group,
                     completed: completed,
                     checkpoint: "\(node.key):compensation-unavailable",
-                    hint: "\(reason) The exact inverse is unavailable; preserve state and owned resources."
+                    hint: "\(reason) The exact inverse is unavailable; preserve state and owned resources.",
+                    reasonCode: LifecycleRecoverySafeHoldReason.missingInverse.rawValue
                 )
             }
             let previousRollbackSteps = rollbackStepsByKey[node.key] ?? []
@@ -1305,7 +1360,8 @@ public struct LifecycleSagaExecutor: Sendable {
                         completed: completed,
                         checkpoint: "\(node.key):compensation-record-mismatch",
                         hint:
-                            "\(reason) The persisted compensation action does not match the exact planned inverse."
+                            "\(reason) The persisted compensation action does not match the exact planned inverse.",
+                        reasonCode: LifecycleRecoverySafeHoldReason.missingInverse.rawValue
                     )
                 }
                 if latest.status == .succeeded {
@@ -1355,7 +1411,8 @@ public struct LifecycleSagaExecutor: Sendable {
                         completed: completed,
                         checkpoint: "\(node.key):compensation-ambiguous-after-resume",
                         hint:
-                            "\(reason) Re-observation could not prove whether the interrupted compensation completed."
+                            "\(reason) Re-observation could not prove whether the interrupted compensation completed.",
+                        reasonCode: LifecycleRecoverySafeHoldReason.ambiguousEffect.rawValue
                     )
                 }
             }
@@ -1366,7 +1423,8 @@ public struct LifecycleSagaExecutor: Sendable {
                     completed: completed,
                     checkpoint: "\(node.key):compensation-attempts-exhausted",
                     hint:
-                        "\(reason) Compensation exhausted its bounded attempts; preserve the checkpoint for operator recovery."
+                        "\(reason) Compensation exhausted its bounded attempts; preserve the checkpoint for operator recovery.",
+                    reasonCode: LifecycleRecoverySafeHoldReason.compensationFailed.rawValue
                 )
             }
             let validation = await validator.validate(
@@ -1386,7 +1444,8 @@ public struct LifecycleSagaExecutor: Sendable {
                     group: group,
                     completed: completed,
                     checkpoint: "\(node.key):compensation-context-stale",
-                    hint: "\(reason) Compensation refused because ownership or fencing changed."
+                    hint: "\(reason) Compensation refused because ownership or fencing changed.",
+                    reasonCode: LifecycleRecoverySafeHoldReason.missingOwnership.rawValue
                 )
             }
             try recordStep(
@@ -1446,7 +1505,51 @@ public struct LifecycleSagaExecutor: Sendable {
                     group: group,
                     completed: completed,
                     checkpoint: "\(node.key):compensation-failed",
-                    hint: "\(reason) Compensation failed; preserve the checkpoint for operator recovery."
+                    hint: "\(reason) Compensation failed; preserve the checkpoint for operator recovery.",
+                    reasonCode: LifecycleRecoverySafeHoldReason.compensationFailed.rawValue
+                )
+            }
+        }
+        var restoredHealth = "not-required"
+        if let verifier = effects as? any LifecycleSagaCompensationVerifying {
+            switch await verifier.verifyCompensation(
+                plan: plan,
+                context: context(
+                    plan: plan,
+                    group: group,
+                    attempt: 1,
+                    direction: .rollback
+                )
+            ) {
+            case .verified(let verification):
+                guard let lockOwner = group.lockOwner else {
+                    throw LifecycleSagaError.stateFailure(
+                        "Lifecycle compensation lost its finite lease before restored-health verification."
+                    )
+                }
+                let now = clock.now()
+                try store.operationGroups.recordCheckpointRenewingLease(
+                    groupID: group.id,
+                    expectedFencingToken: group.fencingToken,
+                    expectedLockOwner: lockOwner,
+                    checkpoint: "rollback-restored-health-verified",
+                    verificationJSONRedacted: try jsonObject([
+                        "reasonCode": "rollback.restored-health-verified",
+                        "summary": verification.summaryRedacted,
+                        "observationSHA256": verification.observationSHA256 ?? ""
+                    ]),
+                    lockExpiresAt: try Self.leaseExpiration(after: now),
+                    updatedAt: now
+                )
+                restoredHealth = "verified"
+            case .safeHold(let reasonCode, let hintRedacted):
+                return try safeHold(
+                    plan: plan,
+                    group: group,
+                    completed: completed,
+                    checkpoint: "rollback-restored-health-safe-hold",
+                    hint: hintRedacted,
+                    reasonCode: reasonCode
                 )
             }
         }
@@ -1458,7 +1561,8 @@ public struct LifecycleSagaExecutor: Sendable {
             updatedAt: clock.now(),
             metadataJSONRedacted: try jsonObject([
                 "result": LifecycleSagaExecutionStatus.compensated.rawValue,
-                "planSHA256": plan.planSHA256
+                "planSHA256": plan.planSHA256,
+                "restoredHealth": restoredHealth
             ])
         )
         return result(
@@ -1528,18 +1632,23 @@ public struct LifecycleSagaExecutor: Sendable {
         group: OperationGroupRecord,
         completed: Set<String>,
         checkpoint: String,
-        hint: String
+        hint: String,
+        reasonCode: String? = nil
     ) throws -> LifecycleSagaExecutionResult {
+        var metadata: [String: Any] = [
+            "result": LifecycleSagaExecutionStatus.safeHold.rawValue,
+            "planSHA256": plan.planSHA256
+        ]
+        if let reasonCode {
+            metadata["reasonCode"] = reasonCode
+        }
         try store.operationGroups.finish(
             groupID: group.id,
             status: .failed,
             checkpoint: checkpoint,
             manualRecoveryHintRedacted: hint,
             updatedAt: clock.now(),
-            metadataJSONRedacted: try jsonObject([
-                "result": LifecycleSagaExecutionStatus.safeHold.rawValue,
-                "planSHA256": plan.planSHA256
-            ])
+            metadataJSONRedacted: try jsonObject(metadata)
         )
         return result(
             status: .safeHold,
@@ -1548,7 +1657,8 @@ public struct LifecycleSagaExecutor: Sendable {
             groupID: group.id,
             checkpoint: checkpoint,
             completed: completed,
-            hint: hint
+            hint: hint,
+            reasonCode: reasonCode
         )
     }
 
@@ -1559,7 +1669,8 @@ public struct LifecycleSagaExecutor: Sendable {
         groupID: String,
         checkpoint: String,
         completed: Set<String>,
-        hint: String
+        hint: String,
+        reasonCode: String? = nil
     ) -> LifecycleSagaExecutionResult {
         result(
             status: status,
@@ -1568,7 +1679,8 @@ public struct LifecycleSagaExecutor: Sendable {
             groupID: groupID,
             checkpoint: checkpoint,
             completed: completed.sorted(),
-            hint: hint
+            hint: hint,
+            reasonCode: reasonCode
         )
     }
 
@@ -1579,7 +1691,8 @@ public struct LifecycleSagaExecutor: Sendable {
         groupID: String,
         checkpoint: String,
         completed: [String],
-        hint: String
+        hint: String,
+        reasonCode: String? = nil
     ) -> LifecycleSagaExecutionResult {
         LifecycleSagaExecutionResult(
             status: status,
@@ -1588,7 +1701,8 @@ public struct LifecycleSagaExecutor: Sendable {
             planSHA256: plan.planSHA256,
             checkpoint: checkpoint,
             completedNodeKeys: completed.sorted(),
-            recoveryHintRedacted: RuntimeRedactionPolicy.default.redact(hint)
+            recoveryHintRedacted: RuntimeRedactionPolicy.default.redact(hint),
+            recoveryReasonCode: reasonCode
         )
     }
 

@@ -38,6 +38,8 @@ New runtime resources use collision-resistant v2 identifiers and exact labels fo
 
 Operation recovery records bind exact checkpoints, failed/completed steps, verified effects, and precomputed inverse actions. Confirmed resume or rollback re-observes the runtime and proceeds only when identity, ownership, fence, and effect remain exact.
 
+Automatic compensation and confirmed rollback select prior revisions only from exact healthy ownership/recovery evidence. Completion requires one exact resource UUID/generation and fresh running plus configured startup/readiness/liveness proof. Ambiguous effects, irreversible hooks, missing ownership/inverses, unavailable prior or sensitive configuration, compensation failure, and failed restored health use stable bounded safe-hold reason codes. Restored-health failure preserves owned resources and cannot trigger inverse-of-rollback candidate recreation.
+
 ## Local State Boundary
 
 State-backed commands default to the per-user Application Support database. An explicit CLI override wins over `HOSTWRIGHT_STATE_DB`, which wins over the default. Before SQLite or daemon-lock use, Hostwright enforces absolute normalized paths, safe root/current-user parent ownership, no group/other-writable or access-granting-ACL parents, no user-controlled directory symlinks, exact `0700` owned directories, and current-user-owned regular single-link `0600` sensitive files without special bits or access-granting ACL entries. Creation explicitly applies those modes instead of depending on the caller's `umask`.

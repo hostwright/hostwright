@@ -92,7 +92,7 @@ Those events and daemon operation records are local forensic inputs for `hostwri
 
 Both daemon modes may execute only the supported `up` lifecycle DAG through the exact production CLI lifecycle driver. There is no daemon-specific provider executor and no direct Apple command path. The daemon reuses provider capability binding, exact plan confirmation, project/resource UUID ownership, provider/project generations, fencing, the three-attempt node retry limit, compensation, and safe holds.
 
-The current Phase 08 boundary does not add autonomous last-healthy rollback selection, garbage collection, broad deletion, Phase 09 transport, or multi-host authority. Unsupported drift and unmanaged collisions fail before mutation. Explicit CLI lifecycle and cleanup confirmation contracts remain unchanged.
+The daemon uses the shared Gate 7 last-verified-healthy compensation contract: exact inverse effects must be followed by fresh prior-revision ownership, running, and configured-probe proof or a reason-coded safe hold. It does not add garbage collection, broad deletion, Phase 09 transport, or multi-host authority. Unsupported drift and unmanaged collisions fail before mutation. Explicit CLI lifecycle and cleanup confirmation contracts remain unchanged.
 
 ### Health-gated rollout
 
@@ -166,5 +166,5 @@ Status and validation are read-only. A failed preflight performs no plist or lau
 ## Current Sequenced Limitations
 
 - privileged helper
-- autonomous last-healthy rollback selection and safe-hold expansion
+- complete checkpoint taxonomy and kill-point qualification
 - image, volume, or unmanaged cleanup

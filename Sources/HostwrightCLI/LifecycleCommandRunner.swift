@@ -696,6 +696,9 @@ public struct LifecycleCommandRunner: Sendable {
                     executionStatus: result.status
                 )
             }
+            if let reasonCode = result.recoveryReasonCode {
+                payload["recoveryReasonCode"] = reasonCode
+            }
             let output = CLIJSON.render(payload)
             return CLIRunResult(
                 standardOutput: succeeded ? output : "",
@@ -742,6 +745,9 @@ public struct LifecycleCommandRunner: Sendable {
             }
         }
         if !result.recoveryHintRedacted.isEmpty {
+            if let reasonCode = result.recoveryReasonCode {
+                lines.append("Recovery reason: \(reasonCode)")
+            }
             lines.append(result.recoveryHintRedacted)
         }
         let detail = lines.joined(separator: "\n")

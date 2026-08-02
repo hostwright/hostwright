@@ -12,9 +12,9 @@ Phase 06 qualification is complete for exact Hostwright-owned persistent storage
 
 Phase 07 qualification is complete for the exact networking subset each provider advertises. Hostwright now qualifies UUID-owned project networks, deterministic project DNS and service aliases, structured TCP/UDP and Unix-socket publication, guarded host access, explicit LAN exposure, local TLS and mTLS ingress, fail-closed ingress/egress policy, authenticated service tunnels, and signed sandboxed network-provider modules through `hostwright-network-helper`. Unsupported providers or unavailable exposure modes fail before mutation; generic public relays, unmanaged DNS mutation, and a general plugin system remain outside scope.
 
-Phase 08 health-gated rollout now persists exact prior/candidate identities and requires every declared startup, readiness, liveness, dependency, stable-observation, progress-deadline, restart-budget, and maintenance gate before promotion. Missing or ambiguous proof stops promotion, and restart resumes the same durable stage without a duplicate candidate. Autonomous last-healthy selection, broad cleanup, telemetry completion, and aggregate Phase 08 qualification remain incomplete.
+Phase 08 health-gated rollout now persists exact prior/candidate identities and requires every declared startup, readiness, liveness, dependency, stable-observation, progress-deadline, restart-budget, and maintenance gate before promotion. Missing or ambiguous proof stops promotion, and restart resumes the same durable stage without a duplicate candidate. Complete mutation-checkpoint enumeration, broad cleanup, telemetry completion, and aggregate Phase 08 qualification remain incomplete.
 
-Phase 08 is in progress. Gates 1–5 implement the exact current-user LaunchAgent lifecycle, level-triggered unattended reconciliation, secure declared-configuration reload, schema-v17 workload/project restart budgets, and deterministic timezone-aware maintenance deferral with deadlines, preview, exact cancellation, emergency override, and pre-effect revalidation. Expanded unattended rollout/rollback, complete checkpoint/finalizer/GC authority, OSLog, durable watches, metrics, traces, support bundles, and aggregate soak evidence remain unavailable until their owning Phase 08 gates pass.
+Phase 08 is in progress. Gates 1–7 implement the exact current-user LaunchAgent lifecycle, level-triggered unattended reconciliation, secure declared-configuration reload, schema-v17 workload/project restart budgets, deterministic timezone-aware maintenance deferral, health-gated rollout, and exact last-healthy rollback with reason-coded safe holds. Complete checkpoint/finalizer/GC authority, OSLog, durable watches, metrics, traces, support bundles, and aggregate soak evidence remain unavailable until their owning Phase 08 gates pass.
 
 Permanent exclusions are limited to private Apple APIs, unsupported Intel/old-macOS emulation, unsafe writes without cluster quorum, silent telemetry, unauthenticated public exposure, and destructive garbage collection of unmanaged resources. Homebrew-core and direct guest accelerator constraints have implemented fallback tracks.
 
@@ -134,7 +134,7 @@ Hostwright is not production ready.
 - JSON output for `validate`, `apply`, `logs`, and `cleanup` success paths.
 - Shell completion installation or shell profile mutation.
 - User-facing broad Apple container cleanup, volume deletion, or unmanaged deletion.
-- Automatic rollback outside the exact lifecycle and image effects whose inverse ownership and identity are durably proven.
+- Automatic rollback outside the exact lifecycle and image effects whose inverse ownership, identity, prior revision, and restored health are durably proven.
 - Runtime mutation beyond create-missing-service, managed start, managed restart, and exact cleanup-eligible container delete.
 - Container-exec or interactive health checks.
 - Aggressive restart loops or daemon-enforced restart mutation.

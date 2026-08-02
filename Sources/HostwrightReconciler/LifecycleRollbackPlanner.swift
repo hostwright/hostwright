@@ -30,6 +30,18 @@ public enum LifecycleRecoveryRequest: String, Codable, Equatable, Sendable {
     case rollback
 }
 
+public enum LifecycleRecoverySafeHoldReason: String, Codable, Equatable, Sendable {
+    case ambiguousEffect = "rollback.effect-ambiguous"
+    case irreversibleEffect = "rollback.effect-irreversible"
+    case missingOwnership = "rollback.ownership-missing"
+    case missingInverse = "rollback.inverse-missing"
+    case compensationFailed = "rollback.compensation-failed"
+    case healthyRevisionUnavailable = "rollback.healthy-revision-unavailable"
+    case sensitiveConfigurationUnavailable = "rollback.sensitive-configuration-unavailable"
+    case restoredHealthFailed = "rollback.restored-health-failed"
+    case planningIncomplete = "rollback.planning-incomplete"
+}
+
 public struct LifecycleHealthyRevisionRecord: Codable, Equatable, Sendable {
     public let projectName: String
     public let serviceName: String
@@ -168,11 +180,14 @@ public struct LifecycleRollbackPlan: Equatable, Sendable {
 }
 
 public struct LifecycleRecoverySafeHold: Equatable, Sendable {
+    public let schemaVersion: Int
+    public let reasonCode: LifecycleRecoverySafeHoldReason
     public let reason: String
     public let affectedNodeKeys: [String]
     public let operatorCommands: [String]
 
     public init(
+        reasonCode: LifecycleRecoverySafeHoldReason = .planningIncomplete,
         reason: String,
         affectedNodeKeys: [String],
         operatorCommands: [String] = [
@@ -181,6 +196,8 @@ public struct LifecycleRecoverySafeHold: Equatable, Sendable {
             "hostwright update --dry-run"
         ]
     ) {
+        schemaVersion = 1
+        self.reasonCode = reasonCode
         self.reason = reason
         self.affectedNodeKeys = affectedNodeKeys.sorted()
         self.operatorCommands = operatorCommands
@@ -221,6 +238,7 @@ public struct LifecycleRollbackPlanner: Sendable {
         if proof.certainty == .ambiguous {
             return .safeHold(
                 LifecycleRecoverySafeHold(
+                    reasonCode: .ambiguousEffect,
                     reason:
                         "Runtime effects are ambiguous; exact ownership and inverse actions " +
                         "cannot be proven.",
@@ -256,6 +274,7 @@ public struct LifecycleRollbackPlanner: Sendable {
         }) {
             return .safeHold(
                 LifecycleRecoverySafeHold(
+                    reasonCode: .irreversibleEffect,
                     reason:
                         "Hook \(irreversibleHook.key) completed and its external effects " +
                         "cannot be inverted safely.",
@@ -270,6 +289,7 @@ public struct LifecycleRollbackPlanner: Sendable {
             ) else {
                 return .safeHold(
                     LifecycleRecoverySafeHold(
+                        reasonCode: .missingOwnership,
                         reason:
                             "Exact ownership is missing for affected resource " +
                             "\(node.resourceUUID).",
@@ -282,6 +302,7 @@ public struct LifecycleRollbackPlanner: Sendable {
             ), node.compensation != nil else {
                 return .safeHold(
                     LifecycleRecoverySafeHold(
+                        reasonCode: .missingInverse,
                         reason:
                             "An exact inverse is unavailable for completed node \(node.key).",
                         affectedNodeKeys: affectedKeys
@@ -318,6 +339,7 @@ public struct LifecycleRollbackPlanner: Sendable {
         }) {
             return .safeHold(
                 LifecycleRecoverySafeHold(
+                    reasonCode: .healthyRevisionUnavailable,
                     reason:
                         "The exact verified healthy revision required to recreate " +
                         "\(missingExactRevision.key) is unavailable.",
@@ -332,6 +354,7 @@ public struct LifecycleRollbackPlanner: Sendable {
         ) {
             return .safeHold(
                 LifecycleRecoverySafeHold(
+                    reasonCode: .sensitiveConfigurationUnavailable,
                     reason:
                         "Rollback inverse \(unsafeInverse.key) requires desired " +
                         "configuration whose redacted sensitive values or references " +
@@ -421,6 +444,89 @@ public struct LifecycleRollbackPlanner: Sendable {
             )
             rollbackNodes.append(rollback)
             previousRollbackKey = rollback.key
+        }
+        let affectedIdentities = Set(
+            effectedNodes.compactMap { node -> RuntimeServiceIdentity? in
+                guard !node.desiredSpecificationJSONRedacted.isEmpty else {
+                    return nil
+                }
+                return try? LifecycleRevisionCodec.decodeRedactedDesiredJSON(
+                    node.desiredSpecificationJSONRedacted
+                ).identity
+            }
+        )
+        for healthy in healthyRevisions
+        where affectedIdentities.contains(healthy.identity) {
+            let desired = try LifecycleRevisionCodec.decodeRedactedDesiredJSON(
+                healthy.desiredSpecificationJSONRedacted
+            )
+            let kinds = desired.probes.configuredKinds
+            let checks: [(suffix: String, condition: LifecyclePlanCondition)] =
+                kinds.isEmpty
+                ? [
+                    (
+                        "running",
+                        LifecyclePlanCondition(
+                            kind: "lifecycle",
+                            subject: healthy.identity.displayName,
+                            expectedValue: RuntimeLifecycleState.running.rawValue
+                        )
+                    )
+                ]
+                : kinds.map { kind in
+                    let expected: String
+                    switch kind {
+                    case .startup: expected = "succeeded"
+                    case .readiness: expected = "ready"
+                    case .liveness: expected = "healthy"
+                    }
+                    return (
+                        kind.rawValue,
+                        LifecyclePlanCondition(
+                            kind: "probe-\(kind.rawValue)",
+                            subject: healthy.identity.displayName,
+                            expectedValue: expected
+                        )
+                    )
+                }
+            let matchingEffect = effectedNodes.first {
+                $0.resourceUUID.lowercased() == healthy.resourceUUID.lowercased()
+            }
+            guard let fencingToken = matchingEffect?.fencingToken ??
+                    effectedNodes.first?.fencingToken else {
+                continue
+            }
+            for check in checks {
+                let identityKey = healthy.identity.displayName
+                    .replacingOccurrences(of: "/", with: "-")
+                let key = String(
+                    "rollback-verify-\(identityKey)-\(check.suffix)".prefix(127)
+                )
+                let node = try LifecyclePlanNode(
+                    key: key,
+                    action: .verify,
+                    serviceName: healthy.identity.displayName,
+                    resourceIdentifier: healthy.resourceIdentifier,
+                    resourceUUID: healthy.resourceUUID,
+                    resourceGeneration: healthy.resourceGeneration,
+                    fencingToken: fencingToken,
+                    dependencies: previousRollbackKey.map { [$0] } ?? [],
+                    preconditions: [
+                        LifecyclePlanCondition(
+                            kind: "rollback-restored-revision",
+                            subject: healthy.identity.displayName,
+                            expectedValue: healthy.revisionSHA256
+                        )
+                    ],
+                    postconditions: [check.condition],
+                    timeoutSeconds: 60,
+                    compensation: nil,
+                    desiredSpecificationJSONRedacted:
+                        healthy.desiredSpecificationJSONRedacted
+                )
+                rollbackNodes.append(node)
+                previousRollbackKey = node.key
+            }
         }
         return try LifecyclePlanCompiler.stableTopologicalOrder(rollbackNodes)
     }

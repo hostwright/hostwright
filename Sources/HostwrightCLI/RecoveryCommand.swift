@@ -269,7 +269,9 @@ struct RecoveryCommandRunner {
             return CLIRunResult(
                 standardError: CLIJSON.render([
                     "kind": "error",
+                    "schemaVersion": hold.schemaVersion,
                     "code": HostwrightErrorCode.partialFailure.rawValue,
+                    "reasonCode": hold.reasonCode.rawValue,
                     "exitCode": Int(exitCode.rawValue),
                     "message": message,
                     "affectedNodeKeys": affectedNodeKeys,
@@ -280,6 +282,7 @@ struct RecoveryCommandRunner {
         }
         var lines = [
             "\(HostwrightErrorCode.partialFailure.rawValue): \(message)",
+            "Reason: \(hold.reasonCode.rawValue)",
             "Affected nodes: \(affectedNodeKeys.isEmpty ? "none" : affectedNodeKeys.joined(separator: ","))",
             "Operator commands:"
         ]

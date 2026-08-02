@@ -64,6 +64,10 @@ final class LifecycleRollbackPlannerTests: XCTestCase {
                     "\(request) must not recreate a revision from redacted secrets."
                 )
             }
+            XCTAssertEqual(
+                hold.reasonCode,
+                .sensitiveConfigurationUnavailable
+            )
             XCTAssertTrue(hold.reason.contains(recreateEffect.key))
             XCTAssertTrue(hold.reason.contains("cannot be reconstructed exactly"))
             XCTAssertFalse(hold.reason.contains(secret))
@@ -104,7 +108,20 @@ final class LifecycleRollbackPlannerTests: XCTestCase {
         let effected = fixture.plan.nodes.filter {
             completed.contains($0.idempotencyKey) && $0.action.mutatesRuntime
         }
-        XCTAssertEqual(rollback.nodes.count, effected.count)
+        let inverseNodes = rollback.nodes.filter { $0.action != .verify }
+        let healthNodes = rollback.nodes.filter { $0.action == .verify }
+        XCTAssertEqual(inverseNodes.count, effected.count)
+        XCTAssertEqual(healthNodes.map(\.postconditions.first?.kind), [
+            "probe-startup",
+            "probe-readiness"
+        ])
+        XCTAssertTrue(healthNodes.allSatisfy {
+            $0.compensation == nil &&
+                $0.preconditions.contains {
+                    $0.kind == "rollback-restored-revision" &&
+                        $0.expectedValue == fixture.healthy.revisionSHA256
+                }
+        })
         XCTAssertEqual(resume.pendingNodes, rollback.nodes)
         XCTAssertTrue(resume.satisfiedNodeKeys.isEmpty)
         XCTAssertEqual(
@@ -112,11 +129,11 @@ final class LifecycleRollbackPlannerTests: XCTestCase {
             fixture.healthy.revisionSHA256
         )
         XCTAssertEqual(
-            rollback.nodes.first?.action,
+            inverseNodes.first?.action,
             effected.last?.compensation?.action
         )
         XCTAssertEqual(
-            rollback.nodes.last?.action,
+            inverseNodes.last?.action,
             effected.first?.compensation?.action
         )
         for (index, node) in rollback.nodes.enumerated() {
@@ -150,6 +167,8 @@ final class LifecycleRollbackPlannerTests: XCTestCase {
         guard case .safeHold(let hold) = decision else {
             return XCTFail("Ambiguous effects must enter safe hold.")
         }
+        XCTAssertEqual(hold.schemaVersion, 1)
+        XCTAssertEqual(hold.reasonCode, .ambiguousEffect)
         XCTAssertTrue(hold.reason.contains("ambiguous"))
         XCTAssertFalse(hold.operatorCommands.isEmpty)
         XCTAssertTrue(hold.operatorCommands.allSatisfy { !$0.contains("secret") })
@@ -179,6 +198,7 @@ final class LifecycleRollbackPlannerTests: XCTestCase {
         guard case .safeHold(let hold) = decision else {
             return XCTFail("Completed hooks cannot be automatically inverted.")
         }
+        XCTAssertEqual(hold.reasonCode, .irreversibleEffect)
         XCTAssertTrue(hold.reason.contains("Hook"))
     }
 
@@ -206,6 +226,7 @@ final class LifecycleRollbackPlannerTests: XCTestCase {
         guard case .safeHold(let ownershipHold) = missingOwnership else {
             return XCTFail("Missing ownership must enter safe hold.")
         }
+        XCTAssertEqual(ownershipHold.reasonCode, .missingOwnership)
         XCTAssertTrue(ownershipHold.reason.contains("ownership"))
 
         let missingInverse = try LifecycleRollbackPlanner().decide(
@@ -225,6 +246,7 @@ final class LifecycleRollbackPlannerTests: XCTestCase {
         guard case .safeHold(let inverseHold) = missingInverse else {
             return XCTFail("Missing inverse must enter safe hold.")
         }
+        XCTAssertEqual(inverseHold.reasonCode, .missingInverse)
         XCTAssertTrue(inverseHold.reason.contains("inverse"))
     }
 
@@ -260,6 +282,7 @@ final class LifecycleRollbackPlannerTests: XCTestCase {
         guard case .safeHold(let hold) = decision else {
             return XCTFail("A different healthy resource must not satisfy exact rollback.")
         }
+        XCTAssertEqual(hold.reasonCode, .healthyRevisionUnavailable)
         XCTAssertTrue(hold.reason.contains("exact verified healthy revision"))
         XCTAssertFalse(hold.affectedNodeKeys.isEmpty)
     }

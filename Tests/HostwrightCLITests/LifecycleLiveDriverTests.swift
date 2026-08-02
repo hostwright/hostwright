@@ -1212,7 +1212,11 @@ final class LifecycleLiveDriverTests: XCTestCase {
                     timeoutSeconds: 60
                 )
             )
-            XCTAssertEqual(result.status, .succeeded)
+            XCTAssertEqual(
+                result.status,
+                .succeeded,
+                result.recoveryHintRedacted
+            )
             XCTAssertEqual(result.groupID, sourceGroup.id)
             XCTAssertEqual(try fixture.adapterSnapshot().mutations, [.create, .start])
         }
@@ -1506,7 +1510,7 @@ final class LifecycleLiveDriverTests: XCTestCase {
             XCTAssertEqual(resumed.status, .succeeded)
             XCTAssertEqual(
                 try fixture.adapterSnapshot().mutations,
-                [.create, .stop, .stop, .remove]
+                [.create, .start, .stop, .stop, .remove]
             )
             XCTAssertEqual(
                 try fixture.store.desiredStates.loadProject(
@@ -1622,12 +1626,20 @@ final class LifecycleLiveDriverTests: XCTestCase {
                     timeoutSeconds: 60
                 )
             )
-            XCTAssertEqual(result.status, .succeeded)
+            XCTAssertEqual(
+                result.status,
+                .succeeded,
+                result.recoveryHintRedacted
+            )
             let snapshot = try fixture.adapterSnapshot()
-            XCTAssertEqual(snapshot.mutations, [.create, .stop, .stop, .remove])
+            XCTAssertEqual(
+                snapshot.mutations,
+                [.create, .start, .stop, .stop, .remove]
+            )
             XCTAssertEqual(
                 snapshot.mutationResourceUUIDs,
                 [
+                    update.oldResourceUUID,
                     update.oldResourceUUID,
                     update.candidateResourceUUID,
                     update.candidateResourceUUID,
@@ -1644,6 +1656,63 @@ final class LifecycleLiveDriverTests: XCTestCase {
             )
             XCTAssertFalse(
                 snapshot.resourceUUIDs.contains(update.candidateResourceUUID)
+            )
+        }
+    }
+
+    func testPersistedRollbackSafeHoldsWhenRestoredRevisionIsNotRunning()
+        throws
+    {
+        try withFixture(existingManagedResource: true) { fixture in
+            let update = try recoveryUpdateFixture(fixture: fixture)
+            try seedCompletedUpdate(fixture: fixture, update: update)
+            let completedWithoutPriorStop = Set(
+                update.plan.nodes.filter {
+                    update.completedNodeKeys.contains($0.key) &&
+                        $0.action != .stop
+                }.map(\.key)
+            )
+            let sourceGroup = try persistLifecycleGroup(
+                store: fixture.store,
+                plan: update.plan,
+                status: .failed,
+                completedNodeKeys: completedWithoutPriorStop
+            )
+
+            let result = try LifecyclePersistedRecoveryDriver(
+                environment: fixture.environment
+            ).execute(
+                LifecyclePersistedRecoveryRequest(
+                    action: .rollback,
+                    groupID: sourceGroup.id,
+                    confirmationPlanSHA256: update.plan.planSHA256,
+                    stateStoreConfiguration: StateStoreConfiguration(
+                        explicitDatabasePath: fixture.databasePath
+                    ),
+                    timeoutSeconds: 60
+                )
+            )
+
+            XCTAssertEqual(result.status, .safeHold)
+            XCTAssertEqual(
+                result.recoveryReasonCode,
+                LifecycleRecoverySafeHoldReason.restoredHealthFailed.rawValue
+            )
+            XCTAssertTrue(result.checkpoint.contains("restored-health-safe-hold"))
+            let snapshot = try fixture.adapterSnapshot()
+            XCTAssertEqual(snapshot.mutations, [.create, .stop, .stop, .remove])
+            XCTAssertTrue(snapshot.resourceUUIDs.contains(update.oldResourceUUID))
+            XCTAssertFalse(
+                snapshot.resourceUUIDs.contains(update.candidateResourceUUID)
+            )
+            let group = try XCTUnwrap(
+                fixture.store.operationGroups.load(id: result.groupID)
+            )
+            XCTAssertEqual(group.status, .failed)
+            XCTAssertTrue(
+                group.metadataJSONRedacted.contains(
+                    LifecycleRecoverySafeHoldReason.restoredHealthFailed.rawValue
+                )
             )
         }
     }
@@ -1995,12 +2064,15 @@ final class LifecycleLiveDriverTests: XCTestCase {
             let resumed = try driver.execute(request)
             XCTAssertEqual(resumed.status, .succeeded)
             let snapshot = try fixture.adapterSnapshot()
-            XCTAssertEqual(snapshot.mutations, [.create, .stop, .stop, .remove])
+            XCTAssertEqual(
+                snapshot.mutations,
+                [.create, .start, .stop, .stop, .remove]
+            )
             XCTAssertEqual(
                 snapshot.mutationResourceUUIDs.filter {
                     $0 == update.oldResourceUUID
                 }.count,
-                1
+                2
             )
             let sentinelResourceUUID = HostwrightResourceUUID.legacy(
                 kind: "service",
@@ -2299,6 +2371,7 @@ private func recoveryUpdateFixture(
     let completedActions: Set<LifecyclePlanAction> = [
         .create,
         .start,
+        .stop,
         .promote,
         .retire
     ]

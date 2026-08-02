@@ -19,6 +19,11 @@ public enum DaemonWakeReason: String, Equatable, Sendable {
     case shutdownRequested
 }
 
+public protocol DaemonControlServing: Sendable {
+    func start() throws
+    func stop()
+}
+
 public struct DaemonConfiguration: Equatable, Sendable {
     public let mode: DaemonMode
     public let configPath: String
@@ -210,6 +215,7 @@ public struct DaemonLoopRunner {
     private let instanceLock: any DaemonInstanceLock
     private let shutdownToken: DaemonShutdownToken
     private let configurationMonitor: DaemonConfigurationChangeMonitor?
+    private let controlService: (any DaemonControlServing)?
 
     public init(
         configuration: DaemonConfiguration,
@@ -220,6 +226,7 @@ public struct DaemonLoopRunner {
         instanceLock: any DaemonInstanceLock,
         shutdownToken: DaemonShutdownToken = DaemonShutdownToken(),
         configurationMonitor: DaemonConfigurationChangeMonitor? = nil,
+        controlService: (any DaemonControlServing)? = nil,
         readConfig: @escaping (String) throws -> String,
         readConfiguration: ((
             String,
@@ -237,6 +244,7 @@ public struct DaemonLoopRunner {
         self.instanceLock = instanceLock
         self.shutdownToken = shutdownToken
         self.configurationMonitor = configurationMonitor
+        self.controlService = controlService
         self.readConfig = readConfig
         self.readConfiguration = readConfiguration ?? { path, kind, expected in
             let text = try readConfig(path)
@@ -274,7 +282,9 @@ public struct DaemonLoopRunner {
         defer { configurationMonitor?.stop() }
 
         let store = SQLiteStateStore(configuration: configuration.stateStoreConfiguration)
-        try store.migrate()
+        _ = try StateUpgradeService(store: store).migrateToLatestWithVerifiedBackup()
+        try controlService?.start()
+        defer { controlService?.stop() }
         try recordLifecycleEvent(
             store: store,
             type: "daemon.started",

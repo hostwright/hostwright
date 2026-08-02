@@ -309,6 +309,57 @@ public struct DarwinControlPeerCodeValidator: ControlPeerCodeValidating, Sendabl
   }
 }
 
+public enum DarwinCurrentControlCodeIdentity {
+  private static let revocationFlag = UInt32(1) << 30
+
+  public static func inspect() throws -> CodeIdentity {
+    var code: SecCode?
+    guard SecCodeCopySelf([], &code) == errSecSuccess, let code else {
+      throw ControlPeerAuthenticationError.codeUnavailable
+    }
+    guard
+      SecCodeCheckValidity(
+        code,
+        SecCSFlags(rawValue: kSecCSStrictValidate | revocationFlag),
+        nil
+      ) == errSecSuccess
+    else {
+      throw ControlPeerAuthenticationError.codeRequirementRejected
+    }
+    var staticCode: SecStaticCode?
+    guard SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess, let staticCode else {
+      throw ControlPeerAuthenticationError.staticCodeUnavailable
+    }
+    var information: CFDictionary?
+    guard
+      SecCodeCopySigningInformation(
+        staticCode,
+        SecCSFlags(rawValue: kSecCSSigningInformation),
+        &information
+      ) == errSecSuccess,
+      let values = information as? [String: Any],
+      let identifier = values[kSecCodeInfoIdentifier as String] as? String,
+      let cdHashData = values[kSecCodeInfoUnique as String] as? Data
+    else {
+      throw ControlPeerAuthenticationError.signingInformationUnavailable
+    }
+    let hash = cdHashData.map { String(format: "%02x", $0) }.joined()
+    let team = values[kSecCodeInfoTeamIdentifier as String] as? String
+    let identity = CodeIdentity(
+      teamIdentifier: team,
+      signingIdentifier: identifier,
+      codeDirectoryHash: hash,
+      validationMode: team == nil ? .pinnedAdHoc : .installedRequirement
+    )
+    do {
+      try identity.validate()
+    } catch {
+      throw ControlPeerAuthenticationError.codeIdentityMalformed
+    }
+    return identity
+  }
+}
+
 public struct DeclaredControlCredential: Sendable, Equatable {
   public let identifier: String
   public let p256X963PublicKey: Data

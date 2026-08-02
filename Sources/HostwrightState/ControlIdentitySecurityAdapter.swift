@@ -28,7 +28,18 @@ public struct SQLiteControlIdentitySecurityAdapter: Sendable {
     codeIdentity: CodeIdentity
   ) throws -> ControlPeerIdentityRecord {
     let matches = try store.controlIdentities.listIdentities().filter {
-      $0.userID == userID && $0.codeIdentity == codeIdentity
+      guard $0.userID == userID,
+        $0.codeIdentity.validationMode == codeIdentity.validationMode
+      else { return false }
+      switch codeIdentity.validationMode {
+      case .installedRequirement:
+        return $0.codeIdentity.teamIdentifier == codeIdentity.teamIdentifier
+          && $0.codeIdentity.signingIdentifier == codeIdentity.signingIdentifier
+      case .pinnedAdHoc:
+        return $0.codeIdentity.teamIdentifier == nil
+          && $0.codeIdentity.signingIdentifier == codeIdentity.signingIdentifier
+          && $0.codeIdentity.codeDirectoryHash == codeIdentity.codeDirectoryHash
+      }
     }
     guard let identity = matches.first else {
       throw ControlPeerAuthenticationError.subjectNotDeclared

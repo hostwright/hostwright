@@ -5,6 +5,16 @@ import HostwrightCore
 import XCTest
 
 final class ControlRequestTests: XCTestCase {
+    func testControlToolParserAcceptsOnlyAbsolutePersistentSocketPath() throws {
+        XCTAssertEqual(
+            try LocalControlToolCommand.parse(arguments: ["--socket", "/tmp/control.sock"]),
+            .persistent(socketPath: "/tmp/control.sock")
+        )
+        XCTAssertThrowsError(
+            try LocalControlToolCommand.parse(arguments: ["--socket", "control.sock"])
+        )
+    }
+
     func testParserAcceptsVersionedBoundedEventRequest() throws {
         let request = try LocalControlRequestParser.parse(
             Data(#"{"apiVersion":2,"requestID":"request-1","operation":"events","project":"demo","eventType":"apply.succeeded","service":"api","severity":"info","limit":25,"sort":"desc"}"#.utf8)

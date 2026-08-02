@@ -2,10 +2,15 @@ import Darwin
 import Dispatch
 import Foundation
 import HostwrightCLI
+import HostwrightControl
+import HostwrightControlPlane
+import HostwrightControlSecurity
+import HostwrightControlTransport
 import HostwrightCore
 import HostwrightDaemonCore
 import HostwrightObservability
 import HostwrightRuntime
+import HostwrightState
 
 @main
 struct HostwrightDaemonEntrypoint {
@@ -69,7 +74,8 @@ struct HostwrightDaemonEntrypoint {
                 arguments: arguments,
                 runtimeAdapter: RuntimeAdapterFactory.defaultLocal(),
                 reconciliationDriver: UnattendedLifecycleReconciler(),
-                shutdownToken: shutdownToken
+                shutdownToken: shutdownToken,
+                controlServiceFactory: HostwrightDaemonControlService.make
             )
             let elapsed = (DispatchTime.now().uptimeNanoseconds - startedAt) / 1_000_000
             emitDaemonRecord(

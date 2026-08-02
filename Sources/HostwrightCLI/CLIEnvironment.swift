@@ -1,6 +1,7 @@
 import Darwin
 import Dispatch
 import Foundation
+import HostwrightControlSecurity
 import HostwrightCore
 import HostwrightDaemonCore
 import HostwrightHealth
@@ -52,6 +53,7 @@ public struct CLIEnvironment: @unchecked Sendable {
     public var benchmarkUUID: () -> UUID
     public var benchmarkNotice: (String) -> Void
     public var daemonLifecycleController: () -> DaemonLifecycleController
+    public var controlIdentityBootstrap: () throws -> Void
     public var observabilitySink: any HostwrightLogSinking
     public var observabilityCorrelationID: () -> String
     public var observabilityStatus: () -> HostwrightObservabilityStatus
@@ -142,6 +144,7 @@ public struct CLIEnvironment: @unchecked Sendable {
         daemonLifecycleController: @escaping () -> DaemonLifecycleController = {
             DaemonLifecycleController()
         },
+        controlIdentityBootstrap: @escaping () throws -> Void = {},
         observabilitySink: any HostwrightLogSinking = DisabledHostwrightLogSink(),
         observabilityCorrelationID: @escaping () -> String = { UUID().uuidString.lowercased() },
         observabilityStatus: @escaping () -> HostwrightObservabilityStatus = {
@@ -229,6 +232,7 @@ public struct CLIEnvironment: @unchecked Sendable {
         self.benchmarkUUID = benchmarkUUID
         self.benchmarkNotice = benchmarkNotice
         self.daemonLifecycleController = daemonLifecycleController
+        self.controlIdentityBootstrap = controlIdentityBootstrap
         self.observabilitySink = observabilitySink
         self.observabilityCorrelationID = observabilityCorrelationID
         self.observabilityStatus = observabilityStatus
@@ -331,6 +335,9 @@ public struct CLIEnvironment: @unchecked Sendable {
         benchmarkUUID: { UUID() },
         benchmarkNotice: { message in
             FileHandle.standardError.write(Data((message + "\n").utf8))
+        },
+        controlIdentityBootstrap: {
+            try HostwrightControlIdentityBootstrap.bootstrapCurrentProcess()
         },
         observabilitySink: HostwrightOSLogSink(),
         observabilityStatus: { HostwrightObservabilityStatus(configuration: .live) },

@@ -1,6 +1,8 @@
 import Darwin
 import Foundation
 import HostwrightControl
+import HostwrightControlPlane
+import HostwrightControlTransport
 import HostwrightCore
 
 let command: LocalControlToolCommand
@@ -19,6 +21,31 @@ case .version:
     print(HostwrightIdentity.version)
 case .help:
     print(LocalControlToolCommand.helpText, terminator: "")
+case .persistent(let socketPath):
+    do {
+        let requestData = try LocalControlInputReader.read(
+            maximumBytes: ControlPlaneContract.maximumRequestBytes
+        )
+        let request = try Phase09StrictDecoder.decode(
+            ControlRequestEnvelope.self,
+            from: requestData,
+            allowedKeys: [
+                "apiVersion", "protocolRevision", "requestID", "operation",
+                "timeoutMilliseconds", "idempotencyKey", "body"
+            ],
+            requiredKeys: [
+                "apiVersion", "protocolRevision", "requestID", "operation", "timeoutMilliseconds"
+            ]
+        )
+        let response = try PersistentControlClient(socketPath: socketPath).send(request)
+        FileHandle.standardOutput.write(try ControlPlaneCanonicalJSON.encode(response))
+        FileHandle.standardOutput.write(Data("\n".utf8))
+    } catch {
+        FileHandle.standardError.write(
+            Data("HW-API-001: The persistent control request failed.\n".utf8)
+        )
+        exit(LocalControlExitCode.unavailable.rawValue)
+    }
 case .run(let configuration):
     let result: LocalControlRunResult
     do {

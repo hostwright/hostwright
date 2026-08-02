@@ -314,7 +314,8 @@ public enum HostwrightCLI {
         case .daemon(let options):
             return try DaemonLifecycleCommandRunner(
                 options: options,
-                controller: environment.daemonLifecycleController()
+                controller: environment.daemonLifecycleController(),
+                controlIdentityBootstrap: environment.controlIdentityBootstrap
             ).run()
         case .restartBudget(let options):
             return try RestartBudgetCommandRunner(

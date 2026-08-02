@@ -64,6 +64,23 @@ public struct StateUpgradeMigrationResult: Codable, Equatable, Sendable {
     }
 }
 
+public struct StateUpgradePreparedMigrationResult: Codable, Equatable, Sendable {
+    public let schemaVersion: Int
+    public let kind: String
+    public let migration: StateUpgradeMigrationResult
+    public let rollbackSnapshot: StateUpgradeSnapshot?
+
+    public init(
+        migration: StateUpgradeMigrationResult,
+        rollbackSnapshot: StateUpgradeSnapshot?
+    ) {
+        self.schemaVersion = 1
+        self.kind = "stateUpgradePreparedMigrationResult"
+        self.migration = migration
+        self.rollbackSnapshot = rollbackSnapshot
+    }
+}
+
 public struct StateUpgradeRevision: Codable, Equatable, Sendable {
     public let databaseSHA256: String
     public let databaseBytes: UInt64
@@ -187,6 +204,58 @@ public struct StateUpgradeService: Sendable {
             fromSchemaVersion: before,
             toSchemaVersion: MigrationRunner.latestSchemaVersion
         )
+    }
+
+    public func migrateToLatestWithVerifiedBackup() throws -> StateUpgradePreparedMigrationResult {
+        try withExclusiveLifecycleFence {
+            guard let revision = try verifiedRevision() else {
+                try store.migrate()
+                try store.validateSchema()
+                return StateUpgradePreparedMigrationResult(
+                    migration: StateUpgradeMigrationResult(
+                        fromSchemaVersion: MigrationRunner.latestSchemaVersion,
+                        toSchemaVersion: MigrationRunner.latestSchemaVersion
+                    ),
+                    rollbackSnapshot: nil
+                )
+            }
+            if revision.stateSchemaVersion == MigrationRunner.latestSchemaVersion {
+                try store.validateSchema()
+                return StateUpgradePreparedMigrationResult(
+                    migration: StateUpgradeMigrationResult(
+                        fromSchemaVersion: revision.stateSchemaVersion,
+                        toSchemaVersion: revision.stateSchemaVersion
+                    ),
+                    rollbackSnapshot: nil
+                )
+            }
+
+            let databaseParent = (store.path as NSString).deletingLastPathComponent
+            let rollbackRoot = URL(fileURLWithPath: databaseParent, isDirectory: true)
+                .appendingPathComponent(".hostwright-state-upgrades", isDirectory: true)
+            let operationID = UUID().uuidString.lowercased()
+            let rollbackDirectory = rollbackRoot.appendingPathComponent(
+                operationID,
+                isDirectory: true
+            )
+            let pathManager = SecureStatePathManager()
+            try pathManager.ensurePrivateMaintenanceDirectory(rollbackRoot.path)
+            try pathManager.ensurePrivateMaintenanceDirectory(rollbackDirectory.path)
+            let snapshot = try createVerifiedSnapshot(
+                at: rollbackDirectory.appendingPathComponent("state.sqlite").path
+            )
+            try pathManager.writePrivateJSON(
+                snapshot,
+                to: rollbackDirectory.appendingPathComponent("snapshot-v1.json").path
+            )
+            try verify(snapshot)
+            let migration = try migrateToLatest()
+            try verify(snapshot)
+            return StateUpgradePreparedMigrationResult(
+                migration: migration,
+                rollbackSnapshot: snapshot
+            )
+        }
     }
 
     @discardableResult

@@ -407,6 +407,84 @@ final class StateUpgradeTests: XCTestCase {
         }
     }
 
+    func testV17MigrationCreatesVerifiedRollbackPackageAndReachesLatestSchema() throws {
+        try withTemporaryStore(throughVersion: 17) { store, directory in
+            let service = StateUpgradeService(store: store)
+
+            let result = try service.migrateToLatestWithVerifiedBackup()
+
+            XCTAssertEqual(result.kind, "stateUpgradePreparedMigrationResult")
+            XCTAssertEqual(result.migration.fromSchemaVersion, 17)
+            XCTAssertEqual(
+                result.migration.toSchemaVersion,
+                MigrationRunner.latestSchemaVersion
+            )
+            XCTAssertEqual(try store.schemaVersion(), MigrationRunner.latestSchemaVersion)
+
+            let snapshot = try XCTUnwrap(result.rollbackSnapshot)
+            XCTAssertEqual(snapshot.databasePath, store.path)
+            XCTAssertEqual(snapshot.stateSchemaVersion, 17)
+            XCTAssertGreaterThan(snapshot.databaseBytes, 0)
+            XCTAssertEqual(snapshot.databaseSHA256.count, 64)
+            XCTAssertNoThrow(try service.verify(snapshot))
+
+            let rollbackDirectory = URL(fileURLWithPath: snapshot.snapshotPath)
+                .deletingLastPathComponent()
+            let rollbackRoot = directory.appendingPathComponent(
+                ".hostwright-state-upgrades",
+                isDirectory: true
+            )
+            let manifestURL = rollbackDirectory.appendingPathComponent("snapshot-v1.json")
+            XCTAssertEqual(rollbackDirectory.deletingLastPathComponent(), rollbackRoot)
+            XCTAssertEqual(permissions(rollbackRoot.path), 0o700)
+            XCTAssertEqual(permissions(rollbackDirectory.path), 0o700)
+            XCTAssertEqual(permissions(snapshot.snapshotPath), 0o600)
+            XCTAssertEqual(permissions(manifestURL.path), 0o600)
+            XCTAssertEqual(
+                try JSONDecoder().decode(
+                    StateUpgradeSnapshot.self,
+                    from: Data(contentsOf: manifestURL)
+                ),
+                snapshot
+            )
+        }
+    }
+
+    func testAbsentDatabaseInitializesLatestWithoutRollbackSnapshot() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("hostwright-state-upgrade-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: false,
+            attributes: [.posixPermissions: 0o700]
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let store = SQLiteStateStore(path: directory.appendingPathComponent("state.sqlite").path)
+        let rollbackRoot = directory.appendingPathComponent(
+            ".hostwright-state-upgrades",
+            isDirectory: true
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: store.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: rollbackRoot.path))
+
+        let result = try StateUpgradeService(store: store).migrateToLatestWithVerifiedBackup()
+
+        XCTAssertEqual(result.kind, "stateUpgradePreparedMigrationResult")
+        XCTAssertEqual(
+            result.migration.fromSchemaVersion,
+            MigrationRunner.latestSchemaVersion
+        )
+        XCTAssertEqual(
+            result.migration.toSchemaVersion,
+            MigrationRunner.latestSchemaVersion
+        )
+        XCTAssertNil(result.rollbackSnapshot)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: store.path))
+        XCTAssertEqual(try store.schemaVersion(), MigrationRunner.latestSchemaVersion)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: rollbackRoot.path))
+    }
+
     private func withTemporaryStore(
         throughVersion: Int,
         _ body: (SQLiteStateStore, URL) throws -> Void

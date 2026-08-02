@@ -5,12 +5,16 @@ import HostwrightCore
 public enum LocalControlToolCommand: Equatable, Sendable {
     case version
     case help
+    case persistent(socketPath: String)
     case run(LocalControlConfiguration)
 
     public static func parse(arguments: [String]) throws -> LocalControlToolCommand {
         guard !arguments.isEmpty else { return .help }
         if arguments == ["--version"] || arguments == ["version"] { return .version }
         if arguments == ["--help"] || arguments == ["-h"] || arguments == ["help"] { return .help }
+        if arguments.count == 2, arguments[0] == "--socket", arguments[1].hasPrefix("/") {
+            return .persistent(socketPath: arguments[1])
+        }
 
         var manifestPath: String?
         var stateDatabasePath: String?
@@ -62,9 +66,11 @@ public enum LocalControlToolCommand: Equatable, Sendable {
 
     Usage:
       hostwright-control --version
+      hostwright-control --socket <absolute-control-socket>
       hostwright-control --manifest <absolute-path> [--state-db <absolute-path>] [--team-profile <absolute-path>]
 
-    Reads exactly one version-2 JSON request from stdin, writes exactly one JSON response to stdout, and exits.
+    Socket mode sends one revision-2.1 request through the authenticated persistent daemon socket.
+    Manifest mode is the bounded one-shot bootstrap companion and preserves revision-2.0 plan compatibility.
     Supported operations: plan, status, events, recovery, doctor, lifecycle, image, registry, and volume.
     Manifest, state, and team-profile paths are fixed by launch arguments and cannot be supplied by a request.
     This process does not expose apply, cleanup, logs, diagnostics export, benchmark, extension execution, or any generic mutation operation.

@@ -35,24 +35,18 @@ final class ControlIdentitySecurityAdapterTests: XCTestCase {
     }
   }
 
-  func testRejectsUndeclaredOrDuplicateActiveIdentity() throws {
+  func testInstalledRequirementAllowsCDHashRotationButRejectsDuplicateIdentity() throws {
     try withAdapter { store, adapter, identity in
-      XCTAssertThrowsError(
-        try adapter.resolve(
-          userID: identity.userID,
-          codeIdentity: CodeIdentity(
-            teamIdentifier: identity.codeIdentity.teamIdentifier,
-            signingIdentifier: identity.codeIdentity.signingIdentifier,
-            codeDirectoryHash: String(repeating: "b", count: 40),
-            validationMode: identity.codeIdentity.validationMode
-          )
+      let rotated = try adapter.resolve(
+        userID: identity.userID,
+        codeIdentity: CodeIdentity(
+          teamIdentifier: identity.codeIdentity.teamIdentifier,
+          signingIdentifier: identity.codeIdentity.signingIdentifier,
+          codeDirectoryHash: String(repeating: "b", count: 40),
+          validationMode: identity.codeIdentity.validationMode
         )
-      ) { error in
-        XCTAssertEqual(
-          error as? ControlPeerAuthenticationError,
-          .subjectNotDeclared
-        )
-      }
+      )
+      XCTAssertEqual(rotated.localSubject.identifier, identity.subjectID)
       XCTAssertThrowsError(
         try store.controlIdentities.declare(
           ControlPeerIdentityRecord(

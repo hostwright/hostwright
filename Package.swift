@@ -44,6 +44,10 @@ let package = Package(
         .library(name: "HostwrightControlPlane", targets: ["HostwrightControlPlane"]),
         .library(name: "HostwrightControlSecurity", targets: ["HostwrightControlSecurity"]),
         .library(name: "HostwrightControl", targets: ["HostwrightControl"]),
+        .library(
+            name: "HostwrightControlTransport",
+            targets: ["HostwrightControlTransport"]
+        ),
         .library(name: "HostwrightManifest", targets: ["HostwrightManifest"]),
         .library(name: "HostwrightRuntime", targets: ["HostwrightRuntime"]),
         .library(name: "HostwrightState", targets: ["HostwrightState"]),
@@ -86,6 +90,7 @@ let package = Package(
         .target(
             name: "HostwrightCLI",
             dependencies: [
+                "HostwrightControlSecurity",
                 "HostwrightCore",
                 "HostwrightDaemonCore",
                 "HostwrightExtensions",
@@ -110,7 +115,11 @@ let package = Package(
         ),
         .executableTarget(
             name: "HostwrightControlTool",
-            dependencies: ["HostwrightControl"]
+            dependencies: [
+                "HostwrightControl",
+                "HostwrightControlPlane",
+                "HostwrightControlTransport"
+            ]
         ),
         .executableTarget(
             name: "HostwrightContainerizationHelper",
@@ -126,10 +135,15 @@ let package = Package(
             name: "HostwrightDaemon",
             dependencies: [
                 "HostwrightCLI",
+                "HostwrightControl",
+                "HostwrightControlPlane",
+                "HostwrightControlSecurity",
+                "HostwrightControlTransport",
                 "HostwrightCore",
                 "HostwrightDaemonCore",
                 "HostwrightObservability",
-                "HostwrightRuntime"
+                "HostwrightRuntime",
+                "HostwrightState"
             ]
         ),
         .executableTarget(
@@ -191,6 +205,15 @@ let package = Package(
                 "HostwrightCore",
                 "HostwrightRegistry",
                 "HostwrightRuntime"
+            ]
+        ),
+        .target(
+            name: "HostwrightControlTransport",
+            dependencies: [
+                "HostwrightControlPlane",
+                "HostwrightControlSecurity",
+                "HostwrightCore",
+                "HostwrightState"
             ]
         ),
         .target(
@@ -405,6 +428,13 @@ let package = Package(
             ]
         ),
         .testTarget(
+            name: "HostwrightControlTransportTests",
+            dependencies: [
+                "HostwrightControlPlane",
+                "HostwrightControlTransport"
+            ]
+        ),
+        .testTarget(
             name: "HostwrightCoreTests",
             dependencies: ["HostwrightCore"],
             resources: [
@@ -487,6 +517,7 @@ let package = Package(
         .testTarget(
             name: "HostwrightDaemonTests",
             dependencies: [
+                "HostwrightDaemon",
                 "HostwrightDaemonCore",
                 "HostwrightManifest",
                 "HostwrightRuntime",

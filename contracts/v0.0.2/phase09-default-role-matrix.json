@@ -1,0 +1,7 @@
+[
+  { "role": "viewer", "resources": ["project", "service", "image", "volume", "registry", "secret-metadata", "runtime", "state", "daemon", "observability"], "verbs": ["get", "list", "watch"] },
+  { "role": "operator", "inherits": "viewer", "resources": ["project", "service", "runtime"], "verbs": ["plan", "start", "stop", "restart", "execute"] },
+  { "role": "maintainer", "inherits": "operator", "resources": ["project", "service", "image", "volume", "registry", "runtime"], "verbs": ["create", "update", "delete", "approve"] },
+  { "role": "security-admin", "resources": ["audit", "policy", "profile", "plugin", "provider", "secret-metadata"], "verbs": ["get", "list", "watch", "create", "update", "delete", "approve", "delegate", "admin"] },
+  { "role": "owner", "resources": ["project", "service", "image", "volume", "registry", "secret-metadata", "runtime", "state", "daemon", "observability", "audit", "policy", "profile", "plugin", "provider"], "verbs": ["get", "list", "watch", "plan", "create", "update", "delete", "start", "stop", "restart", "execute", "approve", "delegate", "admin"] }
+]

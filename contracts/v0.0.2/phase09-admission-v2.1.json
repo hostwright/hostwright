@@ -1,0 +1,9 @@
+{
+  "policyIdentifier": "built-in",
+  "stage": "authorizeEffectiveIntent",
+  "allowed": true,
+  "failurePolicy": "deny",
+  "reasonCode": "role-permits-effective-intent",
+  "mutations": [],
+  "advisory": false
+}

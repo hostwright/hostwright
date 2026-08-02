@@ -37,6 +37,7 @@ let package = Package(
             targets: ["HostwrightRuntimeConformanceTool"]
         ),
         .library(name: "HostwrightCore", targets: ["HostwrightCore"]),
+        .library(name: "HostwrightControlPlane", targets: ["HostwrightControlPlane"]),
         .library(name: "HostwrightControl", targets: ["HostwrightControl"]),
         .library(name: "HostwrightManifest", targets: ["HostwrightManifest"]),
         .library(name: "HostwrightRuntime", targets: ["HostwrightRuntime"]),
@@ -166,6 +167,10 @@ let package = Package(
             ]
         ),
         .target(name: "HostwrightCore"),
+        .target(
+            name: "HostwrightControlPlane",
+            dependencies: ["HostwrightCore"]
+        ),
         .target(
             name: "HostwrightControl",
             dependencies: [
@@ -348,6 +353,10 @@ let package = Package(
                 "HostwrightState"
             ],
             path: "Tests/HostwrightTunnelQualificationTool"
+        ),
+        .testTarget(
+            name: "HostwrightControlPlaneTests",
+            dependencies: ["HostwrightControlPlane"]
         ),
         .testTarget(
             name: "HostwrightControlTests",

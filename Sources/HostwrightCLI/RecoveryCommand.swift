@@ -75,6 +75,10 @@ struct RecoveryCommandRunner {
                 for record in records {
                     let group = record.group
                     let mode = recoveryMode(for: group)
+                    let checkpoint = group.groupKind == "lifecycle-v1"
+                        ? LifecycleMutationCheckpointRecord(
+                            checkpoint: group.checkpoint
+                        ) : nil
                     lines.append(
                         "- \(group.updatedAt) \(group.plannedActionType) " +
                             "\(group.serviceName ?? "project") status=\(group.status.rawValue) " +
@@ -82,6 +86,13 @@ struct RecoveryCommandRunner {
                     )
                     lines.append("  group: \(group.id)")
                     lines.append("  plan: \(group.planHash)")
+                    if let checkpoint {
+                        lines.append(
+                            "  checkpoint-contract: v\(checkpoint.schemaVersion) " +
+                                "class=\(checkpoint.classification.rawValue) " +
+                                "recovery=\(checkpoint.recovery.rawValue)"
+                        )
+                    }
                     if group.lockOwner != nil || group.lockExpiresAt != nil {
                         lines.append("  lock: owner=\(RuntimeRedactionPolicy.default.redact(group.lockOwner ?? "unknown")) expiresAt=\(group.lockExpiresAt ?? "unknown")")
                     }

@@ -216,6 +216,61 @@ final class LifecyclePlanTests: XCTestCase {
 }
 
 final class LifecycleSagaExecutorTests: XCTestCase {
+    func testMutationCheckpointTaxonomyClassifiesEverySagaTerminalAndBoundary()
+        throws
+    {
+        let cases: [
+            (String, LifecycleMutationCheckpointClass, LifecycleMutationRecoveryClass)
+        ] = [
+            ("intent-persisted", .intent, .resume),
+            ("create-web:effect-pending", .forwardEffect, .reobserve),
+            ("create-web:verified", .verification, .complete),
+            ("create-web:verified-after-resume", .verification, .complete),
+            ("create-web:compensation-pending", .compensation, .reobserve),
+            ("create-web:compensated", .compensation, .complete),
+            ("create-web:compensation-ambiguous-after-resume", .compensation, .safeHold),
+            ("create-web:compensation-attempts-exhausted", .compensation, .safeHold),
+            ("create-web:compensation-context-stale", .compensation, .safeHold),
+            ("create-web:compensation-failed", .compensation, .safeHold),
+            ("create-web:compensation-record-mismatch", .compensation, .safeHold),
+            ("create-web:compensation-unavailable", .compensation, .safeHold),
+            ("create-web:cancelled-before-effect", .interruption, .resume),
+            ("create-web:cancelled-no-effect", .interruption, .resume),
+            ("create-web:ambiguous-after-resume", .safeHold, .safeHold),
+            ("create-web:ambiguous-effect", .safeHold, .safeHold),
+            ("create-web:accepted-without-effect", .safeHold, .safeHold),
+            ("create-web:context-stale", .safeHold, .safeHold),
+            ("create-web:irreversible-effect-safe-hold", .safeHold, .safeHold),
+            ("create-web:restored-health-safe-hold", .restoredHealth, .safeHold),
+            ("rollback-restored-health-verified", .restoredHealth, .complete),
+            ("rollback-restored-health-safe-hold", .restoredHealth, .safeHold),
+            ("finalizer:started", .finalizer, .reobserve),
+            ("finalizer:failed", .finalizer, .reobserve),
+            ("finalizer:verified", .finalizer, .complete),
+            ("verified", .terminal, .complete),
+            ("compensated", .terminal, .complete)
+        ]
+        for (value, classification, recovery) in cases {
+            let record = try XCTUnwrap(
+                LifecycleMutationCheckpointRecord(checkpoint: value)
+            )
+            XCTAssertEqual(record.schemaVersion, 1)
+            XCTAssertEqual(record.checkpoint, value)
+            XCTAssertEqual(record.classification, classification)
+            XCTAssertEqual(record.recovery, recovery)
+            XCTAssertEqual(
+                record.nodeKey,
+                value.hasPrefix("create-web:") ? "create-web" : nil
+            )
+        }
+        XCTAssertNil(LifecycleMutationCheckpointRecord(checkpoint: ""))
+        XCTAssertNil(
+            LifecycleMutationCheckpointRecord(
+                checkpoint: "create-web:unknown-future-boundary"
+            )
+        )
+    }
+
     func testFinalizerRunsUnderActiveGroupAndResumesSameFence()
         async throws
     {
@@ -966,11 +1021,6 @@ final class LifecycleSagaExecutorTests: XCTestCase {
             let observations: [LifecycleSagaObservation] =
                 rollbackStatus == .started
                 ? [
-                    .noEffect(
-                        LifecycleNodeVerification(
-                            summaryRedacted: "second create had no effect"
-                        )
-                    ),
                     .satisfied(
                         LifecycleNodeVerification(
                             summaryRedacted:
@@ -978,13 +1028,7 @@ final class LifecycleSagaExecutorTests: XCTestCase {
                         )
                     )
                 ]
-                : [
-                    .noEffect(
-                        LifecycleNodeVerification(
-                            summaryRedacted: "second create had no effect"
-                        )
-                    )
-                ]
+                : []
             let effects = ScriptedLifecycleEffects(
                 apply: [],
                 observe: observations

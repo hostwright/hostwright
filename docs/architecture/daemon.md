@@ -166,5 +166,4 @@ Status and validation are read-only. A failed preflight performs no plist or lau
 ## Current Sequenced Limitations
 
 - privileged helper
-- complete checkpoint taxonomy and kill-point qualification
 - image, volume, or unmanaged cleanup

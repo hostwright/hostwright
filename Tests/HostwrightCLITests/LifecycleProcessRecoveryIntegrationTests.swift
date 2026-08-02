@@ -150,10 +150,22 @@ final class LifecycleProcessRecoveryIntegrationTests: XCTestCase {
                 }.count,
                 1
             )
-        case .compensationCheckpoint:
+        case .compensationCheckpoint, .compensationEffectSatisfied:
             XCTAssertEqual(
                 group.checkpoint,
                 "create-primary:compensation-pending"
+            )
+        case .finalizerEffectSatisfied:
+            XCTAssertEqual(group.checkpoint, "finalizer:started")
+            XCTAssertEqual(
+                try foundation.store.operationGroupSteps.load(
+                    groupID: foundation.groupID
+                ).filter {
+                    $0.stepKey == "create-primary" &&
+                        $0.direction == .forward &&
+                        $0.status == .succeeded
+                }.count,
+                1
             )
         }
 
@@ -204,7 +216,8 @@ final class LifecycleProcessRecoveryIntegrationTests: XCTestCase {
                 ledger.count(event: .compensate, node: "create-primary"),
                 0
             )
-        case .effectPartial, .compensationCheckpoint:
+        case .effectPartial, .compensationCheckpoint,
+                .compensationEffectSatisfied:
             XCTAssertEqual(group.status, .failed)
             XCTAssertEqual(group.checkpoint, "compensated")
             XCTAssertEqual(
@@ -251,6 +264,13 @@ final class LifecycleProcessRecoveryIntegrationTests: XCTestCase {
                         $0.direction == .forward &&
                         $0.status == .succeeded
                 }.count,
+                1
+            )
+        case .finalizerEffectSatisfied:
+            XCTAssertEqual(group.status, .succeeded)
+            XCTAssertEqual(group.checkpoint, "verified")
+            XCTAssertEqual(
+                ledger.count(event: .finalize, node: "lifecycle-finalizer"),
                 1
             )
         }
@@ -328,6 +348,8 @@ private enum ProcessRecoveryScenario: String, CaseIterable, Sendable {
     case effectAmbiguous = "effect-ambiguous"
     case verifiedCheckpoint = "verified-checkpoint"
     case compensationCheckpoint = "compensation-checkpoint"
+    case compensationEffectSatisfied = "compensation-effect-satisfied"
+    case finalizerEffectSatisfied = "finalizer-effect-satisfied"
 }
 
 private enum ProcessRecoveryStage: String, Sendable {
@@ -490,7 +512,10 @@ private struct ProcessRecoveryFoundation: Sendable {
             store: store,
             effects: ProcessRecoveryEffects(foundation: self),
             validator: ProcessRecoveryValidator(),
-            clock: ProcessRecoveryClock(stage: stage)
+            clock: ProcessRecoveryClock(stage: stage),
+            finalizer: scenario == .finalizerEffectSatisfied
+                ? ProcessRecoveryFinalizer(foundation: self)
+                : nil
         ).execute(
             plan: plan,
             operationID: operationID,
@@ -499,7 +524,8 @@ private struct ProcessRecoveryFoundation: Sendable {
             lockOwner: "lifecycle-process-\(stage.rawValue)"
         )
         switch scenario {
-        case .effectPartial, .compensationCheckpoint:
+        case .effectPartial, .compensationCheckpoint,
+                .compensationEffectSatisfied:
             guard result.status == .compensated else {
                 throw ProcessRecoveryError.workerFailed(
                     "Expected compensation, got \(result.status.rawValue)."
@@ -592,7 +618,7 @@ private struct ProcessRecoveryFoundation: Sendable {
         }
         return value.range(
             of:
-                "^ready:[a-z-]+:(intent-effect-pending|effect-before-observation|verified-checkpoint|compensation-checkpoint)\\n$",
+                "^ready:[a-z-]+:(intent-effect-pending|effect-before-observation|verified-checkpoint|compensation-checkpoint|compensation-effect-before-verification|finalizer-effect-before-verification)\\n$",
             options: .regularExpression
         ) != nil
     }
@@ -735,7 +761,8 @@ private struct ProcessRecoveryEffects: LifecycleSagaEffects {
             }
             let event: ProcessRecoveryLedgerEvent =
                 foundation.scenario == .effectPartial ||
-                foundation.scenario == .compensationCheckpoint
+                foundation.scenario == .compensationCheckpoint ||
+                foundation.scenario == .compensationEffectSatisfied
                 ? .applyPartial
                 : foundation.scenario == .effectAmbiguous
                     ? .applyAmbiguous
@@ -808,6 +835,12 @@ private struct ProcessRecoveryEffects: LifecycleSagaEffects {
                 node: node.key,
                 to: foundation.ledgerURL
             )
+            if foundation.stage == .kill,
+               foundation.scenario == .compensationEffectSatisfied {
+                try stop(
+                    boundary: "compensation-effect-before-verification"
+                )
+            }
             return .compensated(
                 LifecycleNodeVerification(
                     summaryRedacted: "persisted runtime effect removed"
@@ -861,6 +894,7 @@ private enum ProcessRecoveryLedgerEvent: String {
     case applyPartial = "apply-partial"
     case applyAmbiguous = "apply-ambiguous"
     case compensate
+    case finalize
 }
 
 private enum ProcessRecoveryLedgerState: Equatable {
@@ -959,8 +993,35 @@ private struct ProcessRecoveryLedger {
                 state = .ambiguous
             case .compensate:
                 state = .absent
+            case .finalize:
+                break
             }
         }
         return state
+    }
+}
+
+private struct ProcessRecoveryFinalizer: LifecycleSagaFinalizing {
+    let foundation: ProcessRecoveryFoundation
+
+    func finalize(context: LifecycleSagaContext) async throws {
+        let node = "lifecycle-finalizer"
+        let ledger = try ProcessRecoveryLedger.read(foundation.ledgerURL)
+        guard ledger.count(event: .finalize, node: node) == 0 else {
+            return
+        }
+        try ProcessRecoveryLedger.append(
+            .finalize,
+            node: node,
+            to: foundation.ledgerURL
+        )
+        if foundation.stage == .kill {
+            try foundation.publishReady(
+                boundary: "finalizer-effect-before-verification"
+            )
+            while true {
+                _ = Darwin.pause()
+            }
+        }
     }
 }

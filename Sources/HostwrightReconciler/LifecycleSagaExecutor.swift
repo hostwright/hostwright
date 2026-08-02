@@ -221,6 +221,106 @@ public protocol LifecycleSagaFinalizing: Sendable {
     ) async throws
 }
 
+public enum LifecycleMutationCheckpointClass: String, Codable, Equatable, Sendable {
+    case intent
+    case forwardEffect = "forward-effect"
+    case verification
+    case compensation
+    case restoredHealth = "restored-health"
+    case finalizer
+    case interruption
+    case safeHold = "safe-hold"
+    case terminal
+}
+
+public enum LifecycleMutationRecoveryClass: String, Codable, Equatable, Sendable {
+    case resume
+    case reobserve
+    case safeHold = "safe-hold"
+    case complete
+}
+
+public struct LifecycleMutationCheckpointRecord: Codable, Equatable, Sendable {
+    public static let currentSchemaVersion = 1
+
+    public let schemaVersion: Int
+    public let checkpoint: String
+    public let classification: LifecycleMutationCheckpointClass
+    public let recovery: LifecycleMutationRecoveryClass
+    public let nodeKey: String?
+
+    public init?(checkpoint: String) {
+        guard !checkpoint.isEmpty, checkpoint.utf8.count <= 255 else {
+            return nil
+        }
+        let exact: (
+            LifecycleMutationCheckpointClass,
+            LifecycleMutationRecoveryClass
+        )?
+        switch checkpoint {
+        case "intent-persisted": exact = (.intent, .resume)
+        case "verified": exact = (.terminal, .complete)
+        case "compensated": exact = (.terminal, .complete)
+        case "rollback-restored-health-verified":
+            exact = (.restoredHealth, .complete)
+        case "rollback-restored-health-safe-hold":
+            exact = (.restoredHealth, .safeHold)
+        case "finalizer:started", "finalizer:failed":
+            exact = (.finalizer, .reobserve)
+        case "finalizer:verified": exact = (.finalizer, .complete)
+        default: exact = nil
+        }
+        if let exact {
+            schemaVersion = Self.currentSchemaVersion
+            self.checkpoint = checkpoint
+            classification = exact.0
+            recovery = exact.1
+            nodeKey = nil
+            return
+        }
+
+        guard let separator = checkpoint.lastIndex(of: ":") else {
+            return nil
+        }
+        let node = String(checkpoint[..<separator])
+        let suffix = String(checkpoint[checkpoint.index(after: separator)...])
+        guard !node.isEmpty else { return nil }
+        let classified: (
+            LifecycleMutationCheckpointClass,
+            LifecycleMutationRecoveryClass
+        )?
+        switch suffix {
+        case "effect-pending": classified = (.forwardEffect, .reobserve)
+        case "verified", "verified-after-resume":
+            classified = (.verification, .complete)
+        case "compensation-pending": classified = (.compensation, .reobserve)
+        case "compensated": classified = (.compensation, .complete)
+        case "compensation-ambiguous-after-resume",
+             "compensation-attempts-exhausted",
+             "compensation-context-stale",
+             "compensation-failed",
+             "compensation-record-mismatch",
+             "compensation-unavailable":
+            classified = (.compensation, .safeHold)
+        case "restored-health-safe-hold":
+            classified = (.restoredHealth, .safeHold)
+        case "cancelled-before-effect", "cancelled-no-effect":
+            classified = (.interruption, .resume)
+        case "ambiguous-after-resume", "ambiguous-effect",
+             "accepted-without-effect", "context-stale",
+             "irreversible-effect-safe-hold":
+            classified = (.safeHold, .safeHold)
+        default: classified = nil
+        }
+        guard let classified else { return nil }
+        schemaVersion = Self.currentSchemaVersion
+        self.checkpoint = checkpoint
+        classification = classified.0
+        recovery = classified.1
+        nodeKey = node
+    }
+}
+
 public protocol LifecycleSagaClock: Sendable {
     func now() -> String
 }
@@ -364,6 +464,13 @@ public struct LifecycleSagaExecutor: Sendable {
             groupIdempotencyKey: resolvedGroupIdempotencyKey,
             allowFailedSafeHoldResume: allowFailedSafeHoldResume
         )
+        guard let mutationCheckpoint = LifecycleMutationCheckpointRecord(
+            checkpoint: group.checkpoint
+        ) else {
+            throw LifecycleSagaError.stateFailure(
+                "Lifecycle checkpoint contract v1 does not recognize the exact persisted checkpoint. No external effect was attempted."
+            )
+        }
         if group.status == .succeeded {
             if let finalizer {
                 do {
@@ -412,6 +519,26 @@ public struct LifecycleSagaExecutor: Sendable {
 
         let planNodeKeys = Set(plan.nodes.map(\.key))
         var completed = try completedNodeKeys(groupID: group.id).intersection(planNodeKeys)
+        if mutationCheckpoint.classification == .compensation ||
+            mutationCheckpoint.classification == .restoredHealth {
+            let rollbackKeys = Set(
+                try store.operationGroupSteps.load(groupID: group.id)
+                    .filter { $0.direction == .rollback }
+                    .map(\.stepKey)
+            )
+            let compensationNodes = plan.nodes.filter {
+                rollbackKeys.contains($0.key)
+            }
+            return try await compensate(
+                plan: plan,
+                group: group,
+                completed: completed,
+                currentNodes: compensationNodes,
+                reason: group.manualRecoveryHintRedacted.isEmpty
+                    ? "Resuming the exact persisted compensation checkpoint."
+                    : group.manualRecoveryHintRedacted
+            )
+        }
         while completed != planNodeKeys {
             if Task.isCancelled {
                 let pendingKey = plan.nodes.first { !completed.contains($0.key) }?.key ?? "lifecycle"

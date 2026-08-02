@@ -2690,6 +2690,92 @@ final class HostwrightCLITests: XCTestCase {
         }
     }
 
+    func testRecoveryOutputIncludesVersionedLifecycleCheckpointContract() throws {
+        try withTemporaryDatabase { databasePath in
+            let store = SQLiteStateStore(path: databasePath)
+            try store.migrate()
+            let groupID = HostwrightResourceUUID.legacy(
+                kind: "checkpoint-contract-group",
+                identifier: databasePath
+            )
+            let operationID = HostwrightResourceUUID.legacy(
+                kind: "checkpoint-contract-operation",
+                identifier: databasePath
+            )
+            let fence = HostwrightResourceUUID.legacy(
+                kind: "checkpoint-contract-fence",
+                identifier: databasePath
+            )
+            let planSHA256 = String(repeating: "a", count: 64)
+            XCTAssertNotNil(
+                try store.operationGroups.acquire(
+                    OperationGroupRecord(
+                        id: groupID,
+                        operationID: operationID,
+                        groupKind: "lifecycle-v1",
+                        projectID: "project-demo",
+                        serviceName: "api",
+                        plannedActionType: "up",
+                        status: .active,
+                        groupIdempotencyKey: planSHA256,
+                        planHash: planSHA256,
+                        checkpoint: "intent-persisted",
+                        lockOwner: "checkpoint-contract-test",
+                        lockExpiresAt: "2026-08-01T23:00:00Z",
+                        rollbackAvailable: true,
+                        manualRecoveryHintRedacted: "",
+                        createdAt: "2026-08-01T22:00:00Z",
+                        updatedAt: "2026-08-01T22:00:00Z",
+                        metadataJSONRedacted: "{}",
+                        fencingToken: fence,
+                        intentJSONRedacted: "{}",
+                        compensationJSONRedacted: "[]",
+                        verificationJSONRedacted: "{}"
+                    )
+                ).acquired
+            )
+            try store.operationGroups.finish(
+                groupID: groupID,
+                status: .interrupted,
+                checkpoint: "create-api:effect-pending",
+                manualRecoveryHintRedacted: "re-observe exact resource",
+                updatedAt: "2026-08-01T22:00:01Z",
+                metadataJSONRedacted: "{}"
+            )
+
+            let jsonResult = HostwrightCLI.run(
+                arguments: [
+                    "recovery", "--state-db", databasePath,
+                    "--output", "json"
+                ],
+                environment: environment(files: FileBox())
+            )
+            XCTAssertEqual(jsonResult.exitCode, 0, jsonResult.standardError)
+            let object = try jsonObject(jsonResult.standardOutput)
+            let groups = try XCTUnwrap(
+                object["operationGroups"] as? [[String: Any]]
+            )
+            let contract = try XCTUnwrap(
+                groups.first?["checkpointContract"] as? [String: Any]
+            )
+            XCTAssertEqual(contract["schemaVersion"] as? Int, 1)
+            XCTAssertEqual(contract["classification"] as? String, "forward-effect")
+            XCTAssertEqual(contract["recovery"] as? String, "reobserve")
+            XCTAssertEqual(contract["nodeKey"] as? String, "create-api")
+
+            let textResult = HostwrightCLI.run(
+                arguments: ["recovery", "--state-db", databasePath],
+                environment: environment(files: FileBox())
+            )
+            XCTAssertEqual(textResult.exitCode, 0, textResult.standardError)
+            XCTAssertTrue(
+                textResult.standardOutput.contains(
+                    "checkpoint-contract: v1 class=forward-effect recovery=reobserve"
+                )
+            )
+        }
+    }
+
     func testRecoveryJSONOutputIncludesLegacyRestartRecoveryWhenNoOperationGroupExists() throws {
         try withTemporaryDatabase { databasePath in
             let store = SQLiteStateStore(path: databasePath)

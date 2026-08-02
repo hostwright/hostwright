@@ -720,6 +720,10 @@ enum CLIJSON {
             "operationGroups": records.map { record in
                 let group = record.group
                 let mode = recoveryMode(for: group)
+                let checkpoint = group.groupKind == "lifecycle-v1"
+                    ? LifecycleMutationCheckpointRecord(
+                        checkpoint: group.checkpoint
+                    ) : nil
                 return [
                     "id": group.id,
                     "operationID": group.operationID,
@@ -729,6 +733,14 @@ enum CLIJSON {
                     "plannedActionType": group.plannedActionType,
                     "status": group.status.rawValue,
                     "checkpoint": group.checkpoint,
+                    "checkpointContract": checkpoint.map {
+                        [
+                            "schemaVersion": $0.schemaVersion,
+                            "classification": $0.classification.rawValue,
+                            "recovery": $0.recovery.rawValue,
+                            "nodeKey": $0.nodeKey as Any
+                        ].compactNilValues()
+                    } as Any,
                     "lockOwner": group.lockOwner.map(RuntimeRedactionPolicy.default.redact) as Any,
                     "lockExpiresAt": group.lockExpiresAt as Any,
                     "planHash": group.planHash,
@@ -765,7 +777,10 @@ enum CLIJSON {
         stateDatabasePath: String,
         result: LifecycleSagaExecutionResult
     ) -> String {
-        render([
+        let checkpoint = LifecycleMutationCheckpointRecord(
+            checkpoint: result.checkpoint
+        )
+        return render([
             "kind": "recovery-execution",
             "action": action == .resume ? "resume" : "rollback",
             "stateDatabasePath": stateDatabasePath,
@@ -774,6 +789,14 @@ enum CLIJSON {
             "planSHA256": result.planSHA256,
             "status": result.status.rawValue,
             "checkpoint": result.checkpoint,
+            "checkpointContract": checkpoint.map {
+                [
+                    "schemaVersion": $0.schemaVersion,
+                    "classification": $0.classification.rawValue,
+                    "recovery": $0.recovery.rawValue,
+                    "nodeKey": $0.nodeKey as Any
+                ].compactNilValues()
+            } as Any,
             "completedNodeKeys": result.completedNodeKeys,
             "recoveryHint": RuntimeRedactionPolicy.default.redact(
                 result.recoveryHintRedacted

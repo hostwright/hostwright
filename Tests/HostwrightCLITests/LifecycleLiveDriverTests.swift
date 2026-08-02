@@ -1166,6 +1166,58 @@ final class LifecycleLiveDriverTests: XCTestCase {
         }
     }
 
+    func testPersistedRecoveryRefusesUnknownCheckpointBeforeMutation() throws {
+        try withFixture { fixture in
+            let dryOptions = fixture.options(command: .up, dryRun: true)
+            let liveDriver = LifecycleLiveDriver(
+                environment: fixture.environment,
+                options: dryOptions
+            )
+            let preparation = try liveDriver.prepare(options: dryOptions)
+            let compiled = try LifecycleCommandPlanCompiler().compile(
+                options: dryOptions,
+                preparation: preparation
+            )
+            let sourceGroup = try persistLifecycleGroup(
+                store: fixture.store,
+                plan: compiled.plan,
+                status: .interrupted,
+                completedNodeKeys: [],
+                terminalCheckpoint: "unknown-future-checkpoint"
+            )
+
+            XCTAssertThrowsError(
+                try LifecyclePersistedRecoveryDriver(
+                    environment: fixture.environment
+                ).execute(
+                    LifecyclePersistedRecoveryRequest(
+                        action: .resume,
+                        groupID: sourceGroup.id,
+                        confirmationPlanSHA256: compiled.plan.planSHA256,
+                        stateStoreConfiguration: StateStoreConfiguration(
+                            explicitDatabasePath: fixture.databasePath
+                        ),
+                        timeoutSeconds: 60
+                    )
+                )
+            ) { error in
+                guard case let LifecyclePersistedRecoveryError.safeHold(hold) =
+                        error else {
+                    return XCTFail("Expected an exact recovery safe hold, got \(error).")
+                }
+                XCTAssertEqual(hold.schemaVersion, 1)
+                XCTAssertEqual(hold.reasonCode, .planningIncomplete)
+                XCTAssertTrue(hold.affectedNodeKeys.isEmpty)
+            }
+            XCTAssertEqual(try fixture.adapterSnapshot().mutations, [])
+            XCTAssertEqual(
+                try fixture.store.operationGroups.load(id: sourceGroup.id)?
+                    .checkpoint,
+                "unknown-future-checkpoint"
+            )
+        }
+    }
+
     func testPersistedRecoveryResumeUsesExactInterruptedSaga() throws {
         try withFixture { fixture in
             let dryOptions = fixture.options(command: .up, dryRun: true)
@@ -2632,11 +2684,12 @@ private func persistLifecycleGroup(
     try store.operationGroups.finish(
         groupID: groupID,
         status: status,
-        checkpoint: terminalCheckpoint ?? (
-            status == .interrupted
-                ? "interrupted-for-test"
-                : "failed-for-test"
-        ),
+        checkpoint: terminalCheckpoint ?? {
+            let nodeKey = plan.nodes.first?.key ?? "lifecycle"
+            return status == .interrupted
+                ? "\(nodeKey):cancelled-before-effect"
+                : "\(nodeKey):ambiguous-effect"
+        }(),
         manualRecoveryHintRedacted: "test recovery",
         updatedAt: timestamp,
         metadataJSONRedacted: terminalMetadataJSONRedacted

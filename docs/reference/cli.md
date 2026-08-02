@@ -596,6 +596,8 @@ JSON shape:
 
 Inspection reads durable operation groups and steps from the selected, already-migrated state database without creating or migrating it. Output distinguishes completed work, resumable work, compensable work, and safe holds, and includes the exact group identity, persisted plan hash, checkpoint, remaining effects, and redacted operator guidance.
 
+For `lifecycle-v1` groups, text includes `checkpoint-contract: v1 class=<class> recovery=<action>`. JSON includes `checkpointContract` with `schemaVersion`, `classification`, `recovery`, and the bounded `nodeKey` when the checkpoint is node-scoped. Confirmed execution refuses an absent or unrecognized checkpoint contract before runtime mutation; inspection preserves the original checkpoint for diagnosis.
+
 `recovery resume` and `recovery rollback` require the exact group UUID and persisted plan SHA-256. They re-observe provider identity, capabilities, generations, fences, ownership, and completed effects before continuing. Resume skips already verified nodes. Rollback applies only precomputed inverse actions whose exact ownership and effect remain provable; otherwise the group stays in safe hold without deleting or fabricating success.
 
 Rollback success also requires fresh health proof for the exact last verified revision. The local JSON lifecycle result includes `recoveryReasonCode` when a reason-coded safe hold occurs. `rollback.restored-health-failed` means inverse effects completed but the restored resource did not prove its running/configured-probe contract; preserve it, inspect `hostwright recovery --output json`, and retry only the reported group and plan hash. Hostwright does not undo a rollback merely because this terminal health proof failed.

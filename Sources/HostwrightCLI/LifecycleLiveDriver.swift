@@ -1135,8 +1135,26 @@ struct LifecyclePersistedRecoveryDriver {
                 "The exact lifecycle operation group does not exist."
             )
         }
-        guard sourceGroup.planHash == request.confirmationPlanSHA256,
-              let persistedPlan = try? LifecyclePersistedIntentCodec.decode(
+        guard sourceGroup.planHash == request.confirmationPlanSHA256 else {
+            throw LifecyclePersistedRecoveryError.confirmationMismatch
+        }
+        guard LifecycleMutationCheckpointRecord(
+            checkpoint: sourceGroup.checkpoint
+        ) != nil else {
+            throw LifecyclePersistedRecoveryError.safeHold(
+                LifecycleRecoverySafeHold(
+                    reasonCode: .planningIncomplete,
+                    reason:
+                        "The lifecycle checkpoint is not recognized by checkpoint contract v1. No runtime mutation was attempted.",
+                    affectedNodeKeys: [],
+                    operatorCommands: [
+                        "hostwright recovery --state-db <path> --output json",
+                        "hostwright inspect --output json"
+                    ]
+                )
+            )
+        }
+        guard let persistedPlan = try? LifecyclePersistedIntentCodec.decode(
                   sourceGroup.intentJSONRedacted
               ),
               persistedPlan.planSHA256 == sourceGroup.planHash,

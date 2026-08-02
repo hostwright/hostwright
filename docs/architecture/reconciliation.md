@@ -27,6 +27,30 @@ Replicas and service dependencies expand into deterministic nodes. `started`, `r
 
 Node starts, attempts, provider results, observations, health results, supply-chain authorization events, and checkpoints are durable. After timeout, cancellation, crash, or ambiguous provider output, Hostwright observes before deciding whether to retry, compensate, or hold. Recovery revalidates current signature, SBOM, vulnerability, and provenance evidence and rebinds that authorization to any derived rollback plan. Retry is capped at three attempts and allowed only by normalized retry safety.
 
+### Mutation checkpoint contract v1
+
+Every `lifecycle-v1` operation group has one recognized bounded checkpoint. The enclosing group supplies the operation ID, group ID, plan SHA-256, project, provider generation, and fencing token; the step record supplies direction, resource identity, attempt, result, and verification. `hostwright recovery` renders the following stable classification without copying raw provider output:
+
+| Exact checkpoint | Class | Recovery |
+|---|---|---|
+| `intent-persisted` | `intent` | `resume` |
+| `<node>:effect-pending` | `forward-effect` | `reobserve` |
+| `<node>:verified`, `<node>:verified-after-resume` | `verification` | `complete` |
+| `<node>:cancelled-before-effect`, `<node>:cancelled-no-effect` | `interruption` | `resume` |
+| `<node>:ambiguous-after-resume`, `<node>:ambiguous-effect`, `<node>:accepted-without-effect`, `<node>:context-stale`, `<node>:irreversible-effect-safe-hold` | `safe-hold` | `safe-hold` |
+| `<node>:compensation-pending` | `compensation` | `reobserve` |
+| `<node>:compensated` | `compensation` | `complete` |
+| `<node>:compensation-ambiguous-after-resume`, `<node>:compensation-attempts-exhausted`, `<node>:compensation-context-stale`, `<node>:compensation-failed`, `<node>:compensation-record-mismatch`, `<node>:compensation-unavailable` | `compensation` | `safe-hold` |
+| `<node>:restored-health-safe-hold`, `rollback-restored-health-safe-hold` | `restored-health` | `safe-hold` |
+| `rollback-restored-health-verified` | `restored-health` | `complete` |
+| `finalizer:started`, `finalizer:failed` | `finalizer` | `reobserve` |
+| `finalizer:verified` | `finalizer` | `complete` |
+| `verified`, `compensated` | `terminal` | `complete` |
+
+An unknown checkpoint has no permissive fallback. Confirmed recovery returns a `rollback.planning-incomplete` safe hold before provider observation or mutation. An expired active group at a compensation or restored-health checkpoint re-enters the compensation lane directly: it re-observes the exact inverse before any retry and never replays a forward node merely because its compensation result row lagged the external effect. Finalizers must reconcile their own persisted resource state, so replay either proves the prior result or remains interrupted; it cannot treat a prior return as proof that no effect occurred.
+
+The checkpoint inventory remains owned by its existing bounded authorities. The LaunchAgent controller uses every `DaemonLifecycleCheckpoint`; distribution uses every `DistributionLifecycleCheckpoint`; runtime migration uses every `RuntimeProviderMigrationCheckpoint`; storage attachments, snapshots, backups, capacity admission, reclaim, and state restore/repair use their typed checkpoint records; image, registry, secret, network, DNS, port, and tunnel coordinators use their existing fenced operation groups and journals. Gate 8 qualifies those authorities but does not replace them with a generic workflow engine. Phase 08 retention/GC and observability records do not yet have external-effect checkpoints at this gate; their owning Gates 10–15 must add only their issue-required durable boundaries before claiming support.
+
 Phase 08 rollback uses the same saga and persisted recovery driver. Reverse compensation cannot finish merely because inverse runtime calls returned: Hostwright re-observes one exact owned prior resource per service, verifies provider/capability and resource UUID/generation, requires `running`, and executes every configured startup, readiness, and liveness probe. Explicit rollback plans append those verification nodes after all inverses. A failed or ambiguous restored-health check enters `rollback.restored-health-failed` safe hold and preserves the restored resource; it never compensates the rollback by recreating the failed candidate. Safe holds expose a schema-v1 reason code, bounded redacted explanation, affected nodes, and exact persisted-group recovery commands.
 
 `hostwrightd --foreground` and the exact managed `--service` mode run the same level-triggered reconciliation loop. Healthy scheduling begins immediately and repeats within five seconds without a filesystem event. The daemon validates the explicit config, observes through `RuntimeAdapter`, computes health and restart inputs, and invokes the existing CLI lifecycle compiler/live driver/saga for `up`. An empty DAG records convergence; a nonempty DAG requires fresh observation, exact confirmation, one project lease, durable intent, fencing, bounded execution, and verification. Compensation, interruption, ambiguity, or safe hold remains visible and triggers bounded backoff rather than a success claim.
@@ -61,6 +85,8 @@ The lifecycle planner also detects replica, dependency, revision, probe, and own
 - Failures must be observable through events.
 - Every external effect must use exact UUID-backed ownership, project generation, provider generation, and fence validation.
 - Ambiguous effects must be re-observed before retry, compensation, or return.
+- Missing or unknown lifecycle checkpoint identities must fail before provider mutation.
+- Process loss after a compensation or finalizer effect must re-observe that exact effect before replay.
 - Readiness must gate dependency release and rollout promotion; liveness restarts remain bounded by policy.
 - Removal must verify exact runtime absence before deleting ownership state.
 - Unmanaged collisions and later-phase capability gaps must fail before mutation.

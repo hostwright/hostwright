@@ -44,7 +44,8 @@ public struct CodeIdentityProof: Codable, Equatable, Sendable {
     guard
       teamIdentifier == XPCServiceContract.teamIdentifier
         && signingIdentifier == XPCServiceContract.serviceIdentifier
-        && codeDirectoryHash.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil
+        && codeDirectoryHash.range(
+          of: "^(?:[a-f0-9]{40}|[a-f0-9]{64})$", options: .regularExpression) != nil
         && entitlementProjection == XPCServiceContract.requiredEntitlements
     else { throw ContractValidationError.invalid("code identity proof") }
   }

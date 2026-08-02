@@ -73,7 +73,11 @@ EUID/GID/PID/PID-version, connection, daemon generation, socket device/inode,
 and a server nonce, then creates the Security task with
 `SecTaskCreateWithAuditToken`. Strict `SecCode` validation accepts only an
 installed Hostwright team/identifier requirement or an explicitly recorded
-ad-hoc CDHash produced by the secure bootstrap path. An optional Hostwright
+ad-hoc CDHash produced by the secure bootstrap path. `codeDirectoryHash`
+preserves the lowercase hexadecimal bytes returned by
+`kSecCodeInfoUnique`: 40 characters for a 20-byte Code Directory hash or 64
+characters for a 32-byte hash. It is never replaced by a derived digest of
+those bytes. An optional Hostwright
 P-256 client credential can refine a subject; it never replaces kernel peer
 credentials or code identity. Revocation terminates active sessions
 immediately.
@@ -179,8 +183,8 @@ The XPC protocol is independently versioned at v1. Its service identifier is
 exactly `com.apple.security.app-sandbox=true`. Reciprocal code requirements,
 bounded dictionaries, request IDs, deadlines, cancellation, and crash
 isolation are mandatory. Its sole reference native operation is read-only code
-identity proof: team, code identifier, CDHash, and declared entitlement
-projection. No secret or host mutation crosses it. Gate 11 supplies the signed,
+identity proof: team, code identifier, the native 40-or-64-character CDHash,
+and declared entitlement projection. No secret or host mutation crosses it. Gate 11 supplies the signed,
 notarized, stapled qualification package only as evidence.
 
 Packages contain a canonical manifest, immutable content digests, compatibility

@@ -103,7 +103,7 @@ final class ControlPlaneContractTests: XCTestCase {
   }
 
   func testIdentityAndSessionBindingCrossChecksUID() throws {
-    let hash = String(repeating: "a", count: 64)
+    let hash = String(repeating: "a", count: 40)
     let code = CodeIdentity(
       teamIdentifier: "993YC3JY4Q", signingIdentifier: "dev.hostwright.client",
       codeDirectoryHash: hash, validationMode: .installedRequirement)
@@ -122,6 +122,19 @@ final class ControlPlaneContractTests: XCTestCase {
         peer: peer, subject: LocalSubject(identifier: "u", userID: 502, codeIdentityHash: hash)
       ).validate())
     XCTAssertEqual(CodeValidationMode.allCases, [.installedRequirement, .pinnedAdHoc])
+    XCTAssertNoThrow(
+      try CodeIdentity(
+        signingIdentifier: "hostwright", codeDirectoryHash: String(repeating: "b", count: 64),
+        validationMode: .pinnedAdHoc
+      ).validate())
+    for invalidLength in [39, 41, 63, 65] {
+      XCTAssertThrowsError(
+        try CodeIdentity(
+          signingIdentifier: "hostwright",
+          codeDirectoryHash: String(repeating: "c", count: invalidLength),
+          validationMode: .pinnedAdHoc
+        ).validate())
+    }
   }
 
   func testRBACScopesRolesAndAdmissionRules() throws {
@@ -257,7 +270,7 @@ final class ControlPlaneContractTests: XCTestCase {
     XCTAssertThrowsError(try XPCRequest(requestID: "x", timeoutMilliseconds: 5_001).validate())
     let proof = CodeIdentityProof(
       signingIdentifier: XPCServiceContract.serviceIdentifier,
-      codeDirectoryHash: String(repeating: "a", count: 64))
+      codeDirectoryHash: String(repeating: "a", count: 40))
     XCTAssertNoThrow(
       try XPCResponse(requestID: "x", status: .completed, proof: proof).validate())
     XCTAssertNoThrow(try XPCResponse(requestID: "x", status: .cancelled).validate())
@@ -266,6 +279,16 @@ final class ControlPlaneContractTests: XCTestCase {
         requestID: "x", status: .error, error: SanitizedError(code: "failed", message: "safe")
       ).validate())
     XCTAssertThrowsError(try XPCResponse(requestID: "x", status: .completed).validate())
+    XCTAssertNoThrow(
+      try CodeIdentityProof(
+        signingIdentifier: XPCServiceContract.serviceIdentifier,
+        codeDirectoryHash: String(repeating: "b", count: 64)
+      ).validate())
+    XCTAssertThrowsError(
+      try CodeIdentityProof(
+        signingIdentifier: XPCServiceContract.serviceIdentifier,
+        codeDirectoryHash: String(repeating: "c", count: 41)
+      ).validate())
   }
 
   func testEveryGoldenStrictlyDecodesAndRejectsUnknownFields() throws {

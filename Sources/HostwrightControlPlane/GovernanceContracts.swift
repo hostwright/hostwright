@@ -19,7 +19,8 @@ public struct CodeIdentity: Codable, Equatable, Sendable {
   }
   public func validate() throws {
     guard !signingIdentifier.isEmpty,
-      codeDirectoryHash.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil
+      codeDirectoryHash.range(of: "^(?:[a-f0-9]{40}|[a-f0-9]{64})$", options: .regularExpression)
+        != nil
     else { throw ContractValidationError.required("code identity") }
     switch validationMode {
     case .installedRequirement:

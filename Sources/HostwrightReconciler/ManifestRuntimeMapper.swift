@@ -240,7 +240,8 @@ public enum ManifestRuntimeMapper {
                 strategy: service.update.strategy == .rolling ? .rolling : .recreate,
                 maxSurge: service.update.maxSurge,
                 maxUnavailable: service.update.maxUnavailable,
-                progressDeadlineSeconds: service.update.progressDeadline
+                progressDeadlineSeconds: service.update.progressDeadline,
+                stableObservationSeconds: service.update.stableObservation
             ),
             hooks: RuntimeLifecycleHooks(
                 postStart: service.hooks.postStart,

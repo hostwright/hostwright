@@ -1001,6 +1001,84 @@ struct LifecycleCommandRunnerTests {
     }
 
     @Test
+    func updateResultExposesVersionedExactRolloutStageAndRevisionIdentities() throws {
+        let policy = RuntimeUpdatePolicy(
+            progressDeadlineSeconds: 60,
+            stableObservationSeconds: 3
+        )
+        let previous = service(
+            image: "example.invalid/api@sha256:\(String(repeating: "1", count: 64))",
+            probes: allProbes(),
+            updatePolicy: policy
+        )
+        let desired = service(
+            image: "example.invalid/api@sha256:\(String(repeating: "2", count: 64))",
+            probes: allProbes(),
+            updatePolicy: policy
+        )
+        let observed = ObservedRuntimeService(
+            identity: previous.identity,
+            resourceIdentifier: previous.identity.managedResourceIdentifier,
+            image: previous.image,
+            lifecycleState: .running,
+            healthState: .healthy
+        )
+        let prepared = try preparation(
+            desired: [desired],
+            previous: DesiredRuntimeState(
+                projectName: "demo",
+                services: [previous]
+            ),
+            observed: [observed],
+            bindings: [try resourceBinding(for: observed)]
+        )
+        let plan = try reviewedPlan(preparation: prepared, command: .update)
+        let stable = try #require(
+            plan.nodes.first { $0.key.hasSuffix("-stable") }
+        )
+        let completed = plan.nodes.prefix {
+            $0.key != stable.key
+        }.map(\.key)
+        let execution = LifecycleSagaExecutionResult(
+            status: .safeHold,
+            operationID: HostwrightResourceUUID.generate(),
+            groupID: HostwrightResourceUUID.generate(),
+            planSHA256: plan.planSHA256,
+            checkpoint: "\(stable.key):safe-hold",
+            completedNodeKeys: Array(completed),
+            recoveryHintRedacted: "Preserve the exact stable-health checkpoint."
+        )
+        let result = LifecycleCommandRunner(
+            options: options(
+                command: .update,
+                dryRun: false,
+                confirmation: plan.planSHA256,
+                output: .json
+            ),
+            driver: ScriptedLifecycleCommandDriver(
+                preparation: prepared,
+                executionResult: execution
+            )
+        ).run()
+        let object = try #require(
+            JSONSerialization.jsonObject(
+                with: Data(result.standardError.utf8)
+            ) as? [String: Any]
+        )
+        let rollouts = try #require(object["rollouts"] as? [[String: Any]])
+        let rollout = try #require(rollouts.first)
+        #expect(rollout["schemaVersion"] as? Int == 1)
+        #expect(rollout["service"] as? String == "api")
+        #expect(rollout["stage"] as? String == "stable")
+        #expect(rollout["status"] as? String == "safe-hold")
+        let candidate = try #require(rollout["candidate"] as? [String: Any])
+        let prior = try #require(rollout["prior"] as? [String: Any])
+        #expect(candidate["stableObservationSeconds"] as? Int == 3)
+        #expect(candidate["livenessConfigured"] as? Bool == true)
+        #expect(candidate["revisionSHA256"] as? String != prior["revisionSHA256"] as? String)
+    }
+
+    @Test
     func resourceOutcomeOrderIsDeterministicAcrossInputAndCompletionOrder() throws {
         let firstPreparation = try preparation(
             desired: [service(name: "worker"), service(name: "api")]
@@ -1902,6 +1980,7 @@ struct LifecycleCommandRunnerTests {
         mounts: [RuntimeMountReference] = [],
         ports: [RuntimePortMapping] = [],
         probes: RuntimeProbeSet = RuntimeProbeSet(),
+        updatePolicy: RuntimeUpdatePolicy = RuntimeUpdatePolicy(),
         hooks: RuntimeLifecycleHooks = RuntimeLifecycleHooks()
     ) -> DesiredRuntimeService {
         DesiredRuntimeService(
@@ -1917,6 +1996,7 @@ struct LifecycleCommandRunnerTests {
             networks: networks,
             mounts: mounts,
             probes: probes,
+            updatePolicy: updatePolicy,
             hooks: hooks,
             virtualization: false
         )

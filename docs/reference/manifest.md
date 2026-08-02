@@ -85,6 +85,7 @@ services:
       maxSurge: 1
       maxUnavailable: 0
       progressDeadline: 300s
+      stableObservation: 30s
     hooks:
       postStart:
         exec: ["/app/server", "warm"]
@@ -159,10 +160,12 @@ Validation currently checks:
 - top-level `restartBudget` accepts only project `maxAttempts` from 1 through 1000 and `window` from 1 second through 24 hours;
 - top-level `maintenance` requires a named IANA timezone and 1 through 64 uniquely named recurring or one-shot windows; each window admits only an explicit non-empty subset of `create`, `start`, `restart`, `update`, and `remove`;
 - recurring maintenance uses unique weekdays, strict local `HH:mm`, and a bounded positive duration; one-shot maintenance uses canonical UTC `startsAt` plus a bounded positive duration; `maximumDeferral` is bounded from 1 second through 30 days;
-- rolling/recreate update bounds are internally consistent and progress deadlines are positive;
+- rolling/recreate update bounds are internally consistent, progress deadlines are positive, and optional `stableObservation` is no longer than the progress deadline;
 - Rosetta requires `amd64` plus virtualization.
 
 Validation does not contact registries or Apple container.
+
+`update.stableObservation` defaults to zero. A positive duration requires a readiness or liveness probe. Promotion then requires startup, readiness, liveness, dependency, and stable-observation gates declared by the service. Hostwright persists the first continuously healthy observation and re-runs configured readiness and liveness probes until the duration elapses; a declared probe failure clears the interval. A restart resumes from that persisted checkpoint instead of creating another candidate.
 
 Maintenance scheduling is deterministic in the declared timezone. A nonexistent local time during a daylight-saving transition advances to the first representable matching time; a repeated local time uses its first occurrence only. Elective mutation outside every applicable window is durably deferred with a hard deadline and exact confirmation token. Safety recovery and security-stop actions are never configurable or deferrable. Preview is read-only; cancellation or emergency override applies only to the exact current token, and the daemon revalidates the policy, token, and open interval immediately before lifecycle effects.
 

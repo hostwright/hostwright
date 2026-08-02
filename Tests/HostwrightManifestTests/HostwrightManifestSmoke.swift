@@ -1777,6 +1777,47 @@ final class HostwrightManifestTests: XCTestCase {
         XCTAssertFalse(canonical.contains("maxAttempts:"))
     }
 
+    func testPhase08RolloutStableObservationParsesValidatesAndRoundTrips() throws {
+        let manifest = try ManifestValidator.validated(
+            """
+            version: 2
+            project: rollout-local
+            services:
+              api:
+                image: ghcr.io/example/api:latest
+                probes:
+                  readiness:
+                    exec: ["/bin/check-ready"]
+                    interval: 1s
+                update:
+                  strategy: rolling
+                  maxSurge: 1
+                  maxUnavailable: 0
+                  progressDeadline: 60s
+                  stableObservation: 10s
+            """
+        )
+
+        XCTAssertEqual(manifest.services[0].update.stableObservation, 10)
+        let canonical = try ManifestCanonicalEncoder.encode(manifest)
+        XCTAssertTrue(canonical.contains("stableObservation: \"10s\""))
+        XCTAssertEqual(try ManifestValidator.validated(canonical), manifest)
+
+        assertManifestFailure(
+            """
+            version: 2
+            project: rollout-local
+            services:
+              api:
+                image: ghcr.io/example/api:latest
+                update:
+                  progressDeadline: 60s
+                  stableObservation: 10s
+            """,
+            contains: "stableObservation requires a readiness or liveness probe"
+        )
+    }
+
     func testPhase08RestartBudgetsRejectUnsafeAndUnknownValues() {
         let invalidFields = [
             "maxAttempts: 0",

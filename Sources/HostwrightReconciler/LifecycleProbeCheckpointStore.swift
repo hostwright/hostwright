@@ -111,6 +111,7 @@ public struct LifecycleProbeCheckpointStore: Sendable {
         RuntimeProbeSnapshot(
             resourceIdentifier: snapshot.resourceIdentifier,
             startedAtMilliseconds: snapshot.startedAtMilliseconds,
+            stableSinceMilliseconds: snapshot.stableSinceMilliseconds,
             states: snapshot.states.map { state in
                 RuntimeProbeState(
                     kind: state.kind,

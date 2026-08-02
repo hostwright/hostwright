@@ -6,6 +6,61 @@ import XCTest
 @testable import HostwrightSecrets
 
 final class LifecycleUpdatePlannerTests: XCTestCase {
+    func testStableObservationAndLivenessGatePromotionBeforePriorRevisionRetires() throws {
+        let policy = RuntimeUpdatePolicy(
+            strategy: .rolling,
+            maxSurge: 1,
+            maxUnavailable: 0,
+            progressDeadlineSeconds: 120,
+            stableObservationSeconds: 15
+        )
+        let previous = service(
+            "web",
+            image: "local/web@sha256:old",
+            policy: policy,
+            liveness: true
+        )
+        let desired = service(
+            "web",
+            image: "local/web@sha256:new",
+            policy: policy,
+            liveness: true
+        )
+        let plan = try LifecycleUpdatePlanner().plan(
+            previous: state([previous]),
+            desired: state([desired]),
+            resources: resourceMap(for: [desired]),
+            fencingToken: fence
+        )
+
+        let readiness = try XCTUnwrap(
+            plan.nodes.first { $0.key == key(desired, "readiness") }
+        )
+        let liveness = try XCTUnwrap(
+            plan.nodes.first { $0.key == key(desired, "liveness") }
+        )
+        let stable = try XCTUnwrap(
+            plan.nodes.first { $0.key == key(desired, "stable") }
+        )
+        let promote = try XCTUnwrap(
+            plan.nodes.first { $0.key == key(desired, "promote") }
+        )
+        let retire = try XCTUnwrap(
+            plan.nodes.first { $0.key == key(desired, "retire") }
+        )
+        XCTAssertEqual(liveness.dependencies, [readiness.key])
+        XCTAssertEqual(stable.dependencies, [liveness.key])
+        XCTAssertTrue(stable.preconditions.contains {
+            $0.kind == "stable-observation-seconds" && $0.expectedValue == "15"
+        })
+        XCTAssertEqual(promote.dependencies, [stable.key])
+        let quiesce = try XCTUnwrap(
+            plan.nodes.first { $0.key == key(desired, "quiesce") }
+        )
+        XCTAssertEqual(quiesce.dependencies, [promote.key])
+        XCTAssertEqual(retire.dependencies, [quiesce.key])
+    }
+
     func testRollingPlanIsDeterministicAndRetainsOldRevisionUntilPromotion() throws {
         let previous = replicas(
             serviceName: "web",
@@ -779,7 +834,8 @@ final class LifecycleUpdatePlannerTests: XCTestCase {
         dependencies: [RuntimeServiceDependency] = [],
         environment: [RuntimeEnvironmentValue] = [],
         hooks: RuntimeLifecycleHooks = RuntimeLifecycleHooks(),
-        ports: [RuntimePortMapping] = []
+        ports: [RuntimePortMapping] = [],
+        liveness: Bool = false
     ) -> DesiredRuntimeService {
         DesiredRuntimeService(
             identity: RuntimeServiceIdentity(
@@ -799,7 +855,14 @@ final class LifecycleUpdatePlannerTests: XCTestCase {
                 ),
                 readiness: RuntimeProbeConfiguration(
                     action: .tcp(RuntimeProbeTCPAction(port: 8080))
-                )
+                ),
+                liveness: liveness
+                    ? RuntimeProbeConfiguration(
+                        action: .exec(
+                            RuntimeProbeExecAction(command: ["/bin/live"])
+                        )
+                    )
+                    : nil
             ),
             updatePolicy: policy,
             hooks: hooks,

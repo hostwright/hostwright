@@ -677,7 +677,7 @@ public struct LifecycleCommandRunner: Sendable {
                 }
                 return outcome
             }
-            let output = CLIJSON.render([
+            var payload: [String: Any] = [
                 "kind": "lifecycle-result",
                 "status": result.status.rawValue,
                 "operationID": result.operationID,
@@ -688,7 +688,15 @@ public struct LifecycleCommandRunner: Sendable {
                 "nodeCount": plan.nodes.count,
                 "resourceOutcomes": resourceOutcomes,
                 "recoveryHint": result.recoveryHintRedacted
-            ])
+            ]
+            if plan.command == .update {
+                payload["rollouts"] = rolloutStatuses(
+                    plan: plan,
+                    completedNodeKeys: completedNodeKeys,
+                    executionStatus: result.status
+                )
+            }
+            let output = CLIJSON.render(payload)
             return CLIRunResult(
                 standardOutput: succeeded ? output : "",
                 standardError: succeeded ? "" : output,
@@ -718,6 +726,20 @@ public struct LifecycleCommandRunner: Sendable {
                 fields.append("resourceIdentifier=\(resourceIdentifier)")
             }
             lines.append("- " + fields.joined(separator: " "))
+        }
+        if plan.command == .update {
+            lines.append("Rollout status:")
+            for rollout in rolloutStatuses(
+                plan: plan,
+                completedNodeKeys: completedNodeKeys,
+                executionStatus: result.status
+            ) {
+                lines.append(
+                    "- service=\(rollout["service"] ?? "unknown") " +
+                        "stage=\(rollout["stage"] ?? "unknown") " +
+                        "status=\(rollout["status"] ?? result.status.rawValue)"
+                )
+            }
         }
         if !result.recoveryHintRedacted.isEmpty {
             lines.append(result.recoveryHintRedacted)
@@ -764,6 +786,82 @@ public struct LifecycleCommandRunner: Sendable {
             replica = nil
         }
         return (String(components[1]), replica)
+    }
+
+    private func rolloutStatuses(
+        plan: LifecyclePlan,
+        completedNodeKeys: Set<String>,
+        executionStatus: LifecycleSagaExecutionStatus
+    ) -> [[String: Any]] {
+        let decoded = plan.nodes.compactMap { node -> (LifecyclePlanNode, DesiredRuntimeService)? in
+            guard let desired = try? LifecycleRevisionCodec
+                .decodeRedactedDesiredJSON(
+                    node.desiredSpecificationJSONRedacted
+                ) else {
+                return nil
+            }
+            return (node, desired)
+        }
+        let services = Set(decoded.map { $0.1.logicalServiceName })
+        return services.sorted().map { serviceName in
+            let entries = decoded.filter {
+                $0.1.logicalServiceName == serviceName
+            }
+            let nodes = plan.nodes.filter { node in
+                entries.contains { $0.0.key == node.key }
+            }
+            let candidate = entries.first { $0.0.action == .create }
+            let prior = entries.first { $0.0.action == .retire }
+            let next = nodes.first { !completedNodeKeys.contains($0.key) }
+            let stage = next.map { node in
+                node.key.split(separator: "-").last.map(String.init) ??
+                    node.action.rawValue
+            } ?? "completed"
+            var status: [String: Any] = [
+                "schemaVersion": 1,
+                "service": serviceName,
+                "stage": stage,
+                "status": executionStatus.rawValue,
+                "completedNodeCount": nodes.filter {
+                    completedNodeKeys.contains($0.key)
+                }.count,
+                "nodeCount": nodes.count
+            ]
+            if let candidate {
+                status["candidate"] = [
+                    "resourceIdentifier":
+                        candidate.0.resourceIdentifier ?? "",
+                    "resourceUUID": candidate.0.resourceUUID,
+                    "generation": candidate.0.resourceGeneration,
+                    "revisionSHA256":
+                        (try? LifecycleRevisionCodec.revisionSHA256(
+                            for: candidate.1
+                        )) ?? "",
+                    "startupConfigured":
+                        candidate.1.probes.startup != nil,
+                    "readinessConfigured":
+                        candidate.1.probes.readiness != nil,
+                    "livenessConfigured":
+                        candidate.1.probes.liveness != nil,
+                    "stableObservationSeconds":
+                        candidate.1.updatePolicy.stableObservationSeconds,
+                    "progressDeadlineSeconds":
+                        candidate.1.updatePolicy.progressDeadlineSeconds
+                ]
+            }
+            if let prior {
+                status["prior"] = [
+                    "resourceIdentifier": prior.0.resourceIdentifier ?? "",
+                    "resourceUUID": prior.0.resourceUUID,
+                    "generation": prior.0.resourceGeneration,
+                    "revisionSHA256":
+                        (try? LifecycleRevisionCodec.revisionSHA256(
+                            for: prior.1
+                        )) ?? ""
+                ]
+            }
+            return status
+        }
     }
 
     private func failure(_ diagnostic: HostwrightDiagnostic) -> CLIRunResult {

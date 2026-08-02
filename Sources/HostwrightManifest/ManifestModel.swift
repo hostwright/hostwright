@@ -1189,17 +1189,20 @@ public struct HostwrightUpdatePolicy: Equatable, Sendable {
     public var maxSurge: Int
     public var maxUnavailable: Int
     public var progressDeadline: Int
+    public var stableObservation: Int
 
     public init(
         strategy: HostwrightUpdateStrategy = .rolling,
         maxSurge: Int = 1,
         maxUnavailable: Int = 0,
-        progressDeadline: Int = 300
+        progressDeadline: Int = 300,
+        stableObservation: Int = 0
     ) {
         self.strategy = strategy
         self.maxSurge = maxSurge
         self.maxUnavailable = maxUnavailable
         self.progressDeadline = progressDeadline
+        self.stableObservation = stableObservation
     }
 }
 

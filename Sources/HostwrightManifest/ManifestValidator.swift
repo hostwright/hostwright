@@ -2627,6 +2627,15 @@ public enum ManifestValidator {
         if update.progressDeadline <= 0 {
             issues.append(issue(service, "update.progressDeadline must be positive."))
         }
+        if update.stableObservation < 0 ||
+            update.stableObservation > update.progressDeadline {
+            issues.append(issue(service, "update.stableObservation must be between 0s and progressDeadline."))
+        }
+        if update.stableObservation > 0,
+           service.probes.readiness == nil,
+           service.probes.liveness == nil {
+            issues.append(issue(service, "update.stableObservation requires a readiness or liveness probe."))
+        }
     }
 
     private static func validateHook(

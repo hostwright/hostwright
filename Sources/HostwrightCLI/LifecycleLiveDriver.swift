@@ -2176,8 +2176,9 @@ struct LifecyclePersistedRecoveryDriver {
         recoveryStateJSONRedacted: String? = nil,
         allowFailedSafeHoldResume: Bool = false
     ) async throws -> LifecycleSagaExecutionResult {
-        guard let persistedGroup = try store.operationGroups.load(id: groupID),
-              persistedGroup.planHash == plan.planSHA256 else {
+        let persistedGroup = try store.operationGroups.load(id: groupID)
+        if let persistedGroup,
+           persistedGroup.planHash != plan.planSHA256 {
             throw LifecycleSagaError.persistedPlanMismatch
         }
         let desiredByNode = recoveryDesiredServices(plan: plan)
@@ -2203,7 +2204,8 @@ struct LifecyclePersistedRecoveryDriver {
                 adapter: runtime.adapter,
                 state: runtime.state,
                 store: store,
-                groupIdempotencyKey: persistedGroup.groupIdempotencyKey
+                groupIdempotencyKey:
+                    persistedGroup?.groupIdempotencyKey ?? plan.planSHA256
             ),
             recoveryStateJSONRedacted: recoveryStateJSONRedacted
         ).execute(
@@ -2212,7 +2214,8 @@ struct LifecyclePersistedRecoveryDriver {
             groupID: groupID,
             fencingToken: fencingToken,
             lockOwner: lockOwner,
-            groupIdempotencyKey: persistedGroup.groupIdempotencyKey,
+            groupIdempotencyKey:
+                persistedGroup?.groupIdempotencyKey ?? plan.planSHA256,
             allowFailedSafeHoldResume: allowFailedSafeHoldResume
         )
     }
@@ -2676,6 +2679,7 @@ enum LifecycleSpecialNodeEvidence: Equatable, Sendable {
 enum LifecycleSpecialExecutionError: Error, Equatable, Sendable {
     case invalidExactBinding
     case invalidHook
+    case invalidProbe
     case invalidCompletionCheckpoint
     case staleCapability
     case unavailable(String)
@@ -3115,7 +3119,7 @@ struct LifecycleLiveEffects: LifecycleSagaEffects {
             return .failed(failure)
         }
         if node.action == .validate || node.action == .promote {
-            return .accepted
+            return await applyRolloutGate(node: node, context: context)
         }
         if node.action == .verify {
             guard probeKind(for: node) != nil else {
@@ -3598,6 +3602,29 @@ struct LifecycleLiveEffects: LifecycleSagaEffects {
                 observedService: matches.first,
                 desiredService: await state.desiredService(for: node.key)
             ) {
+                if context.plan.command == .update,
+                   node.action == .promote {
+                    do {
+                        try validateRolloutDependencies(
+                            node: node,
+                            desiredState: desired,
+                            observedState: observed
+                        )
+                        try await validatePromotionEvidence(
+                            node: node,
+                            context: context,
+                            observedState: observed
+                        )
+                    } catch {
+                        return .noEffect(
+                            LifecycleNodeVerification(
+                                observationSHA256: inventory.semanticSHA256,
+                                summaryRedacted:
+                                    "Rollout promotion postcondition lacks current exact health proof."
+                            )
+                        )
+                    }
+                }
                 try reconcileNetworkPorts(
                     node: node,
                     context: context,
@@ -4296,6 +4323,175 @@ struct LifecycleLiveEffects: LifecycleSagaEffects {
         return kinds[0]
     }
 
+    private func stableObservationSeconds(for node: LifecyclePlanNode) -> Int {
+        let values = node.preconditions.compactMap { condition -> Int? in
+            guard condition.kind == "stable-observation-seconds" else {
+                return nil
+            }
+            return Int(condition.expectedValue)
+        }
+        guard values.count == 1, let value = values.first, value > 0 else {
+            return 0
+        }
+        return value
+    }
+
+    private func applyRolloutGate(
+        node: LifecyclePlanNode,
+        context: LifecycleSagaContext
+    ) async -> LifecycleSagaApplyOutcome {
+        guard context.plan.command == .update else {
+            return .accepted
+        }
+        do {
+            let desiredState = await state.desiredStateSnapshot()
+            let observed = try await adapter.observe(desiredState: desiredState)
+            guard observed.adapterMetadata?.providerID == context.plan.providerID,
+                  observed.capabilitySHA256 == context.plan.capabilitySHA256 else {
+                throw LifecycleSpecialExecutionError.staleCapability
+            }
+            await state.replaceObservedState(observed)
+            try validateRolloutDependencies(
+                node: node,
+                desiredState: desiredState,
+                observedState: observed
+            )
+            guard node.action == .promote else {
+                return .accepted
+            }
+            try await validatePromotionEvidence(
+                node: node,
+                context: context,
+                observedState: observed
+            )
+            return .accepted
+        } catch {
+            let diagnostic = node.action == .promote
+                ? "Rollout promotion refused ambiguous or unproven candidate health."
+                : "Rollout preparation refused an unhealthy or ambiguous dependency."
+            await state.recordSpecialEvidence(.noEffect(diagnostic), for: node.key)
+            return .failed(
+                specialFailure(
+                    category: error is LifecycleSpecialExecutionError
+                        ? .rejected
+                        : .ambiguousEffect,
+                    context: context,
+                    diagnostic: diagnostic,
+                    guidance:
+                        "Preserve the exact rollout checkpoint and restore declared health before resuming."
+                )
+            )
+        }
+    }
+
+    private func validatePromotionEvidence(
+        node: LifecyclePlanNode,
+        context: LifecycleSagaContext,
+        observedState: ObservedRuntimeState
+    ) async throws {
+        guard let desired = await state.desiredService(for: node.key) else {
+            throw LifecycleSpecialExecutionError.invalidExactBinding
+        }
+        let identity = await state.identity(
+            for: node,
+            projectName: context.plan.projectName
+        )
+        let matches = observedState.services.filter {
+            $0.identity == identity &&
+                $0.resourceIdentifier == node.resourceIdentifier
+        }
+        guard matches.count == 1,
+              matches[0].lifecycleState == .running else {
+            throw LifecycleSpecialExecutionError.invalidExactBinding
+        }
+        if desired.probes.configuredKinds.isEmpty {
+            guard matches[0].healthState == .healthy ||
+                    matches[0].healthState == .notConfigured else {
+                throw LifecycleSpecialExecutionError.invalidProbe
+            }
+            return
+        }
+        guard let snapshot = try probeStore.loadLatest(
+            groupID: context.groupID,
+            resourceIdentifier: node.resourceIdentifier ?? ""
+        ) else {
+            throw LifecycleSpecialExecutionError.invalidProbe
+        }
+        let now = nowMilliseconds()
+        let resumed = try RuntimeProbeStateMachine.resumed(
+            snapshot,
+            probes: desired.probes,
+            nowMilliseconds: now
+        )
+        guard desired.probes.configuredKinds.allSatisfy({
+            resumed.state(for: $0)?.phase == .succeeded
+        }) else {
+            throw LifecycleSpecialExecutionError.invalidProbe
+        }
+        if desired.updatePolicy.stableObservationSeconds > 0 {
+            guard let stableSince = resumed.stableSinceMilliseconds,
+                  now >= stableSince +
+                    Int64(desired.updatePolicy.stableObservationSeconds) * 1_000 else {
+                throw LifecycleSpecialExecutionError.invalidProbe
+            }
+            let stableDeadline = stableSince +
+                Int64(desired.updatePolicy.stableObservationSeconds) * 1_000
+            let terminalKinds = [
+                RuntimeProbeKind.readiness,
+                .liveness
+            ].filter { desired.probes[$0] != nil }
+            guard terminalKinds.allSatisfy({ kind in
+                (resumed.state(for: kind)?.lastAttemptAtMilliseconds ??
+                    Int64.min) >= stableDeadline
+            }) else {
+                throw LifecycleSpecialExecutionError.invalidProbe
+            }
+        }
+    }
+
+    private func validateRolloutDependencies(
+        node: LifecyclePlanNode,
+        desiredState: DesiredRuntimeState,
+        observedState: ObservedRuntimeState
+    ) throws {
+        let conditions = node.preconditions.filter {
+            $0.kind.hasPrefix("dependency-")
+        }
+        for condition in conditions {
+            guard let serviceName = condition.subject.split(separator: "/").last
+                .map(String.init) else {
+                throw LifecycleSpecialExecutionError.invalidProbe
+            }
+            let desired = desiredState.services.filter {
+                $0.logicalServiceName == serviceName
+            }
+            let observed = observedState.services.filter {
+                $0.identity.serviceName == serviceName
+            }
+            guard !desired.isEmpty, observed.count >= desired.count else {
+                throw LifecycleSpecialExecutionError.invalidProbe
+            }
+            let satisfied: Bool
+            switch condition.kind {
+            case "dependency-started":
+                satisfied = observed.allSatisfy { $0.lifecycleState == .running }
+            case "dependency-ready":
+                satisfied = observed.allSatisfy {
+                    $0.lifecycleState == .running &&
+                        ($0.healthState == .healthy ||
+                            $0.healthState == .notConfigured)
+                }
+            case "dependency-completed":
+                satisfied = observed.allSatisfy { $0.lifecycleState == .exited }
+            default:
+                throw LifecycleSpecialExecutionError.invalidProbe
+            }
+            guard satisfied else {
+                throw LifecycleSpecialExecutionError.invalidProbe
+            }
+        }
+    }
+
     private func applyHook(
         node: LifecyclePlanNode,
         context: LifecycleSagaContext
@@ -4618,9 +4814,11 @@ struct LifecycleLiveEffects: LifecycleSagaEffects {
                 )
             }
 
+            let stableObservationSeconds = stableObservationSeconds(for: node)
             let requiredKinds = RuntimeProbeKind.allCases.filter { kind in
                 guard desired.probes[kind] != nil else { return false }
-                return kind == .startup || kind == targetKind
+                return stableObservationSeconds > 0 ||
+                    kind == .startup || kind == targetKind
             }
             var pendingKind: RuntimeProbeKind?
             probeKinds: for kind in requiredKinds {
@@ -4698,6 +4896,59 @@ struct LifecycleLiveEffects: LifecycleSagaEffects {
                 if probeState.phase != .succeeded {
                     pendingKind = kind
                     break
+                }
+            }
+            if pendingKind == nil, stableObservationSeconds > 0 {
+                guard let stableSince = snapshot.stableSinceMilliseconds else {
+                    return await terminalProbeFailure(
+                        node: node,
+                        context: context,
+                        outcome: .failed,
+                        diagnostic: "Stable rollout observation has no durable healthy-start checkpoint."
+                    )
+                }
+                let stableDeadline = stableSince +
+                    Int64(stableObservationSeconds) * 1_000
+                let recurringKinds = [
+                    RuntimeProbeKind.readiness,
+                    .liveness
+                ].filter { desired.probes[$0] != nil }
+                if now >= stableDeadline {
+                    pendingKind = recurringKinds.first { kind in
+                        guard let state = snapshot.state(for: kind) else {
+                            return true
+                        }
+                        return (state.lastAttemptAtMilliseconds ?? Int64.min) <
+                            stableDeadline
+                    }
+                } else {
+                    pendingKind = recurringKinds.first { kind in
+                        guard let state = snapshot.state(for: kind) else {
+                            return false
+                        }
+                        return now >= state.nextAttemptAtMilliseconds
+                    }
+                    if pendingKind == nil {
+                        let nextProbe = recurringKinds.compactMap {
+                            snapshot.state(for: $0)?.nextAttemptAtMilliseconds
+                        }.min() ?? stableDeadline
+                        let wait = min(
+                            max(1, nextProbe - now),
+                            max(1, stableDeadline - now),
+                            250
+                        )
+                        do {
+                            try await sleepMilliseconds(wait)
+                            continue
+                        } catch {
+                            return await terminalProbeFailure(
+                                node: node,
+                                context: context,
+                                outcome: .cancelled,
+                                diagnostic: "Stable rollout observation wait was cancelled."
+                            )
+                        }
+                    }
                 }
             }
             guard let kind = pendingKind else {
@@ -5572,7 +5823,8 @@ struct LifecycleLiveEffects: LifecycleSagaEffects {
             )
         }
         let marksHealthyRevision = node.action == .promote ||
-            (node.action == .verify &&
+            (context.plan.command != .update &&
+                node.action == .verify &&
                 node.postconditions.contains(where: {
                     $0.kind == "probe-readiness" ||
                         $0.kind == "dependency-ready"

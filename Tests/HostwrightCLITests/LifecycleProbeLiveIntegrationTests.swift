@@ -8,6 +8,393 @@ import XCTest
 @testable import HostwrightCLI
 
 final class LifecycleProbeLiveIntegrationTests: XCTestCase {
+    func testStableRolloutObservationReprobesUntilDurableWindowElapses() async throws {
+        let clock = ProbeLiveClock(milliseconds: 1_000)
+        let interactive = ProbeLiveInteractiveExecutor(
+            outcomes: [.succeeded, .succeeded, .succeeded]
+        )
+        let desired = probeLiveDesired(
+            probes: RuntimeProbeSet(
+                readiness: RuntimeProbeConfiguration(
+                    action: .exec(
+                        RuntimeProbeExecAction(command: ["/usr/bin/ready"])
+                    ),
+                    intervalSeconds: 1,
+                    successThreshold: 1,
+                    failureThreshold: 1
+                )
+            ),
+            updatePolicy: RuntimeUpdatePolicy(
+                progressDeadlineSeconds: 20,
+                stableObservationSeconds: 2
+            )
+        )
+        let fixture = try ProbeLiveFixture(
+            action: .verify,
+            desired: desired,
+            preconditions: [
+                LifecyclePlanCondition(
+                    kind: "stable-observation-seconds",
+                    subject: "phase04/web",
+                    expectedValue: "2"
+                ),
+                LifecyclePlanCondition(
+                    kind: "progress-deadline-seconds",
+                    subject: "web",
+                    expectedValue: "20"
+                )
+            ],
+            postcondition: LifecyclePlanCondition(
+                kind: "probe-readiness",
+                subject: "phase04/web",
+                expectedValue: "stable"
+            ),
+            planCommand: .update,
+            interactive: interactive,
+            clock: clock
+        )
+        defer { fixture.cleanup() }
+
+        let outcome = await fixture.effects.apply(
+            node: fixture.node,
+            context: fixture.context
+        )
+        XCTAssertEqual(outcome, .accepted)
+        XCTAssertGreaterThanOrEqual(clock.now(), 3_000)
+        XCTAssertEqual(interactive.snapshot().count, 3)
+        let snapshot = try XCTUnwrap(
+            fixture.probeStore.loadLatest(
+                groupID: fixture.context.groupID,
+                resourceIdentifier: fixture.binding.resourceIdentifier
+            )
+        )
+        XCTAssertEqual(snapshot.stableSinceMilliseconds, 1_000)
+    }
+
+    func testPromotionRefusesMissingProbeProofBeforePriorRevisionCanRetire() async throws {
+        let desired = probeLiveDesired(
+            probes: RuntimeProbeSet(
+                readiness: RuntimeProbeConfiguration(
+                    action: .exec(
+                        RuntimeProbeExecAction(command: ["/usr/bin/ready"])
+                    )
+                )
+            )
+        )
+        let fixture = try ProbeLiveFixture(
+            action: .promote,
+            desired: desired,
+            preconditions: [
+                LifecyclePlanCondition(
+                    kind: "revision-healthy",
+                    subject: "phase04/web",
+                    expectedValue: "true"
+                ),
+                LifecyclePlanCondition(
+                    kind: "progress-deadline-seconds",
+                    subject: "web",
+                    expectedValue: "20"
+                )
+            ],
+            postcondition: LifecyclePlanCondition(
+                kind: "revision-current",
+                subject: "phase04/web",
+                expectedValue: String(repeating: "a", count: 64)
+            ),
+            planCommand: .update,
+            interactive: ProbeLiveInteractiveExecutor(outcomes: [])
+        )
+        defer { fixture.cleanup() }
+
+        guard case .failed(let failure) = await fixture.effects.apply(
+            node: fixture.node,
+            context: fixture.context
+        ) else {
+            return XCTFail("Expected promotion without durable probe proof to fail.")
+        }
+        XCTAssertEqual(failure.category, .rejected)
+        let actions = await fixture.adapter.executedActions()
+        XCTAssertTrue(actions.isEmpty)
+    }
+
+    func testPromotionRecoveryRevalidatesProbeProofBeforeMarkingHealthy() async throws {
+        let desired = probeLiveDesired(
+            probes: RuntimeProbeSet(
+                readiness: RuntimeProbeConfiguration(
+                    action: .exec(
+                        RuntimeProbeExecAction(command: ["/usr/bin/ready"])
+                    )
+                )
+            )
+        )
+        let fixture = try ProbeLiveFixture(
+            action: .promote,
+            desired: desired,
+            preconditions: [
+                LifecyclePlanCondition(
+                    kind: "revision-healthy",
+                    subject: "phase04/web",
+                    expectedValue: "true"
+                ),
+                LifecyclePlanCondition(
+                    kind: "progress-deadline-seconds",
+                    subject: "web",
+                    expectedValue: "20"
+                )
+            ],
+            postcondition: LifecyclePlanCondition(
+                kind: "revision-current",
+                subject: "phase04/web",
+                expectedValue: String(repeating: "a", count: 64)
+            ),
+            planCommand: .update,
+            interactive: ProbeLiveInteractiveExecutor(outcomes: [])
+        )
+        defer { fixture.cleanup() }
+        try fixture.probeStore.save(
+            RuntimeProbeSnapshot(
+                resourceIdentifier: fixture.binding.resourceIdentifier,
+                startedAtMilliseconds: 1_000,
+                states: [
+                    RuntimeProbeState(
+                        kind: .readiness,
+                        phase: .failed,
+                        isPassing: false,
+                        consecutiveFailures: 1,
+                        attemptCount: 1,
+                        nextAttemptAtMilliseconds: 2_000,
+                        lastAttemptAtMilliseconds: 1_000,
+                        lastOutcome: .failed
+                    )
+                ]
+            ),
+            groupID: fixture.context.groupID,
+            fencingToken: fixture.context.fencingToken,
+            serviceName: "web",
+            updatedAt: "2026-07-23T12:00:00Z"
+        )
+
+        guard case .noEffect = await fixture.effects.observe(
+            node: fixture.node,
+            context: fixture.context
+        ) else {
+            return XCTFail("Recovery must refuse promotion without current probe proof.")
+        }
+        XCTAssertFalse(
+            try fixture.exactOwnership().metadataJSONRedacted.contains(
+                #""healthy":true"#
+            )
+        )
+    }
+
+    func testPromotionRefusesStableWindowWithoutTerminalProbeSample() async throws {
+        let desired = probeLiveDesired(
+            probes: RuntimeProbeSet(
+                readiness: RuntimeProbeConfiguration(
+                    action: .exec(
+                        RuntimeProbeExecAction(command: ["/usr/bin/ready"])
+                    ),
+                    intervalSeconds: 5
+                )
+            ),
+            updatePolicy: RuntimeUpdatePolicy(
+                progressDeadlineSeconds: 20,
+                stableObservationSeconds: 2
+            )
+        )
+        let fixture = try ProbeLiveFixture(
+            action: .promote,
+            desired: desired,
+            preconditions: [
+                LifecyclePlanCondition(
+                    kind: "revision-healthy",
+                    subject: "phase04/web",
+                    expectedValue: "true"
+                ),
+                LifecyclePlanCondition(
+                    kind: "progress-deadline-seconds",
+                    subject: "web",
+                    expectedValue: "20"
+                )
+            ],
+            postcondition: LifecyclePlanCondition(
+                kind: "revision-current",
+                subject: "phase04/web",
+                expectedValue: String(repeating: "a", count: 64)
+            ),
+            planCommand: .update,
+            interactive: ProbeLiveInteractiveExecutor(outcomes: []),
+            clock: ProbeLiveClock(milliseconds: 4_000)
+        )
+        defer { fixture.cleanup() }
+        try fixture.probeStore.save(
+            RuntimeProbeSnapshot(
+                resourceIdentifier: fixture.binding.resourceIdentifier,
+                startedAtMilliseconds: 1_000,
+                stableSinceMilliseconds: 1_000,
+                states: [
+                    RuntimeProbeState(
+                        kind: .readiness,
+                        phase: .succeeded,
+                        isPassing: true,
+                        consecutiveSuccesses: 1,
+                        attemptCount: 1,
+                        nextAttemptAtMilliseconds: 7_000,
+                        lastAttemptAtMilliseconds: 2_000,
+                        lastOutcome: .succeeded
+                    )
+                ]
+            ),
+            groupID: fixture.context.groupID,
+            fencingToken: fixture.context.fencingToken,
+            serviceName: "web",
+            updatedAt: "2026-07-23T12:00:00Z"
+        )
+
+        guard case .failed(let failure) = await fixture.effects.apply(
+            node: fixture.node,
+            context: fixture.context
+        ) else {
+            return XCTFail("Promotion requires a terminal sample at the stable boundary.")
+        }
+        XCTAssertEqual(failure.category, .rejected)
+    }
+
+    func testUpdateReadinessDoesNotMarkCandidateHealthyBeforePromotion() async throws {
+        let desired = probeLiveDesired(
+            probes: RuntimeProbeSet(
+                readiness: RuntimeProbeConfiguration(
+                    action: .exec(
+                        RuntimeProbeExecAction(command: ["/usr/bin/ready"])
+                    )
+                )
+            )
+        )
+        let fixture = try ProbeLiveFixture(
+            action: .verify,
+            desired: desired,
+            preconditions: [
+                LifecyclePlanCondition(
+                    kind: "progress-deadline-seconds",
+                    subject: "web",
+                    expectedValue: "20"
+                )
+            ],
+            postcondition: LifecyclePlanCondition(
+                kind: "probe-readiness",
+                subject: "phase04/web",
+                expectedValue: "healthy"
+            ),
+            planCommand: .update,
+            interactive: ProbeLiveInteractiveExecutor(outcomes: [.succeeded])
+        )
+        defer { fixture.cleanup() }
+
+        let applyOutcome = await fixture.effects.apply(
+            node: fixture.node,
+            context: fixture.context
+        )
+        XCTAssertEqual(applyOutcome, .accepted)
+        guard case .satisfied = await fixture.effects.observe(
+            node: fixture.node,
+            context: fixture.context
+        ) else {
+            return XCTFail("Expected readiness proof to persist without promotion.")
+        }
+        XCTAssertFalse(
+            try fixture.exactOwnership().metadataJSONRedacted.contains(
+                #""healthy":true"#
+            )
+        )
+    }
+
+    func testStableRolloutStageResumesPersistedHealthWithoutDuplicateMutation() async throws {
+        let clock = ProbeLiveClock(milliseconds: 2_500)
+        let interactive = ProbeLiveInteractiveExecutor(
+            outcomes: [.succeeded, .succeeded]
+        )
+        let desired = probeLiveDesired(
+            probes: RuntimeProbeSet(
+                readiness: RuntimeProbeConfiguration(
+                    action: .exec(
+                        RuntimeProbeExecAction(command: ["/usr/bin/ready"])
+                    ),
+                    intervalSeconds: 1,
+                    failureThreshold: 1
+                )
+            ),
+            updatePolicy: RuntimeUpdatePolicy(
+                progressDeadlineSeconds: 20,
+                stableObservationSeconds: 2
+            )
+        )
+        let fixture = try ProbeLiveFixture(
+            action: .verify,
+            desired: desired,
+            preconditions: [
+                LifecyclePlanCondition(
+                    kind: "stable-observation-seconds",
+                    subject: "phase04/web",
+                    expectedValue: "2"
+                ),
+                LifecyclePlanCondition(
+                    kind: "progress-deadline-seconds",
+                    subject: "web",
+                    expectedValue: "20"
+                )
+            ],
+            postcondition: LifecyclePlanCondition(
+                kind: "probe-readiness",
+                subject: "phase04/web",
+                expectedValue: "stable"
+            ),
+            planCommand: .update,
+            interactive: interactive,
+            clock: clock
+        )
+        defer { fixture.cleanup() }
+        try fixture.probeStore.save(
+            RuntimeProbeSnapshot(
+                resourceIdentifier: fixture.binding.resourceIdentifier,
+                startedAtMilliseconds: 1_000,
+                stableSinceMilliseconds: 1_000,
+                states: [
+                    RuntimeProbeState(
+                        kind: .readiness,
+                        phase: .succeeded,
+                        isPassing: true,
+                        consecutiveSuccesses: 1,
+                        attemptCount: 1,
+                        nextAttemptAtMilliseconds: 2_000,
+                        lastAttemptAtMilliseconds: 1_000,
+                        lastOutcome: .succeeded
+                    )
+                ]
+            ),
+            groupID: fixture.context.groupID,
+            fencingToken: fixture.context.fencingToken,
+            serviceName: "web",
+            updatedAt: "2026-07-23T12:00:00Z"
+        )
+
+        let outcome = await fixture.effects.apply(
+            node: fixture.node,
+            context: fixture.context
+        )
+        XCTAssertEqual(outcome, .accepted)
+        XCTAssertEqual(interactive.snapshot().count, 2)
+        let actions = await fixture.adapter.executedActions()
+        XCTAssertTrue(actions.isEmpty)
+        let persisted = try XCTUnwrap(
+            fixture.probeStore.loadLatest(
+                groupID: fixture.context.groupID,
+                resourceIdentifier: fixture.binding.resourceIdentifier
+            )
+        )
+        XCTAssertEqual(persisted.stableSinceMilliseconds, 1_000)
+        XCTAssertEqual(persisted.state(for: .readiness)?.attemptCount, 3)
+    }
+
     func testPostStartHookUsesExactContainerAndPersistsCompletion() async throws {
         let interactive = ProbeLiveInteractiveExecutor(outcomes: [.succeeded])
         let fixture = try ProbeLiveFixture(
@@ -709,9 +1096,11 @@ private struct ProbeLiveFixture {
     init(
         action: LifecyclePlanAction,
         desired: DesiredRuntimeService,
+        preconditions: [LifecyclePlanCondition] = [],
         postcondition: LifecyclePlanCondition,
         providerID: RuntimeProviderID = .appleContainerCLI,
         timeoutSeconds: Int = 20,
+        planCommand: LifecycleCommand? = nil,
         interactive: ProbeLiveInteractiveExecutor,
         clock: ProbeLiveClock = ProbeLiveClock()
     ) throws {
@@ -796,11 +1185,12 @@ private struct ProbeLiveFixture {
             resourceUUID: binding.resourceUUID,
             resourceGeneration: binding.resourceGeneration,
             fencingToken: operationFence,
+            preconditions: preconditions,
             postconditions: [postcondition],
             timeoutSeconds: timeoutSeconds
         )
         let plan = try LifecyclePlan(
-            command: action == .restart ? .restart : .up,
+            command: planCommand ?? (action == .restart ? .restart : .up),
             projectID: "project-phase04",
             projectName: desired.identity.projectName,
             projectResourceUUID: binding.projectResourceUUID,
@@ -959,6 +1349,7 @@ private struct ProbeLiveFixture {
 private func probeLiveDesired(
     probes: RuntimeProbeSet = RuntimeProbeSet(),
     restartPolicy: RuntimeRestartPolicy = .no,
+    updatePolicy: RuntimeUpdatePolicy = RuntimeUpdatePolicy(),
     hooks: RuntimeLifecycleHooks = RuntimeLifecycleHooks()
 ) -> DesiredRuntimeService {
     DesiredRuntimeService(
@@ -970,6 +1361,7 @@ private func probeLiveDesired(
         workingDirectory: "/work",
         probes: probes,
         restartPolicy: restartPolicy,
+        updatePolicy: updatePolicy,
         hooks: hooks
     )
 }

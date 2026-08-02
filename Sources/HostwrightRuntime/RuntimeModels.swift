@@ -486,17 +486,20 @@ public struct RuntimeUpdatePolicy: Codable, Equatable, Sendable {
     public let maxSurge: Int
     public let maxUnavailable: Int
     public let progressDeadlineSeconds: Int
+    public let stableObservationSeconds: Int
 
     public init(
         strategy: RuntimeUpdateStrategy = .rolling,
         maxSurge: Int = 1,
         maxUnavailable: Int = 0,
-        progressDeadlineSeconds: Int = 300
+        progressDeadlineSeconds: Int = 300,
+        stableObservationSeconds: Int = 0
     ) {
         self.strategy = strategy
         self.maxSurge = maxSurge
         self.maxUnavailable = maxUnavailable
         self.progressDeadlineSeconds = progressDeadlineSeconds
+        self.stableObservationSeconds = stableObservationSeconds
     }
 }
 

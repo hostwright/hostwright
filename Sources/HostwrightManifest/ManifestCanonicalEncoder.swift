@@ -258,6 +258,9 @@ public enum ManifestCanonicalEncoder {
                 lines.append("      maxSurge: \(service.update.maxSurge)")
                 lines.append("      maxUnavailable: \(service.update.maxUnavailable)")
                 lines.append("      progressDeadline: \(quote("\(service.update.progressDeadline)s"))")
+                if service.update.stableObservation != 0 {
+                    lines.append("      stableObservation: \(quote("\(service.update.stableObservation)s"))")
+                }
             }
             if service.hooks.postStart != nil || service.hooks.preStop != nil {
                 lines.append("    hooks:")

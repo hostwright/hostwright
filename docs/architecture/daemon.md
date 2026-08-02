@@ -92,7 +92,11 @@ Those events and daemon operation records are local forensic inputs for `hostwri
 
 Both daemon modes may execute only the supported `up` lifecycle DAG through the exact production CLI lifecycle driver. There is no daemon-specific provider executor and no direct Apple command path. The daemon reuses provider capability binding, exact plan confirmation, project/resource UUID ownership, provider/project generations, fencing, the three-attempt node retry limit, compensation, and safe holds.
 
-The current Phase 08 boundary does not add rollout-policy expansion, garbage collection, broad deletion, Phase 09 transport, or multi-host authority. Unsupported drift and unmanaged collisions fail before mutation. Explicit CLI lifecycle and cleanup confirmation contracts remain unchanged.
+The current Phase 08 boundary does not add autonomous last-healthy rollback selection, garbage collection, broad deletion, Phase 09 transport, or multi-host authority. Unsupported drift and unmanaged collisions fail before mutation. Explicit CLI lifecycle and cleanup confirmation contracts remain unchanged.
+
+### Health-gated rollout
+
+The shared update DAG persists exact prior and candidate revision identity before effects and orders startup, readiness, liveness, dependency, and optional stable-observation gates before promotion. Stable observation re-runs configured readiness and liveness probes and persists its first continuously healthy timestamp. A process restart therefore resumes the exact stage and candidate rather than creating a duplicate workload. Promotion freshly re-observes the provider, exact candidate lifecycle, dependency states, probe checkpoint, and elapsed stable interval; missing, stale, unhealthy, or ambiguous evidence refuses promotion. Versioned lifecycle text and JSON status report the stage, node counts, exact prior/candidate identity, configured gates, stable duration, and progress deadline.
 
 ### Maintenance windows and change deferral
 
@@ -155,11 +159,12 @@ Every action other than `contract` requires those four environment values. Re-ex
 - `maintenanceDeferred`: inspect `hostwright maintenance status --project <project-id> --json`; wait for the reported applicable window or use only the exact current token for an explicitly justified override.
 - `maintenanceDeadlineExpired` or `maintenanceCancelled`: the plan remains non-mutating. Change the validated desired generation when new work is intended; do not reuse an old token.
 - maintenance confirmation mismatch at effect time: preserve the deferral and saga evidence. The policy, token, window, or configuration changed after admission, so the daemon must re-observe on a later level-triggered iteration.
+- rollout promotion refused: inspect the lifecycle rollout status and exact operation group. Correct the failed or ambiguous startup, readiness, liveness, dependency, stable-observation, or progress-deadline evidence; do not delete the candidate or rewrite checkpoints by hand.
 
 Status and validation are read-only. A failed preflight performs no plist or launchctl mutation. Cleanup must be done through `uninstall`, which refuses changed, linked, wrongly owned, or permission-invalid files.
 
 ## Current Sequenced Limitations
 
 - privileged helper
-- health-gated staged unattended rollout and autonomous rollback expansion
+- autonomous last-healthy rollback selection and safe-hold expansion
 - image, volume, or unmanaged cleanup

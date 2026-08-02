@@ -281,6 +281,16 @@ public enum LifecycleRevisionCodec {
         let labels = Dictionary(
             uniqueKeysWithValues: service.labels.sorted { $0.key < $1.key }
         )
+        var updatePolicy: [String: Any] = [
+            "maxSurge": service.updatePolicy.maxSurge,
+            "maxUnavailable": service.updatePolicy.maxUnavailable,
+            "progressDeadlineSeconds": service.updatePolicy.progressDeadlineSeconds,
+            "strategy": service.updatePolicy.strategy.rawValue
+        ]
+        if service.updatePolicy.stableObservationSeconds != 0 {
+            updatePolicy["stableObservationSeconds"] =
+                service.updatePolicy.stableObservationSeconds
+        }
         var object: [String: Any] = [
             "command": service.command,
             "cpuCount": service.cpuCount.map { $0 as Any } ?? NSNull(),
@@ -323,12 +333,7 @@ public enum LifecycleRevisionCodec {
             "rosetta": service.rosetta,
             "sharedMemoryBytes":
                 service.sharedMemoryBytes.map { String($0) as Any } ?? NSNull(),
-            "updatePolicy": [
-                "maxSurge": service.updatePolicy.maxSurge,
-                "maxUnavailable": service.updatePolicy.maxUnavailable,
-                "progressDeadlineSeconds": service.updatePolicy.progressDeadlineSeconds,
-                "strategy": service.updatePolicy.strategy.rawValue
-            ],
+            "updatePolicy": updatePolicy,
             "userID": service.userID.map { String($0) as Any } ?? NSNull(),
             "virtualization": service.virtualization,
             "workingDirectory":
@@ -694,7 +699,8 @@ public enum LifecycleRevisionCodec {
                     strategy: strategy,
                     maxSurge: updatePolicy.maxSurge,
                     maxUnavailable: updatePolicy.maxUnavailable,
-                    progressDeadlineSeconds: updatePolicy.progressDeadlineSeconds
+                    progressDeadlineSeconds: updatePolicy.progressDeadlineSeconds,
+                    stableObservationSeconds: updatePolicy.stableObservationSeconds
                 ),
                 hooks: RuntimeLifecycleHooks(
                     postStart: hooks.postStart,
@@ -1436,6 +1442,7 @@ public enum LifecycleRevisionCodec {
         let maxSurge: Int
         let maxUnavailable: Int
         let progressDeadlineSeconds: Int
+        let stableObservationSeconds: Int
         let strategy: String
 
         init(from decoder: Decoder) throws {
@@ -1445,6 +1452,7 @@ public enum LifecycleRevisionCodec {
                 required: [
                     "maxSurge", "maxUnavailable", "progressDeadlineSeconds", "strategy"
                 ],
+                optional: ["stableObservationSeconds"],
                 path: "updatePolicy"
             )
             maxSurge = try container.decode(Int.self, forKey: "maxSurge")
@@ -1453,6 +1461,10 @@ public enum LifecycleRevisionCodec {
                 Int.self,
                 forKey: "progressDeadlineSeconds"
             )
+            stableObservationSeconds = try container.decodeIfPresent(
+                Int.self,
+                forKey: "stableObservationSeconds"
+            ) ?? 0
             strategy = try container.decode(String.self, forKey: "strategy")
         }
     }
@@ -1733,6 +1745,11 @@ public struct LifecycleUpdatePlanner: Sendable {
             guard policy.progressDeadlineSeconds > 0,
                   policy.maxSurge >= 0,
                   policy.maxUnavailable >= 0,
+                  policy.stableObservationSeconds >= 0,
+                  policy.stableObservationSeconds <= policy.progressDeadlineSeconds,
+                  policy.stableObservationSeconds == 0 ||
+                    firstDesired.probes.readiness != nil ||
+                    firstDesired.probes.liveness != nil,
                   !(policy.strategy == .rolling &&
                     policy.maxSurge == 0 &&
                     policy.maxUnavailable == 0) else {
@@ -1831,6 +1848,8 @@ public struct LifecycleUpdatePlanner: Sendable {
             let postStartKey = nodeKey(service: desired, phase: "poststart")
             let startupKey = nodeKey(service: desired, phase: "startup")
             let readinessKey = nodeKey(service: desired, phase: "readiness")
+            let livenessKey = nodeKey(service: desired, phase: "liveness")
+            let stableKey = nodeKey(service: desired, phase: "stable")
             let promoteKey = nodeKey(service: desired, phase: "promote")
             let retireKey = nodeKey(service: desired, phase: "retire")
 
@@ -1951,6 +1970,61 @@ public struct LifecycleUpdatePlanner: Sendable {
                     desiredJSON: desiredJSON
                 )
             )
+            var promotionDependency = readinessKey
+            if desired.probes.liveness != nil {
+                nodes.append(
+                    try node(
+                        key: livenessKey,
+                        action: .verify,
+                        service: desired,
+                        resourceIdentifier: resource.candidateResourceIdentifier,
+                        resourceUUID: resource.candidateResourceUUID,
+                        generation: resource.candidateGeneration,
+                        fence: fencingToken,
+                        dependencies: [readinessKey],
+                        postconditions: [
+                            condition("probe-liveness", desired.identity, "healthy")
+                        ],
+                        timeout: nodeTimeout,
+                        desiredJSON: desiredJSON
+                    )
+                )
+                promotionDependency = livenessKey
+            }
+            if policy.stableObservationSeconds > 0 {
+                let stableProbeKind = desired.probes.liveness != nil
+                    ? RuntimeProbeKind.liveness
+                    : .readiness
+                nodes.append(
+                    try node(
+                        key: stableKey,
+                        action: .verify,
+                        service: desired,
+                        resourceIdentifier: resource.candidateResourceIdentifier,
+                        resourceUUID: resource.candidateResourceUUID,
+                        generation: resource.candidateGeneration,
+                        fence: fencingToken,
+                        dependencies: [promotionDependency],
+                        preconditions: [
+                            condition(
+                                "stable-observation-seconds",
+                                desired.identity,
+                                String(policy.stableObservationSeconds)
+                            )
+                        ],
+                        postconditions: [
+                            condition(
+                                "probe-\(stableProbeKind.rawValue)",
+                                desired.identity,
+                                "stable"
+                            )
+                        ],
+                        timeout: nodeTimeout,
+                        desiredJSON: desiredJSON
+                    )
+                )
+                promotionDependency = stableKey
+            }
             nodes.append(
                 try node(
                     key: startKey,
@@ -2033,8 +2107,8 @@ public struct LifecycleUpdatePlanner: Sendable {
                     resourceUUID: resource.candidateResourceUUID,
                     generation: resource.candidateGeneration,
                     fence: fencingToken,
-                    dependencies: [readinessKey],
-                    preconditions: [
+                    dependencies: [promotionDependency],
+                    preconditions: serviceDependencyPreconditions + [
                         condition("revision-healthy", desired.identity, "true")
                     ],
                     postconditions: [

@@ -2141,7 +2141,10 @@ private struct ManifestNodeDecoder {
         let values = try mapping(
             node,
             path: path,
-            allowed: ["strategy", "maxSurge", "maxUnavailable", "progressDeadline"]
+            allowed: [
+                "strategy", "maxSurge", "maxUnavailable", "progressDeadline",
+                "stableObservation"
+            ]
         )
         let strategyRaw = try values["strategy"].map {
             try string($0, path: "\(path).strategy")
@@ -2164,6 +2167,11 @@ private struct ManifestNodeDecoder {
                 values["progressDeadline"],
                 default: 300,
                 path: "\(path).progressDeadline"
+            ),
+            stableObservation: try duration(
+                values["stableObservation"],
+                default: 0,
+                path: "\(path).stableObservation"
             )
         )
     }

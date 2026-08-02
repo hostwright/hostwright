@@ -108,7 +108,7 @@ validate_inputs() {
   local image_digest="${HOSTWRIGHT_PHASE08_SOAK_IMAGE##*@}"
   container image list --format json \
     | /usr/bin/jq -e --arg digest "$image_digest" \
-      '[.[] | .variants[] | .digest] | any(. == $digest)' >/dev/null \
+      '[.[] | .id, .configuration.descriptor.digest, (.variants[].digest)] | any(. == $digest)' >/dev/null \
     || die 'The exact digest-bound soak image is not already local; pulling is forbidden.' 69
   ! /usr/sbin/lsof -nP -iTCP:"$HOSTWRIGHT_PHASE08_SOAK_HOST_PORT" -sTCP:LISTEN >/dev/null 2>&1 \
     || die 'The selected soak host port is already listening.' 75

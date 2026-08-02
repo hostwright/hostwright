@@ -102,6 +102,7 @@ final class MutationCheckpointQualificationScriptTests: XCTestCase {
             "preflight)",
             "source_digest",
             "HOSTWRIGHT_PHASE08_SOAK_SOURCE_COMMIT",
+            ".configuration.descriptor.digest",
             "pmset_count 'Entering Sleep state'",
             "pmset_count 'Wake from'",
             "metrics snapshot",

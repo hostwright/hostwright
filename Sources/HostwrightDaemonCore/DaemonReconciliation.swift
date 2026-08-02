@@ -4,18 +4,20 @@ import HostwrightRuntime
 
 public enum DaemonReconciliationStatus: String, Codable, Equatable, Sendable {
     case converged
+    case deferred
     case mutated
     case compensated
     case interrupted
     case safeHold = "safe-hold"
 
     public var isSuccessfulIteration: Bool {
-        self == .converged || self == .mutated
+        self == .converged || self == .deferred || self == .mutated
     }
 }
 
 public enum DaemonReconciliationReasonCode: String, Codable, Equatable, Sendable {
     case converged = "daemon.reconcile.converged"
+    case restartBudgetDeferred = "daemon.reconcile.restart-budget-deferred"
     case mutationVerified = "daemon.reconcile.mutated"
     case compensated = "daemon.reconcile.compensated"
     case interrupted = "daemon.reconcile.interrupted"
@@ -31,6 +33,8 @@ public struct DaemonReconciliationRequest: Codable, Equatable, Sendable {
     public let stateDatabasePath: String
     public let projectID: String
     public let maximumParallelism: Int
+    public let selectedServiceNames: [String]?
+    public let operationIdempotencyKeySHA256: String?
 
     public init(
         schemaVersion: Int = 1,
@@ -40,7 +44,34 @@ public struct DaemonReconciliationRequest: Codable, Equatable, Sendable {
         configurationTargets: [DaemonConfigurationTarget],
         stateDatabasePath: String,
         projectID: String,
-        maximumParallelism: Int
+        maximumParallelism: Int,
+        operationIdempotencyKeySHA256: String? = nil
+    ) throws {
+        try self.init(
+            schemaVersion: schemaVersion,
+            manifestPath: manifestPath,
+            manifestSHA256: manifestSHA256,
+            configurationSetSHA256: configurationSetSHA256,
+            configurationTargets: configurationTargets,
+            stateDatabasePath: stateDatabasePath,
+            projectID: projectID,
+            maximumParallelism: maximumParallelism,
+            selectedServiceNames: nil,
+            operationIdempotencyKeySHA256: operationIdempotencyKeySHA256
+        )
+    }
+
+    public init(
+        schemaVersion: Int = 1,
+        manifestPath: String,
+        manifestSHA256: String,
+        configurationSetSHA256: String,
+        configurationTargets: [DaemonConfigurationTarget],
+        stateDatabasePath: String,
+        projectID: String,
+        maximumParallelism: Int,
+        selectedServiceNames: [String]?,
+        operationIdempotencyKeySHA256: String? = nil
     ) throws {
         guard schemaVersion == 1,
               !manifestPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -67,7 +98,19 @@ public struct DaemonReconciliationRequest: Codable, Equatable, Sendable {
                   of: "^project-[A-Za-z0-9](?:[A-Za-z0-9._-]{0,126}[A-Za-z0-9])?$",
                   options: .regularExpression
               ) != nil,
-              (1...32).contains(maximumParallelism) else {
+              (1...32).contains(maximumParallelism),
+              selectedServiceNames.map({ names in
+                  names == names.sorted() && Set(names).count == names.count &&
+                      names.allSatisfy {
+                          $0.range(of: "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$", options: .regularExpression) != nil
+                      }
+              }) ?? true,
+              operationIdempotencyKeySHA256.map({ digest in
+                  digest.range(
+                      of: "^[a-f0-9]{64}$",
+                      options: .regularExpression
+                  ) != nil
+              }) ?? true else {
             throw HostwrightDiagnostic(
                 code: .daemonInvalid,
                 message: "Unattended reconciliation requires schema v1, exact paths and digest, one bounded project identity, and parallelism from 1 through 32."
@@ -81,6 +124,8 @@ public struct DaemonReconciliationRequest: Codable, Equatable, Sendable {
         self.stateDatabasePath = stateDatabasePath
         self.projectID = projectID
         self.maximumParallelism = maximumParallelism
+        self.selectedServiceNames = selectedServiceNames
+        self.operationIdempotencyKeySHA256 = operationIdempotencyKeySHA256
     }
 
     init(
@@ -89,7 +134,8 @@ public struct DaemonReconciliationRequest: Codable, Equatable, Sendable {
         manifestSHA256: String,
         stateDatabasePath: String,
         projectID: String,
-        maximumParallelism: Int
+        maximumParallelism: Int,
+        operationIdempotencyKeySHA256: String? = nil
     ) throws {
         let normalizedPath = URL(fileURLWithPath: manifestPath).standardizedFileURL.path
         let target = try DaemonConfigurationTarget(
@@ -108,7 +154,9 @@ public struct DaemonReconciliationRequest: Codable, Equatable, Sendable {
             configurationTargets: [target],
             stateDatabasePath: stateDatabasePath,
             projectID: projectID,
-            maximumParallelism: maximumParallelism
+            maximumParallelism: maximumParallelism,
+            selectedServiceNames: nil,
+            operationIdempotencyKeySHA256: operationIdempotencyKeySHA256
         )
     }
 }
@@ -121,6 +169,7 @@ public struct DaemonReconciliationResult: Codable, Equatable, Sendable {
     public let nodeCount: Int
     public let completedNodeCount: Int
     public let runtimeMutationAttempted: Bool
+    public let attemptedServiceNames: [String]?
     public let operationID: String?
     public let groupID: String?
     public let checkpoint: String
@@ -134,6 +183,7 @@ public struct DaemonReconciliationResult: Codable, Equatable, Sendable {
         nodeCount: Int,
         completedNodeCount: Int,
         runtimeMutationAttempted: Bool,
+        attemptedServiceNames: [String]? = nil,
         operationID: String? = nil,
         groupID: String? = nil,
         checkpoint: String,
@@ -148,6 +198,16 @@ public struct DaemonReconciliationResult: Codable, Equatable, Sendable {
               completedNodeCount >= 0,
               completedNodeCount <= nodeCount,
               !checkpoint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              attemptedServiceNames.map({ names in
+                  names == names.sorted() && Set(names).count == names.count &&
+                      names.allSatisfy {
+                          $0.range(
+                              of: "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$",
+                              options: .regularExpression
+                          ) != nil
+                      }
+              }) ?? true,
+              runtimeMutationAttempted == (attemptedServiceNames?.isEmpty == false),
               operationID.map(HostwrightResourceUUID.isValid) ?? true,
               groupID.map(HostwrightResourceUUID.isValid) ?? true else {
             throw HostwrightDiagnostic(
@@ -155,11 +215,12 @@ public struct DaemonReconciliationResult: Codable, Equatable, Sendable {
                 message: "Unattended reconciliation returned an invalid versioned result."
             )
         }
-        guard (status == .converged) == !runtimeMutationAttempted,
+        guard (!(status == .converged || status == .deferred) || !runtimeMutationAttempted),
               nodeCount == 0 || operationID != nil,
               nodeCount == 0 || groupID != nil,
               nodeCount > 0 || operationID == nil,
               nodeCount > 0 || groupID == nil,
+              status != .mutated || runtimeMutationAttempted,
               status != .mutated || completedNodeCount == nodeCount,
               reasonCode == Self.reasonCode(for: status) else {
             throw HostwrightDiagnostic(
@@ -174,6 +235,7 @@ public struct DaemonReconciliationResult: Codable, Equatable, Sendable {
         self.nodeCount = nodeCount
         self.completedNodeCount = completedNodeCount
         self.runtimeMutationAttempted = runtimeMutationAttempted
+        self.attemptedServiceNames = attemptedServiceNames
         self.operationID = operationID?.lowercased()
         self.groupID = groupID?.lowercased()
         self.checkpoint = checkpoint
@@ -187,6 +249,7 @@ public struct DaemonReconciliationResult: Codable, Equatable, Sendable {
     ) -> DaemonReconciliationReasonCode {
         switch status {
         case .converged: .converged
+        case .deferred: .restartBudgetDeferred
         case .mutated: .mutationVerified
         case .compensated: .compensated
         case .interrupted: .interrupted

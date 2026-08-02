@@ -12,6 +12,11 @@ public enum ManifestCanonicalEncoder {
             "version: \(HostwrightManifest.currentVersion)",
             "project: \(quote(manifest.project ?? ""))"
         ]
+        if let restartBudget = manifest.restartBudget {
+            lines.append("restartBudget:")
+            lines.append("  maxAttempts: \(restartBudget.maxAttempts)")
+            lines.append("  window: \(quote("\(restartBudget.window)s"))")
+        }
         if let imagePolicy = manifest.imagePolicy {
             lines.append("imagePolicy: \(quote(imagePolicy.rawValue))")
         }
@@ -198,6 +203,27 @@ public enum ManifestCanonicalEncoder {
             if let restart = service.restart {
                 lines.append("    restart:")
                 lines.append("      policy: \(quote(restart.policy))")
+                if restart.maxAttempts != 3 {
+                    lines.append("      maxAttempts: \(restart.maxAttempts)")
+                }
+                if restart.window != 300 {
+                    lines.append("      window: \(quote("\(restart.window)s"))")
+                }
+                if restart.backoff != 60 {
+                    lines.append("      backoff: \(quote("\(restart.backoff)s"))")
+                }
+                if restart.maxBackoff != 300 {
+                    lines.append("      maxBackoff: \(quote("\(restart.maxBackoff)s"))")
+                }
+                if restart.jitter != 0 {
+                    lines.append("      jitter: \(quote("\(restart.jitter)s"))")
+                }
+                if restart.stableRun != 60 {
+                    lines.append("      stableRun: \(quote("\(restart.stableRun)s"))")
+                }
+                if restart.priority != 0 {
+                    lines.append("      priority: \(restart.priority)")
+                }
             }
             if service.update != HostwrightUpdatePolicy() {
                 lines.append("    update:")

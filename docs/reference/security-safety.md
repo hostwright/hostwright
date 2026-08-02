@@ -14,11 +14,13 @@ Production subprocess execution uses one shared bounded implementation. It passe
 
 ## Mutation Boundaries
 
-Supported application mutation requires an exact lifecycle plan hash and one durable schema-v16 operation group. `up`, `down`, `run`, `start`, `stop`, `restart`, `rm`, and `update` revalidate provider identity, capability digest, project/resource generation, ownership UUID, and fence before every mutation wave. Intent and compensation are persisted before effects; ambiguous results are re-observed; automatic rollback runs only when ownership and every inverse effect are provable. Otherwise Hostwright records a safe hold.
+Supported application mutation requires an exact lifecycle plan hash and one durable schema-v17 operation group. `up`, `down`, `run`, `start`, `stop`, `restart`, `rm`, and `update` revalidate provider identity, capability digest, project/resource generation, ownership UUID, and fence before every mutation wave. Intent and compensation are persisted before effects; ambiguous results are re-observed; automatic rollback runs only when ownership and every inverse effect are provable. Otherwise Hostwright records a safe hold.
 
 Phase 04 workload lifecycle remains separate from Phase 05 image preparation, Phase 06 storage, and the exact Phase 07 networking boundary. Image commands implement strict Apple CLI pull/build/push/tag/load/save/inspect plus exact Hostwright-owned delete/prune. Storage commands implement exact Hostwright-owned named volumes, snapshots, verified backup/restore, quotas, reclaim, and orphan recovery. Networking commands implement exact owned networks, DNS, ingress, certificates, policy, and tunnels; none of these surfaces add unattended daemon mutation or broad/unmanaged cleanup.
 
 Restart policy state can block managed restart through backoff, operator hold, manual disable, and crash-loop protection. The daemon computes that state before lifecycle admission and refuses a blocking reconciliation plan; supported admitted work executes only through the shared fenced lifecycle saga.
+
+Manual hold release is a same-user confirmation boundary, not a bearer-authentication mechanism. It requires the exact private state database, project, service, and current hold token; the release generation fences later state/history writes so a stale daemon snapshot cannot restore a cleared hold.
 
 ## LaunchAgent Boundary
 
@@ -123,7 +125,7 @@ Cleanup does not delete images, volumes, networks, Apple builder resources, base
 
 ## Storage Boundary
 
-Named-volume authority comes from schema-v16 project/resource UUIDs, provider ID, generation, fencing token, ownership proof, and current provider observation. A name or filesystem path is never sufficient. The shipped `hostwright-local` provider confines managed data below its private Application Support root; its signed helper validates peer UID, process identity, code signature, bounded protocol frames, capability digest, deadline, idempotency key, and mutation context.
+Named-volume authority comes from schema-v17 project/resource UUIDs, provider ID, generation, fencing token, ownership proof, and current provider observation. A name or filesystem path is never sufficient. The shipped `hostwright-local` provider confines managed data below its private Application Support root; its signed helper validates peer UID, process identity, code signature, bounded protocol frames, capability digest, deadline, idempotency key, and mutation context.
 
 Bind mounts use descriptor-based no-symlink validation and reject host root, devices, traversal, unsafe ownership or permissions, and identity swaps. Writable attachment, detach, snapshot, restore, expansion, delete, and reclaim revalidate generation and fencing immediately before effects. One-writer and read-only-many rules are enforced from both durable state and provider observation.
 

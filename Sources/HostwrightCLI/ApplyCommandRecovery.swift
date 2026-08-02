@@ -222,7 +222,7 @@ extension ApplyCommandRunner {
         let severity: StateEventSeverity
         let message: String
         switch status {
-        case .active:
+        case .active, .stablePending:
             eventType = "restart.policy.active"
             severity = .info
             message = "\(managedRestartSentenceLabel(for: action)) succeeded for \(action.identity.displayName); restart attempt budget is reset."
@@ -242,6 +242,10 @@ extension ApplyCommandRunner {
             eventType = "restart.policy.manual-disabled"
             severity = .warning
             message = "Managed start is disabled by restart policy."
+        case .projectBudgetBlocked:
+            eventType = "restart.policy.project-budget-blocked"
+            severity = .warning
+            message = "Managed start is blocked by the project restart budget."
         }
 
         try store.events.append([

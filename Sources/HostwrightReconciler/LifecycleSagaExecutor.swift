@@ -322,11 +322,17 @@ public struct LifecycleSagaExecutor: Sendable {
         fencingToken: String,
         lockOwner: String,
         lockExpiresAt: String? = nil,
+        groupIdempotencyKey: String? = nil,
         allowFailedSafeHoldResume: Bool = false
     ) async throws -> LifecycleSagaExecutionResult {
+        let resolvedGroupIdempotencyKey = groupIdempotencyKey ?? plan.planSHA256
         guard HostwrightResourceUUID.isValid(operationID),
               HostwrightResourceUUID.isValid(groupID),
               HostwrightResourceUUID.isValid(fencingToken),
+              resolvedGroupIdempotencyKey.range(
+                  of: "^[a-f0-9]{64}$",
+                  options: .regularExpression
+              ) != nil,
               !lockOwner.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw LifecycleSagaError.invalidIdentity(
                 "Lifecycle saga requires canonical operation, group, and fencing UUIDs plus a lock owner."
@@ -340,6 +346,7 @@ public struct LifecycleSagaExecutor: Sendable {
             fencingToken: normalizedFence,
             lockOwner: lockOwner,
             lockExpiresAt: lockExpiresAt,
+            groupIdempotencyKey: resolvedGroupIdempotencyKey,
             allowFailedSafeHoldResume: allowFailedSafeHoldResume
         )
         if group.status == .succeeded {
@@ -636,7 +643,8 @@ public struct LifecycleSagaExecutor: Sendable {
                     $0.validation,
                     plan: plan,
                     node: $0.node,
-                    fence: normalizedFence
+                    fence: normalizedFence,
+                    groupIdempotencyKey: group.groupIdempotencyKey
                 )
             }
             if let stale = staleResults.first {
@@ -957,6 +965,7 @@ public struct LifecycleSagaExecutor: Sendable {
         fencingToken: String,
         lockOwner: String,
         lockExpiresAt: String?,
+        groupIdempotencyKey: String,
         allowFailedSafeHoldResume: Bool
     ) throws -> OperationGroupRecord {
         let now = clock.now()
@@ -967,7 +976,7 @@ public struct LifecycleSagaExecutor: Sendable {
                 "Lifecycle operation lease must expire after its acquisition timestamp."
             )
         }
-        if let latest = try store.operationGroups.latest(groupIdempotencyKey: plan.planSHA256) {
+        if let latest = try store.operationGroups.latest(groupIdempotencyKey: groupIdempotencyKey) {
             guard latest.planHash == plan.planSHA256,
                   latest.fencingToken == fencingToken else {
                 throw LifecycleSagaError.persistedPlanMismatch
@@ -1033,7 +1042,7 @@ public struct LifecycleSagaExecutor: Sendable {
             serviceName: nil,
             plannedActionType: plan.command.rawValue,
             status: .active,
-            groupIdempotencyKey: plan.planSHA256,
+            groupIdempotencyKey: groupIdempotencyKey,
             planHash: plan.planSHA256,
             checkpoint: "intent-persisted",
             lockOwner: lockOwner,
@@ -1107,7 +1116,8 @@ public struct LifecycleSagaExecutor: Sendable {
         _ validation: LifecycleSagaValidation,
         plan: LifecyclePlan,
         node: LifecyclePlanNode,
-        fence: String
+        fence: String,
+        groupIdempotencyKey: String
     ) -> Bool {
         validation.providerID == plan.providerID &&
             validation.providerGeneration == plan.providerGeneration &&
@@ -1115,7 +1125,8 @@ public struct LifecycleSagaExecutor: Sendable {
             validation.projectResourceUUID.lowercased() == plan.projectResourceUUID &&
             validation.projectGeneration == plan.projectGeneration &&
             validation.fencingToken.lowercased() == fence &&
-            node.fencingToken == fence &&
+            (node.fencingToken == fence ||
+                groupIdempotencyKey != plan.planSHA256) &&
             validation.ownershipVerified
     }
 
@@ -1363,7 +1374,13 @@ public struct LifecycleSagaExecutor: Sendable {
                 node: node,
                 expectedFencingToken: group.fencingToken
             )
-            guard isCurrent(validation, plan: plan, node: node, fence: group.fencingToken) else {
+            guard isCurrent(
+                validation,
+                plan: plan,
+                node: node,
+                fence: group.fencingToken,
+                groupIdempotencyKey: group.groupIdempotencyKey
+            ) else {
                 return try safeHold(
                     plan: plan,
                     group: group,

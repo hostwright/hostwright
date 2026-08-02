@@ -3141,6 +3141,71 @@ public struct MigrationRunner: Sendable {
                 "CREATE INDEX IF NOT EXISTS service_tunnel_operation_idx ON service_tunnel_sessions(operation_group_id, generation)",
                 "CREATE INDEX IF NOT EXISTS service_tunnel_recovery_idx ON service_tunnel_sessions(lifecycle_state, updated_at_ms)"
             ]
+        ),
+        SchemaMigration(
+            version: 17,
+            description: "Durable restart budgets, crash-loop holds, and attempt history",
+            statements: [
+                "ALTER TABLE restart_policy_state ADD COLUMN reason_class TEXT NOT NULL DEFAULT 'unknown' CHECK (reason_class IN ('process-exit','health-failure','runtime-failure','dependency-failure','operator-request','unknown'))",
+                "ALTER TABLE restart_policy_state ADD COLUMN window_started_at TEXT CHECK (window_started_at IS NULL OR julianday(window_started_at) IS NOT NULL)",
+                "ALTER TABLE restart_policy_state ADD COLUMN window_seconds INTEGER NOT NULL DEFAULT 300 CHECK (window_seconds BETWEEN 1 AND 86400)",
+                "ALTER TABLE restart_policy_state ADD COLUMN initial_backoff_seconds INTEGER NOT NULL DEFAULT 60 CHECK (initial_backoff_seconds BETWEEN 1 AND 3600)",
+                "ALTER TABLE restart_policy_state ADD COLUMN maximum_backoff_seconds INTEGER NOT NULL DEFAULT 300 CHECK (maximum_backoff_seconds BETWEEN 1 AND 86400)",
+                "ALTER TABLE restart_policy_state ADD COLUMN jitter_seconds INTEGER NOT NULL DEFAULT 0 CHECK (jitter_seconds BETWEEN 0 AND 3600)",
+                "ALTER TABLE restart_policy_state ADD COLUMN stable_run_seconds INTEGER NOT NULL DEFAULT 60 CHECK (stable_run_seconds BETWEEN 1 AND 86400)",
+                "ALTER TABLE restart_policy_state ADD COLUMN stable_since TEXT CHECK (stable_since IS NULL OR julianday(stable_since) IS NOT NULL)",
+                "ALTER TABLE restart_policy_state ADD COLUMN priority INTEGER NOT NULL DEFAULT 0 CHECK (priority BETWEEN -100 AND 100)",
+                "ALTER TABLE restart_policy_state ADD COLUMN project_max_attempts INTEGER NOT NULL DEFAULT 10 CHECK (project_max_attempts BETWEEN 1 AND 1000)",
+                "ALTER TABLE restart_policy_state ADD COLUMN project_window_seconds INTEGER NOT NULL DEFAULT 300 CHECK (project_window_seconds BETWEEN 1 AND 86400)",
+                "ALTER TABLE restart_policy_state ADD COLUMN hold_token TEXT CHECK (hold_token IS NULL OR (length(hold_token) = 64 AND hold_token NOT GLOB '*[^0-9a-f]*'))",
+                "ALTER TABLE restart_policy_state ADD COLUMN release_generation INTEGER NOT NULL DEFAULT 0 CHECK (release_generation >= 0)",
+                "ALTER TABLE restart_policy_state ADD COLUMN policy_sha256 TEXT NOT NULL DEFAULT '0000000000000000000000000000000000000000000000000000000000000000' CHECK (length(policy_sha256) = 64 AND policy_sha256 NOT GLOB '*[^0-9a-f]*')",
+                "UPDATE restart_policy_state SET window_started_at = last_failure_at WHERE window_started_at IS NULL AND last_failure_at IS NOT NULL",
+                """
+                CREATE TABLE restart_attempt_history (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                    service_name TEXT NOT NULL,
+                    reason_class TEXT NOT NULL CHECK (reason_class IN ('process-exit','health-failure','runtime-failure','dependency-failure','operator-request','unknown')),
+                    decision TEXT NOT NULL CHECK (decision IN ('admitted','denied','hold','stable-reset','manual-release','failed')),
+                    attempt_number INTEGER NOT NULL CHECK (attempt_number >= 0),
+                    project_attempt_number INTEGER NOT NULL CHECK (project_attempt_number >= 0),
+                    admitted INTEGER NOT NULL CHECK (admitted IN (0, 1)),
+                    hold_token TEXT CHECK (hold_token IS NULL OR (length(hold_token) = 64 AND hold_token NOT GLOB '*[^0-9a-f]*')),
+                    release_generation INTEGER NOT NULL CHECK (release_generation >= 0),
+                    operation_id TEXT,
+                    occurred_at TEXT NOT NULL CHECK (julianday(occurred_at) IS NOT NULL),
+                    backoff_until TEXT CHECK (backoff_until IS NULL OR julianday(backoff_until) IS NOT NULL),
+                    policy_sha256 TEXT NOT NULL CHECK (length(policy_sha256) = 64 AND policy_sha256 NOT GLOB '*[^0-9a-f]*'),
+                    metadata_json_redacted TEXT NOT NULL CHECK (json_valid(metadata_json_redacted) AND json_type(metadata_json_redacted) = 'object' AND length(metadata_json_redacted) <= 65536),
+                    CHECK (length(id) = 36 AND substr(id, 9, 1) = '-' AND substr(id, 14, 1) = '-' AND substr(id, 19, 1) = '-' AND substr(id, 24, 1) = '-' AND replace(id, '-', '') NOT GLOB '*[^0-9a-f]*'),
+                    CHECK (length(service_name) BETWEEN 1 AND 255 AND service_name NOT GLOB '*[^ -~]*'),
+                    CHECK ((admitted = 1 AND decision IN ('admitted','failed')) OR (admitted = 0 AND decision IN ('denied','hold','stable-reset','manual-release'))),
+                    CHECK (decision NOT IN ('hold','manual-release') OR hold_token IS NOT NULL)
+                )
+                """,
+                """
+                CREATE TRIGGER restart_policy_state_budget_insert
+                BEFORE INSERT ON restart_policy_state
+                WHEN NEW.maximum_backoff_seconds < NEW.initial_backoff_seconds
+                  OR NEW.jitter_seconds > NEW.initial_backoff_seconds
+                BEGIN
+                    SELECT RAISE(ABORT, 'invalid restart policy budget');
+                END
+                """,
+                """
+                CREATE TRIGGER restart_policy_state_budget_update
+                BEFORE UPDATE ON restart_policy_state
+                WHEN NEW.maximum_backoff_seconds < NEW.initial_backoff_seconds
+                  OR NEW.jitter_seconds > NEW.initial_backoff_seconds
+                BEGIN
+                    SELECT RAISE(ABORT, 'invalid restart policy budget');
+                END
+                """,
+                "CREATE INDEX restart_attempt_history_project_idx ON restart_attempt_history(project_id, occurred_at, id)",
+                "CREATE INDEX restart_attempt_history_workload_idx ON restart_attempt_history(project_id, service_name, occurred_at, id)",
+                "CREATE INDEX restart_attempt_history_operation_idx ON restart_attempt_history(operation_id) WHERE operation_id IS NOT NULL"
+            ]
         )
     ]
 }

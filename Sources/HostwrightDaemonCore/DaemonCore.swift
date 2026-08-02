@@ -408,7 +408,8 @@ public struct DaemonLoopRunner {
                 timestamp: startedAt
             )
             let observedWithHealth = observedState(observed, applying: healthResults)
-            let restartPolicyRecords = try restartPolicyStates(
+            var restartPolicyRecords = try restartPolicyStates(
+                manifest: manifest,
                 desiredState: mapping.desiredState,
                 observedState: observedWithHealth,
                 store: store,
@@ -441,6 +442,15 @@ public struct DaemonLoopRunner {
                 )
             }
             enteredLifecycleDriver = true
+            let selectedServiceNames = selectedLifecycleServices(
+                manifest: manifest,
+                plan: plan
+            )
+            let operationIdempotencyKeySHA256 = try restartOperationIdempotencyKey(
+                plan: plan,
+                restartPolicyRecords: restartPolicyRecords,
+                projectID: projectID
+            )
             let reconciliation = try await reconciliationDriver.reconcile(
                 request: try DaemonReconciliationRequest(
                     manifestPath: manifestPath,
@@ -449,9 +459,59 @@ public struct DaemonLoopRunner {
                     configurationTargets: configurationTargets,
                     stateDatabasePath: configuration.stateDatabasePath,
                     projectID: projectID,
-                    maximumParallelism: configuration.maximumParallelism
+                    maximumParallelism: configuration.maximumParallelism,
+                    selectedServiceNames: selectedServiceNames,
+                    operationIdempotencyKeySHA256:
+                        operationIdempotencyKeySHA256
                 )
             )
+            var restartAttemptHistory: [RestartAttemptHistoryRecord] = []
+            if reconciliation.runtimeMutationAttempted {
+                let eligibleRestartServices = Set(plan.actions.compactMap { action -> String? in
+                    switch action.executionAvailability {
+                    case .availableForStartManagedService, .availableForRestartManagedService:
+                        return action.identity.serviceName
+                    case .unavailable, .availableForCreateMissingService:
+                        return nil
+                    }
+                })
+                let attemptedRestartServices = eligibleRestartServices.intersection(
+                    Set(reconciliation.attemptedServiceNames ?? [])
+                )
+                if !attemptedRestartServices.isEmpty {
+                    let projectWindow = manifest.restartBudget?.window
+                        ?? RestartPolicyStateDefaults.projectWindowSeconds
+                    var projectAttempt = try projectRestartAttemptCount(
+                        store: store,
+                        projectID: projectID,
+                        timestamp: startedAt,
+                        windowSeconds: projectWindow
+                    )
+                    restartPolicyRecords = restartPolicyRecords.map { state in
+                        guard attemptedRestartServices.contains(state.serviceName) else {
+                            return state
+                        }
+                        projectAttempt += 1
+                        let result = RestartPolicyEvaluator.admittedAttempt(
+                            state: state,
+                            projectAttemptNumber: projectAttempt,
+                            operationID: reconciliation.operationID,
+                            failed: !reconciliation.status.isSuccessfulIteration,
+                            reasonOverride: reconciliation.status == .interrupted ||
+                                reconciliation.status == .safeHold
+                                ? .unknown
+                                : nil,
+                            timestamp: startedAt,
+                            historyID: HostwrightResourceUUID.legacy(
+                                kind: "restart-attempt",
+                                identifier: idGenerator("restart-attempt")
+                            )
+                        )
+                        restartAttemptHistory.append(result.history)
+                        return result.state
+                    }
+                }
+            }
             try persistHealthResults(
                 healthResults,
                 store: store,
@@ -460,6 +520,7 @@ public struct DaemonLoopRunner {
             )
             try persistRestartPolicyStates(
                 restartPolicyRecords,
+                attempts: restartAttemptHistory,
                 store: store,
                 projectID: projectID,
                 timestamp: startedAt
@@ -829,6 +890,7 @@ public struct DaemonLoopRunner {
     }
 
     private func restartPolicyStates(
+        manifest: HostwrightManifest,
         desiredState: DesiredRuntimeState,
         observedState: ObservedRuntimeState,
         store: SQLiteStateStore,
@@ -843,112 +905,300 @@ public struct DaemonLoopRunner {
             try store.restartPolicies.loadProject(projectID: projectID).map { ($0.serviceName, $0) },
             uniquingKeysWith: { first, _ in first }
         )
+        let manifestServices = Dictionary(
+            manifest.services.map { ($0.name, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let projectWindow = manifest.restartBudget?.window
+            ?? RestartPolicyStateDefaults.projectWindowSeconds
+        let projectMaximum = manifest.restartBudget?.maxAttempts
+            ?? RestartPolicyStateDefaults.projectMaxAttempts
+        let projectUsed = try projectRestartAttemptCount(
+            store: store,
+            projectID: projectID,
+            timestamp: timestamp,
+            windowSeconds: projectWindow
+        )
+        var projectRemaining = max(0, projectMaximum - projectUsed)
         var records: [RestartPolicyStateRecord] = []
 
-        for desired in desiredState.services.sorted(by: { $0.identity.displayName < $1.identity.displayName }) {
+        let orderedDesired = desiredState.services.sorted { left, right in
+            let leftPriority = manifestServices[left.identity.serviceName]?.restart?.priority ?? 0
+            let rightPriority = manifestServices[right.identity.serviceName]?.restart?.priority ?? 0
+            return leftPriority == rightPriority
+                ? left.identity.displayName < right.identity.displayName
+                : leftPriority > rightPriority
+        }
+        for desired in orderedDesired {
             let observed = observedByIdentity[normalizedIdentity(desired.identity)]
             let previous = existingStates[desired.identity.serviceName]
-            let state = restartPolicyState(
-                desired: desired,
-                observed: observed,
-                previous: previous,
+            let policy = RestartBudgetPolicy(
+                service: manifestServices[desired.identity.serviceName]?.restart,
+                project: manifest.restartBudget
+            )
+            let restartCandidate = observed.map {
+                $0.lifecycleState == .stopped || $0.lifecycleState == .exited ||
+                    ($0.lifecycleState == .running && $0.healthState == .unhealthy)
+            } ?? false
+            let state = RestartPolicyEvaluator.preparedState(
+                id: previous?.id ?? idGenerator("restart-policy"),
                 projectID: projectID,
+                serviceName: desired.identity.serviceName,
+                restartPolicy: desired.restartPolicy,
+                policy: policy,
+                observedLifecycle: observed?.lifecycleState,
+                observedHealth: observed?.healthState,
+                dependencyUnavailable: hasUnavailableDependency(
+                    desired,
+                    observedState: observedState
+                ),
+                previous: previous,
+                projectCapacityAvailable: !restartCandidate || projectRemaining > 0,
                 timestamp: timestamp
             )
             records.append(state)
+            if restartCandidate && state.status == .active && desired.restartPolicy.allowsManagedStart {
+                projectRemaining = max(0, projectRemaining - 1)
+            }
         }
-        return records
+        return records.sorted { $0.serviceName < $1.serviceName }
     }
 
     private func persistRestartPolicyStates(
         _ records: [RestartPolicyStateRecord],
+        attempts: [RestartAttemptHistoryRecord] = [],
         store: SQLiteStateStore,
         projectID: String,
         timestamp: String
     ) throws {
+        let attemptsByService = Dictionary(
+            attempts.map { ($0.serviceName, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        var events: [EventRecord] = []
         for record in records {
-            try store.restartPolicies.upsert(record)
-        }
-        try store.events.append(records.map { state in
+            let previous = try store.restartPolicies.load(
+                projectID: projectID,
+                serviceName: record.serviceName
+            )
+            if let attempt = attemptsByService[record.serviceName] {
+                try store.restartPolicies.recordAttempt(state: record, history: attempt)
+            } else if let previous, let transition = restartTransition(
+                from: previous,
+                to: record,
+                projectID: projectID,
+                timestamp: timestamp
+            ) {
+                try store.restartPolicies.recordTransition(state: record, history: transition)
+            } else if let previous, restartPolicyStateIsEquivalent(previous, record) {
+                continue
+            } else {
+                try store.restartPolicies.upsert(record)
+            }
+            events.append(
                 EventRecord(
                     id: idGenerator("event-restart-policy"),
                     timestamp: timestamp,
-                    severity: restartStateSeverity(state.status),
+                    severity: restartStateSeverity(record.status),
                     type: "restart.policy.state",
                     source: "hostwrightd",
                     projectID: projectID,
-                    serviceName: state.serviceName,
+                    serviceName: record.serviceName,
                     runtimeAdapter: nil,
-                    message: "Restart policy state for \(projectID)/\(state.serviceName) is \(state.status.rawValue) after lifecycle reconciliation.",
-                    payloadJSONRedacted: state.metadataJSONRedacted
+                    message: "Restart policy state for \(projectID)/\(record.serviceName) is \(record.status.rawValue) after lifecycle reconciliation.",
+                    payloadJSONRedacted: record.metadataJSONRedacted
                 )
-        })
+            )
+        }
+        if !events.isEmpty { try store.events.append(events) }
     }
 
-    private func restartPolicyState(
-        desired: DesiredRuntimeService,
-        observed: ObservedRuntimeService?,
-        previous: RestartPolicyStateRecord?,
+    private func projectRestartAttemptCount(
+        store: SQLiteStateStore,
+        projectID: String,
+        timestamp: String,
+        windowSeconds: Int
+    ) throws -> Int {
+        let formatter = ISO8601DateFormatter()
+        guard let now = formatter.date(from: timestamp) else {
+            throw HostwrightDiagnostic(
+                code: .daemonInvalid,
+                message: "Restart budget evaluation requires a canonical timestamp."
+            )
+        }
+        let since = formatter.string(
+            from: now.addingTimeInterval(-TimeInterval(windowSeconds))
+        )
+        return try store.restartAttempts.admittedCount(
+            projectID: projectID,
+            since: since
+        )
+    }
+
+    private func hasUnavailableDependency(
+        _ desired: DesiredRuntimeService,
+        observedState: ObservedRuntimeState
+    ) -> Bool {
+        desired.dependencies.contains { dependency in
+            let candidates = observedState.services.filter {
+                $0.identity.projectName == desired.identity.projectName &&
+                    $0.identity.serviceName == dependency.serviceName
+            }
+            switch dependency.condition {
+            case .started:
+                return !candidates.contains { $0.lifecycleState == .running }
+            case .ready:
+                return !candidates.contains {
+                    $0.lifecycleState == .running && $0.healthState == .healthy
+                }
+            case .completed:
+                return !candidates.contains { $0.lifecycleState == .exited }
+            }
+        }
+    }
+
+    private func restartTransition(
+        from previous: RestartPolicyStateRecord,
+        to current: RestartPolicyStateRecord,
         projectID: String,
         timestamp: String
-    ) -> RestartPolicyStateRecord {
-        let maxAttempts = previous?.maxAttempts ?? RestartPolicyStateDefaults.maxAttempts
-        let backoffSeconds = previous?.backoffSeconds ?? RestartPolicyStateDefaults.backoffSeconds
-
-        let status: RestartPolicyStateStatus
-        let attemptCount: Int
-        let backoffUntil: String?
-        let lastFailureAt: String?
-
-        if desired.restartPolicy == .no {
-            status = .manualDisabled
-            attemptCount = 0
-            backoffUntil = nil
-            lastFailureAt = nil
-        } else if observed?.lifecycleState == .running && observed?.healthState == .healthy {
-            status = .active
-            attemptCount = 0
-            backoffUntil = nil
-            lastFailureAt = nil
-        } else if previous?.status == .operatorHold || previous?.status == .manualDisabled || previous?.status == .crashLoopBlocked {
-            status = previous?.status ?? .active
-            attemptCount = previous?.attemptCount ?? 0
-            backoffUntil = previous?.backoffUntil
-            lastFailureAt = previous?.lastFailureAt
-        } else {
-            status = previous?.status ?? .active
-            attemptCount = previous?.attemptCount ?? 0
-            backoffUntil = previous?.backoffUntil
-            lastFailureAt = previous?.lastFailureAt
+    ) -> RestartAttemptHistoryRecord? {
+        let decision: RestartAttemptDecision
+        switch current.status {
+        case .crashLoopBlocked where previous.status != .crashLoopBlocked,
+             .operatorHold where previous.status != .operatorHold:
+            guard current.holdToken != nil else { return nil }
+            decision = .hold
+        case .projectBudgetBlocked where previous.status != .projectBudgetBlocked:
+            decision = .denied
+        case .active where previous.attemptCount > 0 && current.attemptCount == 0:
+            decision = .stableReset
+        default:
+            return nil
         }
-
-        return RestartPolicyStateRecord(
-            id: previous?.id ?? idGenerator("restart-policy"),
+        return RestartAttemptHistoryRecord(
+            id: HostwrightResourceUUID.legacy(
+                kind: "restart-transition",
+                identifier: idGenerator("restart-transition")
+            ),
             projectID: projectID,
-            serviceName: desired.identity.serviceName,
-            policy: desired.restartPolicy,
-            status: status,
-            attemptCount: attemptCount,
-            maxAttempts: maxAttempts,
-            backoffSeconds: backoffSeconds,
-            backoffUntil: backoffUntil,
-            lastFailureAt: lastFailureAt,
-            updatedAt: timestamp,
-            metadataJSONRedacted: payload([
-                "attemptCount": attemptCount,
-                "backoffUntil": backoffUntil ?? "",
-                "healthState": observed?.healthState.rawValue ?? "unknown",
-                "lifecycleState": observed?.lifecycleState.rawValue ?? "missing",
-                "maxAttempts": maxAttempts,
-                "mutationPhase": "pre-lifecycle",
-                "policy": desired.restartPolicy.rawValue,
-                "status": status.rawValue
-            ])
+            serviceName: current.serviceName,
+            reasonClass: current.reasonClass,
+            decision: decision,
+            attemptNumber: previous.attemptCount,
+            projectAttemptNumber: 0,
+            admitted: false,
+            holdToken: current.holdToken,
+            releaseGeneration: current.releaseGeneration,
+            occurredAt: timestamp,
+            backoffUntil: current.backoffUntil,
+            policySHA256: current.policySHA256,
+            metadataJSONRedacted: current.metadataJSONRedacted
         )
+    }
+
+    private func restartPolicyStateIsEquivalent(
+        _ left: RestartPolicyStateRecord,
+        _ right: RestartPolicyStateRecord
+    ) -> Bool {
+        left.id == right.id &&
+            left.projectID == right.projectID &&
+            left.serviceName == right.serviceName &&
+            left.policy == right.policy &&
+            left.status == right.status &&
+            left.attemptCount == right.attemptCount &&
+            left.maxAttempts == right.maxAttempts &&
+            left.backoffSeconds == right.backoffSeconds &&
+            left.backoffUntil == right.backoffUntil &&
+            left.lastFailureAt == right.lastFailureAt &&
+            left.reasonClass == right.reasonClass &&
+            left.windowStartedAt == right.windowStartedAt &&
+            left.windowSeconds == right.windowSeconds &&
+            left.initialBackoffSeconds == right.initialBackoffSeconds &&
+            left.maximumBackoffSeconds == right.maximumBackoffSeconds &&
+            left.jitterSeconds == right.jitterSeconds &&
+            left.stableRunSeconds == right.stableRunSeconds &&
+            left.stableSince == right.stableSince &&
+            left.priority == right.priority &&
+            left.projectMaxAttempts == right.projectMaxAttempts &&
+            left.projectWindowSeconds == right.projectWindowSeconds &&
+            left.holdToken == right.holdToken &&
+            left.releaseGeneration == right.releaseGeneration &&
+            left.policySHA256 == right.policySHA256 &&
+            left.metadataJSONRedacted == right.metadataJSONRedacted
     }
 
     private func normalizedIdentity(_ identity: RuntimeServiceIdentity) -> RuntimeServiceIdentity {
         RuntimeServiceIdentity(projectName: identity.projectName, serviceName: identity.serviceName)
+    }
+
+    private func selectedLifecycleServices(
+        manifest: HostwrightManifest,
+        plan: ReconciliationPlan
+    ) -> [String]? {
+        var excluded = Set(plan.actions.compactMap { action -> String? in
+            switch action.kind {
+            case .proposeStartStoppedService, .restartManagedService:
+                return action.executionAvailability == .unavailable
+                    ? action.identity.serviceName
+                    : nil
+            default:
+                return nil
+            }
+        })
+        guard !excluded.isEmpty else { return nil }
+        var changed = true
+        while changed {
+            changed = false
+            for service in manifest.services where !excluded.contains(service.name) &&
+                !Set(service.dependsOn.keys).isDisjoint(with: excluded) {
+                excluded.insert(service.name)
+                changed = true
+            }
+        }
+        return manifest.services.map(\.name).filter { !excluded.contains($0) }.sorted()
+    }
+
+    private func restartOperationIdempotencyKey(
+        plan: ReconciliationPlan,
+        restartPolicyRecords: [RestartPolicyStateRecord],
+        projectID: String
+    ) throws -> String? {
+        let services = Set(plan.actions.compactMap { action -> String? in
+            switch action.executionAvailability {
+            case .availableForStartManagedService, .availableForRestartManagedService:
+                return action.identity.serviceName
+            case .unavailable, .availableForCreateMissingService:
+                return nil
+            }
+        })
+        guard !services.isEmpty else { return nil }
+        let states = Dictionary(
+            restartPolicyRecords.map { ($0.serviceName, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let components = try services.sorted().map { serviceName -> String in
+            guard let state = states[serviceName], state.status == .active else {
+                throw HostwrightDiagnostic(
+                    code: .daemonInvalid,
+                    message: "A restart mutation was selected without one exact admitted budget generation. No mutation was attempted."
+                )
+            }
+            return [
+                serviceName,
+                String(state.attemptCount + 1),
+                String(state.releaseGeneration),
+                state.policySHA256
+            ].joined(separator: ":")
+        }
+        let material = ([
+            "daemon-restart-operation-v1",
+            projectID,
+            plan.planHash
+        ] + components).joined(separator: "\n")
+        return SHA256.hash(data: Data(material.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
     }
 
     private func healthEventSeverity(_ status: RuntimeHealthCheckStatus) -> StateEventSeverity {
@@ -964,9 +1214,9 @@ public struct DaemonLoopRunner {
 
     private func restartStateSeverity(_ status: RestartPolicyStateStatus) -> StateEventSeverity {
         switch status {
-        case .active:
+        case .active, .stablePending:
             return .info
-        case .backingOff, .operatorHold, .manualDisabled:
+        case .backingOff, .operatorHold, .manualDisabled, .projectBudgetBlocked:
             return .warning
         case .crashLoopBlocked:
             return .error

@@ -9,6 +9,223 @@ import XCTest
 @testable import HostwrightState
 
 final class HostwrightReconcilerTests: XCTestCase {
+    func testPhase08RestartBudgetBackoffHoldAndStableResetAreDeterministic() throws {
+        let policy = RestartBudgetPolicy(
+            service: HostwrightRestart(
+                policy: "on-failure",
+                maxAttempts: 2,
+                window: 300,
+                backoff: 10,
+                maxBackoff: 30,
+                jitter: 3,
+                stableRun: 60,
+                priority: 10
+            ),
+            project: HostwrightProjectRestartBudget(maxAttempts: 5, window: 300)
+        )
+        let initial = RestartPolicyEvaluator.preparedState(
+            id: "restart-api",
+            projectID: "project-demo",
+            serviceName: "api",
+            restartPolicy: .onFailure,
+            policy: policy,
+            observedLifecycle: .stopped,
+            observedHealth: .unknown,
+            previous: nil,
+            projectCapacityAvailable: true,
+            timestamp: "2026-08-01T12:00:00Z"
+        )
+        XCTAssertEqual(initial.status, .active)
+        let first = RestartPolicyEvaluator.admittedAttempt(
+            state: initial,
+            projectAttemptNumber: 1,
+            operationID: "11111111-1111-4111-8111-111111111111",
+            failed: true,
+            timestamp: "2026-08-01T12:00:00Z",
+            historyID: "22222222-2222-4222-8222-222222222222"
+        )
+        let repeated = RestartPolicyEvaluator.admittedAttempt(
+            state: initial,
+            projectAttemptNumber: 1,
+            operationID: "11111111-1111-4111-8111-111111111111",
+            failed: true,
+            timestamp: "2026-08-01T12:00:00Z",
+            historyID: "22222222-2222-4222-8222-222222222222"
+        )
+        XCTAssertEqual(first, repeated)
+        XCTAssertEqual(first.state.attemptCount, 1)
+        XCTAssertTrue((10...13).contains(first.state.backoffSeconds))
+
+        let secondAdmission = RestartPolicyEvaluator.admittedAttempt(
+            state: RestartPolicyEvaluator.preparedState(
+                id: first.state.id,
+                projectID: first.state.projectID,
+                serviceName: first.state.serviceName,
+                restartPolicy: .onFailure,
+                policy: policy,
+                observedLifecycle: .stopped,
+                observedHealth: .unknown,
+                previous: first.state,
+                projectCapacityAvailable: true,
+                timestamp: "2026-08-01T12:01:00Z"
+            ),
+            projectAttemptNumber: 2,
+            operationID: nil,
+            failed: true,
+            timestamp: "2026-08-01T12:01:00Z",
+            historyID: "33333333-3333-4333-8333-333333333333"
+        )
+        let held = RestartPolicyEvaluator.preparedState(
+            id: secondAdmission.state.id,
+            projectID: secondAdmission.state.projectID,
+            serviceName: secondAdmission.state.serviceName,
+            restartPolicy: .onFailure,
+            policy: policy,
+            observedLifecycle: .stopped,
+            observedHealth: .unknown,
+            previous: secondAdmission.state,
+            projectCapacityAvailable: true,
+            timestamp: "2026-08-01T12:02:00Z"
+        )
+        XCTAssertEqual(held.status, .crashLoopBlocked)
+        XCTAssertEqual(held.holdToken?.count, 64)
+
+        let stablePending = RestartPolicyEvaluator.preparedState(
+            id: first.state.id,
+            projectID: first.state.projectID,
+            serviceName: first.state.serviceName,
+            restartPolicy: .onFailure,
+            policy: policy,
+            observedLifecycle: .running,
+            observedHealth: .healthy,
+            previous: first.state,
+            projectCapacityAvailable: true,
+            timestamp: "2026-08-01T12:00:20Z"
+        )
+        XCTAssertEqual(stablePending.status, .stablePending)
+        let reset = RestartPolicyEvaluator.preparedState(
+            id: stablePending.id,
+            projectID: stablePending.projectID,
+            serviceName: stablePending.serviceName,
+            restartPolicy: .onFailure,
+            policy: policy,
+            observedLifecycle: .running,
+            observedHealth: .healthy,
+            previous: stablePending,
+            projectCapacityAvailable: true,
+            timestamp: "2026-08-01T12:01:21Z"
+        )
+        XCTAssertEqual(reset.status, .active)
+        XCTAssertEqual(reset.attemptCount, 0)
+    }
+
+    func testPhase08ProjectBudgetBlocksOnlyTheExcessCandidate() {
+        let policy = RestartBudgetPolicy(service: HostwrightRestart(policy: "on-failure"), project: nil)
+        let blocked = RestartPolicyEvaluator.preparedState(
+            id: "restart-worker",
+            projectID: "project-demo",
+            serviceName: "worker",
+            restartPolicy: .onFailure,
+            policy: policy,
+            observedLifecycle: .stopped,
+            observedHealth: .unknown,
+            previous: nil,
+            projectCapacityAvailable: false,
+            timestamp: "2026-08-01T12:00:00Z"
+        )
+        XCTAssertEqual(blocked.status, .projectBudgetBlocked)
+        XCTAssertTrue(RestartPolicyEvaluator.decision(
+            desired: desiredService(restartPolicy: .onFailure),
+            state: blocked,
+            currentTimestamp: "2026-08-01T12:00:00Z"
+        ).isBlocked)
+    }
+
+    func testPhase08ReasonClassesAndAbsoluteBackoffTimeFailClosed() {
+        let policy = RestartBudgetPolicy(
+            service: HostwrightRestart(policy: "on-failure"),
+            project: nil
+        )
+        let cases: [(RuntimeLifecycleState?, RuntimeHealthState?, Bool, RestartReasonClass)] = [
+            (.stopped, .unknown, false, .processExit),
+            (.running, .unhealthy, false, .healthFailure),
+            (.failed, .unknown, false, .runtimeFailure),
+            (.stopped, .unknown, true, .dependencyFailure),
+            (.running, .unknown, false, .unknown)
+        ]
+        for (lifecycle, health, dependencyUnavailable, expected) in cases {
+            let state = RestartPolicyEvaluator.preparedState(
+                id: "restart-api",
+                projectID: "project-demo",
+                serviceName: "api",
+                restartPolicy: .onFailure,
+                policy: policy,
+                observedLifecycle: lifecycle,
+                observedHealth: health,
+                dependencyUnavailable: dependencyUnavailable,
+                previous: nil,
+                projectCapacityAvailable: true,
+                timestamp: "2026-08-01T12:00:00Z"
+            )
+            XCTAssertEqual(state.reasonClass, expected)
+        }
+
+        let decision = RestartPolicyEvaluator.decision(
+            desired: desiredService(restartPolicy: .onFailure),
+            state: restartState(
+                status: .backingOff,
+                attemptCount: 1,
+                backoffUntil: "2026-08-01T12:30:00Z"
+            ),
+            currentTimestamp: "2026-08-01T14:00:00+02:00"
+        )
+        XCTAssertTrue(decision.isBlocked)
+        XCTAssertEqual(decision.executionAvailability, .unavailable)
+    }
+
+    func testPhase08TenThousandFailuresKeepBackoffAndHistoryFieldsBounded() {
+        let policy = RestartBudgetPolicy(
+            service: HostwrightRestart(
+                policy: "on-failure",
+                maxAttempts: 100,
+                window: 86_400,
+                backoff: 1,
+                maxBackoff: 86_400,
+                jitter: 1,
+                stableRun: 1,
+                priority: 0
+            ),
+            project: HostwrightProjectRestartBudget(maxAttempts: 1_000, window: 86_400)
+        )
+        var state = RestartPolicyEvaluator.preparedState(
+            id: "restart-load",
+            projectID: "project-demo",
+            serviceName: "api",
+            restartPolicy: .onFailure,
+            policy: policy,
+            observedLifecycle: .stopped,
+            observedHealth: .unknown,
+            previous: nil,
+            projectCapacityAvailable: true,
+            timestamp: "2026-08-01T12:00:00Z"
+        )
+        for attempt in 1...10_000 {
+            let result = RestartPolicyEvaluator.admittedAttempt(
+                state: state,
+                projectAttemptNumber: attempt,
+                operationID: nil,
+                failed: true,
+                timestamp: "2026-08-01T12:00:00Z",
+                historyID: "history-\(attempt)"
+            )
+            state = result.state
+            XCTAssertLessThanOrEqual(state.backoffSeconds, 86_400)
+            XCTAssertLessThanOrEqual(result.history.metadataJSONRedacted.utf8.count, 65_536)
+        }
+        XCTAssertEqual(state.attemptCount, 10_000)
+        XCTAssertEqual(state.backoffSeconds, 86_400)
+    }
+
     func testMissingDesiredServiceCreatesDeterministicCreateAction() {
         let plan = ReconciliationPlanner().reconcile(
             PlanningInput(desiredState: desiredState(), observedState: ObservedRuntimeState(projectName: "demo", services: []))

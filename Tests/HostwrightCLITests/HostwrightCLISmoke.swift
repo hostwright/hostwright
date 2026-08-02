@@ -23,6 +23,40 @@ final class HostwrightCLITests: XCTestCase {
         XCTAssertEqual(try CLICommand.parse(arguments: ["plan", "--output", "json"]), .plan(path: "hostwright.yaml", output: .json, teamProfilePath: nil))
         XCTAssertEqual(try CLICommand.parse(arguments: ["paths"]), .paths(stateDatabasePath: nil, output: .text))
         XCTAssertEqual(try CLICommand.parse(arguments: ["paths", "--json"]), .paths(stateDatabasePath: nil, output: .json))
+        XCTAssertEqual(
+            try CLICommand.parse(arguments: ["restart-budget", "status", "--project", "project-demo", "--json"]),
+            .restartBudget(
+                options: RestartBudgetCLIOptions(
+                    action: .status(projectID: "project-demo"),
+                    stateDatabasePath: nil,
+                    output: .json
+                )
+            )
+        )
+        XCTAssertEqual(
+            try CLICommand.parse(arguments: [
+                "restart-budget", "release", "--project", "project-demo",
+                "--service", "api", "--confirm-hold", String(repeating: "a", count: 64),
+                "--state-db", "/tmp/state.sqlite"
+            ]),
+            .restartBudget(
+                options: RestartBudgetCLIOptions(
+                    action: .release(
+                        projectID: "project-demo",
+                        serviceName: "api",
+                        holdToken: String(repeating: "a", count: 64)
+                    ),
+                    stateDatabasePath: "/tmp/state.sqlite",
+                    output: .text
+                )
+            )
+        )
+        XCTAssertThrowsError(
+            try CLICommand.parse(arguments: [
+                "restart-budget", "release", "--project", "project-demo",
+                "--service", "api", "--confirm-hold", "wrong"
+            ])
+        )
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["paths", "--json", "--output", "text"]))
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["paths", "--output", "text", "--json"]))
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["paths", "--output", "text", "--output", "json"]))
@@ -215,6 +249,70 @@ final class HostwrightCLITests: XCTestCase {
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["extension", "run"]))
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["extension", "check", "--declaration", "relative.json", "--executable", "/tmp/extension"]))
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["extension", "check", "--declaration", "/tmp/extension.json", "--executable", "/tmp/extension", "--output", "yaml"]))
+    }
+
+    func testPhase08RestartBudgetStatusAndExactReleaseAreNonMutatingUntilConfirmed() throws {
+        try withTemporaryDatabase { databasePath in
+            let store = SQLiteStateStore(path: databasePath)
+            try store.migrate()
+            try saveDesiredManifest(store: store, manifestText: singleServiceManifest)
+            let holdToken = String(repeating: "a", count: 64)
+            try store.restartPolicies.upsert(
+                RestartPolicyStateRecord(
+                    id: "restart-api",
+                    projectID: "project-demo",
+                    serviceName: "api",
+                    policy: .onFailure,
+                    status: .crashLoopBlocked,
+                    attemptCount: 3,
+                    maxAttempts: 3,
+                    holdToken: holdToken,
+                    policySHA256: String(repeating: "b", count: 64),
+                    updatedAt: "2026-08-01T12:00:00Z",
+                    metadataJSONRedacted: "{}"
+                )
+            )
+
+            let status = HostwrightCLI.run(arguments: [
+                "restart-budget", "status", "--project", "project-demo",
+                "--state-db", databasePath, "--json"
+            ])
+            XCTAssertEqual(status.exitCode, CLIExitCode.success.rawValue)
+            XCTAssertEqual(try jsonObject(status.standardOutput)["released"] as? Bool, false)
+            XCTAssertEqual(try store.restartAttempts.loadProject("project-demo"), [])
+
+            let stale = HostwrightCLI.run(arguments: [
+                "restart-budget", "release", "--project", "project-demo",
+                "--service", "api", "--confirm-hold", String(repeating: "c", count: 64),
+                "--state-db", databasePath, "--json"
+            ])
+            XCTAssertEqual(stale.exitCode, CLIExitCode.confirmationMismatch.rawValue)
+            XCTAssertEqual(
+                try store.restartPolicies.load(projectID: "project-demo", serviceName: "api")?.status,
+                .crashLoopBlocked
+            )
+            XCTAssertEqual(try store.restartAttempts.loadProject("project-demo"), [])
+
+            let released = HostwrightCLI.run(arguments: [
+                "restart-budget", "release", "--project", "project-demo",
+                "--service", "api", "--confirm-hold", holdToken,
+                "--state-db", databasePath, "--json"
+            ])
+            XCTAssertEqual(released.exitCode, CLIExitCode.success.rawValue)
+            XCTAssertEqual(try jsonObject(released.standardOutput)["released"] as? Bool, true)
+            XCTAssertEqual(
+                try store.restartPolicies.load(projectID: "project-demo", serviceName: "api")?.status,
+                .active
+            )
+            XCTAssertEqual(try store.restartAttempts.loadProject("project-demo").map(\.decision), [.manualRelease])
+            XCTAssertTrue(
+                try store.events.contains(
+                    type: "restart.policy.manual-release",
+                    source: "hostwright-cli",
+                    payloadContains: "\"releaseGeneration\":1"
+                )
+            )
+        }
     }
 
     func testApplyDefaultsStateDBAndRequiresConfirmedPlanHash() throws {

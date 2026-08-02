@@ -23,6 +23,7 @@ public enum ManifestValidator {
         validateImageSBOM(manifest, issues: &issues)
         validateImageVulnerability(manifest, issues: &issues)
         validateImageProvenance(manifest, issues: &issues)
+        validateProjectRestartBudget(manifest.restartBudget, issues: &issues)
         validateVolumeDeclarations(manifest.volumes, issues: &issues)
         validateNetworkDefinitions(manifest.networks, issues: &issues)
         validateCertificateDeclarations(manifest.certificates, issues: &issues)
@@ -2522,6 +2523,38 @@ public enum ManifestValidator {
         let allowed = ["no", "on-failure", "unless-stopped"]
         if !allowed.contains(restart.policy) {
             issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Service '\(serviceName)' restart policy must be one of: \(allowed.joined(separator: ", "))."))
+        }
+        if !(1...100).contains(restart.maxAttempts) {
+            issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Service '\(serviceName)' restart.maxAttempts must be between 1 and 100."))
+        }
+        if !(1...86_400).contains(restart.window) {
+            issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Service '\(serviceName)' restart.window must be between 1s and 24h."))
+        }
+        if !(1...3_600).contains(restart.backoff) ||
+            !(restart.backoff...86_400).contains(restart.maxBackoff) {
+            issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Service '\(serviceName)' restart backoff must be 1s...1h and maxBackoff must be between backoff and 24h."))
+        }
+        if !(0...restart.backoff).contains(restart.jitter) {
+            issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Service '\(serviceName)' restart.jitter must be between zero and backoff."))
+        }
+        if !(1...86_400).contains(restart.stableRun) {
+            issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Service '\(serviceName)' restart.stableRun must be between 1s and 24h."))
+        }
+        if !(-100...100).contains(restart.priority) {
+            issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Service '\(serviceName)' restart.priority must be between -100 and 100."))
+        }
+    }
+
+    private static func validateProjectRestartBudget(
+        _ budget: HostwrightProjectRestartBudget?,
+        issues: inout [ManifestIssue]
+    ) {
+        guard let budget else { return }
+        if !(1...1_000).contains(budget.maxAttempts) {
+            issues.append(ManifestIssue(code: .manifestValidationFailed, message: "restartBudget.maxAttempts must be between 1 and 1000.", path: "$.restartBudget.maxAttempts"))
+        }
+        if !(1...86_400).contains(budget.window) {
+            issues.append(ManifestIssue(code: .manifestValidationFailed, message: "restartBudget.window must be between 1s and 24h.", path: "$.restartBudget.window"))
         }
     }
 

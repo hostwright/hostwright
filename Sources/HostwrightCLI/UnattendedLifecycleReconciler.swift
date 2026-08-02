@@ -3,6 +3,7 @@ import Foundation
 import HostwrightCore
 import HostwrightDaemonCore
 import HostwrightReconciler
+import HostwrightState
 
 public struct UnattendedLifecycleReconciler: DaemonReconciliationDriving {
     private let readManifest: @Sendable (String) throws -> String
@@ -71,6 +72,7 @@ public struct UnattendedLifecycleReconciler: DaemonReconciliationDriving {
         let planningOptions = LifecycleCLIOptions(
             command: .up,
             manifestPath: request.manifestPath,
+            serviceNames: request.selectedServiceNames ?? [],
             stateDatabasePath: request.stateDatabasePath,
             confirmationPlanSHA256: nil,
             dryRun: true,
@@ -86,6 +88,18 @@ public struct UnattendedLifecycleReconciler: DaemonReconciliationDriving {
             throw HostwrightDiagnostic(
                 code: .confirmationMismatch,
                 message: "The validated daemon project identity changed before lifecycle planning. No mutation was attempted."
+            )
+        }
+        if request.selectedServiceNames?.isEmpty == true {
+            return try DaemonReconciliationResult(
+                status: .deferred,
+                reasonCode: .restartBudgetDeferred,
+                planSHA256: request.configurationSetSHA256,
+                nodeCount: 0,
+                completedNodeCount: 0,
+                runtimeMutationAttempted: false,
+                attemptedServiceNames: [],
+                checkpoint: "restart-budget-deferred"
             )
         }
         let initialCompiled = try compiler.compile(
@@ -113,6 +127,7 @@ public struct UnattendedLifecycleReconciler: DaemonReconciliationDriving {
                 nodeCount: 0,
                 completedNodeCount: 0,
                 runtimeMutationAttempted: false,
+                attemptedServiceNames: [],
                 checkpoint: "observed-converged"
             )
         }
@@ -120,11 +135,14 @@ public struct UnattendedLifecycleReconciler: DaemonReconciliationDriving {
         let executionOptions = LifecycleCLIOptions(
             command: .up,
             manifestPath: request.manifestPath,
+            serviceNames: request.selectedServiceNames ?? [],
             stateDatabasePath: request.stateDatabasePath,
             confirmationPlanSHA256: compiled.plan.planSHA256,
             dryRun: false,
             parallelism: request.maximumParallelism,
-            output: .json
+            output: .json,
+            operationIdempotencyKeySHA256:
+                request.operationIdempotencyKeySHA256
         )
         let executionDriver = makeDriver(executionOptions)
         try Task.checkCancellation()
@@ -135,22 +153,72 @@ public struct UnattendedLifecycleReconciler: DaemonReconciliationDriving {
         )
         try requireExpectedConfiguration(request)
         try Task.checkCancellation()
-        let result = try executionDriver.execute(
-            compiled: compiled,
-            preparation: preparation,
-            options: executionOptions
-        )
+        let result: LifecycleSagaExecutionResult
+        do {
+            result = try executionDriver.execute(
+                compiled: compiled,
+                preparation: preparation,
+                options: executionOptions
+            )
+        } catch {
+            let groupID = HostwrightResourceUUID.legacy(
+                kind: "lifecycle-group",
+                identifier: request.operationIdempotencyKeySHA256 ??
+                    compiled.plan.planSHA256
+            )
+            let store = SQLiteStateStore(path: request.stateDatabasePath)
+            guard let group = try? store.operationGroups.load(id: groupID) else {
+                throw error
+            }
+            let steps = (try? store.operationGroupSteps.load(groupID: groupID)) ?? []
+            let planNodeKeys = Set(compiled.plan.nodes.map(\.key))
+            let completedPlanNodeKeys = Set(
+                steps.filter { $0.status == .succeeded }.map(\.stepKey)
+            ).intersection(planNodeKeys)
+            let attemptedServiceNames = attemptedMutationServiceNames(
+                compiled: compiled,
+                steps: steps,
+                completedNodeKeys: completedPlanNodeKeys
+            )
+            return try DaemonReconciliationResult(
+                status: .interrupted,
+                reasonCode: .interrupted,
+                planSHA256: compiled.plan.planSHA256,
+                nodeCount: compiled.plan.nodes.count,
+                completedNodeCount: completedPlanNodeKeys.count,
+                runtimeMutationAttempted: !attemptedServiceNames.isEmpty,
+                attemptedServiceNames: attemptedServiceNames,
+                operationID: group.operationID,
+                groupID: group.id,
+                checkpoint: group.checkpoint,
+                recoveryHintRedacted: group.manualRecoveryHintRedacted.isEmpty
+                    ? "Inspect the exact durable lifecycle group before retry."
+                    : group.manualRecoveryHintRedacted
+            )
+        }
         try Task.checkCancellation()
 
-        let mutatesRuntime = compiled.plan.nodes.contains {
-            $0.action.mutatesRuntime
+        let steps: [OperationGroupStepRecord]
+        switch result.status {
+        case .succeeded, .alreadySucceeded:
+            steps = []
+        case .compensated, .interrupted, .safeHold:
+            let store = SQLiteStateStore(path: request.stateDatabasePath)
+            steps = try store.operationGroupSteps.load(groupID: result.groupID)
         }
+        let attemptedServiceNames = attemptedMutationServiceNames(
+            compiled: compiled,
+            steps: steps,
+            completedNodeKeys: Set(result.completedNodeKeys)
+        )
+        let runtimeMutationAttempted = !attemptedServiceNames.isEmpty
+
         let status: DaemonReconciliationStatus
         let reason: DaemonReconciliationReasonCode
         switch result.status {
         case .succeeded, .alreadySucceeded:
-            status = mutatesRuntime ? .mutated : .converged
-            reason = mutatesRuntime ? .mutationVerified : .converged
+            status = runtimeMutationAttempted ? .mutated : .converged
+            reason = runtimeMutationAttempted ? .mutationVerified : .converged
         case .compensated:
             status = .compensated
             reason = .compensated
@@ -167,12 +235,32 @@ public struct UnattendedLifecycleReconciler: DaemonReconciliationDriving {
             planSHA256: result.planSHA256,
             nodeCount: compiled.plan.nodes.count,
             completedNodeCount: result.completedNodeKeys.count,
-            runtimeMutationAttempted: mutatesRuntime,
+            runtimeMutationAttempted: runtimeMutationAttempted,
+            attemptedServiceNames: attemptedServiceNames,
             operationID: result.operationID,
             groupID: result.groupID,
             checkpoint: result.checkpoint,
             recoveryHintRedacted: result.recoveryHintRedacted
         )
+    }
+
+    private func attemptedMutationServiceNames(
+        compiled: LifecycleCompiledCommand,
+        steps: [OperationGroupStepRecord],
+        completedNodeKeys: Set<String>
+    ) -> [String] {
+        let startedKeys = completedNodeKeys.union(steps.compactMap { step -> String? in
+            step.direction == .forward && step.status == .started
+                ? step.stepKey
+                : nil
+        })
+        return Set(compiled.plan.nodes.compactMap { node -> String? in
+            guard startedKeys.contains(node.key), node.action.mutatesRuntime else {
+                return nil
+            }
+            return compiled.desiredServicesByNodeKey[node.key]?.logicalServiceName
+                ?? node.serviceName
+        }).sorted()
     }
 
     private func requireExpectedConfiguration(

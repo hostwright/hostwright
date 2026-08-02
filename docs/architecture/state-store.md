@@ -25,7 +25,7 @@ Implemented:
 - operation statuses for recorded, succeeded, and failed apply/cleanup attempts
 - ownership records for apply and cleanup decisions
 - health check result records
-- restart policy state records
+- schema-v17 restart policy state and append-only attempt/hold/release history
 - restart recovery records
 - operation recovery groups and step records
 - local redacted diagnostics export from existing state rows
@@ -79,7 +79,7 @@ The normative path table, environment hooks, command creation semantics, status 
 
 `SQLiteStateStore.migrate()` is the only explicit migration path. Repository reads and writes validate the already-applied schema before accessing tables; they do not create a missing database, create `schema_migrations`, or apply migrations as a side effect.
 
-Schema version 16 is the latest supported state schema. A database migrated by a newer Hostwright release fails closed with an incompatible-schema error. Hostwright does not downgrade state databases or silently convert provider ownership.
+Schema version 17 is the latest supported state schema. A database migrated by a newer Hostwright release fails closed with an incompatible-schema error. Hostwright does not downgrade state databases or silently convert provider ownership. Migration v16→v17 is additive, backup-compatible, and is the only Phase 08 schema migration; no v18 migration is introduced during this phase.
 
 Each migration records a checksum in `schema_migrations`. Current builds accept the historical Phase 6 checksum for schema version 1 and record an algorithmic checksum for fresh migrations. If a known migration version has an unexpected checksum, Hostwright fails before reading or writing application records.
 
@@ -128,7 +128,7 @@ Version 7 locks the v0.0.2 identity and recovery foundation:
 - the migration checksum includes the non-SQL backfill implementation revision, so binaries with different transformation logic cannot claim the same schema-v7 migration;
 - a project generation cannot silently change mutation provider.
 
-Phase 04 completes the durable operation DAG/saga executor and Phase 08 completes unattended checkpoint recovery. Schema v10 retains the v9 OCI referrer foundation and adds immutable image-trust verification, exception, and exact subject-manifest evidence. Schema v11 adds immutable SPDX/CycloneDX document bindings to the exact image descriptor, policy, Gate 6 graph, SBOM referrer, normalized component proof, operation group, and optional provenance descriptor/referrer identities. Schema v12 adds immutable signed vulnerability-report bindings, canonical passed signature proof plus proof hash, exact verifier/trust-material/bundle identities, explainable current-policy decisions, and exact expiring/revocable approvals bound to one prior blocked decision, report/referrer, image, vulnerability/signature policy, database identity/version, and blocked-findings digest. Schema v13 adds immutable DSSE-wrapped in-toto Statement v1/SLSA provenance v1 evidence bound to the exact image descriptor, verified Gate 6 graph and referrer, builder and build type, source and dependency materials, bounded invocation/environment policy, signer material, policy hash, operation group, and verification time. Schema v14 adds bounded provider-scoped content accounting, exact ownership references, operator/policy pins, and shared or exclusive-delete leases with UUID fencing, expiry, and conflict guards. Schema v15 adds exact storage volume, attachment, snapshot, backup, hold, orphan, capacity, quota, and admission records with provider, generation, fencing, operation, and lifecycle constraints.
+Phase 04 completes the durable operation DAG/saga executor and Phase 08 completes unattended checkpoint recovery. Schema v10 retains the v9 OCI referrer foundation and adds immutable image-trust verification, exception, and exact subject-manifest evidence. Schema v11 adds immutable SPDX/CycloneDX document bindings to the exact image descriptor, policy, Gate 6 graph, SBOM referrer, normalized component proof, operation group, and optional provenance descriptor/referrer identities. Schema v12 adds immutable signed vulnerability-report bindings, canonical passed signature proof plus proof hash, exact verifier/trust-material/bundle identities, explainable current-policy decisions, and exact expiring/revocable approvals bound to one prior blocked decision, report/referrer, image, vulnerability/signature policy, database identity/version, and blocked-findings digest. Schema v13 adds immutable DSSE-wrapped in-toto Statement v1/SLSA provenance v1 evidence bound to the exact image descriptor, verified Gate 6 graph and referrer, builder and build type, source and dependency materials, bounded invocation/environment policy, signer material, policy hash, operation group, and verification time. Schema v14 adds bounded provider-scoped content accounting, exact ownership references, operator/policy pins, and shared or exclusive-delete leases with UUID fencing, expiry, and conflict guards. Schema v15 adds exact storage volume, attachment, snapshot, backup, hold, orphan, capacity, quota, and admission records with provider, generation, fencing, operation, and lifecycle constraints. Schema v16 adds UUID/fence-bound project networks, attachments, port reservations, DNS instances, certificates, ingress configuration, and service-tunnel sessions. Schema v17 adds bounded workload/project restart policy columns plus append-only `restart_attempt_history` for admitted attempts, denials, holds, stable resets, failures, and exact manual releases.
 
 Normalized columns hold identifiers, project names, service names, timestamps, lifecycle states, operation status, event severity, restart status, recovery status, checkpoints, lock lease fields, rollback availability flags, and hashes.
 
@@ -140,7 +140,7 @@ Desired environment snapshots never store resolved secret values. `secretEnv` en
 
 `hostwright state integrity` classifies the selected database as:
 
-- `healthy`: SQLite structure, foreign keys, schema v16 ledger/checksums, required tables and indexes, resource/fencing UUIDs, authoritative enums/JSON contracts, and reconstructible projections all pass;
+- `healthy`: SQLite structure, foreign keys, schema v17 ledger/checksums, required tables and indexes, resource/fencing UUIDs, authoritative enums/JSON contracts, and reconstructible projections all pass;
 - `degraded`: authoritative state is valid, but runtime-observation or health projections contain invalid enum/JSON/identity data that can be re-observed safely;
 - `unrecoverable`: SQLite structure, foreign keys, migrations, required schema objects, or authoritative desired/ownership/operation/audit records are invalid.
 

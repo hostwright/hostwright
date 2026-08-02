@@ -76,6 +76,8 @@ hostwright import-stack <path> [--output text|json] [--team-profile <path>]
 hostwright validate [path] [--team-profile <path>]
 hostwright plan [path] [--output text|json] [--team-profile <path>]
 hostwright status [path] [--state-db <path>] [--output text|json] [--runtime-provider auto|apple-cli|containerization]
+hostwright restart-budget status [--project <project-id>] [--state-db <path>] [--output text|json]
+hostwright restart-budget release --project <project-id> --service <name> --confirm-hold <sha256> [--state-db <path>] [--output text|json]
 hostwright apply [path] [--state-db <path>] --confirm-plan <hash> [--runtime-provider auto|apple-cli|containerization] [--team-profile <path> --approval-record <path>]
 hostwright up [path] [--service <name>] [--state-db <path>] (--dry-run | --confirm-plan <hash>) [--runtime-provider auto|apple-cli|containerization] [--timeout <seconds>] [--parallelism <1-32>] [--output text|json]
 hostwright down [path] [--service <name>] [--state-db <path>] (--dry-run | --confirm-plan <hash>) [--runtime-provider auto|apple-cli|containerization] [--timeout <seconds>] [--parallelism <1-32>] [--output text|json]
@@ -122,7 +124,7 @@ hostwright-dist help
 
 Text output is the default for `hostwright` commands. Installed-lifecycle `hostwright-dist` commands require `--output json`; release and developer-evidence commands retain their documented text/report output.
 
-`capabilities`, `runtime providers`, `runtime migrate`, `paths`, every `state`, `secret`, `registry`, and `image` subcommand, `migrate preview`, `import-stack`, `plan`, `status`, every lifecycle command, non-TTY interactive operations, `events`, `recovery`, `extension check`, and `doctor` accept JSON output where shown above. JSON streaming uses bounded NDJSON frames with base64 payloads. Interactive TTY mode and JSON mode are mutually exclusive. JSON output does not weaken mutation gates.
+`capabilities`, `runtime providers`, `runtime migrate`, `paths`, `restart-budget`, every `state`, `secret`, `registry`, and `image` subcommand, `migrate preview`, `import-stack`, `plan`, `status`, every lifecycle command, non-TTY interactive operations, `events`, `recovery`, `extension check`, and `doctor` accept JSON output where shown above. JSON streaming uses bounded NDJSON frames with base64 payloads. Interactive TTY mode and JSON mode are mutually exclusive. JSON output does not weaken mutation gates.
 
 When JSON mode is requested and the CLI can classify the failure, stderr uses this envelope:
 
@@ -265,7 +267,7 @@ Result JSON is schema version 1 and includes the provider, provider version, ope
 
 ## `hostwright volume ...`
 
-Provides current schema-v16 inspection, capacity, health, recovery, exact deletion/prune, snapshot, and verified backup/restore operations through Storage Provider API v1. The shipped `hostwright-local` provider stores exact Hostwright-owned resources on one Mac. `list`, `inspect`, `capacity`, and `health` are read-only. `recover` requires the persisted idempotency key for the exact interrupted volume operation.
+Provides current schema-v17 inspection, capacity, health, recovery, exact deletion/prune, snapshot, and verified backup/restore operations through Storage Provider API v1. The shipped `hostwright-local` provider stores exact Hostwright-owned resources on one Mac. `list`, `inspect`, `capacity`, and `health` are read-only. `recover` requires the persisted idempotency key for the exact interrupted volume operation.
 
 Every destructive operation requires exactly one `--dry-run` or `--confirm-plan <sha256>`. Confirmation binds provider and capability identity, project/resource UUIDs, generation, fence, ownership, attachments, holds, reclaim policy, protection evidence, and current observation. Changed or ambiguous evidence fails before provider mutation. `prune` never invokes global or name-based cleanup.
 
@@ -546,6 +548,12 @@ Failure example:
 ```text
 HW-RUNTIME-001: logs requires an observed Hostwright-managed service.
 ```
+
+## `hostwright restart-budget ...`
+
+`restart-budget status` reads schema-v17 workload/project budget state without observing runtime, creating state, or migrating a missing database. Optional `--project` uses the exact persisted `project-*` identity. Text and JSON include workload status, reason class, attempts, rolling windows, priority, backoff, policy digest, release generation, and the current hold token when one exists.
+
+`restart-budget release` requires exact `--project`, Manifest service name, and lowercase SHA-256 `--confirm-hold`. It atomically resets only the matching held workload, increments its release generation, and records append-only manual-release history plus `restart.policy.manual-release`. A stale token or changed workload generation returns confirmation mismatch and changes nothing. Release never starts, restarts, or otherwise touches runtime; the daemon must re-observe on its next level-triggered iteration.
 
 ## `hostwright events [--state-db <path>] [--project <name>] [--type <event>] [--service <name>] [--severity info|warning|error] [--limit <n>] [--sort asc|desc] [--output text|json]`
 

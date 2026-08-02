@@ -81,6 +81,27 @@ public struct DaemonCLIOptions: Equatable, Sendable {
     }
 }
 
+public enum RestartBudgetCLIAction: Equatable, Sendable {
+    case status(projectID: String?)
+    case release(projectID: String, serviceName: String, holdToken: String)
+}
+
+public struct RestartBudgetCLIOptions: Equatable, Sendable {
+    public let action: RestartBudgetCLIAction
+    public let stateDatabasePath: String?
+    public let output: CLIOutputFormat
+
+    public init(
+        action: RestartBudgetCLIAction,
+        stateDatabasePath: String?,
+        output: CLIOutputFormat
+    ) {
+        self.action = action
+        self.stateDatabasePath = stateDatabasePath
+        self.output = output
+    }
+}
+
 public enum CLICommand: Equatable, Sendable {
     case version
     case capabilities(output: CLIOutputFormat)
@@ -93,6 +114,7 @@ public enum CLICommand: Equatable, Sendable {
     case image(options: ImageCLIOptions)
     case volume(options: StorageCLIOptions)
     case daemon(options: DaemonCLIOptions)
+    case restartBudget(options: RestartBudgetCLIOptions)
     case migrateManifestPreview(path: String, output: CLIOutputFormat)
     case initManifest
     case importStack(path: String, output: CLIOutputFormat, teamProfilePath: String?)
@@ -159,6 +181,8 @@ public enum CLICommand: Equatable, Sendable {
             return .volume(options: try StorageCLIParser.parse(arguments: arguments))
         case "daemon":
             return try daemonCommand(arguments: arguments)
+        case "restart-budget":
+            return try restartBudgetCommand(arguments: arguments)
         case "migrate":
             return try migrateCommand(arguments: arguments)
         case "init":
@@ -300,6 +324,88 @@ public enum CLICommand: Equatable, Sendable {
                 action: action,
                 daemonExecutablePath: daemonExecutablePath,
                 configPath: configPath,
+                output: output
+            )
+        )
+    }
+
+    private static func restartBudgetCommand(arguments: [String]) throws -> CLICommand {
+        guard arguments.count >= 2, ["status", "release"].contains(arguments[1]) else {
+            throw CLIUsageError("restart-budget requires status or release.")
+        }
+        let verb = arguments[1]
+        var projectID: String?
+        var serviceName: String?
+        var holdToken: String?
+        var stateDatabasePath: String?
+        var output = CLIOutputFormat.text
+        var outputSelected = false
+        var index = 2
+        while index < arguments.count {
+            let argument = arguments[index]
+            switch argument {
+            case "--project", "--service", "--confirm-hold", "--state-db", "--output":
+                guard index + 1 < arguments.count else {
+                    throw CLIUsageError("restart-budget requires one value after \(argument).")
+                }
+                let value = arguments[index + 1]
+                switch argument {
+                case "--project":
+                    guard projectID == nil else { throw CLIUsageError("restart-budget accepts --project once.") }
+                    projectID = value
+                case "--service":
+                    guard serviceName == nil else { throw CLIUsageError("restart-budget accepts --service once.") }
+                    serviceName = value
+                case "--confirm-hold":
+                    guard holdToken == nil else { throw CLIUsageError("restart-budget accepts --confirm-hold once.") }
+                    holdToken = value
+                case "--state-db":
+                    guard stateDatabasePath == nil else { throw CLIUsageError("restart-budget accepts --state-db once.") }
+                    stateDatabasePath = value
+                case "--output":
+                    guard !outputSelected, let parsed = CLIOutputFormat(rawValue: value) else {
+                        throw CLIUsageError("restart-budget --output requires text or json once.")
+                    }
+                    output = parsed
+                    outputSelected = true
+                default:
+                    break
+                }
+                index += 2
+            case "--json":
+                guard !outputSelected else { throw CLIUsageError("restart-budget accepts one output selector.") }
+                output = .json
+                outputSelected = true
+                index += 1
+            default:
+                throw CLIUsageError("Unsupported restart-budget option '\(argument)'.")
+            }
+        }
+        if let projectID,
+           projectID.range(of: "^project-[A-Za-z0-9](?:[A-Za-z0-9._-]{0,126}[A-Za-z0-9])?$", options: .regularExpression) == nil {
+            throw CLIUsageError("restart-budget --project requires an exact bounded project ID.")
+        }
+        if let serviceName,
+           serviceName.range(of: "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$", options: .regularExpression) == nil {
+            throw CLIUsageError("restart-budget --service requires a Manifest v2 service name.")
+        }
+        let action: RestartBudgetCLIAction
+        if verb == "status" {
+            guard serviceName == nil, holdToken == nil else {
+                throw CLIUsageError("restart-budget status accepts only optional --project, state, and output selectors.")
+            }
+            action = .status(projectID: projectID)
+        } else {
+            guard let projectID, let serviceName, let holdToken,
+                  holdToken.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil else {
+                throw CLIUsageError("restart-budget release requires exact --project, --service, and --confirm-hold SHA-256 values.")
+            }
+            action = .release(projectID: projectID, serviceName: serviceName, holdToken: holdToken)
+        }
+        return .restartBudget(
+            options: RestartBudgetCLIOptions(
+                action: action,
+                stateDatabasePath: stateDatabasePath,
                 output: output
             )
         )

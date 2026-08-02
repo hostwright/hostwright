@@ -447,13 +447,21 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
         let recoveryStateJSONRedacted = try recoverySnapshot.map(
             lifecycleRecoveryStateJSONRedacted
         )
+        let groupIdempotencyKey = options.operationIdempotencyKeySHA256 ??
+            compiled.plan.planSHA256
+        let operationFencingToken = options.operationIdempotencyKeySHA256.map {
+            HostwrightResourceUUID.legacy(
+                kind: "lifecycle-fencing",
+                identifier: $0
+            )
+        } ?? preparation.planFencingToken
         let operationID = HostwrightResourceUUID.legacy(
             kind: "lifecycle-operation",
-            identifier: compiled.plan.planSHA256
+            identifier: groupIdempotencyKey
         )
         let groupID = HostwrightResourceUUID.legacy(
             kind: "lifecycle-group",
-            identifier: compiled.plan.planSHA256
+            identifier: groupIdempotencyKey
         )
         try lifecyclePersistDesiredImageLocks(
             plan: compiled.plan,
@@ -489,7 +497,8 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
         let validator = LifecycleLiveValidator(
             adapter: adapter,
             state: state,
-            store: store
+            store: store,
+            groupIdempotencyKey: groupIdempotencyKey
         )
         let effects = LifecycleLiveEffects(
             adapter: adapter,
@@ -532,8 +541,9 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
                 plan: compiled.plan,
                 operationID: operationID,
                 groupID: groupID,
-                fencingToken: preparation.planFencingToken,
-                lockOwner: "hostwright-cli"
+                fencingToken: operationFencingToken,
+                lockOwner: "hostwright-cli",
+                groupIdempotencyKey: groupIdempotencyKey
             )
         }
         if result.status == .compensated, let recoverySnapshot {
@@ -801,7 +811,7 @@ private func lifecycleRequiresNamedVolumeDetach(
     }
 }
 
-private func lifecyclePersistDesiredImageLocks(
+func lifecyclePersistDesiredImageLocks(
     plan: LifecyclePlan,
     desiredServicesByNodeKey: [String: DesiredRuntimeService],
     groupID: String,
@@ -815,11 +825,31 @@ private func lifecyclePersistDesiredImageLocks(
               let lock = service.imageLock else {
             continue
         }
+        if let existing = try store.imageDigestLocks.load(
+            planSHA256: plan.planSHA256,
+            resourceUUID: node.resourceUUID,
+            stateKind: .desired
+        ) {
+            guard existing.projectID == plan.projectID,
+                  existing.resourceUUID == node.resourceUUID,
+                  existing.serviceName == service.logicalServiceName,
+                  existing.replicaIndex == service.replicaIndex,
+                  existing.stateKind == .desired,
+                  existing.lock == lock,
+                  existing.providerGeneration == plan.providerGeneration,
+                  existing.planSHA256 == plan.planSHA256,
+                  existing.observationSHA256 == nil else {
+                throw StateStoreError.invalidRecord(
+                    "Existing desired image digest lock does not match the exact repeated lifecycle plan."
+                )
+            }
+            persistedResourceUUIDs.insert(node.resourceUUID)
+            continue
+        }
         let record = ImageDigestLockRecord(
             id: HostwrightResourceUUID.legacy(
                 kind: "image-digest-lock-desired",
-                identifier:
-                    "\(plan.planSHA256):\(node.resourceUUID)"
+                identifier: "\(plan.planSHA256):\(node.resourceUUID)"
             ),
             projectID: plan.projectID,
             resourceUUID: node.resourceUUID,
@@ -2146,6 +2176,10 @@ struct LifecyclePersistedRecoveryDriver {
         recoveryStateJSONRedacted: String? = nil,
         allowFailedSafeHoldResume: Bool = false
     ) async throws -> LifecycleSagaExecutionResult {
+        guard let persistedGroup = try store.operationGroups.load(id: groupID),
+              persistedGroup.planHash == plan.planSHA256 else {
+            throw LifecycleSagaError.persistedPlanMismatch
+        }
         let desiredByNode = recoveryDesiredServices(plan: plan)
         try lifecyclePersistDesiredImageLocks(
             plan: plan,
@@ -2168,7 +2202,8 @@ struct LifecyclePersistedRecoveryDriver {
             validator: LifecycleLiveValidator(
                 adapter: runtime.adapter,
                 state: runtime.state,
-                store: store
+                store: store,
+                groupIdempotencyKey: persistedGroup.groupIdempotencyKey
             ),
             recoveryStateJSONRedacted: recoveryStateJSONRedacted
         ).execute(
@@ -2177,6 +2212,7 @@ struct LifecyclePersistedRecoveryDriver {
             groupID: groupID,
             fencingToken: fencingToken,
             lockOwner: lockOwner,
+            groupIdempotencyKey: persistedGroup.groupIdempotencyKey,
             allowFailedSafeHoldResume: allowFailedSafeHoldResume
         )
     }
@@ -2820,6 +2856,19 @@ struct LifecycleLiveValidator: LifecycleSagaContextValidating {
     let adapter: any RuntimeAdapter
     let state: LifecycleRuntimeExecutionState
     let store: SQLiteStateStore
+    let groupIdempotencyKey: String?
+
+    init(
+        adapter: any RuntimeAdapter,
+        state: LifecycleRuntimeExecutionState,
+        store: SQLiteStateStore,
+        groupIdempotencyKey: String? = nil
+    ) {
+        self.adapter = adapter
+        self.state = state
+        self.store = store
+        self.groupIdempotencyKey = groupIdempotencyKey
+    }
 
     func validate(
         plan: LifecyclePlan,
@@ -2941,7 +2990,7 @@ struct LifecycleLiveValidator: LifecycleSagaContextValidating {
         node: LifecyclePlanNode
     ) -> Bool {
         guard let group = try? store.operationGroups.latest(
-            groupIdempotencyKey: plan.planSHA256
+            groupIdempotencyKey: groupIdempotencyKey ?? plan.planSHA256
         ),
         group.planHash == plan.planSHA256,
         let steps = try? store.operationGroupSteps.load(groupID: group.id) else {
@@ -4200,10 +4249,7 @@ struct LifecycleLiveEffects: LifecycleSagaEffects {
         guard conditions.count == 1,
               let seconds = Int(conditions[0].expectedValue),
               seconds > 0,
-              let group = try? store.operationGroups.latest(
-                  groupIdempotencyKey: context.plan.planSHA256
-              ),
-              group.id == context.groupID,
+              let group = try? store.operationGroups.load(id: context.groupID),
               let startedAt = lifecycleEpochMilliseconds(group.createdAt) else {
             return RuntimeNormalizedFailure(
                 category: .staleCapability,

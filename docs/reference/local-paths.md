@@ -15,7 +15,7 @@ Hostwright uses macOS-native per-user locations. A state-writing command creates
 | Runtime metadata | `~/Library/Application Support/Hostwright/metadata` | Contains the legacy migration journal, state access/writer fences, and pending state-maintenance journal. |
 | Daemon lifecycle metadata | `~/Library/Application Support/Hostwright/daemon` | Contains exact schema-v1 ownership, pending lifecycle intent, and one-generation rollback records. |
 | Backups | `~/Library/Application Support/Hostwright/backups` | Verified online state-backup catalogs. |
-| Cache | `~/Library/Caches/Hostwright` | Private cache root. Provider-managed image bytes remain in the selected runtime; Hostwright stores bounded content accounting, pins, and fenced leases in schema-v16 SQLite state. |
+| Cache | `~/Library/Caches/Hostwright` | Private cache root. Provider-managed image bytes remain in the selected runtime; Hostwright stores bounded content accounting, pins, and fenced leases in schema-v17 SQLite state. |
 | Local storage provider | `~/Library/Application Support/Hostwright/storage/providers/hostwright-local` | Private Hostwright-owned volume, snapshot, backup, journal, and metadata root. |
 | Logs | `~/Library/Logs/Hostwright` | Private daemon stdout/stderr root; structured OSLog is a later Phase 08 gate. |
 | LaunchAgent | `~/Library/LaunchAgents/dev.hostwright.daemon.plist` | Exact current-user managed plist, created only by explicit `hostwright daemon install`. |

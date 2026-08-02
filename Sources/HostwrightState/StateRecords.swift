@@ -612,11 +612,30 @@ public enum RestartPolicyStateStatus: String, Equatable, Sendable {
     case operatorHold
     case manualDisabled
     case crashLoopBlocked
+    case projectBudgetBlocked
+    case stablePending
 }
 
 public enum RestartPolicyStateDefaults {
     public static let maxAttempts = 3
+    public static let windowSeconds = 300
     public static let backoffSeconds = 60
+    public static let maximumBackoffSeconds = 300
+    public static let jitterSeconds = 0
+    public static let stableRunSeconds = 60
+    public static let priority = 0
+    public static let projectMaxAttempts = 10
+    public static let projectWindowSeconds = 300
+    public static let emptyPolicySHA256 = String(repeating: "0", count: 64)
+}
+
+public enum RestartReasonClass: String, CaseIterable, Equatable, Sendable {
+    case processExit = "process-exit"
+    case healthFailure = "health-failure"
+    case runtimeFailure = "runtime-failure"
+    case dependencyFailure = "dependency-failure"
+    case operatorRequest = "operator-request"
+    case unknown
 }
 
 public struct RestartPolicyStateRecord: Equatable, Sendable {
@@ -630,6 +649,20 @@ public struct RestartPolicyStateRecord: Equatable, Sendable {
     public let backoffSeconds: Int
     public let backoffUntil: String?
     public let lastFailureAt: String?
+    public let reasonClass: RestartReasonClass
+    public let windowStartedAt: String?
+    public let windowSeconds: Int
+    public let initialBackoffSeconds: Int
+    public let maximumBackoffSeconds: Int
+    public let jitterSeconds: Int
+    public let stableRunSeconds: Int
+    public let stableSince: String?
+    public let priority: Int
+    public let projectMaxAttempts: Int
+    public let projectWindowSeconds: Int
+    public let holdToken: String?
+    public let releaseGeneration: Int
+    public let policySHA256: String
     public let updatedAt: String
     public let metadataJSONRedacted: String
 
@@ -647,6 +680,51 @@ public struct RestartPolicyStateRecord: Equatable, Sendable {
         updatedAt: String,
         metadataJSONRedacted: String
     ) {
+        self.init(
+            id: id,
+            projectID: projectID,
+            serviceName: serviceName,
+            policy: policy,
+            status: status,
+            attemptCount: attemptCount,
+            maxAttempts: maxAttempts,
+            backoffSeconds: backoffSeconds,
+            backoffUntil: backoffUntil,
+            lastFailureAt: lastFailureAt,
+            reasonClass: .unknown,
+            updatedAt: updatedAt,
+            metadataJSONRedacted: metadataJSONRedacted
+        )
+    }
+
+    public init(
+        id: String,
+        projectID: String,
+        serviceName: String,
+        policy: RuntimeRestartPolicy,
+        status: RestartPolicyStateStatus,
+        attemptCount: Int,
+        maxAttempts: Int = RestartPolicyStateDefaults.maxAttempts,
+        backoffSeconds: Int = RestartPolicyStateDefaults.backoffSeconds,
+        backoffUntil: String? = nil,
+        lastFailureAt: String? = nil,
+        reasonClass: RestartReasonClass = .unknown,
+        windowStartedAt: String? = nil,
+        windowSeconds: Int = RestartPolicyStateDefaults.windowSeconds,
+        initialBackoffSeconds: Int = RestartPolicyStateDefaults.backoffSeconds,
+        maximumBackoffSeconds: Int = RestartPolicyStateDefaults.maximumBackoffSeconds,
+        jitterSeconds: Int = RestartPolicyStateDefaults.jitterSeconds,
+        stableRunSeconds: Int = RestartPolicyStateDefaults.stableRunSeconds,
+        stableSince: String? = nil,
+        priority: Int = RestartPolicyStateDefaults.priority,
+        projectMaxAttempts: Int = RestartPolicyStateDefaults.projectMaxAttempts,
+        projectWindowSeconds: Int = RestartPolicyStateDefaults.projectWindowSeconds,
+        holdToken: String? = nil,
+        releaseGeneration: Int = 0,
+        policySHA256: String = RestartPolicyStateDefaults.emptyPolicySHA256,
+        updatedAt: String,
+        metadataJSONRedacted: String
+    ) {
         self.id = id
         self.projectID = projectID
         self.serviceName = serviceName
@@ -657,6 +735,20 @@ public struct RestartPolicyStateRecord: Equatable, Sendable {
         self.backoffSeconds = max(1, backoffSeconds)
         self.backoffUntil = backoffUntil
         self.lastFailureAt = lastFailureAt
+        self.reasonClass = reasonClass
+        self.windowStartedAt = windowStartedAt
+        self.windowSeconds = max(1, windowSeconds)
+        self.initialBackoffSeconds = max(1, initialBackoffSeconds)
+        self.maximumBackoffSeconds = max(1, maximumBackoffSeconds)
+        self.jitterSeconds = max(0, jitterSeconds)
+        self.stableRunSeconds = max(1, stableRunSeconds)
+        self.stableSince = stableSince
+        self.priority = min(100, max(-100, priority))
+        self.projectMaxAttempts = max(1, projectMaxAttempts)
+        self.projectWindowSeconds = max(1, projectWindowSeconds)
+        self.holdToken = holdToken
+        self.releaseGeneration = max(0, releaseGeneration)
+        self.policySHA256 = policySHA256
         self.updatedAt = updatedAt
         self.metadataJSONRedacted = metadataJSONRedacted
     }
@@ -673,7 +765,102 @@ public struct RestartPolicyStateRecord: Equatable, Sendable {
             backoffSeconds: backoffSeconds,
             backoffUntil: backoffUntil,
             lastFailureAt: lastFailureAt,
+            reasonClass: reasonClass,
+            windowStartedAt: windowStartedAt,
+            windowSeconds: windowSeconds,
+            initialBackoffSeconds: initialBackoffSeconds,
+            maximumBackoffSeconds: maximumBackoffSeconds,
+            jitterSeconds: jitterSeconds,
+            stableRunSeconds: stableRunSeconds,
+            stableSince: stableSince,
+            priority: priority,
+            projectMaxAttempts: projectMaxAttempts,
+            projectWindowSeconds: projectWindowSeconds,
+            holdToken: holdToken,
+            releaseGeneration: releaseGeneration,
+            policySHA256: policySHA256,
             updatedAt: updatedAt,
+            metadataJSONRedacted: policy.redact(metadataJSONRedacted)
+        )
+    }
+}
+
+public enum RestartAttemptDecision: String, CaseIterable, Equatable, Sendable {
+    case admitted
+    case denied
+    case hold
+    case stableReset = "stable-reset"
+    case manualRelease = "manual-release"
+    case failed
+}
+
+public struct RestartAttemptHistoryRecord: Equatable, Sendable {
+    public let id: String
+    public let projectID: String
+    public let serviceName: String
+    public let reasonClass: RestartReasonClass
+    public let decision: RestartAttemptDecision
+    public let attemptNumber: Int
+    public let projectAttemptNumber: Int
+    public let admitted: Bool
+    public let holdToken: String?
+    public let releaseGeneration: Int
+    public let operationID: String?
+    public let occurredAt: String
+    public let backoffUntil: String?
+    public let policySHA256: String
+    public let metadataJSONRedacted: String
+
+    public init(
+        id: String,
+        projectID: String,
+        serviceName: String,
+        reasonClass: RestartReasonClass,
+        decision: RestartAttemptDecision,
+        attemptNumber: Int,
+        projectAttemptNumber: Int,
+        admitted: Bool,
+        holdToken: String? = nil,
+        releaseGeneration: Int = 0,
+        operationID: String? = nil,
+        occurredAt: String,
+        backoffUntil: String? = nil,
+        policySHA256: String,
+        metadataJSONRedacted: String
+    ) {
+        self.id = id
+        self.projectID = projectID
+        self.serviceName = serviceName
+        self.reasonClass = reasonClass
+        self.decision = decision
+        self.attemptNumber = attemptNumber
+        self.projectAttemptNumber = projectAttemptNumber
+        self.admitted = admitted
+        self.holdToken = holdToken
+        self.releaseGeneration = releaseGeneration
+        self.operationID = operationID
+        self.occurredAt = occurredAt
+        self.backoffUntil = backoffUntil
+        self.policySHA256 = policySHA256
+        self.metadataJSONRedacted = metadataJSONRedacted
+    }
+
+    public func redacted(using policy: RuntimeRedactionPolicy = .default) -> RestartAttemptHistoryRecord {
+        RestartAttemptHistoryRecord(
+            id: id,
+            projectID: projectID,
+            serviceName: serviceName,
+            reasonClass: reasonClass,
+            decision: decision,
+            attemptNumber: attemptNumber,
+            projectAttemptNumber: projectAttemptNumber,
+            admitted: admitted,
+            holdToken: holdToken,
+            releaseGeneration: releaseGeneration,
+            operationID: operationID,
+            occurredAt: occurredAt,
+            backoffUntil: backoffUntil,
+            policySHA256: policySHA256,
             metadataJSONRedacted: policy.redact(metadataJSONRedacted)
         )
     }

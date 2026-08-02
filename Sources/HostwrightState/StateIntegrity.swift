@@ -240,8 +240,30 @@ public struct StateIntegrityService: Sendable {
                   + (SELECT COUNT(*) FROM restart_policy_state
                      WHERE id = '' OR project_id = '' OR service_name = '' OR updated_at = ''
                         OR policy NOT IN ('no', 'onFailure', 'unlessStopped')
-                        OR status NOT IN ('active', 'backingOff', 'operatorHold', 'manualDisabled', 'crashLoopBlocked')
+                        OR status NOT IN ('active', 'backingOff', 'operatorHold', 'manualDisabled', 'crashLoopBlocked', 'projectBudgetBlocked', 'stablePending')
                         OR attempt_count < 0 OR max_attempts < 1 OR backoff_seconds < 1
+                        OR reason_class NOT IN ('process-exit', 'health-failure', 'runtime-failure', 'dependency-failure', 'operator-request', 'unknown')
+                        OR window_seconds NOT BETWEEN 1 AND 86400
+                        OR initial_backoff_seconds NOT BETWEEN 1 AND 3600
+                        OR maximum_backoff_seconds NOT BETWEEN initial_backoff_seconds AND 86400
+                        OR jitter_seconds NOT BETWEEN 0 AND initial_backoff_seconds
+                        OR stable_run_seconds NOT BETWEEN 1 AND 86400
+                        OR priority NOT BETWEEN -100 AND 100
+                        OR project_max_attempts NOT BETWEEN 1 AND 1000
+                        OR project_window_seconds NOT BETWEEN 1 AND 86400
+                        OR release_generation < 0
+                        OR length(policy_sha256) != 64 OR policy_sha256 GLOB '*[^0-9a-f]*'
+                        OR (hold_token IS NOT NULL AND (length(hold_token) != 64 OR hold_token GLOB '*[^0-9a-f]*'))
+                        OR json_type(CASE WHEN json_valid(metadata_json_redacted) THEN metadata_json_redacted ELSE 'null' END) != 'object')
+                  + (SELECT COUNT(*) FROM restart_attempt_history
+                     WHERE id = '' OR project_id = '' OR service_name = ''
+                        OR reason_class NOT IN ('process-exit', 'health-failure', 'runtime-failure', 'dependency-failure', 'operator-request', 'unknown')
+                        OR decision NOT IN ('admitted', 'denied', 'hold', 'stable-reset', 'manual-release', 'failed')
+                        OR attempt_number < 0 OR project_attempt_number < 0
+                        OR admitted NOT IN (0, 1) OR release_generation < 0
+                        OR occurred_at = '' OR julianday(occurred_at) IS NULL
+                        OR length(policy_sha256) != 64 OR policy_sha256 GLOB '*[^0-9a-f]*'
+                        OR (hold_token IS NOT NULL AND (length(hold_token) != 64 OR hold_token GLOB '*[^0-9a-f]*'))
                         OR json_type(CASE WHEN json_valid(metadata_json_redacted) THEN metadata_json_redacted ELSE 'null' END) != 'object')
                   + (SELECT COUNT(*) FROM restart_recovery_records
                      WHERE id = '' OR operation_id = '' OR service_name = '' OR resource_identifier = ''
@@ -1782,6 +1804,7 @@ public struct StateIntegrityService: Sendable {
         "ownership_records",
         "health_check_results",
         "restart_policy_state",
+        "restart_attempt_history",
         "restart_recovery_records",
         "operation_groups",
         "operation_group_steps",
@@ -1829,6 +1852,9 @@ public struct StateIntegrityService: Sendable {
         "health_check_results_project_idx",
         "health_check_results_checked_at_idx",
         "restart_policy_state_project_idx",
+        "restart_attempt_history_project_idx",
+        "restart_attempt_history_workload_idx",
+        "restart_attempt_history_operation_idx",
         "restart_recovery_operation_idx",
         "restart_recovery_project_idx",
         "operation_groups_operation_idx",

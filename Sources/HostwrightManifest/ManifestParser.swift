@@ -286,7 +286,7 @@ private struct ManifestNodeDecoder {
             allowed: [
                 "version", "project", "imagePolicy", "imageTrust", "imageSBOM",
                 "imageVulnerability", "imageProvenance", "volumes", "networks",
-                "certificates", "ingress", "tunnels", "services"
+                "certificates", "ingress", "tunnels", "restartBudget", "services"
             ]
         )
         let version = try values["version"].map(versionInteger)
@@ -315,6 +315,9 @@ private struct ManifestNodeDecoder {
         let imageProvenance = try values["imageProvenance"].map {
             try decodeImageProvenance($0, path: "$.imageProvenance")
         }
+        let restartBudget = try values["restartBudget"].map {
+            try decodeProjectRestartBudget($0, path: "$.restartBudget")
+        }
         let volumes = try values["volumes"].map {
             try decodeVolumeDeclarations($0, path: "$.volumes")
         } ?? [:]
@@ -339,6 +342,7 @@ private struct ManifestNodeDecoder {
             imageSBOM: imageSBOM,
             imageVulnerability: imageVulnerability,
             imageProvenance: imageProvenance,
+            restartBudget: restartBudget,
             volumes: volumes,
             networks: networks,
             certificates: certificates,
@@ -1931,12 +1935,49 @@ private struct ManifestNodeDecoder {
         return HostwrightHealthCheck(command: command, interval: "\(probe.interval)s")
     }
 
+    private func decodeProjectRestartBudget(
+        _ node: Node,
+        path: String
+    ) throws -> HostwrightProjectRestartBudget {
+        let values = try mapping(node, path: path, allowed: ["maxAttempts", "window"])
+        return HostwrightProjectRestartBudget(
+            maxAttempts: try values["maxAttempts"].map {
+                try integer($0, path: "\(path).maxAttempts")
+            } ?? 10,
+            window: try duration(
+                values["window"],
+                default: 300,
+                path: "\(path).window"
+            )
+        )
+    }
+
     private func decodeRestart(_ node: Node, path: String) throws -> HostwrightRestart {
-        let values = try mapping(node, path: path, allowed: ["policy"])
+        let values = try mapping(
+            node,
+            path: path,
+            allowed: [
+                "policy", "maxAttempts", "window", "backoff", "maxBackoff",
+                "jitter", "stableRun", "priority"
+            ]
+        )
         guard let policy = values["policy"] else {
             throw ManifestParser.failure("restart requires policy.", node: node, path: "\(path).policy")
         }
-        return HostwrightRestart(policy: try enumString(policy, path: "\(path).policy"))
+        return HostwrightRestart(
+            policy: try enumString(policy, path: "\(path).policy"),
+            maxAttempts: try values["maxAttempts"].map {
+                try integer($0, path: "\(path).maxAttempts")
+            } ?? 3,
+            window: try duration(values["window"], default: 300, path: "\(path).window"),
+            backoff: try duration(values["backoff"], default: 60, path: "\(path).backoff"),
+            maxBackoff: try duration(values["maxBackoff"], default: 300, path: "\(path).maxBackoff"),
+            jitter: try duration(values["jitter"], default: 0, path: "\(path).jitter"),
+            stableRun: try duration(values["stableRun"], default: 60, path: "\(path).stableRun"),
+            priority: try values["priority"].map {
+                try integer($0, path: "\(path).priority")
+            } ?? 0
+        )
     }
 
     private func decodeUpdate(_ node: Node, path: String) throws -> HostwrightUpdatePolicy {

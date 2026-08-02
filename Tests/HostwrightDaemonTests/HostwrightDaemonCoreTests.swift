@@ -38,6 +38,29 @@ final class HostwrightDaemonCoreTests: XCTestCase {
                 maximumParallelism: 33
             )
         )
+        XCTAssertThrowsError(
+            try DaemonReconciliationRequest(
+                manifestPath: "/private/tmp/hostwright.yaml",
+                manifestSHA256: String(repeating: "a", count: 64),
+                stateDatabasePath: "/private/tmp/state.sqlite",
+                projectID: "project-demo",
+                maximumParallelism: 4,
+                operationIdempotencyKeySHA256: "not-a-digest"
+            )
+        )
+        XCTAssertThrowsError(
+            try DaemonReconciliationResult(
+                status: .mutated,
+                reasonCode: .mutationVerified,
+                planSHA256: String(repeating: "b", count: 64),
+                nodeCount: 1,
+                completedNodeCount: 1,
+                runtimeMutationAttempted: true,
+                operationID: HostwrightResourceUUID.generate(),
+                groupID: HostwrightResourceUUID.generate(),
+                checkpoint: "verified"
+            )
+        )
         let managed = DaemonConfiguration(
             mode: .managedService,
             configPath: "/private/tmp/hostwright.yaml",
@@ -68,6 +91,7 @@ final class HostwrightDaemonCoreTests: XCTestCase {
                         nodeCount: 2,
                         completedNodeCount: 2,
                         runtimeMutationAttempted: true,
+                        attemptedServiceNames: ["api"],
                         operationID: HostwrightResourceUUID.generate(),
                         groupID: HostwrightResourceUUID.generate(),
                         checkpoint: "verified"
@@ -112,6 +136,406 @@ final class HostwrightDaemonCoreTests: XCTestCase {
         }
     }
 
+    func testPhase08AdmittedDaemonRestartConsumesOneDurableAttempt() async throws {
+        try await withTemporaryDirectory { directory in
+            let databasePath = directory.appendingPathComponent("state.sqlite").path
+            let operationID = HostwrightResourceUUID.generate()
+            let driver = ScriptedDaemonReconciliationDriver(results: [
+                .success(
+                    try DaemonReconciliationResult(
+                        status: .mutated,
+                        reasonCode: .mutationVerified,
+                        planSHA256: String(repeating: "c", count: 64),
+                        nodeCount: 1,
+                        completedNodeCount: 1,
+                        runtimeMutationAttempted: true,
+                        attemptedServiceNames: ["api"],
+                        operationID: operationID,
+                        groupID: HostwrightResourceUUID.generate(),
+                        checkpoint: "verified"
+                    )
+                )
+            ])
+            let runner = DaemonLoopRunner(
+                configuration: DaemonConfiguration(
+                    configPath: "hostwright.yaml",
+                    stateDatabasePath: databasePath,
+                    maxIterations: 1
+                ),
+                runtimeAdapter: CountingRuntimeAdapter(observedServices: [
+                    Self.observedService(lifecycleState: .exited, healthState: .unknown)
+                ]),
+                reconciliationDriver: driver,
+                healthChecker: ScriptedHealthChecker(results: []),
+                clock: ManualDaemonClock(),
+                instanceLock: ScriptedDaemonLock(),
+                readConfig: { _ in Self.healthRestartManifest },
+                idGenerator: DeterministicIDs().next
+            )
+
+            let summary = try await runner.run()
+
+            XCTAssertEqual(summary.successfulIterations, 1)
+            let store = SQLiteStateStore(path: databasePath)
+            let state = try XCTUnwrap(
+                store.restartPolicies.load(projectID: "project-demo", serviceName: "api")
+            )
+            XCTAssertEqual(state.status, .backingOff)
+            XCTAssertEqual(state.attemptCount, 1)
+            XCTAssertEqual(state.reasonClass, .processExit)
+            let attempts = try store.restartAttempts.loadProject("project-demo")
+            XCTAssertEqual(attempts.count, 1)
+            XCTAssertEqual(attempts[0].decision, .admitted)
+            XCTAssertEqual(attempts[0].operationID, operationID)
+            XCTAssertEqual(try store.restartAttempts.admittedCount(
+                projectID: "project-demo",
+                since: "2026-01-01T00:00:00Z"
+            ), 1)
+        }
+    }
+
+    func testPhase08OnlyExactStartedRestartServiceConsumesBudget() async throws {
+        try await withTemporaryDirectory { directory in
+            let databasePath = directory.appendingPathComponent("state.sqlite").path
+            let manifest = """
+            version: 2
+            project: demo
+            services:
+              api:
+                image: ghcr.io/example/api:latest
+                restart:
+                  policy: on-failure
+              worker:
+                image: ghcr.io/example/api:latest
+                restart:
+                  policy: on-failure
+            """
+            let driver = ScriptedDaemonReconciliationDriver(results: [
+                .success(
+                    try DaemonReconciliationResult(
+                        status: .mutated,
+                        reasonCode: .mutationVerified,
+                        planSHA256: String(repeating: "c", count: 64),
+                        nodeCount: 1,
+                        completedNodeCount: 1,
+                        runtimeMutationAttempted: true,
+                        attemptedServiceNames: ["api"],
+                        operationID: HostwrightResourceUUID.generate(),
+                        groupID: HostwrightResourceUUID.generate(),
+                        checkpoint: "verified"
+                    )
+                )
+            ])
+            let runner = DaemonLoopRunner(
+                configuration: DaemonConfiguration(
+                    configPath: "hostwright.yaml",
+                    stateDatabasePath: databasePath,
+                    maxIterations: 1
+                ),
+                runtimeAdapter: CountingRuntimeAdapter(observedServices: [
+                    Self.observedService(
+                        serviceName: "api",
+                        lifecycleState: .exited,
+                        healthState: .unknown,
+                        ports: []
+                    ),
+                    Self.observedService(
+                        serviceName: "worker",
+                        lifecycleState: .exited,
+                        healthState: .unknown,
+                        ports: []
+                    )
+                ]),
+                reconciliationDriver: driver,
+                healthChecker: ScriptedHealthChecker(results: []),
+                clock: ManualDaemonClock(),
+                instanceLock: ScriptedDaemonLock(),
+                readConfig: { _ in manifest },
+                idGenerator: DeterministicIDs().next
+            )
+
+            _ = try await runner.run()
+
+            let store = SQLiteStateStore(path: databasePath)
+            XCTAssertEqual(
+                try store.restartAttempts.loadProject("project-demo").map(\.serviceName),
+                ["api"]
+            )
+            XCTAssertEqual(
+                try store.restartPolicies.load(
+                    projectID: "project-demo",
+                    serviceName: "api"
+                )?.attemptCount,
+                1
+            )
+            XCTAssertEqual(
+                try store.restartPolicies.load(
+                    projectID: "project-demo",
+                    serviceName: "worker"
+                )?.attemptCount,
+                0
+            )
+        }
+    }
+
+    func testPhase08PostAdmissionInterruptionConsumesFailedUnknownAttempt() async throws {
+        try await withTemporaryDirectory { directory in
+            let databasePath = directory.appendingPathComponent("state.sqlite").path
+            let operationID = HostwrightResourceUUID.generate()
+            let driver = ScriptedDaemonReconciliationDriver(results: [
+                .success(
+                    try DaemonReconciliationResult(
+                        status: .interrupted,
+                        reasonCode: .interrupted,
+                        planSHA256: String(repeating: "d", count: 64),
+                        nodeCount: 1,
+                        completedNodeCount: 0,
+                        runtimeMutationAttempted: true,
+                        attemptedServiceNames: ["api"],
+                        operationID: operationID,
+                        groupID: HostwrightResourceUUID.generate(),
+                        checkpoint: "effect-ambiguous"
+                    )
+                )
+            ])
+            let runner = DaemonLoopRunner(
+                configuration: DaemonConfiguration(
+                    configPath: "hostwright.yaml",
+                    stateDatabasePath: databasePath,
+                    maxIterations: 1
+                ),
+                runtimeAdapter: CountingRuntimeAdapter(observedServices: [
+                    Self.observedService(lifecycleState: .exited, healthState: .unknown)
+                ]),
+                reconciliationDriver: driver,
+                healthChecker: ScriptedHealthChecker(results: []),
+                clock: ManualDaemonClock(),
+                instanceLock: ScriptedDaemonLock(),
+                readConfig: { _ in Self.healthRestartManifest },
+                idGenerator: DeterministicIDs().next
+            )
+
+            let summary = try await runner.run()
+
+            XCTAssertEqual(summary.successfulIterations, 0)
+            XCTAssertEqual(summary.failedIterations, 1)
+            let store = SQLiteStateStore(path: databasePath)
+            let state = try XCTUnwrap(
+                store.restartPolicies.load(projectID: "project-demo", serviceName: "api")
+            )
+            XCTAssertEqual(state.attemptCount, 1)
+            XCTAssertEqual(state.reasonClass, .unknown)
+            let attempts = try store.restartAttempts.loadProject("project-demo")
+            XCTAssertEqual(attempts.count, 1)
+            XCTAssertEqual(attempts[0].decision, .failed)
+            XCTAssertEqual(attempts[0].reasonClass, .unknown)
+            XCTAssertEqual(attempts[0].operationID, operationID)
+        }
+    }
+
+    func testPhase08FreshDaemonRestartAttemptsAdvanceExecutionIdentityAndFence() async throws {
+        try await withTemporaryDirectory { directory in
+            let databasePath = directory.appendingPathComponent("state.sqlite").path
+            let ids = DeterministicIDs()
+            let driver = ScriptedDaemonReconciliationDriver(results: try ["e", "f"].map {
+                .success(
+                    try DaemonReconciliationResult(
+                        status: .mutated,
+                        reasonCode: .mutationVerified,
+                        planSHA256: String(repeating: $0, count: 64),
+                        nodeCount: 1,
+                        completedNodeCount: 1,
+                        runtimeMutationAttempted: true,
+                        attemptedServiceNames: ["api"],
+                        operationID: HostwrightResourceUUID.generate(),
+                        groupID: HostwrightResourceUUID.generate(),
+                        checkpoint: "verified"
+                    )
+                )
+            })
+            for timestamp in ["2026-08-01T12:00:00Z", "2026-08-01T12:01:01Z"] {
+                let runner = DaemonLoopRunner(
+                    configuration: DaemonConfiguration(
+                        configPath: "hostwright.yaml",
+                        stateDatabasePath: databasePath,
+                        maxIterations: 1
+                    ),
+                    runtimeAdapter: CountingRuntimeAdapter(observedServices: [
+                        Self.observedService(lifecycleState: .exited, healthState: .unknown)
+                    ]),
+                    reconciliationDriver: driver,
+                    healthChecker: ScriptedHealthChecker(results: []),
+                    clock: ManualDaemonClock(timestamps: Array(
+                        repeating: timestamp,
+                        count: 3
+                    )),
+                    instanceLock: ScriptedDaemonLock(),
+                    readConfig: { _ in Self.healthRestartManifest },
+                    idGenerator: ids.next
+                )
+                let summary = try await runner.run()
+                XCTAssertEqual(summary.successfulIterations, 1)
+            }
+
+            let keys = driver.requests.compactMap(\.operationIdempotencyKeySHA256)
+            XCTAssertEqual(keys.count, 2)
+            XCTAssertEqual(Set(keys).count, 2)
+            XCTAssertTrue(keys.allSatisfy {
+                $0.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil
+            })
+            XCTAssertEqual(
+                try SQLiteStateStore(path: databasePath)
+                    .restartAttempts.loadProject("project-demo").map(\.attemptNumber),
+                [1, 2]
+            )
+        }
+    }
+
+    func testPhase08StableRunResetSurvivesFreshDaemonProcessesAndRecordsHistory() async throws {
+        try await withTemporaryDirectory { directory in
+            let databasePath = directory.appendingPathComponent("state.sqlite").path
+            let ids = DeterministicIDs()
+            let first = DaemonLoopRunner(
+                configuration: DaemonConfiguration(
+                    configPath: "hostwright.yaml",
+                    stateDatabasePath: databasePath,
+                    maxIterations: 1
+                ),
+                runtimeAdapter: CountingRuntimeAdapter(observedServices: [
+                    Self.observedService(lifecycleState: .exited, healthState: .unknown)
+                ]),
+                reconciliationDriver: ScriptedDaemonReconciliationDriver(results: [
+                    .success(try DaemonReconciliationResult(
+                        status: .mutated,
+                        reasonCode: .mutationVerified,
+                        planSHA256: String(repeating: "c", count: 64),
+                        nodeCount: 1,
+                        completedNodeCount: 1,
+                        runtimeMutationAttempted: true,
+                        attemptedServiceNames: ["api"],
+                        operationID: HostwrightResourceUUID.generate(),
+                        groupID: HostwrightResourceUUID.generate(),
+                        checkpoint: "verified"
+                    ))
+                ]),
+                healthChecker: ScriptedHealthChecker(results: []),
+                clock: ManualDaemonClock(timestamps: Array(
+                    repeating: "2026-08-01T12:00:00Z",
+                    count: 3
+                )),
+                instanceLock: ScriptedDaemonLock(),
+                readConfig: { _ in Self.healthRestartManifest },
+                idGenerator: ids.next
+            )
+            _ = try await first.run()
+
+            for timestamp in ["2026-08-01T12:00:20Z", "2026-08-01T12:01:21Z"] {
+                let runner = DaemonLoopRunner(
+                    configuration: DaemonConfiguration(
+                        configPath: "hostwright.yaml",
+                        stateDatabasePath: databasePath,
+                        maxIterations: 1
+                    ),
+                    runtimeAdapter: CountingRuntimeAdapter(observedServices: [
+                        Self.observedService(lifecycleState: .running, healthState: .healthy)
+                    ]),
+                    reconciliationDriver: ScriptedDaemonReconciliationDriver(),
+                    healthChecker: ScriptedHealthChecker(results: []),
+                    clock: ManualDaemonClock(timestamps: Array(
+                        repeating: timestamp,
+                        count: 3
+                    )),
+                    instanceLock: ScriptedDaemonLock(),
+                    readConfig: { _ in Self.healthRestartManifest },
+                    idGenerator: ids.next
+                )
+                _ = try await runner.run()
+            }
+
+            let store = SQLiteStateStore(path: databasePath)
+            let state = try XCTUnwrap(
+                store.restartPolicies.load(projectID: "project-demo", serviceName: "api")
+            )
+            XCTAssertEqual(state.status, .active)
+            XCTAssertEqual(state.attemptCount, 0)
+            XCTAssertNil(state.stableSince)
+            XCTAssertEqual(
+                try store.restartAttempts.loadProject("project-demo").map(\.decision),
+                [.admitted, .stableReset]
+            )
+        }
+    }
+
+    func testPhase08HeldWorkloadDoesNotStarveIndependentProjectMutation() async throws {
+        try await withTemporaryDirectory { directory in
+            let databasePath = directory.appendingPathComponent("state.sqlite").path
+            let manifestText = """
+            version: 2
+            project: demo
+            restartBudget:
+              maxAttempts: 1
+              window: 300s
+            services:
+              api:
+                image: ghcr.io/example/api:latest
+                restart:
+                  policy: on-failure
+                  priority: 100
+              worker:
+                image: ghcr.io/example/worker:latest
+            """
+            let manifest = try ManifestValidator.validated(manifestText)
+            let store = SQLiteStateStore(path: databasePath)
+            try store.migrate()
+            try store.desiredStates.saveManifestSnapshot(
+                projectID: "project-demo",
+                manifestPath: "hostwright.yaml",
+                manifestHash: "seed",
+                desiredGeneration: 1,
+                manifest: manifest,
+                timestamp: "2026-08-01T12:00:00Z"
+            )
+            try store.restartPolicies.upsert(
+                RestartPolicyStateRecord(
+                    id: "restart-api",
+                    projectID: "project-demo",
+                    serviceName: "api",
+                    policy: .onFailure,
+                    status: .crashLoopBlocked,
+                    attemptCount: 3,
+                    maxAttempts: 3,
+                    holdToken: String(repeating: "a", count: 64),
+                    updatedAt: "2026-08-01T12:00:00Z",
+                    metadataJSONRedacted: "{}"
+                )
+            )
+            let driver = ScriptedDaemonReconciliationDriver()
+            let runner = DaemonLoopRunner(
+                configuration: DaemonConfiguration(
+                    configPath: "hostwright.yaml",
+                    stateDatabasePath: databasePath,
+                    maxIterations: 1
+                ),
+                runtimeAdapter: CountingRuntimeAdapter(observedServices: [
+                    Self.observedService(lifecycleState: .exited, healthState: .unknown)
+                ]),
+                reconciliationDriver: driver,
+                clock: ManualDaemonClock(),
+                instanceLock: ScriptedDaemonLock(),
+                readConfig: { _ in manifestText },
+                idGenerator: DeterministicIDs().next
+            )
+
+            _ = try await runner.run()
+
+            XCTAssertEqual(driver.requests.first?.selectedServiceNames, ["worker"])
+            XCTAssertEqual(
+                try store.restartPolicies.load(projectID: "project-demo", serviceName: "api")?.status,
+                .crashLoopBlocked
+            )
+        }
+    }
+
     func testSafeHoldIsNotReportedAsConvergenceAndBacksOff() async throws {
         try await withTemporaryDirectory { directory in
             let databasePath = directory.appendingPathComponent("state.sqlite").path
@@ -124,6 +548,7 @@ final class HostwrightDaemonCoreTests: XCTestCase {
                         nodeCount: 2,
                         completedNodeCount: 1,
                         runtimeMutationAttempted: true,
+                        attemptedServiceNames: ["api"],
                         operationID: HostwrightResourceUUID.generate(),
                         groupID: HostwrightResourceUUID.generate(),
                         checkpoint: "start-api:ambiguous-after-effect",
@@ -190,6 +615,10 @@ final class HostwrightDaemonCoreTests: XCTestCase {
             XCTAssertEqual(summary.successfulIterations, 2)
             XCTAssertEqual(driver.requests.count, 2)
             XCTAssertEqual(clock.sleepDurations, [5])
+            let restartEvents = try SQLiteStateStore(path: databasePath).events.loadAll().filter {
+                $0.type == "restart.policy.state"
+            }
+            XCTAssertEqual(restartEvents.count, 1)
         }
     }
 
@@ -618,6 +1047,7 @@ final class HostwrightDaemonCoreTests: XCTestCase {
             let adapter = CountingRuntimeAdapter(observedServices: [
                 Self.observedService(lifecycleState: .exited, healthState: .unknown)
             ])
+            let driver = ScriptedDaemonReconciliationDriver()
             let runner = DaemonLoopRunner(
                 configuration: DaemonConfiguration(
                     configPath: "hostwright.yaml",
@@ -625,7 +1055,7 @@ final class HostwrightDaemonCoreTests: XCTestCase {
                     maxIterations: 1
                 ),
                 runtimeAdapter: adapter,
-                reconciliationDriver: ScriptedDaemonReconciliationDriver(),
+                reconciliationDriver: driver,
                 healthChecker: ScriptedHealthChecker(results: []),
                 clock: ManualDaemonClock(),
                 instanceLock: ScriptedDaemonLock(),
@@ -637,6 +1067,7 @@ final class HostwrightDaemonCoreTests: XCTestCase {
 
             XCTAssertEqual(summary.successfulIterations, 1)
             XCTAssertEqual(adapter.executeCount, 0)
+            XCTAssertEqual(driver.requests.first?.selectedServiceNames, [])
             let restartState = try XCTUnwrap(store.restartPolicies.load(projectID: "project-demo", serviceName: "api"))
             XCTAssertEqual(restartState.status, .crashLoopBlocked)
 
@@ -961,19 +1392,24 @@ final class HostwrightDaemonCoreTests: XCTestCase {
     }
 
     private static func observedService(
+        serviceName: String = "api",
         lifecycleState: RuntimeLifecycleState = .running,
         healthState: RuntimeHealthState = .healthy,
         resourceIdentifier: String? = nil,
-        networks: [RuntimeNetworkAttachment] = []
+        networks: [RuntimeNetworkAttachment] = [],
+        ports: [RuntimePortMapping]? = nil
     ) -> ObservedRuntimeService {
-        let identity = RuntimeServiceIdentity(projectName: "demo", serviceName: "api")
+        let identity = RuntimeServiceIdentity(
+            projectName: "demo",
+            serviceName: serviceName
+        )
         return ObservedRuntimeService(
             identity: identity,
             resourceIdentifier: resourceIdentifier ?? identity.managedResourceIdentifier,
             image: "ghcr.io/example/api:latest",
             lifecycleState: lifecycleState,
             healthState: healthState,
-            ports: [RuntimePortMapping(hostPort: 8080, containerPort: 8080, bindAddress: "127.0.0.1")],
+            ports: ports ?? [RuntimePortMapping(hostPort: 8080, containerPort: 8080, bindAddress: "127.0.0.1")],
             networks: networks
         )
     }

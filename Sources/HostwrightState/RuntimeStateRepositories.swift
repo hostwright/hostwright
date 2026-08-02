@@ -99,41 +99,58 @@ public struct RestartPolicyStateRepository: Sendable {
     public func upsert(_ state: RestartPolicyStateRecord) throws {
         let redacted = state.redacted()
         try store.withValidatedConnection { connection in
+            try saveRestartPolicyState(redacted, on: connection)
+        }
+    }
+
+    public func recordAttempt(
+        state: RestartPolicyStateRecord,
+        history: RestartAttemptHistoryRecord
+    ) throws {
+        let redactedState = state.redacted()
+        let redactedHistory = history.redacted()
+        guard redactedState.projectID == redactedHistory.projectID,
+              redactedState.serviceName == redactedHistory.serviceName,
+              redactedState.policySHA256 == redactedHistory.policySHA256,
+              redactedHistory.admitted else {
+            throw StateStoreError.invalidRecord(
+                "Restart attempt state and history require the same admitted workload policy identity."
+            )
+        }
+        try store.withValidatedConnection { connection in
             try connection.transaction {
-                try connection.run(
-                    """
-                    INSERT INTO restart_policy_state (
-                        id, project_id, service_name, policy, status, attempt_count, max_attempts,
-                        backoff_seconds, backoff_until, last_failure_at, updated_at, metadata_json_redacted
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(project_id, service_name) DO UPDATE SET
-                        id = excluded.id,
-                        policy = excluded.policy,
-                        status = excluded.status,
-                        attempt_count = excluded.attempt_count,
-                        max_attempts = excluded.max_attempts,
-                        backoff_seconds = excluded.backoff_seconds,
-                        backoff_until = excluded.backoff_until,
-                        last_failure_at = excluded.last_failure_at,
-                        updated_at = excluded.updated_at,
-                        metadata_json_redacted = excluded.metadata_json_redacted
-                    """,
-                    bindings: [
-                        .text(redacted.id),
-                        .text(redacted.projectID),
-                        .text(redacted.serviceName),
-                        .text(redacted.policy.rawValue),
-                        .text(redacted.status.rawValue),
-                        .int(redacted.attemptCount),
-                        .int(redacted.maxAttempts),
-                        .int(redacted.backoffSeconds),
-                        optionalText(redacted.backoffUntil),
-                        optionalText(redacted.lastFailureAt),
-                        .text(redacted.updatedAt),
-                        .text(redacted.metadataJSONRedacted)
-                    ]
+                try requireCurrentRestartReleaseGeneration(
+                    redactedState,
+                    on: connection
                 )
+                try saveRestartPolicyState(redactedState, on: connection)
+                try insertRestartAttempt(redactedHistory, on: connection)
+            }
+        }
+    }
+
+    public func recordTransition(
+        state: RestartPolicyStateRecord,
+        history: RestartAttemptHistoryRecord
+    ) throws {
+        let redactedState = state.redacted()
+        let redactedHistory = history.redacted()
+        guard redactedState.projectID == redactedHistory.projectID,
+              redactedState.serviceName == redactedHistory.serviceName,
+              redactedState.policySHA256 == redactedHistory.policySHA256,
+              !redactedHistory.admitted else {
+            throw StateStoreError.invalidRecord(
+                "Restart transition state and history require the same non-admitted workload policy identity."
+            )
+        }
+        try store.withValidatedConnection { connection in
+            try connection.transaction {
+                try requireCurrentRestartReleaseGeneration(
+                    redactedState,
+                    on: connection
+                )
+                try saveRestartPolicyState(redactedState, on: connection)
+                try insertRestartAttempt(redactedHistory, on: connection)
             }
         }
     }
@@ -143,7 +160,11 @@ public struct RestartPolicyStateRepository: Sendable {
             let rows = try connection.query(
                 """
                 SELECT id, project_id, service_name, policy, status, attempt_count, max_attempts,
-                       backoff_seconds, backoff_until, last_failure_at, updated_at, metadata_json_redacted
+                       backoff_seconds, backoff_until, last_failure_at, updated_at, metadata_json_redacted,
+                       reason_class, window_started_at, window_seconds, initial_backoff_seconds,
+                       maximum_backoff_seconds, jitter_seconds, stable_run_seconds, stable_since,
+                       priority, project_max_attempts, project_window_seconds, hold_token,
+                       release_generation, policy_sha256
                 FROM restart_policy_state
                 WHERE project_id = ? AND service_name = ?
                 LIMIT 1
@@ -154,12 +175,120 @@ public struct RestartPolicyStateRepository: Sendable {
         }
     }
 
+    public func releaseHold(
+        projectID: String,
+        serviceName: String,
+        expectedHoldToken: String,
+        timestamp: String,
+        historyID: String,
+        eventID: String? = nil
+    ) throws -> RestartPolicyStateRecord? {
+        guard expectedHoldToken.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil,
+              HostwrightResourceUUID.isValid(historyID),
+              eventID.map(HostwrightResourceUUID.isValid) ?? true else {
+            throw StateStoreError.invalidRecord(
+                "Restart hold release requires an exact SHA-256 hold token and canonical evidence UUIDs."
+            )
+        }
+        return try store.withValidatedConnection { connection in
+            try connection.transaction {
+                let rows = try connection.query(
+                    """
+                    SELECT id, project_id, service_name, policy, status, attempt_count, max_attempts,
+                           backoff_seconds, backoff_until, last_failure_at, updated_at, metadata_json_redacted,
+                           reason_class, window_started_at, window_seconds, initial_backoff_seconds,
+                           maximum_backoff_seconds, jitter_seconds, stable_run_seconds, stable_since,
+                           priority, project_max_attempts, project_window_seconds, hold_token,
+                           release_generation, policy_sha256
+                    FROM restart_policy_state
+                    WHERE project_id = ? AND service_name = ? AND hold_token = ?
+                      AND status IN ('crashLoopBlocked', 'operatorHold')
+                    LIMIT 1
+                    """,
+                    bindings: [.text(projectID), .text(serviceName), .text(expectedHoldToken)]
+                )
+                guard let row = rows.first else { return nil }
+                let current = try restartPolicyStateRecord(from: row)
+                let generation = current.releaseGeneration + 1
+                let updated = RestartPolicyStateRecord(
+                    id: current.id,
+                    projectID: current.projectID,
+                    serviceName: current.serviceName,
+                    policy: current.policy,
+                    status: .active,
+                    attemptCount: 0,
+                    maxAttempts: current.maxAttempts,
+                    backoffSeconds: current.initialBackoffSeconds,
+                    backoffUntil: nil,
+                    lastFailureAt: nil,
+                    reasonClass: .operatorRequest,
+                    windowStartedAt: nil,
+                    windowSeconds: current.windowSeconds,
+                    initialBackoffSeconds: current.initialBackoffSeconds,
+                    maximumBackoffSeconds: current.maximumBackoffSeconds,
+                    jitterSeconds: current.jitterSeconds,
+                    stableRunSeconds: current.stableRunSeconds,
+                    stableSince: nil,
+                    priority: current.priority,
+                    projectMaxAttempts: current.projectMaxAttempts,
+                    projectWindowSeconds: current.projectWindowSeconds,
+                    holdToken: nil,
+                    releaseGeneration: generation,
+                    policySHA256: current.policySHA256,
+                    updatedAt: timestamp,
+                    metadataJSONRedacted: "{\"releaseGeneration\":\(generation),\"status\":\"active\"}"
+                )
+                let history = RestartAttemptHistoryRecord(
+                    id: historyID,
+                    projectID: current.projectID,
+                    serviceName: current.serviceName,
+                    reasonClass: .operatorRequest,
+                    decision: .manualRelease,
+                    attemptNumber: current.attemptCount,
+                    projectAttemptNumber: 0,
+                    admitted: false,
+                    holdToken: expectedHoldToken,
+                    releaseGeneration: generation,
+                    occurredAt: timestamp,
+                    policySHA256: current.policySHA256,
+                    metadataJSONRedacted: "{\"releaseGeneration\":\(generation),\"status\":\"manual-release\"}"
+                )
+                try saveRestartPolicyState(updated, on: connection)
+                try insertRestartAttempt(history, on: connection)
+                if let eventID {
+                    try connection.run(
+                        """
+                        INSERT INTO event_ledger (
+                            id, timestamp, severity, type, source, project_id, service_name,
+                            runtime_adapter, message, payload_json_redacted
+                        )
+                        VALUES (?, ?, 'info', 'restart.policy.manual-release', 'hostwright-cli', ?, ?, NULL, ?, ?)
+                        """,
+                        bindings: [
+                            .text(eventID),
+                            .text(timestamp),
+                            .text(projectID),
+                            .text(serviceName),
+                            .text("The exact confirmed restart hold was released without starting or restarting the workload."),
+                            .text("{\"releaseGeneration\":\(generation),\"status\":\"manual-release\"}")
+                        ]
+                    )
+                }
+                return updated
+            }
+        }
+    }
+
     public func loadProject(projectID: String) throws -> [RestartPolicyStateRecord] {
         try store.withValidatedConnection(readOnly: true) { connection in
             let rows = try connection.query(
                 """
                 SELECT id, project_id, service_name, policy, status, attempt_count, max_attempts,
-                       backoff_seconds, backoff_until, last_failure_at, updated_at, metadata_json_redacted
+                       backoff_seconds, backoff_until, last_failure_at, updated_at, metadata_json_redacted,
+                       reason_class, window_started_at, window_seconds, initial_backoff_seconds,
+                       maximum_backoff_seconds, jitter_seconds, stable_run_seconds, stable_since,
+                       priority, project_max_attempts, project_window_seconds, hold_token,
+                       release_generation, policy_sha256
                 FROM restart_policy_state
                 WHERE project_id = ?
                 ORDER BY service_name ASC
@@ -175,7 +304,11 @@ public struct RestartPolicyStateRepository: Sendable {
             let rows = try connection.query(
                 """
                 SELECT id, project_id, service_name, policy, status, attempt_count, max_attempts,
-                       backoff_seconds, backoff_until, last_failure_at, updated_at, metadata_json_redacted
+                       backoff_seconds, backoff_until, last_failure_at, updated_at, metadata_json_redacted,
+                       reason_class, window_started_at, window_seconds, initial_backoff_seconds,
+                       maximum_backoff_seconds, jitter_seconds, stable_run_seconds, stable_since,
+                       priority, project_max_attempts, project_window_seconds, hold_token,
+                       release_generation, policy_sha256
                 FROM restart_policy_state
                 ORDER BY project_id ASC, service_name ASC
                 """
@@ -183,6 +316,182 @@ public struct RestartPolicyStateRepository: Sendable {
             return try rows.map(restartPolicyStateRecord(from:))
         }
     }
+}
+
+public struct RestartAttemptHistoryRepository: Sendable {
+    private let store: SQLiteStateStore
+
+    public init(store: SQLiteStateStore) {
+        self.store = store
+    }
+
+    public func append(_ record: RestartAttemptHistoryRecord) throws {
+        let redacted = record.redacted()
+        try store.withValidatedConnection { connection in
+            try insertRestartAttempt(redacted, on: connection)
+        }
+    }
+
+    public func loadProject(_ projectID: String, since: String? = nil) throws -> [RestartAttemptHistoryRecord] {
+        try load(projectID: projectID, serviceName: nil, since: since)
+    }
+
+    public func loadWorkload(
+        projectID: String,
+        serviceName: String,
+        since: String? = nil
+    ) throws -> [RestartAttemptHistoryRecord] {
+        try load(projectID: projectID, serviceName: serviceName, since: since)
+    }
+
+    public func admittedCount(
+        projectID: String,
+        serviceName: String? = nil,
+        since: String
+    ) throws -> Int {
+        try store.withValidatedConnection(readOnly: true) { connection in
+            let serviceClause = serviceName == nil ? "" : " AND service_name = ?"
+            var bindings: [SQLiteValue] = [.text(projectID), .text(since)]
+            if let serviceName { bindings.append(.text(serviceName)) }
+            let rows = try connection.query(
+                """
+                SELECT COUNT(*) FROM restart_attempt_history
+                WHERE project_id = ? AND admitted = 1 AND occurred_at >= ?\(serviceClause)
+                """,
+                bindings: bindings
+            )
+            guard let value = rows.first?.first ?? nil, let count = Int(value) else {
+                throw StateStoreError.invalidRecord("Could not count restart attempt history.")
+            }
+            return count
+        }
+    }
+
+    private func load(
+        projectID: String,
+        serviceName: String?,
+        since: String?
+    ) throws -> [RestartAttemptHistoryRecord] {
+        try store.withValidatedConnection(readOnly: true) { connection in
+            var clauses = ["project_id = ?"]
+            var bindings: [SQLiteValue] = [.text(projectID)]
+            if let serviceName {
+                clauses.append("service_name = ?")
+                bindings.append(.text(serviceName))
+            }
+            if let since {
+                clauses.append("occurred_at >= ?")
+                bindings.append(.text(since))
+            }
+            let rows = try connection.query(
+                """
+                SELECT id, project_id, service_name, reason_class, decision, attempt_number,
+                       project_attempt_number, admitted, hold_token, release_generation,
+                       operation_id, occurred_at, backoff_until, policy_sha256,
+                       metadata_json_redacted
+                FROM restart_attempt_history
+                WHERE \(clauses.joined(separator: " AND "))
+                ORDER BY occurred_at ASC, id ASC
+                """,
+                bindings: bindings
+            )
+            return try rows.map(restartAttemptHistoryRecord(from:))
+        }
+    }
+}
+
+private func saveRestartPolicyState(
+    _ state: RestartPolicyStateRecord,
+    on connection: SQLiteConnection
+) throws {
+    try connection.run(
+        """
+        INSERT INTO restart_policy_state (
+            id, project_id, service_name, policy, status, attempt_count, max_attempts,
+            backoff_seconds, backoff_until, last_failure_at, updated_at, metadata_json_redacted,
+            reason_class, window_started_at, window_seconds, initial_backoff_seconds,
+            maximum_backoff_seconds, jitter_seconds, stable_run_seconds, stable_since,
+            priority, project_max_attempts, project_window_seconds, hold_token,
+            release_generation, policy_sha256
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(project_id, service_name) DO UPDATE SET
+            id = excluded.id, policy = excluded.policy, status = excluded.status,
+            attempt_count = excluded.attempt_count, max_attempts = excluded.max_attempts,
+            backoff_seconds = excluded.backoff_seconds, backoff_until = excluded.backoff_until,
+            last_failure_at = excluded.last_failure_at, reason_class = excluded.reason_class,
+            window_started_at = excluded.window_started_at, window_seconds = excluded.window_seconds,
+            initial_backoff_seconds = excluded.initial_backoff_seconds,
+            maximum_backoff_seconds = excluded.maximum_backoff_seconds,
+            jitter_seconds = excluded.jitter_seconds, stable_run_seconds = excluded.stable_run_seconds,
+            stable_since = excluded.stable_since, priority = excluded.priority,
+            project_max_attempts = excluded.project_max_attempts,
+            project_window_seconds = excluded.project_window_seconds,
+            hold_token = excluded.hold_token, release_generation = excluded.release_generation,
+            policy_sha256 = excluded.policy_sha256, updated_at = excluded.updated_at,
+            metadata_json_redacted = excluded.metadata_json_redacted
+        """,
+        bindings: [
+            .text(state.id), .text(state.projectID), .text(state.serviceName),
+            .text(state.policy.rawValue), .text(state.status.rawValue),
+            .int(state.attemptCount), .int(state.maxAttempts), .int(state.backoffSeconds),
+            optionalText(state.backoffUntil), optionalText(state.lastFailureAt),
+            .text(state.updatedAt), .text(state.metadataJSONRedacted),
+            .text(state.reasonClass.rawValue), optionalText(state.windowStartedAt),
+            .int(state.windowSeconds), .int(state.initialBackoffSeconds),
+            .int(state.maximumBackoffSeconds), .int(state.jitterSeconds),
+            .int(state.stableRunSeconds), optionalText(state.stableSince), .int(state.priority),
+            .int(state.projectMaxAttempts), .int(state.projectWindowSeconds),
+            optionalText(state.holdToken), .int(state.releaseGeneration), .text(state.policySHA256)
+        ]
+    )
+}
+
+private func requireCurrentRestartReleaseGeneration(
+    _ state: RestartPolicyStateRecord,
+    on connection: SQLiteConnection
+) throws {
+    let rows = try connection.query(
+        """
+        SELECT release_generation
+        FROM restart_policy_state
+        WHERE project_id = ? AND service_name = ?
+        LIMIT 1
+        """,
+        bindings: [.text(state.projectID), .text(state.serviceName)]
+    )
+    if rows.isEmpty, state.releaseGeneration == 0 { return }
+    guard let value = rows.first?.first ?? nil,
+          let releaseGeneration = Int(value),
+          releaseGeneration == state.releaseGeneration else {
+        throw StateStoreError.invalidRecord(
+            "Restart state update was fenced by a newer manual release generation."
+        )
+    }
+}
+
+private func insertRestartAttempt(
+    _ record: RestartAttemptHistoryRecord,
+    on connection: SQLiteConnection
+) throws {
+    try connection.run(
+        """
+        INSERT INTO restart_attempt_history (
+            id, project_id, service_name, reason_class, decision, attempt_number,
+            project_attempt_number, admitted, hold_token, release_generation,
+            operation_id, occurred_at, backoff_until, policy_sha256,
+            metadata_json_redacted
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        bindings: [
+            .text(record.id), .text(record.projectID), .text(record.serviceName),
+            .text(record.reasonClass.rawValue), .text(record.decision.rawValue),
+            .int(record.attemptNumber), .int(record.projectAttemptNumber),
+            .bool(record.admitted), optionalText(record.holdToken),
+            .int(record.releaseGeneration), optionalText(record.operationID),
+            .text(record.occurredAt), optionalText(record.backoffUntil),
+            .text(record.policySHA256), .text(record.metadataJSONRedacted)
+        ]
+    )
 }
 
 public struct RestartRecoveryRecordRepository: Sendable {

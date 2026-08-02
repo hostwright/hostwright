@@ -1720,10 +1720,115 @@ final class HostwrightManifestTests: XCTestCase {
                 image: ghcr.io/example/api:latest
                 restart:
                   policy: on-failure
-                  maxAttempts: 3
+                  burstLimit: 3
             """,
             code: "HW-MANIFEST-003",
-            contains: "Unsupported restart field 'maxAttempts'"
+            contains: "Unsupported restart field 'burstLimit'"
+        )
+    }
+
+    func testPhase08RestartBudgetsParseValidateAndRoundTripCanonically() throws {
+        let manifest = try ManifestValidator.validated(
+            """
+            version: 2
+            project: api-local
+            restartBudget:
+              maxAttempts: 24
+              window: 900s
+            services:
+              api:
+                image: ghcr.io/example/api:latest
+                restart:
+                  policy: on-failure
+                  maxAttempts: 7
+                  window: 600s
+                  backoff: 15s
+                  maxBackoff: 120s
+                  jitter: 5s
+                  stableRun: 90s
+                  priority: 20
+            """
+        )
+
+        XCTAssertEqual(manifest.restartBudget, HostwrightProjectRestartBudget(maxAttempts: 24, window: 900))
+        XCTAssertEqual(
+            manifest.services[0].restart,
+            HostwrightRestart(
+                policy: "on-failure",
+                maxAttempts: 7,
+                window: 600,
+                backoff: 15,
+                maxBackoff: 120,
+                jitter: 5,
+                stableRun: 90,
+                priority: 20
+            )
+        )
+        let canonical = try ManifestCanonicalEncoder.encode(manifest)
+        XCTAssertEqual(try ManifestValidator.validated(canonical), manifest)
+    }
+
+    func testPhase08RestartBudgetDefaultsPreserveLegacyCanonicalManifest() throws {
+        let manifest = try ManifestValidator.validated(Self.validManifest)
+        XCTAssertNil(manifest.restartBudget)
+        XCTAssertEqual(manifest.services[0].restart, HostwrightRestart(policy: "on-failure"))
+        let canonical = try ManifestCanonicalEncoder.encode(manifest)
+        XCTAssertFalse(canonical.contains("restartBudget:"))
+        XCTAssertFalse(canonical.contains("maxAttempts:"))
+    }
+
+    func testPhase08RestartBudgetsRejectUnsafeAndUnknownValues() {
+        let invalidFields = [
+            "maxAttempts: 0",
+            "window: 0s",
+            "backoff: 0s",
+            "stableRun: 0s",
+            "priority: 101"
+        ]
+        for fields in invalidFields {
+            assertManifestFailure(
+                """
+                version: 2
+                project: api-local
+                services:
+                  api:
+                    image: ghcr.io/example/api:latest
+                    restart:
+                      policy: on-failure
+                      \(fields)
+                """,
+                contains: "restart"
+            )
+        }
+        for fields in [
+            "backoff: 60s\n      maxBackoff: 30s",
+            "backoff: 60s\n      jitter: 61s"
+        ] {
+            assertManifestFailure(
+                """
+                version: 2
+                project: api-local
+                services:
+                  api:
+                    image: ghcr.io/example/api:latest
+                    restart:
+                      policy: on-failure
+                      \(fields)
+                """,
+                contains: "restart"
+            )
+        }
+        assertManifestFailure(
+            """
+            version: 2
+            project: api-local
+            restartBudget:
+              maxAttempts: 1001
+            services:
+              api:
+                image: ghcr.io/example/api:latest
+            """,
+            contains: "restartBudget.maxAttempts"
         )
     }
 
@@ -2277,6 +2382,10 @@ final class HostwrightManifestTests: XCTestCase {
         let restartProperties = try XCTUnwrap(restart["properties"] as? [String: Any])
         let restartPolicy = try XCTUnwrap(restartProperties["policy"] as? [String: Any])
         XCTAssertEqual(restartPolicy["enum"] as? [String], ["no", "on-failure", "unless-stopped"])
+        XCTAssertEqual(Set(restartProperties.keys), ["policy", "maxAttempts", "window", "backoff", "maxBackoff", "jitter", "stableRun", "priority"])
+        XCTAssertEqual((restartProperties["maxAttempts"] as? [String: Any])?["maximum"] as? Int, 100)
+        let restartBudget = try XCTUnwrap(definitions["restartBudget"] as? [String: Any])
+        XCTAssertEqual(restartBudget["additionalProperties"] as? Bool, false)
 
         let mount = try XCTUnwrap(definitions["mount"] as? [String: Any])
         XCTAssertEqual((mount["oneOf"] as? [[String: Any]])?.count, 3)

@@ -65,6 +65,10 @@ public struct SQLiteStateStore: StateStore {
         RestartPolicyStateRepository(store: self)
     }
 
+    public var restartAttempts: RestartAttemptHistoryRepository {
+        RestartAttemptHistoryRepository(store: self)
+    }
+
     public var restartRecovery: RestartRecoveryRecordRepository {
         RestartRecoveryRecordRepository(store: self)
     }

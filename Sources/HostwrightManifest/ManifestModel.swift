@@ -13,6 +13,7 @@ public struct HostwrightManifest: Equatable, Sendable {
     public var imageSBOM: HostwrightImageSBOMPolicy?
     public var imageVulnerability: HostwrightImageVulnerabilityPolicy?
     public var imageProvenance: HostwrightImageProvenancePolicy?
+    public var restartBudget: HostwrightProjectRestartBudget?
     public var volumes: [String: HostwrightVolumeDeclaration]
     public var networks: [String: HostwrightNetworkDefinition]
     public var certificates: [String: HostwrightCertificateDeclaration]
@@ -83,6 +84,33 @@ public struct HostwrightManifest: Equatable, Sendable {
             imageSBOM: imageSBOM,
             imageVulnerability: imageVulnerability,
             imageProvenance: imageProvenance,
+            restartBudget: nil,
+            volumes: volumes,
+            services: services
+        )
+    }
+
+    public init(
+        version: Int?,
+        project: String?,
+        imagePolicy: HostwrightImagePolicy?,
+        imageTrust: HostwrightImageTrustPolicy?,
+        imageSBOM: HostwrightImageSBOMPolicy?,
+        imageVulnerability: HostwrightImageVulnerabilityPolicy? = nil,
+        imageProvenance: HostwrightImageProvenancePolicy? = nil,
+        restartBudget: HostwrightProjectRestartBudget?,
+        volumes: [String: HostwrightVolumeDeclaration] = [:],
+        services: [HostwrightService]
+    ) {
+        self.init(
+            version: version,
+            project: project,
+            imagePolicy: imagePolicy,
+            imageTrust: imageTrust,
+            imageSBOM: imageSBOM,
+            imageVulnerability: imageVulnerability,
+            imageProvenance: imageProvenance,
+            restartBudget: restartBudget,
             volumes: volumes,
             networks: [:],
             certificates: [:],
@@ -107,6 +135,40 @@ public struct HostwrightManifest: Equatable, Sendable {
         tunnels: [String: HostwrightTunnelDeclaration] = [:],
         services: [HostwrightService]
     ) {
+        self.init(
+            version: version,
+            project: project,
+            imagePolicy: imagePolicy,
+            imageTrust: imageTrust,
+            imageSBOM: imageSBOM,
+            imageVulnerability: imageVulnerability,
+            imageProvenance: imageProvenance,
+            restartBudget: nil,
+            volumes: volumes,
+            networks: networks,
+            certificates: certificates,
+            ingress: ingress,
+            tunnels: tunnels,
+            services: services
+        )
+    }
+
+    public init(
+        version: Int?,
+        project: String?,
+        imagePolicy: HostwrightImagePolicy?,
+        imageTrust: HostwrightImageTrustPolicy?,
+        imageSBOM: HostwrightImageSBOMPolicy?,
+        imageVulnerability: HostwrightImageVulnerabilityPolicy? = nil,
+        imageProvenance: HostwrightImageProvenancePolicy? = nil,
+        restartBudget: HostwrightProjectRestartBudget?,
+        volumes: [String: HostwrightVolumeDeclaration] = [:],
+        networks: [String: HostwrightNetworkDefinition],
+        certificates: [String: HostwrightCertificateDeclaration],
+        ingress: [String: HostwrightIngressListener] = [:],
+        tunnels: [String: HostwrightTunnelDeclaration] = [:],
+        services: [HostwrightService]
+    ) {
         self.version = version
         self.project = project
         self.imagePolicy = imagePolicy
@@ -114,6 +176,7 @@ public struct HostwrightManifest: Equatable, Sendable {
         self.imageSBOM = imageSBOM
         self.imageVulnerability = imageVulnerability
         self.imageProvenance = imageProvenance
+        self.restartBudget = restartBudget
         self.volumes = volumes
         self.networks = networks
         self.certificates = certificates
@@ -970,9 +1033,55 @@ public enum HostwrightProbeAction: Equatable, Sendable {
 
 public struct HostwrightRestart: Equatable, Sendable {
     public var policy: String
+    public var maxAttempts: Int
+    public var window: Int
+    public var backoff: Int
+    public var maxBackoff: Int
+    public var jitter: Int
+    public var stableRun: Int
+    public var priority: Int
 
     public init(policy: String) {
+        self.init(
+            policy: policy,
+            maxAttempts: 3,
+            window: 300,
+            backoff: 60,
+            maxBackoff: 300,
+            jitter: 0,
+            stableRun: 60,
+            priority: 0
+        )
+    }
+
+    public init(
+        policy: String,
+        maxAttempts: Int,
+        window: Int = 300,
+        backoff: Int = 60,
+        maxBackoff: Int = 300,
+        jitter: Int = 0,
+        stableRun: Int = 60,
+        priority: Int = 0
+    ) {
         self.policy = policy
+        self.maxAttempts = maxAttempts
+        self.window = window
+        self.backoff = backoff
+        self.maxBackoff = maxBackoff
+        self.jitter = jitter
+        self.stableRun = stableRun
+        self.priority = priority
+    }
+}
+
+public struct HostwrightProjectRestartBudget: Equatable, Sendable {
+    public var maxAttempts: Int
+    public var window: Int
+
+    public init(maxAttempts: Int = 10, window: Int = 300) {
+        self.maxAttempts = maxAttempts
+        self.window = window
     }
 }
 

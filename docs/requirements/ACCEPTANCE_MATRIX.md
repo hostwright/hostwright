@@ -161,9 +161,25 @@ Phase 8A is a required preflight before this mutation gate. It proves real read-
 | --- | --- | --- | --- |
 | HW-DAEMON-003, HW-DAEMON-004, HW-RECON-001 | Both daemon modes start reconciliation immediately and repeat healthy level-triggered observation within five seconds without a filesystem event edge. | Automated + local integration | Manual-clock repeated-loop tests and real SQLite/subprocess daemon cells. |
 | HW-DAEMON-004, HW-RECON-002, HW-RECON-004 | Daemon and CLI use the same lifecycle compiler, live driver, exact plan confirmation, provider capability binding, bounded DAG parallelism, and three-attempt node retry limit. | Automated + architecture review | Shared unattended-driver parity tests, lifecycle compiler/saga suites, and dependency-boundary scan. |
-| HW-STATE-003, HW-STATE-005, HW-RECON-005 | Mutation acquires one project-scoped active operation group and records durable intent, fencing, checkpoints, re-observation, compensation, verification, or a precise safe hold. Candidate reads cannot replace the authoritative healthy desired revision before saga intent. | Automated + migration + resilience | Operation-group contention/resume suites, daemon ordering tests, schema-v16 upgrade/future-version refusal, stale observation, process interruption, and recovery cells. |
+| HW-STATE-003, HW-STATE-005, HW-RECON-005 | Mutation acquires one project-scoped active operation group and records durable intent, fencing, checkpoints, re-observation, compensation, verification, or a precise safe hold. Candidate reads cannot replace the authoritative healthy desired revision before saga intent. | Automated + migration + resilience | Operation-group contention/resume suites, daemon ordering tests, schema-v17 upgrade/future-version refusal, stale observation, process interruption, and recovery cells. |
 | HW-OBS-001, HW-SAFE-004 | Versioned reason codes distinguish convergence, verified mutation, compensation, interruption, safe hold, and failure; failures are redacted and never fabricate no-mutation or success evidence. | Automated + security assessment | Daemon result validation, failure/backoff, safe-hold, and secret-scan tests plus `hostwright events` inspection. |
 | HW-RUNTIME-001, HW-SAFE-002, HW-SAFE-003 | Live create/update/recovery and cleanup use only supported `RuntimeAdapter` lifecycle paths and exact Hostwright ownership; unmanaged or ambiguous resources fail closed. | Live runtime + exact cleanup | Qualified Apple runtime lifecycle cells with before/after inventory and retained operation evidence. |
+
+## Phase 08 Gate 3: Secure Configuration Watch And Reload
+
+| Requirement IDs | Acceptance criteria | Verification type | Verification command or review |
+| --- | --- | --- | --- |
+| HW-DAEMON-002, HW-DAEMON-003, HW-SAFE-004 | Only declared manifest/policy inputs and their parent directories are watched; content, owner, mode, link, device, and inode identity are revalidated at every read and use. | Unit + local integration + security | Atomic rename, partial write, symlink/hard-link, parent replacement, permission race, bounded flood, and secure reopen tests. |
+| HW-STATE-003, HW-RECON-005 | One valid content generation reconciles once; rejected or interrupted generations retain the exact last-good authoritative desired state and durable reasoned evidence. | Migration + resilience + live runtime | Last-good persistence/restart, rejection deduplication, cancellation, watcher cleanup, and real-file reload cells. |
+
+## Phase 08 Gate 4: Restart Budgets And Crash-Loop Holds
+
+| Requirement IDs | Acceptance criteria | Verification type | Verification command or review |
+| --- | --- | --- | --- |
+| HW-HEALTH-003, HW-HEALTH-005, HW-DAEMON-005 | Manifest v2 declares bounded workload/project attempts, rolling windows, capped exponential backoff, deterministic jitter, stable-run reset, reason classes, priority, and health interaction. | Unit contract + security | Parser/schema/canonical tests, boundary/property matrices, absolute-time checks, reason classification, and secret/cardinality scans. |
+| HW-STATE-003, HW-STATE-005 | Schema v16 migrates once to v17 with safe defaults and append-only attempt/hold/reset/release history; future and downgrade access fail closed; exact v16 backup restoration remains valid. | Migration + local integration | v16→v17 migration/integrity, future-version refusal, previous-binary refusal, backup/migrate/restore, corruption/lock, and concurrent writer cells. |
+| HW-RECON-004, HW-DAEMON-004, HW-DAEMON-005 | Only actual shared-saga runtime mutation consumes an attempt. Workload/project storms are bounded, higher priority wins deterministically, and blocked workloads do not starve independent work. | Local integration + resilience | Daemon admission, project fairness, concurrent failure, cancellation, process restart, and resource-exhaustion tests. |
+| HW-CLI-008, HW-OBS-001, HW-SAFE-004 | Status is read-only; manual release requires the exact current hold token and atomically records release generation, durable history, and a redacted event without runtime mutation. | Unit + security + live runtime | Parser/JSON/text, stale-token, atomicity, restart persistence, live crash-loop/recovery, and exact cleanup cells. |
 
 ## Phase 16 Gate: Health Checks And Restart Policy Expansion
 

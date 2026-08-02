@@ -346,6 +346,75 @@ final class LifecycleSagaExecutorTests: XCTestCase {
         XCTAssertEqual(steps.map(\.status), [.started, .succeeded])
     }
 
+    func testDistinctExecutionIdempotencyKeysRepeatOnePlanWithoutDuplicateRetry() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+        let firstKey = String(repeating: "1", count: 64)
+        let secondKey = String(repeating: "2", count: 64)
+        let effects = ScriptedLifecycleEffects(
+            apply: [.accepted, .accepted],
+            observe: [
+                .satisfied(LifecycleNodeVerification(summaryRedacted: "first verified")),
+                .satisfied(LifecycleNodeVerification(summaryRedacted: "second verified"))
+            ]
+        )
+        let executor = LifecycleSagaExecutor(
+            store: fixture.store,
+            effects: effects,
+            validator: ExactLifecycleValidator(),
+            clock: FixedLifecycleClock()
+        )
+
+        for key in [firstKey, secondKey] {
+            let fencingToken = HostwrightResourceUUID.legacy(
+                kind: "lifecycle-fencing",
+                identifier: key
+            )
+            let result = try await executor.execute(
+                plan: fixture.plan,
+                operationID: HostwrightResourceUUID.legacy(
+                    kind: "lifecycle-operation",
+                    identifier: key
+                ),
+                groupID: HostwrightResourceUUID.legacy(
+                    kind: "lifecycle-group",
+                    identifier: key
+                ),
+                fencingToken: fencingToken,
+                lockOwner: "lifecycle-generation-test",
+                groupIdempotencyKey: key
+            )
+            XCTAssertEqual(result.status, .succeeded)
+        }
+
+        let repeated = try await executor.execute(
+            plan: fixture.plan,
+            operationID: HostwrightResourceUUID.legacy(
+                kind: "lifecycle-operation",
+                identifier: secondKey
+            ),
+            groupID: HostwrightResourceUUID.legacy(
+                kind: "lifecycle-group",
+                identifier: secondKey
+            ),
+            fencingToken: HostwrightResourceUUID.legacy(
+                kind: "lifecycle-fencing",
+                identifier: secondKey
+            ),
+            lockOwner: "lifecycle-generation-test",
+            groupIdempotencyKey: secondKey
+        )
+        XCTAssertEqual(repeated.status, .alreadySucceeded)
+        let applyCount = await effects.applyCount()
+        XCTAssertEqual(applyCount, 2)
+        XCTAssertEqual(
+            try fixture.store.operationGroups.loadAll().filter {
+                $0.planHash == fixture.plan.planSHA256
+            }.count,
+            2
+        )
+    }
+
     func testConcurrentExactPlanExecutionRejectsLoserBeforeDuplicateEffect() async throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }

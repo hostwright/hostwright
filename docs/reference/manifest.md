@@ -8,6 +8,9 @@ The manifest filename is `hostwright.yaml`.
 version: 2
 project: api-local
 imagePolicy: allow-tags
+restartBudget:
+  maxAttempts: 10
+  window: 300s
 
 volumes:
   database-data:
@@ -60,6 +63,13 @@ services:
         interval: 20s
     restart:
       policy: on-failure
+      maxAttempts: 3
+      window: 300s
+      backoff: 60s
+      maxBackoff: 300s
+      jitter: 0s
+      stableRun: 60s
+      priority: 0
     update:
       strategy: rolling
       maxSurge: 1
@@ -100,7 +110,7 @@ Hostwright pins Yams 6.2.2 only inside `HostwrightManifest` and applies its own 
 
 Duplicate keys are rejected at every level. Anchors, aliases, merge keys, custom tags, multiple documents, ambiguous scalar coercion, unknown fields, and limit violations fail with stable line, column, and manifest-path diagnostics. Canonical encoding uses fixed field order and lexically sorted maps; every checked-in manifest must satisfy parse → canonical encode → parse equality.
 
-The top-level schema accepts exact named-volume declarations. The service schema accepts `image`, `replicas`, `platform`, `resources`, numeric `user` and `group`, `workdir`, `entrypoint`, `command`, `init`, `dependsOn`, `env`, `secretEnv`, `labels`, `ports`, typed bind/named-volume/tmpfs `volumes`, `probes`, legacy `health`, `restart`, `update`, `hooks`, `rosetta`, `virtualization`, `readOnlyRootFilesystem`, and `shmSize`. No accepted field is inert: it maps to desired runtime behavior or fails before mutation when the selected provider cannot execute it.
+The top-level schema accepts the bounded project `restartBudget` and exact named-volume declarations. The service schema accepts `image`, `replicas`, `platform`, `resources`, numeric `user` and `group`, `workdir`, `entrypoint`, `command`, `init`, `dependsOn`, `env`, `secretEnv`, `labels`, `ports`, typed bind/named-volume/tmpfs `volumes`, `probes`, legacy `health`, `restart`, `update`, `hooks`, `rosetta`, `virtualization`, `readOnlyRootFilesystem`, and `shmSize`. No accepted field is inert: it maps to desired runtime behavior or fails before mutation when the selected provider cannot execute it.
 
 Unsupported Kubernetes, Compose, or other orchestrator fields fail closed. This includes `apiVersion`, `kind`, `metadata`, `build`, `depends_on`, `deploy`, `networks`, `network_mode`, `dns`, `dns_search`, `domainname`, `hostname`, `extra_hosts`, `aliases`, `expose`, `configs`, and `secrets`.
 
@@ -135,7 +145,8 @@ Validation currently checks:
 - typed mounts use `bind`, `volume`, or `tmpfs`; bind sources cannot expose host root, devices, traversal, symlinks, or unsafe ownership, and named-volume sources must reference a declaration;
 - each probe declares exactly one `exec`, loopback `http`, or loopback `tcp` action with bounded timing and thresholds;
 - HTTP/TCP probes reference a declared container port;
-- restart policy is `no`, `on-failure`, or `unless-stopped`;
+- restart policy is `no`, `on-failure`, or `unless-stopped`; optional workload `maxAttempts`, rolling `window`, exponential `backoff`/`maxBackoff`, deterministic `jitter`, `stableRun`, and `priority` are bounded and cross-validated;
+- top-level `restartBudget` accepts only project `maxAttempts` from 1 through 1000 and `window` from 1 second through 24 hours;
 - rolling/recreate update bounds are internally consistent and progress deadlines are positive;
 - Rosetta requires `amd64` plus virtualization.
 

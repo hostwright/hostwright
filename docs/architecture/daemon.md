@@ -74,7 +74,7 @@ Each iteration:
 2. Maps the manifest into desired runtime state.
 3. Observes runtime state through `RuntimeAdapter`.
 4. Runs bounded in-process loopback health checks for configured running services.
-5. Computes health and restart-policy inputs without replacing the authoritative desired revision.
+5. Computes health and durable workload/project restart-budget inputs without replacing the authoritative desired revision.
 6. Computes a deterministic reconciliation plan with restart-state blocking and refuses blockers.
 7. Calls the shared lifecycle driver with every exact configuration target, the configuration-set and manifest SHA-256 values, state path, project identity, and bounded parallelism.
 8. The lifecycle driver freshly observes, compiles `up`, binds local image evidence, confirms the exact plan, revalidates, and executes through `LifecycleSagaExecutor`.
@@ -91,7 +91,17 @@ Those events and daemon operation records are local forensic inputs for `hostwri
 
 Both daemon modes may execute only the supported `up` lifecycle DAG through the exact production CLI lifecycle driver. There is no daemon-specific provider executor and no direct Apple command path. The daemon reuses provider capability binding, exact plan confirmation, project/resource UUID ownership, provider/project generations, fencing, the three-attempt node retry limit, compensation, and safe holds.
 
-Gate 2 does not add maintenance windows, restart budgets, rollout-policy expansion, garbage collection, broad deletion, Phase 09 transport, or multi-host authority. Unsupported drift and unmanaged collisions fail before mutation. Explicit CLI lifecycle and cleanup confirmation contracts remain unchanged.
+The current Phase 08 boundary does not add maintenance windows, rollout-policy expansion, garbage collection, broad deletion, Phase 09 transport, or multi-host authority. Unsupported drift and unmanaged collisions fail before mutation. Explicit CLI lifecycle and cleanup confirmation contracts remain unchanged.
+
+### Restart budgets and crash-loop holds
+
+Manifest v2 may declare a project rolling budget with top-level `restartBudget.maxAttempts` and `restartBudget.window`. Each service `restart` policy may additionally declare `maxAttempts`, `window`, `backoff`, `maxBackoff`, `jitter`, `stableRun`, and `priority`. Defaults are 10 attempts per 300 seconds for a project and 3 attempts per 300 seconds for a workload, with 60-second initial backoff capped at 300 seconds, zero jitter, and a 60-second stable-run reset.
+
+The daemon orders restart candidates by priority and exact identity, admits only remaining project capacity, and excludes blocked workloads plus their dependents from that lifecycle iteration. Independent eligible workloads continue. A workload consumes a durable attempt only when its exact mutating lifecycle node has a persisted forward `started` step; a mutation by another service cannot charge it. Each attempt records reason class, workload/project attempt number, policy digest, operation identity, deterministic bounded backoff, and outcome in schema v17. Repeated unchanged observations do not rewrite restart state or emit duplicate state events.
+
+Attempts at the workload limit enter `crashLoopBlocked` with an exact SHA-256 hold token. Holds survive daemon and host restart. A stable healthy run resets the rolling workload state only after the declared duration. `hostwright restart-budget status` is read-only. `hostwright restart-budget release` requires the exact current project, service, and hold token; it atomically records the release generation, history, and event without starting or restarting the workload. A stale token changes nothing.
+
+Restart state and history writes are fenced by that release generation inside the same SQLite transaction. A daemon iteration holding an older snapshot therefore cannot overwrite a concurrent manual release or resurrect its cleared hold.
 
 ## Locking And Shutdown
 
@@ -131,12 +141,14 @@ Every action other than `contract` requires those four environment values. Re-ex
 - `HW-DAEMON-103` or `HW-DAEMON-106`: ownership bytes, launchd state, or a checkpoint is ambiguous. Preserve the JSON result and private lifecycle records. Do not use `launchctl` or file replacement to force progress.
 - `disabled`: `repair` revalidates while preserving disabled intent; use `hostwright daemon start` to clear only Hostwright's exact persistent disabled state and load the recorded generation.
 - `rollback` unavailable: only the one exact prior generation captured by a successful upgrade is eligible; arbitrary executable/config downgrade is refused.
+- `crashLoopBlocked`: inspect `hostwright restart-budget status --project <project-id> --json`, correct the workload failure, then release only the exact current hold token. Release does not perform runtime mutation; the next level-triggered iteration re-observes before any admission.
+- `projectBudgetBlocked`: wait for the rolling project window to expire or correct higher-priority failures. There is no project-wide bypass or implicit reset.
 
 Status and validation are read-only. A failed preflight performs no plist or launchctl mutation. Cleanup must be done through `uninstall`, which refuses changed, linked, wrongly owned, or permission-invalid files.
 
 ## Current Sequenced Limitations
 
 - privileged helper
-- aggressive crash-loop restart policy enforcement
-- restart-budget enforcement beyond launchd's bounded throttle
+- maintenance-window admission and emergency override
+- health-gated staged unattended rollout and autonomous rollback expansion
 - image, volume, or unmanaged cleanup

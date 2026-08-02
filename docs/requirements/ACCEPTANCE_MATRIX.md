@@ -228,6 +228,14 @@ Phase 8A is a required preflight before this mutation gate. It proves real read-
 | HW-OBS-002, HW-CLI-007 | `hostwright status` and `hostwright doctor` report parser/state-path/telemetry policy metadata without claiming service reachability or external telemetry. | Automated + manual | CLI and health XCTest cases; doctor, status, limitations, and security docs review. |
 | HW-DOCS-002, HW-SAFE-004 | Docs describe local-only diagnostics and forensic records without claiming hosted diagnostics, upload, OSLog integration, production monitoring, or support-bundle workflows. | Manual | CLI, limitations, security-safety, state-store, daemon, requirements, and implementation-plan docs review. |
 
+## Phase 08 Gate 11: Structured Redacted OSLog
+
+| Requirement IDs | Acceptance criteria | Verification type | Verification command or review |
+| --- | --- | --- | --- |
+| HW-OBS-004, HW-OBS-001 | Production CLI and daemon boundaries plus successfully committed durable events emit schema-v1 records under fixed subsystem `dev.hostwright`, bounded categories and fields, stable reason codes, one correlation identifier, and truthful terminal outcomes; SQLite remains authoritative. | Unit + local integration + live runtime | Observability/CLI/state XCTest cells and one real `/usr/bin/log show` subsystem/category predicate cell. |
+| HW-OBS-003, HW-SAFE-004 | OSLog construction excludes raw output, event messages/payloads, project/service names, manifest bytes, credentials, secret references, unapproved PII, paths, unbounded fields, and log-injection newlines. | Security assessment + adversarial tests | Synthetic secret/credential/PII/path scanners, field/payload limits, unknown-command tests, and focused security review. |
+| HW-RECON-005, HW-STATE-003 | Sink disablement, filtering, or degradation cannot change command/daemon control results; a failed event transaction cannot emit a success mirror. macOS owns rotation and Hostwright never treats OSLog as durable proof. | Failure + resilience | Degraded-sink CLI tests, duplicate-event transaction failure, concurrent writers, cancellation/regression review, and documentation review. |
+
 ## Phase 21 Gate: GUI Control Surface Requirements And API Boundary
 
 | Requirement IDs | Acceptance criteria | Verification type | Verification command or review |

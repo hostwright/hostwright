@@ -157,6 +157,7 @@ public struct OwnershipCLIOptions: Equatable, Sendable {
 public enum CLICommand: Equatable, Sendable {
     case version
     case capabilities(output: CLIOutputFormat)
+    case observabilityStatus(output: CLIOutputFormat)
     case runtimeProviders(output: CLIOutputFormat)
     case runtimeMigrate(options: RuntimeProviderMigrationCLIOptions)
     case paths(stateDatabasePath: String?, output: CLIOutputFormat)
@@ -219,6 +220,8 @@ public enum CLICommand: Equatable, Sendable {
             return .help
         case "capabilities":
             return try capabilitiesCommand(arguments: arguments)
+        case "observability":
+            return try observabilityCommand(arguments: arguments)
         case "runtime":
             return try runtimeCommand(arguments: arguments)
         case "paths":
@@ -792,6 +795,24 @@ public enum CLICommand: Equatable, Sendable {
             return .capabilities(output: output)
         }
         throw CLIUsageError("capabilities supports only --json or --output text|json.")
+    }
+
+    private static func observabilityCommand(arguments: [String]) throws -> CLICommand {
+        guard arguments.count >= 2, arguments[1] == "status" else {
+            throw CLIUsageError("observability requires status.")
+        }
+        let options = Array(arguments.dropFirst(2))
+        if options.isEmpty {
+            return .observabilityStatus(output: .text)
+        }
+        if options == ["--json"] {
+            return .observabilityStatus(output: .json)
+        }
+        if options.count == 2, options[0] == "--output",
+           let output = CLIOutputFormat(rawValue: options[1]) {
+            return .observabilityStatus(output: output)
+        }
+        throw CLIUsageError("observability status supports only --json or --output text|json.")
     }
 
     private static func runtimeCommand(arguments: [String]) throws -> CLICommand {

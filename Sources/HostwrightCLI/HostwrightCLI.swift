@@ -1,3 +1,4 @@
+import Dispatch
 import Foundation
 import HostwrightCore
 import HostwrightDaemonCore
@@ -5,6 +6,7 @@ import HostwrightExtensions
 import HostwrightHealth
 import HostwrightImport
 import HostwrightManifest
+import HostwrightObservability
 import HostwrightPolicy
 import HostwrightReconciler
 import HostwrightRegistry
@@ -37,6 +39,52 @@ public enum HostwrightCLI {
     """
 
     public static func run(arguments: [String], environment: CLIEnvironment = .live) -> CLIRunResult {
+        let generatedCorrelationID = environment.observabilityCorrelationID()
+        let correlationID = (try? HostwrightLogRecord(
+            category: .cli,
+            severity: .info,
+            reason: .cliStarted,
+            correlationID: generatedCorrelationID,
+            outcome: .started
+        )) == nil ? UUID().uuidString.lowercased() : generatedCorrelationID
+        return HostwrightLogContext.withValues(
+            sink: environment.observabilitySink,
+            correlationID: correlationID
+        ) {
+            runObserved(arguments: arguments, environment: environment, correlationID: correlationID)
+        }
+    }
+
+    private static func runObserved(
+        arguments: [String],
+        environment: CLIEnvironment,
+        correlationID: String
+    ) -> CLIRunResult {
+        let command = observabilityCommand(arguments)
+        emitCLIRecord(
+            reason: .cliStarted,
+            severity: .notice,
+            outcome: .started,
+            correlationID: correlationID,
+            command: command,
+            exitCode: nil
+        )
+        let startedAt = DispatchTime.now().uptimeNanoseconds
+        let result = runUnobserved(arguments: arguments, environment: environment)
+        let elapsed = (DispatchTime.now().uptimeNanoseconds - startedAt) / 1_000_000
+        emitCLIRecord(
+            reason: result.exitCode == 0 ? .cliSucceeded : .cliFailed,
+            severity: result.exitCode == 0 ? .notice : .error,
+            outcome: result.exitCode == 0 ? .succeeded : .failed,
+            correlationID: correlationID,
+            command: command,
+            exitCode: result.exitCode,
+            durationMilliseconds: elapsed
+        )
+        return result
+    }
+
+    private static func runUnobserved(arguments: [String], environment: CLIEnvironment) -> CLIRunResult {
         let outputHint = CLICommand.outputFormatHint(arguments: arguments) ?? .text
         do {
             let command = try CLICommand.parse(arguments: arguments)
@@ -52,6 +100,59 @@ public enum HostwrightCLI {
         }
     }
 
+    private static func observabilityCommand(_ arguments: [String]) -> String {
+        let supported = Set([
+            "apply", "benchmark", "capabilities", "cleanup", "daemon", "diagnostics",
+            "doctor", "events", "extension", "help", "image", "init", "interactive",
+            "lifecycle", "logs", "network", "paths", "plan", "recovery", "registry",
+            "observability", "runtime", "secret", "state", "status", "storage", "validate", "version"
+        ])
+        guard let first = arguments.first else { return "help" }
+        let normalized = first.hasPrefix("--") ? String(first.dropFirst(2)) : first
+        return supported.contains(normalized) ? normalized : "unknown"
+    }
+
+    private static func emitCLIRecord(
+        reason: HostwrightLogReason,
+        severity: HostwrightLogSeverity,
+        outcome: HostwrightLogOutcome,
+        correlationID: String,
+        command: String,
+        exitCode: Int32?,
+        durationMilliseconds: UInt64? = nil
+    ) {
+        var fields = [
+            HostwrightLogField(name: .command, value: command, privacy: .publicValue)
+        ]
+        if let exitCode {
+            fields.append(
+                HostwrightLogField(
+                    name: .exitCode,
+                    value: String(exitCode),
+                    privacy: .publicValue
+                )
+            )
+        }
+        if let durationMilliseconds {
+            fields.append(
+                HostwrightLogField(
+                    name: .durationMilliseconds,
+                    value: String(durationMilliseconds),
+                    privacy: .publicValue
+                )
+            )
+        }
+        guard let record = try? HostwrightLogRecord(
+            category: .cli,
+            severity: severity,
+            reason: reason,
+            correlationID: correlationID,
+            outcome: outcome,
+            fields: fields
+        ) else { return }
+        HostwrightLogContext.emit(record)
+    }
+
     public static func run(command: CLICommand, environment: CLIEnvironment = .live) throws -> CLIRunResult {
         switch command {
         case .version:
@@ -62,6 +163,28 @@ public enum HostwrightCLI {
                 standardOutput: output == .json
                     ? CLIJSON.capabilities(report)
                     : renderCapabilities(report)
+            )
+        case .observabilityStatus(let output):
+            let status = environment.observabilityStatus()
+            if output == .json {
+                return CLIRunResult(standardOutput: CLIJSON.codable(status))
+            }
+            return CLIRunResult(
+                standardOutput: """
+                Hostwright local observability
+                Schema: v\(status.schemaVersion)
+                Subsystem: \(status.subsystem)
+                Enabled: \(status.enabled)
+                Minimum severity: \(status.minimumSeverity)
+                Categories: \(status.categories.joined(separator: ", "))
+                Field limit: \(status.maximumFieldCount) fields, \(status.maximumFieldValueBytes) bytes each
+                Payload limit: \(status.maximumPayloadBytes) bytes
+                Active signpost limit: \(status.maximumActiveSignposts)
+                Durable authority: \(status.durableAuthority)
+                Rotation authority: \(status.rotationAuthority)
+                Automatic upload: \(status.automaticUpload)
+
+                """
             )
         case .runtimeProviders(let output):
             return try RuntimeProvidersCommandRunner(
@@ -304,6 +427,7 @@ public enum HostwrightCLI {
     Usage:
       hostwright --version
       hostwright capabilities [--json|--output text|json]
+      hostwright observability status [--json|--output text|json]
       hostwright runtime providers [--json]
       hostwright runtime migrate [path] --to apple-cli|containerization --dry-run [--state-db <path>] [--json|--output text|json]
       hostwright runtime migrate [path] --to apple-cli|containerization --confirm-migration <token> [--state-db <path>] [--json|--output text|json]

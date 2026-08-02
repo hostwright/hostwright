@@ -3,6 +3,7 @@ import Foundation
 import HostwrightCore
 import HostwrightDaemonCore
 import HostwrightHealth
+import HostwrightObservability
 import HostwrightRegistry
 import HostwrightRuntime
 import HostwrightSecrets
@@ -50,6 +51,9 @@ public struct CLIEnvironment: @unchecked Sendable {
     public var benchmarkUUID: () -> UUID
     public var benchmarkNotice: (String) -> Void
     public var daemonLifecycleController: () -> DaemonLifecycleController
+    public var observabilitySink: any HostwrightLogSinking
+    public var observabilityCorrelationID: () -> String
+    public var observabilityStatus: () -> HostwrightObservabilityStatus
 
     public init(
         fileExists: @escaping (String) -> Bool,
@@ -125,6 +129,11 @@ public struct CLIEnvironment: @unchecked Sendable {
         benchmarkNotice: @escaping (String) -> Void = { _ in },
         daemonLifecycleController: @escaping () -> DaemonLifecycleController = {
             DaemonLifecycleController()
+        },
+        observabilitySink: any HostwrightLogSinking = DisabledHostwrightLogSink(),
+        observabilityCorrelationID: @escaping () -> String = { UUID().uuidString.lowercased() },
+        observabilityStatus: @escaping () -> HostwrightObservabilityStatus = {
+            HostwrightObservabilityStatus(configuration: .disabled)
         }
     ) {
         self.fileExists = fileExists
@@ -191,6 +200,9 @@ public struct CLIEnvironment: @unchecked Sendable {
         self.benchmarkUUID = benchmarkUUID
         self.benchmarkNotice = benchmarkNotice
         self.daemonLifecycleController = daemonLifecycleController
+        self.observabilitySink = observabilitySink
+        self.observabilityCorrelationID = observabilityCorrelationID
+        self.observabilityStatus = observabilityStatus
     }
 
     public static let live = CLIEnvironment(
@@ -279,7 +291,9 @@ public struct CLIEnvironment: @unchecked Sendable {
         benchmarkUUID: { UUID() },
         benchmarkNotice: { message in
             FileHandle.standardError.write(Data((message + "\n").utf8))
-        }
+        },
+        observabilitySink: HostwrightOSLogSink(),
+        observabilityStatus: { HostwrightObservabilityStatus(configuration: .live) }
     )
 }
 

@@ -17,7 +17,7 @@ Hostwright uses macOS-native per-user locations. A state-writing command creates
 | Backups | `~/Library/Application Support/Hostwright/backups` | Verified online state-backup catalogs. |
 | Cache | `~/Library/Caches/Hostwright` | Private cache root. Provider-managed image bytes remain in the selected runtime; Hostwright stores bounded content accounting, pins, and fenced leases in schema-v17 SQLite state. |
 | Local storage provider | `~/Library/Application Support/Hostwright/storage/providers/hostwright-local` | Private Hostwright-owned volume, snapshot, backup, journal, and metadata root. |
-| Logs | `~/Library/Logs/Hostwright` | Private daemon stdout/stderr root; structured OSLog is a later Phase 08 gate. |
+| Logs | `~/Library/Logs/Hostwright` | Private daemon stdout/stderr root. Structured records use system-managed macOS unified logging under `dev.hostwright`; this directory is not an OSLog store. |
 | LaunchAgent | `~/Library/LaunchAgents/dev.hostwright.daemon.plist` | Exact current-user managed plist, created only by explicit `hostwright daemon install`. |
 | Daemon lock | `~/Library/Application Support/Hostwright/run/hostwrightd.lock` | Real `0600` non-symlink lock for the default state database. |
 | Control socket | `~/Library/Application Support/Hostwright/run/control-v2.sock` | Canonical reserved path; the current one-shot control process does not create a socket. |

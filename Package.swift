@@ -88,6 +88,7 @@ let package = Package(
                 "HostwrightManifest",
                 "HostwrightNetworkHelperCore",
                 "HostwrightNetworking",
+                "HostwrightObservability",
                 "HostwrightPolicy",
                 "HostwrightReconciler",
                 "HostwrightRegistry",
@@ -121,6 +122,7 @@ let package = Package(
                 "HostwrightCLI",
                 "HostwrightCore",
                 "HostwrightDaemonCore",
+                "HostwrightObservability",
                 "HostwrightRuntime"
             ]
         ),
@@ -210,6 +212,7 @@ let package = Package(
             dependencies: [
                 "HostwrightCore",
                 "HostwrightManifest",
+                "HostwrightObservability",
                 "HostwrightRegistry",
                 "HostwrightRuntime",
                 "HostwrightStorage",
@@ -244,6 +247,7 @@ let package = Package(
             dependencies: [
                 "HostwrightCore",
                 "HostwrightManifest",
+                "HostwrightObservability",
                 "HostwrightReconciler",
                 "HostwrightRuntime",
                 "HostwrightState"
@@ -418,6 +422,7 @@ let package = Package(
             name: "HostwrightStateTests",
             dependencies: [
                 "HostwrightManifest",
+                "HostwrightObservability",
                 "HostwrightRegistry",
                 "HostwrightRuntime",
                 "HostwrightState",
@@ -447,6 +452,7 @@ let package = Package(
                 "HostwrightCLI",
                 "HostwrightDaemonCore",
                 "HostwrightManifest",
+                "HostwrightObservability",
                 "HostwrightReconciler",
                 "HostwrightRegistry",
                 "HostwrightRuntime",

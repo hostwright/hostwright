@@ -7,6 +7,7 @@ The current CLI provides strict RuntimeAdapter-backed lifecycle, observation, re
 ```bash
 hostwright --version
 hostwright capabilities [--json | --output text|json]
+hostwright observability status [--json | --output text|json]
 hostwright runtime providers [--json]
 hostwright runtime migrate [path] --to apple-cli|containerization --dry-run [--state-db <path>] [--json | --output text|json]
 hostwright runtime migrate [path] --to apple-cli|containerization --confirm-migration <token> [--state-db <path>] [--json | --output text|json]
@@ -227,6 +228,10 @@ The complete artifact-source grammar, prefix policy, JSON contracts, durable che
 Prints the current product version, release target, locked contract versions, and a deterministic catalog of stable, experimental, unavailable, and externally blocked capabilities. Each capability names its owning phase, GitHub epic, reason, and required evidence classes.
 
 JSON is the machine-readable current-support source. The command performs no runtime observation, network access, state access, or mutation. It reports what this exact build declares; it does not convert a planned capability into support.
+
+## `hostwright observability status [--json | --output text|json]`
+
+Reports the schema-v1 local OSLog contract: subsystem, fixed categories, enabled/minimum-level collection policy, field and payload limits, the SQLite durable authority, macOS rotation authority, and the no-upload policy. It is read-only and creates no state or log file. JSON is stable machine-readable status; see [Local Observability](observability.md) for inspection, privacy, and troubleshooting boundaries.
 
 ## `hostwright secret ...`
 

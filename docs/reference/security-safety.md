@@ -256,4 +256,5 @@ The current development build does not yet include the following. Their v0.0.2 i
 - cloud team service, central remote control, hosted audit log, user tracking, enterprise support workflow, or remote policy distribution;
 - credentialed passing Developer ID/notarization/stapling/Gatekeeper evidence, published signed installer verification, vendor-tap availability, dependency/image SBOM claims, or vulnerability scanning;
 - external telemetry, hosted diagnostics, or automatic diagnostic upload.
+- unredacted OSLog fields, OSLog-derived operation authority, or automatic unified-log export.
 - support SLA, enterprise support workflow, enforced CODEOWNERS, or branch-protection policy.

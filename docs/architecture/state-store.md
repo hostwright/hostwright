@@ -244,4 +244,4 @@ The connection authorizer denies transaction and savepoint opcodes inside a Host
 
 ## Module Boundary
 
-SQL is not part of the CLI, reconciler, runtime, health, networking, or observability modules. Runtime observation remains behind `RuntimeAdapter`; state persistence records adapter-shaped observed data but does not call the adapter itself.
+SQL is not part of the CLI, reconciler, runtime, health, networking, or observability modules. Runtime observation remains behind `RuntimeAdapter`; state persistence records adapter-shaped observed data but does not call the adapter itself. Event-ledger insertion commits before the state layer invokes the injected local OSLog mirror, so sink filtering or failure cannot roll back durable truth and a failed SQLite transaction cannot fabricate an OSLog success. The mirror receives only fixed event identity/type/source metadata, never the event message or payload.

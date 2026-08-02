@@ -19,7 +19,7 @@
 - No external telemetry.
 - No hosted diagnostics.
 - No automatic upload.
-- No OSLog integration.
+- No OSLog integration in Phase 20; Phase 08 Gate 11 later adds the bounded local mirror documented in `docs/reference/observability.md`.
 - No production support-bundle workflow.
 - No runtime observation or mutation during diagnostics export.
 - No hidden default state path.

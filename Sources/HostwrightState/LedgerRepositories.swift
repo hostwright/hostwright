@@ -1,3 +1,4 @@
+import HostwrightObservability
 import HostwrightRuntime
 
 public struct EventLedger: Sendable {
@@ -35,6 +36,66 @@ public struct EventLedger: Sendable {
                     )
                 }
             }
+        }
+        mirrorToOSLog(redactedEvents)
+    }
+
+    private func mirrorToOSLog(_ events: [EventRecord]) {
+        guard let correlationID = HostwrightLogContext.correlationID else { return }
+        for event in events {
+            let severity: HostwrightLogSeverity
+            let reason: HostwrightLogReason
+            switch event.severity {
+            case .info:
+                severity = .info
+                reason = .durableEventInfo
+            case .warning:
+                severity = .warning
+                reason = .durableEventWarning
+            case .error:
+                severity = .error
+                reason = .durableEventError
+            }
+            guard let record = try? HostwrightLogRecord(
+                category: logCategory(event.type),
+                severity: severity,
+                reason: reason,
+                correlationID: correlationID,
+                outcome: .observed,
+                fields: [
+                    HostwrightLogField(
+                        name: .eventID,
+                        value: event.id,
+                        privacy: .publicValue
+                    ),
+                    HostwrightLogField(
+                        name: .eventType,
+                        value: event.type,
+                        privacy: .publicValue
+                    ),
+                    HostwrightLogField(
+                        name: .source,
+                        value: event.source,
+                        privacy: .publicValue
+                    )
+                ]
+            ) else { continue }
+            HostwrightLogContext.emit(record)
+        }
+    }
+
+    private func logCategory(_ eventType: String) -> HostwrightLogCategory {
+        let prefix = eventType.split(separator: ".", maxSplits: 1).first.map(String.init) ?? ""
+        switch prefix {
+        case "daemon": return .daemon
+        case "health": return .health
+        case "rollback", "recovery": return .recovery
+        case "runtime", "provider": return .runtime
+        case "security", "secret", "approval", "trust", "vulnerability": return .security
+        case "retention", "gc", "cleanup": return .garbageCollection
+        case "reconciliation", "restart", "maintenance", "update": return .reconciliation
+        case "lifecycle", "operation": return .lifecycle
+        default: return .state
         }
     }
 

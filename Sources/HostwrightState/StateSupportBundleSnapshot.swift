@@ -49,61 +49,76 @@ public struct StateSupportBundleSnapshotService: Sendable {
     }
 
     public func collect(projectID: String?) throws -> StateSupportBundleSnapshot {
-        let before = try StateIntegrityService(store: store).inspectNonMutating()
-        let integrity = try supportIntegrity(before)
-        let events = try loadEvents(projectID: projectID, evidence: false)
-        let operations = try loadOperations(projectID: projectID)
-        let evidence = try loadEvents(projectID: projectID, evidence: true)
-        let rawMetrics = try StateMetricsService(store: store, date: date).snapshot()
-        let metrics = HostwrightMetricsSnapshot(
-            generatedAt: "1970-01-01T00:00:00Z",
-            source: rawMetrics.source,
-            series: rawMetrics.series,
-            slos: rawMetrics.slos,
-            retention: rawMetrics.retention,
-            snapshotSHA256: rawMetrics.snapshotSHA256
-        )
-        let tracePage = try StateTraceService(store: store, date: date).inspect(
-            traceID: nil,
-            limit: HostwrightSupportBundleContract.maximumTraces
-        )
-        let after = try StateIntegrityService(store: store).inspectNonMutating()
-        guard before.databaseSHA256 == after.databaseSHA256,
-              before.databaseBytes == after.databaseBytes,
-              before.stateSchemaVersion == after.stateSchemaVersion else {
-            throw StateStoreError.databaseLocked(
-                path: store.path,
-                message: "state changed while collecting one support-bundle snapshot"
+        try store.withValidatedConnection(readOnly: true) { connection in
+            let before = try StateMaintenanceFileSupport.fingerprint(store.path)
+            let dataVersionBefore = try dataVersion(connection)
+            let integrity = try supportIntegrity(
+                StateIntegrityService(store: store).inspect(
+                    connection: connection,
+                    fingerprint: before
+                )
+            )
+            let events = try loadEvents(projectID: projectID, evidence: false)
+            let operations = try loadOperations(projectID: projectID)
+            let evidence = try loadEvents(projectID: projectID, evidence: true)
+            let rawMetrics = try StateMetricsService(store: store, date: date).snapshot()
+            let metrics = HostwrightMetricsSnapshot(
+                generatedAt: "1970-01-01T00:00:00Z",
+                source: rawMetrics.source,
+                series: rawMetrics.series,
+                slos: rawMetrics.slos,
+                retention: rawMetrics.retention,
+                snapshotSHA256: rawMetrics.snapshotSHA256
+            )
+            let tracePage = try StateTraceService(store: store, date: date).inspect(
+                traceID: nil,
+                limit: HostwrightSupportBundleContract.maximumTraces
+            )
+            let dataVersionAfter = try dataVersion(connection)
+            let after = try StateMaintenanceFileSupport.fingerprint(store.path)
+            guard before == after, dataVersionBefore == dataVersionAfter else {
+                throw StateStoreError.databaseLocked(
+                    path: store.path,
+                    message: "state changed while collecting one support-bundle snapshot"
+                )
+            }
+            return StateSupportBundleSnapshot(
+                integrity: integrity,
+                events: events.records.map {
+                    HostwrightSupportEventRecord(
+                        id: $0.id,
+                        timestamp: $0.timestamp,
+                        severity: $0.severity,
+                        type: $0.type,
+                        source: $0.source
+                    )
+                },
+                droppedEvents: events.dropped,
+                metrics: metrics,
+                traces: tracePage.traces,
+                droppedTraces: max(0, tracePage.retainedTraceCount - tracePage.traces.count),
+                operations: operations.records,
+                droppedOperations: operations.dropped,
+                evidence: evidence.records.map {
+                    HostwrightSupportEvidenceRecord(
+                        id: $0.id,
+                        timestamp: $0.timestamp,
+                        severity: $0.severity,
+                        type: $0.type,
+                        source: $0.source
+                    )
+                },
+                droppedEvidence: evidence.dropped
             )
         }
-        return StateSupportBundleSnapshot(
-            integrity: integrity,
-            events: events.records.map {
-                HostwrightSupportEventRecord(
-                    id: $0.id,
-                    timestamp: $0.timestamp,
-                    severity: $0.severity,
-                    type: $0.type,
-                    source: $0.source
-                )
-            },
-            droppedEvents: events.dropped,
-            metrics: metrics,
-            traces: tracePage.traces,
-            droppedTraces: max(0, tracePage.retainedTraceCount - tracePage.traces.count),
-            operations: operations.records,
-            droppedOperations: operations.dropped,
-            evidence: evidence.records.map {
-                HostwrightSupportEvidenceRecord(
-                    id: $0.id,
-                    timestamp: $0.timestamp,
-                    severity: $0.severity,
-                    type: $0.type,
-                    source: $0.source
-                )
-            },
-            droppedEvidence: evidence.dropped
-        )
+    }
+
+    private func dataVersion(_ connection: SQLiteConnection) throws -> UInt64 {
+        guard let value = try connection.query("PRAGMA data_version").first?.first ?? nil,
+              let version = UInt64(value) else {
+            throw StateStoreError.invalidRecord("SQLite data version is invalid.")
+        }
+        return version
     }
 
     private func supportIntegrity(_ report: StateIntegrityReport) throws -> HostwrightSupportStateIntegrity {

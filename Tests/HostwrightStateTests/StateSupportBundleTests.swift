@@ -4,6 +4,56 @@ import XCTest
 @testable import HostwrightState
 
 final class StateSupportBundleTests: XCTestCase {
+    func testSnapshotAcceptsCommittedNonemptyWALFromAnActiveWriter() throws {
+        let root = try privateRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = SQLiteStateStore(path: root.appendingPathComponent("state.sqlite").path)
+        try store.migrate()
+
+        let writer = try SQLiteConnection(
+            path: store.path,
+            createIfNeeded: false,
+            readOnly: false,
+            profile: .authoritativeState
+        )
+        defer { try? writer.close() }
+        try writer.execute("PRAGMA wal_autocheckpoint = 0")
+        try writer.transaction {
+            try writer.run(
+                """
+                INSERT INTO event_ledger(
+                    id, timestamp, severity, type, source, project_id, service_name,
+                    runtime_adapter, message, payload_json_redacted
+                ) VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?)
+                """,
+                bindings: [
+                    .text("11111111-1111-4111-8111-111111111111"),
+                    .text("2026-08-01T11:00:00Z"),
+                    .text("info"),
+                    .text("lifecycle.completed"),
+                    .text("test"),
+                    .text("Committed active-writer evidence."),
+                    .text("{}")
+                ]
+            )
+        }
+        let wal = store.path + "-wal"
+        XCTAssertGreaterThan(
+            try XCTUnwrap(
+                FileManager.default.attributesOfItem(atPath: wal)[.size] as? NSNumber
+            ).intValue,
+            0
+        )
+
+        let snapshot = try StateSupportBundleSnapshotService(
+            store: store,
+            date: { ISO8601DateFormatter().date(from: "2026-08-01T12:00:00Z")! }
+        ).collect(projectID: nil)
+        XCTAssertEqual(snapshot.integrity.health, "healthy")
+        XCTAssertEqual(snapshot.integrity.stateSchemaVersion, 17)
+        XCTAssertEqual(snapshot.events.count, 1)
+    }
+
     func testVersionSixteenRequiresExplicitUpgradeAndFutureVersionIsRefused() throws {
         let root = try privateRoot()
         defer { try? FileManager.default.removeItem(at: root) }

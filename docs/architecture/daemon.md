@@ -76,10 +76,11 @@ Each iteration:
 4. Runs bounded in-process loopback health checks for configured running services.
 5. Computes health and durable workload/project restart-budget inputs without replacing the authoritative desired revision.
 6. Computes a deterministic reconciliation plan with restart-state blocking and refuses blockers.
-7. Calls the shared lifecycle driver with every exact configuration target, the configuration-set and manifest SHA-256 values, state path, project identity, and bounded parallelism.
-8. The lifecycle driver freshly observes, compiles `up`, binds local image evidence, confirms the exact plan, revalidates, and executes through `LifecycleSagaExecutor`.
-9. The saga acquires one project-scoped active operation group, persists intent and compensation, fences effects, re-observes ambiguous results, and verifies, compensates, interrupts, or enters a safe hold.
-10. Only after the saga result, persists daemon health, restart, observed-state, operation, and event evidence, then sleeps according to cadence or bounded failure backoff.
+7. Classifies the plan's elective action classes and evaluates the exact Manifest v2 maintenance policy. Outside a window it records or reuses one durable current deferral and never enters the lifecycle driver.
+8. Calls the shared lifecycle driver with every exact configuration target, the configuration-set and manifest SHA-256 values, state path, project identity, bounded parallelism, and any exact maintenance admission binding.
+9. The lifecycle driver freshly observes, compiles `up`, binds local image evidence, confirms the exact plan, revalidates the maintenance policy/token/open interval immediately before effects, and executes through `LifecycleSagaExecutor`.
+10. The saga acquires one project-scoped active operation group, persists intent and compensation, fences effects, re-observes ambiguous results, and verifies, compensates, interrupts, or enters a safe hold.
+11. Only after the saga result, persists daemon health, restart, observed-state, operation, maintenance, and event evidence, then sleeps according to cadence or bounded failure backoff.
 
 The shared saga is the only daemon path that publishes the authoritative desired revision before effects. The outer loop never overwrites the last healthy revision merely because it read a new manifest. An empty lifecycle DAG records convergence. Verified execution records mutation. Compensation, interruption, safe hold, or a thrown error is a failed loop iteration and cannot be reported as convergence.
 
@@ -91,7 +92,15 @@ Those events and daemon operation records are local forensic inputs for `hostwri
 
 Both daemon modes may execute only the supported `up` lifecycle DAG through the exact production CLI lifecycle driver. There is no daemon-specific provider executor and no direct Apple command path. The daemon reuses provider capability binding, exact plan confirmation, project/resource UUID ownership, provider/project generations, fencing, the three-attempt node retry limit, compensation, and safe holds.
 
-The current Phase 08 boundary does not add maintenance windows, rollout-policy expansion, garbage collection, broad deletion, Phase 09 transport, or multi-host authority. Unsupported drift and unmanaged collisions fail before mutation. Explicit CLI lifecycle and cleanup confirmation contracts remain unchanged.
+The current Phase 08 boundary does not add rollout-policy expansion, garbage collection, broad deletion, Phase 09 transport, or multi-host authority. Unsupported drift and unmanaged collisions fail before mutation. Explicit CLI lifecycle and cleanup confirmation contracts remain unchanged.
+
+### Maintenance windows and change deferral
+
+Manifest v2 may declare one local timezone and 1 through 64 recurring or one-shot windows. Each window explicitly lists the elective `create`, `start`, `restart`, `update`, and `remove` action classes it admits. A plan requiring multiple classes is admitted only when one active window allows every class. Recurring windows resolve daylight-saving gaps to the first representable later time and repeated times to the first occurrence. One-shot timestamps are canonical UTC. There is no cloud scheduler or filesystem-event dependency.
+
+Outside every applicable window, the daemon records one current versioned deferral in the existing schema-v17 operation ledger, including exact plan/policy digests, action classes, first-deferral time, hard deadline, state, and confirmation token. A newer validated plan supersedes the prior pending record transactionally. Clock rollback cannot resurrect an older transition because durable append order is authoritative. Expired or cancelled work remains denied; sleep or a missed event is handled by the next level-triggered iteration.
+
+`hostwright maintenance preview` is read-only. Status, exact-token cancellation, and explicit reason-bearing emergency override do not touch runtime. An override admits only its exact unchanged plan and policy. Immediately before lifecycle effects, the driver securely reopens the configuration set and revalidates the plan digest, policy digest, exact current token, and still-open interval. A concurrent cancellation, config change, closed window, or supersession refuses mutation. Existing active saga recovery and security-stop actions bypass elective windows because delaying them could leave an ambiguous or unsafe effect.
 
 ### Restart budgets and crash-loop holds
 
@@ -143,12 +152,14 @@ Every action other than `contract` requires those four environment values. Re-ex
 - `rollback` unavailable: only the one exact prior generation captured by a successful upgrade is eligible; arbitrary executable/config downgrade is refused.
 - `crashLoopBlocked`: inspect `hostwright restart-budget status --project <project-id> --json`, correct the workload failure, then release only the exact current hold token. Release does not perform runtime mutation; the next level-triggered iteration re-observes before any admission.
 - `projectBudgetBlocked`: wait for the rolling project window to expire or correct higher-priority failures. There is no project-wide bypass or implicit reset.
+- `maintenanceDeferred`: inspect `hostwright maintenance status --project <project-id> --json`; wait for the reported applicable window or use only the exact current token for an explicitly justified override.
+- `maintenanceDeadlineExpired` or `maintenanceCancelled`: the plan remains non-mutating. Change the validated desired generation when new work is intended; do not reuse an old token.
+- maintenance confirmation mismatch at effect time: preserve the deferral and saga evidence. The policy, token, window, or configuration changed after admission, so the daemon must re-observe on a later level-triggered iteration.
 
 Status and validation are read-only. A failed preflight performs no plist or launchctl mutation. Cleanup must be done through `uninstall`, which refuses changed, linked, wrongly owned, or permission-invalid files.
 
 ## Current Sequenced Limitations
 
 - privileged helper
-- maintenance-window admission and emergency override
 - health-gated staged unattended rollout and autonomous rollback expansion
 - image, volume, or unmanaged cleanup

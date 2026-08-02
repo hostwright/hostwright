@@ -24,6 +24,7 @@ public enum ManifestValidator {
         validateImageVulnerability(manifest, issues: &issues)
         validateImageProvenance(manifest, issues: &issues)
         validateProjectRestartBudget(manifest.restartBudget, issues: &issues)
+        validateMaintenance(manifest.maintenance, issues: &issues)
         validateVolumeDeclarations(manifest.volumes, issues: &issues)
         validateNetworkDefinitions(manifest.networks, issues: &issues)
         validateCertificateDeclarations(manifest.certificates, issues: &issues)
@@ -2555,6 +2556,56 @@ public enum ManifestValidator {
         }
         if !(1...86_400).contains(budget.window) {
             issues.append(ManifestIssue(code: .manifestValidationFailed, message: "restartBudget.window must be between 1s and 24h.", path: "$.restartBudget.window"))
+        }
+    }
+
+    private static func validateMaintenance(
+        _ policy: HostwrightMaintenancePolicy?,
+        issues: inout [ManifestIssue]
+    ) {
+        guard let policy else { return }
+        guard TimeZone(identifier: policy.timezone) != nil else {
+            issues.append(ManifestIssue(code: .manifestValidationFailed, message: "maintenance.timezone must name an installed IANA timezone.", path: "$.maintenance.timezone"))
+            return
+        }
+        if !(60...2_592_000).contains(policy.maximumDeferral) {
+            issues.append(ManifestIssue(code: .manifestValidationFailed, message: "maintenance.maximumDeferral must be between 60s and 30 days.", path: "$.maintenance.maximumDeferral"))
+        }
+        if policy.windows.isEmpty || policy.windows.count > HostwrightMaintenanceWindow.maximumWindows {
+            issues.append(ManifestIssue(code: .manifestValidationFailed, message: "maintenance.windows must contain 1 through 64 windows.", path: "$.maintenance.windows"))
+        }
+        let ids = policy.windows.map(\.id)
+        if Set(ids).count != ids.count {
+            issues.append(ManifestIssue(code: .manifestValidationFailed, message: "maintenance window ids must be unique.", path: "$.maintenance.windows"))
+        }
+        let formatter = ISO8601DateFormatter()
+        for (index, window) in policy.windows.enumerated() {
+            let path = "$.maintenance.windows[\(index)]"
+            if window.id.range(of: "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$", options: .regularExpression) == nil {
+                issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Maintenance window ids must use bounded lowercase names.", path: "\(path).id"))
+            }
+            if window.actions.isEmpty || Set(window.actions).count != window.actions.count || window.actions.contains(where: { !$0.isElective }) {
+                issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Maintenance window actions must be a non-empty unique elective set.", path: "\(path).actions"))
+            }
+            switch window.schedule {
+            case .recurring(let recurring):
+                if recurring.weekdays.isEmpty || Set(recurring.weekdays).count != recurring.weekdays.count {
+                    issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Recurring maintenance weekdays must be non-empty and unique.", path: "\(path).recurring.weekdays"))
+                }
+                if recurring.start.range(of: "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$", options: .regularExpression) == nil {
+                    issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Recurring maintenance start must be canonical 24-hour HH:mm.", path: "\(path).recurring.start"))
+                }
+                if !(60...86_400).contains(recurring.duration) {
+                    issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Recurring maintenance duration must be between 60s and 24h.", path: "\(path).recurring.duration"))
+                }
+            case .oneShot(let oneShot):
+                if formatter.date(from: oneShot.startsAt) == nil || formatter.string(from: formatter.date(from: oneShot.startsAt) ?? Date()) != oneShot.startsAt {
+                    issues.append(ManifestIssue(code: .manifestValidationFailed, message: "One-shot maintenance startsAt must be canonical RFC3339 UTC.", path: "\(path).oneShot.startsAt"))
+                }
+                if !(60...86_400).contains(oneShot.duration) {
+                    issues.append(ManifestIssue(code: .manifestValidationFailed, message: "One-shot maintenance duration must be between 60s and 24h.", path: "\(path).oneShot.duration"))
+                }
+            }
         }
     }
 

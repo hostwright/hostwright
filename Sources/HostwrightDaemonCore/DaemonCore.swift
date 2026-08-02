@@ -441,7 +441,6 @@ public struct DaemonLoopRunner {
                     message: "The unattended reconciliation plan contains blocking issues. No runtime mutation was admitted."
                 )
             }
-            enteredLifecycleDriver = true
             let selectedServiceNames = selectedLifecycleServices(
                 manifest: manifest,
                 plan: plan
@@ -451,20 +450,54 @@ public struct DaemonLoopRunner {
                 restartPolicyRecords: restartPolicyRecords,
                 projectID: projectID
             )
-            let reconciliation = try await reconciliationDriver.reconcile(
-                request: try DaemonReconciliationRequest(
-                    manifestPath: manifestPath,
-                    manifestSHA256: manifestSnapshot.target.contentSHA256,
-                    configurationSetSHA256: configurationSetSHA256,
-                    configurationTargets: configurationTargets,
-                    stateDatabasePath: configuration.stateDatabasePath,
-                    projectID: projectID,
-                    maximumParallelism: configuration.maximumParallelism,
-                    selectedServiceNames: selectedServiceNames,
-                    operationIdempotencyKeySHA256:
-                        operationIdempotencyKeySHA256
-                )
+            let maintenance = try maintenanceAdmission(
+                manifest: manifest,
+                plan: plan,
+                store: store,
+                projectID: projectID,
+                manifestPath: manifestPath,
+                manifestSHA256: manifestSnapshot.target.contentSHA256,
+                timestamp: startedAt
             )
+            let reconciliation: DaemonReconciliationResult
+            if let deferred = maintenance.deferredResult {
+                reconciliation = deferred
+            } else {
+                enteredLifecycleDriver = true
+                do {
+                    reconciliation = try await reconciliationDriver.reconcile(
+                        request: try DaemonReconciliationRequest(
+                            manifestPath: manifestPath,
+                            manifestSHA256: manifestSnapshot.target.contentSHA256,
+                            configurationSetSHA256: configurationSetSHA256,
+                            configurationTargets: configurationTargets,
+                            stateDatabasePath: configuration.stateDatabasePath,
+                            projectID: projectID,
+                            maximumParallelism: configuration.maximumParallelism,
+                            selectedServiceNames: selectedServiceNames,
+                            operationIdempotencyKeySHA256:
+                                operationIdempotencyKeySHA256,
+                            maintenanceAdmission: maintenance.binding
+                        )
+                    )
+                } catch {
+                    try recordMaintenanceCompletion(
+                        maintenance,
+                        reconciliation: nil,
+                        store: store,
+                        projectID: projectID,
+                        timestamp: clock.timestamp()
+                    )
+                    throw error
+                }
+                try recordMaintenanceCompletion(
+                    maintenance,
+                    reconciliation: reconciliation,
+                    store: store,
+                    projectID: projectID,
+                    timestamp: clock.timestamp()
+                )
+            }
             var restartAttemptHistory: [RestartAttemptHistoryRecord] = []
             if reconciliation.runtimeMutationAttempted {
                 let eligibleRestartServices = Set(plan.actions.compactMap { action -> String? in
@@ -1157,6 +1190,192 @@ public struct DaemonLoopRunner {
             }
         }
         return manifest.services.map(\.name).filter { !excluded.contains($0) }.sorted()
+    }
+
+    private struct PreparedMaintenanceAdmission {
+        let binding: DaemonMaintenanceAdmission?
+        let deferredResult: DaemonReconciliationResult?
+        let pending: MaintenanceDeferralRecord?
+    }
+
+    private func maintenanceAdmission(
+        manifest: HostwrightManifest,
+        plan: ReconciliationPlan,
+        store: SQLiteStateStore,
+        projectID: String,
+        manifestPath: String,
+        manifestSHA256: String,
+        timestamp: String
+    ) throws -> PreparedMaintenanceAdmission {
+        let actions = Self.maintenanceActionClasses(plan: plan)
+        guard let policy = manifest.maintenance, !actions.isEmpty else {
+            return PreparedMaintenanceAdmission(binding: nil, deferredResult: nil, pending: nil)
+        }
+        let planSHA256 = sha256(plan.planHash)
+        let policySHA256 = MaintenanceWindowEvaluator.policySHA256(policy)
+        if try store.operationGroups.loadAll().contains(where: {
+            $0.projectID == projectID && $0.status == .active
+        }) {
+            return PreparedMaintenanceAdmission(
+                binding: try DaemonMaintenanceAdmission(
+                    reconciliationPlanSHA256: planSHA256,
+                    policySHA256: policySHA256,
+                    actionClasses: [HostwrightMaintenanceActionClass.recovery.rawValue],
+                    reason: MaintenanceAdmissionReason.safetyRecovery.rawValue,
+                    confirmationToken: nil,
+                    windowID: nil,
+                    windowStartsAt: nil,
+                    windowEndsAt: nil
+                ),
+                deferredResult: nil,
+                pending: nil
+            )
+        }
+        guard let now = ISO8601DateFormatter().date(from: timestamp) else {
+            throw HostwrightDiagnostic(code: .daemonInvalid, message: "Daemon maintenance admission received an invalid clock timestamp.")
+        }
+        var pending = try store.maintenanceDeferrals.latest(projectID: projectID)
+        let matches = pending.map {
+            $0.planSHA256 == planSHA256 &&
+                $0.policySHA256 == policySHA256 &&
+                $0.actionClasses == actions &&
+                [.deferred, .cancelled, .overrideAuthorized].contains($0.state)
+        } == true
+        if !matches {
+            if let current = pending,
+               current.state == .deferred || current.state == .overrideAuthorized {
+                _ = try store.maintenanceDeferrals.supersede(
+                    projectID: projectID,
+                    expectedConfirmationToken: current.confirmationToken,
+                    updatedAt: timestamp
+                )
+            }
+            pending = nil
+        }
+        var decision = MaintenanceWindowEvaluator.evaluate(
+            policy: policy,
+            actions: actions,
+            now: now,
+            deferredAt: pending.flatMap { ISO8601DateFormatter().date(from: $0.firstDeferredAt) },
+            cancelled: pending?.state == .cancelled,
+            emergencyOverrideAuthorized: pending?.state == .overrideAuthorized
+        )
+        if !decision.admitted, pending == nil {
+            let prior = try? store.desiredStates.loadProject(id: projectID)
+            let generation = max(
+                1,
+                (prior?.providerGeneration ?? 0) +
+                    ((prior?.manifestHash == manifestSHA256) ? 0 : 1)
+            )
+            try store.desiredStates.saveManifestSnapshot(
+                projectID: projectID,
+                manifestPath: manifestPath,
+                manifestHash: manifestSHA256,
+                desiredGeneration: generation,
+                manifest: manifest,
+                timestamp: timestamp,
+                mutationProvider: prior?.mutationProvider
+            )
+            let deadline = ISO8601DateFormatter().string(
+                from: now.addingTimeInterval(TimeInterval(policy.maximumDeferral))
+            )
+            pending = try store.maintenanceDeferrals.deferPlan(
+                projectID: projectID,
+                planSHA256: planSHA256,
+                policySHA256: policySHA256,
+                actionClasses: actions,
+                firstDeferredAt: timestamp,
+                deadlineAt: deadline,
+                reasonRedacted: "Elective runtime mutation is outside an allowed maintenance window."
+            )
+            decision = MaintenanceWindowEvaluator.evaluate(
+                policy: policy,
+                actions: actions,
+                now: now,
+                deferredAt: now
+            )
+        }
+        if !decision.admitted {
+            let reasonCode: DaemonReconciliationReasonCode
+            switch decision.reason {
+            case .deadlineExpired:
+                reasonCode = .maintenanceDeadlineExpired
+            case .cancelled:
+                reasonCode = .maintenanceCancelled
+            default:
+                reasonCode = .maintenanceDeferred
+            }
+            return PreparedMaintenanceAdmission(
+                binding: nil,
+                deferredResult: try DaemonReconciliationResult(
+                    status: .deferred,
+                    reasonCode: reasonCode,
+                    planSHA256: planSHA256,
+                    nodeCount: 0,
+                    completedNodeCount: 0,
+                    runtimeMutationAttempted: false,
+                    attemptedServiceNames: [],
+                    checkpoint: decision.reason.rawValue,
+                    recoveryHintRedacted: pending.map { _ in
+                        "Inspect hostwright maintenance status and use only its exact confirmation token."
+                    } ?? ""
+                ),
+                pending: pending
+            )
+        }
+        let active = decision.activeWindow
+        return PreparedMaintenanceAdmission(
+            binding: try DaemonMaintenanceAdmission(
+                reconciliationPlanSHA256: planSHA256,
+                policySHA256: policySHA256,
+                actionClasses: actions.map(\.rawValue),
+                reason: decision.reason.rawValue,
+                confirmationToken: pending?.confirmationToken,
+                windowID: active?.windowID,
+                windowStartsAt: active?.startsAt,
+                windowEndsAt: active?.endsAt
+            ),
+            deferredResult: nil,
+            pending: pending
+        )
+    }
+
+    static func maintenanceActionClasses(
+        plan: ReconciliationPlan
+    ) -> [HostwrightMaintenanceActionClass] {
+        Array(Set(plan.actions.compactMap { action in
+            switch (action.kind, action.executionAvailability) {
+            case (.createMissingService, .availableForCreateMissingService): .create
+            case (.proposeStartStoppedService, .availableForStartManagedService): .start
+            case (.restartManagedService, .availableForRestartManagedService): .restart
+            case (.replaceForImageDrift, _),
+                 (.reconcilePortDrift, _),
+                 (.reconcileMountDrift, _): .update
+            default: nil
+            }
+        })).sorted { $0.rawValue < $1.rawValue }
+    }
+
+    private func recordMaintenanceCompletion(
+        _ maintenance: PreparedMaintenanceAdmission,
+        reconciliation: DaemonReconciliationResult?,
+        store: SQLiteStateStore,
+        projectID: String,
+        timestamp: String
+    ) throws {
+        guard let pending = maintenance.pending,
+              maintenance.binding != nil else { return }
+        let succeeded = reconciliation?.status.isSuccessfulIteration == true
+        _ = try store.maintenanceDeferrals.recordAdmission(
+            projectID: projectID,
+            expectedConfirmationToken: pending.confirmationToken,
+            state: succeeded ? .admitted : .failed,
+            windowID: maintenance.binding?.windowID,
+            reasonRedacted: succeeded
+                ? "The exact maintenance-bound reconciliation completed its admitted iteration."
+                : "The exact maintenance-bound reconciliation failed after lifecycle admission; inspect its durable saga evidence.",
+            updatedAt: timestamp
+        )
     }
 
     private func restartOperationIdempotencyKey(

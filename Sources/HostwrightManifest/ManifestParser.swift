@@ -286,7 +286,7 @@ private struct ManifestNodeDecoder {
             allowed: [
                 "version", "project", "imagePolicy", "imageTrust", "imageSBOM",
                 "imageVulnerability", "imageProvenance", "volumes", "networks",
-                "certificates", "ingress", "tunnels", "restartBudget", "services"
+                "certificates", "ingress", "tunnels", "restartBudget", "maintenance", "services"
             ]
         )
         let version = try values["version"].map(versionInteger)
@@ -318,6 +318,9 @@ private struct ManifestNodeDecoder {
         let restartBudget = try values["restartBudget"].map {
             try decodeProjectRestartBudget($0, path: "$.restartBudget")
         }
+        let maintenance = try values["maintenance"].map {
+            try decodeMaintenance($0, path: "$.maintenance")
+        }
         let volumes = try values["volumes"].map {
             try decodeVolumeDeclarations($0, path: "$.volumes")
         } ?? [:]
@@ -343,6 +346,7 @@ private struct ManifestNodeDecoder {
             imageVulnerability: imageVulnerability,
             imageProvenance: imageProvenance,
             restartBudget: restartBudget,
+            maintenance: maintenance,
             volumes: volumes,
             networks: networks,
             certificates: certificates,
@@ -1949,6 +1953,159 @@ private struct ManifestNodeDecoder {
                 default: 300,
                 path: "\(path).window"
             )
+        )
+    }
+
+    private func decodeMaintenance(
+        _ node: Node,
+        path: String
+    ) throws -> HostwrightMaintenancePolicy {
+        let values = try mapping(
+            node,
+            path: path,
+            allowed: ["timezone", "maximumDeferral", "windows"]
+        )
+        guard let timezoneNode = values["timezone"],
+              let windowsNode = values["windows"] else {
+            throw ManifestParser.failure(
+                "maintenance requires timezone and windows.",
+                code: .manifestValidationFailed,
+                node: node,
+                path: path
+            )
+        }
+        guard case .sequence(let sequence) = windowsNode else {
+            throw ManifestParser.failure(
+                "maintenance.windows must be a sequence.",
+                code: .manifestValidationFailed,
+                node: windowsNode,
+                path: "\(path).windows"
+            )
+        }
+        let windows = try sequence.enumerated().map { index, child in
+            try decodeMaintenanceWindow(child, path: "\(path).windows[\(index)]")
+        }
+        return HostwrightMaintenancePolicy(
+            timezone: try string(timezoneNode, path: "\(path).timezone"),
+            maximumDeferral: try duration(
+                values["maximumDeferral"],
+                default: 86_400,
+                path: "\(path).maximumDeferral"
+            ),
+            windows: windows.sorted { $0.id < $1.id }
+        )
+    }
+
+    private func decodeMaintenanceWindow(
+        _ node: Node,
+        path: String
+    ) throws -> HostwrightMaintenanceWindow {
+        let values = try mapping(
+            node,
+            path: path,
+            allowed: ["id", "actions", "recurring", "oneShot"]
+        )
+        guard let idNode = values["id"], let actionsNode = values["actions"] else {
+            throw ManifestParser.failure(
+                "A maintenance window requires id and actions.",
+                code: .manifestValidationFailed,
+                node: node,
+                path: path
+            )
+        }
+        let rawActions = try strings(actionsNode, path: "\(path).actions")
+        let actions = try rawActions.enumerated().map { index, raw in
+            guard let action = HostwrightMaintenanceActionClass(rawValue: raw),
+                  action.isElective else {
+                throw ManifestParser.failure(
+                    "maintenance window actions must be create, start, restart, update, or remove.",
+                    code: .manifestValidationFailed,
+                    node: actionsNode,
+                    path: "\(path).actions[\(index)]"
+                )
+            }
+            return action
+        }
+        let scheduleNodes = [values["recurring"], values["oneShot"]].compactMap { $0 }
+        guard scheduleNodes.count == 1 else {
+            throw ManifestParser.failure(
+                "A maintenance window requires exactly one of recurring or oneShot.",
+                code: .manifestValidationFailed,
+                node: node,
+                path: path
+            )
+        }
+        let schedule: HostwrightMaintenanceSchedule
+        if let recurringNode = values["recurring"] {
+            let recurring = try mapping(
+                recurringNode,
+                path: "\(path).recurring",
+                allowed: ["weekdays", "start", "duration"]
+            )
+            guard let weekdaysNode = recurring["weekdays"],
+                  let startNode = recurring["start"],
+                  recurring["duration"] != nil else {
+                throw ManifestParser.failure(
+                    "A recurring maintenance window requires weekdays, start, and duration.",
+                    code: .manifestValidationFailed,
+                    node: recurringNode,
+                    path: "\(path).recurring"
+                )
+            }
+            let weekdays = try strings(weekdaysNode, path: "\(path).recurring.weekdays")
+                .enumerated().map { index, raw in
+                    guard let weekday = HostwrightMaintenanceWeekday(rawValue: raw) else {
+                        throw ManifestParser.failure(
+                            "Recurring weekdays must use monday through sunday.",
+                            code: .manifestValidationFailed,
+                            node: weekdaysNode,
+                            path: "\(path).recurring.weekdays[\(index)]"
+                        )
+                    }
+                    return weekday
+                }
+            schedule = .recurring(
+                HostwrightRecurringMaintenanceWindow(
+                    weekdays: weekdays.sorted { $0.rawValue < $1.rawValue },
+                    start: try string(startNode, path: "\(path).recurring.start"),
+                    duration: try duration(
+                        recurring["duration"],
+                        default: 0,
+                        path: "\(path).recurring.duration"
+                    )
+                )
+            )
+        } else {
+            let oneShotNode = values["oneShot"]!
+            let oneShot = try mapping(
+                oneShotNode,
+                path: "\(path).oneShot",
+                allowed: ["startsAt", "duration"]
+            )
+            guard let startsAtNode = oneShot["startsAt"],
+                  oneShot["duration"] != nil else {
+                throw ManifestParser.failure(
+                    "A oneShot maintenance window requires startsAt and duration.",
+                    code: .manifestValidationFailed,
+                    node: oneShotNode,
+                    path: "\(path).oneShot"
+                )
+            }
+            schedule = .oneShot(
+                HostwrightOneShotMaintenanceWindow(
+                    startsAt: try string(startsAtNode, path: "\(path).oneShot.startsAt"),
+                    duration: try duration(
+                        oneShot["duration"],
+                        default: 0,
+                        path: "\(path).oneShot.duration"
+                    )
+                )
+            )
+        }
+        return HostwrightMaintenanceWindow(
+            id: try string(idNode, path: "\(path).id"),
+            actions: actions.sorted { $0.rawValue < $1.rawValue },
+            schedule: schedule
         )
     }
 

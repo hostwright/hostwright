@@ -275,6 +275,249 @@ struct LifecycleCommandRunnerTests {
     }
 
     @Test
+    func unattendedMaintenanceWindowClosingBeforeEffectFailsClosed() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-p08-maintenance-close-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: false,
+            attributes: [.posixPermissions: 0o700]
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let manifest = """
+        version: 2
+        project: demo
+        maintenance:
+          timezone: UTC
+          windows:
+            - id: release
+              actions:
+                - create
+              oneShot:
+                startsAt: "2026-08-02T04:00:00Z"
+                duration: 3600s
+        services:
+          api:
+            image: example.invalid/api:latest
+        """
+        let policy = try #require(ManifestValidator.validated(manifest).maintenance)
+        let admission = try DaemonMaintenanceAdmission(
+            reconciliationPlanSHA256: String(repeating: "a", count: 64),
+            policySHA256: MaintenanceWindowEvaluator.policySHA256(policy),
+            actionClasses: ["create"],
+            reason: "active-window",
+            confirmationToken: nil,
+            windowID: "release",
+            windowStartsAt: "2026-08-02T04:00:00Z",
+            windowEndsAt: "2026-08-02T05:00:00Z"
+        )
+        let driver = ScriptedLifecycleCommandDriver(
+            preparation: try preparation(desired: [service()])
+        )
+        let reconciler = UnattendedLifecycleReconciler(
+            readManifest: { _ in manifest },
+            makeDriver: { _ in driver },
+            now: { ISO8601DateFormatter().date(from: "2026-08-02T05:00:00Z")! }
+        )
+        var refused = false
+        do {
+            _ = try await reconciler.reconcile(
+                request: try makeDaemonReconciliationRequest(
+                    manifestPath: directory.appendingPathComponent("hostwright.yaml").path,
+                    manifestSHA256: SHA256.hash(data: Data(manifest.utf8)).map { String(format: "%02x", $0) }.joined(),
+                    stateDatabasePath: directory.appendingPathComponent("state.sqlite").path,
+                    projectID: "project-demo",
+                    maximumParallelism: 4,
+                    maintenanceAdmission: admission
+                )
+            )
+        } catch {
+            refused = true
+        }
+        #expect(refused)
+        #expect(driver.snapshot().executions == 0)
+    }
+
+    @Test
+    func unattendedMaintenanceOverrideCancelledBeforeEffectFailsClosed() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-p08-maintenance-cancel-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: false,
+            attributes: [.posixPermissions: 0o700]
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let databasePath = directory.appendingPathComponent("state.sqlite").path
+        let manifest = """
+        version: 2
+        project: demo
+        maintenance:
+          timezone: UTC
+          windows:
+            - id: release
+              actions:
+                - create
+              oneShot:
+                startsAt: "2027-08-02T04:00:00Z"
+                duration: 3600s
+        services:
+          api:
+            image: example.invalid/api:latest
+        """
+        let policy = try #require(ManifestValidator.validated(manifest).maintenance)
+        let policySHA = MaintenanceWindowEvaluator.policySHA256(policy)
+        let planSHA = String(repeating: "a", count: 64)
+        let store = SQLiteStateStore(path: databasePath)
+        try store.migrate()
+        let pending = try store.maintenanceDeferrals.deferPlan(
+            projectID: "project-demo",
+            planSHA256: planSHA,
+            policySHA256: policySHA,
+            actionClasses: [.create],
+            firstDeferredAt: "2026-08-02T03:00:00Z",
+            deadlineAt: "2026-08-03T03:00:00Z",
+            reasonRedacted: "outside window"
+        )
+        _ = try store.maintenanceDeferrals.authorizeOverride(
+            projectID: "project-demo",
+            expectedConfirmationToken: pending.confirmationToken,
+            reasonRedacted: "urgent repair",
+            updatedAt: "2026-08-02T03:01:00Z"
+        )
+        _ = try store.maintenanceDeferrals.cancel(
+            projectID: "project-demo",
+            expectedConfirmationToken: pending.confirmationToken,
+            updatedAt: "2026-08-02T03:02:00Z"
+        )
+        let admission = try DaemonMaintenanceAdmission(
+            reconciliationPlanSHA256: planSHA,
+            policySHA256: policySHA,
+            actionClasses: ["create"],
+            reason: "emergency-override",
+            confirmationToken: pending.confirmationToken,
+            windowID: nil,
+            windowStartsAt: nil,
+            windowEndsAt: nil
+        )
+        let driver = ScriptedLifecycleCommandDriver(
+            preparation: try preparation(desired: [service()])
+        )
+        let reconciler = UnattendedLifecycleReconciler(
+            readManifest: { _ in manifest },
+            makeDriver: { _ in driver }
+        )
+        var refused = false
+        do {
+            _ = try await reconciler.reconcile(
+                request: try makeDaemonReconciliationRequest(
+                    manifestPath: directory.appendingPathComponent("hostwright.yaml").path,
+                    manifestSHA256: SHA256.hash(data: Data(manifest.utf8)).map { String(format: "%02x", $0) }.joined(),
+                    stateDatabasePath: databasePath,
+                    projectID: "project-demo",
+                    maximumParallelism: 4,
+                    maintenanceAdmission: admission
+                )
+            )
+        } catch {
+            refused = true
+        }
+        #expect(refused)
+        #expect(driver.snapshot().executions == 0)
+    }
+
+    @Test
+    func unattendedMaintenanceOverridePastHardDeadlineFailsClosed() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-p08-maintenance-deadline-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: false,
+            attributes: [.posixPermissions: 0o700]
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let databasePath = directory.appendingPathComponent("state.sqlite").path
+        let manifest = """
+        version: 2
+        project: demo
+        maintenance:
+          timezone: UTC
+          maximumDeferral: 60s
+          windows:
+            - id: release
+              actions:
+                - create
+              oneShot:
+                startsAt: "2027-08-02T04:00:00Z"
+                duration: 3600s
+        services:
+          api:
+            image: example.invalid/api:latest
+        """
+        let policy = try #require(ManifestValidator.validated(manifest).maintenance)
+        let policySHA = MaintenanceWindowEvaluator.policySHA256(policy)
+        let planSHA = String(repeating: "a", count: 64)
+        let store = SQLiteStateStore(path: databasePath)
+        try store.migrate()
+        let pending = try store.maintenanceDeferrals.deferPlan(
+            projectID: "project-demo",
+            planSHA256: planSHA,
+            policySHA256: policySHA,
+            actionClasses: [.create],
+            firstDeferredAt: "2026-08-02T03:00:00Z",
+            deadlineAt: "2026-08-02T03:01:00Z",
+            reasonRedacted: "outside window"
+        )
+        _ = try store.maintenanceDeferrals.authorizeOverride(
+            projectID: "project-demo",
+            expectedConfirmationToken: pending.confirmationToken,
+            reasonRedacted: "urgent repair",
+            updatedAt: "2026-08-02T03:00:30Z"
+        )
+        let admission = try DaemonMaintenanceAdmission(
+            reconciliationPlanSHA256: planSHA,
+            policySHA256: policySHA,
+            actionClasses: ["create"],
+            reason: "emergency-override",
+            confirmationToken: pending.confirmationToken,
+            windowID: nil,
+            windowStartsAt: nil,
+            windowEndsAt: nil
+        )
+        let driver = ScriptedLifecycleCommandDriver(
+            preparation: try preparation(desired: [service()])
+        )
+        let reconciler = UnattendedLifecycleReconciler(
+            readManifest: { _ in manifest },
+            makeDriver: { _ in driver },
+            now: { ISO8601DateFormatter().date(from: "2026-08-02T03:02:00Z")! }
+        )
+        var refused = false
+        do {
+            _ = try await reconciler.reconcile(
+                request: try makeDaemonReconciliationRequest(
+                    manifestPath: directory.appendingPathComponent("hostwright.yaml").path,
+                    manifestSHA256: SHA256.hash(data: Data(manifest.utf8)).map { String(format: "%02x", $0) }.joined(),
+                    stateDatabasePath: databasePath,
+                    projectID: "project-demo",
+                    maximumParallelism: 4,
+                    maintenanceAdmission: admission
+                )
+            )
+        } catch {
+            refused = true
+        }
+        #expect(refused)
+        #expect(driver.snapshot().executions == 0)
+    }
+
+    @Test
     func repeatedLifecycleGroupReusesOnlyExactPlanScopedImageLockEvidence() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
             "hostwright-p08-image-lock-repeat-\(UUID().uuidString)",
@@ -1782,7 +2025,8 @@ private func makeDaemonReconciliationRequest(
     stateDatabasePath: String,
     projectID: String,
     maximumParallelism: Int,
-    selectedServiceNames: [String]? = nil
+    selectedServiceNames: [String]? = nil,
+    maintenanceAdmission: DaemonMaintenanceAdmission? = nil
 ) throws -> DaemonReconciliationRequest {
     let normalizedPath = URL(fileURLWithPath: manifestPath).standardizedFileURL.path
     let target = try DaemonConfigurationTarget(
@@ -1801,7 +2045,8 @@ private func makeDaemonReconciliationRequest(
         stateDatabasePath: stateDatabasePath,
         projectID: projectID,
         maximumParallelism: maximumParallelism,
-        selectedServiceNames: selectedServiceNames
+        selectedServiceNames: selectedServiceNames,
+        maintenanceAdmission: maintenanceAdmission
     )
 }
 

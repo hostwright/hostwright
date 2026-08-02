@@ -18,10 +18,86 @@ public enum DaemonReconciliationStatus: String, Codable, Equatable, Sendable {
 public enum DaemonReconciliationReasonCode: String, Codable, Equatable, Sendable {
     case converged = "daemon.reconcile.converged"
     case restartBudgetDeferred = "daemon.reconcile.restart-budget-deferred"
+    case maintenanceDeferred = "daemon.reconcile.maintenance-deferred"
+    case maintenanceDeadlineExpired = "daemon.reconcile.maintenance-deadline-expired"
+    case maintenanceCancelled = "daemon.reconcile.maintenance-cancelled"
     case mutationVerified = "daemon.reconcile.mutated"
     case compensated = "daemon.reconcile.compensated"
     case interrupted = "daemon.reconcile.interrupted"
     case safeHold = "daemon.reconcile.safe-hold"
+}
+
+public struct DaemonMaintenanceAdmission: Codable, Equatable, Sendable {
+    public let schemaVersion: Int
+    public let reconciliationPlanSHA256: String
+    public let policySHA256: String
+    public let actionClasses: [String]
+    public let reason: String
+    public let confirmationToken: String?
+    public let windowID: String?
+    public let windowStartsAt: String?
+    public let windowEndsAt: String?
+
+    public init(
+        schemaVersion: Int = 1,
+        reconciliationPlanSHA256: String,
+        policySHA256: String,
+        actionClasses: [String],
+        reason: String,
+        confirmationToken: String?,
+        windowID: String?,
+        windowStartsAt: String?,
+        windowEndsAt: String?
+    ) throws {
+        let normalizedActions = actionClasses.sorted()
+        let permittedReasons = ["active-window", "emergency-override", "safety-recovery"]
+        let electiveActions = Set(["create", "start", "restart", "update", "remove"])
+        guard schemaVersion == 1,
+              Self.isSHA256(reconciliationPlanSHA256),
+              Self.isSHA256(policySHA256),
+              !normalizedActions.isEmpty,
+              normalizedActions == actionClasses,
+              Set(normalizedActions).count == normalizedActions.count,
+              normalizedActions.allSatisfy({ ["create", "start", "restart", "update", "remove", "recovery", "security-stop"].contains($0) }),
+              permittedReasons.contains(reason),
+              confirmationToken.map(Self.isSHA256) ?? true,
+              windowID.map({ $0.range(of: "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$", options: .regularExpression) != nil }) ?? true,
+              (windowStartsAt == nil) == (windowEndsAt == nil),
+              (reason == "active-window") == (windowID != nil),
+              (reason == "active-window") == (windowStartsAt != nil),
+              reason != "emergency-override" || confirmationToken != nil,
+              reason == "safety-recovery"
+                ? normalizedActions == ["recovery"] && confirmationToken == nil
+                : normalizedActions.allSatisfy(electiveActions.contains) else {
+            throw HostwrightDiagnostic(
+                code: .daemonInvalid,
+                message: "Daemon maintenance admission binding is invalid or incomplete."
+            )
+        }
+        if let windowStartsAt, let windowEndsAt {
+            let formatter = ISO8601DateFormatter()
+            guard let start = formatter.date(from: windowStartsAt),
+                  let end = formatter.date(from: windowEndsAt),
+                  formatter.string(from: start) == windowStartsAt,
+                  formatter.string(from: end) == windowEndsAt,
+                  start < end else {
+                throw HostwrightDiagnostic(code: .daemonInvalid, message: "Daemon maintenance window bounds are invalid.")
+            }
+        }
+        self.schemaVersion = schemaVersion
+        self.reconciliationPlanSHA256 = reconciliationPlanSHA256
+        self.policySHA256 = policySHA256
+        self.actionClasses = normalizedActions
+        self.reason = reason
+        self.confirmationToken = confirmationToken
+        self.windowID = windowID
+        self.windowStartsAt = windowStartsAt
+        self.windowEndsAt = windowEndsAt
+    }
+
+    private static func isSHA256(_ value: String) -> Bool {
+        value.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil
+    }
 }
 
 public struct DaemonReconciliationRequest: Codable, Equatable, Sendable {
@@ -35,6 +111,7 @@ public struct DaemonReconciliationRequest: Codable, Equatable, Sendable {
     public let maximumParallelism: Int
     public let selectedServiceNames: [String]?
     public let operationIdempotencyKeySHA256: String?
+    public let maintenanceAdmission: DaemonMaintenanceAdmission?
 
     public init(
         schemaVersion: Int = 1,
@@ -71,7 +148,8 @@ public struct DaemonReconciliationRequest: Codable, Equatable, Sendable {
         projectID: String,
         maximumParallelism: Int,
         selectedServiceNames: [String]?,
-        operationIdempotencyKeySHA256: String? = nil
+        operationIdempotencyKeySHA256: String? = nil,
+        maintenanceAdmission: DaemonMaintenanceAdmission? = nil
     ) throws {
         guard schemaVersion == 1,
               !manifestPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -126,6 +204,7 @@ public struct DaemonReconciliationRequest: Codable, Equatable, Sendable {
         self.maximumParallelism = maximumParallelism
         self.selectedServiceNames = selectedServiceNames
         self.operationIdempotencyKeySHA256 = operationIdempotencyKeySHA256
+        self.maintenanceAdmission = maintenanceAdmission
     }
 
     init(
@@ -222,7 +301,7 @@ public struct DaemonReconciliationResult: Codable, Equatable, Sendable {
               nodeCount > 0 || groupID == nil,
               status != .mutated || runtimeMutationAttempted,
               status != .mutated || completedNodeCount == nodeCount,
-              reasonCode == Self.reasonCode(for: status) else {
+              Self.reasonCode(reasonCode, isValidFor: status) else {
             throw HostwrightDiagnostic(
                 code: .daemonInvalid,
                 message: "Unattended reconciliation returned inconsistent convergence or lifecycle evidence."
@@ -245,15 +324,17 @@ public struct DaemonReconciliationResult: Codable, Equatable, Sendable {
     }
 
     private static func reasonCode(
-        for status: DaemonReconciliationStatus
-    ) -> DaemonReconciliationReasonCode {
+        _ reason: DaemonReconciliationReasonCode,
+        isValidFor status: DaemonReconciliationStatus
+    ) -> Bool {
         switch status {
-        case .converged: .converged
-        case .deferred: .restartBudgetDeferred
-        case .mutated: .mutationVerified
-        case .compensated: .compensated
-        case .interrupted: .interrupted
-        case .safeHold: .safeHold
+        case .converged: reason == .converged
+        case .deferred:
+            [.restartBudgetDeferred, .maintenanceDeferred, .maintenanceDeadlineExpired, .maintenanceCancelled].contains(reason)
+        case .mutated: reason == .mutationVerified
+        case .compensated: reason == .compensated
+        case .interrupted: reason == .interrupted
+        case .safeHold: reason == .safeHold
         }
     }
 }

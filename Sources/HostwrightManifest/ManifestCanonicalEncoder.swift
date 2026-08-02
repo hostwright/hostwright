@@ -17,6 +17,33 @@ public enum ManifestCanonicalEncoder {
             lines.append("  maxAttempts: \(restartBudget.maxAttempts)")
             lines.append("  window: \(quote("\(restartBudget.window)s"))")
         }
+        if let maintenance = manifest.maintenance {
+            lines.append("maintenance:")
+            lines.append("  timezone: \(quote(maintenance.timezone))")
+            lines.append("  maximumDeferral: \(quote("\(maintenance.maximumDeferral)s"))")
+            lines.append("  windows:")
+            for window in maintenance.windows.sorted(by: { $0.id < $1.id }) {
+                lines.append("    - id: \(quote(window.id))")
+                lines.append("      actions:")
+                for action in window.actions.sorted(by: { $0.rawValue < $1.rawValue }) {
+                    lines.append("        - \(quote(action.rawValue))")
+                }
+                switch window.schedule {
+                case .recurring(let recurring):
+                    lines.append("      recurring:")
+                    lines.append("        weekdays:")
+                    for weekday in recurring.weekdays.sorted(by: { $0.rawValue < $1.rawValue }) {
+                        lines.append("          - \(quote(weekday.rawValue))")
+                    }
+                    lines.append("        start: \(quote(recurring.start))")
+                    lines.append("        duration: \(quote("\(recurring.duration)s"))")
+                case .oneShot(let oneShot):
+                    lines.append("      oneShot:")
+                    lines.append("        startsAt: \(quote(oneShot.startsAt))")
+                    lines.append("        duration: \(quote("\(oneShot.duration)s"))")
+                }
+            }
+        }
         if let imagePolicy = manifest.imagePolicy {
             lines.append("imagePolicy: \(quote(imagePolicy.rawValue))")
         }

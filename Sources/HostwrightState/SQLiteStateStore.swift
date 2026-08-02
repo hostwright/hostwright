@@ -73,6 +73,10 @@ public struct SQLiteStateStore: StateStore {
         RestartRecoveryRecordRepository(store: self)
     }
 
+    public var maintenanceDeferrals: MaintenanceDeferralRepository {
+        MaintenanceDeferralRepository(store: self)
+    }
+
     public var ownership: OwnershipRepository {
         OwnershipRepository(store: self)
     }

@@ -2,6 +2,7 @@ import CryptoKit
 import Foundation
 import HostwrightCore
 import HostwrightDaemonCore
+import HostwrightManifest
 import HostwrightReconciler
 import HostwrightState
 
@@ -15,6 +16,7 @@ public struct UnattendedLifecycleReconciler: DaemonReconciliationDriving {
     private let makeDriver: @Sendable (
         LifecycleCLIOptions
     ) -> any LifecycleCommandDriving
+    private let now: @Sendable () -> Date
 
     public init(environment: CLIEnvironment = .live) {
         self.readManifest = { path in
@@ -24,6 +26,7 @@ public struct UnattendedLifecycleReconciler: DaemonReconciliationDriving {
         self.makeDriver = { options in
             LifecycleLiveDriver(environment: environment, options: options)
         }
+        self.now = Date.init
     }
 
     init(
@@ -35,7 +38,8 @@ public struct UnattendedLifecycleReconciler: DaemonReconciliationDriving {
         ) throws -> DaemonConfigurationSnapshot)? = nil,
         makeDriver: @escaping @Sendable (
             LifecycleCLIOptions
-        ) -> any LifecycleCommandDriving
+        ) -> any LifecycleCommandDriving,
+        now: @escaping @Sendable () -> Date = Date.init
     ) {
         self.readManifest = readManifest
         self.readConfiguration = readConfiguration ?? { path, kind, expected in
@@ -61,6 +65,7 @@ public struct UnattendedLifecycleReconciler: DaemonReconciliationDriving {
             return DaemonConfigurationSnapshot(target: target, text: text)
         }
         self.makeDriver = makeDriver
+        self.now = now
     }
 
     public func reconcile(
@@ -152,6 +157,7 @@ public struct UnattendedLifecycleReconciler: DaemonReconciliationDriving {
             preparation: preparation
         )
         try requireExpectedConfiguration(request)
+        try requireMaintenanceAdmission(request)
         try Task.checkCancellation()
         let result: LifecycleSagaExecutionResult
         do {
@@ -279,6 +285,109 @@ public struct UnattendedLifecycleReconciler: DaemonReconciliationDriving {
                 throw HostwrightDiagnostic(
                     code: .confirmationMismatch,
                     message: "A watched daemon configuration target changed during unattended reconciliation. A fresh level-triggered iteration is required; no stale plan was admitted."
+                )
+            }
+        }
+    }
+
+    private func requireMaintenanceAdmission(
+        _ request: DaemonReconciliationRequest
+    ) throws {
+        guard let admission = request.maintenanceAdmission else { return }
+        let manifestText = try readManifest(request.manifestPath)
+        let manifest = try ManifestValidator.validated(manifestText)
+        guard let policy = manifest.maintenance,
+              MaintenanceWindowEvaluator.policySHA256(policy) == admission.policySHA256 else {
+            throw HostwrightDiagnostic(
+                code: .confirmationMismatch,
+                message: "The maintenance policy changed before lifecycle execution. No stale admission was used."
+            )
+        }
+        let store = SQLiteStateStore(path: request.stateDatabasePath)
+        if admission.reason == MaintenanceAdmissionReason.safetyRecovery.rawValue {
+            guard try store.operationGroups.loadAll().contains(where: {
+                $0.projectID == request.projectID && $0.status == .active
+            }) else {
+                throw HostwrightDiagnostic(
+                    code: .confirmationMismatch,
+                    message: "The exact durable recovery group is no longer active. A fresh maintenance decision is required."
+                )
+            }
+            return
+        }
+        let latest = try store.maintenanceDeferrals.latest(projectID: request.projectID)
+        if admission.reason == MaintenanceAdmissionReason.emergencyOverride.rawValue {
+            guard let latest,
+                  latest.state == .overrideAuthorized,
+                  latest.confirmationToken == admission.confirmationToken,
+                  latest.planSHA256 == admission.reconciliationPlanSHA256,
+                  latest.policySHA256 == admission.policySHA256,
+                  latest.actionClasses.map(\.rawValue) == admission.actionClasses else {
+                throw HostwrightDiagnostic(
+                    code: .confirmationMismatch,
+                    message: "The exact emergency maintenance override is absent, cancelled, consumed, or stale. No mutation was attempted."
+                )
+            }
+            let decision = MaintenanceWindowEvaluator.evaluate(
+                policy: policy,
+                actions: latest.actionClasses,
+                now: now(),
+                deferredAt: ISO8601DateFormatter().date(from: latest.firstDeferredAt),
+                emergencyOverrideAuthorized: true
+            )
+            guard decision.admitted, decision.reason == .emergencyOverride else {
+                throw HostwrightDiagnostic(
+                    code: .confirmationMismatch,
+                    message: "The emergency maintenance override reached its hard deferral deadline. A stale plan was not executed."
+                )
+            }
+            return
+        }
+        guard admission.reason == MaintenanceAdmissionReason.activeWindow.rawValue,
+              let startsAt = admission.windowStartsAt,
+              let endsAt = admission.windowEndsAt,
+              let start = ISO8601DateFormatter().date(from: startsAt),
+              let end = ISO8601DateFormatter().date(from: endsAt) else {
+            throw HostwrightDiagnostic(code: .confirmationMismatch, message: "Maintenance admission is incomplete.")
+        }
+        let actionClasses = admission.actionClasses.compactMap(
+            HostwrightMaintenanceActionClass.init(rawValue:)
+        )
+        guard actionClasses.count == admission.actionClasses.count else {
+            throw HostwrightDiagnostic(code: .confirmationMismatch, message: "Maintenance admission actions are invalid.")
+        }
+        let pending = admission.confirmationToken.flatMap { token in
+            latest?.confirmationToken == token ? latest : nil
+        }
+        let instant = now()
+        let decision = MaintenanceWindowEvaluator.evaluate(
+            policy: policy,
+            actions: actionClasses,
+            now: instant,
+            deferredAt: pending.flatMap { ISO8601DateFormatter().date(from: $0.firstDeferredAt) },
+            cancelled: pending?.state == .cancelled
+        )
+        guard instant >= start, instant < end,
+              decision.admitted,
+              decision.reason == .activeWindow,
+              decision.activeWindow?.windowID == admission.windowID,
+              decision.activeWindow?.startsAt == startsAt,
+              decision.activeWindow?.endsAt == endsAt else {
+            throw HostwrightDiagnostic(
+                code: .confirmationMismatch,
+                message: "The admitted maintenance window closed, expired, or changed before the runtime effect boundary. No mutation was attempted."
+            )
+        }
+        if let token = admission.confirmationToken {
+            guard let latest,
+                  latest.confirmationToken == token,
+                  latest.state == .deferred,
+                  latest.planSHA256 == admission.reconciliationPlanSHA256,
+                  latest.policySHA256 == admission.policySHA256,
+                  latest.actionClasses.map(\.rawValue) == admission.actionClasses else {
+                throw HostwrightDiagnostic(
+                    code: .confirmationMismatch,
+                    message: "The pending maintenance plan was cancelled, superseded, or changed before execution."
                 )
             }
         }

@@ -5,10 +5,184 @@ import XCTest
 @testable import HostwrightDaemonCore
 @testable import HostwrightCore
 @testable import HostwrightManifest
+@testable import HostwrightReconciler
 @testable import HostwrightRuntime
 @testable import HostwrightState
 
 final class HostwrightDaemonCoreTests: XCTestCase {
+    func testMaintenanceClassifiesEveryUnattendedUpdateDriftBeforeLifecycleAdmission() {
+        let identity = RuntimeServiceIdentity(projectName: "demo", serviceName: "api")
+        let plan = ReconciliationPlan(
+            projectName: "demo",
+            observationConnected: true,
+            issues: [],
+            drift: [],
+            actions: [
+                PlannedAction(
+                    kind: .replaceForImageDrift,
+                    identity: identity,
+                    resourceIdentifier: identity.managedResourceIdentifier,
+                    reason: "image",
+                    driftKind: .imageMismatch
+                ),
+                PlannedAction(
+                    kind: .reconcilePortDrift,
+                    identity: identity,
+                    resourceIdentifier: identity.managedResourceIdentifier,
+                    reason: "port",
+                    driftKind: .portMismatch
+                ),
+                PlannedAction(
+                    kind: .reconcileMountDrift,
+                    identity: identity,
+                    resourceIdentifier: identity.managedResourceIdentifier,
+                    reason: "mount",
+                    driftKind: .mountMismatch
+                )
+            ]
+        )
+
+        XCTAssertEqual(DaemonLoopRunner.maintenanceActionClasses(plan: plan), [.update])
+    }
+
+    func testMaintenanceAdmissionBindingIsVersionedAndStrict() throws {
+        let binding = try DaemonMaintenanceAdmission(
+            reconciliationPlanSHA256: String(repeating: "a", count: 64),
+            policySHA256: String(repeating: "b", count: 64),
+            actionClasses: ["create", "start"],
+            reason: "active-window",
+            confirmationToken: nil,
+            windowID: "weekly",
+            windowStartsAt: "2026-08-02T04:00:00Z",
+            windowEndsAt: "2026-08-02T05:00:00Z"
+        )
+        XCTAssertEqual(binding.schemaVersion, 1)
+        XCTAssertThrowsError(try DaemonMaintenanceAdmission(
+            reconciliationPlanSHA256: String(repeating: "a", count: 64),
+            policySHA256: String(repeating: "b", count: 64),
+            actionClasses: ["recovery"],
+            reason: "active-window",
+            confirmationToken: nil,
+            windowID: nil,
+            windowStartsAt: nil,
+            windowEndsAt: nil
+        ))
+        XCTAssertThrowsError(try DaemonMaintenanceAdmission(
+            reconciliationPlanSHA256: String(repeating: "a", count: 64),
+            policySHA256: String(repeating: "b", count: 64),
+            actionClasses: ["create"],
+            reason: "active-window",
+            confirmationToken: nil,
+            windowID: "weekly",
+            windowStartsAt: "2026-08-02T04:00:00.000Z",
+            windowEndsAt: "2026-08-02T05:00:00Z"
+        ))
+        XCTAssertThrowsError(try DaemonMaintenanceAdmission(
+            reconciliationPlanSHA256: String(repeating: "a", count: 64),
+            policySHA256: String(repeating: "b", count: 64),
+            actionClasses: ["update"],
+            reason: "safety-recovery",
+            confirmationToken: nil,
+            windowID: nil,
+            windowStartsAt: nil,
+            windowEndsAt: nil
+        ))
+    }
+
+    func testMaintenanceOutsideWindowPersistsDeferralWithoutCallingLifecycleDriver() async throws {
+        try await withTemporaryDirectory { directory in
+            let databasePath = directory.appendingPathComponent("state.sqlite").path
+            let driver = ScriptedDaemonReconciliationDriver()
+            let manifest = """
+            version: 2
+            project: demo
+            maintenance:
+              timezone: UTC
+              maximumDeferral: 3600s
+              windows:
+                - id: future
+                  actions:
+                    - create
+                  oneShot:
+                    startsAt: "2027-01-01T00:00:00Z"
+                    duration: 3600s
+            services:
+              api:
+                image: ghcr.io/example/api:latest
+            """
+            let runner = DaemonLoopRunner(
+                configuration: DaemonConfiguration(
+                    configPath: "hostwright.yaml",
+                    stateDatabasePath: databasePath,
+                    maxIterations: 1
+                ),
+                runtimeAdapter: CountingRuntimeAdapter(),
+                reconciliationDriver: driver,
+                clock: ManualDaemonClock(),
+                instanceLock: ScriptedDaemonLock(),
+                readConfig: { _ in manifest },
+                idGenerator: DeterministicIDs().next
+            )
+
+            let summary = try await runner.run()
+
+            XCTAssertEqual(summary.successfulIterations, 1)
+            XCTAssertTrue(driver.requests.isEmpty)
+            let store = SQLiteStateStore(path: databasePath)
+            let pending = try XCTUnwrap(store.maintenanceDeferrals.latest(projectID: "project-demo"))
+            XCTAssertEqual(pending.state, .deferred)
+            XCTAssertEqual(pending.actionClasses, [.create])
+            XCTAssertTrue(try store.events.loadAll().contains {
+                $0.type == DaemonReconciliationReasonCode.maintenanceDeferred.rawValue
+            })
+            XCTAssertEqual(try store.restartAttempts.loadProject("project-demo").count, 0)
+        }
+    }
+
+    func testMaintenanceActiveWindowPassesExactAdmissionToLifecycleDriver() async throws {
+        try await withTemporaryDirectory { directory in
+            let databasePath = directory.appendingPathComponent("state.sqlite").path
+            let driver = ScriptedDaemonReconciliationDriver()
+            let manifest = """
+            version: 2
+            project: demo
+            maintenance:
+              timezone: UTC
+              windows:
+                - id: live
+                  actions:
+                    - create
+                  oneShot:
+                    startsAt: "2026-07-07T00:00:00Z"
+                    duration: 3600s
+            services:
+              api:
+                image: ghcr.io/example/api:latest
+            """
+            let runner = DaemonLoopRunner(
+                configuration: DaemonConfiguration(
+                    configPath: "hostwright.yaml",
+                    stateDatabasePath: databasePath,
+                    maxIterations: 1
+                ),
+                runtimeAdapter: CountingRuntimeAdapter(),
+                reconciliationDriver: driver,
+                clock: ManualDaemonClock(),
+                instanceLock: ScriptedDaemonLock(),
+                readConfig: { _ in manifest },
+                idGenerator: DeterministicIDs().next
+            )
+
+            _ = try await runner.run()
+
+            let request = try XCTUnwrap(driver.requests.first)
+            let binding = try XCTUnwrap(request.maintenanceAdmission)
+            XCTAssertEqual(binding.reason, "active-window")
+            XCTAssertEqual(binding.actionClasses, ["create"])
+            XCTAssertEqual(binding.windowID, "live")
+        }
+    }
+
     func testUnattendedReconciliationContractIsVersionedAndBounded() throws {
         let request = try DaemonReconciliationRequest(
             manifestPath: "/private/tmp/hostwright.yaml",

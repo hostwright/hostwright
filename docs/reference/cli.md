@@ -78,6 +78,10 @@ hostwright plan [path] [--output text|json] [--team-profile <path>]
 hostwright status [path] [--state-db <path>] [--output text|json] [--runtime-provider auto|apple-cli|containerization]
 hostwright restart-budget status [--project <project-id>] [--state-db <path>] [--output text|json]
 hostwright restart-budget release --project <project-id> --service <name> --confirm-hold <sha256> [--state-db <path>] [--output text|json]
+hostwright maintenance preview <manifest> --action <create|start|restart|update|remove>... [--at <RFC3339-UTC>] [--output text|json]
+hostwright maintenance status [--project <project-id>] [--state-db <path>] [--output text|json]
+hostwright maintenance cancel --project <project-id> --confirm-deferral <sha256> [--state-db <path>] [--output text|json]
+hostwright maintenance override --project <project-id> --confirm-deferral <sha256> --reason <text> [--state-db <path>] [--output text|json]
 hostwright apply [path] [--state-db <path>] --confirm-plan <hash> [--runtime-provider auto|apple-cli|containerization] [--team-profile <path> --approval-record <path>]
 hostwright up [path] [--service <name>] [--state-db <path>] (--dry-run | --confirm-plan <hash>) [--runtime-provider auto|apple-cli|containerization] [--timeout <seconds>] [--parallelism <1-32>] [--output text|json]
 hostwright down [path] [--service <name>] [--state-db <path>] (--dry-run | --confirm-plan <hash>) [--runtime-provider auto|apple-cli|containerization] [--timeout <seconds>] [--parallelism <1-32>] [--output text|json]
@@ -124,7 +128,7 @@ hostwright-dist help
 
 Text output is the default for `hostwright` commands. Installed-lifecycle `hostwright-dist` commands require `--output json`; release and developer-evidence commands retain their documented text/report output.
 
-`capabilities`, `runtime providers`, `runtime migrate`, `paths`, `restart-budget`, every `state`, `secret`, `registry`, and `image` subcommand, `migrate preview`, `import-stack`, `plan`, `status`, every lifecycle command, non-TTY interactive operations, `events`, `recovery`, `extension check`, and `doctor` accept JSON output where shown above. JSON streaming uses bounded NDJSON frames with base64 payloads. Interactive TTY mode and JSON mode are mutually exclusive. JSON output does not weaken mutation gates.
+`capabilities`, `runtime providers`, `runtime migrate`, `paths`, `restart-budget`, `maintenance`, every `state`, `secret`, `registry`, and `image` subcommand, `migrate preview`, `import-stack`, `plan`, `status`, every lifecycle command, non-TTY interactive operations, `events`, `recovery`, `extension check`, and `doctor` accept JSON output where shown above. JSON streaming uses bounded NDJSON frames with base64 payloads. Interactive TTY mode and JSON mode are mutually exclusive. JSON output does not weaken mutation gates.
 
 When JSON mode is requested and the CLI can classify the failure, stderr uses this envelope:
 
@@ -554,6 +558,14 @@ HW-RUNTIME-001: logs requires an observed Hostwright-managed service.
 `restart-budget status` reads schema-v17 workload/project budget state without observing runtime, creating state, or migrating a missing database. Optional `--project` uses the exact persisted `project-*` identity. Text and JSON include workload status, reason class, attempts, rolling windows, priority, backoff, policy digest, release generation, and the current hold token when one exists.
 
 `restart-budget release` requires exact `--project`, Manifest service name, and lowercase SHA-256 `--confirm-hold`. It atomically resets only the matching held workload, increments its release generation, and records append-only manual-release history plus `restart.policy.manual-release`. A stale token or changed workload generation returns confirmation mismatch and changes nothing. Release never starts, restarts, or otherwise touches runtime; the daemon must re-observe on its next level-triggered iteration.
+
+## `hostwright maintenance ...`
+
+`maintenance preview` securely parses and validates the named Manifest v2 file, then evaluates one or more unique elective `--action` values at the current time or an optional canonical UTC `--at`. It is read-only: it does not create or open state and reports the active or next applicable window plus the exact policy digest.
+
+`maintenance status` reads the latest append-only schema-v17 deferral state for one exact project or all projects. A deferred record reports its action classes, plan and policy digests, hard deadline, state, and exact confirmation token.
+
+`maintenance cancel` atomically cancels only the current matching deferred or override-authorized record. `maintenance override` atomically authorizes only the current matching deferred record and requires a bounded redacted reason. Both require the exact project and `--confirm-deferral` SHA-256; stale, superseded, admitted, failed, or mismatched input changes nothing. Neither command touches runtime. The daemon re-observes and revalidates the exact binding immediately before any admitted lifecycle effect.
 
 ## `hostwright events [--state-db <path>] [--project <name>] [--type <event>] [--service <name>] [--severity info|warning|error] [--limit <n>] [--sort asc|desc] [--output text|json]`
 

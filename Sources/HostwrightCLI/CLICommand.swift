@@ -102,6 +102,29 @@ public struct RestartBudgetCLIOptions: Equatable, Sendable {
     }
 }
 
+public enum MaintenanceCLIAction: Equatable, Sendable {
+    case preview(manifestPath: String, actions: [String], at: String?)
+    case status(projectID: String?)
+    case cancel(projectID: String, confirmationToken: String)
+    case override(projectID: String, confirmationToken: String, reason: String)
+}
+
+public struct MaintenanceCLIOptions: Equatable, Sendable {
+    public let action: MaintenanceCLIAction
+    public let stateDatabasePath: String?
+    public let output: CLIOutputFormat
+
+    public init(
+        action: MaintenanceCLIAction,
+        stateDatabasePath: String?,
+        output: CLIOutputFormat
+    ) {
+        self.action = action
+        self.stateDatabasePath = stateDatabasePath
+        self.output = output
+    }
+}
+
 public enum CLICommand: Equatable, Sendable {
     case version
     case capabilities(output: CLIOutputFormat)
@@ -115,6 +138,7 @@ public enum CLICommand: Equatable, Sendable {
     case volume(options: StorageCLIOptions)
     case daemon(options: DaemonCLIOptions)
     case restartBudget(options: RestartBudgetCLIOptions)
+    case maintenance(options: MaintenanceCLIOptions)
     case migrateManifestPreview(path: String, output: CLIOutputFormat)
     case initManifest
     case importStack(path: String, output: CLIOutputFormat, teamProfilePath: String?)
@@ -183,6 +207,8 @@ public enum CLICommand: Equatable, Sendable {
             return try daemonCommand(arguments: arguments)
         case "restart-budget":
             return try restartBudgetCommand(arguments: arguments)
+        case "maintenance":
+            return try maintenanceCommand(arguments: arguments)
         case "migrate":
             return try migrateCommand(arguments: arguments)
         case "init":
@@ -409,6 +435,117 @@ public enum CLICommand: Equatable, Sendable {
                 output: output
             )
         )
+    }
+
+    private static func maintenanceCommand(arguments: [String]) throws -> CLICommand {
+        guard arguments.count >= 2,
+              ["preview", "status", "cancel", "override"].contains(arguments[1]) else {
+            throw CLIUsageError("maintenance requires preview, status, cancel, or override.")
+        }
+        let verb = arguments[1]
+        var manifestPath: String?
+        var actions: [String] = []
+        var at: String?
+        var projectID: String?
+        var confirmationToken: String?
+        var reason: String?
+        var stateDatabasePath: String?
+        var output = CLIOutputFormat.text
+        var outputSelected = false
+        var index = 2
+        while index < arguments.count {
+            let argument = arguments[index]
+            switch argument {
+            case "--action", "--at", "--project", "--confirm-deferral", "--reason", "--state-db", "--output":
+                guard index + 1 < arguments.count else {
+                    throw CLIUsageError("maintenance requires one value after \(argument).")
+                }
+                let value = arguments[index + 1]
+                switch argument {
+                case "--action": actions.append(value)
+                case "--at":
+                    guard at == nil else { throw CLIUsageError("maintenance accepts --at once.") }
+                    at = value
+                case "--project":
+                    guard projectID == nil else { throw CLIUsageError("maintenance accepts --project once.") }
+                    projectID = value
+                case "--confirm-deferral":
+                    guard confirmationToken == nil else { throw CLIUsageError("maintenance accepts --confirm-deferral once.") }
+                    confirmationToken = value
+                case "--reason":
+                    guard reason == nil else { throw CLIUsageError("maintenance accepts --reason once.") }
+                    reason = value
+                case "--state-db":
+                    guard stateDatabasePath == nil else { throw CLIUsageError("maintenance accepts --state-db once.") }
+                    stateDatabasePath = value
+                case "--output":
+                    guard !outputSelected, let parsed = CLIOutputFormat(rawValue: value) else {
+                        throw CLIUsageError("maintenance --output requires text or json once.")
+                    }
+                    output = parsed
+                    outputSelected = true
+                default: break
+                }
+                index += 2
+            case "--json":
+                guard !outputSelected else { throw CLIUsageError("maintenance accepts one output selector.") }
+                output = .json
+                outputSelected = true
+                index += 1
+            default:
+                guard verb == "preview", manifestPath == nil, !argument.hasPrefix("-") else {
+                    throw CLIUsageError("Unsupported maintenance option '\(argument)'.")
+                }
+                manifestPath = argument
+                index += 1
+            }
+        }
+        if let projectID,
+           projectID.range(of: "^project-[A-Za-z0-9](?:[A-Za-z0-9._-]{0,126}[A-Za-z0-9])?$", options: .regularExpression) == nil {
+            throw CLIUsageError("maintenance --project requires an exact bounded project ID.")
+        }
+        if let confirmationToken,
+           confirmationToken.range(of: "^[a-f0-9]{64}$", options: .regularExpression) == nil {
+            throw CLIUsageError("maintenance --confirm-deferral requires an exact SHA-256 token.")
+        }
+        let action: MaintenanceCLIAction
+        switch verb {
+        case "preview":
+            guard projectID == nil, confirmationToken == nil, reason == nil,
+                  let manifestPath, !actions.isEmpty,
+                  Set(actions).count == actions.count,
+                  actions.allSatisfy({ ["create", "start", "restart", "update", "remove"].contains($0) }) else {
+                throw CLIUsageError("maintenance preview requires a manifest and one or more unique elective --action values.")
+            }
+            if let at {
+                let formatter = ISO8601DateFormatter()
+                guard let date = formatter.date(from: at), formatter.string(from: date) == at else {
+                    throw CLIUsageError("maintenance preview --at requires canonical RFC3339 UTC.")
+                }
+            }
+            action = .preview(manifestPath: manifestPath, actions: actions.sorted(), at: at)
+        case "status":
+            guard manifestPath == nil, actions.isEmpty, at == nil, confirmationToken == nil, reason == nil else {
+                throw CLIUsageError("maintenance status accepts only optional --project, state, and output selectors.")
+            }
+            action = .status(projectID: projectID)
+        case "cancel":
+            guard manifestPath == nil, actions.isEmpty, at == nil, reason == nil,
+                  let projectID, let confirmationToken else {
+                throw CLIUsageError("maintenance cancel requires exact --project and --confirm-deferral values.")
+            }
+            action = .cancel(projectID: projectID, confirmationToken: confirmationToken)
+        default:
+            guard manifestPath == nil, actions.isEmpty, at == nil,
+                  let projectID, let confirmationToken, let reason,
+                  !reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  reason.utf8.count <= 512,
+                  reason.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) }) else {
+                throw CLIUsageError("maintenance override requires exact --project, --confirm-deferral, and bounded --reason values.")
+            }
+            action = .override(projectID: projectID, confirmationToken: confirmationToken, reason: reason)
+        }
+        return .maintenance(options: MaintenanceCLIOptions(action: action, stateDatabasePath: stateDatabasePath, output: output))
     }
 
     private static func capabilitiesCommand(arguments: [String]) throws -> CLICommand {

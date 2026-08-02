@@ -1945,7 +1945,8 @@ final class HostwrightManifestTests: XCTestCase {
             [
                 "version", "project", "imagePolicy", "imageTrust", "imageSBOM",
                 "imageVulnerability", "imageProvenance", "volumes", "networks",
-                "certificates", "ingress", "tunnels", "services"
+                "certificates", "ingress", "tunnels", "restartBudget",
+                "maintenance", "services"
             ]
         )
         let required = try XCTUnwrap(schemaJSON["required"] as? [String])
@@ -1964,6 +1965,8 @@ final class HostwrightManifestTests: XCTestCase {
         XCTAssertEqual(imageVulnerability["$ref"] as? String, "#/$defs/imageVulnerability")
         let imageProvenance = try XCTUnwrap(properties["imageProvenance"] as? [String: Any])
         XCTAssertEqual(imageProvenance["$ref"] as? String, "#/$defs/imageProvenance")
+        let maintenanceRef = try XCTUnwrap(properties["maintenance"] as? [String: Any])
+        XCTAssertEqual(maintenanceRef["$ref"] as? String, "#/$defs/maintenance")
         let volumes = try XCTUnwrap(properties["volumes"] as? [String: Any])
         XCTAssertEqual(volumes["$ref"] as? String, "#/$defs/volumeDeclarations")
         let services = try XCTUnwrap(properties["services"] as? [String: Any])
@@ -2386,6 +2389,29 @@ final class HostwrightManifestTests: XCTestCase {
         XCTAssertEqual((restartProperties["maxAttempts"] as? [String: Any])?["maximum"] as? Int, 100)
         let restartBudget = try XCTUnwrap(definitions["restartBudget"] as? [String: Any])
         XCTAssertEqual(restartBudget["additionalProperties"] as? Bool, false)
+        let maintenance = try XCTUnwrap(definitions["maintenance"] as? [String: Any])
+        XCTAssertEqual(maintenance["required"] as? [String], ["timezone", "windows"])
+        XCTAssertEqual(maintenance["additionalProperties"] as? Bool, false)
+        let maintenanceProperties = try XCTUnwrap(maintenance["properties"] as? [String: Any])
+        XCTAssertEqual(Set(maintenanceProperties.keys), ["timezone", "maximumDeferral", "windows"])
+        XCTAssertEqual((maintenanceProperties["windows"] as? [String: Any])?["maxItems"] as? Int, 64)
+        let maintenanceWindow = try XCTUnwrap(definitions["maintenanceWindow"] as? [String: Any])
+        XCTAssertEqual(maintenanceWindow["required"] as? [String], ["id", "actions"])
+        XCTAssertEqual(maintenanceWindow["additionalProperties"] as? Bool, false)
+        XCTAssertEqual((maintenanceWindow["oneOf"] as? [[String: Any]])?.count, 2)
+        let maintenanceWindowProperties = try XCTUnwrap(maintenanceWindow["properties"] as? [String: Any])
+        XCTAssertEqual(
+            ((maintenanceWindowProperties["actions"] as? [String: Any])?["items"] as? [String: Any])?["enum"] as? [String],
+            ["create", "start", "restart", "update", "remove"]
+        )
+        let recurringMaintenanceWindow = try XCTUnwrap(
+            definitions["recurringMaintenanceWindow"] as? [String: Any]
+        )
+        XCTAssertEqual(recurringMaintenanceWindow["additionalProperties"] as? Bool, false)
+        let oneShotMaintenanceWindow = try XCTUnwrap(
+            definitions["oneShotMaintenanceWindow"] as? [String: Any]
+        )
+        XCTAssertEqual(oneShotMaintenanceWindow["additionalProperties"] as? Bool, false)
 
         let mount = try XCTUnwrap(definitions["mount"] as? [String: Any])
         XCTAssertEqual((mount["oneOf"] as? [[String: Any]])?.count, 3)

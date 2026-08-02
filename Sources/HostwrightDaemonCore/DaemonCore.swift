@@ -2,6 +2,7 @@ import CryptoKit
 import Foundation
 import HostwrightCore
 import HostwrightManifest
+import HostwrightObservability
 import HostwrightReconciler
 import HostwrightRuntime
 import HostwrightState
@@ -355,12 +356,62 @@ public struct DaemonLoopRunner {
         )
     }
 
-    private enum IterationResult {
+    private enum IterationResult: Equatable {
         case success
         case failure
     }
 
     private func runIteration(iteration: Int, store: SQLiteStateStore) async throws -> IterationResult {
+        let traceID = HostwrightResourceUUID.legacy(
+            kind: "daemon-trace",
+            identifier: idGenerator("trace-daemon-\(iteration)")
+        )
+        guard let session = try? HostwrightTraceSession(
+            traceID: traceID,
+            processCorrelationID: HostwrightLogContext.correlationID ?? traceID,
+            selected: HostwrightTraceSession.deterministicSelection(traceID: traceID)
+        ) else {
+            return try await runIterationUntraced(iteration: iteration, store: store)
+        }
+        session.attach(StateTraceSink(store: store))
+        return try await HostwrightTraceContext.withSession(session) {
+            let root = session.start(
+                .daemonReconciliation,
+                attributes: [
+                    try? HostwrightTraceAttribute(key: .component, value: "daemon"),
+                    try? HostwrightTraceAttribute(key: .daemonIteration, value: String(iteration)),
+                    try? HostwrightTraceAttribute(key: .mode, value: configuration.mode.rawValue)
+                ].compactMap { $0 }
+            )
+            return try await HostwrightTraceContext.withSpan(root) {
+                do {
+                    let result = try await runIterationUntraced(iteration: iteration, store: store)
+                    let status: HostwrightTraceSpanStatus = result == .success ? .succeeded : .failed
+                    let sampling = status == .succeeded
+                        ? "deterministic-1-of-16"
+                        : "failure-override"
+                    _ = session.finish(
+                        root,
+                        status: status,
+                        attributes: session.rootCompletionAttributes(sampling: sampling)
+                    )
+                    session.complete(status: status)
+                    return result
+                } catch {
+                    let status: HostwrightTraceSpanStatus = error is CancellationError ? .cancelled : .failed
+                    _ = session.finish(
+                        root,
+                        status: status,
+                        attributes: session.rootCompletionAttributes(sampling: "failure-override")
+                    )
+                    session.complete(status: status)
+                    throw error
+                }
+            }
+        }
+    }
+
+    private func runIterationUntraced(iteration: Int, store: SQLiteStateStore) async throws -> IterationResult {
         let startedAt = clock.timestamp()
         var currentProjectID: String?
         var currentPlanHash = "unavailable"
@@ -397,16 +448,24 @@ public struct DaemonLoopRunner {
                     projectName: mapping.desiredState.projectName
                 )
             )
-            let observed = try await runtimeAdapter.observe(desiredState: observationDesiredState)
+            let observed = try await HostwrightTraceContext.withSpan(
+                .providerObserve,
+                attributes: [try? HostwrightTraceAttribute(key: .phase, value: "observe")]
+                    .compactMap { $0 }
+            ) {
+                try await runtimeAdapter.observe(desiredState: observationDesiredState)
+            }
             let adapterName = observed.adapterMetadata?.adapterName ?? "runtime-adapter"
 
-            let healthResults = try await runHealthChecks(
-                desiredState: mapping.desiredState,
-                observedState: observed,
-                store: store,
-                projectID: projectID,
-                timestamp: startedAt
-            )
+            let healthResults = try await HostwrightTraceContext.withSpan(.healthEvaluate) {
+                try await runHealthChecks(
+                    desiredState: mapping.desiredState,
+                    observedState: observed,
+                    store: store,
+                    projectID: projectID,
+                    timestamp: startedAt
+                )
+            }
             let observedWithHealth = observedState(observed, applying: healthResults)
             var restartPolicyRecords = try restartPolicyStates(
                 manifest: manifest,
@@ -428,12 +487,14 @@ public struct DaemonLoopRunner {
                 },
                 uniquingKeysWith: { first, _ in first }
             )
-            let plan = ReconciliationPlanner().plan(
-                manifest: manifest,
-                observedState: observedWithHealth,
-                restartPolicyStates: restartPolicyStateMap,
-                currentTimestamp: startedAt
-            )
+            let plan = HostwrightTraceContext.withSpan(.planCompile) {
+                ReconciliationPlanner().plan(
+                    manifest: manifest,
+                    observedState: observedWithHealth,
+                    restartPolicyStates: restartPolicyStateMap,
+                    currentTimestamp: startedAt
+                )
+            }
             currentPlanHash = plan.planHash
             guard !plan.includesBlockers else {
                 throw HostwrightDiagnostic(

@@ -235,6 +235,7 @@ let package = Package(
                 "HostwrightHealth",
                 "HostwrightManifest",
                 "HostwrightNetworking",
+                "HostwrightObservability",
                 "HostwrightPolicy",
                 "HostwrightRuntime",
                 "HostwrightSecrets",

@@ -1,4 +1,5 @@
 import HostwrightCore
+import HostwrightObservability
 import HostwrightReconciler
 import HostwrightRuntime
 import HostwrightState
@@ -48,7 +49,9 @@ extension ApplyCommandRunner {
         let observed: ObservedRuntimeState
         do {
             observed = try waitForAsync {
-                try await adapter.observe(desiredState: desiredState)
+                try await HostwrightTraceContext.withSpan(.providerObserve) {
+                    try await adapter.observe(desiredState: desiredState)
+                }
             }
         } catch {
             return RuntimeMutationReobservation(recoveredEvent: nil, provedNoEffect: false)

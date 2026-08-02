@@ -21,6 +21,7 @@ Implemented:
 - desired manifest snapshot persistence
 - observed runtime snapshot persistence
 - event ledger
+- bounded schema-v1 trace spans in the event ledger with exact event/operation correlation
 - operation ledger records for mutation safety
 - operation statuses for recorded, succeeded, and failed apply/cleanup attempts
 - ownership records with exact resource/project UUIDs, generations, provider/controller identity, ownership proof, fencing token, deletion intent, finalizers, and the bound local mutation lease
@@ -85,6 +86,8 @@ Schema version 17 is the latest supported state schema. A database migrated by a
 Gate 12 adds no table or migration. Existing event rows project into schema-v1 stream records at read time. An opaque cursor binds the exact event identifier and SHA-256 of the stored redacted row, then resolves the row's current SQLite append position during each shared read lock. Retained cursors therefore survive authoritative `VACUUM`; deleted anchors become explicit retention gaps and modified anchors fail integrity. Cursor/watch reads do not create, migrate, repair, or compact state. See [Durable Events and Local Watches](../reference/events.md).
 
 Gate 13 also adds no table or migration. A schema-v1 metrics snapshot executes bounded aggregate queries inside one read transaction under the shared state fence, validates the fixed series catalog, and binds the result plus the physical source database SHA-256/bytes into `snapshotSHA256`. Metrics retain no independent samples: confirmed compaction affects future counters, histograms, summaries, and SLOs only through the authoritative source-row classes, while gauges reflect current schema-v17 rows. Explicit local export writes a separate operator-owned file and never changes state. See [Bounded Local Metrics and SLOs](../reference/metrics.md).
+
+Gate 14 also adds no table or migration. Schema-v1 trace spans use fixed type `trace.span.v1` and source `hostwright.trace` in `event_ledger`. The trace repository validates canonical UUID context, bounded hierarchy, closed attributes, immutable event/operation links, terminal roots, and a deterministic complete-trace hash. Trace rows retain under the independent `traces` class and are excluded from ordinary event/audit compaction selection. Explicit local export is consent-bound, operator-owned, and never changes state. See [Correlated Local Traces](../reference/traces.md).
 
 Each migration records a checksum in `schema_migrations`. Current builds accept the historical Phase 6 checksum for schema version 1 and record an algorithmic checksum for fresh migrations. If a known migration version has an unexpected checksum, Hostwright fails before reading or writing application records.
 

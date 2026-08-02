@@ -3,6 +3,7 @@ import Foundation
 import HostwrightCore
 import HostwrightManifest
 import HostwrightNetworking
+import HostwrightObservability
 import HostwrightReconciler
 import HostwrightRegistry
 import HostwrightRuntime
@@ -87,6 +88,7 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
             )
         )
         try store.migrate()
+        HostwrightTraceContext.session?.attach(StateTraceSink(store: store))
 
         let projectName = manifest.project ?? ""
         let projectID = "project-\(projectName)"

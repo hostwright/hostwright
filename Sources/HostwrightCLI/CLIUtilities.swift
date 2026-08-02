@@ -5,6 +5,7 @@ import HostwrightHealth
 import HostwrightImport
 import HostwrightManifest
 import HostwrightNetworking
+import HostwrightObservability
 import HostwrightPolicy
 import HostwrightReconciler
 import HostwrightRuntime
@@ -36,10 +37,16 @@ func hostwrightAcquireExactOperationMutationFence(
 func hostwrightWaitForAsync<T: Sendable>(_ operation: @escaping @Sendable () async throws -> T) throws -> T {
     let semaphore = DispatchSemaphore(value: 0)
     let box = CLIAsyncResultBox<T>()
+    let traceSession = HostwrightTraceContext.session
+    let traceSpan = HostwrightTraceContext.span
 
     Task.detached {
         do {
-            box.result = Result.success(try await operation())
+            box.result = Result.success(try await HostwrightTraceContext.withValues(
+                session: traceSession,
+                span: traceSpan,
+                operation: operation
+            ))
         } catch {
             box.result = Result.failure(error)
         }

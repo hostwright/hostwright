@@ -30,11 +30,18 @@ struct MetricsCommandRunner {
                 throw StateStoreError.operationCancelled(path: stateStoreConfiguration.databasePath)
             }
             let data = try canonicalData(snapshot)
-            let receipt = try MetricsExportWriter.write(
+            let written = try SecureLocalExportWriter.write(
                 data,
-                snapshotSHA256: snapshot.snapshotSHA256,
                 to: outputPath,
-                isCancelled: environment.metricsCancelled
+                maximumBytes: HostwrightTraceContract.maximumExportBytes,
+                isCancelled: environment.metricsCancelled,
+                unsafeError: HostwrightMetricsError.unsafeExportPath
+            )
+            let receipt = HostwrightMetricsExportReceipt(
+                snapshotSHA256: snapshot.snapshotSHA256,
+                outputPath: outputPath,
+                outputSHA256: written.outputSHA256,
+                outputBytes: written.outputBytes
             )
             return CLIRunResult(
                 standardOutput: options.output == .json
@@ -102,27 +109,34 @@ struct MetricsCommandRunner {
     }
 }
 
-private enum MetricsExportWriter {
+struct SecureLocalExportReceipt {
+    let outputSHA256: String
+    let outputBytes: UInt64
+}
+
+enum SecureLocalExportWriter {
     static func write(
         _ data: Data,
-        snapshotSHA256: String,
         to path: String,
-        isCancelled: () -> Bool
-    ) throws -> HostwrightMetricsExportReceipt {
+        maximumBytes: Int,
+        isCancelled: () -> Bool,
+        unsafeError: any Error
+    ) throws -> SecureLocalExportReceipt {
+        guard data.count <= maximumBytes else { throw unsafeError }
         guard path.hasPrefix("/"),
               URL(fileURLWithPath: path).standardizedFileURL.path == path else {
-            throw HostwrightMetricsError.unsafeExportPath
+            throw unsafeError
         }
         let parent = (path as NSString).deletingLastPathComponent
         let filename = (path as NSString).lastPathComponent
         guard !parent.isEmpty, !filename.isEmpty, filename != ".", filename != "..",
               filename.utf8.count <= 255,
               let resolved = realpath(parent, nil) else {
-            throw HostwrightMetricsError.unsafeExportPath
+            throw unsafeError
         }
         defer { free(resolved) }
         guard String(cString: resolved) == parent else {
-            throw HostwrightMetricsError.unsafeExportPath
+            throw unsafeError
         }
 
         let parentDescriptor = Darwin.open(
@@ -130,7 +144,7 @@ private enum MetricsExportWriter {
             O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC
         )
         guard parentDescriptor >= 0 else {
-            throw HostwrightMetricsError.unsafeExportPath
+            throw unsafeError
         }
         defer { Darwin.close(parentDescriptor) }
         var parentMetadata = stat()
@@ -138,12 +152,12 @@ private enum MetricsExportWriter {
               parentMetadata.st_mode & S_IFMT == S_IFDIR,
               parentMetadata.st_uid == geteuid(),
               parentMetadata.st_mode & 0o077 == 0 else {
-            throw HostwrightMetricsError.unsafeExportPath
+            throw unsafeError
         }
         try HostwrightLocalFilesystemPolicy.validateNoAccessGrantingACL(
             fileDescriptor: parentDescriptor,
             path: parent,
-            role: "metrics export parent"
+            role: "local export parent"
         )
         guard !isCancelled() else {
             throw StateStoreError.operationCancelled(path: path)
@@ -158,7 +172,7 @@ private enum MetricsExportWriter {
             )
         }
         guard descriptor >= 0 else {
-            throw HostwrightMetricsError.unsafeExportPath
+            throw unsafeError
         }
         var created = stat()
         guard fstat(descriptor, &created) == 0,
@@ -168,7 +182,7 @@ private enum MetricsExportWriter {
               created.st_mode & 0o7777 == S_IRUSR | S_IWUSR else {
             Darwin.close(descriptor)
             filename.withCString { _ = Darwin.unlinkat(parentDescriptor, $0, 0) }
-            throw HostwrightMetricsError.unsafeExportPath
+            throw unsafeError
         }
 
         var completed = false
@@ -217,7 +231,7 @@ private enum MetricsExportWriter {
               finalMetadata.st_uid == geteuid(),
               finalMetadata.st_mode & 0o7777 == S_IRUSR | S_IWUSR,
               finalMetadata.st_size == data.count else {
-            throw HostwrightMetricsError.unsafeExportPath
+            throw unsafeError
         }
 
         var observed = Data(count: data.count)
@@ -238,7 +252,7 @@ private enum MetricsExportWriter {
             offset += readCount
         }
         guard observed == data else {
-            throw HostwrightMetricsError.unsafeExportPath
+            throw unsafeError
         }
         var pathMetadata = stat()
         let pathMatches = filename.withCString {
@@ -249,7 +263,7 @@ private enum MetricsExportWriter {
               pathMetadata.st_ino == created.st_ino,
               pathMetadata.st_nlink == 1,
               Darwin.fsync(parentDescriptor) == 0 else {
-            throw HostwrightMetricsError.unsafeExportPath
+            throw unsafeError
         }
         guard !isCancelled() else {
             throw StateStoreError.operationCancelled(path: path)
@@ -258,9 +272,7 @@ private enum MetricsExportWriter {
             .map { String(format: "%02x", $0) }
             .joined()
         completed = true
-        return HostwrightMetricsExportReceipt(
-            snapshotSHA256: snapshotSHA256,
-            outputPath: path,
+        return SecureLocalExportReceipt(
             outputSHA256: outputSHA256,
             outputBytes: UInt64(data.count)
         )

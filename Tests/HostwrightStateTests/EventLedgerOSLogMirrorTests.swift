@@ -4,6 +4,33 @@ import HostwrightState
 import XCTest
 
 final class EventLedgerOSLogMirrorTests: XCTestCase {
+    func testTraceSpansRemainDurableWithoutRecursiveOSLogMirroring() throws {
+        try withStore { store in
+            let sink = EventLogCapture()
+            let span = try HostwrightTraceSpanRecord(
+                traceID: "11111111-1111-4111-8111-111111111111",
+                spanID: "22222222-2222-4222-8222-222222222222",
+                parentSpanID: nil,
+                processCorrelationID: "33333333-3333-4333-8333-333333333333",
+                name: .cliRequest,
+                status: .failed,
+                startedAt: "2026-08-02T00:00:00Z",
+                endedAt: "2026-08-02T00:00:01Z",
+                durationMilliseconds: 1_000,
+                depth: 0
+            )
+            let emission = HostwrightLogContext.withValues(
+                sink: sink,
+                correlationID: "33333333-3333-4333-8333-333333333333"
+            ) {
+                StateTraceSink(store: store).record(span)
+            }
+            XCTAssertEqual(emission.status, .persisted)
+            XCTAssertTrue(sink.records().isEmpty)
+            XCTAssertEqual(try store.events.loadAll().map(\.type), [HostwrightTraceContract.eventType])
+        }
+    }
+
     func testCommittedEventIsMirroredWithCorrelationWithoutMessageOrPayload() throws {
         try withStore { store in
             let sink = EventLogCapture()

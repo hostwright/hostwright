@@ -51,7 +51,59 @@ public enum HostwrightCLI {
             sink: environment.observabilitySink,
             correlationID: correlationID
         ) {
-            runObserved(arguments: arguments, environment: environment, correlationID: correlationID)
+            runTraced(arguments: arguments, environment: environment, correlationID: correlationID)
+        }
+    }
+
+    private static func runTraced(
+        arguments: [String],
+        environment: CLIEnvironment,
+        correlationID: String
+    ) -> CLIRunResult {
+        let command = observabilityCommand(arguments)
+        let alwaysSampledCommands = Set([
+            "apply", "cleanup", "daemon", "down", "recovery", "restart", "rm", "run", "start",
+            "stop", "up", "update"
+        ]).contains(command)
+        let traceAttributeCommands = Set([
+            "apply", "cleanup", "daemon", "down", "recovery", "restart", "rm", "up", "update"
+        ])
+        guard let session = try? HostwrightTraceSession(
+            traceID: correlationID,
+            processCorrelationID: correlationID,
+            selected: alwaysSampledCommands || HostwrightTraceSession.deterministicSelection(traceID: correlationID)
+        ) else {
+            return runObserved(arguments: arguments, environment: environment, correlationID: correlationID)
+        }
+        return HostwrightTraceContext.withSession(session) {
+            var attributes = [try? HostwrightTraceAttribute(key: .component, value: "cli")]
+                .compactMap { $0 }
+            if traceAttributeCommands.contains(command) {
+                if let commandAttribute = try? HostwrightTraceAttribute(key: .command, value: command) {
+                    attributes.append(commandAttribute)
+                }
+            }
+            let root = session.start(.cliRequest, attributes: attributes)
+            return HostwrightTraceContext.withSpan(root) {
+                let result = runObserved(
+                    arguments: arguments,
+                    environment: environment,
+                    correlationID: correlationID
+                )
+                let status: HostwrightTraceSpanStatus = result.exitCode == 0
+                    ? .succeeded
+                    : (result.exitCode == 130 ? .cancelled : .failed)
+                let sampling = status == .succeeded
+                    ? (alwaysSampledCommands ? "all" : "deterministic-1-of-16")
+                    : "failure-override"
+                _ = session.finish(
+                    root,
+                    status: status,
+                    attributes: session.rootCompletionAttributes(sampling: sampling)
+                )
+                session.complete(status: status)
+                return result
+            }
         }
     }
 
@@ -102,10 +154,11 @@ public enum HostwrightCLI {
 
     private static func observabilityCommand(_ arguments: [String]) -> String {
         let supported = Set([
-            "apply", "benchmark", "capabilities", "cleanup", "daemon", "diagnostics",
+            "apply", "benchmark", "capabilities", "cleanup", "daemon", "diagnostics", "down",
             "doctor", "events", "extension", "help", "image", "init", "interactive",
             "lifecycle", "logs", "metrics", "network", "paths", "plan", "recovery", "registry",
-            "observability", "runtime", "secret", "state", "status", "storage", "validate", "version"
+            "observability", "restart", "rm", "run", "runtime", "secret", "start", "state", "status",
+            "stop", "storage", "traces", "up", "update", "validate", "version"
         ])
         guard let first = arguments.first else { return "help" }
         let normalized = first.hasPrefix("--") ? String(first.dropFirst(2)) : first
@@ -294,6 +347,15 @@ public enum HostwrightCLI {
                 ),
                 environment: environment
             ).run()
+        case .traces(let options):
+            return try TraceCommandRunner(
+                options: options,
+                stateStoreConfiguration: try hostwrightStateStoreConfiguration(
+                    explicitPath: options.stateDatabasePath,
+                    environment: environment
+                ),
+                environment: environment
+            ).run()
         case .migrateManifestPreview(let path, let output):
             let source = try hostwrightReadManifestText(path: path, environment: environment)
             let preview = try ManifestMigrator.previewV2(source)
@@ -443,6 +505,8 @@ public enum HostwrightCLI {
       hostwright observability status [--json|--output text|json]
       hostwright metrics snapshot [--state-db <path>] [--output text|json]
       hostwright metrics export --output-path <absolute-new-path> --confirm-snapshot <sha256> [--state-db <path>] [--output text|json]
+      hostwright traces inspect [--trace-id <uuid>] [--limit <1-100>] [--state-db <path>] [--output text|json]
+      hostwright traces export --trace-id <uuid> --output-path <absolute-new-path> --confirm-trace <sha256> [--state-db <path>] [--output text|json]
       hostwright runtime providers [--json]
       hostwright runtime migrate [path] --to apple-cli|containerization --dry-run [--state-db <path>] [--json|--output text|json]
       hostwright runtime migrate [path] --to apple-cli|containerization --confirm-migration <token> [--state-db <path>] [--json|--output text|json]

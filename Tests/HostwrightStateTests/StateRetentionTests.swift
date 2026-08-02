@@ -1,9 +1,48 @@
 import Foundation
 import XCTest
+@testable import HostwrightObservability
 @testable import HostwrightRuntime
 @testable import HostwrightState
 
 final class StateRetentionTests: XCTestCase {
+    func testTraceRowsHaveAnExactIndependentRetentionClass() throws {
+        try withStore { store, _ in
+            let span = try HostwrightTraceSpanRecord(
+                traceID: "11111111-1111-4111-8111-111111111111",
+                spanID: "22222222-2222-4222-8222-222222222222",
+                parentSpanID: nil,
+                processCorrelationID: "33333333-3333-4333-8333-333333333333",
+                name: .cliRequest,
+                status: .succeeded,
+                startedAt: "2026-01-01T00:00:00Z",
+                endedAt: "2026-01-01T00:00:01Z",
+                durationMilliseconds: 1_000,
+                depth: 0,
+                attributes: [
+                    try HostwrightTraceAttribute(key: .sampling, value: "all"),
+                    try HostwrightTraceAttribute(key: .droppedSpans, value: "0")
+                ]
+            )
+            XCTAssertEqual(StateTraceSink(store: store).record(span).status, .persisted)
+            let service = try StateRetentionService(store: store)
+            let now = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-08-01T12:00:00Z"))
+            let plan = try service.compactionPlan(policy: policy(), at: now)
+            XCTAssertEqual(status(.traces, in: plan).currentRecords, 1)
+            XCTAssertEqual(status(.traces, in: plan).candidateRecords, 1)
+            XCTAssertEqual(status(.events, in: plan).currentRecords, 0)
+            let result = try service.compact(
+                policy: policy(),
+                confirmationToken: plan.confirmationToken,
+                at: now
+            )
+            XCTAssertEqual(result.deletedRecords[.traces], 1)
+            XCTAssertThrowsError(try store.traces.inspect(
+                traceID: "11111111-1111-4111-8111-111111111111",
+                limit: 1
+            ))
+        }
+    }
+
     func testPlanIsDeterministicAndPreservesHoldsRecoveryAndUnavailableProducers() throws {
         try withStore { store, _ in
             try appendEvent(id: "delete-event", timestamp: "2026-01-01T00:00:00Z", type: "runtime.changed", to: store)

@@ -1,6 +1,7 @@
 import Foundation
 import HostwrightCore
 import HostwrightNetworking
+import HostwrightObservability
 import HostwrightReconciler
 import HostwrightRuntime
 import HostwrightState
@@ -533,21 +534,25 @@ public struct LifecycleCommandRunner: Sendable {
                     "Lifecycle execution requires exactly one of dry-run or exact plan confirmation."
                 )
             }
-            let initialPreparation = try driver.prepare(options: options)
-            let initialCompiled = try compiler.compile(
-                options: options,
-                preparation: initialPreparation
-            )
+            let initialPreparation = try HostwrightTraceContext.withSpan(
+                .providerObserve,
+                attributes: [try? HostwrightTraceAttribute(key: .phase, value: "prepare")]
+                    .compactMap { $0 }
+            ) {
+                try driver.prepare(options: options)
+            }
+            let initialCompiled = try HostwrightTraceContext.withSpan(.planCompile) {
+                try compiler.compile(options: options, preparation: initialPreparation)
+            }
             let preparation = try LifecycleImageLockBinder.bind(
                 preparation: initialPreparation,
                 initialCompiled: initialCompiled,
                 options: options,
                 resolve: driver.localImageEvidence
             )
-            let compiled = try compiler.compile(
-                options: options,
-                preparation: preparation
-            )
+            let compiled = try HostwrightTraceContext.withSpan(.planCompile) {
+                try compiler.compile(options: options, preparation: preparation)
+            }
 
             if let provided = options.confirmationPlanSHA256,
                provided != compiled.plan.planSHA256 {
@@ -563,7 +568,13 @@ public struct LifecycleCommandRunner: Sendable {
                 )
             }
 
-            try driver.revalidate(compiled: compiled, preparation: preparation)
+            try HostwrightTraceContext.withSpan(
+                .healthEvaluate,
+                attributes: [try? HostwrightTraceAttribute(key: .phase, value: "verify")]
+                    .compactMap { $0 }
+            ) {
+                try driver.revalidate(compiled: compiled, preparation: preparation)
+            }
             let result = try driver.execute(
                 compiled: compiled,
                 preparation: preparation,

@@ -100,7 +100,7 @@ In a source checkout, replace `hostwright` with `swift run hostwright`. The [Man
 | `hostwright up`, `down`, `run`, `start`, `stop`, `restart`, `rm`, `update` | Execute plan-hash-gated lifecycle operations. `apply` routes to a confirmed `up` plan for compatibility. |
 | `hostwright exec`, `attach`, `copy`, `export`, `inspect`, `stats`, `logs` | Use provider-gated interactive, transfer, inspection, and streaming operations. |
 | `hostwright image`, `registry`, `secret`, `volume` | Manage provider images, registry authentication and OCI evidence, typed local secret references, and exact Hostwright-owned named-volume, snapshot, backup, quota, reclaim, and orphan workflows. |
-| `hostwright status`, `events`, `recovery`, `state`, `cleanup`, `doctor`, `diagnostics` | Observe workloads, inspect and maintain local state, recover fenced operations, and remove verified Hostwright-owned resources. |
+| `hostwright status`, `events`, `traces`, `recovery`, `state`, `cleanup`, `doctor`, `diagnostics` | Observe workloads, inspect correlated local evidence, maintain local state, recover fenced operations, and remove verified Hostwright-owned resources. |
 | `hostwright-control` | Accept one bounded local JSON request, return one JSON response, and exit. It opens no socket or HTTP listener. |
 | `hostwright daemon`, `hostwrightd` | Control the exact current-user `dev.hostwright.daemon` LaunchAgent or run the foreground loop. Both daemon modes level-trigger supported drift through the shared fenced lifecycle saga. |
 | `hostwright-dist` | Build, verify, install, upgrade, repair, roll back, and uninstall Hostwright distributions through explicit paths. |

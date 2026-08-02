@@ -60,6 +60,8 @@ public struct CLIEnvironment: @unchecked Sendable {
     public var eventWatchCancelled: () -> Bool
     public var metricsDate: @Sendable () -> Date
     public var metricsCancelled: () -> Bool
+    public var traceDate: @Sendable () -> Date
+    public var traceCancelled: () -> Bool
 
     public init(
         fileExists: @escaping (String) -> Bool,
@@ -149,7 +151,9 @@ public struct CLIEnvironment: @unchecked Sendable {
         },
         eventWatchCancelled: @escaping () -> Bool = { false },
         metricsDate: @escaping @Sendable () -> Date = Date.init,
-        metricsCancelled: @escaping () -> Bool = { false }
+        metricsCancelled: @escaping () -> Bool = { false },
+        traceDate: @escaping @Sendable () -> Date = Date.init,
+        traceCancelled: @escaping () -> Bool = { false }
     ) {
         self.fileExists = fileExists
         self.readTextFile = readTextFile
@@ -223,6 +227,8 @@ public struct CLIEnvironment: @unchecked Sendable {
         self.eventWatchCancelled = eventWatchCancelled
         self.metricsDate = metricsDate
         self.metricsCancelled = metricsCancelled
+        self.traceDate = traceDate
+        self.traceCancelled = traceCancelled
     }
 
     public static let live = CLIEnvironment(

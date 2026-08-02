@@ -5,11 +5,51 @@ import XCTest
 @testable import HostwrightDaemonCore
 @testable import HostwrightCore
 @testable import HostwrightManifest
+@testable import HostwrightObservability
 @testable import HostwrightReconciler
 @testable import HostwrightRuntime
 @testable import HostwrightState
 
 final class HostwrightDaemonCoreTests: XCTestCase {
+    func testEachDaemonIterationPersistsOneCompleteBoundedCorrelatedTrace() async throws {
+        try await withTemporaryDirectory { directory in
+            let databasePath = directory.appendingPathComponent("state.sqlite").path
+            let runner = DaemonLoopRunner(
+                configuration: DaemonConfiguration(
+                    configPath: "hostwright.yaml",
+                    stateDatabasePath: databasePath,
+                    maxIterations: 1
+                ),
+                runtimeAdapter: CountingRuntimeAdapter(),
+                reconciliationDriver: ScriptedDaemonReconciliationDriver(),
+                clock: ManualDaemonClock(),
+                instanceLock: ScriptedDaemonLock(),
+                readConfig: { _ in
+                    """
+                    version: 2
+                    project: demo
+                    services:
+                      api:
+                        image: ghcr.io/example/api:latest
+                    """
+                },
+                idGenerator: DeterministicIDs().next
+            )
+
+            let summary = try await runner.run()
+            XCTAssertEqual(summary.iterations, 1)
+            let page = try SQLiteStateStore(path: databasePath).traces.inspect(limit: 10)
+            XCTAssertEqual(page.retainedTraceCount, 1)
+            let trace = try XCTUnwrap(page.traces.first)
+            XCTAssertTrue(trace.complete)
+            XCTAssertTrue(trace.spans.contains { $0.name == .daemonReconciliation })
+            XCTAssertEqual(trace.status, summary.failedIterations == 0 ? .succeeded : .failed)
+            XCTAssertLessThanOrEqual(trace.spanCount, HostwrightTraceContract.maximumSpans)
+            XCTAssertFalse(trace.eventIDs.isEmpty)
+            XCTAssertFalse(trace.operationIDs.isEmpty)
+        }
+    }
+
     func testMaintenanceClassifiesEveryUnattendedUpdateDriftBeforeLifecycleAdmission() {
         let identity = RuntimeServiceIdentity(projectName: "demo", serviceName: "api")
         let plan = ReconciliationPlan(

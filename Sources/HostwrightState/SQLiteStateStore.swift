@@ -49,6 +49,10 @@ public struct SQLiteStateStore: StateStore {
         OperationLedger(store: self)
     }
 
+    public var traces: StateTraceService {
+        StateTraceService(store: self)
+    }
+
     public var operationGroups: OperationGroupRepository {
         OperationGroupRepository(store: self)
     }

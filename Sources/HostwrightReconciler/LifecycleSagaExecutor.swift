@@ -1,5 +1,6 @@
 import Foundation
 import HostwrightCore
+import HostwrightObservability
 import HostwrightRuntime
 import HostwrightState
 
@@ -443,6 +444,58 @@ public struct LifecycleSagaExecutor: Sendable {
         groupIdempotencyKey: String? = nil,
         allowFailedSafeHoldResume: Bool = false
     ) async throws -> LifecycleSagaExecutionResult {
+        guard let session = HostwrightTraceContext.session else {
+            return try await executeUntraced(
+                plan: plan,
+                operationID: operationID,
+                groupID: groupID,
+                fencingToken: fencingToken,
+                lockOwner: lockOwner,
+                lockExpiresAt: lockExpiresAt,
+                groupIdempotencyKey: groupIdempotencyKey,
+                allowFailedSafeHoldResume: allowFailedSafeHoldResume
+            )
+        }
+        session.linkOperation(operationID)
+        let token = session.start(
+            .sagaExecute,
+            attributes: [try? HostwrightTraceAttribute(key: .phase, value: "execute")]
+                .compactMap { $0 }
+        )
+        do {
+            let result = try await HostwrightTraceContext.withSpan(token) {
+                try await executeUntraced(
+                    plan: plan,
+                    operationID: operationID,
+                    groupID: groupID,
+                    fencingToken: fencingToken,
+                    lockOwner: lockOwner,
+                    lockExpiresAt: lockExpiresAt,
+                    groupIdempotencyKey: groupIdempotencyKey,
+                    allowFailedSafeHoldResume: allowFailedSafeHoldResume
+                )
+            }
+            let status: HostwrightTraceSpanStatus = [.succeeded, .alreadySucceeded].contains(result.status)
+                ? .succeeded
+                : (result.status == .interrupted ? .cancelled : .failed)
+            _ = session.finish(token, status: status)
+            return result
+        } catch {
+            _ = session.finish(token, status: error is CancellationError ? .cancelled : .failed)
+            throw error
+        }
+    }
+
+    private func executeUntraced(
+        plan: LifecyclePlan,
+        operationID: String,
+        groupID: String,
+        fencingToken: String,
+        lockOwner: String,
+        lockExpiresAt: String? = nil,
+        groupIdempotencyKey: String? = nil,
+        allowFailedSafeHoldResume: Bool = false
+    ) async throws -> LifecycleSagaExecutionResult {
         let resolvedGroupIdempotencyKey = groupIdempotencyKey ?? plan.planSHA256
         guard HostwrightResourceUUID.isValid(operationID),
               HostwrightResourceUUID.isValid(groupID),
@@ -585,16 +638,22 @@ public struct LifecycleSagaExecutor: Sendable {
                 checkpoint: "finalizer:started"
             )
             do {
-                try await finalizer.finalize(
-                    context: LifecycleSagaContext(
-                        plan: plan,
-                        operationID: operationID.lowercased(),
-                        groupID: group.id,
-                        fencingToken: normalizedFence,
-                        leaseOwner: group.lockOwner,
-                        attempt: 1
+                try await HostwrightTraceContext.withSpan(
+                    .finalizerExecute,
+                    attributes: [try? HostwrightTraceAttribute(key: .phase, value: "finalize")]
+                        .compactMap { $0 }
+                ) {
+                    try await finalizer.finalize(
+                        context: LifecycleSagaContext(
+                            plan: plan,
+                            operationID: operationID.lowercased(),
+                            groupID: group.id,
+                            fencingToken: normalizedFence,
+                            leaseOwner: group.lockOwner,
+                            attempt: 1
+                        )
                     )
-                )
+                }
             } catch {
                 return try interrupt(
                     plan: plan,
@@ -1054,7 +1113,13 @@ public struct LifecycleSagaExecutor: Sendable {
                     LifecycleSagaRecoveryResult(
                         node: node,
                         attempt: attempt,
-                        observation: await effects.observe(node: node, context: context)
+                        observation: await HostwrightTraceContext.withSpan(
+                            .providerObserve,
+                            attributes: [try? HostwrightTraceAttribute(key: .phase, value: "observe")]
+                                .compactMap { $0 }
+                        ) {
+                            await effects.observe(node: node, context: context)
+                        }
                     )
                 }
             }
@@ -1081,11 +1146,13 @@ public struct LifecycleSagaExecutor: Sendable {
                     LifecycleSagaValidationResult(
                         node: node,
                         attempt: attempt,
-                        validation: await validator.validate(
-                            plan: plan,
-                            node: node,
-                            expectedFencingToken: fence
-                        )
+                        validation: await HostwrightTraceContext.withSpan(.healthEvaluate) {
+                            await validator.validate(
+                                plan: plan,
+                                node: node,
+                                expectedFencingToken: fence
+                            )
+                        }
                     )
                 }
             }
@@ -1110,8 +1177,20 @@ public struct LifecycleSagaExecutor: Sendable {
             for (node, attempt) in inputs {
                 let context = context(plan: plan, group: group, attempt: attempt)
                 tasks.addTask {
-                    let outcome = await effects.apply(node: node, context: context)
-                    let observation = await effects.observe(node: node, context: context)
+                    let outcome = await HostwrightTraceContext.withSpan(
+                        .providerApply,
+                        attributes: [try? HostwrightTraceAttribute(key: .phase, value: "apply")]
+                            .compactMap { $0 }
+                    ) {
+                        await effects.apply(node: node, context: context)
+                    }
+                    let observation = await HostwrightTraceContext.withSpan(
+                        .providerObserve,
+                        attributes: [try? HostwrightTraceAttribute(key: .phase, value: "observe")]
+                            .compactMap { $0 }
+                    ) {
+                        await effects.observe(node: node, context: context)
+                    }
                     return LifecycleSagaAttemptResult(
                         node: node,
                         attempt: attempt,
@@ -1504,15 +1583,21 @@ public struct LifecycleSagaExecutor: Sendable {
                     for: node,
                     compensation: compensation
                 )
-                let observation = await effects.observe(
-                    node: compensatingNode,
-                    context: context(
-                        plan: plan,
-                        group: group,
-                        attempt: max(1, attempt - 1),
-                        direction: .rollback
+                let observation = await HostwrightTraceContext.withSpan(
+                    .providerObserve,
+                    attributes: [try? HostwrightTraceAttribute(key: .phase, value: "observe")]
+                        .compactMap { $0 }
+                ) {
+                    await effects.observe(
+                        node: compensatingNode,
+                        context: context(
+                            plan: plan,
+                            group: group,
+                            attempt: max(1, attempt - 1),
+                            direction: .rollback
+                        )
                     )
-                )
+                }
                 switch observation {
                 case .satisfied(let verification):
                     try recordStep(
@@ -1556,11 +1641,13 @@ public struct LifecycleSagaExecutor: Sendable {
                     reasonCode: LifecycleRecoverySafeHoldReason.compensationFailed.rawValue
                 )
             }
-            let validation = await validator.validate(
-                plan: plan,
-                node: node,
-                expectedFencingToken: group.fencingToken
-            )
+            let validation = await HostwrightTraceContext.withSpan(.healthEvaluate) {
+                await validator.validate(
+                    plan: plan,
+                    node: node,
+                    expectedFencingToken: group.fencingToken
+                )
+            }
             guard isCurrent(
                 validation,
                 plan: plan,
@@ -1592,16 +1679,22 @@ public struct LifecycleSagaExecutor: Sendable {
                 suffix: "compensation-pending",
                 verification: nil
             )
-            let outcome = await effects.compensate(
-                compensation: compensation,
-                node: node,
-                context: context(
-                    plan: plan,
-                    group: group,
-                    attempt: attempt,
-                    direction: .rollback
+            let outcome = await HostwrightTraceContext.withSpan(
+                .rollbackCompensate,
+                attributes: [try? HostwrightTraceAttribute(key: .phase, value: "compensate")]
+                    .compactMap { $0 }
+            ) {
+                await effects.compensate(
+                    compensation: compensation,
+                    node: node,
+                    context: context(
+                        plan: plan,
+                        group: group,
+                        attempt: attempt,
+                        direction: .rollback
+                    )
                 )
-            )
+            }
             switch outcome {
             case .compensated(let verification):
                 try recordStep(

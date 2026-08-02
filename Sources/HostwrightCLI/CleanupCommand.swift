@@ -1,6 +1,7 @@
 import Foundation
 import HostwrightCore
 import HostwrightManifest
+import HostwrightObservability
 import HostwrightPolicy
 import HostwrightReconciler
 import HostwrightRuntime
@@ -61,6 +62,7 @@ struct CleanupCommandRunner {
             let mapping = ManifestRuntimeMapper.map(validatedManifest.manifest)
             let store = SQLiteStateStore(configuration: stateStoreConfiguration)
             try store.migrate()
+            HostwrightTraceContext.session?.attach(StateTraceSink(store: store))
             let projectID = "project-\(mapping.desiredState.projectName)"
             let observationDesiredState = try hostwrightDesiredStateWithOwnershipHints(
                 mapping.desiredState,
@@ -72,7 +74,9 @@ struct CleanupCommandRunner {
             let observed: ObservedRuntimeState
             do {
                 observed = try hostwrightWaitForAsync {
-                    try await adapter.observe(desiredState: observationDesiredState)
+                    try await HostwrightTraceContext.withSpan(.providerObserve) {
+                        try await adapter.observe(desiredState: observationDesiredState)
+                    }
                 }
             } catch {
                 return failure(code: .runtimeUnavailable, message: "Runtime observation failed: \(RuntimeRedactionPolicy.default.redact(String(describing: error)))")
@@ -474,7 +478,8 @@ struct CleanupCommandRunner {
                 var event: RuntimeEvent
                 do {
                     event = try hostwrightWaitForAsync {
-                        try await adapter.execute(
+                        try await HostwrightTraceContext.withSpan(.cleanupVerify) {
+                            try await adapter.execute(
                             PlannedRuntimeAction(
                                 kind: .remove,
                                 identity: candidate.identity,
@@ -491,7 +496,8 @@ struct CleanupCommandRunner {
                                 approvalHash: teamBinding?.approvalHash,
                                 context: context
                             )
-                        )
+                            )
+                        }
                     }
                     guard reobserveFailedDelete(
                         adapter: adapter,
@@ -807,7 +813,9 @@ struct CleanupCommandRunner {
         let reobserved: ObservedRuntimeState
         do {
             reobserved = try hostwrightWaitForAsync {
-                try await adapter.observe(desiredState: desiredState)
+                try await HostwrightTraceContext.withSpan(.cleanupVerify) {
+                    try await adapter.observe(desiredState: desiredState)
+                }
             }
         } catch {
             return .ambiguous

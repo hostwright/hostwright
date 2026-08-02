@@ -1,6 +1,7 @@
 import Foundation
 import HostwrightCore
 import HostwrightDaemonCore
+import HostwrightObservability
 import HostwrightRuntime
 import HostwrightSecrets
 import HostwrightState
@@ -175,6 +176,23 @@ public struct MetricsCLIOptions: Equatable, Sendable {
     }
 }
 
+public enum TraceCLIAction: Equatable, Sendable {
+    case inspect(traceID: String?, limit: Int)
+    case export(traceID: String, outputPath: String, confirmationSHA256: String)
+}
+
+public struct TraceCLIOptions: Equatable, Sendable {
+    public let action: TraceCLIAction
+    public let stateDatabasePath: String?
+    public let output: CLIOutputFormat
+
+    public init(action: TraceCLIAction, stateDatabasePath: String?, output: CLIOutputFormat) {
+        self.action = action
+        self.stateDatabasePath = stateDatabasePath
+        self.output = output
+    }
+}
+
 public enum CLICommand: Equatable, Sendable {
     case version
     case capabilities(output: CLIOutputFormat)
@@ -192,6 +210,7 @@ public enum CLICommand: Equatable, Sendable {
     case maintenance(options: MaintenanceCLIOptions)
     case ownership(options: OwnershipCLIOptions)
     case metrics(options: MetricsCLIOptions)
+    case traces(options: TraceCLIOptions)
     case migrateManifestPreview(path: String, output: CLIOutputFormat)
     case initManifest
     case importStack(path: String, output: CLIOutputFormat, teamProfilePath: String?)
@@ -274,6 +293,8 @@ public enum CLICommand: Equatable, Sendable {
             return try ownershipCommand(arguments: arguments)
         case "metrics":
             return try metricsCommand(arguments: arguments)
+        case "traces":
+            return try tracesCommand(arguments: arguments)
         case "migrate":
             return try migrateCommand(arguments: arguments)
         case "init":
@@ -1892,6 +1913,100 @@ public enum CLICommand: Equatable, Sendable {
         default:
             preconditionFailure("validated metrics action")
         }
+    }
+
+    private static func tracesCommand(arguments: [String]) throws -> CLICommand {
+        guard arguments.count >= 2, ["inspect", "export"].contains(arguments[1]) else {
+            throw CLIUsageError("traces requires exactly one action: inspect or export.")
+        }
+        let actionName = arguments[1]
+        var stateDatabasePath: String?
+        var traceID: String?
+        var limit = 20
+        var limitSelected = false
+        var outputPath: String?
+        var confirmationSHA256: String?
+        var output: CLIOutputFormat = .text
+        var outputSelected = false
+        var index = 2
+        while index < arguments.count {
+            let argument = arguments[index]
+            switch argument {
+            case "--state-db", "--trace-id", "--limit", "--output-path", "--confirm-trace", "--output":
+                guard index + 1 < arguments.count else {
+                    throw CLIUsageError("traces requires one value after \(argument).")
+                }
+                let value = arguments[index + 1]
+                switch argument {
+                case "--state-db":
+                    guard stateDatabasePath == nil else { throw CLIUsageError("traces accepts --state-db once.") }
+                    stateDatabasePath = value
+                case "--trace-id":
+                    guard traceID == nil, let uuid = UUID(uuidString: value),
+                          uuid.uuidString.lowercased() == value else {
+                        throw CLIUsageError("traces --trace-id requires one canonical lowercase UUID.")
+                    }
+                    traceID = value
+                case "--limit":
+                    guard !limitSelected, let parsed = Int(value), (1...100).contains(parsed) else {
+                        throw CLIUsageError("traces --limit must be selected once between 1 and 100.")
+                    }
+                    limit = parsed
+                    limitSelected = true
+                case "--output-path":
+                    guard outputPath == nil, value.hasPrefix("/"),
+                          URL(fileURLWithPath: value).standardizedFileURL.path == value,
+                          ![".", ".."].contains((value as NSString).lastPathComponent) else {
+                        throw CLIUsageError("traces export --output-path requires one normalized absolute file path.")
+                    }
+                    outputPath = value
+                case "--confirm-trace":
+                    guard confirmationSHA256 == nil,
+                          value.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil else {
+                        throw CLIUsageError("traces export --confirm-trace requires one lowercase SHA-256.")
+                    }
+                    confirmationSHA256 = value
+                default:
+                    guard !outputSelected, let parsed = CLIOutputFormat(rawValue: value) else {
+                        throw CLIUsageError("traces --output requires text or json once.")
+                    }
+                    output = parsed
+                    outputSelected = true
+                }
+                index += 2
+            case "--json":
+                guard !outputSelected else { throw CLIUsageError("traces accepts one output selector.") }
+                output = .json
+                outputSelected = true
+                index += 1
+            default:
+                throw CLIUsageError("Unsupported traces option '\(argument)'.")
+            }
+        }
+        if actionName == "inspect" {
+            guard outputPath == nil, confirmationSHA256 == nil else {
+                throw CLIUsageError("traces inspect does not accept export confirmation or output-path flags.")
+            }
+            return .traces(options: TraceCLIOptions(
+                action: .inspect(traceID: traceID, limit: limit),
+                stateDatabasePath: stateDatabasePath,
+                output: output
+            ))
+        }
+        guard let traceID, let outputPath, let confirmationSHA256, !limitSelected else {
+            throw CLIUsageError(
+                "traces export requires --trace-id, --output-path, and --confirm-trace and does not accept --limit."
+            )
+        }
+        return .traces(options: TraceCLIOptions(
+            action: .export(
+                traceID: traceID,
+                outputPath: outputPath,
+                confirmationSHA256: confirmationSHA256
+            ),
+            stateDatabasePath: stateDatabasePath,
+            output: output
+        ))
     }
 
     private static func eventsCommand(arguments: [String]) throws -> CLICommand {

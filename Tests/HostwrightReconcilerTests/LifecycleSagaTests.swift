@@ -2,6 +2,7 @@ import Foundation
 import XCTest
 @testable import HostwrightCore
 @testable import HostwrightManifest
+@testable import HostwrightObservability
 @testable import HostwrightReconciler
 @testable import HostwrightRuntime
 @testable import HostwrightState
@@ -216,6 +217,50 @@ final class LifecyclePlanTests: XCTestCase {
 }
 
 final class LifecycleSagaExecutorTests: XCTestCase {
+    func testSagaPropagatesOneTraceAcrossApplyObserveAndOwningOperation() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+        let session = try HostwrightTraceSession(
+            traceID: "11111111-1111-4111-8111-111111111111",
+            processCorrelationID: "22222222-2222-4222-8222-222222222222",
+            selected: true
+        )
+        session.attach(StateTraceSink(store: fixture.store))
+        let result = try await HostwrightTraceContext.withSession(session) {
+            let root = session.start(.cliRequest)
+            let result = try await HostwrightTraceContext.withSpan(root) {
+                try await LifecycleSagaExecutor(
+                    store: fixture.store,
+                    effects: InspectingLifecycleEffects(store: fixture.store),
+                    validator: ExactLifecycleValidator(),
+                    clock: FixedLifecycleClock()
+                ).execute(
+                    plan: fixture.plan,
+                    operationID: fixture.operationID,
+                    groupID: fixture.groupID,
+                    fencingToken: fixture.fence,
+                    lockOwner: "trace-test"
+                )
+            }
+            _ = session.finish(
+                root,
+                status: .succeeded,
+                attributes: session.rootCompletionAttributes(sampling: "all")
+            )
+            session.complete(status: .succeeded)
+            return result
+        }
+        XCTAssertEqual(result.status, .succeeded)
+        let trace = try fixture.store.traces.completeTrace(session.traceID)
+        XCTAssertEqual(trace.status, .succeeded)
+        XCTAssertTrue(trace.operationIDs.contains(fixture.operationID))
+        XCTAssertTrue(trace.spans.contains { $0.name == .sagaExecute })
+        XCTAssertTrue(trace.spans.contains { $0.name == .providerApply })
+        XCTAssertTrue(trace.spans.contains { $0.name == .providerObserve })
+        XCTAssertTrue(trace.spans.contains { $0.name == .healthEvaluate })
+        XCTAssertTrue(trace.spans.allSatisfy { $0.processCorrelationID == session.processCorrelationID })
+    }
+
     func testMutationCheckpointTaxonomyClassifiesEverySagaTerminalAndBoundary()
         throws
     {

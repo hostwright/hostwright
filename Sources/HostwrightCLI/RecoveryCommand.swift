@@ -1,6 +1,7 @@
 import CryptoKit
 import Foundation
 import HostwrightCore
+import HostwrightObservability
 import HostwrightReconciler
 import HostwrightRuntime
 import HostwrightSecrets
@@ -123,6 +124,7 @@ struct RecoveryCommandRunner {
     ) -> CLIRunResult {
         do {
             let store = SQLiteStateStore(configuration: stateStoreConfiguration)
+            HostwrightTraceContext.session?.attach(StateTraceSink(store: store))
             guard let group = try store.operationGroups.load(id: groupID) else {
                 return failure(
                     HostwrightDiagnostic(

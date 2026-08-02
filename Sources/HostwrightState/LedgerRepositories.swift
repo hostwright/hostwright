@@ -48,12 +48,15 @@ public struct EventLedger: Sendable {
                 Thread.sleep(forTimeInterval: Double(attempt) * 0.01)
             }
         }
+        for event in redactedEvents where event.type != HostwrightTraceContract.eventType {
+            HostwrightTraceContext.session?.linkEvent(event.id)
+        }
         mirrorToOSLog(redactedEvents)
     }
 
     private func mirrorToOSLog(_ events: [EventRecord]) {
         guard let correlationID = HostwrightLogContext.correlationID else { return }
-        for event in events {
+        for event in events where event.type != HostwrightTraceContract.eventType {
             let severity: HostwrightLogSeverity
             let reason: HostwrightLogReason
             switch event.severity {
@@ -218,6 +221,7 @@ public struct OperationLedger: Sendable {
                 )
             }
         }
+        HostwrightTraceContext.session?.linkOperation(redacted.id)
     }
 
     public func loadAll() throws -> [OperationRecord] {

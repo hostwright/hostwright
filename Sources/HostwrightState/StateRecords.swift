@@ -297,7 +297,10 @@ public struct EventRecord: Equatable, Sendable {
             serviceName: serviceName,
             runtimeAdapter: runtimeAdapter,
             message: policy.redact(message),
-            payloadJSONRedacted: policy.redact(payloadJSONRedacted)
+            payloadJSONRedacted: (try? StateJSON.redactedJSON(
+                payloadJSONRedacted,
+                using: policy
+            )) ?? "{}"
         )
     }
 }
@@ -357,7 +360,10 @@ public struct OperationRecord: Equatable, Sendable {
             status: status,
             idempotencyKey: idempotencyKey,
             planHash: planHash,
-            payloadJSONRedacted: policy.redact(payloadJSONRedacted)
+            payloadJSONRedacted: (try? StateJSON.redactedJSON(
+                payloadJSONRedacted,
+                using: policy
+            )) ?? "{}"
         )
     }
 }
@@ -598,10 +604,16 @@ public struct HealthCheckResultRecord: Equatable, Sendable {
             status: status,
             exitStatus: exitStatus,
             timedOut: timedOut,
-            commandJSONRedacted: policy.redact(commandJSONRedacted),
+            commandJSONRedacted: (try? StateJSON.redactedJSON(
+                commandJSONRedacted,
+                using: policy
+            )) ?? "[]",
             stdoutRedacted: policy.redact(stdoutRedacted),
             stderrRedacted: policy.redact(stderrRedacted),
-            metadataJSONRedacted: policy.redact(metadataJSONRedacted)
+            metadataJSONRedacted: (try? StateJSON.redactedJSON(
+                metadataJSONRedacted,
+                using: policy
+            )) ?? "{}"
         )
     }
 }
@@ -780,7 +792,10 @@ public struct RestartPolicyStateRecord: Equatable, Sendable {
             releaseGeneration: releaseGeneration,
             policySHA256: policySHA256,
             updatedAt: updatedAt,
-            metadataJSONRedacted: policy.redact(metadataJSONRedacted)
+            metadataJSONRedacted: (try? StateJSON.redactedJSON(
+                metadataJSONRedacted,
+                using: policy
+            )) ?? "{}"
         )
     }
 }
@@ -861,7 +876,10 @@ public struct RestartAttemptHistoryRecord: Equatable, Sendable {
             occurredAt: occurredAt,
             backoffUntil: backoffUntil,
             policySHA256: policySHA256,
-            metadataJSONRedacted: policy.redact(metadataJSONRedacted)
+            metadataJSONRedacted: (try? StateJSON.redactedJSON(
+                metadataJSONRedacted,
+                using: policy
+            )) ?? "{}"
         )
     }
 }
@@ -924,11 +942,17 @@ public struct RestartRecoveryRecord: Equatable, Sendable {
             resourceIdentifier: policy.redact(resourceIdentifier),
             planHash: planHash,
             status: status,
-            completedStepsJSONRedacted: policy.redact(completedStepsJSONRedacted),
+            completedStepsJSONRedacted: (try? StateJSON.redactedJSON(
+                completedStepsJSONRedacted,
+                using: policy
+            )) ?? "[]",
             manualRecoveryHintRedacted: policy.redact(manualRecoveryHintRedacted),
             createdAt: createdAt,
             updatedAt: updatedAt,
-            metadataJSONRedacted: policy.redact(metadataJSONRedacted)
+            metadataJSONRedacted: (try? StateJSON.redactedJSON(
+                metadataJSONRedacted,
+                using: policy
+            )) ?? "{}"
         )
     }
 }
@@ -1006,7 +1030,10 @@ public struct OwnershipRecord: Equatable, Sendable {
             createdAt: createdAt,
             observedAt: observedAt,
             cleanupEligible: cleanupEligible,
-            metadataJSONRedacted: policy.redact(metadataJSONRedacted),
+            metadataJSONRedacted: (try? StateJSON.redactedJSON(
+                metadataJSONRedacted,
+                using: policy
+            )) ?? "{}",
             identityVersion: identityVersion,
             resourceUUID: resourceUUID,
             resourceGeneration: resourceGeneration,

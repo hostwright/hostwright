@@ -16,7 +16,7 @@ final class NetworkStateRepositoryTests: XCTestCase {
     private let workloadUUID =
         "40000000-0000-4000-8000-000000000001"
 
-    func testSchemaV15MigratesAdditivelyToV16NetworkState()
+    func testSchemaV15MigratesAdditivelyThroughV17NetworkState()
         throws
     {
         try withStore(throughVersion: 15) { store in
@@ -33,7 +33,7 @@ final class NetworkStateRepositoryTests: XCTestCase {
             )
             XCTAssertEqual(
                 try migrationVersions(store),
-                Array(1...16)
+                Array(1...HostwrightContractVersions.stateSchema)
             )
             XCTAssertEqual(
                 Set(try tableNames(store).filter {
@@ -909,7 +909,8 @@ final class NetworkStateRepositoryTests: XCTestCase {
                     INSERT INTO schema_migrations (
                         version, description, checksum, applied_at
                     ) VALUES (
-                        17, 'future network schema',
+                        \(HostwrightContractVersions.stateSchema + 1),
+                        'future network schema',
                         'future-checksum', '2026-07-26T12:00:00Z'
                     )
                     """
@@ -927,8 +928,14 @@ final class NetworkStateRepositoryTests: XCTestCase {
                         "Expected downgrade refusal, got \(error)."
                     )
                 }
-                XCTAssertEqual(found, 17)
-                XCTAssertEqual(supported, 16)
+                XCTAssertEqual(
+                    found,
+                    HostwrightContractVersions.stateSchema + 1
+                )
+                XCTAssertEqual(
+                    supported,
+                    HostwrightContractVersions.stateSchema
+                )
             }
         }
     }

@@ -635,7 +635,7 @@ final class HostwrightCLITests: XCTestCase {
         XCTAssertTrue(result.standardOutput.contains("hostwright migrate preview <path> [--json|--output text|json]"))
         XCTAssertTrue(result.standardOutput.contains("JSON output is supported for capabilities, paths, migrate preview"))
         XCTAssertTrue(result.standardOutput.contains("import-stack reads a narrow safe stack-file subset"))
-        XCTAssertTrue(result.standardOutput.contains("Diagnostics writes a local redacted JSON bundle only"))
+        XCTAssertTrue(result.standardOutput.contains("Diagnostics-v1 remains a local redacted JSON export."))
         XCTAssertTrue(result.standardOutput.contains("hostwright import-stack compose.yaml --output json"))
         XCTAssertTrue(result.standardOutput.contains("hostwright doctor --output json"))
         XCTAssertTrue(result.standardOutput.contains("--team-profile <path>"))
@@ -1153,7 +1153,11 @@ final class HostwrightCLITests: XCTestCase {
             let store = SQLiteStateStore(path: databasePath)
             XCTAssertTrue(try store.operations.loadAll().isEmpty)
             XCTAssertTrue(try store.operationGroups.loadAll().isEmpty)
-            XCTAssertTrue(try store.events.loadAll().isEmpty)
+            XCTAssertTrue(
+                try store.events.loadAll().allSatisfy {
+                    $0.type == "trace.span.v1"
+                }
+            )
             XCTAssertTrue(try store.ownership.loadAll().isEmpty)
             XCTAssertNil(try store.observedStates.loadLatestSnapshot(
                 projectID: "project-demo",

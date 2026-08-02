@@ -516,6 +516,11 @@ final class HostwrightStateTests: XCTestCase {
             XCTAssertEqual(events.map(\.timestamp), ["2026-07-01T00:00:01Z", "2026-07-01T00:00:01Z"])
             XCTAssertTrue(events[0].message.contains("[REDACTED]"))
             XCTAssertFalse(events[0].payloadJSONRedacted.contains(fakeSecret))
+            XCTAssertTrue(
+                events.allSatisfy {
+                    StateJSON.isObject($0.payloadJSONRedacted)
+                }
+            )
         }
     }
 
@@ -808,6 +813,11 @@ final class HostwrightStateTests: XCTestCase {
             XCTAssertEqual(operations[4].status, .succeeded)
             XCTAssertFalse(operations[0].payloadJSONRedacted.contains(fakeSecret))
             XCTAssertFalse(operations[3].payloadJSONRedacted.contains(fakeSecret))
+            XCTAssertTrue(
+                operations.allSatisfy {
+                    StateJSON.isObject($0.payloadJSONRedacted)
+                }
+            )
             XCTAssertEqual(try store.operations.latest(idempotencyKey: "plan-hash:create:api:retry")?.status, .succeeded)
         }
     }
@@ -1564,6 +1574,12 @@ final class HostwrightStateTests: XCTestCase {
             XCTAssertFalse(results.map(\.stdoutRedacted).joined().contains(fakeSecret))
             XCTAssertFalse(results.map(\.stderrRedacted).joined().contains(fakeSecret))
             XCTAssertFalse(results.map(\.metadataJSONRedacted).joined().contains(fakeSecret))
+            XCTAssertTrue(
+                results.allSatisfy {
+                    StateJSON.isArray($0.commandJSONRedacted) &&
+                        StateJSON.isObject($0.metadataJSONRedacted)
+                }
+            )
         }
     }
 
@@ -1608,6 +1624,7 @@ final class HostwrightStateTests: XCTestCase {
             XCTAssertEqual(state.status, .crashLoopBlocked)
             XCTAssertEqual(state.attemptCount, 3)
             XCTAssertFalse(state.metadataJSONRedacted.contains(fakeSecret))
+            XCTAssertTrue(StateJSON.isObject(state.metadataJSONRedacted))
             XCTAssertEqual(try store.restartPolicies.loadProject(projectID: projectID).count, 1)
         }
     }
@@ -1845,6 +1862,12 @@ final class HostwrightStateTests: XCTestCase {
             XCTAssertEqual(try store.restartRecovery.loadAll().count, 2)
             XCTAssertFalse(records.map(\.manualRecoveryHintRedacted).joined().contains(fakeSecret))
             XCTAssertFalse(records.map(\.metadataJSONRedacted).joined().contains(fakeSecret))
+            XCTAssertTrue(
+                records.allSatisfy {
+                    StateJSON.isArray($0.completedStepsJSONRedacted) &&
+                        StateJSON.isObject($0.metadataJSONRedacted)
+                }
+            )
         }
     }
 
@@ -1870,6 +1893,7 @@ final class HostwrightStateTests: XCTestCase {
             XCTAssertEqual(ownership.count, 1)
             XCTAssertFalse(ownership[0].cleanupEligible)
             XCTAssertFalse(ownership[0].metadataJSONRedacted.contains(fakeSecret))
+            XCTAssertTrue(StateJSON.isObject(ownership[0].metadataJSONRedacted))
         }
     }
 

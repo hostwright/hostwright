@@ -2605,8 +2605,9 @@ final class DistributionDurableLifecycleTests: XCTestCase {
         if arguments.contains("--version") {
             print("\(version)")
         } else if arguments.contains("--help") {
-            print("Usage: hostwrightd fixture")
-            print("does not perform unattended runtime mutation")
+            print("hostwrightd --foreground --config <hostwright.yaml>")
+            print("hostwrightd --service --config <absolute-hostwright.yaml>")
+            print("Mutations require exact provider capability, ownership, plan confirmation, and durable fencing.")
         } else if arguments.count == 3,
                   arguments[0] == "--foreground",
                   arguments[1] == "--config" {

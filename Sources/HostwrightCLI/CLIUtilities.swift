@@ -706,11 +706,23 @@ enum CLIJSON {
         ].compactNilValues()
     }
 
-    static func events(stateDatabasePath: String, projectName: String?, filters: EventFilters, events: [EventRecord]) -> String {
+    static func events(
+        stateDatabasePath: String,
+        projectName: String?,
+        filters: EventFilters,
+        events: [EventRecord],
+        snapshotPageSize: Int,
+        snapshotMoreAvailable: Bool
+    ) -> String {
         render([
             "kind": "events",
+            "schemaVersion": HostwrightEventStreamPage.schemaVersion,
+            "mode": "snapshot",
+            "status": HostwrightEventStreamStatus.ready.rawValue,
             "stateDatabasePath": stateDatabasePath,
             "project": projectName as Any,
+            "pageSize": snapshotPageSize,
+            "moreAvailable": snapshotMoreAvailable,
             "filters": [
                 "type": filters.type as Any,
                 "serviceName": filters.serviceName as Any,
@@ -733,6 +745,81 @@ enum CLIJSON {
                 ].compactNilValues()
             }
         ].compactNilValues())
+    }
+
+    static func eventStream(
+        stateDatabasePath: String,
+        projectName: String?,
+        filters: EventFilters,
+        pageSize: Int,
+        watch: Bool,
+        timeoutSeconds: Int?,
+        page: HostwrightEventStreamPage
+    ) -> String {
+        render([
+            "kind": "events",
+            "schemaVersion": HostwrightEventStreamPage.schemaVersion,
+            "cursorSchemaVersion": HostwrightEventCursor.schemaVersion,
+            "mode": watch ? "watch" : "cursor-page",
+            "status": page.status.rawValue,
+            "stateDatabasePath": stateDatabasePath,
+            "project": projectName as Any,
+            "pageSize": pageSize,
+            "timeoutSeconds": timeoutSeconds as Any,
+            "moreAvailable": page.moreAvailable,
+            "nextCursor": page.nextCursor as Any,
+            "retentionGap": page.retentionGap.map { gap in
+                [
+                    "requestedCursor": gap.requestedCursor,
+                    "earliestAvailableCursor": gap.earliestAvailableCursor as Any,
+                    "latestAvailableCursor": gap.latestAvailableCursor as Any
+                ].compactNilValues()
+            } as Any,
+            "filters": [
+                "type": filters.type as Any,
+                "serviceName": filters.serviceName as Any,
+                "severity": filters.severity?.rawValue as Any,
+                "limit": filters.limit as Any,
+                "sort": filters.sort.rawValue
+            ].compactNilValues(),
+            "events": page.events.map { record in
+                let event = record.event
+                return [
+                    "position": record.position,
+                    "cursor": record.cursor,
+                    "eventReference": record.eventReference,
+                    "eventClass": record.eventClass.rawValue,
+                    "operationReferences": record.operationReferences,
+                    "auditReference": record.auditReference as Any,
+                    "id": event.id,
+                    "timestamp": event.timestamp,
+                    "severity": event.severity.rawValue,
+                    "type": event.type,
+                    "source": event.source,
+                    "projectID": event.projectID as Any,
+                    "serviceName": event.serviceName as Any,
+                    "runtimeAdapter": event.runtimeAdapter as Any,
+                    "message": RuntimeRedactionPolicy.default.redact(event.message),
+                    "payloadJSONRedacted": RuntimeRedactionPolicy.default.redact(
+                        event.payloadJSONRedacted
+                    )
+                ].compactNilValues()
+            }
+        ].compactNilValues())
+    }
+
+    static func eventError(
+        code: String,
+        message: String,
+        exitCode: CLIExitCode
+    ) -> String {
+        render([
+            "kind": "error",
+            "schemaVersion": HostwrightEventStreamPage.schemaVersion,
+            "code": code,
+            "message": message,
+            "exitCode": exitCode.rawValue
+        ])
     }
 
     static func recovery(stateDatabasePath: String, projectName: String?, records: [RecoveryRecord]) -> String {

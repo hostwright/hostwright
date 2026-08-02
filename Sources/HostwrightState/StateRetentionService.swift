@@ -604,7 +604,7 @@ public struct StateRetentionService {
         ).compactMap { row in
             guard row.count == 5, let id = row[0], let timestamp = row[1],
                   let type = row[2], let source = row[3] else { return nil }
-            let audit = isAudit(type: type, source: source)
+            let audit = EventAuditClassifier.isAudit(type: type, source: source)
             guard audit == audits else { return nil }
             return retentionRow(
                 table: "event_ledger", id: id, timestamp: timestamp,
@@ -1026,30 +1026,6 @@ public struct StateRetentionService {
         let rightRank = ranks[right.table] ?? 10
         if leftRank != rightRank { return leftRank < rightRank }
         return candidateOrder(left, right)
-    }
-
-    private func isAudit(type: String, source: String) -> Bool {
-        let text = "\(type).\(source)".lowercased()
-        let exactTypes: Set<String> = [
-            "restart.policy.manual-release",
-            "team.approval.recorded",
-            "team.profile.selected"
-        ]
-        let protectedPrefixes = [
-            "image.provenance.",
-            "image.sbom.",
-            "image.trust.",
-            "image.vulnerability.",
-            "secret.",
-            "security.",
-            "state.maintenance.",
-            "state.retention."
-        ]
-        return exactTypes.contains(type.lowercased()) ||
-            protectedPrefixes.contains { type.lowercased().hasPrefix($0) } ||
-            ["audit", "security", "maintenance", "retention", "operator"].contains {
-                text.contains($0)
-            }
     }
 
     private func parseTimestamp(_ value: String) -> Date? {

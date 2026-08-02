@@ -1,4 +1,5 @@
 import Darwin
+import Dispatch
 import Foundation
 import HostwrightCore
 import HostwrightDaemonCore
@@ -54,6 +55,9 @@ public struct CLIEnvironment: @unchecked Sendable {
     public var observabilitySink: any HostwrightLogSinking
     public var observabilityCorrelationID: () -> String
     public var observabilityStatus: () -> HostwrightObservabilityStatus
+    public var eventWatchMonotonicNow: () -> UInt64
+    public var eventWatchSleep: (TimeInterval) -> Void
+    public var eventWatchCancelled: () -> Bool
 
     public init(
         fileExists: @escaping (String) -> Bool,
@@ -134,7 +138,14 @@ public struct CLIEnvironment: @unchecked Sendable {
         observabilityCorrelationID: @escaping () -> String = { UUID().uuidString.lowercased() },
         observabilityStatus: @escaping () -> HostwrightObservabilityStatus = {
             HostwrightObservabilityStatus(configuration: .disabled)
-        }
+        },
+        eventWatchMonotonicNow: @escaping () -> UInt64 = {
+            DispatchTime.now().uptimeNanoseconds
+        },
+        eventWatchSleep: @escaping (TimeInterval) -> Void = { interval in
+            Thread.sleep(forTimeInterval: interval)
+        },
+        eventWatchCancelled: @escaping () -> Bool = { false }
     ) {
         self.fileExists = fileExists
         self.readTextFile = readTextFile
@@ -203,6 +214,9 @@ public struct CLIEnvironment: @unchecked Sendable {
         self.observabilitySink = observabilitySink
         self.observabilityCorrelationID = observabilityCorrelationID
         self.observabilityStatus = observabilityStatus
+        self.eventWatchMonotonicNow = eventWatchMonotonicNow
+        self.eventWatchSleep = eventWatchSleep
+        self.eventWatchCancelled = eventWatchCancelled
     }
 
     public static let live = CLIEnvironment(

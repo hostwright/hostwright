@@ -360,7 +360,7 @@ public enum HostwrightCLI {
                 ),
                 environment: environment
             ).run()
-        case .events(let stateDatabasePath, let projectName, let filters, let output):
+        case .events(let stateDatabasePath, let projectName, let filters, let stream, let output):
             return EventsCommandRunner(
                 stateStoreConfiguration: try hostwrightStateStoreConfiguration(
                     explicitPath: stateDatabasePath,
@@ -368,7 +368,11 @@ public enum HostwrightCLI {
                 ),
                 projectName: projectName,
                 filters: filters,
-                output: output
+                stream: stream,
+                output: output,
+                monotonicNow: environment.eventWatchMonotonicNow,
+                sleep: environment.eventWatchSleep,
+                isCancelled: environment.eventWatchCancelled
             ).run()
         case .recovery(let action, let stateDatabasePath, let projectName, let output):
             return RecoveryCommandRunner(
@@ -529,7 +533,7 @@ public enum HostwrightCLI {
       hostwright inspect <service> [--manifest <path>] [--state-db <path>] [--runtime-provider <auto|apple-cli|containerization>] [--timeout <seconds>] [--json|--output text|json]
       hostwright stats <service> [--manifest <path>] [--state-db <path>] [--runtime-provider <auto|apple-cli|containerization>] [--timeout <seconds>] [--json|--output text|json]
       hostwright logs <service> [path] [--tail <n>] [--follow] [--runtime-provider <auto|apple-cli|containerization>] [--timeout <seconds>] [--state-db <path>] [--output <text|json>]
-      hostwright events [--state-db <path>] [--project <name>] [--type <event>] [--service <name>] [--severity info|warning|error] [--limit <n>] [--sort asc|desc] [--output text|json]
+      hostwright events [--state-db <path>] [--project <name>] [--type <event>] [--service <name>] [--severity info|warning|error] [--limit <1...1000>] [--sort asc|desc] [--cursor beginning|<token>] [--watch] [--timeout <1...300>] [--output text|json]
       hostwright recovery [--state-db <path>] [--project <name>] [--output text|json]
       hostwright recovery resume --group <uuid> --confirm-plan <hash> [--timeout <seconds>] [--state-db <path>] [--project <name>] [--output text|json]
       hostwright recovery rollback --group <uuid> --confirm-plan <hash> [--timeout <seconds>] [--state-db <path>] [--project <name>] [--output text|json]

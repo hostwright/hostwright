@@ -82,6 +82,8 @@ The normative path table, environment hooks, command creation semantics, status 
 
 Schema version 17 is the latest supported state schema. A database migrated by a newer Hostwright release fails closed with an incompatible-schema error. Hostwright does not downgrade state databases or silently convert provider ownership. Migration v16→v17 is additive, backup-compatible, and is the only Phase 08 schema migration; no v18 migration is introduced during this phase.
 
+Gate 12 adds no table or migration. Existing event rows project into schema-v1 stream records at read time. An opaque cursor binds the exact event identifier and SHA-256 of the stored redacted row, then resolves the row's current SQLite append position during each shared read lock. Retained cursors therefore survive authoritative `VACUUM`; deleted anchors become explicit retention gaps and modified anchors fail integrity. Cursor/watch reads do not create, migrate, repair, or compact state. See [Durable Events and Local Watches](../reference/events.md).
+
 Each migration records a checksum in `schema_migrations`. Current builds accept the historical Phase 6 checksum for schema version 1 and record an algorithmic checksum for fresh migrations. If a known migration version has an unexpected checksum, Hostwright fails before reading or writing application records.
 
 Hostwright-owned databases use SQLite `application_id` `0x48575254` (`HWRT`). A compatible legacy database with application ID zero is claimed only inside the explicit migration transaction after its ledger has been validated. A nonzero foreign application ID is rejected before journal-mode or other persistent configuration, and its database and sidecars are not modified.

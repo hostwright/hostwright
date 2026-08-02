@@ -192,7 +192,13 @@ public enum CLICommand: Equatable, Sendable {
     case lifecycle(options: LifecycleCLIOptions)
     case interactive(options: InteractiveCLIOptions)
     case logs(serviceName: String, path: String, tail: Int, stateDatabasePath: String?)
-    case events(stateDatabasePath: String?, projectName: String?, filters: EventFilters, output: CLIOutputFormat)
+    case events(
+        stateDatabasePath: String?,
+        projectName: String?,
+        filters: EventFilters,
+        stream: EventStreamCLIOptions,
+        output: CLIOutputFormat
+    )
     case recovery(
         action: RecoveryCLIAction,
         stateDatabasePath: String?,
@@ -1787,6 +1793,10 @@ public enum CLICommand: Equatable, Sendable {
         var severity: StateEventSeverity?
         var limit: Int?
         var sort: EventSortOrder = .ascending
+        var cursor: String?
+        var watch = false
+        var timeoutSeconds = EventStreamCLIOptions.defaultTimeoutSeconds
+        var timeoutSelected = false
         var output: CLIOutputFormat = .text
         var index = 1
 
@@ -1802,19 +1812,19 @@ public enum CLICommand: Equatable, Sendable {
                 guard index + 1 < arguments.count else {
                     throw CLIUsageError("events requires a value after --project.")
                 }
-                projectName = arguments[index + 1]
+                projectName = try eventFilterValue(arguments[index + 1], label: "project")
                 index += 2
             case "--type":
                 guard index + 1 < arguments.count else {
                     throw CLIUsageError("events requires a value after --type.")
                 }
-                eventType = arguments[index + 1]
+                eventType = try eventFilterValue(arguments[index + 1], label: "type")
                 index += 2
             case "--service":
                 guard index + 1 < arguments.count else {
                     throw CLIUsageError("events requires a value after --service.")
                 }
-                serviceName = arguments[index + 1]
+                serviceName = try eventFilterValue(arguments[index + 1], label: "service")
                 index += 2
             case "--severity":
                 guard index + 1 < arguments.count, let parsed = StateEventSeverity(rawValue: arguments[index + 1]) else {
@@ -1823,8 +1833,12 @@ public enum CLICommand: Equatable, Sendable {
                 severity = parsed
                 index += 2
             case "--limit":
-                guard index + 1 < arguments.count, let parsed = Int(arguments[index + 1]), parsed > 0 else {
-                    throw CLIUsageError("events requires a positive integer after --limit.")
+                guard index + 1 < arguments.count,
+                      let parsed = Int(arguments[index + 1]),
+                      (1...HostwrightEventStreamPage.maximumPageSize).contains(parsed) else {
+                    throw CLIUsageError(
+                        "events --limit must be between 1 and \(HostwrightEventStreamPage.maximumPageSize)."
+                    )
                 }
                 limit = parsed
                 index += 2
@@ -1834,20 +1848,66 @@ public enum CLICommand: Equatable, Sendable {
                 }
                 sort = parsed
                 index += 2
+            case "--cursor":
+                guard index + 1 < arguments.count else {
+                    throw CLIUsageError("events requires a value after --cursor.")
+                }
+                let value = arguments[index + 1]
+                guard !value.isEmpty,
+                      value.utf8.count <= HostwrightEventCursor.maximumTokenBytes else {
+                    throw CLIUsageError("events --cursor is empty or exceeds the cursor limit.")
+                }
+                cursor = value
+                index += 2
+            case "--watch":
+                watch = true
+                index += 1
+            case "--timeout":
+                guard index + 1 < arguments.count,
+                      let parsed = Int(arguments[index + 1]),
+                      (1...EventStreamCLIOptions.maximumTimeoutSeconds).contains(parsed) else {
+                    throw CLIUsageError(
+                        "events --timeout must be between 1 and \(EventStreamCLIOptions.maximumTimeoutSeconds) seconds."
+                    )
+                }
+                timeoutSeconds = parsed
+                timeoutSelected = true
+                index += 2
             case "--output":
                 output = try parseOutputValue(arguments: arguments, index: index, commandName: "events")
                 index += 2
             default:
-                throw CLIUsageError("events supports only --state-db, --project, --type, --service, --severity, --limit, --sort, and --output.")
+                throw CLIUsageError("events supports only --state-db, --project, --type, --service, --severity, --limit, --sort, --cursor, --watch, --timeout, and --output.")
             }
+        }
+
+        guard !timeoutSelected || watch else {
+            throw CLIUsageError("events --timeout requires --watch.")
+        }
+        guard (cursor == nil && !watch) || sort == .ascending else {
+            throw CLIUsageError("events cursor and watch modes require --sort asc.")
         }
 
         return .events(
             stateDatabasePath: stateDatabasePath,
             projectName: projectName,
             filters: EventFilters(type: eventType, serviceName: serviceName, severity: severity, limit: limit, sort: sort),
+            stream: EventStreamCLIOptions(
+                cursor: cursor,
+                watch: watch,
+                timeoutSeconds: timeoutSeconds
+            ),
             output: output
         )
+    }
+
+    private static func eventFilterValue(_ value: String, label: String) throws -> String {
+        guard !value.isEmpty,
+              value.utf8.count <= 255,
+              value.range(of: "^[ -~]+$", options: .regularExpression) != nil else {
+            throw CLIUsageError("events --\(label) must be printable text within 255 bytes.")
+        }
+        return value
     }
 
     private static func recoveryCommand(arguments: [String]) throws -> CLICommand {
@@ -2359,6 +2419,25 @@ public struct EventFilters: Equatable, Sendable {
         self.severity = severity
         self.limit = limit
         self.sort = sort
+    }
+}
+
+public struct EventStreamCLIOptions: Equatable, Sendable {
+    public static let defaultTimeoutSeconds = 30
+    public static let maximumTimeoutSeconds = 300
+
+    public let cursor: String?
+    public let watch: Bool
+    public let timeoutSeconds: Int
+
+    public init(
+        cursor: String? = nil,
+        watch: Bool = false,
+        timeoutSeconds: Int = EventStreamCLIOptions.defaultTimeoutSeconds
+    ) {
+        self.cursor = cursor
+        self.watch = watch
+        self.timeoutSeconds = timeoutSeconds
     }
 }
 

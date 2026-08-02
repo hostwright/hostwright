@@ -34,4 +34,4 @@ OSLog collection reads existing system-managed local records and creates no Host
 
 ## Current boundary
 
-Phase 08 Gate 11 adds structured OSLog only. Durable cursor/watch resume, metrics and SLOs, correlated traces, privacy-safe support bundles, external export, and aggregate soak qualification remain owned by later Phase 08 gates. The `observability.telemetry` capability therefore remains `experimental` until the aggregate Gate 16 evidence passes.
+Phase 08 Gates 11 and 12 provide structured OSLog plus durable local event cursors and bounded long-poll watches. Metrics and SLOs, correlated traces, privacy-safe support bundles, external export, and aggregate soak qualification remain owned by later Phase 08 gates. The `observability.telemetry` capability therefore remains `experimental` until the aggregate Gate 16 evidence passes.

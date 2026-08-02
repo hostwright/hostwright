@@ -103,7 +103,7 @@ hostwright copy (<absolute-host-path> <service:/absolute/container/path> | <serv
 hostwright export <service> <absolute-destination-path> [--manifest <path>] [--state-db <path>] [--runtime-provider auto|apple-cli|containerization] [--timeout <seconds>] [--output text|json]
 hostwright inspect|stats <service> [--manifest <path>] [--state-db <path>] [--runtime-provider auto|apple-cli|containerization] [--timeout <seconds>] [--output text|json]
 hostwright logs <service> [path] [--tail <n>] [--follow] [--runtime-provider auto|apple-cli|containerization] [--timeout <seconds>] [--state-db <path>] [--output text|json]
-hostwright events [--state-db <path>] [--project <name>] [--type <event>] [--service <name>] [--severity info|warning|error] [--limit <n>] [--sort asc|desc] [--output text|json]
+hostwright events [--state-db <path>] [--project <name>] [--type <event>] [--service <name>] [--severity info|warning|error] [--limit <1...1000>] [--sort asc|desc] [--cursor beginning|<token>] [--watch] [--timeout <1...300>] [--output text|json]
 hostwright recovery [--state-db <path>] [--project <name>] [--output text|json]
 hostwright recovery resume|rollback --group <uuid> --confirm-plan <hash> [--timeout <seconds>] [--state-db <path>] [--project <name>] [--output text|json]
 hostwright diagnostics [--state-db <path>] --bundle <path> [--project <name>] [--manifest <path>]
@@ -135,6 +135,8 @@ hostwright-dist help
 Text output is the default for `hostwright` commands. Installed-lifecycle `hostwright-dist` commands require `--output json`; release and developer-evidence commands retain their documented text/report output.
 
 `capabilities`, `runtime providers`, `runtime migrate`, `paths`, `restart-budget`, `maintenance`, `ownership`, every `state`, `secret`, `registry`, and `image` subcommand, `migrate preview`, `import-stack`, `plan`, `status`, every lifecycle command, non-TTY interactive operations, `events`, `recovery`, `extension check`, and `doctor` accept JSON output where shown above. JSON streaming uses bounded NDJSON frames with base64 payloads. Interactive TTY mode and JSON mode are mutually exclusive. JSON output does not weaken mutation gates.
+
+`events` snapshot output is timestamp-sorted and bounded to 100 records by default. Cursor mode uses durable append order, accepts `beginning` or an opaque returned cursor, and returns at most 1,000 records. `--watch` is one local long-poll page with a 1-to-300-second timeout and no persistent listener. See [Durable Events and Local Watches](events.md).
 
 When JSON mode is requested and the CLI can classify the failure, stderr uses this envelope:
 
@@ -597,9 +599,9 @@ HW-RUNTIME-001: logs requires an observed Hostwright-managed service.
 
 `ownership handoff` performs one exact expired-lease compare-and-swap for `lifecycle-v1` operation groups, whose recovery driver can immediately claim the fixed handoff controller through the same local effect fence. It requires the operation-group UUID, persisted plan SHA-256, fencing UUID, prior controller, canonical prior UTC expiry, target local controller (`resume` or `rollback`), and a 1–900 second lease. Success atomically rebinds the group and every exact ownership record attached to it. A live, in-flight, unsupported-kind, stale, malformed, or mismatched tuple returns confirmation mismatch and changes nothing. Other mutation kinds retain their existing native recovery contracts and cannot be handed off through this command. Handoff does not execute recovery or runtime mutation, bypass finalizers, authorize another user, or add a multi-host lease.
 
-## `hostwright events [--state-db <path>] [--project <name>] [--type <event>] [--service <name>] [--severity info|warning|error] [--limit <n>] [--sort asc|desc] [--output text|json]`
+## `hostwright events [--state-db <path>] [--project <name>] [--type <event>] [--service <name>] [--severity info|warning|error] [--limit <1...1000>] [--sort asc|desc] [--cursor beginning|<token>] [--watch] [--timeout <1...300>] [--output text|json]`
 
-Reads the SQLite event ledger from the selected, already-migrated state database and renders events in deterministic timestamp/id order. Selection uses the standard override precedence and Application Support default.
+Reads the SQLite event ledger from the selected, already-migrated state database. Compatible snapshots render deterministic timestamp/append order. Cursor pages and bounded local watches use durable SQLite append order, exact event digests, explicit retention gaps, and resumable schema-v1 cursors. Selection uses the standard override precedence and Application Support default.
 
 It does not inspect runtime state and does not create or migrate the database as a read side effect.
 
@@ -608,8 +610,13 @@ Filters are applied after project selection and before rendering:
 - `--type <event>` matches the event type, such as `cleanup.failed`.
 - `--service <name>` matches a service name on event rows that carry one.
 - `--severity info|warning|error` matches event severity.
-- `--limit <n>` returns the first `n` filtered records in the selected order.
+- `--limit <1...1000>` returns the first bounded filtered page; the default is 100.
 - `--sort asc|desc` defaults to `asc`.
+- `--cursor beginning|<token>` selects append-ordered cursor mode; cursor modes require ascending order.
+- `--watch` returns one bounded page after the current or supplied cursor and never creates a listener.
+- `--timeout <1...300>` bounds a watch and defaults to 30 seconds.
+
+Cursor/watch JSON adds `schemaVersion`, `cursorSchemaVersion`, `mode`, `status`, `pageSize`, `moreAvailable`, `nextCursor`, immutable event and audit references, and an optional `retentionGap`. See [Durable Events and Local Watches](events.md) for resume, cancellation, compaction-gap, and privacy rules.
 
 JSON shape:
 

@@ -113,11 +113,23 @@ final class HostwrightCLITests: XCTestCase {
         )
         XCTAssertEqual(
             try CLICommand.parse(arguments: ["events", "--state-db", "/tmp/state.sqlite", "--project", "demo"]),
-            .events(stateDatabasePath: "/tmp/state.sqlite", projectName: "demo", filters: EventFilters(), output: .text)
+            .events(
+                stateDatabasePath: "/tmp/state.sqlite",
+                projectName: "demo",
+                filters: EventFilters(),
+                stream: EventStreamCLIOptions(),
+                output: .text
+            )
         )
         XCTAssertEqual(
             try CLICommand.parse(arguments: ["events", "--state-db", "/tmp/state.sqlite", "--output", "json"]),
-            .events(stateDatabasePath: "/tmp/state.sqlite", projectName: nil, filters: EventFilters(), output: .json)
+            .events(
+                stateDatabasePath: "/tmp/state.sqlite",
+                projectName: nil,
+                filters: EventFilters(),
+                stream: EventStreamCLIOptions(),
+                output: .json
+            )
         )
         XCTAssertEqual(
             try CLICommand.parse(arguments: ["events", "--state-db", "/tmp/state.sqlite", "--type", "cleanup.failed", "--service", "api", "--severity", "error", "--limit", "5", "--sort", "desc", "--output", "json"]),
@@ -125,6 +137,7 @@ final class HostwrightCLITests: XCTestCase {
                 stateDatabasePath: "/tmp/state.sqlite",
                 projectName: nil,
                 filters: EventFilters(type: "cleanup.failed", serviceName: "api", severity: .error, limit: 5, sort: .descending),
+                stream: EventStreamCLIOptions(),
                 output: .json
             )
         )

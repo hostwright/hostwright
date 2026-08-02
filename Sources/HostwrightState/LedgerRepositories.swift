@@ -1,8 +1,9 @@
+import Foundation
 import HostwrightObservability
 import HostwrightRuntime
 
 public struct EventLedger: Sendable {
-    private let store: SQLiteStateStore
+    let store: SQLiteStateStore
 
     public init(store: SQLiteStateStore) {
         self.store = store
@@ -10,31 +11,41 @@ public struct EventLedger: Sendable {
 
     public func append(_ events: [EventRecord]) throws {
         let redactedEvents = events.map { $0.redacted() }
-        try store.withValidatedConnection { connection in
-            try connection.transaction {
-                for event in redactedEvents {
-                    try connection.run(
-                        """
-                        INSERT INTO event_ledger (
-                            id, timestamp, severity, type, source, project_id, service_name,
-                            runtime_adapter, message, payload_json_redacted
-                        )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        bindings: [
-                            .text(event.id),
-                            .text(event.timestamp),
-                            .text(event.severity.rawValue),
-                            .text(event.type),
-                            .text(event.source),
-                            optionalText(event.projectID),
-                            optionalText(event.serviceName),
-                            optionalText(event.runtimeAdapter),
-                            .text(event.message),
-                            .text(event.payloadJSONRedacted)
-                        ]
-                    )
+        var attempt = 0
+        while true {
+            attempt += 1
+            do {
+                try store.withValidatedConnection { connection in
+                    try connection.transaction {
+                        for event in redactedEvents {
+                            try connection.run(
+                                """
+                                INSERT INTO event_ledger (
+                                    id, timestamp, severity, type, source, project_id, service_name,
+                                    runtime_adapter, message, payload_json_redacted
+                                )
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                """,
+                                bindings: [
+                                    .text(event.id),
+                                    .text(event.timestamp),
+                                    .text(event.severity.rawValue),
+                                    .text(event.type),
+                                    .text(event.source),
+                                    optionalText(event.projectID),
+                                    optionalText(event.serviceName),
+                                    optionalText(event.runtimeAdapter),
+                                    .text(event.message),
+                                    .text(event.payloadJSONRedacted)
+                                ]
+                            )
+                        }
+                    }
                 }
+                break
+            } catch StateStoreError.databaseLocked(_, let message)
+                where attempt < 4 && message.contains("state-writer fence") {
+                Thread.sleep(forTimeInterval: Double(attempt) * 0.01)
             }
         }
         mirrorToOSLog(redactedEvents)

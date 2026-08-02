@@ -236,6 +236,14 @@ Phase 8A is a required preflight before this mutation gate. It proves real read-
 | HW-OBS-003, HW-SAFE-004 | OSLog construction excludes raw output, event messages/payloads, project/service names, manifest bytes, credentials, secret references, unapproved PII, paths, unbounded fields, and log-injection newlines. | Security assessment + adversarial tests | Synthetic secret/credential/PII/path scanners, field/payload limits, unknown-command tests, and focused security review. |
 | HW-RECON-005, HW-STATE-003 | Sink disablement, filtering, or degradation cannot change command/daemon control results; a failed event transaction cannot emit a success mirror. macOS owns rotation and Hostwright never treats OSLog as durable proof. | Failure + resilience | Degraded-sink CLI tests, duplicate-event transaction failure, concurrent writers, cancellation/regression review, and documentation review. |
 
+## Phase 08 Gate 12: Durable Event History And Watches
+
+| Requirement IDs | Acceptance criteria | Verification type | Verification command or review |
+| --- | --- | --- | --- |
+| HW-OBS-006, HW-STATE-003 | Schema-v1 cursor pages return bounded SQLite append order with exact event digests, fixed event classes, immutable operation/audit references, and no acknowledged duplicate on resume. Existing timestamp-sorted snapshots remain compatible and bounded. | Unit contract + local integration | Event stream/state tests and existing/new CLI event tests with real schema-v17 SQLite. |
+| HW-OBS-006, HW-STATE-009 | Retained cursors survive authoritative `VACUUM`; a deleted cursor reports an explicit retention gap plus earliest/latest recovery cursors, and a changed retained record fails integrity. Existing v16 events project after the sole v16→v17 migration with no v18. | Migration + resilience | Cursor/VACUUM, compaction-gap, tamper, restart, v16 upgrade, future-version refusal, and state-integrity cells. |
+| HW-OBS-003, HW-SAFE-004 | Filters, cursor tokens, pages, polling, timeouts, and operation references are strict and bounded. A watch returns one synchronous page, advances across filtered rows, handles timeout/cancellation explicitly, and creates no network listener, state mutation, or upload. | Security + live runtime | Adversarial parser/cursor tests, 1,001-event backpressure page, cancellation/timeout cells, local CLI subprocess watch/resume, scope scan, and security review. |
+
 ## Phase 21 Gate: GUI Control Surface Requirements And API Boundary
 
 | Requirement IDs | Acceptance criteria | Verification type | Verification command or review |

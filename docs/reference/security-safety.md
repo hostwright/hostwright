@@ -56,6 +56,8 @@ Authoritative state is bound to SQLite `application_id` `0x48575254` (`HWRT`). H
 
 These controls prevent Hostwright from crossing filesystem trust boundaries. They do not sandbox another process already running under the same macOS account, and they cannot force a same-user program that opens the SQLite file directly to honor Hostwright's writer fence. Direct external writes are unsupported and must stop before restore, repair, or recovery.
 
+Event cursors bind only a validated non-secret event identifier and SHA-256 of the complete stored redacted row. Cursor input is canonical and size-bounded; modified retained rows fail integrity and deleted anchors produce an explicit retention gap. Watches are local read-only long polls with bounded filters, page size, timeout, and synchronous output backpressure. They create no listener, credential, state row, file, socket, or runtime resource. The SQLite ledger remains authoritative; OSLog is only a best-effort local mirror. See [Durable Events and Local Watches](events.md) and [Local Observability](observability.md).
+
 ## Policy Boundary
 
 Policy evaluation is local, deterministic, and non-mutating. `HostwrightPolicy` explains allow/warning/blocker decisions for planner safety checks, cleanup classification, image policy, env/secrets, lifecycle requests, secure exposure requests, untrusted manifests, accelerator placeholders, and extension declarations.

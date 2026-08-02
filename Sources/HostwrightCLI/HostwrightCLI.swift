@@ -153,6 +153,14 @@ public enum HostwrightCLI {
                 ),
                 environment: environment
             ).run()
+        case .ownership(let options):
+            return try OwnershipCommandRunner(
+                options: options,
+                stateStoreConfiguration: try hostwrightStateStoreConfiguration(
+                    explicitPath: options.stateDatabasePath,
+                    environment: environment
+                )
+            ).run()
         case .migrateManifestPreview(let path, let output):
             let source = try hostwrightReadManifestText(path: path, environment: environment)
             let preview = try ManifestMigrator.previewV2(source)
@@ -360,6 +368,8 @@ public enum HostwrightCLI {
       hostwright maintenance status [--project <project-id>] [--state-db <path>] [--json|--output text|json]
       hostwright maintenance cancel --project <project-id> --confirm-deferral <sha256> [--state-db <path>] [--json|--output text|json]
       hostwright maintenance override --project <project-id> --confirm-deferral <sha256> --reason <text> [--state-db <path>] [--json|--output text|json]
+      hostwright ownership status [--project <project-id>] [--state-db <path>] [--json|--output text|json]
+      hostwright ownership handoff --group <uuid> --confirm-plan <sha256> --confirm-fence <uuid> --from-controller <id> --from-expiry <RFC3339-UTC> --to-controller resume|rollback --lease-seconds <1-900> [--state-db <path>] [--json|--output text|json]
       hostwright image pull|push <reference> [--platform linux/arm64|linux/amd64] [--offline] [--progress none|plain] [--state-db <path>] [--runtime-provider auto|apple-cli|containerization] [--json|--output text|json]
       hostwright image tag <source> <target> [--state-db <path>] [--runtime-provider auto|apple-cli|containerization] [--json|--output text|json]
       hostwright image load --input <absolute-path> --reference <expected-reference>... [--state-db <path>] [--runtime-provider auto|apple-cli|containerization] [--json|--output text|json]
@@ -427,7 +437,7 @@ public enum HostwrightCLI {
     Lifecycle dry-runs emit deterministic plans; confirmed up, down, run, start, stop, restart, rm, and update executions emit deterministic per-resource outcomes. Every lifecycle command supports --json or --output json.
     Cleanup deletes only exact cleanup-eligible Hostwright-owned stopped/created/exited containers after dry-run token confirmation.
     Diagnostics writes a local redacted JSON bundle only. It never uploads telemetry.
-    JSON output is supported for capabilities, paths, migrate preview, restart-budget, maintenance, every state, secret, registry, and image subcommand, import-stack, plan, status, every lifecycle command, events, recovery, extension check, doctor, and errors when --json or --output json is present.
+    JSON output is supported for capabilities, paths, migrate preview, restart-budget, maintenance, ownership, every state, secret, registry, and image subcommand, import-stack, plan, status, every lifecycle command, events, recovery, extension check, doctor, and errors when --json or --output json is present.
     Team profiles and approvals are loaded only from explicit local paths. Profile-aware mutations require an approval bound to the exact profile, manifest, and plan or cleanup token.
     Benchmark runs are explicit local hardware evidence. They refuse image pulls and broad cleanup, use bounded disposable Hostwright-owned resources, and write only the requested non-existing report path.
     Extension check executes one reviewed-local protocol handshake from explicit absolute paths. The protocol grants no Hostwright capability, but the reviewed executable still has the invoking macOS account's ambient privileges; it is not sandboxed.

@@ -102,6 +102,7 @@ public struct LifecycleSagaContext: Sendable {
     public let operationID: String
     public let groupID: String
     public let fencingToken: String
+    public let leaseOwner: String?
     public let attempt: Int
     public let direction: OperationGroupStepDirection
 
@@ -110,6 +111,7 @@ public struct LifecycleSagaContext: Sendable {
         operationID: String,
         groupID: String,
         fencingToken: String,
+        leaseOwner: String? = nil,
         attempt: Int,
         direction: OperationGroupStepDirection = .forward
     ) {
@@ -117,6 +119,7 @@ public struct LifecycleSagaContext: Sendable {
         self.operationID = operationID
         self.groupID = groupID
         self.fencingToken = fencingToken
+        self.leaseOwner = leaseOwner
         self.attempt = attempt
         self.direction = direction
     }
@@ -472,24 +475,6 @@ public struct LifecycleSagaExecutor: Sendable {
             )
         }
         if group.status == .succeeded {
-            if let finalizer {
-                do {
-                    try await finalizer.finalize(
-                        context: LifecycleSagaContext(
-                            plan: plan,
-                            operationID:
-                                operationID.lowercased(),
-                            groupID: group.id,
-                            fencingToken: normalizedFence,
-                            attempt: 1
-                        )
-                    )
-                } catch {
-                    throw LifecycleSagaError.stateFailure(
-                        "Succeeded lifecycle finalizer recovery failed for the exact persisted group."
-                    )
-                }
-            }
             return result(
                 status: .alreadySucceeded,
                 plan: plan,
@@ -510,6 +495,20 @@ public struct LifecycleSagaExecutor: Sendable {
                 checkpoint: group.checkpoint,
                 completed: try completedNodeKeys(groupID: group.id).intersection(planNodeKeys),
                 hint: group.manualRecoveryHintRedacted
+            )
+        }
+        let mutationFence = try store.acquireOperationMutationFence(
+            groupID: group.id
+        )
+        defer { mutationFence.release() }
+        guard let currentLease = try store.operationGroups.load(id: group.id),
+              currentLease.status == .active,
+              currentLease.planHash == group.planHash,
+              currentLease.fencingToken == group.fencingToken,
+              currentLease.lockOwner == group.lockOwner,
+              currentLease.lockExpiresAt == group.lockExpiresAt else {
+            throw LifecycleSagaError.stateFailure(
+                "Lifecycle execution lost its exact operation mutation fence before effects."
             )
         }
         guard group.planHash == plan.planSHA256,
@@ -592,6 +591,7 @@ public struct LifecycleSagaExecutor: Sendable {
                         operationID: operationID.lowercased(),
                         groupID: group.id,
                         fencingToken: normalizedFence,
+                        leaseOwner: group.lockOwner,
                         attempt: 1
                     )
                 )
@@ -612,13 +612,13 @@ public struct LifecycleSagaExecutor: Sendable {
         }
 
         let finishedAt = clock.now()
-        try store.operationGroups.finish(
-            groupID: group.id,
+        try finishOwned(
+            group: group,
             status: .succeeded,
             checkpoint: "verified",
-            manualRecoveryHintRedacted: "",
+            hint: "",
             updatedAt: finishedAt,
-            metadataJSONRedacted: try jsonObject([
+            metadata: try jsonObject([
                 "lifecyclePlanSchemaVersion": LifecyclePlan.currentSchemaVersion,
                 "planSHA256": plan.planSHA256,
                 "result": LifecycleSagaExecutionStatus.succeeded.rawValue
@@ -1277,6 +1277,7 @@ public struct LifecycleSagaExecutor: Sendable {
             operationID: group.operationID,
             groupID: group.id,
             fencingToken: group.fencingToken,
+            leaseOwner: group.lockOwner,
             attempt: attempt,
             direction: direction
         )
@@ -1395,7 +1396,8 @@ public struct LifecycleSagaExecutor: Sendable {
                 manualRecoveryHintRedacted: failure?.guidance ?? "",
                 metadataJSONRedacted: try jsonObject(metadata)
             ),
-            expectedFencingToken: group.fencingToken
+            expectedFencingToken: group.fencingToken,
+            expectedLockOwner: group.lockOwner ?? ""
         )
     }
 
@@ -1680,13 +1682,13 @@ public struct LifecycleSagaExecutor: Sendable {
                 )
             }
         }
-        try store.operationGroups.finish(
-            groupID: group.id,
+        try finishOwned(
+            group: group,
             status: .failed,
             checkpoint: "compensated",
-            manualRecoveryHintRedacted: reason,
+            hint: reason,
             updatedAt: clock.now(),
-            metadataJSONRedacted: try jsonObject([
+            metadata: try jsonObject([
                 "result": LifecycleSagaExecutionStatus.compensated.rawValue,
                 "planSHA256": plan.planSHA256,
                 "restoredHealth": restoredHealth
@@ -1732,13 +1734,13 @@ public struct LifecycleSagaExecutor: Sendable {
         checkpoint: String,
         hint: String
     ) throws -> LifecycleSagaExecutionResult {
-        try store.operationGroups.finish(
-            groupID: group.id,
+        try finishOwned(
+            group: group,
             status: .interrupted,
             checkpoint: checkpoint,
-            manualRecoveryHintRedacted: hint,
+            hint: hint,
             updatedAt: clock.now(),
-            metadataJSONRedacted: try jsonObject([
+            metadata: try jsonObject([
                 "result": LifecycleSagaExecutionStatus.interrupted.rawValue,
                 "planSHA256": plan.planSHA256
             ])
@@ -1769,13 +1771,13 @@ public struct LifecycleSagaExecutor: Sendable {
         if let reasonCode {
             metadata["reasonCode"] = reasonCode
         }
-        try store.operationGroups.finish(
-            groupID: group.id,
+        try finishOwned(
+            group: group,
             status: .failed,
             checkpoint: checkpoint,
-            manualRecoveryHintRedacted: hint,
+            hint: hint,
             updatedAt: clock.now(),
-            metadataJSONRedacted: try jsonObject(metadata)
+            metadata: try jsonObject(metadata)
         )
         return result(
             status: .safeHold,
@@ -1786,6 +1788,37 @@ public struct LifecycleSagaExecutor: Sendable {
             completed: completed,
             hint: hint,
             reasonCode: reasonCode
+        )
+    }
+
+    private func finishOwned(
+        group: OperationGroupRecord,
+        status: OperationGroupStatus,
+        checkpoint: String,
+        hint: String,
+        updatedAt: String,
+        metadata: String
+    ) throws {
+        guard let expectedOwner = group.lockOwner,
+              let current = try store.operationGroups.load(id: group.id),
+              current.status == .active,
+              current.fencingToken == group.fencingToken,
+              current.lockOwner == expectedOwner,
+              let currentExpiry = current.lockExpiresAt else {
+            throw LifecycleSagaError.stateFailure(
+                "Lifecycle terminal transition lost its exact fenced executor lease."
+            )
+        }
+        try store.operationGroups.finishExactLease(
+            groupID: group.id,
+            expectedFencingToken: group.fencingToken,
+            expectedLockOwner: expectedOwner,
+            expectedLockExpiresAt: currentExpiry,
+            status: status,
+            checkpoint: checkpoint,
+            manualRecoveryHintRedacted: hint,
+            updatedAt: updatedAt,
+            metadataJSONRedacted: metadata
         )
     }
 

@@ -529,12 +529,19 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
         } else {
             serviceTunnelFinalizer = nil
         }
+        let lifecycleFinalizer = LifecycleCompositeFinalizer(
+            dependent: serviceTunnelFinalizer,
+            ownership: LifecycleOwnershipFinalizer(
+                store: store,
+                adapter: adapter
+            )
+        )
         let executor = LifecycleSagaExecutor(
             store: store,
             effects: effects,
             validator: validator,
             recoveryStateJSONRedacted: recoveryStateJSONRedacted,
-            finalizer: serviceTunnelFinalizer
+            finalizer: lifecycleFinalizer
         )
         let result = try hostwrightWaitForAsync {
             try await executor.execute(
@@ -542,7 +549,7 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
                 operationID: operationID,
                 groupID: groupID,
                 fencingToken: operationFencingToken,
-                lockOwner: "hostwright-cli",
+                lockOwner: "hostwright-cli:\(operationID)",
                 groupIdempotencyKey: groupIdempotencyKey
             )
         }
@@ -1958,8 +1965,13 @@ struct LifecyclePersistedRecoveryDriver {
     ) async throws -> LifecycleSagaExecutionResult {
         switch request.action {
         case .resume:
+            let recoveryOwner = recoveryProcessOwner(for: .resume)
             guard sourceGroup.status == .interrupted ||
                     isExpiredActive(sourceGroup) ||
+                    isHandedOffActive(
+                        sourceGroup,
+                        controllerID: "hostwright-recovery-resume"
+                    ) ||
                     isFailedSafeHold(sourceGroup) else {
                 throw LifecyclePersistedRecoveryError.unavailable(
                     "Only an interrupted lifecycle operation, its exact expired active lease, or an exact failed safe-hold can be resumed."
@@ -1970,7 +1982,7 @@ struct LifecyclePersistedRecoveryDriver {
                 operationID: sourceGroup.operationID,
                 groupID: sourceGroup.id,
                 fencingToken: sourceGroup.fencingToken,
-                lockOwner: "hostwright-recovery-resume",
+                lockOwner: recoveryOwner,
                 store: store,
                 deadline: deadline,
                 recoveryStateJSONRedacted:
@@ -1992,12 +2004,18 @@ struct LifecyclePersistedRecoveryDriver {
             }
             return result
         case .rollback:
+            let recoveryOwner = recoveryProcessOwner(for: .rollback)
+            let handedOffActive = isHandedOffActive(
+                sourceGroup,
+                controllerID: "hostwright-recovery-rollback"
+            )
             guard sourceGroup.status == .interrupted ||
-                    sourceGroup.status == .failed,
+                    sourceGroup.status == .failed ||
+                    handedOffActive,
                   sourceGroup.rollbackAvailable,
                   persistedPlan.command == .update else {
                 throw LifecyclePersistedRecoveryError.unavailable(
-                    "Only an interrupted or failed update with recorded inverses can be rolled back."
+                    "Only an interrupted, failed, or exactly handed-off update with recorded inverses can be rolled back."
                 )
             }
             if isCompletedCompensation(sourceGroup) {
@@ -2059,6 +2077,13 @@ struct LifecyclePersistedRecoveryDriver {
                         "Completed compensation and exact ownership projection are verified."
                 )
             }
+            if handedOffActive {
+                try claimRollbackHandoff(
+                    sourceGroup: sourceGroup,
+                    recoveryOwner: recoveryOwner,
+                    store: store
+                )
+            }
             let rollbackFencingToken = HostwrightResourceUUID.legacy(
                 kind: "lifecycle-rollback-fence",
                 identifier: sourceGroup.id
@@ -2088,7 +2113,7 @@ struct LifecyclePersistedRecoveryDriver {
                 operationID: rollbackOperationID,
                 groupID: rollbackGroupID,
                 fencingToken: rollbackFencingToken,
-                lockOwner: "hostwright-recovery-rollback",
+                lockOwner: recoveryOwner,
                 store: store,
                 deadline: deadline,
                 recoveryStateJSONRedacted:
@@ -2107,6 +2132,75 @@ struct LifecyclePersistedRecoveryDriver {
             }
             return result
         }
+    }
+
+    private func recoveryProcessOwner(
+        for action: LifecyclePersistedRecoveryAction
+    ) -> String {
+        let controller = switch action {
+        case .resume: "hostwright-recovery-resume"
+        case .rollback: "hostwright-recovery-rollback"
+        }
+        return "\(controller):\(HostwrightResourceUUID.generate())"
+    }
+
+    private func isHandedOffActive(
+        _ group: OperationGroupRecord,
+        controllerID: String
+    ) -> Bool {
+        guard group.status == .active,
+              group.lockOwner == controllerID,
+              let expiry = group.lockExpiresAt,
+              expiry > hostwrightTimestamp(),
+              let data = group.metadataJSONRedacted.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data)
+                as? [String: Any],
+              let authority = object["localLeaseAuthority"]
+                as? [String: Any],
+              (authority["schemaVersion"] as? NSNumber)?.intValue == 1,
+              authority["controllerID"] as? String == controllerID else {
+            return false
+        }
+        return true
+    }
+
+    private func claimRollbackHandoff(
+        sourceGroup: OperationGroupRecord,
+        recoveryOwner: String,
+        store: SQLiteStateStore
+    ) throws {
+        let now = Date()
+        let timestamp = ISO8601DateFormatter().string(from: now)
+        let replacementExpiry = ISO8601DateFormatter().string(
+            from: now.addingTimeInterval(300)
+        )
+        let claim = try store.operationGroups.reclaimExpiredActive(
+            groupID: sourceGroup.id,
+            expectedPlanHash: sourceGroup.planHash,
+            expectedFencingToken: sourceGroup.fencingToken,
+            lockOwner: recoveryOwner,
+            lockExpiresAt: replacementExpiry,
+            currentTimestamp: timestamp
+        )
+        guard case .reclaimed(let claimed) = claim,
+              claimed.lockOwner == recoveryOwner,
+              claimed.lockExpiresAt == replacementExpiry else {
+            throw LifecyclePersistedRecoveryError.unavailable(
+                "The exact rollback handoff was claimed by another local recovery process."
+            )
+        }
+        try store.operationGroups.finishExactLease(
+            groupID: claimed.id,
+            expectedFencingToken: claimed.fencingToken,
+            expectedLockOwner: recoveryOwner,
+            expectedLockExpiresAt: replacementExpiry,
+            status: .interrupted,
+            checkpoint: claimed.checkpoint,
+            manualRecoveryHintRedacted:
+                claimed.manualRecoveryHintRedacted,
+            updatedAt: timestamp,
+            metadataJSONRedacted: claimed.metadataJSONRedacted
+        )
     }
 
     private func rebindImageRecoveryAuthorizations(
@@ -2266,7 +2360,11 @@ struct LifecyclePersistedRecoveryDriver {
                 groupIdempotencyKey:
                     persistedGroup?.groupIdempotencyKey ?? plan.planSHA256
             ),
-            recoveryStateJSONRedacted: recoveryStateJSONRedacted
+            recoveryStateJSONRedacted: recoveryStateJSONRedacted,
+            finalizer: LifecycleOwnershipFinalizer(
+                store: store,
+                adapter: runtime.adapter
+            )
         ).execute(
             plan: plan,
             operationID: operationID,
@@ -3200,8 +3298,8 @@ struct LifecycleLiveEffects:
             return await applyProbe(node: node, context: context)
         }
         do {
-            if node.action != .create,
-               let binding = await state.binding(
+            var existingOwnershipWasBound = false
+            if let binding = await state.binding(
                    resourceUUID: node.resourceUUID,
                    resourceIdentifier: node.resourceIdentifier
                ) {
@@ -3224,6 +3322,7 @@ struct LifecycleLiveEffects:
                         )
                     )
                 }
+                existingOwnershipWasBound = true
                 if current.fencingToken != context.fencingToken {
                     guard current.fencingToken == binding.currentFencingToken,
                           let advanced = try store.ownership.advanceFencingToken(
@@ -3249,6 +3348,18 @@ struct LifecycleLiveEffects:
                     }
                     _ = advanced
                 }
+            }
+            if node.action != .create || existingOwnershipWasBound {
+                try await bindOwnershipMutationLease(
+                    node: node,
+                    context: context
+                )
+            }
+            if node.action == .delete || node.action == .retire {
+                try await markOwnershipDeleting(
+                    node: node,
+                    context: context
+                )
             }
             if node.action == .runHook {
                 return await applyHook(node: node, context: context)
@@ -3320,6 +3431,152 @@ struct LifecycleLiveEffects:
                 )
             )
         }
+    }
+
+    private func bindOwnershipMutationLease(
+        node: LifecyclePlanNode,
+        context: LifecycleSagaContext
+    ) async throws {
+        guard let current = try store.ownership.loadAll().first(where: {
+            $0.resourceUUID == node.resourceUUID &&
+                $0.resourceIdentifier == node.resourceIdentifier &&
+                RuntimeProviderBinding.stableID(for: $0.runtimeAdapter) ==
+                    context.plan.providerID
+        }),
+        current.fencingToken == context.fencingToken,
+        let group = try store.operationGroups.load(id: context.groupID),
+        group.status == .active,
+        group.planHash == context.plan.planSHA256,
+        group.fencingToken == context.fencingToken,
+        group.lockOwner == context.leaseOwner,
+        let groupOwner = group.lockOwner,
+        let groupExpiry = group.lockExpiresAt else {
+            throw StateStoreError.invalidRecord(
+                "Lifecycle mutation requires the exact owned resource and active finite mutation lease."
+            )
+        }
+        let prior = try OwnershipAuthorityMetadata.decode(
+            from: current.metadataJSONRedacted
+        )
+        try prior?.validate(for: current)
+        if let prior, prior.deletionTimestamp != nil {
+            guard node.action == .delete || node.action == .retire,
+                  prior.operationGroupID == group.id,
+                  prior.leaseOwner == groupOwner,
+                  prior.leaseExpiresAt == groupExpiry else {
+                throw StateStoreError.invalidRecord(
+                    "Lifecycle mutation found ownership already bound to deletion."
+                )
+            }
+            return
+        }
+        if let prior,
+           prior.operationGroupID == group.id,
+           prior.leaseOwner == groupOwner,
+           prior.leaseExpiresAt == groupExpiry {
+            return
+        }
+        let handoffGeneration = (prior?.handoffGeneration ?? 0) +
+            ((prior?.operationGroupID == group.id) ? 0 : 1)
+        let bound = try OwnershipAuthorityRecord.lifecycle(
+            ownership: current,
+            operationGroup: group,
+            finalizerState: .active,
+            handoffGeneration: handoffGeneration
+        )
+        let metadata = try OwnershipAuthorityMetadata.encode(
+            bound,
+            into: current.metadataJSONRedacted
+        )
+        try store.ownership.upsert(
+            OwnershipRecord(
+                id: current.id,
+                resourceIdentifier: current.resourceIdentifier,
+                resourceType: current.resourceType,
+                projectID: current.projectID,
+                serviceName: current.serviceName,
+                runtimeAdapter: current.runtimeAdapter,
+                createdAt: current.createdAt,
+                observedAt: hostwrightTimestamp(),
+                cleanupEligible: current.cleanupEligible,
+                metadataJSONRedacted: metadata,
+                identityVersion: current.identityVersion,
+                resourceUUID: current.resourceUUID,
+                resourceGeneration: current.resourceGeneration,
+                projectResourceUUID: current.projectResourceUUID,
+                projectGeneration: current.projectGeneration,
+                providerGeneration: current.providerGeneration,
+                fencingToken: current.fencingToken
+            )
+        )
+    }
+
+    private func markOwnershipDeleting(
+        node: LifecyclePlanNode,
+        context: LifecycleSagaContext
+    ) async throws {
+        guard let current = try store.ownership.loadAll().first(where: {
+            $0.resourceUUID == node.resourceUUID &&
+                $0.resourceIdentifier == node.resourceIdentifier &&
+                RuntimeProviderBinding.stableID(for: $0.runtimeAdapter) ==
+                    context.plan.providerID
+        }),
+        current.fencingToken == context.fencingToken,
+        let group = try store.operationGroups.load(id: context.groupID),
+        group.status == .active,
+        group.planHash == context.plan.planSHA256,
+        group.fencingToken == context.fencingToken,
+        group.lockOwner == context.leaseOwner else {
+            throw StateStoreError.invalidRecord(
+                "Lifecycle deletion requires the exact owned resource and active mutation lease."
+            )
+        }
+        let prior = try OwnershipAuthorityMetadata.decode(
+            from: current.metadataJSONRedacted
+        )
+        try prior?.validate(for: current)
+        if let prior, prior.deletionTimestamp != nil {
+            guard prior.operationGroupID == group.id,
+                  Set(prior.finalizers.map(\.state)) == [.releasing] else {
+                throw StateStoreError.invalidRecord(
+                    "Lifecycle deletion found a different or terminal ownership finalizer."
+                )
+            }
+            return
+        }
+        let deleting = try OwnershipAuthorityRecord.lifecycle(
+            ownership: current,
+            operationGroup: group,
+            finalizerState: .releasing,
+            deletionTimestamp: hostwrightTimestamp(),
+            handoffGeneration: (prior?.handoffGeneration ?? 0) +
+                ((prior?.operationGroupID == group.id) ? 0 : 1)
+        )
+        let metadata = try OwnershipAuthorityMetadata.encode(
+            deleting,
+            into: current.metadataJSONRedacted
+        )
+        try store.ownership.upsert(
+            OwnershipRecord(
+                id: current.id,
+                resourceIdentifier: current.resourceIdentifier,
+                resourceType: current.resourceType,
+                projectID: current.projectID,
+                serviceName: current.serviceName,
+                runtimeAdapter: current.runtimeAdapter,
+                createdAt: current.createdAt,
+                observedAt: hostwrightTimestamp(),
+                cleanupEligible: current.cleanupEligible,
+                metadataJSONRedacted: metadata,
+                identityVersion: current.identityVersion,
+                resourceUUID: current.resourceUUID,
+                resourceGeneration: current.resourceGeneration,
+                projectResourceUUID: current.projectResourceUUID,
+                projectGeneration: current.projectGeneration,
+                providerGeneration: current.providerGeneration,
+                fencingToken: current.fencingToken
+            )
+        )
     }
 
     private func acquireImageContentLeaseIfNeeded(
@@ -6037,14 +6294,43 @@ struct LifecycleLiveEffects:
             try store.imageDigestLocks.save(record)
         }
         if node.action == .create, let exactContainer {
-            let record = OwnershipRecord(
-                id: HostwrightResourceUUID.generate(),
+            let existing = try store.ownership.loadAll().first(where: {
+                $0.resourceUUID == node.resourceUUID &&
+                    $0.resourceIdentifier ==
+                        (node.resourceIdentifier ?? exactContainer.name) &&
+                    RuntimeProviderBinding.stableID(
+                        for: $0.runtimeAdapter
+                    ) == context.plan.providerID
+            })
+            let existingAuthority = try existing.flatMap {
+                try OwnershipAuthorityMetadata.decode(
+                    from: $0.metadataJSONRedacted
+                )
+            }
+            if let existing {
+                try existingAuthority?.validate(for: existing)
+                guard existing.fencingToken == context.fencingToken,
+                      existing.projectID == context.plan.projectID,
+                      existing.serviceName == identity.serviceName,
+                      existing.projectResourceUUID ==
+                        context.plan.projectResourceUUID,
+                      existingAuthority?.deletionTimestamp == nil,
+                      existingAuthority.map({
+                          Set($0.finalizers.map(\.state)) == [.active]
+                      }) ?? true else {
+                    throw StateStoreError.invalidRecord(
+                        "Lifecycle replacement create found stale, deleting, or mismatched ownership authority."
+                    )
+                }
+            }
+            let baseRecord = OwnershipRecord(
+                id: existing?.id ?? HostwrightResourceUUID.generate(),
                 resourceIdentifier: node.resourceIdentifier ?? exactContainer.name,
                 resourceType: "container",
                 projectID: context.plan.projectID,
                 serviceName: identity.serviceName,
                 runtimeAdapter: context.plan.providerID.rawValue,
-                createdAt: now,
+                createdAt: existing?.createdAt ?? now,
                 observedAt: now,
                 cleanupEligible: true,
                 metadataJSONRedacted: try lifecycleOwnershipMetadataJSON(
@@ -6061,6 +6347,46 @@ struct LifecycleLiveEffects:
                 projectGeneration: context.plan.projectGeneration,
                 providerGeneration: context.plan.providerGeneration,
                 fencingToken: context.fencingToken
+            )
+            guard let group = try store.operationGroups.load(
+                id: context.groupID
+            ),
+            group.status == .active,
+            group.planHash == context.plan.planSHA256,
+            group.fencingToken == context.fencingToken,
+            group.lockOwner == context.leaseOwner else {
+                throw StateStoreError.invalidRecord(
+                    "Lifecycle ownership authority requires the exact active operation lease."
+                )
+            }
+            let authority = try OwnershipAuthorityRecord.lifecycle(
+                ownership: baseRecord,
+                operationGroup: group,
+                finalizerState: .active,
+                handoffGeneration:
+                    existingAuthority?.handoffGeneration ?? 0
+            )
+            let record = OwnershipRecord(
+                id: baseRecord.id,
+                resourceIdentifier: baseRecord.resourceIdentifier,
+                resourceType: baseRecord.resourceType,
+                projectID: baseRecord.projectID,
+                serviceName: baseRecord.serviceName,
+                runtimeAdapter: baseRecord.runtimeAdapter,
+                createdAt: baseRecord.createdAt,
+                observedAt: baseRecord.observedAt,
+                cleanupEligible: baseRecord.cleanupEligible,
+                metadataJSONRedacted: try OwnershipAuthorityMetadata.encode(
+                    authority,
+                    into: baseRecord.metadataJSONRedacted
+                ),
+                identityVersion: baseRecord.identityVersion,
+                resourceUUID: baseRecord.resourceUUID,
+                resourceGeneration: baseRecord.resourceGeneration,
+                projectResourceUUID: baseRecord.projectResourceUUID,
+                projectGeneration: baseRecord.projectGeneration,
+                providerGeneration: baseRecord.providerGeneration,
+                fencingToken: baseRecord.fencingToken
             )
             try store.ownership.upsert(record)
             await state.setBinding(
@@ -6096,20 +6422,6 @@ struct LifecycleLiveEffects:
             )
         }
         if node.action == .delete || node.action == .retire {
-            if let record = try store.ownership.loadAll().first(where: {
-                $0.resourceUUID == node.resourceUUID
-            }) {
-                guard try store.ownership.removeExact(
-                    resourceIdentifier: record.resourceIdentifier,
-                    runtimeAdapter: record.runtimeAdapter,
-                    expectedResourceUUID: record.resourceUUID,
-                    expectedFencingToken: record.fencingToken
-                ) else {
-                    throw StateStoreError.invalidRecord(
-                        "Verified runtime deletion could not remove the exact ownership projection."
-                    )
-                }
-            }
             await state.removeBinding(resourceUUID: node.resourceUUID)
         }
         try store.observedStates.saveSnapshot(
@@ -6145,13 +6457,22 @@ struct LifecycleLiveEffects:
         } else {
             await state.desiredService(for: node.key)
         }
-        let metadata = try lifecycleOwnershipMetadataJSON(
+        var metadata = try lifecycleOwnershipMetadataJSON(
             identity: identity,
             desiredService: resolvedDesiredService,
             healthy: true,
             capabilitySHA256: context.plan.capabilitySHA256,
             planSHA256: context.plan.planSHA256
         )
+        if let authority = try OwnershipAuthorityMetadata.decode(
+            from: current.metadataJSONRedacted
+        ) {
+            try authority.validate(for: current)
+            metadata = try OwnershipAuthorityMetadata.encode(
+                authority,
+                into: metadata
+            )
+        }
         try store.ownership.upsert(
             OwnershipRecord(
                 id: current.id,

@@ -164,6 +164,11 @@ struct RegistryReferrerMutationCoordinator {
         intent: ReferrerMutationIntent,
         group: OperationGroupRecord
     ) throws -> CLIRunResult {
+        let mutationFence = try hostwrightAcquireExactOperationMutationFence(
+            store: store,
+            group: group
+        )
+        defer { mutationFence.release() }
         do {
             guard let graph = try store.ociReferrers.loadGraph(
                 discoveryID: intent.discoveryID
@@ -281,6 +286,11 @@ struct RegistryReferrerMutationCoordinator {
         intent: ReferrerMutationIntent,
         group: OperationGroupRecord
     ) throws -> CLIRunResult {
+        let mutationFence = try hostwrightAcquireExactOperationMutationFence(
+            store: store,
+            group: group
+        )
+        defer { mutationFence.release() }
         do {
             guard let digestValue = intent.referrerDigest,
                   let graph = try store.ociReferrers.loadGraph(

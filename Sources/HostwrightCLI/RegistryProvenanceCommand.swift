@@ -195,6 +195,11 @@ struct RegistryProvenanceCommandRunner {
                 ]
             )
         }
+        let mutationFence = try hostwrightAcquireExactOperationMutationFence(
+            store: store,
+            group: group
+        )
+        defer { mutationFence.release() }
 
         var graphPersisted = false
         do {
@@ -406,6 +411,11 @@ struct RegistryProvenanceCommandRunner {
                 ]
             )
         }
+        let mutationFence = try hostwrightAcquireExactOperationMutationFence(
+            store: store,
+            group: group
+        )
+        defer { mutationFence.release() }
 
         var recordPersisted = false
         do {

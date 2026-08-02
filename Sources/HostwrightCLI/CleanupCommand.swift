@@ -1,3 +1,4 @@
+import Foundation
 import HostwrightCore
 import HostwrightManifest
 import HostwrightPolicy
@@ -339,9 +340,13 @@ struct CleanupCommandRunner {
             }
 
             let operationID = hostwrightUniqueID(prefix: "operation-cleanup")
+            let operationGroupID = HostwrightResourceUUID.generate()
             let operationFencingToken = HostwrightResourceUUID.generate()
+            let lockOwner = "hostwright-cleanup:\(operationID)"
+            let lockExpiresAt = ISO8601DateFormatter().string(
+                from: Date().addingTimeInterval(300)
+            )
             var failureRecovery = "not-attempted"
-            var failureRecoveryError: String?
             var successPayload: [String: Any] = ["result": "deleted"]
             var successEventPayload: [String: Any] = ["resourceIdentifier": candidate.resourceIdentifier]
             try store.operations.record(
@@ -370,18 +375,88 @@ struct CleanupCommandRunner {
                 guard let projectResourceUUID = candidate.ownership.projectResourceUUID else {
                     throw StateStoreError.invalidRecord("Cleanup ownership lost its project UUID binding.")
                 }
-                guard try store.ownership.advanceFencingToken(
+                let groupResult = try store.operationGroups.acquire(
+                    OperationGroupRecord(
+                        id: operationGroupID,
+                        operationID: operationID,
+                        groupKind: "cleanup-v1",
+                        projectID: projectID,
+                        serviceName: candidate.identity.serviceName,
+                        plannedActionType: "deleteManagedContainer",
+                        status: .active,
+                        groupIdempotencyKey: idempotencyKey,
+                        planHash: token,
+                        checkpoint: "intent-persisted",
+                        lockOwner: lockOwner,
+                        lockExpiresAt: lockExpiresAt,
+                        rollbackAvailable: false,
+                        manualRecoveryHintRedacted: "",
+                        createdAt: timestamp,
+                        updatedAt: timestamp,
+                        metadataJSONRedacted: jsonPayload([
+                            "resourceIdentifier": candidate.resourceIdentifier,
+                            "resourceUUID": candidate.ownership.resourceUUID
+                        ]),
+                        fencingToken: operationFencingToken,
+                        intentJSONRedacted: jsonPayload([
+                            "planHash": token,
+                            "resourceIdentifier": candidate.resourceIdentifier,
+                            "resourceUUID": candidate.ownership.resourceUUID
+                        ]),
+                        compensationJSONRedacted: "[]",
+                        verificationJSONRedacted: "{}"
+                    ),
+                    currentTimestamp: timestamp
+                )
+                guard let operationGroup = groupResult.acquired else {
+                    throw StateStoreError.invalidRecord(
+                        "Cleanup could not acquire the sole local project mutation lease."
+                    )
+                }
+                let mutationFence = try store.acquireOperationMutationFence(
+                    groupID: operationGroupID
+                )
+                defer { mutationFence.release() }
+                guard let fencedGroup = try store.operationGroups.load(
+                    id: operationGroupID
+                ), fencedGroup.status == .active,
+                fencedGroup.fencingToken == operationFencingToken,
+                fencedGroup.lockOwner == lockOwner,
+                fencedGroup.lockExpiresAt == lockExpiresAt else {
+                    throw StateStoreError.invalidRecord(
+                        "Cleanup lost its exact operation mutation fence before the provider effect."
+                    )
+                }
+                guard let advancedOwnership = try store.ownership.advanceFencingToken(
                     resourceIdentifier: candidate.resourceIdentifier,
                     runtimeAdapter: candidate.runtimeAdapter,
                     expectedResourceUUID: candidate.ownership.resourceUUID,
                     expectedFencingToken: candidate.ownership.fencingToken,
                     newFencingToken: operationFencingToken,
                     observedAt: timestamp
-                ) != nil else {
+                ) else {
                     throw StateStoreError.invalidRecord(
                         "Ownership fencing changed before cleanup execution; refusing stale deletion."
                     )
                 }
+                try bindCleanupDeletionAuthority(
+                    ownership: advancedOwnership,
+                    operationGroup: operationGroup,
+                    store: store,
+                    timestamp: timestamp
+                )
+                try store.operationGroups.recordCheckpointRenewingLease(
+                    groupID: operationGroupID,
+                    expectedFencingToken: operationFencingToken,
+                    expectedLockOwner: lockOwner,
+                    checkpoint: "ownership-deletion-intent-persisted",
+                    verificationJSONRedacted: jsonPayload([
+                        "resourceUUID": advancedOwnership.resourceUUID,
+                        "fencingToken": operationFencingToken
+                    ]),
+                    lockExpiresAt: lockExpiresAt,
+                    updatedAt: timestamp
+                )
                 let context = RuntimeMutationContext(
                     providerID: providerID,
                     capabilitySHA256: capabilitySHA256,
@@ -391,12 +466,12 @@ struct CleanupCommandRunner {
                     projectResourceUUID: projectResourceUUID,
                     projectGeneration: candidate.ownership.projectGeneration,
                     providerGeneration: candidate.ownership.providerGeneration,
-                    fencingToken: candidate.ownership.fencingToken
+                    fencingToken: operationFencingToken
                 )
                 if let issue = context.validationIssue {
                     throw StateStoreError.invalidRecord(issue)
                 }
-                let event: RuntimeEvent
+                var event: RuntimeEvent
                 do {
                     event = try hostwrightWaitForAsync {
                         try await adapter.execute(
@@ -416,6 +491,17 @@ struct CleanupCommandRunner {
                                 approvalHash: teamBinding?.approvalHash,
                                 context: context
                             )
+                        )
+                    }
+                    guard reobserveFailedDelete(
+                        adapter: adapter,
+                        desiredState: observationDesiredState,
+                        candidate: candidate,
+                        providerID: providerID,
+                        capabilitySHA256: capabilitySHA256
+                    ) == .resourceAbsent else {
+                        throw StateStoreError.invalidRecord(
+                            "Cleanup provider success was not confirmed by exact runtime absence."
                         )
                     }
                 } catch {
@@ -448,24 +534,8 @@ struct CleanupCommandRunner {
                             resourceIdentifier: candidate.resourceIdentifier
                         )
                     case .resourcePresent:
-                        do {
-                            let restored = try store.ownership.advanceFencingToken(
-                                resourceIdentifier: candidate.resourceIdentifier,
-                                runtimeAdapter: candidate.runtimeAdapter,
-                                expectedResourceUUID: candidate.ownership.resourceUUID,
-                                expectedFencingToken: operationFencingToken,
-                                newFencingToken: candidate.ownership.fencingToken,
-                                observedAt: hostwrightTimestamp()
-                            )
-                            failureRecovery = restored == nil
-                                ? "resource-present-fence-retained"
-                                : "resource-present-fence-restored"
-                        } catch {
-                            failureRecovery = "resource-present-fence-retained"
-                            failureRecoveryError = RuntimeRedactionPolicy.default.redact(
-                                String(describing: error)
-                            )
-                        }
+                        failureRecovery =
+                            "resource-present-operation-fence-retained"
                         throw providerError
                     case .ambiguous:
                         failureRecovery = "reobservation-ambiguous-operation-fence-retained"
@@ -475,6 +545,30 @@ struct CleanupCommandRunner {
 
                 let successTimestamp = hostwrightTimestamp()
                 do {
+                    try finalizeCleanupOwnership(
+                        candidate: candidate,
+                        operationGroupID: operationGroupID,
+                        operationFencingToken: operationFencingToken,
+                        expectedLeaseOwner: lockOwner,
+                        expectedLeaseExpiresAt: lockExpiresAt,
+                        store: store,
+                        timestamp: successTimestamp
+                    )
+                    try store.operationGroups.finishExactLease(
+                        groupID: operationGroupID,
+                        expectedFencingToken: operationFencingToken,
+                        expectedLockOwner: lockOwner,
+                        expectedLockExpiresAt: lockExpiresAt,
+                        status: .succeeded,
+                        checkpoint: "ownership-finalizers-complete",
+                        manualRecoveryHintRedacted: "",
+                        updatedAt: successTimestamp,
+                        metadataJSONRedacted: jsonPayload([
+                            "resourceIdentifier": candidate.resourceIdentifier,
+                            "resourceUUID": candidate.ownership.resourceUUID,
+                            "runtimeAbsent": true
+                        ])
+                    )
                     try store.operations.record(
                         OperationRecord(
                             id: "\(operationID)-succeeded",
@@ -508,15 +602,6 @@ struct CleanupCommandRunner {
                             )
                         )
                     ])
-                    try store.ownership.markCleanupCompleted(
-                        resourceIdentifier: candidate.resourceIdentifier,
-                        runtimeAdapter: candidate.runtimeAdapter,
-                        observedAt: successTimestamp,
-                        metadataJSONRedacted: jsonPayload(
-                            ["cleanupToken": token, "cleanupStatus": "deleted"]
-                                .merging(hostwrightTeamBindingPayload(teamBinding)) { current, _ in current }
-                        )
-                    )
                     lines.append("- deleted \(candidate.resourceIdentifier)")
                 } catch {
                     let redactedPersistenceError = RuntimeRedactionPolicy.default.redact(String(describing: error))
@@ -533,15 +618,12 @@ struct CleanupCommandRunner {
                 hadFailure = true
                 let redactedError = RuntimeRedactionPolicy.default.redact(String(describing: error))
                 do {
-                    var failurePayload: [String: Any] = [
+                    let failurePayload: [String: Any] = [
                         "error": redactedError,
                         "fencingToken": operationFencingToken,
                         "priorFencingToken": candidate.ownership.fencingToken,
                         "recovery": failureRecovery
                     ]
-                    if let failureRecoveryError {
-                        failurePayload["recoveryError"] = failureRecoveryError
-                    }
                     try store.operations.record(
                         OperationRecord(
                             id: "\(operationID)-failed",
@@ -602,7 +684,92 @@ struct CleanupCommandRunner {
         return CLIRunResult(standardOutput: lines.joined(separator: "\n"))
     }
 
-    private enum FailedDeleteObservation {
+    private func bindCleanupDeletionAuthority(
+        ownership: OwnershipRecord,
+        operationGroup: OperationGroupRecord,
+        store: SQLiteStateStore,
+        timestamp: String
+    ) throws {
+        let prior = try OwnershipAuthorityMetadata.decode(
+            from: ownership.metadataJSONRedacted
+        )
+        try prior?.validate(for: ownership)
+        guard prior?.deletionTimestamp == nil else {
+            throw StateStoreError.invalidRecord(
+                "Cleanup found ownership already bound to a deletion finalizer."
+            )
+        }
+        let authority = try OwnershipAuthorityRecord.lifecycle(
+            ownership: ownership,
+            operationGroup: operationGroup,
+            finalizerState: .releasing,
+            deletionTimestamp: timestamp,
+            handoffGeneration: (prior?.handoffGeneration ?? 0) +
+                ((prior?.operationGroupID == operationGroup.id) ? 0 :
+                    (prior == nil ? 0 : 1))
+        )
+        let metadata = try OwnershipAuthorityMetadata.encode(
+            authority,
+            into: ownership.metadataJSONRedacted
+        )
+        try store.ownership.upsert(
+            OwnershipRecord(
+                id: ownership.id,
+                resourceIdentifier: ownership.resourceIdentifier,
+                resourceType: ownership.resourceType,
+                projectID: ownership.projectID,
+                serviceName: ownership.serviceName,
+                runtimeAdapter: ownership.runtimeAdapter,
+                createdAt: ownership.createdAt,
+                observedAt: timestamp,
+                cleanupEligible: ownership.cleanupEligible,
+                metadataJSONRedacted: metadata,
+                identityVersion: ownership.identityVersion,
+                resourceUUID: ownership.resourceUUID,
+                resourceGeneration: ownership.resourceGeneration,
+                projectResourceUUID: ownership.projectResourceUUID,
+                projectGeneration: ownership.projectGeneration,
+                providerGeneration: ownership.providerGeneration,
+                fencingToken: ownership.fencingToken
+            )
+        )
+    }
+
+    private func finalizeCleanupOwnership(
+        candidate: CleanupCandidate,
+        operationGroupID: String,
+        operationFencingToken: String,
+        expectedLeaseOwner: String,
+        expectedLeaseExpiresAt: String,
+        store: SQLiteStateStore,
+        timestamp: String
+    ) throws {
+        guard let projectUUID = candidate.ownership.projectResourceUUID,
+              try store.networkPorts.loadProject(
+                  projectUUID: projectUUID
+              ).allSatisfy({
+                  $0.resourceUUID != candidate.ownership.resourceUUID
+              }),
+              try store.serviceTunnels.listRecoverable(
+                  projectUUID: projectUUID
+              ).isEmpty else {
+            throw StateStoreError.invalidRecord(
+                "Cleanup finalization could not prove dependent network and tunnel release."
+            )
+        }
+        _ = try store.ownership.markCleanupCompleted(
+            resourceIdentifier: candidate.resourceIdentifier,
+            runtimeAdapter: candidate.runtimeAdapter,
+            expectedResourceUUID: candidate.ownership.resourceUUID,
+            expectedFencingToken: operationFencingToken,
+            expectedOperationGroupID: operationGroupID,
+            expectedLeaseOwner: expectedLeaseOwner,
+            expectedLeaseExpiresAt: expectedLeaseExpiresAt,
+            observedAt: timestamp
+        )
+    }
+
+    private enum FailedDeleteObservation: Equatable {
         case resourcePresent
         case resourceAbsent
         case ambiguous

@@ -601,58 +601,182 @@ public struct OwnershipRepository: Sendable {
               redacted.providerGeneration >= 0 else {
             throw StateStoreError.invalidRecord("Ownership identity, generation, or fencing fields are invalid.")
         }
+        let incomingAuthority = try OwnershipAuthorityMetadata.decode(
+            from: redacted.metadataJSONRedacted
+        )
+        try incomingAuthority?.validate(for: redacted)
         try store.withValidatedConnection { connection in
             try connection.transaction {
-                try connection.run(
+                let rows = try connection.query(
                     """
-                    INSERT INTO ownership_records (
-                        id, resource_identifier, resource_type, project_id, service_name, runtime_adapter,
-                        created_at, observed_at, cleanup_eligible, metadata_json_redacted, identity_version,
-                        resource_uuid, resource_generation, project_resource_uuid, project_generation,
-                        provider_generation, fencing_token
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(resource_identifier, runtime_adapter) DO UPDATE SET
-                        resource_type = excluded.resource_type,
-                        project_id = excluded.project_id,
-                        service_name = excluded.service_name,
-                        observed_at = excluded.observed_at,
-                        cleanup_eligible = excluded.cleanup_eligible,
-                        metadata_json_redacted = excluded.metadata_json_redacted,
-                        identity_version = excluded.identity_version,
-                        resource_uuid = ownership_records.resource_uuid,
-                        resource_generation = MAX(ownership_records.resource_generation, excluded.resource_generation),
-                        project_resource_uuid = COALESCE(ownership_records.project_resource_uuid, excluded.project_resource_uuid),
-                        project_generation = MAX(ownership_records.project_generation, excluded.project_generation),
-                        provider_generation = MAX(ownership_records.provider_generation, excluded.provider_generation),
-                        fencing_token = CASE
-                            WHEN excluded.provider_generation >= ownership_records.provider_generation
-                             AND excluded.resource_generation >= ownership_records.resource_generation
-                            THEN excluded.fencing_token
-                            ELSE ownership_records.fencing_token
-                        END
+                    SELECT id, resource_identifier, resource_type, project_id, service_name, runtime_adapter,
+                           created_at, observed_at, cleanup_eligible, metadata_json_redacted, identity_version,
+                           resource_uuid, resource_generation, project_resource_uuid, project_generation,
+                           provider_generation, fencing_token
+                    FROM ownership_records
+                    WHERE resource_identifier = ? AND runtime_adapter = ?
+                    LIMIT 1
                     """,
                     bindings: [
-                        .text(redacted.id),
                         .text(redacted.resourceIdentifier),
-                        .text(redacted.resourceType),
-                        optionalText(redacted.projectID),
-                        optionalText(redacted.serviceName),
-                        .text(redacted.runtimeAdapter),
-                        .text(redacted.createdAt),
-                        .text(redacted.observedAt),
-                        .bool(redacted.cleanupEligible),
-                        .text(redacted.metadataJSONRedacted),
-                        .int(redacted.identityVersion),
-                        .text(redacted.resourceUUID),
-                        .int(redacted.resourceGeneration),
-                        optionalText(redacted.projectResourceUUID),
-                        .int(redacted.projectGeneration),
-                        .int(redacted.providerGeneration),
-                        .text(redacted.fencingToken)
+                        .text(redacted.runtimeAdapter)
                     ]
                 )
+                if let existing = try rows.first.map(ownershipRecord(from:)) {
+                    try validateTransition(
+                        from: existing,
+                        to: redacted,
+                        incomingAuthority: incomingAuthority
+                    )
+                    try connection.run(
+                        """
+                        UPDATE ownership_records
+                        SET observed_at = ?, cleanup_eligible = ?,
+                            metadata_json_redacted = ?, resource_generation = ?,
+                            project_generation = ?, provider_generation = ?
+                        WHERE id = ? AND resource_identifier = ?
+                          AND runtime_adapter = ? AND resource_uuid = ?
+                          AND project_resource_uuid IS ? AND fencing_token = ?
+                        """,
+                        bindings: [
+                            .text(redacted.observedAt),
+                            .bool(redacted.cleanupEligible),
+                            .text(redacted.metadataJSONRedacted),
+                            .int(redacted.resourceGeneration),
+                            .int(redacted.projectGeneration),
+                            .int(redacted.providerGeneration),
+                            .text(existing.id),
+                            .text(existing.resourceIdentifier),
+                            .text(existing.runtimeAdapter),
+                            .text(existing.resourceUUID),
+                            optionalText(existing.projectResourceUUID),
+                            .text(existing.fencingToken)
+                        ]
+                    )
+                } else {
+                    try connection.run(
+                        """
+                        INSERT INTO ownership_records (
+                            id, resource_identifier, resource_type, project_id, service_name, runtime_adapter,
+                            created_at, observed_at, cleanup_eligible, metadata_json_redacted, identity_version,
+                            resource_uuid, resource_generation, project_resource_uuid, project_generation,
+                            provider_generation, fencing_token
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        bindings: [
+                            .text(redacted.id),
+                            .text(redacted.resourceIdentifier),
+                            .text(redacted.resourceType),
+                            optionalText(redacted.projectID),
+                            optionalText(redacted.serviceName),
+                            .text(redacted.runtimeAdapter),
+                            .text(redacted.createdAt),
+                            .text(redacted.observedAt),
+                            .bool(redacted.cleanupEligible),
+                            .text(redacted.metadataJSONRedacted),
+                            .int(redacted.identityVersion),
+                            .text(redacted.resourceUUID),
+                            .int(redacted.resourceGeneration),
+                            optionalText(redacted.projectResourceUUID),
+                            .int(redacted.projectGeneration),
+                            .int(redacted.providerGeneration),
+                            .text(redacted.fencingToken)
+                        ]
+                    )
+                }
             }
+        }
+    }
+
+    private func validateTransition(
+        from existing: OwnershipRecord,
+        to incoming: OwnershipRecord,
+        incomingAuthority: OwnershipAuthorityRecord?
+    ) throws {
+        let existingAuthority = try OwnershipAuthorityMetadata.decode(
+            from: existing.metadataJSONRedacted
+        )
+        try existingAuthority?.validate(for: existing)
+        guard incoming.id == existing.id,
+              incoming.resourceIdentifier == existing.resourceIdentifier,
+              incoming.resourceType == existing.resourceType,
+              incoming.projectID == existing.projectID,
+              incoming.serviceName == existing.serviceName,
+              incoming.runtimeAdapter == existing.runtimeAdapter,
+              incoming.createdAt == existing.createdAt,
+              incoming.identityVersion == existing.identityVersion,
+              incoming.resourceUUID == existing.resourceUUID,
+              incoming.projectResourceUUID == existing.projectResourceUUID,
+              incoming.fencingToken == existing.fencingToken,
+              incoming.resourceGeneration >= existing.resourceGeneration,
+              incoming.projectGeneration >= existing.projectGeneration,
+              incoming.providerGeneration >= existing.providerGeneration,
+              incoming.observedAt >= existing.observedAt,
+              existing.cleanupEligible || !incoming.cleanupEligible else {
+            throw StateStoreError.invalidRecord(
+                "Ownership update lost its exact immutable identity, fence, generation ordering, or cleanup authority."
+            )
+        }
+        switch (existingAuthority, incomingAuthority) {
+        case (nil, nil), (nil, .some):
+            return
+        case (.some, nil):
+            throw StateStoreError.invalidRecord(
+                "Versioned ownership authority cannot be removed by an update."
+            )
+        case let (.some(previous), .some(next)):
+            let beginsDeletion = previous.deletionTimestamp == nil &&
+                next.deletionTimestamp != nil &&
+                Set(previous.finalizers.map(\.state)) == [.active] &&
+                Set(next.finalizers.map(\.state)) == [.releasing]
+            let rebindsLiveLease = previous.deletionTimestamp == nil &&
+                next.deletionTimestamp == nil &&
+                Set(previous.finalizers.map(\.state)) == [.active] &&
+                Set(next.finalizers.map(\.state)) == [.active]
+            let changesOperation = previous.operationGroupID !=
+                next.operationGroupID
+            let changesLeaseAuthority =
+                previous.leaseOwner != next.leaseOwner &&
+                next.leaseOwner != nil
+            let validAuthorityHandoff = changesOperation
+                ? (beginsDeletion || rebindsLiveLease)
+                : (changesLeaseAuthority
+                    ? previous.deletionTimestamp == next.deletionTimestamp
+                    : true)
+            guard previous.controllerID == next.controllerID,
+                  validAuthorityHandoff,
+                  ((changesOperation || changesLeaseAuthority)
+                    ?
+                        next.handoffGeneration ==
+                            previous.handoffGeneration + 1
+                    : next.handoffGeneration ==
+                        previous.handoffGeneration),
+                  previous.deletionTimestamp == nil ||
+                    previous.deletionTimestamp == next.deletionTimestamp,
+                  finalizerTransition(
+                      from: previous.finalizers,
+                      to: next.finalizers
+                  ) else {
+                throw StateStoreError.invalidRecord(
+                    "Ownership authority controller, operation, deletion, handoff, or finalizer transition is stale or invalid."
+                )
+            }
+        }
+    }
+
+    private func finalizerTransition(
+        from previous: [OwnershipFinalizerRecord],
+        to next: [OwnershipFinalizerRecord]
+    ) -> Bool {
+        guard previous.map(\.name) == next.map(\.name) else { return false }
+        let order: [OwnershipFinalizerState: Int] = [
+            .active: 0,
+            .releasing: 1,
+            .released: 2,
+            .quarantined: 2
+        ]
+        return zip(previous, next).allSatisfy {
+            (order[$0.state] ?? -1) <= (order[$1.state] ?? -1)
         }
     }
 
@@ -688,22 +812,100 @@ public struct OwnershipRepository: Sendable {
         }
         return try store.withValidatedConnection { connection in
             try connection.transaction {
+                let currentRows = try connection.query(
+                    """
+                    SELECT id, resource_identifier, resource_type, project_id, service_name, runtime_adapter,
+                           created_at, observed_at, cleanup_eligible, metadata_json_redacted, identity_version,
+                           resource_uuid, resource_generation, project_resource_uuid, project_generation,
+                           provider_generation, fencing_token
+                    FROM ownership_records
+                    WHERE resource_identifier = ? AND runtime_adapter = ?
+                      AND resource_uuid = ? AND fencing_token = ?
+                    LIMIT 1
+                    """,
+                    bindings: [
+                        .text(resourceIdentifier),
+                        .text(runtimeAdapter),
+                        .text(expectedResourceUUID.lowercased()),
+                        .text(expectedFencingToken.lowercased())
+                    ]
+                )
+                guard let current = try currentRows.first.map(
+                    ownershipRecord(from:)
+                ) else {
+                    return nil
+                }
+                var metadataJSON = current.metadataJSONRedacted
+                if let authority = try OwnershipAuthorityMetadata.decode(
+                    from: metadataJSON
+                ) {
+                    try authority.validate(for: current)
+                    let projected = OwnershipRecord(
+                        id: current.id,
+                        resourceIdentifier: current.resourceIdentifier,
+                        resourceType: current.resourceType,
+                        projectID: current.projectID,
+                        serviceName: current.serviceName,
+                        runtimeAdapter: current.runtimeAdapter,
+                        createdAt: current.createdAt,
+                        observedAt: observedAt,
+                        cleanupEligible: current.cleanupEligible,
+                        metadataJSONRedacted: current.metadataJSONRedacted,
+                        identityVersion: current.identityVersion,
+                        resourceUUID: current.resourceUUID,
+                        resourceGeneration: current.resourceGeneration,
+                        projectResourceUUID: current.projectResourceUUID,
+                        projectGeneration: current.projectGeneration,
+                        providerGeneration: current.providerGeneration,
+                        fencingToken: newFencingToken.lowercased()
+                    )
+                    let rebound = OwnershipAuthorityRecord(
+                        controllerID: authority.controllerID,
+                        providerID: authority.providerID,
+                        ownershipProofSHA256:
+                            OwnershipAuthorityRecord.proofSHA256(
+                                ownership: projected,
+                                controllerID: authority.controllerID,
+                                providerID: authority.providerID,
+                                fencingToken: newFencingToken.lowercased()
+                            ),
+                        resourceUUID: authority.resourceUUID,
+                        resourceGeneration: authority.resourceGeneration,
+                        projectResourceUUID: authority.projectResourceUUID,
+                        projectGeneration: authority.projectGeneration,
+                        providerGeneration: authority.providerGeneration,
+                        fencingToken: newFencingToken.lowercased(),
+                        finalizers: authority.finalizers,
+                        deletionTimestamp: authority.deletionTimestamp,
+                        operationGroupID: authority.operationGroupID,
+                        leaseOwner: authority.leaseOwner,
+                        leaseExpiresAt: authority.leaseExpiresAt,
+                        handoffGeneration: authority.handoffGeneration
+                    )
+                    try rebound.validate(for: projected)
+                    metadataJSON = try OwnershipAuthorityMetadata.encode(
+                        rebound,
+                        into: metadataJSON
+                    )
+                }
                 try connection.run(
                     """
                     UPDATE ownership_records
-                    SET fencing_token = ?, observed_at = ?
+                    SET fencing_token = ?, observed_at = ?,
+                        metadata_json_redacted = ?
                     WHERE resource_identifier = ?
                       AND runtime_adapter = ?
                       AND resource_uuid = ?
                       AND fencing_token = ?
                     """,
                     bindings: [
-                        .text(newFencingToken),
+                        .text(newFencingToken.lowercased()),
                         .text(observedAt),
+                        .text(metadataJSON),
                         .text(resourceIdentifier),
                         .text(runtimeAdapter),
-                        .text(expectedResourceUUID),
-                        .text(expectedFencingToken)
+                        .text(expectedResourceUUID.lowercased()),
+                        .text(expectedFencingToken.lowercased())
                     ]
                 )
                 let rows = try connection.query(
@@ -719,8 +921,8 @@ public struct OwnershipRepository: Sendable {
                     bindings: [
                         .text(resourceIdentifier),
                         .text(runtimeAdapter),
-                        .text(expectedResourceUUID),
-                        .text(newFencingToken)
+                        .text(expectedResourceUUID.lowercased()),
+                        .text(newFencingToken.lowercased())
                     ]
                 )
                 return try rows.first.map(ownershipRecord(from:))
@@ -823,25 +1025,310 @@ public struct OwnershipRepository: Sendable {
     public func markCleanupCompleted(
         resourceIdentifier: String,
         runtimeAdapter: String,
-        observedAt: String,
-        metadataJSONRedacted: String
-    ) throws {
-        let redactedMetadata = RuntimeRedactionPolicy.default.redact(metadataJSONRedacted)
+        expectedResourceUUID: String,
+        expectedFencingToken: String,
+        expectedOperationGroupID: String,
+        expectedLeaseOwner: String,
+        expectedLeaseExpiresAt: String,
+        observedAt: String
+    ) throws -> OwnershipRecord {
+        guard HostwrightResourceUUID.isValid(expectedResourceUUID),
+              HostwrightResourceUUID.isValid(expectedFencingToken),
+              HostwrightResourceUUID.isValid(expectedOperationGroupID),
+              !expectedLeaseOwner.isEmpty,
+              !expectedLeaseExpiresAt.isEmpty,
+              let current = try loadAll().first(where: {
+                  $0.resourceIdentifier == resourceIdentifier &&
+                      $0.runtimeAdapter == runtimeAdapter &&
+                      $0.resourceUUID == expectedResourceUUID.lowercased() &&
+                      $0.fencingToken == expectedFencingToken.lowercased()
+              }),
+              let authority = try OwnershipAuthorityMetadata.decode(
+                  from: current.metadataJSONRedacted
+              ) else {
+            throw StateStoreError.invalidRecord(
+                "Cleanup finalization requires exact versioned ownership, UUID, fence, and operation identity."
+            )
+        }
+        try authority.validate(for: current)
+        guard authority.operationGroupID == expectedOperationGroupID.lowercased(),
+              authority.leaseOwner == expectedLeaseOwner,
+              authority.leaseExpiresAt == expectedLeaseExpiresAt,
+              authority.deletionTimestamp != nil,
+              Set(authority.finalizers.map(\.state)) == [.releasing] else {
+            throw StateStoreError.invalidRecord(
+                "Cleanup finalization requires the exact releasing ownership finalizers."
+            )
+        }
+        let released = OwnershipAuthorityRecord(
+            controllerID: authority.controllerID,
+            providerID: authority.providerID,
+            ownershipProofSHA256: authority.ownershipProofSHA256,
+            resourceUUID: authority.resourceUUID,
+            resourceGeneration: authority.resourceGeneration,
+            projectResourceUUID: authority.projectResourceUUID,
+            projectGeneration: authority.projectGeneration,
+            providerGeneration: authority.providerGeneration,
+            fencingToken: authority.fencingToken,
+            finalizers: authority.finalizers.map {
+                OwnershipFinalizerRecord(name: $0.name, state: .released)
+            },
+            deletionTimestamp: authority.deletionTimestamp,
+            operationGroupID: authority.operationGroupID,
+            leaseOwner: nil,
+            leaseExpiresAt: nil,
+            handoffGeneration: authority.handoffGeneration
+        )
+        try released.validate(for: current)
+        let metadata = try OwnershipAuthorityMetadata.encode(
+            released,
+            into: current.metadataJSONRedacted
+        )
+        let updated = OwnershipRecord(
+            id: current.id,
+            resourceIdentifier: current.resourceIdentifier,
+            resourceType: current.resourceType,
+            projectID: current.projectID,
+            serviceName: current.serviceName,
+            runtimeAdapter: current.runtimeAdapter,
+            createdAt: current.createdAt,
+            observedAt: observedAt,
+            cleanupEligible: false,
+            metadataJSONRedacted: metadata,
+            identityVersion: current.identityVersion,
+            resourceUUID: current.resourceUUID,
+            resourceGeneration: current.resourceGeneration,
+            projectResourceUUID: current.projectResourceUUID,
+            projectGeneration: current.projectGeneration,
+            providerGeneration: current.providerGeneration,
+            fencingToken: current.fencingToken
+        )
         try store.withValidatedConnection { connection in
             try connection.transaction {
+                let groups = try connection.query(
+                    """
+                    SELECT status, fencing_token, lock_owner, lock_expires_at
+                    FROM operation_groups
+                    WHERE id = ?
+                    LIMIT 1
+                    """,
+                    bindings: [.text(expectedOperationGroupID.lowercased())]
+                )
+                guard groups.count == 1,
+                      groups[0][0] == OperationGroupStatus.active.rawValue,
+                      groups[0][1] == expectedFencingToken.lowercased(),
+                      groups[0][2] == expectedLeaseOwner,
+                      groups[0][3] == expectedLeaseExpiresAt else {
+                    throw StateStoreError.invalidRecord(
+                        "Cleanup finalization lost the exact active operation lease."
+                    )
+                }
+                let matches = try connection.query(
+                    """
+                    SELECT id FROM ownership_records
+                    WHERE id = ? AND resource_identifier = ?
+                      AND runtime_adapter = ? AND resource_uuid = ?
+                      AND fencing_token = ? AND metadata_json_redacted = ?
+                    LIMIT 1
+                    """,
+                    bindings: [
+                        .text(current.id),
+                        .text(current.resourceIdentifier),
+                        .text(current.runtimeAdapter),
+                        .text(current.resourceUUID),
+                        .text(current.fencingToken),
+                        .text(current.metadataJSONRedacted)
+                    ]
+                )
+                guard matches.count == 1 else {
+                    throw StateStoreError.invalidRecord(
+                        "Cleanup finalization lost its exact ownership compare-and-swap."
+                    )
+                }
                 try connection.run(
                     """
                     UPDATE ownership_records
-                    SET observed_at = ?, cleanup_eligible = 0, metadata_json_redacted = ?
-                    WHERE resource_identifier = ? AND runtime_adapter = ?
+                    SET observed_at = ?, cleanup_eligible = 0,
+                        metadata_json_redacted = ?
+                    WHERE id = ? AND resource_identifier = ?
+                      AND runtime_adapter = ? AND resource_uuid = ?
+                      AND fencing_token = ? AND metadata_json_redacted = ?
                     """,
                     bindings: [
                         .text(observedAt),
-                        .text(redactedMetadata),
-                        .text(resourceIdentifier),
-                        .text(runtimeAdapter)
+                        .text(metadata),
+                        .text(current.id),
+                        .text(current.resourceIdentifier),
+                        .text(current.runtimeAdapter),
+                        .text(current.resourceUUID),
+                        .text(current.fencingToken),
+                        .text(current.metadataJSONRedacted)
                     ]
                 )
+                try connection.run(
+                    """
+                    DELETE FROM ownership_records
+                    WHERE id = ? AND resource_identifier = ?
+                      AND runtime_adapter = ? AND resource_uuid = ?
+                      AND fencing_token = ? AND cleanup_eligible = 0
+                      AND metadata_json_redacted = ?
+                    """,
+                    bindings: [
+                        .text(current.id),
+                        .text(current.resourceIdentifier),
+                        .text(current.runtimeAdapter),
+                        .text(current.resourceUUID),
+                        .text(current.fencingToken),
+                        .text(metadata)
+                    ]
+                )
+                let remaining = try connection.query(
+                    "SELECT id FROM ownership_records WHERE id = ? LIMIT 1",
+                    bindings: [.text(current.id)]
+                )
+                guard remaining.isEmpty else {
+                    throw StateStoreError.invalidRecord(
+                        "Cleanup finalizer could not remove the exact released ownership row."
+                    )
+                }
+            }
+        }
+        return updated
+    }
+
+    public func releaseMutationLease(
+        resourceIdentifier: String,
+        runtimeAdapter: String,
+        expectedResourceUUID: String,
+        expectedFencingToken: String,
+        expectedOperationGroupID: String,
+        expectedLeaseOwner: String,
+        expectedLeaseExpiresAt: String,
+        observedAt: String
+    ) throws {
+        guard HostwrightResourceUUID.isValid(expectedResourceUUID),
+              HostwrightResourceUUID.isValid(expectedFencingToken),
+              HostwrightResourceUUID.isValid(expectedOperationGroupID),
+              !expectedLeaseOwner.isEmpty,
+              !expectedLeaseExpiresAt.isEmpty else {
+            throw StateStoreError.invalidRecord(
+                "Ownership lease release requires exact UUID, fence, group, owner, and expiry."
+            )
+        }
+        try store.withValidatedConnection { connection in
+            try connection.transaction {
+                let groups = try connection.query(
+                    """
+                    SELECT status, fencing_token, lock_owner, lock_expires_at
+                    FROM operation_groups
+                    WHERE id = ?
+                    LIMIT 1
+                    """,
+                    bindings: [.text(expectedOperationGroupID.lowercased())]
+                )
+                guard groups.count == 1,
+                      groups[0][0] == OperationGroupStatus.active.rawValue,
+                      groups[0][1] == expectedFencingToken.lowercased(),
+                      groups[0][2] == expectedLeaseOwner,
+                      groups[0][3] == expectedLeaseExpiresAt else {
+                    throw StateStoreError.invalidRecord(
+                        "Ownership lease release lost the exact active operation lease."
+                    )
+                }
+                let rows = try connection.query(
+                    """
+                    SELECT id, resource_identifier, resource_type, project_id,
+                           service_name, runtime_adapter, created_at, observed_at,
+                           cleanup_eligible, metadata_json_redacted,
+                           identity_version, resource_uuid, resource_generation,
+                           project_resource_uuid, project_generation,
+                           provider_generation, fencing_token
+                    FROM ownership_records
+                    WHERE resource_identifier = ? AND runtime_adapter = ?
+                      AND resource_uuid = ? AND fencing_token = ?
+                    LIMIT 1
+                    """,
+                    bindings: [
+                        .text(resourceIdentifier),
+                        .text(runtimeAdapter),
+                        .text(expectedResourceUUID.lowercased()),
+                        .text(expectedFencingToken.lowercased())
+                    ]
+                )
+                guard let ownership = try rows.first.map(
+                    ownershipRecord(from:)
+                ), let authority = try OwnershipAuthorityMetadata.decode(
+                    from: ownership.metadataJSONRedacted
+                ) else {
+                    throw StateStoreError.invalidRecord(
+                        "Ownership lease release requires exact versioned authority."
+                    )
+                }
+                try authority.validate(for: ownership)
+                guard authority.operationGroupID ==
+                        expectedOperationGroupID.lowercased(),
+                      authority.leaseOwner == expectedLeaseOwner,
+                      authority.leaseExpiresAt == expectedLeaseExpiresAt,
+                      authority.deletionTimestamp == nil,
+                      Set(authority.finalizers.map(\.state)) == [.active] else {
+                    throw StateStoreError.invalidRecord(
+                        "Ownership lease release found stale or deleting authority."
+                    )
+                }
+                let released = OwnershipAuthorityRecord(
+                    controllerID: authority.controllerID,
+                    providerID: authority.providerID,
+                    ownershipProofSHA256: authority.ownershipProofSHA256,
+                    resourceUUID: authority.resourceUUID,
+                    resourceGeneration: authority.resourceGeneration,
+                    projectResourceUUID: authority.projectResourceUUID,
+                    projectGeneration: authority.projectGeneration,
+                    providerGeneration: authority.providerGeneration,
+                    fencingToken: authority.fencingToken,
+                    finalizers: authority.finalizers,
+                    deletionTimestamp: nil,
+                    operationGroupID: authority.operationGroupID,
+                    leaseOwner: nil,
+                    leaseExpiresAt: nil,
+                    handoffGeneration: authority.handoffGeneration
+                )
+                try released.validate(for: ownership)
+                let metadata = try OwnershipAuthorityMetadata.encode(
+                    released,
+                    into: ownership.metadataJSONRedacted
+                )
+                try connection.run(
+                    """
+                    UPDATE ownership_records
+                    SET metadata_json_redacted = ?, observed_at = ?
+                    WHERE id = ? AND fencing_token = ?
+                      AND metadata_json_redacted = ?
+                    """,
+                    bindings: [
+                        .text(metadata),
+                        .text(observedAt),
+                        .text(ownership.id),
+                        .text(ownership.fencingToken),
+                        .text(ownership.metadataJSONRedacted)
+                    ]
+                )
+                let updated = try connection.query(
+                    """
+                    SELECT metadata_json_redacted
+                    FROM ownership_records
+                    WHERE id = ? AND fencing_token = ?
+                    LIMIT 1
+                    """,
+                    bindings: [
+                        .text(ownership.id),
+                        .text(ownership.fencingToken)
+                    ]
+                )
+                guard updated.first?.first == metadata else {
+                    throw StateStoreError.invalidRecord(
+                        "Ownership lease release lost its exact compare-and-swap."
+                    )
+                }
             }
         }
     }
@@ -862,7 +1349,10 @@ public struct OwnershipRepository: Sendable {
             try connection.transaction {
                 let matches = try connection.query(
                     """
-                    SELECT id
+                    SELECT id, resource_identifier, resource_type, project_id, service_name, runtime_adapter,
+                           created_at, observed_at, cleanup_eligible, metadata_json_redacted, identity_version,
+                           resource_uuid, resource_generation, project_resource_uuid, project_generation,
+                           provider_generation, fencing_token
                     FROM ownership_records
                     WHERE resource_identifier = ?
                       AND runtime_adapter = ?
@@ -877,7 +1367,19 @@ public struct OwnershipRepository: Sendable {
                         .text(expectedFencingToken.lowercased())
                     ]
                 )
-                guard matches.count == 1 else {
+                guard let record = try matches.first.map(
+                    ownershipRecord(from:)
+                ),
+                let authority = try OwnershipAuthorityMetadata.decode(
+                    from: record.metadataJSONRedacted
+                ) else {
+                    return false
+                }
+                try authority.validate(for: record)
+                guard authority.deletionTimestamp != nil,
+                      Set(authority.finalizers.map(\.state)) == [.released],
+                      authority.leaseOwner == nil,
+                      authority.leaseExpiresAt == nil else {
                     return false
                 }
                 try connection.run(

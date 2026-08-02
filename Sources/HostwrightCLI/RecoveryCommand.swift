@@ -383,6 +383,11 @@ private struct SecretPersistedRecoveryDriver {
             timeoutSeconds: request.timeoutSeconds,
             store: store
         )
+        let mutationFence = try hostwrightAcquireExactOperationMutationFence(
+            store: store,
+            group: activeGroup
+        )
+        defer { mutationFence.release() }
         let manager = environment.secretManager()
         let observed = try observation(
             matching: intent.referenceSHA256,

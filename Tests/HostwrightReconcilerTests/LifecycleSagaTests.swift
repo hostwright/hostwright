@@ -342,7 +342,7 @@ final class LifecycleSagaExecutorTests: XCTestCase {
         let repeatedCallCount = await finalizer.callCount()
         let expectedGroups =
             await finalizer.onlyObservedExpectedGroups()
-        XCTAssertEqual(repeatedCallCount, 3)
+        XCTAssertEqual(repeatedCallCount, 2)
         XCTAssertTrue(expectedGroups)
     }
 
@@ -497,6 +497,28 @@ final class LifecycleSagaExecutorTests: XCTestCase {
             )
         }
         await effects.waitUntilApplyStarted()
+        let inFlight = try XCTUnwrap(
+            fixture.store.operationGroups.load(id: fixture.groupID)
+        )
+        XCTAssertThrowsError(
+            try fixture.store.operationGroups.handoffExpiredActive(
+                groupID: inFlight.id,
+                expectedPlanHash: inFlight.planHash,
+                expectedFencingToken: inFlight.fencingToken,
+                expectedLockOwner: try XCTUnwrap(inFlight.lockOwner),
+                expectedLockExpiresAt:
+                    try XCTUnwrap(inFlight.lockExpiresAt),
+                newLockOwner: "hostwright-recovery-resume",
+                newLockExpiresAt: "2100-01-01T00:10:00Z",
+                currentTimestamp: "2099-01-01T00:10:00Z"
+            )
+        ) { error in
+            guard case StateStoreError.databaseLocked(_, _) = error else {
+                return XCTFail(
+                    "An in-flight effect must block lease handoff at the OS fence."
+                )
+            }
+        }
 
         do {
             _ = try await second.execute(
@@ -1571,7 +1593,7 @@ private actor FailOnceLifecycleFinalizer:
     }
 
     func onlyObservedExpectedGroups() -> Bool {
-        observedStatuses == [.active, .active, .succeeded]
+        observedStatuses == [.active, .active]
     }
 }
 

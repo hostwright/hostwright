@@ -1274,7 +1274,7 @@ final class LifecycleLiveDriverTests: XCTestCase {
         }
     }
 
-    func testPersistedRecoveryReclaimsExactExpiredActiveLeaseAfterReobservation() throws {
+    func testPersistedRecoveryClaimsExactHandoffAfterReobservation() throws {
         try withFixture { fixture in
             let dryOptions = fixture.options(command: .up, dryRun: true)
             let liveDriver = LifecycleLiveDriver(
@@ -1356,6 +1356,21 @@ final class LifecycleLiveDriverTests: XCTestCase {
                 ),
                 expectedFencingToken: node.fencingToken
             )
+            let handedOff = try fixture.store.operationGroups
+                .handoffExpiredActive(
+                    groupID: groupID,
+                    expectedPlanHash: compiled.plan.planSHA256,
+                    expectedFencingToken: node.fencingToken,
+                    expectedLockOwner: "terminated-recovery-test",
+                    expectedLockExpiresAt: "2000-01-01T00:10:00Z",
+                    newLockOwner: "hostwright-recovery-resume",
+                    newLockExpiresAt: "2099-01-01T00:10:00Z",
+                    currentTimestamp: "2000-01-01T00:11:00Z"
+                )
+            XCTAssertEqual(
+                handedOff.lockOwner,
+                "hostwright-recovery-resume"
+            )
 
             let result = try LifecyclePersistedRecoveryDriver(
                 environment: fixture.environment
@@ -1372,6 +1387,10 @@ final class LifecycleLiveDriverTests: XCTestCase {
             )
 
             XCTAssertEqual(result.status, .succeeded)
+            XCTAssertNil(
+                try fixture.store.operationGroups.load(id: groupID)?
+                    .lockOwner
+            )
             XCTAssertEqual(
                 try fixture.adapterSnapshot().mutations,
                 [.create, .start]
@@ -2452,13 +2471,9 @@ private func seedCompletedUpdate(
             $0.resourceUUID == update.oldResourceUUID
         }
     )
-    XCTAssertTrue(
-        try fixture.store.ownership.removeExact(
-            resourceIdentifier: oldRecord.resourceIdentifier,
-            runtimeAdapter: oldRecord.runtimeAdapter,
-            expectedResourceUUID: oldRecord.resourceUUID,
-            expectedFencingToken: oldRecord.fencingToken
-        )
+    try finalizeRetiredOwnershipFixture(
+        store: fixture.store,
+        ownership: oldRecord
     )
     let candidateRecord = OwnershipRecord(
         id: "ownership-candidate",
@@ -2500,6 +2515,114 @@ private func seedCompletedUpdate(
             candidateOwnership: candidateOwnership
         )
     }
+}
+
+private func finalizeRetiredOwnershipFixture(
+    store: SQLiteStateStore,
+    ownership: OwnershipRecord
+) throws {
+    let timestamp = ISO8601DateFormatter().string(from: Date())
+    let expiry = ISO8601DateFormatter().string(
+        from: Date().addingTimeInterval(300)
+    )
+    let fence = HostwrightResourceUUID.generate()
+    let advanced = try XCTUnwrap(
+        store.ownership.advanceFencingToken(
+            resourceIdentifier: ownership.resourceIdentifier,
+            runtimeAdapter: ownership.runtimeAdapter,
+            expectedResourceUUID: ownership.resourceUUID,
+            expectedFencingToken: ownership.fencingToken,
+            newFencingToken: fence,
+            observedAt: timestamp
+        )
+    )
+    let groupID = HostwrightResourceUUID.generate()
+    let operationID = HostwrightResourceUUID.generate()
+    let owner = "hostwright-test-finalizer:\(operationID)"
+    let planHash = String(repeating: "d", count: 64)
+    let group = try XCTUnwrap(
+        store.operationGroups.acquire(
+            OperationGroupRecord(
+                id: groupID,
+                operationID: operationID,
+                groupKind: "cleanup-v1",
+                projectID: advanced.projectID,
+                serviceName: advanced.serviceName,
+                plannedActionType: "deleteManagedContainer",
+                status: .active,
+                groupIdempotencyKey: planHash,
+                planHash: planHash,
+                checkpoint: "ownership-deletion-intent-persisted",
+                lockOwner: owner,
+                lockExpiresAt: expiry,
+                rollbackAvailable: false,
+                manualRecoveryHintRedacted: "",
+                createdAt: timestamp,
+                updatedAt: timestamp,
+                metadataJSONRedacted: "{}",
+                fencingToken: fence,
+                intentJSONRedacted: "{}",
+                compensationJSONRedacted: "[]",
+                verificationJSONRedacted: "{}"
+            ),
+            currentTimestamp: timestamp
+        ).acquired
+    )
+    let previous = try OwnershipAuthorityMetadata.decode(
+        from: advanced.metadataJSONRedacted
+    )
+    let deleting = try OwnershipAuthorityRecord.lifecycle(
+        ownership: advanced,
+        operationGroup: group,
+        finalizerState: .releasing,
+        deletionTimestamp: timestamp,
+        handoffGeneration: (previous?.handoffGeneration ?? 0) + 1
+    )
+    try store.ownership.upsert(
+        OwnershipRecord(
+            id: advanced.id,
+            resourceIdentifier: advanced.resourceIdentifier,
+            resourceType: advanced.resourceType,
+            projectID: advanced.projectID,
+            serviceName: advanced.serviceName,
+            runtimeAdapter: advanced.runtimeAdapter,
+            createdAt: advanced.createdAt,
+            observedAt: timestamp,
+            cleanupEligible: advanced.cleanupEligible,
+            metadataJSONRedacted: try OwnershipAuthorityMetadata.encode(
+                deleting,
+                into: advanced.metadataJSONRedacted
+            ),
+            identityVersion: advanced.identityVersion,
+            resourceUUID: advanced.resourceUUID,
+            resourceGeneration: advanced.resourceGeneration,
+            projectResourceUUID: advanced.projectResourceUUID,
+            projectGeneration: advanced.projectGeneration,
+            providerGeneration: advanced.providerGeneration,
+            fencingToken: advanced.fencingToken
+        )
+    )
+    _ = try store.ownership.markCleanupCompleted(
+        resourceIdentifier: advanced.resourceIdentifier,
+        runtimeAdapter: advanced.runtimeAdapter,
+        expectedResourceUUID: advanced.resourceUUID,
+        expectedFencingToken: advanced.fencingToken,
+        expectedOperationGroupID: group.id,
+        expectedLeaseOwner: owner,
+        expectedLeaseExpiresAt: expiry,
+        observedAt: timestamp
+    )
+    try store.operationGroups.finishExactLease(
+        groupID: group.id,
+        expectedFencingToken: group.fencingToken,
+        expectedLockOwner: owner,
+        expectedLockExpiresAt: expiry,
+        status: .succeeded,
+        checkpoint: "ownership-finalizers-complete",
+        manualRecoveryHintRedacted: "",
+        updatedAt: timestamp,
+        metadataJSONRedacted: "{}"
+    )
 }
 
 private func seedRecoveryCandidate(

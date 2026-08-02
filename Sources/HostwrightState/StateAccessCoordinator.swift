@@ -8,6 +8,29 @@ enum StateAccessMode {
     case exclusive
 }
 
+public final class OperationMutationFence: @unchecked Sendable {
+    private let descriptor: Int32
+    private let lock = NSLock()
+    private var released = false
+
+    fileprivate init(descriptor: Int32) {
+        self.descriptor = descriptor
+    }
+
+    public func release() {
+        lock.withLock {
+            guard !released else { return }
+            released = true
+            _ = flock(descriptor, LOCK_UN)
+            close(descriptor)
+        }
+    }
+
+    deinit {
+        release()
+    }
+}
+
 struct StateAccessCoordinator {
     let configuration: StateStoreConfiguration
 
@@ -104,6 +127,33 @@ struct StateAccessCoordinator {
             throw StateStoreError.maintenanceRecoveryRequired(journalPath: paths.journalPath)
         }
         return try body()
+    }
+
+    func acquireOperationMutationFence(
+        groupID: String
+    ) throws -> OperationMutationFence {
+        guard HostwrightResourceUUID.isValid(groupID) else {
+            throw StateStoreError.invalidRecord(
+                "Operation mutation fencing requires an exact group UUID."
+            )
+        }
+        let paths = try configuration.maintenancePaths()
+        let descriptor = try openSecureLock(
+            paths.accessLockPath + ".operation-" + groupID.lowercased()
+        )
+        do {
+            try acquire(
+                descriptor,
+                operation: LOCK_EX,
+                deadline:
+                    DispatchTime.now().uptimeNanoseconds + 250_000_000,
+                role: "operation mutation fence"
+            )
+            return OperationMutationFence(descriptor: descriptor)
+        } catch {
+            close(descriptor)
+            throw error
+        }
     }
 
     private func acquire(

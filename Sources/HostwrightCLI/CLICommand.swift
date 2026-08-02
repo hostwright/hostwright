@@ -125,6 +125,35 @@ public struct MaintenanceCLIOptions: Equatable, Sendable {
     }
 }
 
+public enum OwnershipCLIAction: Equatable, Sendable {
+    case status(projectID: String?)
+    case handoff(
+        groupID: String,
+        planSHA256: String,
+        fencingToken: String,
+        priorControllerID: String,
+        priorExpiry: String,
+        targetControllerID: String,
+        leaseSeconds: Int
+    )
+}
+
+public struct OwnershipCLIOptions: Equatable, Sendable {
+    public let action: OwnershipCLIAction
+    public let stateDatabasePath: String?
+    public let output: CLIOutputFormat
+
+    public init(
+        action: OwnershipCLIAction,
+        stateDatabasePath: String?,
+        output: CLIOutputFormat
+    ) {
+        self.action = action
+        self.stateDatabasePath = stateDatabasePath
+        self.output = output
+    }
+}
+
 public enum CLICommand: Equatable, Sendable {
     case version
     case capabilities(output: CLIOutputFormat)
@@ -139,6 +168,7 @@ public enum CLICommand: Equatable, Sendable {
     case daemon(options: DaemonCLIOptions)
     case restartBudget(options: RestartBudgetCLIOptions)
     case maintenance(options: MaintenanceCLIOptions)
+    case ownership(options: OwnershipCLIOptions)
     case migrateManifestPreview(path: String, output: CLIOutputFormat)
     case initManifest
     case importStack(path: String, output: CLIOutputFormat, teamProfilePath: String?)
@@ -209,6 +239,8 @@ public enum CLICommand: Equatable, Sendable {
             return try restartBudgetCommand(arguments: arguments)
         case "maintenance":
             return try maintenanceCommand(arguments: arguments)
+        case "ownership":
+            return try ownershipCommand(arguments: arguments)
         case "migrate":
             return try migrateCommand(arguments: arguments)
         case "init":
@@ -546,6 +578,202 @@ public enum CLICommand: Equatable, Sendable {
             action = .override(projectID: projectID, confirmationToken: confirmationToken, reason: reason)
         }
         return .maintenance(options: MaintenanceCLIOptions(action: action, stateDatabasePath: stateDatabasePath, output: output))
+    }
+
+    private static func ownershipCommand(
+        arguments: [String]
+    ) throws -> CLICommand {
+        guard arguments.count >= 2,
+              ["status", "handoff"].contains(arguments[1]) else {
+            throw CLIUsageError("ownership requires status or handoff.")
+        }
+        let verb = arguments[1]
+        var projectID: String?
+        var groupID: String?
+        var planSHA256: String?
+        var fencingToken: String?
+        var priorControllerID: String?
+        var priorExpiry: String?
+        var targetControllerID: String?
+        var leaseSeconds: Int?
+        var stateDatabasePath: String?
+        var output = CLIOutputFormat.text
+        var outputSelected = false
+        var index = 2
+
+        while index < arguments.count {
+            let argument = arguments[index]
+            switch argument {
+            case "--project", "--group", "--confirm-plan", "--confirm-fence",
+                 "--from-controller", "--from-expiry", "--to-controller",
+                 "--lease-seconds", "--state-db", "--output":
+                guard index + 1 < arguments.count else {
+                    throw CLIUsageError(
+                        "ownership requires one value after \(argument)."
+                    )
+                }
+                let value = arguments[index + 1]
+                switch argument {
+                case "--project":
+                    guard projectID == nil else {
+                        throw CLIUsageError("ownership accepts --project once.")
+                    }
+                    projectID = value
+                case "--group":
+                    guard groupID == nil else {
+                        throw CLIUsageError("ownership accepts --group once.")
+                    }
+                    groupID = value.lowercased()
+                case "--confirm-plan":
+                    guard planSHA256 == nil else {
+                        throw CLIUsageError(
+                            "ownership accepts --confirm-plan once."
+                        )
+                    }
+                    planSHA256 = value.lowercased()
+                case "--confirm-fence":
+                    guard fencingToken == nil else {
+                        throw CLIUsageError(
+                            "ownership accepts --confirm-fence once."
+                        )
+                    }
+                    fencingToken = value.lowercased()
+                case "--from-controller":
+                    guard priorControllerID == nil else {
+                        throw CLIUsageError(
+                            "ownership accepts --from-controller once."
+                        )
+                    }
+                    priorControllerID = value
+                case "--from-expiry":
+                    guard priorExpiry == nil else {
+                        throw CLIUsageError(
+                            "ownership accepts --from-expiry once."
+                        )
+                    }
+                    priorExpiry = value
+                case "--to-controller":
+                    guard targetControllerID == nil else {
+                        throw CLIUsageError(
+                            "ownership accepts --to-controller once."
+                        )
+                    }
+                    targetControllerID = [
+                        "resume": "hostwright-recovery-resume",
+                        "rollback": "hostwright-recovery-rollback"
+                    ][value]
+                    guard targetControllerID != nil else {
+                        throw CLIUsageError(
+                            "ownership --to-controller requires resume or rollback."
+                        )
+                    }
+                case "--lease-seconds":
+                    guard leaseSeconds == nil,
+                          let parsed = Int(value),
+                          (1...900).contains(parsed) else {
+                        throw CLIUsageError(
+                            "ownership --lease-seconds requires 1 through 900."
+                        )
+                    }
+                    leaseSeconds = parsed
+                case "--state-db":
+                    guard stateDatabasePath == nil else {
+                        throw CLIUsageError("ownership accepts --state-db once.")
+                    }
+                    stateDatabasePath = value
+                case "--output":
+                    guard !outputSelected,
+                          let parsed = CLIOutputFormat(rawValue: value) else {
+                        throw CLIUsageError(
+                            "ownership --output requires text or json once."
+                        )
+                    }
+                    output = parsed
+                    outputSelected = true
+                default:
+                    preconditionFailure("Unknown ownership parser option.")
+                }
+                index += 2
+            case "--json":
+                guard !outputSelected else {
+                    throw CLIUsageError(
+                        "ownership accepts one output selector."
+                    )
+                }
+                output = .json
+                outputSelected = true
+                index += 1
+            default:
+                throw CLIUsageError(
+                    "Unsupported ownership option '\(argument)'."
+                )
+            }
+        }
+
+        if let projectID,
+           projectID.range(
+               of: "^project-[A-Za-z0-9](?:[A-Za-z0-9._-]{0,126}[A-Za-z0-9])?$",
+               options: .regularExpression
+           ) == nil {
+            throw CLIUsageError(
+                "ownership --project requires an exact bounded project ID."
+            )
+        }
+        let action: OwnershipCLIAction
+        if verb == "status" {
+            guard groupID == nil, planSHA256 == nil, fencingToken == nil,
+                  priorControllerID == nil, priorExpiry == nil,
+                  targetControllerID == nil, leaseSeconds == nil else {
+                throw CLIUsageError(
+                    "ownership status accepts only optional --project, state, and output selectors."
+                )
+            }
+            action = .status(projectID: projectID)
+        } else {
+            guard projectID == nil,
+                  let groupID, HostwrightResourceUUID.isValid(groupID),
+                  let planSHA256,
+                  planSHA256.range(
+                      of: "^[a-f0-9]{64}$",
+                      options: .regularExpression
+                  ) != nil,
+                  let fencingToken,
+                  HostwrightResourceUUID.isValid(fencingToken),
+                  let priorControllerID,
+                  !priorControllerID.isEmpty,
+                  priorControllerID.utf8.count <= 128,
+                  priorControllerID.unicodeScalars.allSatisfy({
+                      !CharacterSet.controlCharacters.contains($0)
+                  }),
+                  let priorExpiry,
+                  let expiryDate = ISO8601DateFormatter().date(
+                      from: priorExpiry
+                  ),
+                  ISO8601DateFormatter().string(from: expiryDate) ==
+                    priorExpiry,
+                  let targetControllerID,
+                  let leaseSeconds else {
+                throw CLIUsageError(
+                    "ownership handoff requires exact group, plan, fence, prior controller/expiry, target controller, and bounded lease values."
+                )
+            }
+            action = .handoff(
+                groupID: groupID,
+                planSHA256: planSHA256,
+                fencingToken: fencingToken,
+                priorControllerID: priorControllerID,
+                priorExpiry: priorExpiry,
+                targetControllerID: targetControllerID,
+                leaseSeconds: leaseSeconds
+            )
+        }
+        return .ownership(
+            options: OwnershipCLIOptions(
+                action: action,
+                stateDatabasePath: stateDatabasePath,
+                output: output
+            )
+        )
     }
 
     private static func capabilitiesCommand(arguments: [String]) throws -> CLICommand {

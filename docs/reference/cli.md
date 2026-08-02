@@ -82,6 +82,8 @@ hostwright maintenance preview <manifest> --action <create|start|restart|update|
 hostwright maintenance status [--project <project-id>] [--state-db <path>] [--output text|json]
 hostwright maintenance cancel --project <project-id> --confirm-deferral <sha256> [--state-db <path>] [--output text|json]
 hostwright maintenance override --project <project-id> --confirm-deferral <sha256> --reason <text> [--state-db <path>] [--output text|json]
+hostwright ownership status [--project <project-id>] [--state-db <path>] [--json | --output text|json]
+hostwright ownership handoff --group <uuid> --confirm-plan <sha256> --confirm-fence <uuid> --from-controller <id> --from-expiry <RFC3339-UTC> --to-controller resume|rollback --lease-seconds <1-900> [--state-db <path>] [--json | --output text|json]
 hostwright apply [path] [--state-db <path>] --confirm-plan <hash> [--runtime-provider auto|apple-cli|containerization] [--team-profile <path> --approval-record <path>]
 hostwright up [path] [--service <name>] [--state-db <path>] (--dry-run | --confirm-plan <hash>) [--runtime-provider auto|apple-cli|containerization] [--timeout <seconds>] [--parallelism <1-32>] [--output text|json]
 hostwright down [path] [--service <name>] [--state-db <path>] (--dry-run | --confirm-plan <hash>) [--runtime-provider auto|apple-cli|containerization] [--timeout <seconds>] [--parallelism <1-32>] [--output text|json]
@@ -128,7 +130,7 @@ hostwright-dist help
 
 Text output is the default for `hostwright` commands. Installed-lifecycle `hostwright-dist` commands require `--output json`; release and developer-evidence commands retain their documented text/report output.
 
-`capabilities`, `runtime providers`, `runtime migrate`, `paths`, `restart-budget`, `maintenance`, every `state`, `secret`, `registry`, and `image` subcommand, `migrate preview`, `import-stack`, `plan`, `status`, every lifecycle command, non-TTY interactive operations, `events`, `recovery`, `extension check`, and `doctor` accept JSON output where shown above. JSON streaming uses bounded NDJSON frames with base64 payloads. Interactive TTY mode and JSON mode are mutually exclusive. JSON output does not weaken mutation gates.
+`capabilities`, `runtime providers`, `runtime migrate`, `paths`, `restart-budget`, `maintenance`, `ownership`, every `state`, `secret`, `registry`, and `image` subcommand, `migrate preview`, `import-stack`, `plan`, `status`, every lifecycle command, non-TTY interactive operations, `events`, `recovery`, `extension check`, and `doctor` accept JSON output where shown above. JSON streaming uses bounded NDJSON frames with base64 payloads. Interactive TTY mode and JSON mode are mutually exclusive. JSON output does not weaken mutation gates.
 
 When JSON mode is requested and the CLI can classify the failure, stderr uses this envelope:
 
@@ -566,6 +568,12 @@ HW-RUNTIME-001: logs requires an observed Hostwright-managed service.
 `maintenance status` reads the latest append-only schema-v17 deferral state for one exact project or all projects. A deferred record reports its action classes, plan and policy digests, hard deadline, state, and exact confirmation token.
 
 `maintenance cancel` atomically cancels only the current matching deferred or override-authorized record. `maintenance override` atomically authorizes only the current matching deferred record and requires a bounded redacted reason. Both require the exact project and `--confirm-deferral` SHA-256; stale, superseded, admitted, failed, or mismatched input changes nothing. Neither command touches runtime. The daemon re-observes and revalidates the exact binding immediately before any admitted lifecycle effect.
+
+## `hostwright ownership ...`
+
+`ownership status` is a local read-only view over the already-migrated schema-v17 ownership authority and active or interrupted mutation groups. Text and schema-v1 JSON distinguish active, deleting, released, quarantined, legacy, and invalid ownership and report only bounded non-secret identity, proof, finalizer, deletion, lease, and handoff fields. It does not create or migrate state, inspect runtime, or infer ownership from a resource name.
+
+`ownership handoff` performs one exact expired-lease compare-and-swap for `lifecycle-v1` operation groups, whose recovery driver can immediately claim the fixed handoff controller through the same local effect fence. It requires the operation-group UUID, persisted plan SHA-256, fencing UUID, prior controller, canonical prior UTC expiry, target local controller (`resume` or `rollback`), and a 1–900 second lease. Success atomically rebinds the group and every exact ownership record attached to it. A live, in-flight, unsupported-kind, stale, malformed, or mismatched tuple returns confirmation mismatch and changes nothing. Other mutation kinds retain their existing native recovery contracts and cannot be handed off through this command. Handoff does not execute recovery or runtime mutation, bypass finalizers, authorize another user, or add a multi-host lease.
 
 ## `hostwright events [--state-db <path>] [--project <name>] [--type <event>] [--service <name>] [--severity info|warning|error] [--limit <n>] [--sort asc|desc] [--output text|json]`
 

@@ -113,6 +113,14 @@ public struct SQLiteStateStore: StateStore {
         }
     }
 
+    public func acquireOperationMutationFence(
+        groupID: String
+    ) throws -> OperationMutationFence {
+        try configuration.prepareStateAccessFoundation()
+        return try StateAccessCoordinator(configuration: configuration)
+            .acquireOperationMutationFence(groupID: groupID)
+    }
+
     public func schemaVersion() throws -> Int {
         try configuration.validate()
         let versions = try MigrationRunner().appliedVersions(in: self)

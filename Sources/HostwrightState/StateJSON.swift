@@ -2,6 +2,11 @@ import Foundation
 import HostwrightRuntime
 
 enum StateJSON {
+    private static let nonSecretStructuredKeys: Set<String> = [
+        "hostwrightAuthority",
+        "localLeaseAuthority"
+    ]
+
     private static let nonSecretIdentityKeys: Set<String> = [
         "authorizationPlanSHA256",
         "capabilitySHA256",
@@ -68,7 +73,9 @@ enum StateJSON {
         if let object = value as? [String: Any] {
             var redacted: [String: Any] = [:]
             for (key, nested) in object {
-                if nonSecretIdentityKeys.contains(key), let string = nested as? String {
+                if nonSecretStructuredKeys.contains(key) {
+                    redacted[key] = redact(nested, key: nil, using: policy)
+                } else if nonSecretIdentityKeys.contains(key), let string = nested as? String {
                     redacted[key] = string
                 } else {
                     redacted[key] = policy.isSensitiveKey(key)

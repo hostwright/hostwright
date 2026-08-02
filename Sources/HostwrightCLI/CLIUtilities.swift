@@ -10,6 +10,29 @@ import HostwrightReconciler
 import HostwrightRuntime
 import HostwrightState
 
+func hostwrightAcquireExactOperationMutationFence(
+    store: SQLiteStateStore,
+    group: OperationGroupRecord
+) throws -> OperationMutationFence {
+    let fence = try store.acquireOperationMutationFence(groupID: group.id)
+    do {
+        guard let current = try store.operationGroups.load(id: group.id),
+              current.status == .active,
+              current.planHash == group.planHash,
+              current.fencingToken == group.fencingToken,
+              current.lockOwner == group.lockOwner,
+              current.lockExpiresAt == group.lockExpiresAt else {
+            throw StateStoreError.invalidRecord(
+                "Operation mutation fencing lost the exact active lease before effects."
+            )
+        }
+        return fence
+    } catch {
+        fence.release()
+        throw error
+    }
+}
+
 func hostwrightWaitForAsync<T: Sendable>(_ operation: @escaping @Sendable () async throws -> T) throws -> T {
     let semaphore = DispatchSemaphore(value: 0)
     let box = CLIAsyncResultBox<T>()

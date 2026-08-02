@@ -2864,7 +2864,14 @@ final class HostwrightCLITests: XCTestCase {
                 )],
                 adapterMetadata: fakeAdapterMetadata
             )
-            let adapter = ScriptedApplyRuntimeAdapter(observedState: observed)
+            let adapter = ScriptedApplyRuntimeAdapter(
+                observedState: observed,
+                postExecuteObservedState: ObservedRuntimeState(
+                    projectName: "demo",
+                    services: [],
+                    adapterMetadata: fakeAdapterMetadata
+                )
+            )
 
             let dryRun = HostwrightCLI.run(
                 arguments: ["cleanup", "--state-db", databasePath, "--dry-run"],
@@ -2893,21 +2900,33 @@ final class HostwrightCLITests: XCTestCase {
                 environment: environment(files: files, runtimeAdapter: adapter)
             )
 
-            XCTAssertEqual(confirmed.exitCode, 0)
+            XCTAssertEqual(
+                confirmed.exitCode,
+                0,
+                "stdout=\(confirmed.standardOutput) stderr=\(confirmed.standardError)"
+            )
             XCTAssertEqual(adapter.executedActions.map(\.kind), [.remove])
             let cleanupContext = try XCTUnwrap(adapter.confirmations.last?.context)
             XCTAssertNil(cleanupContext.validationIssue)
             let events = try SQLiteStateStore(path: databasePath).events.loadAll()
             XCTAssertTrue(events.contains { $0.type == "cleanup.planned" })
             XCTAssertTrue(events.contains { $0.type == "cleanup.deleted" })
-            XCTAssertLessThan(
-                events.firstIndex { $0.type == "cleanup.planned" }!,
-                events.firstIndex { $0.type == "cleanup.deleted" }!
-            )
+            if let plannedIndex = events.firstIndex(where: {
+                $0.type == "cleanup.planned"
+            }), let deletedIndex = events.firstIndex(where: {
+                $0.type == "cleanup.deleted"
+            }) {
+                XCTAssertLessThan(plannedIndex, deletedIndex)
+            }
             let ownership = try SQLiteStateStore(path: databasePath).ownership.loadAll()
-            XCTAssertEqual(ownership.count, 1)
-            XCTAssertFalse(ownership[0].cleanupEligible)
-            XCTAssertNotEqual(ownership[0].fencingToken, cleanupContext.fencingToken)
+            XCTAssertTrue(ownership.isEmpty)
+            XCTAssertNotEqual(
+                HostwrightResourceUUID.legacy(
+                    kind: "ownership-fence",
+                    identifier: "owner-api"
+                ),
+                cleanupContext.fencingToken
+            )
         }
     }
 
@@ -2971,7 +2990,14 @@ final class HostwrightCLITests: XCTestCase {
                 ],
                 adapterMetadata: fakeAdapterMetadata
             )
-            let adapter = ScriptedApplyRuntimeAdapter(observedState: observed)
+            let adapter = ScriptedApplyRuntimeAdapter(
+                observedState: observed,
+                postExecuteObservedState: ObservedRuntimeState(
+                    projectName: "demo",
+                    services: [],
+                    adapterMetadata: fakeAdapterMetadata
+                )
+            )
 
             let dryRun = HostwrightCLI.run(
                 arguments: ["cleanup", "--state-db", databasePath, "--dry-run"],
@@ -3009,7 +3035,11 @@ final class HostwrightCLITests: XCTestCase {
             XCTAssertFalse(confirmed.standardOutput.contains("- deleted hostwright-demo-dupe"))
 
             let ownership = try store.ownership.loadAll()
-            XCTAssertFalse(try XCTUnwrap(ownership.first { $0.resourceIdentifier == "hostwright-demo-api" }).cleanupEligible)
+            XCTAssertNil(
+                ownership.first {
+                    $0.resourceIdentifier == "hostwright-demo-api"
+                }
+            )
             XCTAssertTrue(try XCTUnwrap(ownership.first { $0.resourceIdentifier == "hostwright-demo-worker" }).cleanupEligible)
             XCTAssertTrue(try XCTUnwrap(ownership.first { $0.resourceIdentifier == "hostwright-demo-dupe" }).cleanupEligible)
         }
@@ -3180,6 +3210,11 @@ final class HostwrightCLITests: XCTestCase {
             )
             let adapter = ScriptedApplyRuntimeAdapter(
                 observedState: observed,
+                postExecuteObservedState: ObservedRuntimeState(
+                    projectName: "demo",
+                    services: [],
+                    adapterMetadata: fakeAdapterMetadata
+                ),
                 onExecute: { _ in
                     try FileManager.default.removeItem(atPath: databasePath)
                     try FileManager.default.createDirectory(atPath: databasePath, withIntermediateDirectories: false)
@@ -3521,6 +3556,20 @@ final class HostwrightCLITests: XCTestCase {
             let secret = fakeSecret
             let adapter = ScriptedApplyRuntimeAdapter(
                 observedState: observed,
+                postExecuteObservedState: ObservedRuntimeState(
+                    projectName: "demo",
+                    services: [
+                        ObservedRuntimeService(
+                            identity: RuntimeServiceIdentity(
+                                projectName: "demo",
+                                serviceName: "worker"
+                            ),
+                            resourceIdentifier: "hostwright-demo-worker",
+                            lifecycleState: .stopped
+                        )
+                    ],
+                    adapterMetadata: fakeAdapterMetadata
+                ),
                 onExecute: { action in
                     if action.identity.serviceName == "worker" {
                         throw RuntimeAdapterError.commandFailed(exitStatus: 2, message: "delete failed", standardError: "token=\(secret)")
@@ -3555,11 +3604,24 @@ final class HostwrightCLITests: XCTestCase {
             XCTAssertTrue(events.contains { $0.type == "cleanup.deleted" })
             XCTAssertTrue(events.contains { $0.type == "cleanup.failed" })
             let ownership = try store.ownership.loadAll()
-            XCTAssertFalse(try XCTUnwrap(ownership.first { $0.serviceName == "api" }).cleanupEligible)
+            XCTAssertNil(ownership.first { $0.serviceName == "api" })
             let survivingWorkerOwnership = try XCTUnwrap(ownership.first { $0.serviceName == "worker" })
             XCTAssertTrue(survivingWorkerOwnership.cleanupEligible)
-            XCTAssertEqual(survivingWorkerOwnership.fencingToken, originalWorkerOwnership.fencingToken)
-            XCTAssertEqual(adapter.observedDesiredStates.count, 3)
+            XCTAssertNotEqual(
+                survivingWorkerOwnership.fencingToken,
+                originalWorkerOwnership.fencingToken
+            )
+            let workerAuthority = try XCTUnwrap(
+                OwnershipAuthorityMetadata.decode(
+                    from: survivingWorkerOwnership.metadataJSONRedacted
+                )
+            )
+            XCTAssertNotNil(workerAuthority.deletionTimestamp)
+            XCTAssertEqual(
+                Set(workerAuthority.finalizers.map(\.state)),
+                [.releasing]
+            )
+            XCTAssertEqual(adapter.observedDesiredStates.count, 4)
             let recoveryHint = try XCTUnwrap(
                 adapter.observedDesiredStates.last?.ownedResourceHints.first {
                     $0.resourceIdentifier == originalWorkerOwnership.resourceIdentifier
@@ -3639,7 +3701,7 @@ final class HostwrightCLITests: XCTestCase {
             let events = try store.events.loadAll()
             XCTAssertTrue(events.contains { $0.type == "cleanup.deleted" })
             XCTAssertFalse(events.contains { $0.type == "cleanup.failed" })
-            XCTAssertFalse(try XCTUnwrap(store.ownership.loadAll().first).cleanupEligible)
+            XCTAssertTrue(try store.ownership.loadAll().isEmpty)
         }
     }
 

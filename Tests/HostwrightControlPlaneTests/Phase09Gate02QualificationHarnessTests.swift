@@ -71,6 +71,10 @@ final class Phase09Gate02QualificationHarnessTests: XCTestCase {
     XCTAssertTrue(source.contains("record_socket_root"))
     XCTAssertTrue(source.contains("socket_root=\"$socket_parent/.hwp09g2-$socket_suffix\""))
     XCTAssertTrue(source.contains("record_live_artifact_inventory"))
+    XCTAssertEqual(
+      source.components(separatedBy: "record_live_artifact_inventory \"$runtime\"").count - 1,
+      1
+    )
     XCTAssertTrue(source.contains("state.sqlite-wal"))
     XCTAssertTrue(source.contains("state.sqlite-shm"))
     XCTAssertTrue(source.contains("state-access-lock"))

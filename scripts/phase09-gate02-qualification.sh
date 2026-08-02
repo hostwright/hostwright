@@ -295,7 +295,6 @@ run_live_qualification() {
   canonical="$(printf '%s' "$result" | /usr/bin/jq -cS .)"
   [[ "$canonical" == "$result" ]] || die 'live result is not canonical JSON.' 70
   printf '%s' "$result" | /usr/bin/jq -e 'keys == ["adHoc","qualification","signed"] and .qualification == "phase09-gate2-live-v1" and (.signed.mode == "signed") and (.adHoc.mode == "adHoc") and ([.signed,.adHoc][] | (.subjectID | test("^[A-Za-z0-9._:-]{1,128}$")) and (.sessionID | test("^[0-9A-Fa-f-]{36}$")) and (.nativeCDHashLength == 20 or .nativeCDHashLength == 32) and .revocationStatus == "inactive")' >/dev/null
-  record_live_artifact_inventory "$runtime"
   printf '%s\n' "$result"
   cleanup_live_runtime "$runtime"
 }

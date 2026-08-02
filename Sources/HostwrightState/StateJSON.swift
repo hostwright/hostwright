@@ -1,4 +1,5 @@
 import Foundation
+import HostwrightObservability
 import HostwrightRuntime
 
 enum StateJSON {
@@ -21,6 +22,7 @@ enum StateJSON {
         "resourceFencingToken",
         "resourceUUID",
         "secretReferenceSHA256",
+        "signerPublicKeySHA256",
         "verification"
     ]
 
@@ -51,6 +53,39 @@ enum StateJSON {
             throw StateStoreError.invalidRecord("State JSON payload could not be decoded for redaction.")
         }
         return try encode(redact(value, using: policy))
+    }
+
+    static func redactedJSONPreservingInvalid(
+        _ json: String,
+        using policy: RuntimeRedactionPolicy = .default
+    ) -> String {
+        (try? redactedJSON(json, using: policy)) ?? policy.redact(json)
+    }
+
+    static func redactedEventPayload(
+        _ json: String,
+        type: String,
+        source: String,
+        using policy: RuntimeRedactionPolicy = .default
+    ) -> String {
+        if type == HostwrightTraceContract.eventType,
+           source == HostwrightTraceContract.source,
+           let data = json.data(using: .utf8),
+           let decoded = try? JSONDecoder().decode(
+               HostwrightTraceSpanRecord.self,
+               from: data
+           ),
+           let validated = try? decoded.validated() {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [
+                .sortedKeys,
+                .withoutEscapingSlashes
+            ]
+            if let encoded = try? encoder.encode(validated) {
+                return String(decoding: encoded, as: UTF8.self)
+            }
+        }
+        return redactedJSONPreservingInvalid(json, using: policy)
     }
 
     static func isObject(_ json: String) -> Bool {

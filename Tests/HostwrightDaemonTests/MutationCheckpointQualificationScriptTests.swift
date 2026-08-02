@@ -112,6 +112,7 @@ final class MutationCheckpointQualificationScriptTests: XCTestCase {
             "RuntimeQualificationRecoveryDriverTests",
             "RuntimeQualificationProcessControlTests",
             "container stop",
+            "--interval 4 --jitter 1",
             "final-rm-plan.json",
             "evidence-v1.sha256"
         ] {

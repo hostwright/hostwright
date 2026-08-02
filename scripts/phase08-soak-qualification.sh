@@ -168,7 +168,7 @@ start_daemon() {
     --config "$HOSTWRIGHT_PHASE08_SOAK_ROOT/hostwright.yaml" \
     --state-db "$HOSTWRIGHT_PHASE08_SOAK_ROOT/state.sqlite" \
     --lock-file "$HOSTWRIGHT_PHASE08_SOAK_ROOT/daemon.lock" \
-    --interval 5 --jitter 1 --max-backoff 30 --parallelism 1 \
+    --interval 4 --jitter 1 --max-backoff 30 --parallelism 1 \
     > "$log_file" 2>&1 &
   daemon_pid=$!
   chmod 600 "$log_file"

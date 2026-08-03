@@ -614,8 +614,8 @@ final class StateRetentionTests: XCTestCase {
         let base = policy(holds: holds)
         return StateRetentionPolicy(
             recoveryHorizonSeconds: base.recoveryHorizonSeconds,
-            maximumDatabaseBytes: 1_048_576,
-            targetDatabaseBytes: 1_048_576,
+            maximumDatabaseBytes: 2 * 1_024 * 1_024,
+            targetDatabaseBytes: 2 * 1_024 * 1_024,
             classes: base.classes,
             holds: holds
         )

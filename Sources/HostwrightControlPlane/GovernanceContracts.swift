@@ -588,3 +588,49 @@ public struct AuditRetentionCheckpoint: Codable, Equatable, Sendable {
     else { throw ContractValidationError.invalid("retention checkpoint") }
   }
 }
+
+public struct ControlSecurityAuditEvent: Equatable, Sendable {
+  public let subjectID: String
+  public let requestID: String
+  public let target: String
+  public let action: AuditAction
+  public let outcome: String
+  public let reasonCode: String
+  public let operationRef: String?
+  public let payloadDigest: String
+  public let deduplicationKey: String
+
+  public init(
+    subjectID: String,
+    requestID: String,
+    target: String,
+    action: AuditAction,
+    outcome: String,
+    reasonCode: String,
+    operationRef: String? = nil,
+    payloadDigest: String,
+    deduplicationKey: String
+  ) {
+    self.subjectID = subjectID
+    self.requestID = requestID
+    self.target = target
+    self.action = action
+    self.outcome = outcome
+    self.reasonCode = reasonCode
+    self.operationRef = operationRef
+    self.payloadDigest = payloadDigest
+    self.deduplicationKey = deduplicationKey
+  }
+
+  public func validate() throws {
+    guard !subjectID.isEmpty, !requestID.isEmpty, !target.isEmpty,
+      !outcome.isEmpty, !reasonCode.isEmpty, !deduplicationKey.isEmpty,
+      AuditRecord.digest(payloadDigest)
+    else { throw ContractValidationError.invalid("control security audit event") }
+  }
+}
+
+public protocol ControlSecurityAuditRecording: Sendable {
+  @discardableResult
+  func record(_ event: ControlSecurityAuditEvent) throws -> AuditRecord
+}

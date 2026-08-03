@@ -32,7 +32,7 @@ final class StateMetricsTests: XCTestCase {
             ).snapshot()
 
             XCTAssertEqual(first.schemaVersion, 1)
-            XCTAssertEqual(first.source.schemaVersion, 17)
+            XCTAssertEqual(first.source.schemaVersion, 19)
             XCTAssertEqual(first.series.count, 59)
             XCTAssertLessThanOrEqual(first.series.count, HostwrightMetricCatalog.maximumSeries)
             XCTAssertEqual(first.snapshotSHA256, second.snapshotSHA256)
@@ -155,14 +155,15 @@ final class StateMetricsTests: XCTestCase {
         try store.withValidatedConnection { connection in
             try connection.transaction {
                 try connection.run(
-                    "INSERT INTO schema_migrations(version, description, checksum, applied_at) VALUES (18, 'future', 'future', '2026-08-01T00:00:00Z')"
+                    "INSERT INTO schema_migrations(version, description, checksum, applied_at) VALUES (?, 'future', 'future', '2026-08-01T00:00:00Z')",
+                    bindings: [.int64(Int64(MigrationRunner.latestSchemaVersion + 1))]
                 )
             }
         }
         XCTAssertThrowsError(try StateMetricsService(store: store).snapshot())
     }
 
-    func testVersionSixteenRequiresExplicitUpgradeAndProjectsAfterVersionSeventeenMigration() throws {
+    func testVersionSixteenRequiresExplicitUpgradeAndProjectsAfterVersionNineteenMigration() throws {
         let root = try privateRoot()
         defer { try? FileManager.default.removeItem(at: root) }
         let store = SQLiteStateStore(path: root.appendingPathComponent("upgrade.sqlite").path)
@@ -174,8 +175,8 @@ final class StateMetricsTests: XCTestCase {
 
         try store.migrate()
         let snapshot = try StateMetricsService(store: store).snapshot()
-        XCTAssertEqual(snapshot.source.schemaVersion, 17)
-        XCTAssertEqual(try store.schemaVersion(), 17)
+        XCTAssertEqual(snapshot.source.schemaVersion, 19)
+        XCTAssertEqual(try store.schemaVersion(), 19)
         XCTAssertEqual(snapshot.series.count, 59)
     }
 

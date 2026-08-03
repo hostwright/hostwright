@@ -62,6 +62,23 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
         stateDatabasePath: configuration.stateDatabasePath
       )
     )
+    let auditTrail = TamperEvidentAuditTrail(
+      store: store,
+      keyStore: try MacOSAuditSigningKeyStore(
+        service: MacOSAuditSigningKeyStore.serviceName(
+          stateDatabasePath: configuration.stateDatabasePath
+        )
+      )
+    )
+    _ = try auditTrail.recoverPendingKeyRotation()
+    switch auditTrail.verify().health {
+    case .healthy:
+      break
+    case .recoverableAnchorLag:
+      _ = try auditTrail.recoverAnchorAfterVerifiedCrash()
+    case .degraded, .tampered:
+      throw PersistentControlServerError.persistenceFailed
+    }
     let server = try PersistentControlConnectionServer(
       authenticator: authenticator,
       requestRepository: ControlRequestRepository(store: store),
@@ -70,9 +87,11 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
       mutatingOperations: [
         "up", "down", "run", "start", "stop", "restart", "rm", "update",
         "image", "registry", "volume",
+        "audit.export",
       ],
+      auditRecorder: auditTrail,
       handler: { _, request, _ in
-        try Self.handle(request: request, localAPI: localAPI)
+        try Self.handle(request: request, localAPI: localAPI, auditTrail: auditTrail)
       }
     )
     lock.lock()
@@ -153,8 +172,36 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
 
   private static func handle(
     request: ControlRequestEnvelope,
-    localAPI: LocalControlAPI
+    localAPI: LocalControlAPI,
+    auditTrail: TamperEvidentAuditTrail
   ) throws -> ControlResponseEnvelope {
+    if request.operation == "audit.verify" {
+      let report = auditTrail.verify()
+      return ControlResponseEnvelope(
+        requestID: request.requestID,
+        status: report.health == .tampered ? .error : .completed,
+        reasonCode: report.health == .tampered ? .internalError : .completed,
+        result: try controlPlaneValue(report),
+        error: report.health == .tampered
+          ? SanitizedError(
+            code: "auditVerificationFailed",
+            message: "The tamper-evident audit trail did not verify."
+          )
+          : nil
+      )
+    }
+    if request.operation == "audit.export" {
+      let exported = try auditTrail.exportVerified()
+      return ControlResponseEnvelope(
+        requestID: request.requestID,
+        status: .completed,
+        reasonCode: .completed,
+        result: .object([
+          "encoding": .string("base64"),
+          "payload": .string(exported.base64EncodedString()),
+        ])
+      )
+    }
     var payload: [String: ControlPlaneJSONValue] = [
       "apiVersion": .integer(Int64(request.apiVersion)),
       "requestID": .string(request.requestID),
@@ -203,6 +250,15 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
       status: .completed,
       reasonCode: .completed,
       result: responseResult
+    )
+  }
+
+  private static func controlPlaneValue<T: Encodable>(
+    _ value: T
+  ) throws -> ControlPlaneJSONValue {
+    try JSONDecoder().decode(
+      ControlPlaneJSONValue.self,
+      from: JSONEncoder().encode(value)
     )
   }
 

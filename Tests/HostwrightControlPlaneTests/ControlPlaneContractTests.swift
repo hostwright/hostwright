@@ -264,6 +264,19 @@ final class ControlPlaneContractTests: XCTestCase {
     XCTAssertNoThrow(
       try ControlResponseEnvelope(requestID: "r", status: .completed, reasonCode: .completed)
         .validate())
+    XCTAssertNoThrow(
+      try ControlResponseEnvelope(
+        requestID: "r", status: .accepted, reasonCode: .accepted,
+        operationRef: "operation:r"
+      ).validate())
+    XCTAssertThrowsError(
+      try ControlResponseEnvelope(requestID: "r", status: .accepted, reasonCode: .accepted)
+        .validate())
+    XCTAssertThrowsError(
+      try ControlResponseEnvelope(
+        requestID: "r", status: .accepted, reasonCode: .accepted,
+        operationRef: "operation:r", result: .string("transient")
+      ).validate())
     XCTAssertThrowsError(
       try ControlResponseEnvelope(requestID: "r", status: .error, reasonCode: .internalError)
         .validate())

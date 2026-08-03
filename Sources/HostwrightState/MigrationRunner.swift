@@ -3315,5 +3315,109 @@ public struct MigrationRunner: Sendable {
             "CREATE INDEX idempotency_records_request_idx ON idempotency_records(request_id)",
           ]
         ),
+        SchemaMigration(
+          version: 19,
+          description: "Immutable tamper-evident audit segments, records, keys, and retention anchors",
+          statements: [
+            """
+            CREATE TABLE audit_key_metadata (
+                key_id TEXT PRIMARY KEY,
+                generation INTEGER NOT NULL UNIQUE CHECK (generation > 0),
+                algorithm TEXT NOT NULL CHECK (algorithm = 'p256-sha256'),
+                public_key_x963_base64 TEXT NOT NULL CHECK (length(public_key_x963_base64) BETWEEN 1 AND 256),
+                public_key_sha256 TEXT NOT NULL UNIQUE CHECK (length(public_key_sha256) = 64 AND public_key_sha256 NOT GLOB '*[^0-9a-f]*'),
+                status TEXT NOT NULL CHECK (status IN ('pending','active','retired','revoked')),
+                prior_key_id TEXT REFERENCES audit_key_metadata(key_id) ON DELETE RESTRICT,
+                transition_signature_der_base64 TEXT,
+                created_at TEXT NOT NULL CHECK (julianday(created_at) IS NOT NULL),
+                retired_at TEXT CHECK (retired_at IS NULL OR julianday(retired_at) IS NOT NULL),
+                revoked_at TEXT CHECK (revoked_at IS NULL OR julianday(revoked_at) IS NOT NULL),
+                CHECK (length(key_id) BETWEEN 1 AND 128 AND key_id NOT GLOB '*[^ -~]*'),
+                CHECK ((generation = 1 AND prior_key_id IS NULL AND transition_signature_der_base64 IS NULL) OR (generation > 1 AND prior_key_id IS NOT NULL AND length(transition_signature_der_base64) BETWEEN 1 AND 256)),
+                CHECK ((status = 'retired' AND retired_at IS NOT NULL) OR status != 'retired'),
+                CHECK ((status = 'revoked' AND revoked_at IS NOT NULL) OR status != 'revoked')
+            )
+            """,
+            """
+            CREATE TABLE audit_segments (
+                segment_id TEXT PRIMARY KEY,
+                ordinal INTEGER NOT NULL UNIQUE CHECK (ordinal > 0),
+                first_sequence INTEGER NOT NULL UNIQUE CHECK (first_sequence > 0),
+                last_sequence INTEGER NOT NULL UNIQUE CHECK (last_sequence >= first_sequence),
+                record_count INTEGER NOT NULL CHECK (record_count > 0 AND record_count = last_sequence - first_sequence + 1),
+                prior_segment_digest TEXT,
+                first_record_digest TEXT NOT NULL CHECK (length(first_record_digest) = 71 AND first_record_digest GLOB 'sha256:*'),
+                last_record_digest TEXT NOT NULL CHECK (length(last_record_digest) = 71 AND last_record_digest GLOB 'sha256:*'),
+                segment_digest TEXT NOT NULL UNIQUE CHECK (length(segment_digest) = 71 AND segment_digest GLOB 'sha256:*'),
+                signature_der_base64 TEXT NOT NULL CHECK (length(signature_der_base64) BETWEEN 1 AND 256),
+                key_id TEXT NOT NULL REFERENCES audit_key_metadata(key_id) ON DELETE RESTRICT,
+                status TEXT NOT NULL CHECK (status = 'sealed'),
+                opened_at TEXT NOT NULL CHECK (julianday(opened_at) IS NOT NULL),
+                sealed_at TEXT NOT NULL CHECK (julianday(sealed_at) IS NOT NULL),
+                CHECK (length(segment_id) BETWEEN 1 AND 128 AND segment_id NOT GLOB '*[^ -~]*'),
+                CHECK (prior_segment_digest IS NULL OR (length(prior_segment_digest) = 71 AND prior_segment_digest GLOB 'sha256:*')),
+                CHECK (julianday(sealed_at) >= julianday(opened_at))
+            )
+            """,
+            """
+            CREATE TABLE audit_records (
+                record_id TEXT PRIMARY KEY,
+                segment_id TEXT NOT NULL REFERENCES audit_segments(segment_id) ON DELETE CASCADE,
+                sequence INTEGER NOT NULL UNIQUE CHECK (sequence > 0),
+                timestamp TEXT NOT NULL CHECK (julianday(timestamp) IS NOT NULL),
+                previous_digest TEXT,
+                subject_id TEXT NOT NULL,
+                request_id TEXT,
+                target TEXT,
+                action TEXT NOT NULL CHECK (action IN ('request','authentication','authorization','admission','operation','effect','recovery','plugin','admin','export','retention')),
+                outcome TEXT NOT NULL,
+                reason_code TEXT NOT NULL,
+                policy_ref TEXT,
+                plan_ref TEXT,
+                approval_ref TEXT,
+                operation_ref TEXT,
+                plugin_ref TEXT,
+                payload_digest TEXT NOT NULL CHECK (length(payload_digest) = 71 AND payload_digest GLOB 'sha256:*'),
+                record_digest TEXT NOT NULL UNIQUE CHECK (length(record_digest) = 71 AND record_digest GLOB 'sha256:*'),
+                signing_key_id TEXT NOT NULL REFERENCES audit_key_metadata(key_id) ON DELETE RESTRICT,
+                deduplication_key TEXT,
+                canonical_json TEXT NOT NULL CHECK (json_valid(canonical_json) AND json_type(canonical_json) = 'object'),
+                CHECK (length(record_id) BETWEEN 1 AND 128 AND record_id NOT GLOB '*[^ -~]*'),
+                CHECK (length(subject_id) BETWEEN 1 AND 128),
+                CHECK (request_id IS NULL OR length(request_id) BETWEEN 1 AND 128),
+                CHECK (target IS NULL OR length(target) BETWEEN 1 AND 512),
+                CHECK (length(outcome) BETWEEN 1 AND 128),
+                CHECK (length(reason_code) BETWEEN 1 AND 128),
+                CHECK (deduplication_key IS NULL OR (length(deduplication_key) BETWEEN 1 AND 256 AND deduplication_key NOT GLOB '*[^ -~]*')),
+                CHECK (previous_digest IS NULL OR (length(previous_digest) = 71 AND previous_digest GLOB 'sha256:*'))
+            )
+            """,
+            """
+            CREATE TABLE audit_retention_anchors (
+                checkpoint_id TEXT PRIMARY KEY,
+                removed_through_segment_id TEXT NOT NULL,
+                removed_through_ordinal INTEGER NOT NULL UNIQUE CHECK (removed_through_ordinal > 0),
+                prior_anchor_digest TEXT NOT NULL CHECK (length(prior_anchor_digest) = 71 AND prior_anchor_digest GLOB 'sha256:*'),
+                new_anchor_digest TEXT NOT NULL UNIQUE CHECK (length(new_anchor_digest) = 71 AND new_anchor_digest GLOB 'sha256:*'),
+                approver TEXT NOT NULL CHECK (length(approver) BETWEEN 1 AND 128),
+                reason TEXT NOT NULL CHECK (length(reason) BETWEEN 1 AND 512),
+                timestamp TEXT NOT NULL CHECK (julianday(timestamp) IS NOT NULL),
+                signature_der_base64 TEXT NOT NULL CHECK (length(signature_der_base64) BETWEEN 1 AND 256),
+                key_id TEXT NOT NULL REFERENCES audit_key_metadata(key_id) ON DELETE RESTRICT,
+                canonical_json TEXT NOT NULL CHECK (json_valid(canonical_json) AND json_type(canonical_json) = 'object'),
+                CHECK (length(checkpoint_id) BETWEEN 1 AND 128 AND checkpoint_id NOT GLOB '*[^ -~]*'),
+                CHECK (length(removed_through_segment_id) BETWEEN 1 AND 128 AND removed_through_segment_id NOT GLOB '*[^ -~]*')
+            )
+            """,
+            "CREATE UNIQUE INDEX audit_key_metadata_active_idx ON audit_key_metadata(status) WHERE status = 'active'",
+            "CREATE INDEX audit_segments_key_idx ON audit_segments(key_id, ordinal)",
+            "CREATE INDEX audit_segments_prior_digest_idx ON audit_segments(prior_segment_digest, ordinal)",
+            "CREATE INDEX audit_records_segment_idx ON audit_records(segment_id, sequence)",
+            "CREATE INDEX audit_records_subject_idx ON audit_records(subject_id, timestamp, sequence)",
+            "CREATE INDEX audit_records_request_idx ON audit_records(request_id, sequence) WHERE request_id IS NOT NULL",
+            "CREATE UNIQUE INDEX audit_records_deduplication_idx ON audit_records(deduplication_key) WHERE deduplication_key IS NOT NULL",
+            "CREATE INDEX audit_retention_key_idx ON audit_retention_anchors(key_id, removed_through_ordinal)",
+          ]
+        ),
     ]
 }

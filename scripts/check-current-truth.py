@@ -76,7 +76,7 @@ def main() -> int:
             errors,
         )
     require('releaseTarget = "v0.0.2"' in identity, "HostwrightIdentity release target is not v0.0.2", errors)
-    for fragment in ["manifest = 2", "controlAPI = 2", "runtimeProviderAPI = 2", "storageProviderAPI = 1", "pluginABI = 1", "stateSchema = 18"]:
+    for fragment in ["manifest = 2", "controlAPI = 2", "runtimeProviderAPI = 2", "storageProviderAPI = 1", "pluginABI = 1", "stateSchema = 19"]:
         require(fragment in contracts, f"missing contract truth: {fragment}", errors)
 
     require("0.0.2-dev" in readme and "v0.0.2" in readme, "README lacks current version/release truth", errors)

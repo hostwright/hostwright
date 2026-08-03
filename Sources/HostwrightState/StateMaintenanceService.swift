@@ -429,11 +429,13 @@ public struct StateMaintenanceService {
             profile: .portableArtifact
         )
         let report: StateIntegrityReport
+        let auditState: StateBackupAuditMetadata
         do {
             report = try StateIntegrityService(store: store).inspect(
                 connection: backupConnection,
                 fingerprint: fingerprint
             )
+            auditState = try backupAuditMetadata(connection: backupConnection)
             try backupConnection.close()
         } catch {
             try? backupConnection.close()
@@ -456,7 +458,9 @@ public struct StateMaintenanceService {
             databaseSHA256: fingerprint.sha256,
             databaseBytes: fingerprint.bytes,
             stateSchemaVersion: report.stateSchemaVersion ?? 0,
-            sourceHealth: report.health
+            sourceHealth: report.health,
+            auditHead: auditState.head,
+            auditActiveKeyID: auditState.activeKeyID
         )
         let manifestPath = URL(fileURLWithPath: stagingDirectory, isDirectory: true)
             .appendingPathComponent("manifest.json")
@@ -506,7 +510,7 @@ public struct StateMaintenanceService {
             try StateStrictJSONObject.validate(
                 data,
                 allowedKeys: Self.backupManifestKeys,
-                requiredKeys: Self.backupManifestKeys
+                requiredKeys: Self.backupManifestRequiredKeys
             )
         } catch let error as StateStrictJSONError {
             throw StateMaintenanceError.backupNotRestorable(
@@ -550,13 +554,16 @@ public struct StateMaintenanceService {
             connection: connection,
             fingerprint: fingerprint
         )
+        let auditState = try backupAuditMetadata(connection: connection)
         let isVerifiedPreRepairSnapshot = manifest.purpose == .preRepair
             && manifest.sourceHealth == .degraded
             && report.health == .degraded
             && !report.repairableProjectionTables.isEmpty
         guard (report.health == .healthy || isVerifiedPreRepairSnapshot),
               report.stateSchemaVersion == manifest.stateSchemaVersion,
-              manifest.stateSchemaVersion == MigrationRunner.latestSchemaVersion else {
+              manifest.stateSchemaVersion == MigrationRunner.latestSchemaVersion,
+              auditState.head == manifest.auditHead,
+              auditState.activeKeyID == manifest.auditActiveKeyID else {
             throw StateMaintenanceError.backupNotRestorable(
                 id: backupID,
                 reason: "the database no longer passes the recorded schema and integrity contract"
@@ -570,6 +577,8 @@ public struct StateMaintenanceService {
                 databaseSHA256: manifest.databaseSHA256,
                 databaseBytes: manifest.databaseBytes,
                 stateSchemaVersion: manifest.stateSchemaVersion,
+                auditHead: manifest.auditHead,
+                auditActiveKeyID: manifest.auditActiveKeyID,
                 restorable: report.health == .healthy,
                 verificationMessage: report.health == .healthy
                     ? "Digest, size, state schema, SQLite integrity, foreign keys, and logical contracts verified."
@@ -765,6 +774,52 @@ public struct StateMaintenanceService {
         ] + countContract)
     }
 
+    private func backupAuditMetadata(
+        connection: SQLiteConnection
+    ) throws -> StateBackupAuditMetadata {
+        let activeRows = try connection.query(
+            "SELECT key_id FROM audit_key_metadata WHERE status = 'active'"
+        )
+        guard activeRows.count <= 1 else {
+            throw StateMaintenanceError.backupNotRestorable(
+                id: "audit-metadata",
+                reason: "the backup contains multiple active audit signing keys"
+            )
+        }
+        let activeKeyID = activeRows.first?.first ?? nil
+        let rows = try connection.query(
+            """
+            SELECT ordinal, segment_id, segment_digest, key_id
+            FROM audit_segments
+            ORDER BY ordinal DESC
+            LIMIT 1
+            """
+        )
+        guard let row = rows.first else {
+            return StateBackupAuditMetadata(head: nil, activeKeyID: activeKeyID)
+        }
+        guard row.count == 4,
+              let ordinalText = row[0],
+              let ordinal = UInt64(ordinalText),
+              let segmentID = row[1],
+              let segmentDigest = row[2],
+              let keyID = row[3] else {
+            throw StateMaintenanceError.backupNotRestorable(
+                id: "audit-metadata",
+                reason: "the backup audit head metadata is invalid"
+            )
+        }
+        return StateBackupAuditMetadata(
+            head: AuditChainHeadAnchor(
+                segmentOrdinal: ordinal,
+                segmentID: segmentID,
+                segmentDigest: segmentDigest,
+                keyID: keyID
+            ),
+            activeKeyID: activeKeyID
+        )
+    }
+
     private static let projectionDeleteOrder = [
         "observed_services",
         "observed_runtime_snapshots",
@@ -772,6 +827,19 @@ public struct StateMaintenanceService {
     ]
 
     private static let backupManifestKeys: Set<String> = [
+        "schemaVersion",
+        "backupID",
+        "createdAt",
+        "purpose",
+        "databaseSHA256",
+        "databaseBytes",
+        "stateSchemaVersion",
+        "sourceHealth",
+        "auditHead",
+        "auditActiveKeyID"
+    ]
+
+    private static let backupManifestRequiredKeys: Set<String> = [
         "schemaVersion",
         "backupID",
         "createdAt",
@@ -798,6 +866,13 @@ private struct StateBackupManifest: Codable, Equatable {
     let databaseBytes: UInt64
     let stateSchemaVersion: Int
     let sourceHealth: StateIntegrityHealth
+    let auditHead: AuditChainHeadAnchor?
+    let auditActiveKeyID: String?
+}
+
+private struct StateBackupAuditMetadata: Equatable {
+    let head: AuditChainHeadAnchor?
+    let activeKeyID: String?
 }
 
 private struct VerifiedStateBackup {
@@ -1162,6 +1237,12 @@ private extension StateMaintenanceService {
             )
             journal = journal.updating(checkpoint: .mutationCommitted)
             try replaceJournal(journal)
+            try synchronizeExternalAuditMetadata(
+                StateBackupAuditMetadata(
+                    head: backup.auditHead,
+                    activeKeyID: backup.auditActiveKeyID
+                )
+            )
             try interruptIfRequested(.mutationCommitted, selected: interruptAfter)
 
             var quarantinePath: String?
@@ -1621,6 +1702,7 @@ private extension StateMaintenanceService {
         }
         try cleanupRestoreStage(stagedPath)
         try StateMaintenanceFileSupport.synchronizeDirectory(parent)
+        try synchronizeExternalAuditMetadataForCurrentDatabase()
         try removeJournal()
     }
 
@@ -1918,6 +2000,8 @@ private extension StateMaintenanceService {
                 guard post.health == .healthy else {
                     throw StateMaintenanceError.recoveryFailed("the replacement failed final recovery verification")
                 }
+                let restoredAuditMetadata = try backupAuditMetadata(connection: connection)
+                try synchronizeExternalAuditMetadata(restoredAuditMetadata)
                 try connection.close()
                 if finalizedJournal.sourceDatabaseExisted,
                    StateMaintenanceFileSupport.exists(displacedPath),
@@ -2089,6 +2173,60 @@ private extension StateMaintenanceService {
                 checks: [.init(identifier: "state.open", status: .failed, message: String(describing: error))],
                 repairableProjectionTables: [],
                 recommendedAction: "Restore a verified backup or recover the pending maintenance journal."
+            )
+        }
+    }
+
+    func synchronizeExternalAuditMetadataForCurrentDatabase() throws {
+        guard StateMaintenanceFileSupport.exists(store.path) else {
+            try synchronizeExternalAuditMetadata(
+                StateBackupAuditMetadata(head: nil, activeKeyID: nil)
+            )
+            return
+        }
+        let connection = try SQLiteConnection(
+            path: store.path,
+            createIfNeeded: false,
+            readOnly: true,
+            profile: .authoritativeState
+        )
+        defer { try? connection.close() }
+        let metadata = try backupAuditMetadata(connection: connection)
+        try connection.close()
+        try synchronizeExternalAuditMetadata(metadata)
+    }
+
+    func synchronizeExternalAuditMetadata(
+        _ metadata: StateBackupAuditMetadata
+    ) throws {
+        guard metadata.head == nil || metadata.activeKeyID != nil else {
+            throw StateMaintenanceError.recoveryFailed(
+                "the restored audit head has no active signing key"
+            )
+        }
+        let keyStore = try MacOSAuditSigningKeyStore(
+            service: MacOSAuditSigningKeyStore.serviceName(
+                stateDatabasePath: store.path
+            )
+        )
+        if let activeKeyID = metadata.activeKeyID {
+            do {
+                try keyStore.activate(keyID: activeKeyID)
+            } catch {
+                throw StateMaintenanceError.recoveryFailed(
+                    "the restored audit signing key is unavailable in the local Keychain"
+                )
+            }
+        }
+        do {
+            if let head = metadata.head {
+                try keyStore.storeHead(head)
+            } else {
+                try keyStore.clearHead()
+            }
+        } catch {
+            throw StateMaintenanceError.recoveryFailed(
+                "the restored audit head could not be synchronized with the local Keychain"
             )
         }
     }

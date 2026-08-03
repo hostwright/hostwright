@@ -394,7 +394,11 @@ public struct ControlResponseEnvelope: Codable, Equatable, Sendable {
       throw ContractValidationError.unsupportedVersion("control response")
     }
     switch status {
-    case .accepted, .completed:
+    case .accepted:
+      guard let operationRef, !operationRef.isEmpty, result == nil, error == nil else {
+        throw ContractValidationError.required("accepted operation reference")
+      }
+    case .completed:
       guard error == nil else { throw ContractValidationError.invalid("success error") }
     case .rejected, .error:
       guard let error else { throw ContractValidationError.required("response error") }

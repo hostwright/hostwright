@@ -698,6 +698,37 @@ public struct StateIntegrityService: Sendable {
             let invalidServiceTunnelContent =
                 try ServiceTunnelStateRepository
                     .invalidStoredRecordCount(on: connection)
+            let invalidAuditStructure = try count(
+                connection,
+                sql: """
+                SELECT
+                    (SELECT COUNT(*)
+                     FROM audit_records record
+                     JOIN audit_segments segment ON segment.segment_id = record.segment_id
+                     WHERE segment.first_sequence != record.sequence
+                        OR segment.last_sequence != record.sequence
+                        OR segment.record_count != 1
+                        OR segment.first_record_digest != record.record_digest
+                        OR segment.last_record_digest != record.record_digest
+                        OR segment.key_id != record.signing_key_id
+                        OR length(record.canonical_json) > 1048576)
+                  + (SELECT COUNT(*)
+                     FROM audit_segments segment
+                     LEFT JOIN audit_records record ON record.segment_id = segment.segment_id
+                     WHERE record.record_id IS NULL)
+                  + (SELECT CASE WHEN COUNT(*) > 1 THEN COUNT(*) ELSE 0 END
+                     FROM audit_key_metadata WHERE status = 'active')
+                  + (SELECT COUNT(*)
+                     FROM audit_key_metadata
+                     WHERE public_key_sha256 != substr(key_id, 6)
+                        OR length(public_key_sha256) != 64
+                        OR public_key_sha256 GLOB '*[^0-9a-f]*')
+                  + (SELECT COUNT(*)
+                     FROM audit_retention_anchors
+                     WHERE removed_through_ordinal < 1
+                        OR length(canonical_json) > 1048576)
+                """
+            )
             let authoritativeProblems = sqlAuthoritativeProblems +
                 invalidIdentityProblems + invalidReferrerContent +
                 invalidImageTrustContent + invalidImageSBOMContent +
@@ -705,7 +736,7 @@ public struct StateIntegrityService: Sendable {
                 invalidImageProvenanceContent +
                 invalidStorageContent + invalidNetworkContent
                 + invalidProjectDNSContent + invalidCertificateContent
-                + invalidServiceTunnelContent
+                + invalidServiceTunnelContent + invalidAuditStructure
             if authoritativeProblems == 0 {
                 checks.append(.init(identifier: "hostwright.authoritative-records", status: .passed, message: "Authoritative state records satisfy the v\(MigrationRunner.latestSchemaVersion) logical contract."))
             } else {
@@ -1879,7 +1910,11 @@ public struct StateIntegrityService: Sendable {
         "control_sessions",
         "identity_revocations",
         "control_requests",
-        "idempotency_records"
+        "idempotency_records",
+        "audit_key_metadata",
+        "audit_segments",
+        "audit_records",
+        "audit_retention_anchors"
     ]
 
     private static let requiredIndexes = [
@@ -1903,6 +1938,14 @@ public struct StateIntegrityService: Sendable {
         "control_requests_subject_idempotency_idx",
         "control_requests_subject_status_idx",
         "idempotency_records_request_idx",
+        "audit_key_metadata_active_idx",
+        "audit_segments_key_idx",
+        "audit_segments_prior_digest_idx",
+        "audit_records_segment_idx",
+        "audit_records_subject_idx",
+        "audit_records_request_idx",
+        "audit_records_deduplication_idx",
+        "audit_retention_key_idx",
         "restart_recovery_operation_idx",
         "restart_recovery_project_idx",
         "operation_groups_operation_idx",

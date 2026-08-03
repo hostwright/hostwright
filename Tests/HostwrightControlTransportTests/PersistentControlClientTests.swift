@@ -134,7 +134,8 @@ final class PersistentControlClientTests: XCTestCase {
       requestRepository: ControlRequestRepository(store: store),
       daemonGeneration: 1,
       socketIdentity: listener.identity,
-      mutatingOperations: []
+      mutatingOperations: [],
+      auditRecorder: ClientTestControlAuditRecorder()
     ) { _, request, _ in
       ControlResponseEnvelope(
         requestID: request.requestID,
@@ -337,7 +338,8 @@ final class PersistentControlClientTests: XCTestCase {
       requestRepository: ControlRequestRepository(store: store),
       daemonGeneration: daemonGeneration,
       socketIdentity: listener.identity,
-      mutatingOperations: ["service.start"]
+      mutatingOperations: ["service.start"],
+      auditRecorder: ClientTestControlAuditRecorder()
     ) { _, request, _ in
       counter.increment()
       return ControlResponseEnvelope(
@@ -445,6 +447,28 @@ final class PersistentControlClientTests: XCTestCase {
       return
     }
     try? FileManager.default.removeItem(at: root)
+  }
+}
+
+private final class ClientTestControlAuditRecorder: ControlSecurityAuditRecording, @unchecked Sendable {
+  func record(_ event: ControlSecurityAuditEvent) throws -> AuditRecord {
+    try event.validate()
+    return AuditRecord(
+      identifier: "client-test-audit",
+      segmentID: "client-test-segment",
+      sequence: 1,
+      timestamp: Date(),
+      subjectID: event.subjectID,
+      requestID: event.requestID,
+      target: event.target,
+      action: event.action,
+      outcome: event.outcome,
+      reasonCode: event.reasonCode,
+      operationRef: event.operationRef,
+      payloadDigest: event.payloadDigest,
+      recordDigest: "sha256:" + String(repeating: "3", count: 64),
+      signingKeyID: "test-key"
+    )
   }
 }
 

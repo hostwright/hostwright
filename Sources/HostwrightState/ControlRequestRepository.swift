@@ -252,6 +252,17 @@ public struct ControlRequestRepository: Sendable {
             "Only accepted control requests may enter a terminal state."
           )
         }
+        if let recorded = existing.operationReference,
+          let operationReference,
+          recorded != operationReference
+        {
+          throw StateStoreError.invalidRecord(
+            "The control request cannot change its durable operation reference."
+          )
+        }
+        let effectiveOperationReference = status == .rejected
+          ? nil
+          : operationReference ?? existing.operationReference
         try connection.run(
           """
           UPDATE control_requests
@@ -259,7 +270,7 @@ public struct ControlRequestRepository: Sendable {
           WHERE request_id = ? AND status = 'accepted'
           """,
           bindings: [
-            .text(status.rawValue), controlRequestOptionalText(operationReference),
+            .text(status.rawValue), controlRequestOptionalText(effectiveOperationReference),
             .text(updatedAt), .text(requestID),
           ]
         )
@@ -272,6 +283,52 @@ public struct ControlRequestRepository: Sendable {
         guard let updated = try load(requestID, on: connection), updated.status == status else {
           throw StateStoreError.transactionInvariantViolation(
             message: "Control request terminal transition did not persist."
+          )
+        }
+        return updated
+      }
+    }
+  }
+
+  public func recordAcceptedOperationReference(
+    requestID: String,
+    operationReference: String,
+    updatedAt: String
+  ) throws -> ControlRequestRecord {
+    try ControlRequestValidation.requestID(requestID)
+    try ControlRequestValidation.optionalOperationReference(operationReference)
+    guard !operationReference.isEmpty else {
+      throw StateStoreError.invalidRecord("Accepted operation references cannot be empty.")
+    }
+    _ = try ControlRequestValidation.timestamp(updatedAt, named: "request update timestamp")
+    return try store.withValidatedConnection { connection in
+      try connection.transaction {
+        guard let existing = try load(requestID, on: connection) else {
+          throw StateStoreError.notFound("Control request \(requestID) does not exist.")
+        }
+        guard existing.status == .accepted else {
+          throw StateStoreError.invalidRecord(
+            "Only accepted control requests may bind an operation reference."
+          )
+        }
+        if let recorded = existing.operationReference {
+          guard recorded == operationReference else {
+            throw StateStoreError.invalidRecord(
+              "The control request is already bound to a different operation reference."
+            )
+          }
+          return existing
+        }
+        try connection.run(
+          "UPDATE control_requests SET operation_reference = ?, updated_at = ? WHERE request_id = ? AND status = 'accepted' AND operation_reference IS NULL",
+          bindings: [.text(operationReference), .text(updatedAt), .text(requestID)]
+        )
+        guard let updated = try load(requestID, on: connection),
+          updated.status == .accepted,
+          updated.operationReference == operationReference
+        else {
+          throw StateStoreError.transactionInvariantViolation(
+            message: "Control request operation reference did not persist."
           )
         }
         return updated

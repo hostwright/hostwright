@@ -507,37 +507,72 @@ enum ControlSecurityQualificationRunner {
     clientPath: String,
     socketPath: String,
     credentialFilePath: String?
-  ) throws -> Process {
-    let process = Process()
-    process.executableURL = URL(fileURLWithPath: clientPath)
+  ) throws -> pid_t {
     var arguments = ["client", socketPath]
     if let credentialFilePath {
       arguments += ["--credential-file", credentialFilePath]
     }
-    process.arguments = arguments
-    process.standardOutput = FileHandle.nullDevice
-    process.standardError = FileHandle.standardError
-    process.environment = [:]
-    do {
-      try process.run()
-      return process
-    } catch {
+    let argvStrings = [clientPath] + arguments
+    var argv = argvStrings.map { strdup($0) }
+    guard !argv.contains(where: { $0 == nil }) else {
+      argv.compactMap { $0 }.forEach { free($0) }
       throw ControlSecurityQualificationError.clientLaunchFailed
     }
+    argv.append(nil)
+    defer { argv.compactMap { $0 }.forEach { free($0) } }
+
+    var environment: [UnsafeMutablePointer<CChar>?] = [nil]
+    var fileActions: posix_spawn_file_actions_t?
+    guard posix_spawn_file_actions_init(&fileActions) == 0 else {
+      throw ControlSecurityQualificationError.clientLaunchFailed
+    }
+    defer { posix_spawn_file_actions_destroy(&fileActions) }
+    guard
+      posix_spawn_file_actions_addopen(&fileActions, STDIN_FILENO, "/dev/null", O_RDONLY, 0) == 0,
+      posix_spawn_file_actions_addopen(&fileActions, STDOUT_FILENO, "/dev/null", O_WRONLY, 0) == 0
+    else {
+      throw ControlSecurityQualificationError.clientLaunchFailed
+    }
+
+    var processID: pid_t = 0
+    let result = argv.withUnsafeMutableBufferPointer { arguments in
+      environment.withUnsafeMutableBufferPointer { environment in
+        posix_spawn(
+          &processID,
+          clientPath,
+          &fileActions,
+          nil,
+          arguments.baseAddress!,
+          environment.baseAddress!
+        )
+      }
+    }
+    guard result == 0, processID > 0 else {
+      throw ControlSecurityQualificationError.clientLaunchFailed
+    }
+    return processID
   }
 
-  private static func waitForExit(_ process: Process) throws {
+  private static func waitForExit(_ processID: pid_t) throws {
     let deadline = Date().addingTimeInterval(clientDeadline)
-    while process.isRunning && Date() < deadline {
+    var status: Int32 = 0
+    while Date() < deadline {
+      let waited = waitpid(processID, &status, WNOHANG)
+      if waited == processID {
+        guard status == 0 else {
+          throw ControlSecurityQualificationError.clientDidNotExit
+        }
+        return
+      }
+      if waited < 0, errno == EINTR { continue }
+      guard waited == 0 else {
+        throw ControlSecurityQualificationError.clientDidNotExit
+      }
       usleep(10_000)
     }
-    guard !process.isRunning, process.terminationStatus == 0 else {
-      if process.isRunning {
-        _ = Darwin.kill(process.processIdentifier, SIGKILL)
-        process.waitUntilExit()
-      }
-      throw ControlSecurityQualificationError.clientDidNotExit
-    }
+    _ = Darwin.kill(processID, SIGKILL)
+    while waitpid(processID, &status, 0) < 0, errno == EINTR {}
+    throw ControlSecurityQualificationError.clientDidNotExit
   }
 
   private static func connectClient(to socketPath: String, credentialFilePath: String?) throws {

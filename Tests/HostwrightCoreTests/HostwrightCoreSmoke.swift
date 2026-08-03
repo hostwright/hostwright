@@ -34,7 +34,7 @@ final class HostwrightCoreTests: XCTestCase {
 
         for case let fileURL as URL in enumerator where fileURL.pathExtension == "swift" {
             let contents = try String(contentsOf: fileURL, encoding: .utf8)
-            if contents.range(of: #"\bProcess\s*\("#, options: .regularExpression) != nil {
+            if contents.range(of: #"\b(?:Foundation\s*\.\s*)?Process\s*\("#, options: .regularExpression) != nil {
                 processCallSites.append(fileURL.path.replacingOccurrences(of: root.path + "/", with: ""))
             }
         }

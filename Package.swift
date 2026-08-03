@@ -34,6 +34,10 @@ let package = Package(
             name: "hostwright-control-security-qualification",
             targets: ["HostwrightControlSecurityQualificationTool"]
         ),
+        .executable(
+            name: "hostwright-audit-qualification",
+            targets: ["HostwrightAuditQualificationTool"]
+        ),
         .executable(name: "hostwrightd", targets: ["HostwrightDaemon"]),
         .executable(name: "hostwright-dist", targets: ["HostwrightDistributionTool"]),
         .executable(
@@ -262,7 +266,8 @@ let package = Package(
                 "HostwrightSQLiteSupport"
             ],
             linkerSettings: [
-                .linkedLibrary("sqlite3")
+                .linkedLibrary("sqlite3"),
+                .linkedFramework("Security")
             ]
         ),
         .target(
@@ -404,6 +409,14 @@ let package = Package(
                 .linkedLibrary("bsm"),
             ]
         ),
+        .executableTarget(
+            name: "HostwrightAuditQualificationTool",
+            dependencies: [
+                "HostwrightControlPlane",
+                "HostwrightCore",
+                "HostwrightState"
+            ]
+        ),
         .testTarget(
             name: "HostwrightControlPlaneTests",
             dependencies: ["HostwrightControlPlane"]
@@ -415,6 +428,10 @@ let package = Package(
         .testTarget(
             name: "HostwrightControlSecurityQualificationToolTests",
             dependencies: ["HostwrightControlSecurityQualificationTool"]
+        ),
+        .testTarget(
+            name: "HostwrightAuditQualificationToolTests",
+            dependencies: ["HostwrightAuditQualificationTool"]
         ),
         .testTarget(
             name: "HostwrightControlTests",

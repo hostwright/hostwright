@@ -153,6 +153,27 @@ fails, a security-sensitive mutation fails closed; read-only APIs remain
 available with explicit degraded health. See
 [`phase09-audit-v2.1.json`](../../contracts/v0.0.2/phase09-audit-v2.1.json).
 
+Audit schema v1 seals every committed record as a one-record segment before a
+mutation can be acknowledged. A record digest is SHA-256 over its sorted-key,
+UTF-8 JSON preimage with an RFC 3339 fractional-seconds timestamp and without
+`recordDigest`. A segment digest is SHA-256 over its sorted-key JSON preimage;
+the Keychain P-256 key signs that 32-byte digest. Key identifiers are
+`p256:<sha256-of-X9.63-public-key>`. The database stores only public keys,
+signed key-transition metadata, DER signatures, and canonical preimages. The
+private key, active-key pointer, and latest sealed segment head are
+device-local Keychain items scoped to the canonical state-database path.
+
+The external head makes tail truncation observable. A fully verified database
+ahead of its external head is the sole automatically recoverable crash state;
+a database behind or divergent from the head fails closed. Retention can
+delete only a sealed prefix while retaining a signed checkpoint from the
+genesis or prior retention anchor to the removed-through segment digest.
+Verified backup manifests bind the audit head and active key, and an authorized
+restore synchronizes those Keychain values before its maintenance journal is
+removed. Export bundles are canonical and independently verifiable from their
+public keys, transition signatures, record chains, segment signatures, and
+retention checkpoints.
+
 Workload Profile v1 covers filesystem, network, resources, identity, secrets,
 images, runtime and syscall options, host access, observability, accelerators,
 and extension grants. It permits one parent and rejects cycles. A child may

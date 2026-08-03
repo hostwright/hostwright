@@ -113,6 +113,7 @@ final class PersistentControlServerTests: XCTestCase {
       daemonGeneration: 1,
       socketIdentity: ControlSocketIdentity(device: 31, inode: 37),
       mutatingOperations: ["service.start"],
+      auditRecorder: TestControlAuditRecorder(),
       now: { Date(timeIntervalSince1970: 1_785_715_200) },
       handler: { _, request, _ in
         invocations.increment()
@@ -222,6 +223,7 @@ final class PersistentControlServerTests: XCTestCase {
       daemonGeneration: 1,
       socketIdentity: ControlSocketIdentity(device: 31, inode: 37),
       mutatingOperations: ["service.start"],
+      auditRecorder: TestControlAuditRecorder(),
       now: { Date(timeIntervalSince1970: 1_785_715_200) },
       handler: { _, request, _ in
         invocations.increment()
@@ -327,6 +329,7 @@ final class PersistentControlServerTests: XCTestCase {
       daemonGeneration: 1,
       socketIdentity: ControlSocketIdentity(device: 31, inode: 37),
       mutatingOperations: [],
+      auditRecorder: TestControlAuditRecorder(),
       handler: { _, request, _ in
         invocations.increment()
         return ControlResponseEnvelope(
@@ -425,6 +428,7 @@ final class PersistentControlServerTests: XCTestCase {
       daemonGeneration: 1,
       socketIdentity: ControlSocketIdentity(device: 31, inode: 37),
       mutatingOperations: [],
+      auditRecorder: TestControlAuditRecorder(),
       monotonicNow: { clock.next() },
       handler: { _, request, _ in
         invocations.increment()
@@ -531,6 +535,7 @@ final class PersistentControlServerTests: XCTestCase {
       daemonGeneration: 1,
       socketIdentity: ControlSocketIdentity(device: 31, inode: 37),
       mutatingOperations: ["service.start"],
+      auditRecorder: TestControlAuditRecorder(),
       handler: { _, request, _ in
         ControlResponseEnvelope(
           requestID: request.requestID, status: .completed, reasonCode: .completed)
@@ -648,6 +653,36 @@ final class PersistentControlServerTests: XCTestCase {
     let root = try temporaryDirectory()
     defer { try? FileManager.default.removeItem(at: root) }
     try body(root)
+  }
+}
+
+private final class TestControlAuditRecorder: ControlSecurityAuditRecording, @unchecked Sendable {
+  private let lock = NSLock()
+  private var sequence: UInt64 = 0
+
+  func record(_ event: ControlSecurityAuditEvent) throws -> AuditRecord {
+    try event.validate()
+    lock.lock()
+    sequence += 1
+    let current = sequence
+    lock.unlock()
+    return AuditRecord(
+      identifier: "test-audit-\(current)",
+      segmentID: "test-segment-\(current)",
+      sequence: current,
+      timestamp: Date(),
+      previousDigest: current == 1 ? nil : "sha256:" + String(repeating: "1", count: 64),
+      subjectID: event.subjectID,
+      requestID: event.requestID,
+      target: event.target,
+      action: event.action,
+      outcome: event.outcome,
+      reasonCode: event.reasonCode,
+      operationRef: event.operationRef,
+      payloadDigest: event.payloadDigest,
+      recordDigest: "sha256:" + String(repeating: "2", count: 64),
+      signingKeyID: "test-key"
+    )
   }
 }
 

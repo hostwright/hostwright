@@ -3,6 +3,8 @@ import HostwrightSQLiteSupport
 import SQLite3
 import Darwin
 
+protocol StateTransactionPreservedError: Error {}
+
 enum SQLiteConnectionProfile: String, Sendable {
     case authoritativeState
     case portableArtifact
@@ -332,6 +334,9 @@ final class SQLiteConnection {
             }
             if let stateError = original as? StateStoreError {
                 throw stateError
+            }
+            if let preserved = original as? any StateTransactionPreservedError {
+                throw preserved
             }
             throw StateStoreError.transactionFailed(message: String(describing: original))
         }

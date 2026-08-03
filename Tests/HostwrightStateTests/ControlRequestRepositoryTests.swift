@@ -82,6 +82,26 @@ final class ControlRequestRepositoryTests: XCTestCase {
       _ = try repository.record(accepted)
       _ = try repository.record(rejected)
 
+      let bound = try repository.recordAcceptedOperationReference(
+        requestID: "accepted", operationReference: "operation-1",
+        updatedAt: "2026-08-02T20:01:30Z"
+      )
+      XCTAssertEqual(bound.status, .accepted)
+      XCTAssertEqual(bound.operationReference, "operation-1")
+      XCTAssertEqual(
+        try repository.recordAcceptedOperationReference(
+          requestID: "accepted", operationReference: "operation-1",
+          updatedAt: "2026-08-02T20:01:31Z"
+        ),
+        bound
+      )
+      XCTAssertThrowsError(
+        try repository.recordAcceptedOperationReference(
+          requestID: "accepted", operationReference: "operation-other",
+          updatedAt: "2026-08-02T20:01:32Z"
+        )
+      )
+
       let completed = try repository.updateTerminal(
         requestID: "accepted", status: .completed, operationReference: "operation-1",
         updatedAt: "2026-08-02T20:02:00Z")
@@ -112,6 +132,19 @@ final class ControlRequestRepositoryTests: XCTestCase {
         try repository.updateTerminal(
           requestID: "accepted-rejection", status: .rejected,
           operationReference: "forbidden", updatedAt: "2026-08-02T20:04:00Z"))
+
+      let acceptedForCompletion = ControlRequestSubmission(
+        request: request(id: "accepted-completion"), idempotencyExpiresAt: nil)
+      _ = try repository.record(acceptedForCompletion)
+      _ = try repository.recordAcceptedOperationReference(
+        requestID: "accepted-completion", operationReference: "operation-preserved",
+        updatedAt: "2026-08-02T20:04:00Z"
+      )
+      let preserved = try repository.updateTerminal(
+        requestID: "accepted-completion", status: .completed, operationReference: nil,
+        updatedAt: "2026-08-02T20:05:00Z"
+      )
+      XCTAssertEqual(preserved.operationReference, "operation-preserved")
     }
   }
 

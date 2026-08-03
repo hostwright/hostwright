@@ -244,6 +244,7 @@ public struct PersistentControlConnectionServer: Sendable {
   private let daemonGeneration: UInt64
   private let socketIdentity: ControlSocketIdentity
   private let mutatingOperations: Set<String>
+  private let auditRecorder: any ControlSecurityAuditRecording
   private let handler: Handler
   private let now: @Sendable () -> Date
   private let monotonicNow: @Sendable () -> UInt64
@@ -254,6 +255,7 @@ public struct PersistentControlConnectionServer: Sendable {
     daemonGeneration: UInt64,
     socketIdentity: ControlSocketIdentity,
     mutatingOperations: Set<String>,
+    auditRecorder: any ControlSecurityAuditRecording,
     now: @escaping @Sendable () -> Date = Date.init,
     monotonicNow: @escaping @Sendable () -> UInt64 = {
       DispatchTime.now().uptimeNanoseconds
@@ -268,6 +270,7 @@ public struct PersistentControlConnectionServer: Sendable {
     self.daemonGeneration = daemonGeneration
     self.socketIdentity = socketIdentity
     self.mutatingOperations = mutatingOperations
+    self.auditRecorder = auditRecorder
     self.now = now
     self.monotonicNow = monotonicNow
     self.handler = handler
@@ -356,8 +359,39 @@ public struct PersistentControlConnectionServer: Sendable {
       do {
         switch try requestRepository.recordOrReplay(submission) {
         case .replayed(let record):
-          return (Self.replayResponse(record), deadline)
+          let replay = Self.replayResponse(record)
+          if record.status == .accepted {
+            try recordAudit(
+              peer: peer,
+              request: request,
+              action: .request,
+              outcome: "accepted",
+              reasonCode: ControlReasonCode.accepted.rawValue,
+              operationRef: record.operationReference,
+              payloadDigest: "sha256:\(digest)",
+              stage: "accepted"
+            )
+            if record.operationReference != nil {
+              try recordResponseAudit(
+                peer: peer,
+                request: request,
+                response: replay,
+                stage: "operation-accepted"
+              )
+            }
+          }
+          return (replay, deadline)
         case .created:
+          try recordAudit(
+            peer: peer,
+            request: request,
+            action: .request,
+            outcome: "accepted",
+            reasonCode: ControlReasonCode.accepted.rawValue,
+            operationRef: nil,
+            payloadDigest: "sha256:\(digest)",
+            stage: "accepted"
+          )
           break
         }
       } catch let error as StateStoreError {
@@ -372,6 +406,16 @@ public struct PersistentControlConnectionServer: Sendable {
             createdAt: timestamp,
             updatedAt: timestamp
           )
+        )
+        try recordAudit(
+          peer: peer,
+          request: request,
+          action: .request,
+          outcome: "rejected",
+          reasonCode: ControlReasonCode.idempotencyConflict.rawValue,
+          operationRef: nil,
+          payloadDigest: "sha256:\(digest)",
+          stage: "idempotency-conflict"
         )
         return (
           ControlResponseEnvelope(
@@ -403,7 +447,39 @@ public struct PersistentControlConnectionServer: Sendable {
     }
     try deadline.assertActive()
     try response.validate()
-    if isMutation, response.status != .accepted {
+    if isMutation, response.status == .accepted {
+      guard let operationReference = response.operationRef else {
+        throw PersistentControlServerError.persistenceFailed
+      }
+      do {
+        _ = try requestRepository.recordAcceptedOperationReference(
+          requestID: request.requestID,
+          operationReference: operationReference,
+          updatedAt: ISO8601DateFormatter().string(from: now())
+        )
+      } catch {
+        throw PersistentControlServerError.persistenceFailed
+      }
+      try recordResponseAudit(
+        peer: peer,
+        request: request,
+        response: response,
+        stage: "operation-accepted"
+      )
+    } else if isMutation {
+      let canonicalResponse = try ControlPlaneCanonicalJSON.encode(response)
+      let responseDigest = SHA256.hash(data: canonicalResponse)
+        .map { String(format: "%02x", $0) }.joined()
+      try recordAudit(
+        peer: peer,
+        request: request,
+        action: .operation,
+        outcome: response.status.rawValue,
+        reasonCode: response.reasonCode.rawValue,
+        operationRef: response.operationRef,
+        payloadDigest: "sha256:\(responseDigest)",
+        stage: "terminal"
+      )
       let status: ControlRequestStatus
       switch response.status {
       case .completed: status = .completed
@@ -423,6 +499,56 @@ public struct PersistentControlConnectionServer: Sendable {
       }
     }
     return (response, deadline)
+  }
+
+  private func recordResponseAudit(
+    peer: AuthenticatedControlPeer,
+    request: ControlRequestEnvelope,
+    response: ControlResponseEnvelope,
+    stage: String
+  ) throws {
+    let canonicalResponse = try ControlPlaneCanonicalJSON.encode(response)
+    let responseDigest = SHA256.hash(data: canonicalResponse)
+      .map { String(format: "%02x", $0) }.joined()
+    try recordAudit(
+      peer: peer,
+      request: request,
+      action: .operation,
+      outcome: response.status.rawValue,
+      reasonCode: response.reasonCode.rawValue,
+      operationRef: response.operationRef,
+      payloadDigest: "sha256:\(responseDigest)",
+      stage: stage
+    )
+  }
+
+  private func recordAudit(
+    peer: AuthenticatedControlPeer,
+    request: ControlRequestEnvelope,
+    action: AuditAction,
+    outcome: String,
+    reasonCode: String,
+    operationRef: String?,
+    payloadDigest: String,
+    stage: String
+  ) throws {
+    do {
+      try auditRecorder.record(
+        ControlSecurityAuditEvent(
+          subjectID: peer.binding.subject.identifier,
+          requestID: request.requestID,
+          target: request.operation,
+          action: action,
+          outcome: outcome,
+          reasonCode: reasonCode,
+          operationRef: operationRef,
+          payloadDigest: payloadDigest,
+          deduplicationKey: "control:\(request.requestID):\(stage)"
+        )
+      )
+    } catch {
+      throw PersistentControlServerError.persistenceFailed
+    }
   }
 
   private func write(

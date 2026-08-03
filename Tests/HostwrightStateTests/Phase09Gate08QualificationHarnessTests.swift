@@ -23,6 +23,7 @@ final class Phase09Gate08QualificationHarnessTests: XCTestCase {
     XCTAssertTrue(source.contains("ControlStreamFrameContractTests|ControlStreamSessionStateTests|ControlStreamCursorTests"))
     XCTAssertTrue(source.contains("PersistentControlStreamIntegrationTests|DaemonControlStreamSourcesTests"))
     XCTAssertTrue(source.contains("ControlIdentitySecurityAdapterTests"))
+    XCTAssertTrue(source.contains("daemon-2.stderr.log"))
     XCTAssertTrue(source.contains("hostwright-stream-qualification"))
     XCTAssertTrue(source.contains("EventStreamTests|StateUpgradeTests|ControlStreamCursorTests"))
     XCTAssertTrue(source.contains("testInactiveSessionClosesTheActiveStreamConnection"))

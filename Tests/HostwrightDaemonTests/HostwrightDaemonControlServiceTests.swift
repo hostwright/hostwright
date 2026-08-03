@@ -2,6 +2,8 @@ import Darwin
 import Foundation
 import XCTest
 @testable import HostwrightControlPlane
+@testable import HostwrightControlSecurity
+@testable import HostwrightControlTransport
 @testable import HostwrightCore
 @testable import HostwrightDaemon
 @testable import HostwrightDaemonCore
@@ -55,6 +57,39 @@ final class HostwrightDaemonControlServiceTests: XCTestCase {
     }
   }
 
+  func testAuthenticatedClientCanReconnectAfterServiceRestart() throws {
+    try withPrivateHome { home in
+      var stage = "fixture"
+      do {
+        let fixture = try makeService(home: home)
+        let service = fixture.service
+        let serverIdentity = try DarwinCurrentControlCodeIdentity.inspect()
+        let client = PersistentControlClient(
+          socketPath: fixture.socketPath,
+          serverTrustPolicy: PersistentControlServerTrustPolicy(
+            pinnedAdHocCodeDirectoryHashes: [serverIdentity.codeDirectoryHash]
+          )
+        )
+        stage = "first-start"
+        try service.start()
+        stage = "first-connect"
+        let first = try client.connectSession()
+        first.close()
+
+        stage = "first-stop"
+        service.stop()
+        stage = "second-start"
+        try service.start()
+        defer { service.stop() }
+        stage = "second-connect"
+        let second = try client.connectSession()
+        second.close()
+      } catch {
+        XCTFail("authenticated reconnect stage \(stage) failed: \(error)")
+      }
+    }
+  }
+
   func testStopPreservesSocketThatReplacedTheOwnedInode() throws {
     try withPrivateHome { home in
       let fixture = try makeService(home: home)
@@ -89,15 +124,12 @@ final class HostwrightDaemonControlServiceTests: XCTestCase {
     let store = SQLiteStateStore(configuration: stateConfiguration)
     try store.migrate()
     try stateConfiguration.prepareRuntimeSupport()
+    let identity = try DarwinCurrentControlCodeIdentity.inspect()
     try store.controlIdentities.bootstrap(
       ControlPeerIdentityRecord(
         subjectID: "daemon-control-test-owner",
         userID: UInt32(geteuid()),
-        codeIdentity: CodeIdentity(
-          signingIdentifier: "hostwright-daemon-test",
-          codeDirectoryHash: String(repeating: "a", count: 40),
-          validationMode: .pinnedAdHoc
-        ),
+        codeIdentity: identity,
         declaredBySubjectID: "daemon-control-test-owner",
         declaredAt: "2026-08-02T00:00:00Z",
         updatedAt: "2026-08-02T00:00:00Z"

@@ -319,40 +319,61 @@ private enum HostwrightStreamQualificationMain {
   }
 
   private static func resume(root: URL, statePath: String, socketPath: String) throws {
-    let cursor = String(decoding: try Data(contentsOf: root.appendingPathComponent("resume-cursor.txt")), as: UTF8.self)
     let store = SQLiteStateStore(path: statePath)
-    let session = try PersistentControlClient(socketPath: socketPath).connectSession()
-    defer { session.close() }
-    let streamID = "gate08-resume"
-    let projectID = "project-phase09-gate08-live"
-    try session.openStream(
-      streamID: streamID,
-      request: ControlStreamOpenRequest(
-        source: .events,
-        filter: .object(["projectID": .string(projectID)]),
-        heartbeatMilliseconds: 1_000
-      ),
-      cursor: cursor,
-      initialCredit: 4
-    )
-    try requireOpen(session, streamID: streamID)
-    try store.events.append([event("gate08-live-event-after-restart", projectID: projectID)])
-    let resumed = try nextData(session, streamID: streamID, timeoutMilliseconds: 10_000)
-    guard case .object(let fields)? = resumed.payload,
-      case .string(let identifier)? = fields["id"],
-      identifier == "gate08-live-event-after-restart"
-    else { throw failure(69) }
-    try session.cancel(streamID: streamID)
-    try requireTerminal(session, streamID: streamID)
-    let integrity = StateIntegrityService(store: store).inspect()
-    let result = ResumeQualificationResult(
-      kind: "hostwright.phase09.stream.resume-qualification.v1",
-      resumedWithoutDuplicate: true,
-      daemonRestartCursorAccepted: true,
-      integrityHealth: integrity.health.rawValue
-    )
-    try removeOwnedKeychainItems(statePath: statePath)
-    try emit(result)
+    var stage = "cursor-load"
+    do {
+      let cursor = String(
+        decoding: try Data(contentsOf: root.appendingPathComponent("resume-cursor.txt")),
+        as: UTF8.self
+      )
+      stage = "connect"
+      let session = try PersistentControlClient(socketPath: socketPath).connectSession()
+      defer { session.close() }
+      let streamID = "gate08-resume"
+      let projectID = "project-phase09-gate08-live"
+      stage = "stream-open"
+      try session.openStream(
+        streamID: streamID,
+        request: ControlStreamOpenRequest(
+          source: .events,
+          filter: .object(["projectID": .string(projectID)]),
+          heartbeatMilliseconds: 1_000
+        ),
+        cursor: cursor,
+        initialCredit: 4
+      )
+      stage = "stream-accept"
+      try requireOpen(session, streamID: streamID)
+      stage = "event-append"
+      try store.events.append([event("gate08-live-event-after-restart", projectID: projectID)])
+      stage = "event-resume"
+      let resumed = try nextData(session, streamID: streamID, timeoutMilliseconds: 10_000)
+      guard case .object(let fields)? = resumed.payload,
+        case .string(let identifier)? = fields["id"],
+        identifier == "gate08-live-event-after-restart"
+      else { throw failure(69) }
+      stage = "stream-terminal"
+      try session.cancel(streamID: streamID)
+      try requireTerminal(session, streamID: streamID)
+      stage = "integrity"
+      let integrity = StateIntegrityService(store: store).inspect()
+      let result = ResumeQualificationResult(
+        kind: "hostwright.phase09.stream.resume-qualification.v1",
+        resumedWithoutDuplicate: true,
+        daemonRestartCursorAccepted: true,
+        integrityHealth: integrity.health.rawValue
+      )
+      stage = "keychain-cleanup"
+      try removeOwnedKeychainItems(statePath: statePath)
+      stage = "result"
+      try emit(result)
+    } catch {
+      let diagnostic = "stream qualification resume stage '\(stage)' failed"
+        + " (errorType=\(String(reflecting: type(of: error))),"
+        + " error=\(String(describing: error))).\n"
+      FileHandle.standardError.write(Data(diagnostic.utf8))
+      throw error
+    }
   }
 
   private static func waitForOwnership(store: SQLiteStateStore) throws -> OwnershipRecord {

@@ -17,6 +17,7 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
   private var connections = Set<Int32>()
   private let connectionGroup = DispatchGroup()
   private let acceptQueue = DispatchQueue(label: "dev.hostwright.control.accept")
+  private let acceptQueueKey = DispatchSpecificKey<Void>()
   private let connectionQueue = DispatchQueue(
     label: "dev.hostwright.control.connections",
     attributes: .concurrent
@@ -24,6 +25,7 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
 
   private init(configuration: DaemonConfiguration) {
     self.configuration = configuration
+    acceptQueue.setSpecific(key: acceptQueueKey, value: ())
   }
 
   static func make(configuration: DaemonConfiguration) throws -> any DaemonControlServing {
@@ -52,10 +54,6 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
       ),
       subjectResolver: identityAdapter,
       sessionStore: identityAdapter
-    )
-    let listener = try ControlUnixSocketListener(
-      path: resolution.layout.controlSocket,
-      recoverStaleSocket: true
     )
     let localAPI = LocalControlAPI(
       configuration: LocalControlConfiguration(
@@ -114,6 +112,10 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
       repository: store.admission, authorizer: rbacAuthorizer)
     let profileAdministration = WorkloadProfileAdministrationService(
       repository: store.workloadProfiles, authorizer: rbacAuthorizer)
+    let listener = try ControlUnixSocketListener(
+      path: resolution.layout.controlSocket,
+      recoverStaleSocket: true
+    )
     let server = try PersistentControlConnectionServer(
       authenticator: authenticator,
       requestRepository: requestRepository,
@@ -213,6 +215,9 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
     self.listener = nil
     lock.unlock()
     listener?.closeAndRemoveOwnedSocket()
+    if DispatchQueue.getSpecific(key: acceptQueueKey) == nil {
+      acceptQueue.sync {}
+    }
     lock.lock()
     let drainingDescriptors = connections
     for descriptor in drainingDescriptors {
@@ -226,13 +231,14 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
       _ = shutdown(descriptor, SHUT_RDWR)
     }
     lock.unlock()
+    _ = connectionGroup.wait(timeout: .now() + 5)
   }
 
   private func acceptLoop(
     listener: ControlUnixSocketListener,
     server: PersistentControlConnectionServer
   ) {
-    while !isStopped {
+    while isCurrent(listener) {
       guard let descriptor = try? listener.accept(timeoutMilliseconds: 250) else {
         continue
       }
@@ -253,10 +259,10 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
     }
   }
 
-  private var isStopped: Bool {
+  private func isCurrent(_ listener: ControlUnixSocketListener) -> Bool {
     lock.lock()
     defer { lock.unlock() }
-    return stopped
+    return !stopped && self.listener === listener
   }
 
   private func register(_ descriptor: Int32) -> Bool {

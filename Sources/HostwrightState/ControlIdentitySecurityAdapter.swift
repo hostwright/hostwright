@@ -28,7 +28,10 @@ public struct SQLiteControlIdentitySecurityAdapter: Sendable {
     userID: UInt32,
     codeIdentity: CodeIdentity
   ) throws -> ControlPeerIdentityRecord {
-    let matches = try store.controlIdentities.listIdentities().filter {
+    let identities = try retryTransientContention {
+      try store.controlIdentities.listIdentities()
+    }
+    let matches = identities.filter {
       guard $0.userID == userID,
         $0.codeIdentity.validationMode == codeIdentity.validationMode
       else { return false }
@@ -53,6 +56,21 @@ public struct SQLiteControlIdentitySecurityAdapter: Sendable {
 
   private func timestamp(_ date: Date) -> String {
     ISO8601DateFormatter().string(from: date)
+  }
+
+  private func retryTransientContention<T>(_ operation: () throws -> T) throws -> T {
+    let deadline = DispatchTime.now().uptimeNanoseconds
+      + UInt64(ControlPlaneContract.maximumAuthenticationHandshakeMilliseconds) * 1_000_000
+    while true {
+      do {
+        return try operation()
+      } catch let error as StateStoreError {
+        guard case .databaseLocked = error,
+          DispatchTime.now().uptimeNanoseconds < deadline
+        else { throw error }
+        usleep(25_000)
+      }
+    }
   }
 }
 
@@ -123,28 +141,20 @@ extension SQLiteControlIdentitySecurityAdapter: ControlSessionBindingStoring {
       expiresAt: timestamp(createdAt.addingTimeInterval(sessionLifetime)),
       updatedAt: timestamp(createdAt)
     )
-    let deadline = DispatchTime.now().uptimeNanoseconds
-      + UInt64(ControlPlaneContract.maximumAuthenticationHandshakeMilliseconds) * 1_000_000
-    while true {
-      do {
-        try store.controlIdentities.persistSession(session)
-        return
-      } catch let error as StateStoreError {
-        guard case .databaseLocked = error,
-          DispatchTime.now().uptimeNanoseconds < deadline
-        else { throw error }
-        usleep(25_000)
-      }
+    try retryTransientContention {
+      try store.controlIdentities.persistSession(session)
     }
   }
 
   public func isActive(sessionID: String, daemonGeneration: UInt64) throws -> Bool {
     do {
-      _ = try store.controlIdentities.validateActiveSession(
-        sessionID,
-        daemonGeneration: daemonGeneration,
-        at: timestamp(now())
-      )
+      try retryTransientContention {
+        _ = try store.controlIdentities.validateActiveSession(
+          sessionID,
+          daemonGeneration: daemonGeneration,
+          at: timestamp(now())
+        )
+      }
       return true
     } catch StateStoreError.notFound, StateStoreError.invalidRecord {
       return false

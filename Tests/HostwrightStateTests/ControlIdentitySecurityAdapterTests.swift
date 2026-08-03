@@ -137,6 +137,52 @@ final class ControlIdentitySecurityAdapterTests: XCTestCase {
     }
   }
 
+  func testSessionValidationWaitsForTransientExclusiveContention() throws {
+    try withAdapter { store, adapter, identity in
+      let binding = self.binding(identity: identity)
+      try adapter.persist(binding)
+      let coordinator = StateAccessCoordinator(configuration: store.configuration)
+      let acquired = self.expectation(description: "exclusive fence acquired")
+      let finished = self.expectation(description: "exclusive fence released")
+      let release = DispatchSemaphore(value: 0)
+      let backgroundFailure = Mutex<String?>(nil)
+      DispatchQueue.global(qos: .userInitiated).async {
+        do {
+          try coordinator.withLock(.exclusive) {
+            acquired.fulfill()
+            guard release.wait(timeout: .now() + 5) == .success else {
+              throw StateStoreError.databaseLocked(
+                path: store.path,
+                message: "the test exclusive release deadline expired"
+              )
+            }
+          }
+        } catch {
+          backgroundFailure.withLock { $0 = String(describing: error) }
+        }
+        finished.fulfill()
+      }
+      self.wait(for: [acquired], timeout: 2)
+      DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.6) {
+        release.signal()
+      }
+
+      let started = ContinuousClock.now
+      XCTAssertTrue(
+        try adapter.isActive(
+          sessionID: binding.sessionID,
+          daemonGeneration: binding.daemonGeneration
+        )
+      )
+      let elapsed = started.duration(to: .now)
+      self.wait(for: [finished], timeout: 2)
+
+      XCTAssertGreaterThanOrEqual(elapsed, .milliseconds(500))
+      XCTAssertLessThan(elapsed, .seconds(5))
+      XCTAssertNil(backgroundFailure.withLock { $0 })
+    }
+  }
+
   func testRefusesUnboundedSessionLifetimeAndUnsignedIntegerOverflow() throws {
     let store = try temporaryStore()
     XCTAssertThrowsError(

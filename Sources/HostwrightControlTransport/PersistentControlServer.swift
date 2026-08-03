@@ -238,6 +238,12 @@ public struct PersistentControlConnectionServer: Sendable {
       ControlRequestEnvelope,
       ControlTransportDeadline
     ) throws -> ControlResponseEnvelope
+  public typealias Authorizer =
+    @Sendable (
+      AuthenticatedControlPeer,
+      ControlRequestEnvelope,
+      Date
+    ) throws -> RBACDecision
 
   private let authenticator: ControlPeerAuthenticator
   private let requestRepository: ControlRequestRepository
@@ -245,6 +251,7 @@ public struct PersistentControlConnectionServer: Sendable {
   private let socketIdentity: ControlSocketIdentity
   private let mutatingOperations: Set<String>
   private let auditRecorder: any ControlSecurityAuditRecording
+  private let authorizer: Authorizer
   private let handler: Handler
   private let now: @Sendable () -> Date
   private let monotonicNow: @Sendable () -> UInt64
@@ -256,6 +263,7 @@ public struct PersistentControlConnectionServer: Sendable {
     socketIdentity: ControlSocketIdentity,
     mutatingOperations: Set<String>,
     auditRecorder: any ControlSecurityAuditRecording,
+    authorizer: @escaping Authorizer,
     now: @escaping @Sendable () -> Date = Date.init,
     monotonicNow: @escaping @Sendable () -> UInt64 = {
       DispatchTime.now().uptimeNanoseconds
@@ -271,6 +279,7 @@ public struct PersistentControlConnectionServer: Sendable {
     self.socketIdentity = socketIdentity
     self.mutatingOperations = mutatingOperations
     self.auditRecorder = auditRecorder
+    self.authorizer = authorizer
     self.now = now
     self.monotonicNow = monotonicNow
     self.handler = handler
@@ -336,6 +345,48 @@ public struct PersistentControlConnectionServer: Sendable {
     )
     try deadline.assertActive()
     let isMutation = mutatingOperations.contains(request.operation)
+    let authorization: RBACDecision
+    do {
+      authorization = try authorizer(
+        peer,
+        request,
+        now()
+      )
+      try authorization.validate()
+    } catch {
+      throw PersistentControlServerError.invalidRequest
+    }
+    let canonicalAuthorization = try ControlPlaneCanonicalJSON.encode(authorization)
+    let authorizationDigest = SHA256.hash(data: canonicalAuthorization)
+      .map { String(format: "%02x", $0) }.joined()
+    do {
+      try recordAudit(
+        peer: peer,
+        request: request,
+        action: .authorization,
+        outcome: authorization.effect.rawValue,
+        reasonCode: authorization.reasonCode,
+        operationRef: nil,
+        payloadDigest: "sha256:\(authorizationDigest)",
+        stage: "authorization-\(authorizationDigest)"
+      )
+    } catch {
+      if isMutation { throw error }
+    }
+    guard authorization.effect == .allow else {
+      return (
+        ControlResponseEnvelope(
+          requestID: request.requestID,
+          status: .rejected,
+          reasonCode: .unauthorized,
+          error: SanitizedError(
+            code: "authorizationDenied",
+            message: "The authenticated subject is not authorized for this operation."
+          )
+        ),
+        deadline
+      )
+    }
     if isMutation {
       let acceptedAt = now()
       let timestamp = ISO8601DateFormatter().string(from: acceptedAt)

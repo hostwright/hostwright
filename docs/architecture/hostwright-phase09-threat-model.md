@@ -1,8 +1,9 @@
 # Phase 09 Threat Model
 
-Status: Gate 1 security design input. This is a repository-grounded threat
-model for the frozen Phase 09 contracts, not evidence that a control socket,
-RBAC, provider, or plugin implementation is present.
+Status: Gate 5 security model. Gates 2–5 now implement the local peer identity,
+persistent socket, tamper-evident audit, and RBAC controls described here.
+Admission, profiles, streams, CLI parity, providers, and plugin lifecycle remain
+future gates and are not implied by this status.
 
 ## Executive summary
 

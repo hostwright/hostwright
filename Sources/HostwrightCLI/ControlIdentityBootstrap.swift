@@ -38,6 +38,10 @@ enum HostwrightControlIdentityBootstrap {
                     updatedAt: timestamp
                 )
             )
+            try store.rbac.bootstrapDefaultRolesAndOwner(
+                subjectID: subjectID,
+                timestamp: timestamp
+            )
             return
         }
         guard identities.contains(where: {
@@ -45,6 +49,14 @@ enum HostwrightControlIdentityBootstrap {
         }) else {
             throw StateStoreError.invalidRecord(
                 "The installing process is not an active declared control identity."
+            )
+        }
+        if let current = identities.first(where: {
+            $0.userID == userID && $0.revokedAt == nil && matches($0.codeIdentity, codeIdentity)
+        }) {
+            try store.rbac.bootstrapDefaultRolesAndOwner(
+                subjectID: current.subjectID,
+                timestamp: timestamp
             )
         }
     }

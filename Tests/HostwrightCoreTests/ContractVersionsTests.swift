@@ -17,7 +17,7 @@ final class ContractVersionsTests: XCTestCase {
         XCTAssertEqual(HostwrightContractVersions.storageProviderAPI, 1)
         XCTAssertEqual(HostwrightContractVersions.networkProviderSPI, 1)
         XCTAssertEqual(HostwrightContractVersions.pluginABI, 1)
-        XCTAssertEqual(HostwrightContractVersions.stateSchema, 19)
+        XCTAssertEqual(HostwrightContractVersions.stateSchema, 20)
     }
 
     func testCapabilityCatalogIsDeterministicUniqueAndCoversEveryRoadmapPhase() {

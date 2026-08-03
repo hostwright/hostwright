@@ -5,7 +5,7 @@ public enum HostwrightContractVersions {
     public static let storageProviderAPI = 1
     public static let networkProviderSPI = 1
     public static let pluginABI = 1
-    public static let stateSchema = 19
+    public static let stateSchema = 20
 }
 
 public struct HostwrightContractSnapshot: Codable, Equatable, Sendable {

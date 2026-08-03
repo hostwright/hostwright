@@ -38,6 +38,10 @@ let package = Package(
             name: "hostwright-audit-qualification",
             targets: ["HostwrightAuditQualificationTool"]
         ),
+        .executable(
+            name: "hostwright-rbac-qualification",
+            targets: ["HostwrightRBACQualificationTool"]
+        ),
         .executable(name: "hostwrightd", targets: ["HostwrightDaemon"]),
         .executable(name: "hostwright-dist", targets: ["HostwrightDistributionTool"]),
         .executable(
@@ -146,6 +150,7 @@ let package = Package(
                 "HostwrightCore",
                 "HostwrightDaemonCore",
                 "HostwrightObservability",
+                "HostwrightPolicy",
                 "HostwrightRuntime",
                 "HostwrightState"
             ]
@@ -344,10 +349,12 @@ let package = Package(
         .target(
             name: "HostwrightPolicy",
             dependencies: [
+                "HostwrightControlPlane",
                 "HostwrightCore",
                 "HostwrightManifest",
                 "HostwrightNetworking",
-                "HostwrightRuntime"
+                "HostwrightRuntime",
+                "HostwrightState"
             ]
         ),
         .target(
@@ -414,6 +421,14 @@ let package = Package(
             dependencies: [
                 "HostwrightControlPlane",
                 "HostwrightCore",
+                "HostwrightState"
+            ]
+        ),
+        .executableTarget(
+            name: "HostwrightRBACQualificationTool",
+            dependencies: [
+                "HostwrightControlPlane",
+                "HostwrightPolicy",
                 "HostwrightState"
             ]
         ),
@@ -596,9 +611,11 @@ let package = Package(
         .testTarget(
             name: "HostwrightPolicyTests",
             dependencies: [
+                "HostwrightControlPlane",
                 "HostwrightManifest",
                 "HostwrightPolicy",
-                "HostwrightRuntime"
+                "HostwrightRuntime",
+                "HostwrightState"
             ]
         ),
         .testTarget(

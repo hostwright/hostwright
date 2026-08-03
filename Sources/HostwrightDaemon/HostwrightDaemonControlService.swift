@@ -6,6 +6,7 @@ import HostwrightControlPlane
 import HostwrightControlSecurity
 import HostwrightControlTransport
 import HostwrightDaemonCore
+import HostwrightPolicy
 import HostwrightState
 
 final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sendable {
@@ -79,6 +80,9 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
     case .degraded, .tampered:
       throw PersistentControlServerError.persistenceFailed
     }
+    let rbacAuthorizer = RBACAuthorizationEngine(repository: store.rbac)
+    let rbacAdministration = RBACAdministrationService(
+      repository: store.rbac, authorizer: rbacAuthorizer)
     let server = try PersistentControlConnectionServer(
       authenticator: authenticator,
       requestRepository: ControlRequestRepository(store: store),
@@ -88,10 +92,19 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
         "up", "down", "run", "start", "stop", "restart", "rm", "update",
         "image", "registry", "volume",
         "audit.export",
+        "rbac.role.create", "rbac.role.update", "rbac.role.delete",
+        "rbac.binding.create", "rbac.binding.delete",
+        "rbac.delegation.create", "rbac.delegation.revoke",
       ],
       auditRecorder: auditTrail,
-      handler: { _, request, _ in
-        try Self.handle(request: request, localAPI: localAPI, auditTrail: auditTrail)
+      authorizer: { peer, request, at in
+        try rbacAuthorizer.authorize(subject: peer.binding.subject, request: request, at: at)
+      },
+      handler: { peer, request, _ in
+        try Self.handle(
+          peer: peer, request: request, localAPI: localAPI, auditTrail: auditTrail,
+          rbacRepository: store.rbac, rbacAdministration: rbacAdministration,
+          rbacAuthorizer: rbacAuthorizer)
       }
     )
     lock.lock()
@@ -171,10 +184,20 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
   }
 
   private static func handle(
+    peer: AuthenticatedControlPeer,
     request: ControlRequestEnvelope,
     localAPI: LocalControlAPI,
-    auditTrail: TamperEvidentAuditTrail
+    auditTrail: TamperEvidentAuditTrail,
+    rbacRepository: RBACRepository,
+    rbacAdministration: RBACAdministrationService,
+    rbacAuthorizer: RBACAuthorizationEngine
   ) throws -> ControlResponseEnvelope {
+    if let response = RBACControlOperations.handle(
+      peer: peer, request: request, repository: rbacRepository,
+      administration: rbacAdministration, authorizer: rbacAuthorizer, now: Date())
+    {
+      return response
+    }
     if request.operation == "audit.verify" {
       let report = auditTrail.verify()
       return ControlResponseEnvelope(

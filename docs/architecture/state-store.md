@@ -150,7 +150,7 @@ Desired environment snapshots never store resolved secret values. `secretEnv` en
 
 `hostwright state integrity` classifies the selected database as:
 
-- `healthy`: SQLite structure, foreign keys, schema v18 ledger/checksums, required tables and indexes, resource/fencing UUIDs, authoritative enums/JSON contracts, and reconstructible projections all pass;
+- `healthy`: SQLite structure, foreign keys, schema v20 ledger/checksums, required tables, indexes, and security triggers, resource/fencing UUIDs, authoritative enums/JSON contracts, and reconstructible projections all pass;
 - `degraded`: authoritative state is valid, but runtime-observation or health projections contain invalid enum/JSON/identity data that can be re-observed safely;
 - `unrecoverable`: SQLite structure, foreign keys, migrations, required schema objects, or authoritative desired/ownership/operation/audit records are invalid.
 

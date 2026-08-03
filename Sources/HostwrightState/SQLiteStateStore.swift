@@ -49,6 +49,10 @@ public struct SQLiteStateStore: StateStore {
         ControlIdentityRepository(store: self)
     }
 
+    public var rbac: RBACRepository {
+        RBACRepository(store: self)
+    }
+
     public var operations: OperationLedger {
         OperationLedger(store: self)
     }

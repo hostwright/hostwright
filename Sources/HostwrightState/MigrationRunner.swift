@@ -1,4 +1,6 @@
+import Foundation
 import HostwrightCore
+import HostwrightControlPlane
 import HostwrightRuntime
 
 public struct SchemaMigration: Equatable, Sendable {
@@ -156,6 +158,10 @@ public struct MigrationRunner: Sendable {
 
                 if migration.version == 7 {
                     try backfillV7IdentityAndFencing(on: connection)
+                }
+
+                if migration.version == 20 {
+                    try backfillV20RBACDefaults(on: connection)
                 }
 
                 for statement in migration.finalizationStatements {
@@ -390,6 +396,91 @@ public struct MigrationRunner: Sendable {
                 bindings: [.text(providerID.rawValue), .text(projectID)]
             )
         }
+    }
+
+    private func backfillV20RBACDefaults(on connection: SQLiteConnection) throws {
+        let candidates = try connection.query(
+            """
+            SELECT subject_id
+            FROM peer_identities
+            WHERE revoked_at IS NULL AND subject_id = declared_by_subject_id
+            ORDER BY julianday(declared_at), subject_id
+            """
+        ).compactMap { $0.first ?? nil }
+        guard candidates.count <= 1 else {
+            throw StateStoreError.migrationFailed(
+                version: 20,
+                message: "RBAC bootstrap found multiple active self-declared installing subjects."
+            )
+        }
+        let timestamp = try connection.query(
+            "SELECT strftime('%Y-%m-%dT%H:%M:%SZ', 'now')"
+        ).first?.first ?? nil
+        guard let timestamp else {
+            throw StateStoreError.migrationFailed(
+                version: 20,
+                message: "RBAC bootstrap could not obtain a canonical timestamp."
+            )
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        for role in DefaultRole.allCases {
+            let rules = Self.expandedDefaultRules(for: role)
+            let encoded = try encoder.encode(rules)
+            guard let canonicalRules = String(data: encoded, encoding: .utf8) else {
+                throw StateStoreError.migrationFailed(
+                    version: 20,
+                    message: "RBAC default role rules were not UTF-8."
+                )
+            }
+            try connection.run(
+                """
+                INSERT INTO rbac_roles (
+                    role_id, built_in, rules_json, generation, created_by_subject_id,
+                    created_at, updated_at
+                ) VALUES (?, 1, ?, 1, NULL, ?, ?)
+                """,
+                bindings: [
+                    .text(role.rawValue), .text(canonicalRules), .text(timestamp), .text(timestamp)
+                ]
+            )
+        }
+        if let installingSubject = candidates.first {
+            try connection.run(
+                """
+                INSERT INTO rbac_bindings (
+                    binding_id, subject_id, role_id, scope_kind, scope_identifier,
+                    created_by_subject_id, generation, created_at, updated_at
+                ) VALUES ('bootstrap-owner', ?, 'owner', 'global', NULL, ?, 1, ?, ?)
+                """,
+                bindings: [
+                    .text(installingSubject), .text(installingSubject), .text(timestamp),
+                    .text(timestamp)
+                ]
+            )
+        }
+    }
+
+    private static func expandedDefaultRules(for role: DefaultRole) -> [RBACRule] {
+        let order: [DefaultRole]
+        switch role {
+        case .viewer: order = [.viewer]
+        case .operator: order = [.viewer, .operator]
+        case .maintainer: order = [.viewer, .operator, .maintainer]
+        case .securityAdmin: order = [.securityAdmin]
+        case .owner: order = [.owner]
+        }
+        return order.compactMap { included in
+            guard let permission = DefaultRolePolicy.matrix.first(where: { $0.role == included })
+            else { return nil }
+            return RBACRule(
+                identifier: "builtin.\(role.rawValue).\(included.rawValue).allow",
+                effect: .allow,
+                resources: permission.resources.sorted { $0.rawValue < $1.rawValue },
+                verbs: permission.verbs.sorted { $0.rawValue < $1.rawValue },
+                scope: RBACScope(kind: .global)
+            )
+        }.sorted { $0.identifier < $1.identifier }
     }
 
     func validateAppliedSchema(on connection: SQLiteConnection) throws {
@@ -3417,6 +3508,168 @@ public struct MigrationRunner: Sendable {
             "CREATE INDEX audit_records_request_idx ON audit_records(request_id, sequence) WHERE request_id IS NOT NULL",
             "CREATE UNIQUE INDEX audit_records_deduplication_idx ON audit_records(deduplication_key) WHERE deduplication_key IS NOT NULL",
             "CREATE INDEX audit_retention_key_idx ON audit_retention_anchors(key_id, removed_through_ordinal)",
+          ]
+        ),
+        SchemaMigration(
+          version: 20,
+          description: "Least-privilege RBAC, admission policy, and workload profile authority",
+          implementationRevision: "phase09-policy-profile-v1",
+          statements: [
+            """
+            CREATE TABLE rbac_roles (
+                role_id TEXT PRIMARY KEY,
+                built_in INTEGER NOT NULL CHECK (built_in IN (0, 1)),
+                rules_json TEXT NOT NULL CHECK (json_valid(rules_json) AND json_type(rules_json) = 'array' AND length(rules_json) BETWEEN 2 AND 262144),
+                generation INTEGER NOT NULL CHECK (generation >= 1),
+                created_by_subject_id TEXT REFERENCES peer_identities(subject_id) ON DELETE RESTRICT,
+                created_at TEXT NOT NULL CHECK (julianday(created_at) IS NOT NULL),
+                updated_at TEXT NOT NULL CHECK (julianday(updated_at) IS NOT NULL),
+                CHECK (length(role_id) BETWEEN 1 AND 128 AND role_id NOT GLOB '*[^ -~]*'),
+                CHECK ((built_in = 1 AND created_by_subject_id IS NULL) OR (built_in = 0 AND created_by_subject_id IS NOT NULL)),
+                CHECK (julianday(updated_at) >= julianday(created_at))
+            )
+            """,
+            """
+            CREATE TABLE rbac_bindings (
+                binding_id TEXT PRIMARY KEY,
+                subject_id TEXT NOT NULL REFERENCES peer_identities(subject_id) ON DELETE RESTRICT,
+                role_id TEXT NOT NULL REFERENCES rbac_roles(role_id) ON DELETE RESTRICT,
+                scope_kind TEXT NOT NULL CHECK (scope_kind IN ('global','project','resource')),
+                scope_identifier TEXT,
+                created_by_subject_id TEXT NOT NULL REFERENCES peer_identities(subject_id) ON DELETE RESTRICT,
+                generation INTEGER NOT NULL CHECK (generation >= 1),
+                created_at TEXT NOT NULL CHECK (julianday(created_at) IS NOT NULL),
+                updated_at TEXT NOT NULL CHECK (julianday(updated_at) IS NOT NULL),
+                CHECK (length(binding_id) BETWEEN 1 AND 128 AND binding_id NOT GLOB '*[^ -~]*'),
+                CHECK ((scope_kind = 'global' AND scope_identifier IS NULL) OR (scope_kind != 'global' AND scope_identifier IS NOT NULL AND length(scope_identifier) BETWEEN 1 AND 128 AND scope_identifier NOT GLOB '*[^ -~]*')),
+                CHECK (julianday(updated_at) >= julianday(created_at)),
+                UNIQUE (subject_id, role_id, scope_kind, scope_identifier)
+            )
+            """,
+            """
+            CREATE TABLE rbac_delegations (
+                delegation_id TEXT PRIMARY KEY,
+                delegator_subject_id TEXT NOT NULL REFERENCES peer_identities(subject_id) ON DELETE RESTRICT,
+                delegate_subject_id TEXT NOT NULL REFERENCES peer_identities(subject_id) ON DELETE RESTRICT,
+                role_ids_json TEXT NOT NULL CHECK (json_valid(role_ids_json) AND json_type(role_ids_json) = 'array' AND length(role_ids_json) BETWEEN 2 AND 65536),
+                delegated_rules_json TEXT NOT NULL CHECK (json_valid(delegated_rules_json) AND json_type(delegated_rules_json) = 'array' AND length(delegated_rules_json) BETWEEN 2 AND 262144),
+                scope_kind TEXT NOT NULL CHECK (scope_kind IN ('global','project','resource')),
+                scope_identifier TEXT,
+                expires_at TEXT NOT NULL CHECK (julianday(expires_at) IS NOT NULL),
+                revoked_at TEXT CHECK (revoked_at IS NULL OR julianday(revoked_at) IS NOT NULL),
+                generation INTEGER NOT NULL CHECK (generation >= 1),
+                created_at TEXT NOT NULL CHECK (julianday(created_at) IS NOT NULL),
+                updated_at TEXT NOT NULL CHECK (julianday(updated_at) IS NOT NULL),
+                CHECK (length(delegation_id) BETWEEN 1 AND 128 AND delegation_id NOT GLOB '*[^ -~]*'),
+                CHECK (delegator_subject_id != delegate_subject_id),
+                CHECK (json_array_length(role_ids_json) > 0 OR json_array_length(delegated_rules_json) > 0),
+                CHECK ((scope_kind = 'global' AND scope_identifier IS NULL) OR (scope_kind != 'global' AND scope_identifier IS NOT NULL AND length(scope_identifier) BETWEEN 1 AND 128 AND scope_identifier NOT GLOB '*[^ -~]*')),
+                CHECK (julianday(expires_at) > julianday(created_at)),
+                CHECK (revoked_at IS NULL OR julianday(revoked_at) >= julianday(created_at)),
+                CHECK (julianday(updated_at) >= julianday(created_at))
+            )
+            """,
+            """
+            CREATE TABLE admission_policies (
+                policy_id TEXT PRIMARY KEY,
+                version INTEGER NOT NULL CHECK (version >= 1),
+                source_kind TEXT NOT NULL CHECK (source_kind IN ('built-in','extension')),
+                stage TEXT NOT NULL CHECK (stage IN ('builtInMutation','extensionMutation','builtInValidation','extensionValidation')),
+                failure_policy TEXT NOT NULL CHECK (failure_policy IN ('deny','ignore')),
+                advisory INTEGER NOT NULL CHECK (advisory IN (0, 1)),
+                mutating INTEGER NOT NULL CHECK (mutating IN (0, 1)),
+                document_json TEXT NOT NULL CHECK (json_valid(document_json) AND json_type(document_json) = 'object' AND length(document_json) BETWEEN 2 AND 1048576),
+                document_sha256 TEXT NOT NULL CHECK (length(document_sha256) = 64 AND document_sha256 NOT GLOB '*[^0-9a-f]*'),
+                enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
+                generation INTEGER NOT NULL CHECK (generation >= 1),
+                created_by_subject_id TEXT NOT NULL REFERENCES peer_identities(subject_id) ON DELETE RESTRICT,
+                created_at TEXT NOT NULL CHECK (julianday(created_at) IS NOT NULL),
+                updated_at TEXT NOT NULL CHECK (julianday(updated_at) IS NOT NULL),
+                CHECK (length(policy_id) BETWEEN 1 AND 128 AND policy_id NOT GLOB '*[^ -~]*'),
+                CHECK (failure_policy != 'ignore' OR (source_kind = 'extension' AND stage = 'extensionValidation' AND advisory = 1 AND mutating = 0)),
+                CHECK (julianday(updated_at) >= julianday(created_at))
+            )
+            """,
+            """
+            CREATE TABLE admission_exceptions (
+                exception_id TEXT PRIMARY KEY,
+                policy_id TEXT NOT NULL REFERENCES admission_policies(policy_id) ON DELETE RESTRICT,
+                subject_id TEXT NOT NULL REFERENCES peer_identities(subject_id) ON DELETE RESTRICT,
+                target TEXT NOT NULL CHECK (length(target) BETWEEN 1 AND 512 AND target NOT GLOB '*[^ -~]*'),
+                plan_hash TEXT NOT NULL CHECK (length(plan_hash) = 64 AND plan_hash NOT GLOB '*[^0-9a-f]*'),
+                approval_identity TEXT NOT NULL CHECK (length(approval_identity) BETWEEN 1 AND 128 AND approval_identity NOT GLOB '*[^ -~]*'),
+                expires_at TEXT NOT NULL CHECK (julianday(expires_at) IS NOT NULL),
+                created_by_subject_id TEXT NOT NULL REFERENCES peer_identities(subject_id) ON DELETE RESTRICT,
+                generation INTEGER NOT NULL CHECK (generation >= 1),
+                created_at TEXT NOT NULL CHECK (julianday(created_at) IS NOT NULL),
+                updated_at TEXT NOT NULL CHECK (julianday(updated_at) IS NOT NULL),
+                CHECK (length(exception_id) BETWEEN 1 AND 128 AND exception_id NOT GLOB '*[^ -~]*'),
+                CHECK (julianday(expires_at) > julianday(created_at)),
+                CHECK (julianday(updated_at) >= julianday(created_at)),
+                UNIQUE (policy_id, subject_id, target, plan_hash)
+            )
+            """,
+            """
+            CREATE TABLE workload_profiles (
+                profile_id TEXT PRIMARY KEY,
+                version INTEGER NOT NULL CHECK (version = 1),
+                parent_profile_id TEXT REFERENCES workload_profiles(profile_id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED,
+                profile_json TEXT NOT NULL CHECK (json_valid(profile_json) AND json_type(profile_json) = 'object' AND length(profile_json) BETWEEN 2 AND 1048576),
+                profile_sha256 TEXT NOT NULL CHECK (length(profile_sha256) = 64 AND profile_sha256 NOT GLOB '*[^0-9a-f]*'),
+                generation INTEGER NOT NULL CHECK (generation >= 1),
+                created_by_subject_id TEXT NOT NULL REFERENCES peer_identities(subject_id) ON DELETE RESTRICT,
+                created_at TEXT NOT NULL CHECK (julianday(created_at) IS NOT NULL),
+                updated_at TEXT NOT NULL CHECK (julianday(updated_at) IS NOT NULL),
+                CHECK (length(profile_id) BETWEEN 1 AND 128 AND profile_id NOT GLOB '*[^ -~]*'),
+                CHECK (parent_profile_id IS NULL OR parent_profile_id != profile_id),
+                CHECK (julianday(updated_at) >= julianday(created_at))
+            )
+            """,
+            """
+            CREATE TRIGGER rbac_builtin_role_update
+            BEFORE UPDATE ON rbac_roles WHEN OLD.built_in = 1
+            BEGIN SELECT RAISE(ABORT, 'built-in RBAC roles are immutable'); END
+            """,
+            """
+            CREATE TRIGGER rbac_builtin_role_delete
+            BEFORE DELETE ON rbac_roles WHEN OLD.built_in = 1
+            BEGIN SELECT RAISE(ABORT, 'built-in RBAC roles are immutable'); END
+            """,
+            """
+            CREATE TRIGGER rbac_last_owner_delete
+            BEFORE DELETE ON rbac_bindings
+            WHEN OLD.role_id = 'owner' AND OLD.scope_kind = 'global'
+              AND (SELECT COUNT(*) FROM rbac_bindings WHERE role_id = 'owner' AND scope_kind = 'global') <= 1
+            BEGIN SELECT RAISE(ABORT, 'at least one global owner is required'); END
+            """,
+            """
+            CREATE TRIGGER rbac_delegation_owner_insert
+            BEFORE INSERT ON rbac_delegations
+            WHEN EXISTS (SELECT 1 FROM json_each(NEW.role_ids_json) WHERE value = 'owner')
+            BEGIN SELECT RAISE(ABORT, 'owner role cannot be delegated'); END
+            """,
+            """
+            CREATE TRIGGER rbac_delegation_owner_update
+            BEFORE UPDATE ON rbac_delegations
+            WHEN EXISTS (SELECT 1 FROM json_each(NEW.role_ids_json) WHERE value = 'owner')
+            BEGIN SELECT RAISE(ABORT, 'owner role cannot be delegated'); END
+            """,
+            """
+            CREATE TRIGGER rbac_owner_binding_update
+            BEFORE UPDATE ON rbac_bindings
+            WHEN OLD.role_id = 'owner' AND OLD.scope_kind = 'global'
+            BEGIN SELECT RAISE(ABORT, 'global owner bindings are replaced atomically, not updated'); END
+            """,
+            "CREATE INDEX rbac_roles_builtin_idx ON rbac_roles(built_in, role_id)",
+            "CREATE INDEX rbac_bindings_subject_idx ON rbac_bindings(subject_id, scope_kind, scope_identifier, role_id)",
+            "CREATE INDEX rbac_bindings_role_idx ON rbac_bindings(role_id, scope_kind, scope_identifier, subject_id)",
+            "CREATE UNIQUE INDEX rbac_bindings_identity_idx ON rbac_bindings(subject_id, role_id, scope_kind, IFNULL(scope_identifier, ''))",
+            "CREATE INDEX rbac_delegations_delegate_idx ON rbac_delegations(delegate_subject_id, revoked_at, expires_at, delegation_id)",
+            "CREATE INDEX rbac_delegations_delegator_idx ON rbac_delegations(delegator_subject_id, revoked_at, expires_at, delegation_id)",
+            "CREATE INDEX admission_policies_active_idx ON admission_policies(enabled, stage, policy_id)",
+            "CREATE INDEX admission_exceptions_lookup_idx ON admission_exceptions(policy_id, subject_id, target, expires_at)",
+            "CREATE INDEX workload_profiles_parent_idx ON workload_profiles(parent_profile_id, profile_id)",
+            "CREATE UNIQUE INDEX workload_profiles_digest_idx ON workload_profiles(profile_sha256)",
           ]
         ),
     ]

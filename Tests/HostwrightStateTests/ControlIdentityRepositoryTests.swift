@@ -247,16 +247,16 @@ final class ControlIdentityRepositoryTests: XCTestCase {
     }
   }
 
-  func testV17MigratesContiguouslyToV19() throws {
+  func testV17MigratesContiguouslyToV20() throws {
     try withStore(throughVersion: 17) { store in
       XCTAssertEqual(try store.schemaVersion(), 17)
       try store.migrate()
-      XCTAssertEqual(try store.schemaVersion(), 19)
+      XCTAssertEqual(try store.schemaVersion(), 20)
       try store.withConnection(createIfNeeded: false, readOnly: true) { connection in
         let versions = try connection.query(
           "SELECT version FROM schema_migrations ORDER BY version"
         ).compactMap { $0.first ?? nil }.compactMap(Int.init)
-        XCTAssertEqual(versions, Array(1...19))
+        XCTAssertEqual(versions, Array(1...20))
       }
     }
   }

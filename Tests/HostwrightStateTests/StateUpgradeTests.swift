@@ -376,7 +376,7 @@ final class StateUpgradeTests: XCTestCase {
         }
     }
 
-    func testV17SnapshotMigratesToV19AndRestoresExactV17() throws {
+    func testV17SnapshotMigratesToV20AndRestoresExactV17() throws {
         try withTemporaryStore(throughVersion: 17) { store, directory in
             let rollback = directory.appendingPathComponent("rollback", isDirectory: true)
             try FileManager.default.createDirectory(
@@ -389,8 +389,8 @@ final class StateUpgradeTests: XCTestCase {
                 at: rollback.appendingPathComponent("state.sqlite").path
             )
             XCTAssertEqual(snapshot.stateSchemaVersion, 17)
-            XCTAssertEqual(try service.migrateToLatest().toSchemaVersion, 19)
-            XCTAssertEqual(try store.schemaVersion(), 19)
+            XCTAssertEqual(try service.migrateToLatest().toSchemaVersion, 20)
+            XCTAssertEqual(try store.schemaVersion(), 20)
 
             XCTAssertEqual(
                 try service.restoreVerifiedSnapshot(

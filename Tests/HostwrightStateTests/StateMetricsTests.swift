@@ -32,7 +32,7 @@ final class StateMetricsTests: XCTestCase {
             ).snapshot()
 
             XCTAssertEqual(first.schemaVersion, 1)
-            XCTAssertEqual(first.source.schemaVersion, 19)
+            XCTAssertEqual(first.source.schemaVersion, 20)
             XCTAssertEqual(first.series.count, 59)
             XCTAssertLessThanOrEqual(first.series.count, HostwrightMetricCatalog.maximumSeries)
             XCTAssertEqual(first.snapshotSHA256, second.snapshotSHA256)
@@ -163,7 +163,7 @@ final class StateMetricsTests: XCTestCase {
         XCTAssertThrowsError(try StateMetricsService(store: store).snapshot())
     }
 
-    func testVersionSixteenRequiresExplicitUpgradeAndProjectsAfterVersionNineteenMigration() throws {
+    func testVersionSixteenRequiresExplicitUpgradeAndProjectsAfterVersionTwentyMigration() throws {
         let root = try privateRoot()
         defer { try? FileManager.default.removeItem(at: root) }
         let store = SQLiteStateStore(path: root.appendingPathComponent("upgrade.sqlite").path)
@@ -175,8 +175,8 @@ final class StateMetricsTests: XCTestCase {
 
         try store.migrate()
         let snapshot = try StateMetricsService(store: store).snapshot()
-        XCTAssertEqual(snapshot.source.schemaVersion, 19)
-        XCTAssertEqual(try store.schemaVersion(), 19)
+        XCTAssertEqual(snapshot.source.schemaVersion, 20)
+        XCTAssertEqual(try store.schemaVersion(), 20)
         XCTAssertEqual(snapshot.series.count, 59)
     }
 

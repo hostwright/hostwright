@@ -12,10 +12,11 @@ These files are executable compatibility fixtures for the contracts locked in Ph
 
 ## Phase 09 Gate 1 freeze
 
-The following fixtures freeze Phase 09 contracts. They are inputs to later
-implementation and qualification gates; they do not claim that a persistent
-Control API, RBAC, audit store, provider runtime, XPC service, or plugin
-lifecycle is already implemented.
+The following fixtures freeze Phase 09 contracts. Gates 2–5 implement the
+identity, persistent unary Control API, tamper-evident audit, and RBAC portions.
+The remaining fixtures are still inputs to their later qualification gates and
+do not claim that streams, admission, profiles, provider runtimes, XPC, or the
+plugin lifecycle are already implemented.
 
 - `phase09-control-request-v2.1.json`: revision 2.1 persistent Control API request.
 - `phase09-control-response-v2.1.json`: revision 2.1 response and reason-code envelope.

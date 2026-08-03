@@ -46,7 +46,6 @@ struct AuditQualificationResult: Codable, Equatable {
     guard qualification == "phase09-gate4-live-v1",
       health == "healthy",
       stateSchema == HostwrightContractVersions.stateSchema,
-      stateSchema == 19,
       recordCount >= 3,
       segmentCount >= 3,
       exportBytes > 0,

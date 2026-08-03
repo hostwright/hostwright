@@ -12,9 +12,8 @@ final class AuditSchemaV19MigrationTests: XCTestCase {
             let result = try service.migrateToLatestWithVerifiedBackup()
 
             XCTAssertEqual(result.migration.fromSchemaVersion, 18)
-            XCTAssertEqual(result.migration.toSchemaVersion, 19)
-            XCTAssertEqual(try store.schemaVersion(), 19)
-            XCTAssertEqual(HostwrightContractVersions.stateSchema, 19)
+            XCTAssertEqual(result.migration.toSchemaVersion, 20)
+            XCTAssertEqual(try store.schemaVersion(), 20)
             try store.validateSchema()
 
             let snapshot = try XCTUnwrap(result.rollbackSnapshot)

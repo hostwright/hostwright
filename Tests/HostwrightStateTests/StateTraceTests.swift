@@ -14,7 +14,7 @@ final class StateTraceTests: XCTestCase {
         XCTAssertEqual(try store.schemaVersion(), 16)
 
         try store.migrate()
-        XCTAssertEqual(try store.schemaVersion(), 19)
+        XCTAssertEqual(try store.schemaVersion(), 20)
         XCTAssertTrue(try store.traces.inspect(limit: 20).traces.isEmpty)
         try store.withValidatedConnection { connection in
             try connection.transaction {

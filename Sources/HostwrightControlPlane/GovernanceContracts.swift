@@ -105,12 +105,12 @@ public struct ControlSessionBinding: Codable, Equatable, Sendable {
   }
 }
 
-public enum RBACResource: String, Codable, CaseIterable, Sendable {
+public enum RBACResource: String, Codable, CaseIterable, Hashable, Sendable {
   case project, service, image, volume, registry
   case secretMetadata = "secret-metadata"
   case runtime, state, daemon, observability, audit, policy, profile, plugin, provider
 }
-public enum RBACVerb: String, Codable, CaseIterable, Sendable {
+public enum RBACVerb: String, Codable, CaseIterable, Hashable, Sendable {
   case get, list, watch, plan, create, update, delete, start, stop, restart, execute, approve,
     delegate, admin
 }
@@ -137,7 +137,7 @@ public struct RBACScope: Codable, Equatable, Sendable {
     }
   }
 }
-public enum RBACConditionKind: String, Codable, CaseIterable, Sendable {
+public enum RBACConditionKind: String, Codable, CaseIterable, Hashable, Sendable {
   case project, resource, operation, profileHash, expiresAt
 }
 public enum RBACEffect: String, Codable, CaseIterable, Sendable { case allow, deny }
@@ -196,6 +196,16 @@ public struct RBACCondition: Codable, Equatable, Sendable {
     self.kind = kind
     self.value = value
   }
+  public func validate() throws {
+    guard !value.isEmpty, value.utf8.count <= 128,
+      value.unicodeScalars.allSatisfy({ $0.value >= 0x20 && $0.value <= 0x7e })
+    else { throw ContractValidationError.invalid("rbac condition") }
+    if kind == .expiresAt {
+      guard ISO8601DateFormatter().date(from: value) != nil else {
+        throw ContractValidationError.invalid("rbac condition expiry")
+      }
+    }
+  }
 }
 public struct RBACRule: Codable, Equatable, Sendable {
   public let identifier: String
@@ -219,7 +229,11 @@ public struct RBACRule: Codable, Equatable, Sendable {
     guard !identifier.isEmpty && !resources.isEmpty && !verbs.isEmpty else {
       throw ContractValidationError.required("rbac rule")
     }
+    guard Set(resources).count == resources.count, Set(verbs).count == verbs.count,
+      Set(conditions.map(\.kind)).count == conditions.count
+    else { throw ContractValidationError.invalid("duplicate rbac rule member") }
     try scope.validate()
+    try conditions.forEach { try $0.validate() }
   }
 }
 public struct RoleDefinition: Codable, Equatable, Sendable {
@@ -246,6 +260,12 @@ public struct RBACBinding: Codable, Equatable, Sendable {
     self.subject = subject
     self.roleIdentifier = roleIdentifier
     self.scope = scope
+  }
+  public func validate() throws {
+    guard !identifier.isEmpty, !subject.isEmpty, !roleIdentifier.isEmpty else {
+      throw ContractValidationError.required("rbac binding")
+    }
+    try scope.validate()
   }
 }
 public struct RBACDelegation: Codable, Equatable, Sendable {
@@ -290,6 +310,11 @@ public struct RBACDecision: Codable, Equatable, Sendable {
     self.effect = effect
     self.ruleIdentifiers = ruleIdentifiers
     self.reasonCode = reasonCode
+  }
+  public func validate() throws {
+    guard !reasonCode.isEmpty, Set(ruleIdentifiers).count == ruleIdentifiers.count,
+      ruleIdentifiers.allSatisfy({ !$0.isEmpty })
+    else { throw ContractValidationError.invalid("rbac decision") }
   }
 }
 

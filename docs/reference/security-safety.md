@@ -36,6 +36,42 @@ Disable state is changed only through `launchctl enable|disable` for the exact m
 
 New runtime resources use collision-resistant v2 identifiers and exact labels for managed state, identity version, project, service, optional instance, and resource identifier. Mutation plans retain the exact observed identifier. State-backed legacy identifiers remain readable for upgrade continuity, but labels or ownership records may not be inferred from a Hostwright-looking name.
 
+## Local Control Authorization Boundary
+
+The persistent Control API authorizes the kernel- and code-bound local subject
+after session revalidation and before a mutation can enter idempotency or
+accepted state. Unknown operations require `daemon/admin`; an unbound subject
+has no permissions. Every healthy authorization decision is appended to the
+tamper-evident audit trail. An audit append failure blocks mutation before
+durable acceptance, while read-only handling retains the Gate 4 degraded-audit
+behavior.
+
+Schema v20 stores five immutable default roles, custom roles, scoped bindings,
+and expiring delegations. The fixed resources, verbs, global/project/resource
+scopes, and AND-only conditions are defined by the Phase 09 golden contracts.
+Explicit deny rules override every allow. Authorization explanations return
+stable reason codes and sorted matching rule identifiers. The in-process cache
+is keyed by a digest of the complete persisted RBAC snapshot, so a role,
+binding, delegation, revocation, or expiry change takes effect without a daemon
+restart.
+
+Bootstrap creates one global owner binding only for the installing declared
+subject. SQLite and repository guards preserve at least one global owner and
+make built-in roles immutable. `security-admin` may grant only permissions it
+already holds; custom role, binding, and delegation paths compare each allowed
+resource/verb pair against the actor's current authority. Owner cannot be
+delegated, delegations must expire in the future, conditional grants by a
+non-owner are refused, stale generations fail, and only a delegator or global
+owner may revoke a delegation.
+
+The implemented Control API management operations are `rbac.preview`, the
+`rbac.role.*`, `rbac.binding.*`, and `rbac.delegation.*` families. Their typed
+payloads compose the frozen `RoleDefinition`, `RBACBinding`, `RBACDelegation`,
+`ControlRequestEnvelope`, and scalar generation fields; request-supplied actor
+or creation timestamps are not authoritative. Mutation responses and errors
+are bounded and sanitized. Gate 9 still owns normal CLI parity, so these
+operations do not yet claim a complete CLI surface.
+
 Schema-v17 ownership authority binds exact resource/project UUIDs, resource/project/provider generations, controller, provider, fencing token, and a deterministic ownership proof. A delete or cleanup records versioned deletion intent and ordered finalizers before provider mutation, then requires fresh exact runtime absence and released dependent port/tunnel finalizers before removing the ownership row. Missing, legacy, forged, stale, live-leased, or ambiguous authority fails closed. Cleanup never searches by a Hostwright-looking name, deletes an unmanaged resource, or treats provider acceptance as proof of absence.
 
 `hostwright ownership handoff` is a local recovery compare-and-swap, not authentication or general lease takeover. It accepts only an expired exact `lifecycle-v1` group/plan/fence/controller/expiry tuple, targets the bounded `resume` or `rollback` controller, and atomically advances the group lease plus every bound ownership record. An in-flight effect holds a private per-group OS fence, so handoff cannot overtake it. Lifecycle recovery replaces the fixed controller with one UUID-qualified process owner through a second single-winner compare-and-swap; the former controller and losing recovery processes cannot mutate, append evidence, finalize, clean up, or terminalize the group. Other mutation kinds retain their existing native recovery contracts and are refused by this command. A live or changed lease, unsupported operation kind, malformed authority, or stale proof changes nothing.

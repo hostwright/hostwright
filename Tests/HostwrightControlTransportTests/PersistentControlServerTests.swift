@@ -114,6 +114,7 @@ final class PersistentControlServerTests: XCTestCase {
       socketIdentity: ControlSocketIdentity(device: 31, inode: 37),
       mutatingOperations: ["service.start"],
       auditRecorder: TestControlAuditRecorder(),
+      authorizer: allowingTestControlRequestAuthorizer,
       now: { Date(timeIntervalSince1970: 1_785_715_200) },
       handler: { _, request, _ in
         invocations.increment()
@@ -224,6 +225,7 @@ final class PersistentControlServerTests: XCTestCase {
       socketIdentity: ControlSocketIdentity(device: 31, inode: 37),
       mutatingOperations: ["service.start"],
       auditRecorder: TestControlAuditRecorder(),
+      authorizer: allowingTestControlRequestAuthorizer,
       now: { Date(timeIntervalSince1970: 1_785_715_200) },
       handler: { _, request, _ in
         invocations.increment()
@@ -330,6 +332,7 @@ final class PersistentControlServerTests: XCTestCase {
       socketIdentity: ControlSocketIdentity(device: 31, inode: 37),
       mutatingOperations: [],
       auditRecorder: TestControlAuditRecorder(),
+      authorizer: allowingTestControlRequestAuthorizer,
       handler: { _, request, _ in
         invocations.increment()
         return ControlResponseEnvelope(
@@ -429,6 +432,7 @@ final class PersistentControlServerTests: XCTestCase {
       socketIdentity: ControlSocketIdentity(device: 31, inode: 37),
       mutatingOperations: [],
       auditRecorder: TestControlAuditRecorder(),
+      authorizer: allowingTestControlRequestAuthorizer,
       monotonicNow: { clock.next() },
       handler: { _, request, _ in
         invocations.increment()
@@ -536,6 +540,7 @@ final class PersistentControlServerTests: XCTestCase {
       socketIdentity: ControlSocketIdentity(device: 31, inode: 37),
       mutatingOperations: ["service.start"],
       auditRecorder: TestControlAuditRecorder(),
+      authorizer: allowingTestControlRequestAuthorizer,
       handler: { _, request, _ in
         ControlResponseEnvelope(
           requestID: request.requestID, status: .completed, reasonCode: .completed)

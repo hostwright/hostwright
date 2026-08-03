@@ -76,13 +76,13 @@ def main() -> int:
             errors,
         )
     require('releaseTarget = "v0.0.2"' in identity, "HostwrightIdentity release target is not v0.0.2", errors)
-    for fragment in ["manifest = 2", "controlAPI = 2", "runtimeProviderAPI = 2", "storageProviderAPI = 1", "pluginABI = 1", "stateSchema = 19"]:
+    for fragment in ["manifest = 2", "controlAPI = 2", "runtimeProviderAPI = 2", "storageProviderAPI = 1", "pluginABI = 1", "stateSchema = 20"]:
         require(fragment in contracts, f"missing contract truth: {fragment}", errors)
 
     require("0.0.2-dev" in readme and "v0.0.2" in readme, "README lacks current version/release truth", errors)
     require("`brew install hostwright` does not exist today" in readme, "README must state the unqualified brew command does not exist", errors)
     require("macOS command-line control plane" in readme, "README lacks the product purpose", errors)
-    require("Manifest v2" in readme and "SQLite schema v18" in readme, "README lacks current manifest/state contracts", errors)
+    require("Manifest v2" in readme and "SQLite schema v20" in readme, "README lacks current manifest/state contracts", errors)
     require("project networks" in readme and "service tunnels" in readme, "README lacks current Phase 07 networking truth", errors)
     require("Apple `container` 1.0.0 and 1.1.0" in readme, "README lacks the tested Apple container matrix", errors)
     require("`hostwright image`, `registry`, `secret`" in readme, "README lacks the current image, registry, and secret surfaces", errors)

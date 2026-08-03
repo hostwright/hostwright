@@ -183,25 +183,32 @@ public struct StateIntegrityService: Sendable {
             ).compactMap { $0.first ?? nil }
         )
         let missingIndexes = Self.requiredIndexes.filter { !presentIndexes.contains($0) }
-        if missingTables.isEmpty, missingIndexes.isEmpty {
+        let presentTriggers = Set(
+            try connection.query(
+                "SELECT name FROM sqlite_master WHERE type = 'trigger'"
+            ).compactMap { $0.first ?? nil }
+        )
+        let missingTriggers = Self.requiredTriggers.filter { !presentTriggers.contains($0) }
+        if missingTables.isEmpty, missingIndexes.isEmpty, missingTriggers.isEmpty {
             checks.append(.init(
                 identifier: "hostwright.schema-objects",
                 status: .passed,
-                message: "All required state tables and indexes are present."
+                message: "All required state tables, indexes, and triggers are present."
             ))
         } else {
             unrecoverable = true
             let missing = (missingTables.map { "table:\($0)" }
-                + missingIndexes.map { "index:\($0)" }).joined(separator: ", ")
+                + missingIndexes.map { "index:\($0)" }
+                + missingTriggers.map { "trigger:\($0)" }).joined(separator: ", ")
             checks.append(.init(
                 identifier: "hostwright.schema-objects",
                 status: .failed,
                 message: "Missing required schema object(s): \(missing).",
-                affectedRows: missingTables.count + missingIndexes.count
+                affectedRows: missingTables.count + missingIndexes.count + missingTriggers.count
             ))
         }
 
-        if missingTables.isEmpty, missingIndexes.isEmpty {
+        if missingTables.isEmpty, missingIndexes.isEmpty, missingTriggers.isEmpty {
             let sqlAuthoritativeProblems = try count(
                 connection,
                 sql: """
@@ -729,6 +736,65 @@ public struct StateIntegrityService: Sendable {
                         OR length(canonical_json) > 1048576)
                 """
             )
+            let invalidPolicyProfileStructure = try count(
+                connection,
+                sql: """
+                SELECT
+                    (SELECT CASE
+                        WHEN (SELECT COUNT(*) FROM peer_identities) = 0 THEN
+                            CASE WHEN (SELECT COUNT(*) FROM rbac_bindings WHERE role_id = 'owner' AND scope_kind = 'global') = 0 THEN 0 ELSE 1 END
+                        WHEN (SELECT COUNT(*) FROM rbac_bindings WHERE role_id = 'owner' AND scope_kind = 'global') >= 1 THEN 0
+                        ELSE 1
+                    END)
+                  + (SELECT CASE
+                        WHEN COUNT(*) = 5
+                         AND SUM(CASE WHEN role_id IN ('viewer','operator','maintainer','security-admin','owner') THEN 1 ELSE 0 END) = 5
+                        THEN 0 ELSE 1 END
+                     FROM rbac_roles WHERE built_in = 1)
+                  + (SELECT COUNT(*) FROM rbac_roles
+                     WHERE role_id = '' OR built_in NOT IN (0, 1) OR generation < 1
+                        OR json_type(CASE WHEN json_valid(rules_json) THEN rules_json ELSE 'null' END) != 'array'
+                        OR length(rules_json) > 262144
+                        OR julianday(created_at) IS NULL OR julianday(updated_at) IS NULL
+                        OR julianday(updated_at) < julianday(created_at))
+                  + (SELECT COUNT(*) FROM rbac_bindings
+                     WHERE binding_id = '' OR subject_id = '' OR role_id = '' OR generation < 1
+                        OR scope_kind NOT IN ('global','project','resource')
+                        OR (scope_kind = 'global' AND scope_identifier IS NOT NULL)
+                        OR (scope_kind != 'global' AND (scope_identifier IS NULL OR scope_identifier = ''))
+                        OR julianday(created_at) IS NULL OR julianday(updated_at) IS NULL
+                        OR julianday(updated_at) < julianday(created_at))
+                  + (SELECT COUNT(*) FROM rbac_delegations
+                     WHERE delegation_id = '' OR delegator_subject_id = '' OR delegate_subject_id = ''
+                        OR delegator_subject_id = delegate_subject_id OR generation < 1
+                        OR json_type(CASE WHEN json_valid(role_ids_json) THEN role_ids_json ELSE 'null' END) != 'array'
+                        OR json_type(CASE WHEN json_valid(delegated_rules_json) THEN delegated_rules_json ELSE 'null' END) != 'array'
+                        OR (json_array_length(role_ids_json) = 0 AND json_array_length(delegated_rules_json) = 0)
+                        OR EXISTS (SELECT 1 FROM json_each(rbac_delegations.role_ids_json) WHERE value = 'owner')
+                        OR julianday(expires_at) <= julianday(created_at)
+                        OR (revoked_at IS NOT NULL AND julianday(revoked_at) < julianday(created_at)))
+                  + (SELECT COUNT(*) FROM admission_policies
+                     WHERE policy_id = '' OR version < 1 OR generation < 1
+                        OR source_kind NOT IN ('built-in','extension')
+                        OR stage NOT IN ('builtInMutation','extensionMutation','builtInValidation','extensionValidation')
+                        OR failure_policy NOT IN ('deny','ignore') OR advisory NOT IN (0, 1)
+                        OR mutating NOT IN (0, 1) OR enabled NOT IN (0, 1)
+                        OR (failure_policy = 'ignore' AND NOT (source_kind = 'extension' AND stage = 'extensionValidation' AND advisory = 1 AND mutating = 0))
+                        OR json_type(CASE WHEN json_valid(document_json) THEN document_json ELSE 'null' END) != 'object'
+                        OR length(document_sha256) != 64 OR document_sha256 GLOB '*[^0-9a-f]*')
+                  + (SELECT COUNT(*) FROM admission_exceptions
+                     WHERE exception_id = '' OR policy_id = '' OR subject_id = '' OR target = ''
+                        OR length(plan_hash) != 64 OR plan_hash GLOB '*[^0-9a-f]*'
+                        OR approval_identity = '' OR generation < 1
+                        OR julianday(expires_at) <= julianday(created_at))
+                  + (SELECT COUNT(*) FROM workload_profiles
+                     WHERE profile_id = '' OR version != 1 OR generation < 1
+                        OR parent_profile_id = profile_id
+                        OR json_type(CASE WHEN json_valid(profile_json) THEN profile_json ELSE 'null' END) != 'object'
+                        OR length(profile_sha256) != 64 OR profile_sha256 GLOB '*[^0-9a-f]*')
+                """
+            )
+            let invalidFrozenRBACDefaults = try frozenRBACDefaultProblems(connection)
             let authoritativeProblems = sqlAuthoritativeProblems +
                 invalidIdentityProblems + invalidReferrerContent +
                 invalidImageTrustContent + invalidImageSBOMContent +
@@ -737,6 +803,7 @@ public struct StateIntegrityService: Sendable {
                 invalidStorageContent + invalidNetworkContent
                 + invalidProjectDNSContent + invalidCertificateContent
                 + invalidServiceTunnelContent + invalidAuditStructure
+                + invalidPolicyProfileStructure + invalidFrozenRBACDefaults
             if authoritativeProblems == 0 {
                 checks.append(.init(identifier: "hostwright.authoritative-records", status: .passed, message: "Authoritative state records satisfy the v\(MigrationRunner.latestSchemaVersion) logical contract."))
             } else {
@@ -1852,6 +1919,28 @@ public struct StateIntegrityService: Sendable {
         return fractional.date(from: value) ?? whole.date(from: value)
     }
 
+    private func frozenRBACDefaultProblems(_ connection: SQLiteConnection) throws -> Int {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        let expected = try Dictionary(
+            uniqueKeysWithValues: RBACRepository.defaultRoles(
+                timestamp: "2001-01-01T00:00:00Z"
+            ).map { role in
+                (role.roleID, String(decoding: try encoder.encode(role.rules), as: UTF8.self))
+            }
+        )
+        let stored = try connection.query(
+            "SELECT role_id, rules_json FROM rbac_roles WHERE built_in = 1 ORDER BY role_id"
+        )
+        guard stored.count == expected.count else { return 1 }
+        for row in stored {
+            guard row.count == 2, let roleID = row[0], let rules = row[1],
+                expected[roleID] == rules
+            else { return 1 }
+        }
+        return 0
+    }
+
     private func sha256(_ data: Data) -> String {
         SHA256.hash(data: data).map {
             String(format: "%02x", $0)
@@ -1914,7 +2003,13 @@ public struct StateIntegrityService: Sendable {
         "audit_key_metadata",
         "audit_segments",
         "audit_records",
-        "audit_retention_anchors"
+        "audit_retention_anchors",
+        "rbac_roles",
+        "rbac_bindings",
+        "rbac_delegations",
+        "admission_policies",
+        "admission_exceptions",
+        "workload_profiles"
     ]
 
     private static let requiredIndexes = [
@@ -1946,6 +2041,16 @@ public struct StateIntegrityService: Sendable {
         "audit_records_request_idx",
         "audit_records_deduplication_idx",
         "audit_retention_key_idx",
+        "rbac_roles_builtin_idx",
+        "rbac_bindings_subject_idx",
+        "rbac_bindings_role_idx",
+        "rbac_bindings_identity_idx",
+        "rbac_delegations_delegate_idx",
+        "rbac_delegations_delegator_idx",
+        "admission_policies_active_idx",
+        "admission_exceptions_lookup_idx",
+        "workload_profiles_parent_idx",
+        "workload_profiles_digest_idx",
         "restart_recovery_operation_idx",
         "restart_recovery_project_idx",
         "operation_groups_operation_idx",
@@ -2035,5 +2140,14 @@ public struct StateIntegrityService: Sendable {
         "service_tunnel_active_peer_idx",
         "service_tunnel_operation_idx",
         "service_tunnel_recovery_idx"
+    ]
+
+    private static let requiredTriggers = [
+        "rbac_builtin_role_update",
+        "rbac_builtin_role_delete",
+        "rbac_last_owner_delete",
+        "rbac_delegation_owner_insert",
+        "rbac_delegation_owner_update",
+        "rbac_owner_binding_update"
     ]
 }

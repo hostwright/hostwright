@@ -9,6 +9,48 @@ import XCTest
 @testable import HostwrightControlTransport
 
 final class PersistentControlAuditIntegrationTests: XCTestCase {
+  func testDeniedMutationIsAuditedBeforeDurabilityAndNeverInvokesHandler() throws {
+    let root = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let store = SQLiteStateStore(path: root.appendingPathComponent("state.sqlite").path)
+    try store.migrate()
+    let repository = ControlRequestRepository(store: store, now: fixedNow)
+    let recorder = RecordingAuditRecorder()
+    let invocations = InvocationCounter()
+    let server = try makeServer(
+      store: store, repository: repository, recorder: recorder,
+      mutatingOperations: ["service.start"],
+      authorizer: { _, _, _ in
+        RBACDecision(
+          effect: .deny, ruleIdentifiers: ["deny.service.start"],
+          reasonCode: "authorization.explicit-deny")
+      },
+      handler: { _, request, _ in
+        invocations.increment()
+        return ControlResponseEnvelope(
+          requestID: request.requestID, status: .completed, reasonCode: .completed)
+      })
+    let session = try start(server: server)
+    defer { session.closeClientAndWait() }
+
+    try completeAuthentication(descriptor: session.client)
+    let request = ControlRequestEnvelope(
+      requestID: "authorization-denied-one", operation: "service.start",
+      timeoutMilliseconds: 1_000, idempotencyKey: "authorization-denied-key")
+    try write(request, descriptor: session.client)
+    let response = try readResponse(descriptor: session.client)
+
+    XCTAssertEqual(response.status, .rejected)
+    XCTAssertEqual(response.reasonCode, .unauthorized)
+    XCTAssertEqual(response.error?.code, "authorizationDenied")
+    XCTAssertEqual(invocations.value, 0)
+    XCTAssertNil(try repository.load(request.requestID))
+    XCTAssertEqual(recorder.events.count, 1)
+    XCTAssertEqual(recorder.events[0].action, .authorization)
+    XCTAssertEqual(recorder.events[0].outcome, "deny")
+    XCTAssertEqual(recorder.events[0].reasonCode, "authorization.explicit-deny")
+  }
+
   func testMutationPersistsAcceptedAuditBeforeHandlerAndTerminalAuditBeforeResponse() throws {
     let root = try temporaryDirectory()
     defer { try? FileManager.default.removeItem(at: root) }
@@ -31,6 +73,11 @@ final class PersistentControlAuditIntegrationTests: XCTestCase {
       operationRef: "operation-terminal-one"
     )
     let expectedTerminalPayload = sha256(try ControlPlaneCanonicalJSON.encode(expectedResponse))
+    let authorizationKey = try authorizationDeduplicationKey(
+      requestID: request.requestID,
+      decision: RBACDecision(
+        effect: .allow, ruleIdentifiers: ["test.allow"],
+        reasonCode: "authorization.allowed"))
     let server = try makeServer(
       store: store,
       repository: repository,
@@ -40,6 +87,7 @@ final class PersistentControlAuditIntegrationTests: XCTestCase {
         invocation.increment()
         XCTAssertEqual(try repository.load(received.requestID)?.status, .accepted)
         XCTAssertEqual(recorder.events.map(\.deduplicationKey), [
+          authorizationKey,
           "control:audit-terminal-one:accepted",
         ])
         return expectedResponse
@@ -56,17 +104,21 @@ final class PersistentControlAuditIntegrationTests: XCTestCase {
     XCTAssertEqual(invocation.value, 1)
     XCTAssertEqual(try repository.load(request.requestID)?.status, .completed)
     let events = recorder.events
-    XCTAssertEqual(events.count, 2)
-    XCTAssertEqual(events[0].deduplicationKey, "control:audit-terminal-one:accepted")
-    XCTAssertEqual(events[0].action, .request)
-    XCTAssertEqual(events[0].outcome, "accepted")
-    XCTAssertEqual(events[0].reasonCode, "accepted")
-    XCTAssertEqual(events[0].payloadDigest, expectedAcceptedPayload)
-    XCTAssertEqual(events[1].deduplicationKey, "control:audit-terminal-one:terminal")
-    XCTAssertEqual(events[1].action, .operation)
-    XCTAssertEqual(events[1].outcome, "completed")
-    XCTAssertEqual(events[1].reasonCode, "completed")
-    XCTAssertEqual(events[1].payloadDigest, expectedTerminalPayload)
+    XCTAssertEqual(events.count, 3)
+    XCTAssertEqual(events[0].deduplicationKey, authorizationKey)
+    XCTAssertEqual(events[0].action, .authorization)
+    XCTAssertEqual(events[0].outcome, "allow")
+    XCTAssertEqual(events[0].reasonCode, "authorization.allowed")
+    XCTAssertEqual(events[1].deduplicationKey, "control:audit-terminal-one:accepted")
+    XCTAssertEqual(events[1].action, .request)
+    XCTAssertEqual(events[1].outcome, "accepted")
+    XCTAssertEqual(events[1].reasonCode, "accepted")
+    XCTAssertEqual(events[1].payloadDigest, expectedAcceptedPayload)
+    XCTAssertEqual(events[2].deduplicationKey, "control:audit-terminal-one:terminal")
+    XCTAssertEqual(events[2].action, .operation)
+    XCTAssertEqual(events[2].outcome, "completed")
+    XCTAssertEqual(events[2].reasonCode, "completed")
+    XCTAssertEqual(events[2].payloadDigest, expectedTerminalPayload)
   }
 
   func testAuditFailureFailsClosedForMutationWhileReadOnlyOperationRemainsCallable() throws {
@@ -114,7 +166,7 @@ final class PersistentControlAuditIntegrationTests: XCTestCase {
 
     XCTAssertEqual(session.result.error as? PersistentControlServerError, .persistenceFailed)
     XCTAssertEqual(mutationInvocations.value, 0)
-    XCTAssertEqual(try repository.load(mutation.requestID)?.status, .accepted)
+    XCTAssertNil(try repository.load(mutation.requestID))
     XCTAssertTrue(recorder.events.isEmpty)
   }
 
@@ -166,11 +218,57 @@ final class PersistentControlAuditIntegrationTests: XCTestCase {
       try repository.load(request.requestID)?.operationReference,
       "operation-accepted-one"
     )
+    let authorizationKey = try authorizationDeduplicationKey(
+      requestID: request.requestID,
+      decision: RBACDecision(
+        effect: .allow, ruleIdentifiers: ["test.allow"],
+        reasonCode: "authorization.allowed"))
     XCTAssertEqual(recorder.events.map(\.deduplicationKey), [
+      authorizationKey,
       "control:audit-replay-one:accepted",
       "control:audit-replay-one:operation-accepted",
     ])
-    XCTAssertEqual(recorder.recordAttemptCount, 4)
+    XCTAssertEqual(recorder.recordAttemptCount, 6)
+  }
+
+  func testChangedAuthorizationDecisionUsesDistinctAuditIdentityAndDeniesReplay() throws {
+    let root = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let store = SQLiteStateStore(path: root.appendingPathComponent("state.sqlite").path)
+    try store.migrate()
+    let repository = ControlRequestRepository(store: store, now: fixedNow)
+    let recorder = RecordingAuditRecorder()
+    let invocations = InvocationCounter()
+    let authorization = MutableAuthorizationDecision()
+    let server = try makeServer(
+      store: store, repository: repository, recorder: recorder,
+      mutatingOperations: ["service.start"],
+      authorizer: { _, _, _ in authorization.decision },
+      handler: { _, request, _ in
+        invocations.increment()
+        return ControlResponseEnvelope(
+          requestID: request.requestID, status: .completed, reasonCode: .completed)
+      })
+    let session = try start(server: server)
+    defer { session.closeClientAndWait() }
+
+    try completeAuthentication(descriptor: session.client)
+    let request = ControlRequestEnvelope(
+      requestID: "authorization-change-one", operation: "service.start",
+      timeoutMilliseconds: 1_000, idempotencyKey: "authorization-change-key")
+    try write(request, descriptor: session.client)
+    XCTAssertEqual(try readResponse(descriptor: session.client).status, .completed)
+    authorization.deny()
+    try write(request, descriptor: session.client)
+    let denied = try readResponse(descriptor: session.client)
+
+    XCTAssertEqual(denied.status, .rejected)
+    XCTAssertEqual(denied.reasonCode, .unauthorized)
+    XCTAssertEqual(invocations.value, 1)
+    let authorizationEvents = recorder.events.filter { $0.action == .authorization }
+    XCTAssertEqual(authorizationEvents.count, 2)
+    XCTAssertEqual(Set(authorizationEvents.map(\.deduplicationKey)).count, 2)
+    XCTAssertEqual(authorizationEvents.map(\.outcome), ["allow", "deny"])
   }
 
   private func makeServer(
@@ -178,6 +276,8 @@ final class PersistentControlAuditIntegrationTests: XCTestCase {
     repository: ControlRequestRepository,
     recorder: any ControlSecurityAuditRecording,
     mutatingOperations: Set<String>,
+    authorizer: @escaping PersistentControlConnectionServer.Authorizer =
+      allowingTestControlRequestAuthorizer,
     handler: @escaping PersistentControlConnectionServer.Handler
   ) throws -> PersistentControlConnectionServer {
     let identity = fixtureIdentity()
@@ -216,6 +316,7 @@ final class PersistentControlAuditIntegrationTests: XCTestCase {
       socketIdentity: ControlSocketIdentity(device: 41, inode: 43),
       mutatingOperations: mutatingOperations,
       auditRecorder: recorder,
+      authorizer: authorizer,
       now: fixedNow,
       handler: handler
     )
@@ -305,6 +406,36 @@ private let fixedNow: @Sendable () -> Date = { Date(timeIntervalSince1970: 1_785
 
 private func sha256(_ data: Data) -> String {
   "sha256:" + SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+}
+
+private func authorizationDeduplicationKey(
+  requestID: String,
+  decision: RBACDecision
+) throws -> String {
+  let digest = SHA256.hash(data: try ControlPlaneCanonicalJSON.encode(decision))
+    .map { String(format: "%02x", $0) }.joined()
+  return "control:\(requestID):authorization-\(digest)"
+}
+
+private final class MutableAuthorizationDecision: @unchecked Sendable {
+  private let lock = NSLock()
+  private var current = RBACDecision(
+    effect: .allow, ruleIdentifiers: ["mutable.allow"],
+    reasonCode: "authorization.allowed")
+
+  var decision: RBACDecision {
+    lock.lock()
+    defer { lock.unlock() }
+    return current
+  }
+
+  func deny() {
+    lock.lock()
+    current = RBACDecision(
+      effect: .deny, ruleIdentifiers: ["mutable.deny"],
+      reasonCode: "authorization.explicit-deny")
+    lock.unlock()
+  }
 }
 
 private final class RecordingAuditRecorder: ControlSecurityAuditRecording, @unchecked Sendable {

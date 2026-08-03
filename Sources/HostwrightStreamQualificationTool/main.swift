@@ -347,11 +347,29 @@ private enum HostwrightStreamQualificationMain {
       stage = "event-append"
       try store.events.append([event("gate08-live-event-after-restart", projectID: projectID)])
       stage = "event-resume"
-      let resumed = try nextData(session, streamID: streamID, timeoutMilliseconds: 10_000)
-      guard case .object(let fields)? = resumed.payload,
-        case .string(let identifier)? = fields["id"],
-        identifier == "gate08-live-event-after-restart"
-      else { throw failure(69) }
+      let deadline = Date().addingTimeInterval(20)
+      var resumedIDs = Set<String>()
+      var markerObserved = false
+      while !markerObserved, resumedIDs.count < 256, Date() < deadline {
+        let remaining = max(1, Int(deadline.timeIntervalSinceNow * 1_000))
+        let resumed = try nextData(
+          session,
+          streamID: streamID,
+          timeoutMilliseconds: remaining
+        )
+        guard case .object(let fields)? = resumed.payload,
+          case .string(let identifier)? = fields["id"],
+          identifier != "gate08-live-event-1",
+          identifier != "gate08-live-event-2",
+          resumedIDs.insert(identifier).inserted,
+          let resumedCursor = resumed.cursor
+        else { throw failure(69) }
+        markerObserved = identifier == "gate08-live-event-after-restart"
+        if !markerObserved {
+          try session.acknowledge(streamID: streamID, credit: 1, cursor: resumedCursor)
+        }
+      }
+      guard markerObserved else { throw failure(69) }
       stage = "stream-terminal"
       try session.cancel(streamID: streamID)
       try requireTerminal(session, streamID: streamID)

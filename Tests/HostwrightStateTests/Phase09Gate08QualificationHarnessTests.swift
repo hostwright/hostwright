@@ -24,6 +24,13 @@ final class Phase09Gate08QualificationHarnessTests: XCTestCase {
     XCTAssertTrue(source.contains("PersistentControlStreamIntegrationTests|DaemonControlStreamSourcesTests"))
     XCTAssertTrue(source.contains("ControlIdentitySecurityAdapterTests"))
     XCTAssertTrue(source.contains("daemon-2.stderr.log"))
+    let qualificationTool = try String(
+      contentsOfFile: "Sources/HostwrightStreamQualificationTool/main.swift",
+      encoding: .utf8
+    )
+    XCTAssertTrue(qualificationTool.contains("resumedIDs.count < 256"))
+    XCTAssertTrue(qualificationTool.contains("identifier != \"gate08-live-event-1\""))
+    XCTAssertTrue(qualificationTool.contains("identifier != \"gate08-live-event-2\""))
     XCTAssertTrue(source.contains("hostwright-stream-qualification"))
     XCTAssertTrue(source.contains("EventStreamTests|StateUpgradeTests|ControlStreamCursorTests"))
     XCTAssertTrue(source.contains("testInactiveSessionClosesTheActiveStreamConnection"))

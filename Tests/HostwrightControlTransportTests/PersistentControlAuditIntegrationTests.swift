@@ -79,13 +79,6 @@ final class PersistentControlAuditIntegrationTests: XCTestCase {
           originalRequest: request, effectiveRequest: request,
           admissionEvaluationDigestSHA256: String(repeating: "b", count: 64),
           admissionPlanHash: String(repeating: "a", count: 64), exceptionIDs: [])))
-    let expectedResponse = ControlResponseEnvelope(
-      requestID: request.requestID,
-      status: .completed,
-      reasonCode: .completed,
-      operationRef: "operation-terminal-one"
-    )
-    let expectedTerminalPayload = sha256(try ControlPlaneCanonicalJSON.encode(expectedResponse))
     let authorizationKey = try authorizationDeduplicationKey(
       requestID: request.requestID,
       decision: RBACDecision(
@@ -106,7 +99,11 @@ final class PersistentControlAuditIntegrationTests: XCTestCase {
             + authorizationKey.split(separator: "-").last!,
           "control:audit-terminal-one:accepted",
         ])
-        return expectedResponse
+        return ControlResponseEnvelope(
+          requestID: request.requestID,
+          status: .completed,
+          reasonCode: .completed
+        )
       }
     )
     let session = try start(server: server)
@@ -116,7 +113,10 @@ final class PersistentControlAuditIntegrationTests: XCTestCase {
     try write(request, descriptor: session.client)
     let response = try readResponse(descriptor: session.client)
 
-    XCTAssertEqual(response, expectedResponse)
+    XCTAssertEqual(response.status, .completed)
+    XCTAssertEqual(response.reasonCode, .completed)
+    XCTAssertTrue(response.operationRef?.hasPrefix("unary:") == true)
+    let expectedTerminalPayload = sha256(try ControlPlaneCanonicalJSON.encode(response))
     XCTAssertEqual(invocation.value, 1)
     XCTAssertEqual(try repository.load(request.requestID)?.status, .completed)
     let events = recorder.events
@@ -217,8 +217,7 @@ final class PersistentControlAuditIntegrationTests: XCTestCase {
         return ControlResponseEnvelope(
           requestID: received.requestID,
           status: .accepted,
-          reasonCode: .accepted,
-          operationRef: "operation-accepted-one"
+          reasonCode: .accepted
         )
       }
     )
@@ -229,17 +228,16 @@ final class PersistentControlAuditIntegrationTests: XCTestCase {
     try write(request, descriptor: session.client)
     let first = try readResponse(descriptor: session.client)
     XCTAssertEqual(first.status, .accepted)
-    XCTAssertEqual(first.operationRef, "operation-accepted-one")
+    XCTAssertTrue(first.operationRef?.hasPrefix("unary:") == true)
     try write(request, descriptor: session.client)
     let replay = try readResponse(descriptor: session.client)
-    XCTAssertEqual(replay.status, .accepted)
-    XCTAssertEqual(replay.operationRef, "operation-accepted-one")
+    XCTAssertEqual(replay, first)
 
     XCTAssertEqual(invocations.value, 1)
     XCTAssertEqual(try repository.load(request.requestID)?.status, .accepted)
     XCTAssertEqual(
       try repository.load(request.requestID)?.operationReference,
-      "operation-accepted-one"
+      first.operationRef
     )
     let authorizationKey = try authorizationDeduplicationKey(
       requestID: request.requestID,

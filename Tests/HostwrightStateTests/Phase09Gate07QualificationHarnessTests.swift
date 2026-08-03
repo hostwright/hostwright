@@ -93,6 +93,7 @@ final class Phase09Gate07QualificationHarnessTests: XCTestCase {
     XCTAssertTrue(source.contains("security cms -S"))
     XCTAssertTrue(source.contains("Gate 7 evidence is valid and reused; no cells were rerun."))
     XCTAssertTrue(source.contains("completed evidence is incomplete or changed; preserve this root and do not rerun."))
+    XCTAssertTrue(source.contains("root_lock_created=0; gate_lock_created=0"))
     XCTAssertTrue(source.contains("A6CFABEC0AA50ABE00A745BAFA83BC24783AA5DB"))
     XCTAssertTrue(source.contains("record_root"))
     XCTAssertTrue(source.contains("inventory"))

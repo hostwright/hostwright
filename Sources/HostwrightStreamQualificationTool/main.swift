@@ -417,8 +417,6 @@ private enum HostwrightStreamQualificationMain {
         daemonRestartCursorAccepted: true,
         integrityHealth: integrity.health.rawValue
       )
-      stage = "keychain-cleanup"
-      try removeOwnedKeychainItems(statePath: statePath)
       stage = "result"
       try emit(result)
     } catch {

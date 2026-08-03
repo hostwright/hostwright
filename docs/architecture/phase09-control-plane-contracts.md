@@ -142,6 +142,24 @@ bound to policy, subject, target, plan hash, approval identity, and expiry.
 The frozen request/decision example is
 [`phase09-admission-v2.1.json`](../../contracts/v0.0.2/phase09-admission-v2.1.json).
 
+Gate 6 implements this order in the persistent daemon request pipeline. Stored
+policy documents use a bounded declarative schema with exact operation names,
+AND-only `exists`/`equals` conditions, object-field mutations, and
+`required`/`forbidden`/`equals` validation. There is no embedded expression
+language. Policy documents and decisions are canonical-digest bound; malformed
+documents fail closed except for the frozen advisory, non-mutating extension
+case. Mutation policies cannot rewrite `planHash`, `approvalIdentity`, or
+`dryRun`. The daemon audits admission, reauthorizes the effective request, and
+binds both original and effective requests plus the evaluation digest into
+idempotency state before invoking a mutation handler. A dry run returns the
+effective request, decisions, target, plan hash, exception IDs, and evaluation
+digest without persistence or effects.
+
+Policy and exception administration is available only through strict
+`admission.*` Control API operations and the `policy` RBAC resource. Exceptions
+require `approve`, identify the approving actor exactly, have a future expiry,
+and match one immutable policy ID, subject, derived target, and plan hash.
+
 ## Audit, profiles, and persistence
 
 Audit records are canonical append-only SHA-256 chains, grouped into P-256

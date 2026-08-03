@@ -83,6 +83,9 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
     let rbacAuthorizer = RBACAuthorizationEngine(repository: store.rbac)
     let rbacAdministration = RBACAdministrationService(
       repository: store.rbac, authorizer: rbacAuthorizer)
+    let admissionEngine = AdmissionPolicyEngine(repository: store.admission)
+    let admissionAdministration = AdmissionAdministrationService(
+      repository: store.admission, authorizer: rbacAuthorizer)
     let server = try PersistentControlConnectionServer(
       authenticator: authenticator,
       requestRepository: ControlRequestRepository(store: store),
@@ -95,16 +98,33 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
         "rbac.role.create", "rbac.role.update", "rbac.role.delete",
         "rbac.binding.create", "rbac.binding.delete",
         "rbac.delegation.create", "rbac.delegation.revoke",
+        "admission.policy.create", "admission.policy.set-enabled",
+        "admission.policy.delete", "admission.exception.create",
+        "admission.exception.delete",
       ],
       auditRecorder: auditTrail,
       authorizer: { peer, request, at in
         try rbacAuthorizer.authorize(subject: peer.binding.subject, request: request, at: at)
       },
+      admissionEvaluator: { peer, request, at in
+        let evaluated = try admissionEngine.evaluate(
+          subjectID: peer.binding.subject.identifier, request: request, at: at)
+        return try PersistentControlAdmissionEvaluation(
+          effectiveRequest: evaluated.effectiveRequest, decisions: evaluated.decisions,
+          target: evaluated.target, planHash: evaluated.planHash,
+          approvalIdentity: evaluated.approvalIdentity,
+          exceptionIDs: evaluated.exceptionIDs, allowed: evaluated.allowed,
+          reasonCode: evaluated.reasonCode,
+          evaluationDigestSHA256: evaluated.evaluationDigestSHA256,
+          dryRun: evaluated.dryRun)
+      },
       handler: { peer, request, _ in
         try Self.handle(
           peer: peer, request: request, localAPI: localAPI, auditTrail: auditTrail,
           rbacRepository: store.rbac, rbacAdministration: rbacAdministration,
-          rbacAuthorizer: rbacAuthorizer)
+          rbacAuthorizer: rbacAuthorizer, admissionRepository: store.admission,
+          admissionAdministration: admissionAdministration,
+          admissionEngine: admissionEngine)
       }
     )
     lock.lock()
@@ -190,8 +210,17 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
     auditTrail: TamperEvidentAuditTrail,
     rbacRepository: RBACRepository,
     rbacAdministration: RBACAdministrationService,
-    rbacAuthorizer: RBACAuthorizationEngine
+    rbacAuthorizer: RBACAuthorizationEngine,
+    admissionRepository: AdmissionRepository,
+    admissionAdministration: AdmissionAdministrationService,
+    admissionEngine: AdmissionPolicyEngine
   ) throws -> ControlResponseEnvelope {
+    if let response = AdmissionControlOperations.handle(
+      peer: peer, request: request, repository: admissionRepository,
+      administration: admissionAdministration, engine: admissionEngine, now: Date())
+    {
+      return response
+    }
     if let response = RBACControlOperations.handle(
       peer: peer, request: request, repository: rbacRepository,
       administration: rbacAdministration, authorizer: rbacAuthorizer, now: Date())

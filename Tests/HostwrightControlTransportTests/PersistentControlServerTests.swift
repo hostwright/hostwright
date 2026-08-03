@@ -115,6 +115,7 @@ final class PersistentControlServerTests: XCTestCase {
       mutatingOperations: ["service.start"],
       auditRecorder: TestControlAuditRecorder(),
       authorizer: allowingTestControlRequestAuthorizer,
+      admissionEvaluator: allowingTestControlAdmissionEvaluator,
       now: { Date(timeIntervalSince1970: 1_785_715_200) },
       handler: { _, request, _ in
         invocations.increment()
@@ -226,6 +227,7 @@ final class PersistentControlServerTests: XCTestCase {
       mutatingOperations: ["service.start"],
       auditRecorder: TestControlAuditRecorder(),
       authorizer: allowingTestControlRequestAuthorizer,
+      admissionEvaluator: allowingTestControlAdmissionEvaluator,
       now: { Date(timeIntervalSince1970: 1_785_715_200) },
       handler: { _, request, _ in
         invocations.increment()
@@ -333,6 +335,7 @@ final class PersistentControlServerTests: XCTestCase {
       mutatingOperations: [],
       auditRecorder: TestControlAuditRecorder(),
       authorizer: allowingTestControlRequestAuthorizer,
+      admissionEvaluator: allowingTestControlAdmissionEvaluator,
       handler: { _, request, _ in
         invocations.increment()
         return ControlResponseEnvelope(
@@ -433,6 +436,7 @@ final class PersistentControlServerTests: XCTestCase {
       mutatingOperations: [],
       auditRecorder: TestControlAuditRecorder(),
       authorizer: allowingTestControlRequestAuthorizer,
+      admissionEvaluator: allowingTestControlAdmissionEvaluator,
       monotonicNow: { clock.next() },
       handler: { _, request, _ in
         invocations.increment()
@@ -541,6 +545,7 @@ final class PersistentControlServerTests: XCTestCase {
       mutatingOperations: ["service.start"],
       auditRecorder: TestControlAuditRecorder(),
       authorizer: allowingTestControlRequestAuthorizer,
+      admissionEvaluator: allowingTestControlAdmissionEvaluator,
       handler: { _, request, _ in
         ControlResponseEnvelope(
           requestID: request.requestID, status: .completed, reasonCode: .completed)

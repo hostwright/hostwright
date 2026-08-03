@@ -8,6 +8,14 @@ import XCTest
 
 @testable import HostwrightControlTransport
 
+private struct TestPersistedMutationBinding: Codable {
+  let originalRequest: ControlRequestEnvelope
+  let effectiveRequest: ControlRequestEnvelope
+  let admissionEvaluationDigestSHA256: String
+  let admissionPlanHash: String
+  let exceptionIDs: [String]
+}
+
 final class PersistentControlAuditIntegrationTests: XCTestCase {
   func testDeniedMutationIsAuditedBeforeDurabilityAndNeverInvokesHandler() throws {
     let root = try temporaryDirectory()
@@ -65,7 +73,12 @@ final class PersistentControlAuditIntegrationTests: XCTestCase {
       timeoutMilliseconds: 1_000,
       idempotencyKey: "audit-terminal-idempotency"
     )
-    let expectedAcceptedPayload = sha256(try ControlPlaneCanonicalJSON.encode(request))
+    let expectedAcceptedPayload = sha256(
+      try ControlPlaneCanonicalJSON.encode(
+        TestPersistedMutationBinding(
+          originalRequest: request, effectiveRequest: request,
+          admissionEvaluationDigestSHA256: String(repeating: "b", count: 64),
+          admissionPlanHash: String(repeating: "a", count: 64), exceptionIDs: [])))
     let expectedResponse = ControlResponseEnvelope(
       requestID: request.requestID,
       status: .completed,
@@ -88,6 +101,9 @@ final class PersistentControlAuditIntegrationTests: XCTestCase {
         XCTAssertEqual(try repository.load(received.requestID)?.status, .accepted)
         XCTAssertEqual(recorder.events.map(\.deduplicationKey), [
           authorizationKey,
+          "control:audit-terminal-one:admission-" + String(repeating: "b", count: 64),
+          "control:audit-terminal-one:effective-authorization-"
+            + authorizationKey.split(separator: "-").last!,
           "control:audit-terminal-one:accepted",
         ])
         return expectedResponse
@@ -104,21 +120,26 @@ final class PersistentControlAuditIntegrationTests: XCTestCase {
     XCTAssertEqual(invocation.value, 1)
     XCTAssertEqual(try repository.load(request.requestID)?.status, .completed)
     let events = recorder.events
-    XCTAssertEqual(events.count, 3)
+    XCTAssertEqual(events.count, 5)
     XCTAssertEqual(events[0].deduplicationKey, authorizationKey)
     XCTAssertEqual(events[0].action, .authorization)
     XCTAssertEqual(events[0].outcome, "allow")
     XCTAssertEqual(events[0].reasonCode, "authorization.allowed")
-    XCTAssertEqual(events[1].deduplicationKey, "control:audit-terminal-one:accepted")
-    XCTAssertEqual(events[1].action, .request)
-    XCTAssertEqual(events[1].outcome, "accepted")
-    XCTAssertEqual(events[1].reasonCode, "accepted")
-    XCTAssertEqual(events[1].payloadDigest, expectedAcceptedPayload)
-    XCTAssertEqual(events[2].deduplicationKey, "control:audit-terminal-one:terminal")
-    XCTAssertEqual(events[2].action, .operation)
-    XCTAssertEqual(events[2].outcome, "completed")
-    XCTAssertEqual(events[2].reasonCode, "completed")
-    XCTAssertEqual(events[2].payloadDigest, expectedTerminalPayload)
+    XCTAssertEqual(events[1].action, .admission)
+    XCTAssertEqual(events[1].outcome, "allowed")
+    XCTAssertEqual(events[1].planRef, "sha256:" + String(repeating: "a", count: 64))
+    XCTAssertEqual(events[2].action, .authorization)
+    XCTAssertEqual(events[2].outcome, "allow")
+    XCTAssertEqual(events[3].deduplicationKey, "control:audit-terminal-one:accepted")
+    XCTAssertEqual(events[3].action, .request)
+    XCTAssertEqual(events[3].outcome, "accepted")
+    XCTAssertEqual(events[3].reasonCode, "accepted")
+    XCTAssertEqual(events[3].payloadDigest, expectedAcceptedPayload)
+    XCTAssertEqual(events[4].deduplicationKey, "control:audit-terminal-one:terminal")
+    XCTAssertEqual(events[4].action, .operation)
+    XCTAssertEqual(events[4].outcome, "completed")
+    XCTAssertEqual(events[4].reasonCode, "completed")
+    XCTAssertEqual(events[4].payloadDigest, expectedTerminalPayload)
   }
 
   func testAuditFailureFailsClosedForMutationWhileReadOnlyOperationRemainsCallable() throws {
@@ -225,10 +246,13 @@ final class PersistentControlAuditIntegrationTests: XCTestCase {
         reasonCode: "authorization.allowed"))
     XCTAssertEqual(recorder.events.map(\.deduplicationKey), [
       authorizationKey,
+      "control:audit-replay-one:admission-" + String(repeating: "b", count: 64),
+      "control:audit-replay-one:effective-authorization-"
+        + authorizationKey.split(separator: "-").last!,
       "control:audit-replay-one:accepted",
       "control:audit-replay-one:operation-accepted",
     ])
-    XCTAssertEqual(recorder.recordAttemptCount, 6)
+    XCTAssertEqual(recorder.recordAttemptCount, 10)
   }
 
   func testChangedAuthorizationDecisionUsesDistinctAuditIdentityAndDeniesReplay() throws {
@@ -266,9 +290,9 @@ final class PersistentControlAuditIntegrationTests: XCTestCase {
     XCTAssertEqual(denied.reasonCode, .unauthorized)
     XCTAssertEqual(invocations.value, 1)
     let authorizationEvents = recorder.events.filter { $0.action == .authorization }
-    XCTAssertEqual(authorizationEvents.count, 2)
-    XCTAssertEqual(Set(authorizationEvents.map(\.deduplicationKey)).count, 2)
-    XCTAssertEqual(authorizationEvents.map(\.outcome), ["allow", "deny"])
+    XCTAssertEqual(authorizationEvents.count, 3)
+    XCTAssertEqual(Set(authorizationEvents.map(\.deduplicationKey)).count, 3)
+    XCTAssertEqual(authorizationEvents.map(\.outcome), ["allow", "allow", "deny"])
   }
 
   private func makeServer(
@@ -317,6 +341,7 @@ final class PersistentControlAuditIntegrationTests: XCTestCase {
       mutatingOperations: mutatingOperations,
       auditRecorder: recorder,
       authorizer: authorizer,
+      admissionEvaluator: allowingTestControlAdmissionEvaluator,
       now: fixedNow,
       handler: handler
     )

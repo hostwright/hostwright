@@ -136,7 +136,8 @@ final class PersistentControlClientTests: XCTestCase {
       socketIdentity: listener.identity,
       mutatingOperations: [],
       auditRecorder: ClientTestControlAuditRecorder(),
-      authorizer: allowingTestControlRequestAuthorizer
+      authorizer: allowingTestControlRequestAuthorizer,
+      admissionEvaluator: allowingTestControlAdmissionEvaluator
     ) { _, request, _ in
       ControlResponseEnvelope(
         requestID: request.requestID,
@@ -341,7 +342,8 @@ final class PersistentControlClientTests: XCTestCase {
       socketIdentity: listener.identity,
       mutatingOperations: ["service.start"],
       auditRecorder: ClientTestControlAuditRecorder(),
-      authorizer: allowingTestControlRequestAuthorizer
+      authorizer: allowingTestControlRequestAuthorizer,
+      admissionEvaluator: allowingTestControlAdmissionEvaluator
     ) { _, request, _ in
       counter.increment()
       return ControlResponseEnvelope(

@@ -621,6 +621,9 @@ public struct ControlSecurityAuditEvent: Equatable, Sendable {
   public let action: AuditAction
   public let outcome: String
   public let reasonCode: String
+  public let policyRef: String?
+  public let planRef: String?
+  public let approvalRef: String?
   public let operationRef: String?
   public let payloadDigest: String
   public let deduplicationKey: String
@@ -632,6 +635,9 @@ public struct ControlSecurityAuditEvent: Equatable, Sendable {
     action: AuditAction,
     outcome: String,
     reasonCode: String,
+    policyRef: String? = nil,
+    planRef: String? = nil,
+    approvalRef: String? = nil,
     operationRef: String? = nil,
     payloadDigest: String,
     deduplicationKey: String
@@ -642,6 +648,9 @@ public struct ControlSecurityAuditEvent: Equatable, Sendable {
     self.action = action
     self.outcome = outcome
     self.reasonCode = reasonCode
+    self.policyRef = policyRef
+    self.planRef = planRef
+    self.approvalRef = approvalRef
     self.operationRef = operationRef
     self.payloadDigest = payloadDigest
     self.deduplicationKey = deduplicationKey

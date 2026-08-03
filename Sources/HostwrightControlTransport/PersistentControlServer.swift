@@ -18,6 +18,55 @@ public enum PersistentControlServerError: Error, Equatable, Sendable {
   case persistenceFailed
 }
 
+public struct PersistentControlAdmissionEvaluation: Equatable, Sendable {
+  public let effectiveRequest: ControlRequestEnvelope
+  public let decisions: [AdmissionDecision]
+  public let target: String
+  public let planHash: String
+  public let approvalIdentity: String?
+  public let exceptionIDs: [String]
+  public let allowed: Bool
+  public let reasonCode: String
+  public let evaluationDigestSHA256: String
+  public let dryRun: Bool
+
+  public init(
+    effectiveRequest: ControlRequestEnvelope, decisions: [AdmissionDecision], target: String,
+    planHash: String, approvalIdentity: String?, exceptionIDs: [String], allowed: Bool,
+    reasonCode: String, evaluationDigestSHA256: String, dryRun: Bool
+  ) throws {
+    try effectiveRequest.validate()
+    try decisions.forEach { try $0.validate() }
+    guard !target.isEmpty, target.utf8.count <= 512,
+      target.unicodeScalars.allSatisfy({ (32...126).contains(Int($0.value)) }),
+      planHash.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil,
+      evaluationDigestSHA256.range(
+        of: "^[a-f0-9]{64}$", options: .regularExpression) != nil,
+      !reasonCode.isEmpty, reasonCode.utf8.count <= 128,
+      exceptionIDs.count <= 128,
+      exceptionIDs == Array(Set(exceptionIDs)).sorted(),
+      exceptionIDs.allSatisfy({
+        $0.range(of: "^[A-Za-z0-9._:-]{1,128}$", options: .regularExpression) != nil
+      }),
+      approvalIdentity == nil || (
+        !approvalIdentity!.isEmpty && approvalIdentity!.utf8.count <= 128
+          && approvalIdentity!.unicodeScalars.allSatisfy({
+            (32...126).contains(Int($0.value))
+          }))
+    else { throw PersistentControlServerError.invalidRequest }
+    self.effectiveRequest = effectiveRequest
+    self.decisions = decisions
+    self.target = target
+    self.planHash = planHash
+    self.approvalIdentity = approvalIdentity
+    self.exceptionIDs = exceptionIDs
+    self.allowed = allowed
+    self.reasonCode = reasonCode
+    self.evaluationDigestSHA256 = evaluationDigestSHA256
+    self.dryRun = dryRun
+  }
+}
+
 public struct ControlSocketIdentity: Equatable, Sendable {
   public let device: UInt64
   public let inode: UInt64
@@ -244,6 +293,12 @@ public struct PersistentControlConnectionServer: Sendable {
       ControlRequestEnvelope,
       Date
     ) throws -> RBACDecision
+  public typealias AdmissionEvaluator =
+    @Sendable (
+      AuthenticatedControlPeer,
+      ControlRequestEnvelope,
+      Date
+    ) throws -> PersistentControlAdmissionEvaluation
 
   private let authenticator: ControlPeerAuthenticator
   private let requestRepository: ControlRequestRepository
@@ -252,6 +307,7 @@ public struct PersistentControlConnectionServer: Sendable {
   private let mutatingOperations: Set<String>
   private let auditRecorder: any ControlSecurityAuditRecording
   private let authorizer: Authorizer
+  private let admissionEvaluator: AdmissionEvaluator
   private let handler: Handler
   private let now: @Sendable () -> Date
   private let monotonicNow: @Sendable () -> UInt64
@@ -264,6 +320,9 @@ public struct PersistentControlConnectionServer: Sendable {
     mutatingOperations: Set<String>,
     auditRecorder: any ControlSecurityAuditRecording,
     authorizer: @escaping Authorizer,
+    admissionEvaluator: @escaping AdmissionEvaluator = { _, _, _ in
+      throw PersistentControlServerError.persistenceFailed
+    },
     now: @escaping @Sendable () -> Date = Date.init,
     monotonicNow: @escaping @Sendable () -> UInt64 = {
       DispatchTime.now().uptimeNanoseconds
@@ -280,6 +339,7 @@ public struct PersistentControlConnectionServer: Sendable {
     self.mutatingOperations = mutatingOperations
     self.auditRecorder = auditRecorder
     self.authorizer = authorizer
+    self.admissionEvaluator = admissionEvaluator
     self.now = now
     self.monotonicNow = monotonicNow
     self.handler = handler
@@ -387,11 +447,111 @@ public struct PersistentControlConnectionServer: Sendable {
         deadline
       )
     }
+    var effectiveRequest = request
+    var admission: PersistentControlAdmissionEvaluation?
+    if isMutation {
+      let evaluated: PersistentControlAdmissionEvaluation
+      do {
+        evaluated = try admissionEvaluator(peer, request, now())
+        guard evaluated.effectiveRequest.requestID == request.requestID,
+          evaluated.effectiveRequest.apiVersion == request.apiVersion,
+          evaluated.effectiveRequest.protocolRevision == request.protocolRevision,
+          evaluated.effectiveRequest.operation == request.operation,
+          evaluated.effectiveRequest.timeoutMilliseconds == request.timeoutMilliseconds,
+          evaluated.effectiveRequest.idempotencyKey == request.idempotencyKey
+        else { throw PersistentControlServerError.invalidRequest }
+      } catch {
+        try recordAudit(
+          peer: peer, request: request, action: .admission, outcome: "error",
+          reasonCode: "admission.policy-failed", operationRef: nil,
+          payloadDigest: "sha256:" + Self.digest(Data("admission.policy-failed".utf8)),
+          stage: "admission-failed"
+        )
+        return (
+          ControlResponseEnvelope(
+            requestID: request.requestID, status: .rejected,
+            reasonCode: .admissionDenied,
+            error: SanitizedError(
+              code: "admissionFailedClosed",
+              message: "Admission policy evaluation did not complete safely.")),
+          deadline)
+      }
+      let policyDigest = try Self.digest(
+        ControlPlaneCanonicalJSON.encode(evaluated.decisions))
+      try recordAudit(
+        peer: peer, request: request, action: .admission,
+        outcome: evaluated.allowed ? "allowed" : "denied",
+        reasonCode: evaluated.reasonCode, operationRef: nil,
+        payloadDigest: "sha256:\(evaluated.evaluationDigestSHA256)",
+        stage: "admission-\(evaluated.evaluationDigestSHA256)",
+        policyRef: "sha256:\(policyDigest)", planRef: "sha256:\(evaluated.planHash)",
+        approvalRef: evaluated.approvalIdentity)
+      guard evaluated.allowed else {
+        return (
+          ControlResponseEnvelope(
+            requestID: request.requestID, status: .rejected,
+            reasonCode: .admissionDenied,
+            error: SanitizedError(
+              code: "admissionDenied",
+              message: "Admission policy denied the requested mutation.")),
+          deadline)
+      }
+      let effectiveAuthorization: RBACDecision
+      do {
+        effectiveAuthorization = try authorizer(peer, evaluated.effectiveRequest, now())
+        try effectiveAuthorization.validate()
+      } catch {
+        throw PersistentControlServerError.invalidRequest
+      }
+      let effectiveAuthorizationData = try ControlPlaneCanonicalJSON.encode(
+        effectiveAuthorization)
+      let effectiveAuthorizationDigest = Self.digest(effectiveAuthorizationData)
+      try recordAudit(
+        peer: peer, request: request, action: .authorization,
+        outcome: effectiveAuthorization.effect.rawValue,
+        reasonCode: effectiveAuthorization.reasonCode, operationRef: nil,
+        payloadDigest: "sha256:\(effectiveAuthorizationDigest)",
+        stage: "effective-authorization-\(effectiveAuthorizationDigest)",
+        policyRef: "sha256:\(policyDigest)", planRef: "sha256:\(evaluated.planHash)",
+        approvalRef: evaluated.approvalIdentity)
+      guard effectiveAuthorization.effect == .allow else {
+        return (
+          ControlResponseEnvelope(
+            requestID: request.requestID, status: .rejected,
+            reasonCode: .unauthorized,
+            error: SanitizedError(
+              code: "effectiveAuthorizationDenied",
+              message: "The admitted mutation exceeds the subject's effective authority.")),
+          deadline)
+      }
+      effectiveRequest = evaluated.effectiveRequest
+      admission = evaluated
+      if evaluated.dryRun {
+        let result = try Self.controlPlaneValue(
+          AdmissionDryRunResult(
+            effectiveRequest: evaluated.effectiveRequest,
+            decisions: evaluated.decisions,
+            target: evaluated.target,
+            planHash: evaluated.planHash,
+            exceptionIDs: evaluated.exceptionIDs,
+            evaluationDigestSHA256: evaluated.evaluationDigestSHA256))
+        return (
+          ControlResponseEnvelope(
+            requestID: request.requestID, status: .completed,
+            reasonCode: .completed, result: result),
+          deadline)
+      }
+    }
     if isMutation {
       let acceptedAt = now()
       let timestamp = ISO8601DateFormatter().string(from: acceptedAt)
-      let canonicalRequest = try ControlPlaneCanonicalJSON.encode(request)
-      let digest = SHA256.hash(data: canonicalRequest).map { String(format: "%02x", $0) }.joined()
+      let canonicalRequest = try ControlPlaneCanonicalJSON.encode(
+        PersistedMutationBinding(
+          originalRequest: request, effectiveRequest: effectiveRequest,
+          admissionEvaluationDigestSHA256: admission!.evaluationDigestSHA256,
+          admissionPlanHash: admission!.planHash,
+          exceptionIDs: admission!.exceptionIDs))
+      let digest = Self.digest(canonicalRequest)
       let submission = ControlRequestSubmission(
         request: ControlRequestRecord(
           requestID: request.requestID,
@@ -447,17 +607,19 @@ public struct PersistentControlConnectionServer: Sendable {
         }
       } catch let error as StateStoreError {
         guard case .invalidRecord = error else { throw error }
-        try requestRepository.recordRejectedConflict(
-          ControlRequestRecord(
-            requestID: request.requestID,
-            subjectID: peer.binding.subject.identifier,
-            idempotencyKey: nil,
-            requestDigestSHA256: digest,
-            status: .rejected,
-            createdAt: timestamp,
-            updatedAt: timestamp
+        if try requestRepository.load(request.requestID) == nil {
+          try requestRepository.recordRejectedConflict(
+            ControlRequestRecord(
+              requestID: request.requestID,
+              subjectID: peer.binding.subject.identifier,
+              idempotencyKey: nil,
+              requestDigestSHA256: digest,
+              status: .rejected,
+              createdAt: timestamp,
+              updatedAt: timestamp
+            )
           )
-        )
+        }
         try recordAudit(
           peer: peer,
           request: request,
@@ -484,7 +646,7 @@ public struct PersistentControlConnectionServer: Sendable {
     try deadline.assertActive()
     let response: ControlResponseEnvelope
     do {
-      response = try handler(peer, request, deadline)
+      response = try handler(peer, effectiveRequest, deadline)
     } catch {
       response = ControlResponseEnvelope(
         requestID: request.requestID,
@@ -581,7 +743,10 @@ public struct PersistentControlConnectionServer: Sendable {
     reasonCode: String,
     operationRef: String?,
     payloadDigest: String,
-    stage: String
+    stage: String,
+    policyRef: String? = nil,
+    planRef: String? = nil,
+    approvalRef: String? = nil
   ) throws {
     do {
       try auditRecorder.record(
@@ -592,6 +757,9 @@ public struct PersistentControlConnectionServer: Sendable {
           action: action,
           outcome: outcome,
           reasonCode: reasonCode,
+          policyRef: policyRef,
+          planRef: planRef,
+          approvalRef: approvalRef,
           operationRef: operationRef,
           payloadDigest: payloadDigest,
           deduplicationKey: "control:\(request.requestID):\(stage)"
@@ -639,6 +807,35 @@ public struct PersistentControlConnectionServer: Sendable {
         of: "^[A-Za-z0-9._:-]{1,128}$", options: .regularExpression) != nil
     else { throw PersistentControlServerError.invalidRequest }
     return request
+  }
+
+  private struct PersistedMutationBinding: Codable {
+    let originalRequest: ControlRequestEnvelope
+    let effectiveRequest: ControlRequestEnvelope
+    let admissionEvaluationDigestSHA256: String
+    let admissionPlanHash: String
+    let exceptionIDs: [String]
+  }
+
+  private struct AdmissionDryRunResult: Codable {
+    let effectiveRequest: ControlRequestEnvelope
+    let decisions: [AdmissionDecision]
+    let target: String
+    let planHash: String
+    let exceptionIDs: [String]
+    let evaluationDigestSHA256: String
+  }
+
+  private static func digest(_ data: Data) -> String {
+    SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+  }
+
+  private static func controlPlaneValue<T: Encodable>(
+    _ value: T
+  ) throws -> ControlPlaneJSONValue {
+    try JSONDecoder().decode(
+      ControlPlaneJSONValue.self,
+      from: ControlPlaneCanonicalJSON.encode(value))
   }
 
   private static func replayResponse(_ record: ControlRequestRecord) -> ControlResponseEnvelope {

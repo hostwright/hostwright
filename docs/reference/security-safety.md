@@ -150,9 +150,21 @@ Current public Hostwright releases nevertheless remain source-only. Local unsign
 
 ## Control Surface Boundary
 
-Future GUI or local control surfaces must use Hostwright command contracts or the explicit `hostwright-control` subset while preserving the same validation, redaction, ownership, selected-state-path, and RuntimeAdapter boundaries. The one-shot API exposes strict image lifecycle parity only through the same durable coordinator; first use may create its launch-selected image state database through that shared secure path boundary. It does not expose generic mutation, apply compatibility, or cleanup-token authority.
+Daemon-ready local control uses the authenticated, user-private Unix-socket
+Control API v2.1. It has no TCP listener. Kernel peer credentials, audit token,
+live code identity, the persisted subject, RBAC, admission, effective-intent
+reauthorization, durable idempotency, and tamper-evident audit all run before a
+mutation handler. The one-shot `hostwright-control` companion remains only the
+bounded bootstrap path for daemon installation and repair. Neither surface
+permits request-selected state paths or direct calls around the shared
+validation, ownership, provider, migration, and audit boundaries.
 
-They must not call Apple container, SQLite, `RuntimeAdapter`, state migrations, cleanup deletion, health execution, or diagnostics upload directly. `hostwright-control` delegates its admitted operations, including `image`, to existing CLI contracts, requires launch-fixed paths, rejects request-selected paths and arbitrary mutation names, bounds one stdin request and one stdout response, and then exits. It adds no GUI code, daemon API, listener, web dashboard, hosted diagnostics, telemetry upload, or remote control.
+Admission policies are bounded declarative documents, not arbitrary native
+code. Conflicting writes, malformed policy state, stale plan hashes, expired or
+ambiguous exceptions, effective-authority escalation, and audit failure deny a
+mutation before effects. Only an explicit advisory non-mutating extension may
+ignore its own execution failure. Dry-run admission has no durable request or
+runtime effect.
 
 Phase 09 schema v18 adds the persistent identity foundation without yet opening a Control API listener. Authentication cross-checks `getpeereid`, `LOCAL_PEERPID`, and `LOCAL_PEERTOKEN`; binds the audit-token UID, GID, PID, PID version, audit session, daemon generation, socket device/inode, and nonce; and validates live code through `SecTaskCreateWithAuditToken` plus strict `SecCode` requirements. Installed peers are restricted to the frozen Hostwright team and identifier set. Ad-hoc peers require an explicit native CDHash pin. Optional P-256 proof refines but never replaces kernel and code identity. Sessions are persisted before use and are invalidated immediately by subject, credential, native CDHash, session, credential rotation, expiry, or daemon-generation change.
 

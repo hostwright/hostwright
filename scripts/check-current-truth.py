@@ -123,7 +123,7 @@ def main() -> int:
     ]:
         pattern = rf'capability\("{re.escape(identifier)}"[^\n]+\.stable, 4, {issue}'
         require(re.search(pattern, capability_catalog) is not None, f"capability catalog does not report qualified Phase 04 capability: {identifier}", errors)
-    require("Schema version 18 is the latest" in state, "state docs do not name schema v18", errors)
+    require("Schema version 20 is the latest" in state, "state docs do not name schema v20", errors)
     require(
         re.search(r'capability\("storage\.persistent"[^\n]+\.stable, 6, 163', capability_catalog)
         is not None,

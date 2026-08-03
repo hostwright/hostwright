@@ -42,6 +42,10 @@ let package = Package(
             name: "hostwright-rbac-qualification",
             targets: ["HostwrightRBACQualificationTool"]
         ),
+        .executable(
+            name: "hostwright-admission-qualification",
+            targets: ["HostwrightAdmissionQualificationTool"]
+        ),
         .executable(name: "hostwrightd", targets: ["HostwrightDaemon"]),
         .executable(name: "hostwright-dist", targets: ["HostwrightDistributionTool"]),
         .executable(
@@ -426,6 +430,14 @@ let package = Package(
         ),
         .executableTarget(
             name: "HostwrightRBACQualificationTool",
+            dependencies: [
+                "HostwrightControlPlane",
+                "HostwrightPolicy",
+                "HostwrightState"
+            ]
+        ),
+        .executableTarget(
+            name: "HostwrightAdmissionQualificationTool",
             dependencies: [
                 "HostwrightControlPlane",
                 "HostwrightPolicy",

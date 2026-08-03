@@ -53,6 +53,10 @@ public struct SQLiteStateStore: StateStore {
         RBACRepository(store: self)
     }
 
+    public var admission: AdmissionRepository {
+        AdmissionRepository(store: self)
+    }
+
     public var operations: OperationLedger {
         OperationLedger(store: self)
     }

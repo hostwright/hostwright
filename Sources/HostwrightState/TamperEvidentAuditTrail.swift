@@ -834,6 +834,9 @@ extension TamperEvidentAuditTrail: ControlSecurityAuditRecording {
         action: event.action,
         outcome: event.outcome,
         reasonCode: event.reasonCode,
+        policyRef: event.policyRef,
+        planRef: event.planRef,
+        approvalRef: event.approvalRef,
         operationRef: event.operationRef,
         payloadDigest: event.payloadDigest,
         deduplicationKey: event.deduplicationKey

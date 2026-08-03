@@ -164,6 +164,14 @@ public final class RBACAuthorizationEngine: @unchecked Sendable {
     case "rbac.role.delete", "rbac.binding.delete": (resourceKind, verb) = (.policy, .delete)
     case "rbac.delegation.create": (resourceKind, verb) = (.policy, .delegate)
     case "rbac.delegation.revoke": (resourceKind, verb) = (.policy, .update)
+    case "admission.preview": (resourceKind, verb) = (.policy, .get)
+    case "admission.policy.list", "admission.exception.list":
+      (resourceKind, verb) = (.policy, .list)
+    case "admission.policy.create": (resourceKind, verb) = (.policy, .create)
+    case "admission.policy.set-enabled": (resourceKind, verb) = (.policy, .update)
+    case "admission.policy.delete", "admission.exception.delete":
+      (resourceKind, verb) = (.policy, .delete)
+    case "admission.exception.create": (resourceKind, verb) = (.policy, .approve)
     default: (resourceKind, verb) = (.daemon, .admin)
     }
     return RBACAuthorizationTarget(

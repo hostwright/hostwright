@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import HostwrightControlPlane
 import HostwrightCore
 import HostwrightRegistry
 
@@ -795,6 +796,7 @@ public struct StateIntegrityService: Sendable {
                 """
             )
             let invalidFrozenRBACDefaults = try frozenRBACDefaultProblems(connection)
+            let invalidAdmissionContent = try admissionContentProblems(connection)
             let authoritativeProblems = sqlAuthoritativeProblems +
                 invalidIdentityProblems + invalidReferrerContent +
                 invalidImageTrustContent + invalidImageSBOMContent +
@@ -804,6 +806,7 @@ public struct StateIntegrityService: Sendable {
                 + invalidProjectDNSContent + invalidCertificateContent
                 + invalidServiceTunnelContent + invalidAuditStructure
                 + invalidPolicyProfileStructure + invalidFrozenRBACDefaults
+                + invalidAdmissionContent
             if authoritativeProblems == 0 {
                 checks.append(.init(identifier: "hostwright.authoritative-records", status: .passed, message: "Authoritative state records satisfy the v\(MigrationRunner.latestSchemaVersion) logical contract."))
             } else {
@@ -1939,6 +1942,72 @@ public struct StateIntegrityService: Sendable {
             else { return 1 }
         }
         return 0
+    }
+
+    private func admissionContentProblems(_ connection: SQLiteConnection) throws -> Int {
+        var problems = 0
+        for row in try connection.query(
+            """
+            SELECT policy_id, version, source_kind, stage, failure_policy, advisory, mutating,
+                   document_json, document_sha256, enabled, generation,
+                   created_by_subject_id, created_at, updated_at
+            FROM admission_policies ORDER BY policy_id
+            """
+        ) {
+            do {
+                guard row.count == 14, let policyID = row[0],
+                    let version = row[1].flatMap(Int.init), let sourceRaw = row[2],
+                    let source = AdmissionPolicySourceKind(rawValue: sourceRaw),
+                    let stageRaw = row[3], let stage = AdmissionStage(rawValue: stageRaw),
+                    let failureRaw = row[4],
+                    let failure = AdmissionFailurePolicy(rawValue: failureRaw),
+                    let advisory = row[5].flatMap(Int.init),
+                    let mutating = row[6].flatMap(Int.init), let documentJSON = row[7],
+                    let documentData = documentJSON.data(using: .utf8),
+                    let document = try? JSONDecoder().decode(
+                        ControlPlaneJSONValue.self, from: documentData),
+                    let documentSHA = row[8], let enabled = row[9].flatMap(Int.init),
+                    let generation = row[10].flatMap(Int.init), let creator = row[11],
+                    let createdAt = row[12], let updatedAt = row[13],
+                    [advisory, mutating, enabled].allSatisfy({ $0 == 0 || $0 == 1 })
+                else { throw StateStoreError.invalidRecord("Malformed admission policy") }
+                _ = try AdmissionPolicyRecord(
+                    policyID: policyID, version: version, sourceKind: source, stage: stage,
+                    failurePolicy: failure, advisory: advisory == 1, mutating: mutating == 1,
+                    document: document, documentSHA256: documentSHA, enabled: enabled == 1,
+                    generation: generation, createdBySubjectID: creator,
+                    createdAt: createdAt, updatedAt: updatedAt
+                ).canonicalized()
+                guard String(
+                    decoding: try ControlPlaneCanonicalJSON.encode(document), as: UTF8.self
+                ) == documentJSON else {
+                    throw StateStoreError.invalidRecord("Noncanonical admission policy JSON")
+                }
+            } catch { problems += 1 }
+        }
+        for row in try connection.query(
+            """
+            SELECT exception_id, policy_id, subject_id, target, plan_hash, approval_identity,
+                   expires_at, created_by_subject_id, generation, created_at, updated_at
+            FROM admission_exceptions ORDER BY exception_id
+            """
+        ) {
+            do {
+                guard row.count == 11, let exceptionID = row[0], let policyID = row[1],
+                    let subjectID = row[2], let target = row[3], let planHash = row[4],
+                    let approval = row[5], let expiresAt = row[6], let creator = row[7],
+                    let generation = row[8].flatMap(Int.init), let createdAt = row[9],
+                    let updatedAt = row[10]
+                else { throw StateStoreError.invalidRecord("Malformed admission exception") }
+                _ = try AdmissionExceptionRecord(
+                    exceptionID: exceptionID, policyID: policyID, subjectID: subjectID,
+                    target: target, planHash: planHash, approvalIdentity: approval,
+                    expiresAt: expiresAt, createdBySubjectID: creator,
+                    generation: generation, createdAt: createdAt, updatedAt: updatedAt
+                ).canonicalized()
+            } catch { problems += 1 }
+        }
+        return problems
     }
 
     private func sha256(_ data: Data) -> String {

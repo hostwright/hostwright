@@ -128,8 +128,27 @@ private enum HostwrightStreamQualificationMain {
       event("gate08-live-event-1", projectID: projectID),
       event("gate08-live-event-2", projectID: projectID),
     ])
-    let first = try nextData(session, streamID: eventStream, timeoutMilliseconds: 10_000)
-    guard let firstCursor = first.cursor else { throw failure(66) }
+    let markerDeadline = Date().addingTimeInterval(20)
+    var deliveredEventIDs = Set<String>()
+    var firstCursor: String?
+    while firstCursor == nil, deliveredEventIDs.count < 256, Date() < markerDeadline {
+      let remaining = max(1, Int(markerDeadline.timeIntervalSinceNow * 1_000))
+      let first = try nextData(
+        session,
+        streamID: eventStream,
+        timeoutMilliseconds: remaining
+      )
+      let (identifier, cursor) = try eventIdentity(first)
+      guard deliveredEventIDs.insert(identifier).inserted,
+        identifier != "gate08-live-event-2"
+      else { throw failure(66) }
+      if identifier == "gate08-live-event-1" {
+        firstCursor = cursor
+      } else {
+        try session.acknowledge(streamID: eventStream, credit: 1, cursor: cursor)
+      }
+    }
+    guard let firstCursor else { throw failure(66) }
     stage = "events-heartbeat"
     var heartbeatObserved = false
     do {
@@ -141,9 +160,27 @@ private enum HostwrightStreamQualificationMain {
     }
     stage = "events-second"
     try session.acknowledge(streamID: eventStream, credit: 1, cursor: firstCursor)
-    let second = try nextData(session, streamID: eventStream, timeoutMilliseconds: 10_000)
-    guard second.cursor != nil, second.cursor != firstCursor else { throw failure(68) }
-    let cursor = second.cursor!
+    let secondMarkerDeadline = Date().addingTimeInterval(20)
+    var cursor: String?
+    while cursor == nil, deliveredEventIDs.count < 256, Date() < secondMarkerDeadline {
+      let remaining = max(1, Int(secondMarkerDeadline.timeIntervalSinceNow * 1_000))
+      let second = try nextData(
+        session,
+        streamID: eventStream,
+        timeoutMilliseconds: remaining
+      )
+      let (identifier, candidate) = try eventIdentity(second)
+      guard deliveredEventIDs.insert(identifier).inserted,
+        identifier != "gate08-live-event-1",
+        candidate != firstCursor
+      else { throw failure(68) }
+      if identifier == "gate08-live-event-2" {
+        cursor = candidate
+      } else {
+        try session.acknowledge(streamID: eventStream, credit: 1, cursor: candidate)
+      }
+    }
+    guard let cursor else { throw failure(68) }
     try Data(cursor.utf8).write(to: root.appendingPathComponent("resume-cursor.txt"))
     stage = "events-terminal"
     try session.cancel(streamID: eventStream)
@@ -357,12 +394,11 @@ private enum HostwrightStreamQualificationMain {
           streamID: streamID,
           timeoutMilliseconds: remaining
         )
-        guard case .object(let fields)? = resumed.payload,
-          case .string(let identifier)? = fields["id"],
+        let (identifier, resumedCursor) = try eventIdentity(resumed)
+        guard
           identifier != "gate08-live-event-1",
           identifier != "gate08-live-event-2",
-          resumedIDs.insert(identifier).inserted,
-          let resumedCursor = resumed.cursor
+          resumedIDs.insert(identifier).inserted
         else { throw failure(69) }
         markerObserved = identifier == "gate08-live-event-after-restart"
         if !markerObserved {
@@ -444,6 +480,17 @@ private enum HostwrightStreamQualificationMain {
       if frame.kind == .gap || frame.kind == .end || frame.kind == .error { throw failure(72) }
     }
     throw failure(72)
+  }
+
+  private static func eventIdentity(_ frame: StreamFrame) throws -> (String, String) {
+    guard frame.kind == .data,
+      case .object(let fields)? = frame.payload,
+      case .string(let identifier)? = fields["id"],
+      !identifier.isEmpty,
+      let cursor = frame.cursor,
+      !cursor.isEmpty
+    else { throw failure(69) }
+    return (identifier, cursor)
   }
 
   private static func drainFinite(

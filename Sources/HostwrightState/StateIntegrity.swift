@@ -797,6 +797,7 @@ public struct StateIntegrityService: Sendable {
             )
             let invalidFrozenRBACDefaults = try frozenRBACDefaultProblems(connection)
             let invalidAdmissionContent = try admissionContentProblems(connection)
+            let invalidWorkloadProfileContent = try workloadProfileContentProblems(connection)
             let authoritativeProblems = sqlAuthoritativeProblems +
                 invalidIdentityProblems + invalidReferrerContent +
                 invalidImageTrustContent + invalidImageSBOMContent +
@@ -807,6 +808,7 @@ public struct StateIntegrityService: Sendable {
                 + invalidServiceTunnelContent + invalidAuditStructure
                 + invalidPolicyProfileStructure + invalidFrozenRBACDefaults
                 + invalidAdmissionContent
+                + invalidWorkloadProfileContent
             if authoritativeProblems == 0 {
                 checks.append(.init(identifier: "hostwright.authoritative-records", status: .passed, message: "Authoritative state records satisfy the v\(MigrationRunner.latestSchemaVersion) logical contract."))
             } else {
@@ -2006,6 +2008,56 @@ public struct StateIntegrityService: Sendable {
                     generation: generation, createdAt: createdAt, updatedAt: updatedAt
                 ).canonicalized()
             } catch { problems += 1 }
+        }
+        return problems
+    }
+
+    private func workloadProfileContentProblems(_ connection: SQLiteConnection) throws -> Int {
+        var problems = 0
+        let rows = try connection.query(
+            """
+            SELECT profile_id, version, parent_profile_id, profile_json, profile_sha256,
+                   generation, created_by_subject_id, created_at, updated_at
+            FROM workload_profiles ORDER BY profile_id
+            """
+        )
+        let identifiers = Set(rows.compactMap { $0.first ?? nil })
+        var parents: [String: String] = [:]
+        for row in rows {
+            do {
+                guard row.count == 9, let identifier = row[0],
+                    let version = row[1].flatMap(Int.init), let profileJSON = row[3],
+                    let data = profileJSON.data(using: .utf8),
+                    let profile = try? JSONDecoder().decode(WorkloadProfile.self, from: data),
+                    let digest = row[4], let generation = row[5].flatMap(Int.init),
+                    let creator = row[6], let createdAt = row[7], let updatedAt = row[8],
+                    profile.identifier == identifier, profile.version == version,
+                    profile.parent == row[2]
+                else { throw StateStoreError.invalidRecord("Malformed workload profile") }
+                if let parent = profile.parent {
+                    guard identifiers.contains(parent) else {
+                        throw StateStoreError.invalidRecord("Missing workload profile parent")
+                    }
+                    parents[identifier] = parent
+                }
+                _ = try WorkloadProfileRecord(
+                    profile: profile, profileSHA256: digest, generation: generation,
+                    createdBySubjectID: creator, createdAt: createdAt, updatedAt: updatedAt)
+                guard String(
+                    decoding: try ControlPlaneCanonicalJSON.encode(profile), as: UTF8.self
+                ) == profileJSON else {
+                    throw StateStoreError.invalidRecord("Noncanonical workload profile JSON")
+                }
+            } catch { problems += 1 }
+        }
+        for identifier in identifiers {
+            var seen = Set<String>()
+            var current: String? = identifier
+            while let value = current {
+                guard seen.insert(value).inserted else { problems += 1; break }
+                guard seen.count <= 32 else { problems += 1; break }
+                current = parents[value]
+            }
         }
         return problems
     }

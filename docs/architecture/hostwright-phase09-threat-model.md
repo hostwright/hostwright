@@ -1,9 +1,9 @@
 # Phase 09 Threat Model
 
-Status: Gate 5 security model. Gates 2–5 now implement the local peer identity,
-persistent socket, tamper-evident audit, and RBAC controls described here.
-Admission, profiles, streams, CLI parity, providers, and plugin lifecycle remain
-future gates and are not implied by this status.
+Status: Gate 7 security model. Gates 2–7 now implement the local peer identity,
+persistent socket, tamper-evident audit, RBAC, deterministic admission, and
+secure workload-profile controls described here. Streams, CLI parity, extension
+providers, and plugin lifecycle remain future gates and are not implied here.
 
 ## Executive summary
 
@@ -78,6 +78,7 @@ signature, Keychain access controls, or a P-256 signature without its key.
 | P09-T03 | Oversized frame, slowloris, request flood | Memory/FD exhaustion | one-shot adapter has bounded payloads | pre-allocation length rejection, 64 KiB/1 MiB caps, deadline and 64/32 concurrency caps, drain/cancel (G3, G8) | A same-user client can consume its own assigned quota. |
 | P09-T04 | RBAC binding or delegation escalation | Unauthorized resource action | current local policy approvals | fixed resources/verbs/scopes, AND-only conditions, deny overrides, subset-only expiring delegation, last-owner check (G5) | Owners retain broad authority by design. |
 | P09-T05 | Admission mutation or stale approval bypass | Effective intent exceeds request | current plan/confirmation gates | fixed two-pass ordering, canonical conflict deny, effective-intent auth, plan-hash/expiry-bound exception (G6) | Faulty policy logic fails closed for security-sensitive actions. |
+| P09-T05A | Workload or provider silently weakens a selected profile | Runtime authority exceeds the reviewed profile | provider preflight and manifest validation | canonical inheritance hash, subset-only child policy, exact `profile.weaken` approval, second hash-bound RBAC, and provider/workload gap denial before effects (G7) | Legacy requests remain unprofiled until selected; Gate 9 removes remaining direct CLI mutation paths. |
 | P09-T06 | Audit deletion, reorder, fork, truncation, key rotation, clock change, storage pressure | Concealed security event or unsafe mutation | state migration ledger and existing audit boundaries | canonical SHA-256 chain, P-256 segment seals, Keychain keys, retention checkpoint, verification; audit append failure denies sensitive mutation (G4) | Physical destruction of all local evidence is detectable only against retained verification anchors. |
 | P09-T07 | Cursor forgery or slow stream consumer | Cross-subject data or resource exhaustion | existing bounded process I/O | opaque subject-bound cursors, credits, sequences, gaps, eviction, cancellation, restart recovery (G8) | Legitimate slow clients can observe a gap and must resync. |
 | P09-T08 | WASI ambient authority / grant escape | Host filesystem/network/state compromise | WasmKit 0.3.1 limits in network provider path | fresh Preview 1 command, no preopens/env/network/socket/Keychain, deterministic host time/random, grant-filtered snapshots/actions and hard limits (G10) | Runtime implementation vulnerabilities require upstream remediation. |

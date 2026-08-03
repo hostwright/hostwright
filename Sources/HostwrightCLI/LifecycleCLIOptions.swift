@@ -25,6 +25,8 @@ public struct LifecycleCLIOptions: Equatable, Sendable {
     public let parallelism: Int
     public let output: CLIOutputFormat
     public let operationIdempotencyKeySHA256: String?
+    public let workloadProfileID: String?
+    public let workloadProfileSHA256: String?
 
     public init(
         command: LifecycleCommandKind,
@@ -37,7 +39,9 @@ public struct LifecycleCLIOptions: Equatable, Sendable {
         timeoutSeconds: Int = 300,
         parallelism: Int = min(4, max(1, ProcessInfo.processInfo.activeProcessorCount)),
         output: CLIOutputFormat = .text,
-        operationIdempotencyKeySHA256: String? = nil
+        operationIdempotencyKeySHA256: String? = nil,
+        workloadProfileID: String? = nil,
+        workloadProfileSHA256: String? = nil
     ) {
         self.command = command
         self.manifestPath = manifestPath
@@ -50,6 +54,8 @@ public struct LifecycleCLIOptions: Equatable, Sendable {
         self.parallelism = parallelism
         self.output = output
         self.operationIdempotencyKeySHA256 = operationIdempotencyKeySHA256
+        self.workloadProfileID = workloadProfileID
+        self.workloadProfileSHA256 = workloadProfileSHA256
     }
 }
 
@@ -75,6 +81,8 @@ enum LifecycleCLIParser {
         var parallelismSelected = false
         var output = CLIOutputFormat.text
         var outputSelected = false
+        var workloadProfileID: String?
+        var workloadProfileSHA256: String?
         var index = 1
 
         while index < arguments.count {
@@ -141,6 +149,22 @@ enum LifecycleCLIParser {
                 parallelism = value
                 parallelismSelected = true
                 index += 2
+            case "--workload-profile-id":
+                workloadProfileID = try uniqueValue(
+                    existing: workloadProfileID, arguments: arguments, index: index,
+                    option: "--workload-profile-id", command: rawCommand)
+                guard validServiceName(workloadProfileID!) else {
+                    throw CLIUsageError("\(rawCommand) workload profile IDs must be bounded safe identifiers.")
+                }
+                index += 2
+            case "--workload-profile-hash":
+                workloadProfileSHA256 = try uniqueValue(
+                    existing: workloadProfileSHA256, arguments: arguments, index: index,
+                    option: "--workload-profile-hash", command: rawCommand)
+                guard validSHA256(workloadProfileSHA256!) else {
+                    throw CLIUsageError("\(rawCommand) workload profile hashes must be exact lowercase SHA-256 values.")
+                }
+                index += 2
             case "--json":
                 guard !outputSelected else {
                     throw CLIUsageError("\(rawCommand) accepts one output selector.")
@@ -171,6 +195,9 @@ enum LifecycleCLIParser {
         if command == .run, serviceNames.count != 1 {
             throw CLIUsageError("run requires exactly one --service value.")
         }
+        guard (workloadProfileID == nil) == (workloadProfileSHA256 == nil) else {
+            throw CLIUsageError("\(rawCommand) requires workload profile ID and hash together.")
+        }
 
         return LifecycleCLIOptions(
             command: command,
@@ -182,7 +209,9 @@ enum LifecycleCLIParser {
             runtimeProvider: runtimeProvider,
             timeoutSeconds: timeoutSeconds,
             parallelism: parallelism,
-            output: output
+            output: output,
+            workloadProfileID: workloadProfileID,
+            workloadProfileSHA256: workloadProfileSHA256
         )
     }
 

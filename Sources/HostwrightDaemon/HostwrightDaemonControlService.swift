@@ -83,15 +83,20 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
     let rbacAuthorizer = RBACAuthorizationEngine(repository: store.rbac)
     let rbacAdministration = RBACAdministrationService(
       repository: store.rbac, authorizer: rbacAuthorizer)
-    let admissionEngine = AdmissionPolicyEngine(repository: store.admission)
+    let profileEngine = WorkloadProfilePolicyEngine(repository: store.workloadProfiles)
+    let admissionEngine = AdmissionPolicyEngine(
+      repository: store.admission,
+      workloadProfileResolver: { try profileEngine.resolve(id: $0) })
     let admissionAdministration = AdmissionAdministrationService(
       repository: store.admission, authorizer: rbacAuthorizer)
+    let profileAdministration = WorkloadProfileAdministrationService(
+      repository: store.workloadProfiles, authorizer: rbacAuthorizer)
     let server = try PersistentControlConnectionServer(
       authenticator: authenticator,
       requestRepository: ControlRequestRepository(store: store),
       daemonGeneration: UInt64.random(in: 1...UInt64.max),
       socketIdentity: listener.identity,
-      mutatingOperations: [
+      mutatingOperations: Set([
         "up", "down", "run", "start", "stop", "restart", "rm", "update",
         "image", "registry", "volume",
         "audit.export",
@@ -101,7 +106,7 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
         "admission.policy.create", "admission.policy.set-enabled",
         "admission.policy.delete", "admission.exception.create",
         "admission.exception.delete",
-      ],
+      ]).union(WorkloadProfileControlOperations.mutatingOperations),
       auditRecorder: auditTrail,
       authorizer: { peer, request, at in
         try rbacAuthorizer.authorize(subject: peer.binding.subject, request: request, at: at)
@@ -124,7 +129,8 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
           rbacRepository: store.rbac, rbacAdministration: rbacAdministration,
           rbacAuthorizer: rbacAuthorizer, admissionRepository: store.admission,
           admissionAdministration: admissionAdministration,
-          admissionEngine: admissionEngine)
+          admissionEngine: admissionEngine, profileRepository: store.workloadProfiles,
+          profileAdministration: profileAdministration, profileEngine: profileEngine)
       }
     )
     lock.lock()
@@ -213,8 +219,17 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
     rbacAuthorizer: RBACAuthorizationEngine,
     admissionRepository: AdmissionRepository,
     admissionAdministration: AdmissionAdministrationService,
-    admissionEngine: AdmissionPolicyEngine
+    admissionEngine: AdmissionPolicyEngine,
+    profileRepository: WorkloadProfileRepository,
+    profileAdministration: WorkloadProfileAdministrationService,
+    profileEngine: WorkloadProfilePolicyEngine
   ) throws -> ControlResponseEnvelope {
+    if let response = WorkloadProfileControlOperations.handle(
+      peer: peer, request: request, repository: profileRepository,
+      administration: profileAdministration, engine: profileEngine, now: Date())
+    {
+      return response
+    }
     if let response = AdmissionControlOperations.handle(
       peer: peer, request: request, repository: admissionRepository,
       administration: admissionAdministration, engine: admissionEngine, now: Date())

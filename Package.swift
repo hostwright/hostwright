@@ -46,6 +46,10 @@ let package = Package(
             name: "hostwright-admission-qualification",
             targets: ["HostwrightAdmissionQualificationTool"]
         ),
+        .executable(
+            name: "hostwright-profile-qualification",
+            targets: ["HostwrightProfileQualificationTool"]
+        ),
         .executable(name: "hostwrightd", targets: ["HostwrightDaemon"]),
         .executable(name: "hostwright-dist", targets: ["HostwrightDistributionTool"]),
         .executable(
@@ -167,6 +171,7 @@ let package = Package(
             name: "HostwrightRuntimeConformanceTool",
             dependencies: [
                 "HostwrightCLI",
+                "HostwrightControlPlane",
                 "HostwrightCore",
                 "HostwrightRuntime",
                 "HostwrightState"
@@ -306,6 +311,7 @@ let package = Package(
                 "HostwrightCore",
                 "HostwrightManifest",
                 "HostwrightObservability",
+                "HostwrightPolicy",
                 "HostwrightReconciler",
                 "HostwrightRuntime",
                 "HostwrightState"
@@ -444,6 +450,15 @@ let package = Package(
                 "HostwrightState"
             ]
         ),
+        .executableTarget(
+            name: "HostwrightProfileQualificationTool",
+            dependencies: [
+                "HostwrightControlPlane",
+                "HostwrightPolicy",
+                "HostwrightRuntime",
+                "HostwrightState"
+            ]
+        ),
         .testTarget(
             name: "HostwrightControlPlaneTests",
             dependencies: ["HostwrightControlPlane"]
@@ -572,9 +587,11 @@ let package = Package(
             name: "HostwrightCLITests",
             dependencies: [
                 "HostwrightCLI",
+                "HostwrightControlPlane",
                 "HostwrightDaemonCore",
                 "HostwrightManifest",
                 "HostwrightObservability",
+                "HostwrightPolicy",
                 "HostwrightReconciler",
                 "HostwrightRegistry",
                 "HostwrightRuntime",

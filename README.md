@@ -129,6 +129,7 @@ Architecture references:
 - [Daemon and LaunchAgent lifecycle](docs/architecture/daemon.md)
 - [State store](docs/architecture/state-store.md)
 - [Storage](docs/reference/storage.md)
+- [Secure workload profiles](docs/reference/workload-profiles.md)
 - [Resource identity and provider binding](docs/design/adr-0007-resource-identity-provider-binding.md)
 - [Durable operation DAG and saga](docs/design/adr-0008-durable-operation-dag-saga.md)
 - [v0.0.2 platform contracts](docs/design/adr-0009-v0.0.2-platform-contracts.md)

@@ -166,6 +166,15 @@ mutation before effects. Only an explicit advisory non-mutating extension may
 ignore its own execution failure. Dry-run admission has no durable request or
 runtime effect.
 
+Workload Profile v1 is canonical schema-v20 authority, not a client assertion.
+Admission resolves `workloadProfileID`, binds the effective inheritance hash
+into the plan and second RBAC pass, and rejects a conflicting supplied hash. A
+child may widen a parent/current constraint only with an exact actor, base,
+candidate, and expiry approval authorized for `profile.weaken`. Lifecycle
+preflight re-resolves the hash and reports sorted provider/workload gaps before
+effects; unsupported enforcement never falls back permissively. See
+[Secure Workload Profiles](workload-profiles.md).
+
 Phase 09 schema v18 adds the persistent identity foundation without yet opening a Control API listener. Authentication cross-checks `getpeereid`, `LOCAL_PEERPID`, and `LOCAL_PEERTOKEN`; binds the audit-token UID, GID, PID, PID version, audit session, daemon generation, socket device/inode, and nonce; and validates live code through `SecTaskCreateWithAuditToken` plus strict `SecCode` requirements. Installed peers are restricted to the frozen Hostwright team and identifier set. Ad-hoc peers require an explicit native CDHash pin. Optional P-256 proof refines but never replaces kernel and code identity. Sessions are persisted before use and are invalidated immediately by subject, credential, native CDHash, session, credential rotation, expiry, or daemon-generation change.
 
 Configured files must be existing regular non-symlink files with safe ownership, no group/world write permission, and no set-ID bits. This check reduces accidental or cross-account substitution; it is not an operating-system sandbox or a guarantee against the invoking account replacing its own files. State-backed status can perform compatible path/schema migration, observation snapshot, and audit writes to the launch-configured database or the secure default when no state override is configured. An image mutation can affect only the exact versioned image request accepted by the shared coordinator. Source-consuming and destructive requests are bound to structured pre-observation digests before provider effects. Load verifies the complete inventory delta, and interrupted creation recovery requires durable reference-to-digest proof before adoption or exact rollback.

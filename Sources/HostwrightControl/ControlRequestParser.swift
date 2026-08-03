@@ -22,6 +22,8 @@ public enum LocalControlRequestParser {
         "runtimeProvider",
         "timeout",
         "parallelism",
+        "workloadProfileID",
+        "profileHash",
         "imageOperation",
         "imageReferences",
         "imageTargetReference",
@@ -159,12 +161,22 @@ public enum LocalControlRequestParser {
         if let parallelism = request.parallelism, !(1...32).contains(parallelism) {
             throw invalid("Local control lifecycle parallelism must be between 1 and 32.")
         }
+        if let identifier = request.workloadProfileID, !validServiceName(identifier) {
+            throw invalid("Local control workloadProfileID must be a bounded safe identifier.")
+        }
+        if let digest = request.profileHash, !validSHA256(digest) {
+            throw invalid("Local control profileHash must be an exact lowercase SHA-256.")
+        }
+        guard (request.workloadProfileID == nil) == (request.profileHash == nil) else {
+            throw invalid("Local control workload profile ID and hash must be supplied together.")
+        }
 
         let hasEventOnlyFilters = request.eventType != nil || request.service != nil ||
             request.severity != nil || request.limit != nil || request.sort != nil
         let hasLifecycleFields = request.services != nil || request.dryRun != nil ||
             request.confirmPlan != nil || request.runtimeProvider != nil ||
-            request.timeout != nil || request.parallelism != nil
+            request.timeout != nil || request.parallelism != nil ||
+            request.workloadProfileID != nil || request.profileHash != nil
         let hasImageFields = request.imageOperation != nil ||
             request.imageReferences != nil ||
             request.imageTargetReference != nil ||

@@ -36,6 +36,8 @@ public struct LocalControlRequest: Codable, Equatable, Sendable {
     public let runtimeProvider: String?
     public let timeout: Int?
     public let parallelism: Int?
+    public let workloadProfileID: String?
+    public let profileHash: String?
     public let imageOperation: String?
     public let imageReferences: [String]?
     public let imageTargetReference: String?
@@ -117,6 +119,8 @@ public struct LocalControlRequest: Codable, Equatable, Sendable {
         runtimeProvider: String? = nil,
         timeout: Int? = nil,
         parallelism: Int? = nil,
+        workloadProfileID: String? = nil,
+        profileHash: String? = nil,
         imageOperation: String? = nil,
         imageReferences: [String]? = nil,
         imageTargetReference: String? = nil,
@@ -197,6 +201,8 @@ public struct LocalControlRequest: Codable, Equatable, Sendable {
         self.runtimeProvider = runtimeProvider
         self.timeout = timeout
         self.parallelism = parallelism
+        self.workloadProfileID = workloadProfileID
+        self.profileHash = profileHash
         self.imageOperation = imageOperation
         self.imageReferences = imageReferences
         self.imageTargetReference = imageTargetReference

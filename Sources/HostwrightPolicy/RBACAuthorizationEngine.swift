@@ -172,6 +172,12 @@ public final class RBACAuthorizationEngine: @unchecked Sendable {
     case "admission.policy.delete", "admission.exception.delete":
       (resourceKind, verb) = (.policy, .delete)
     case "admission.exception.create": (resourceKind, verb) = (.policy, .approve)
+    case "profile.list": (resourceKind, verb) = (.profile, .list)
+    case "profile.get", "profile.resolve", "profile.preview", "profile.drift":
+      (resourceKind, verb) = (.profile, .get)
+    case "profile.create": (resourceKind, verb) = (.profile, .create)
+    case "profile.update": (resourceKind, verb) = (.profile, .update)
+    case "profile.delete": (resourceKind, verb) = (.profile, .delete)
     default: (resourceKind, verb) = (.daemon, .admin)
     }
     return RBACAuthorizationTarget(

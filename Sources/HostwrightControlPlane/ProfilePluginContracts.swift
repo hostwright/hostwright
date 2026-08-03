@@ -139,11 +139,75 @@ public struct WorkloadProfile: Codable, Equatable, Sendable {
   }
   public func validate() throws {
     guard version == 1 else { throw ContractValidationError.unsupportedVersion("workload profile") }
-    guard !identifier.isEmpty && parent != identifier else {
+    guard Self.identifier(identifier), parent.map(Self.identifier) != false, parent != identifier else {
       throw ContractValidationError.invalid("profile parent")
     }
     try resources?.validate()
     try extensionGrants.forEach { try $0.validate() }
+    try Self.paths(filesystem.allowReadPaths, named: "profile read paths")
+    try Self.paths(filesystem.allowWritePaths, named: "profile write paths")
+    guard Set(filesystem.allowWritePaths).isSubset(of: Set(filesystem.allowReadPaths)) else {
+      throw ContractValidationError.invalid("profile write paths")
+    }
+    try Self.values(network.allowedOrigins, named: "profile network origins", maximum: 128)
+    guard network.allowedOrigins.allSatisfy(Self.origin) else {
+      throw ContractValidationError.invalid("profile network origins")
+    }
+    if network.mode == .isolated && !network.allowedOrigins.isEmpty {
+      throw ContractValidationError.invalid("isolated profile origins")
+    }
+    try Self.values(secrets.allowedReferences, named: "profile secret references", maximum: 128)
+    try Self.values(runtime.allowedProviders, named: "profile runtime providers", maximum: 32)
+    try Self.values(runtime.deniedOptions, named: "profile runtime options", maximum: 128)
+    guard Set(runtime.deniedOptions).isSubset(of: ["init", "rosetta", "shared-memory", "virtualization"]) else {
+      throw ContractValidationError.invalid("profile runtime options")
+    }
+    try Self.values(accelerators.allowed, named: "profile accelerators", maximum: 32)
+    try Self.values(syscalls.allowed, named: "profile allowed syscalls", maximum: 512)
+    try Self.values(syscalls.denied, named: "profile denied syscalls", maximum: 512)
+    guard Set(syscalls.allowed).isDisjoint(with: Set(syscalls.denied)) else {
+      throw ContractValidationError.invalid("profile syscall conflict")
+    }
+    let grants = extensionGrants.map { "\($0.capability.rawValue)\u{0}\($0.scope)" }
+    guard grants == grants.sorted(), Set(grants).count == grants.count else {
+      throw ContractValidationError.invalid("profile extension grants")
+    }
+    if let identity, !identity.allowRoot {
+      guard identity.runAsUser != 0, identity.runAsGroup != 0 else {
+        throw ContractValidationError.invalid("profile root identity")
+      }
+    }
+  }
+
+  private static func identifier(_ value: String) -> Bool {
+    value.range(
+      of: "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$", options: .regularExpression) != nil
+  }
+
+  private static func origin(_ value: String) -> Bool {
+    guard let components = URLComponents(string: value), components.scheme == "https",
+      let host = components.host, !host.isEmpty, components.user == nil,
+      components.password == nil, components.query == nil, components.fragment == nil,
+      components.path.isEmpty, components.string == value
+    else { return false }
+    return true
+  }
+
+  private static func values(_ values: [String], named: String, maximum: Int) throws {
+    guard values.count <= maximum, values == values.sorted(), Set(values).count == values.count,
+      values.allSatisfy({ !$0.isEmpty && $0.utf8.count <= 512
+        && $0.unicodeScalars.allSatisfy { (32...126).contains(Int($0.value)) } })
+    else { throw ContractValidationError.invalid(named) }
+  }
+
+  private static func paths(_ paths: [String], named: String) throws {
+    try values(paths, named: named, maximum: 128)
+    guard paths.allSatisfy({ path in
+      path.hasPrefix("/") && path != "/" && !path.contains("//")
+        && !path.hasSuffix("/")
+        && !path.split(separator: "/", omittingEmptySubsequences: false).contains("..")
+        && !path.split(separator: "/", omittingEmptySubsequences: false).contains(".")
+    }) else { throw ContractValidationError.invalid(named) }
   }
 }
 

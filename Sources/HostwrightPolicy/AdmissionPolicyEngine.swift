@@ -42,9 +42,14 @@ public struct AdmissionPipelineEvaluation: Codable, Equatable, Sendable {
 
 public struct AdmissionPolicyEngine: Sendable {
   private let repository: AdmissionRepository
+  private let workloadProfileResolver: (@Sendable (String) throws -> WorkloadProfileResolution)?
 
-  public init(repository: AdmissionRepository) {
+  public init(
+    repository: AdmissionRepository,
+    workloadProfileResolver: (@Sendable (String) throws -> WorkloadProfileResolution)? = nil
+  ) {
     self.repository = repository
+    self.workloadProfileResolver = workloadProfileResolver
   }
 
   public static func validatePolicyDocument(_ policy: AdmissionPolicyRecord) throws {
@@ -64,6 +69,41 @@ public struct AdmissionPolicyEngine: Sendable {
     var effectiveBody = originalBody
     var decisions: [AdmissionDecision] = []
     var writes: [String: (ControlPlaneJSONValue, String)] = [:]
+    var boundWorkloadProfile: WorkloadProfileResolution?
+    if case .object(let fields) = effectiveBody,
+      fields["workloadProfileID"] == nil, fields["profileHash"] != nil {
+      throw AdmissionPolicyError.invalidRequest
+    }
+    if case .object(var fields) = effectiveBody, let profileField = fields["workloadProfileID"] {
+      guard case .string(let profileID) = profileField, Self.safeIdentifier(profileID),
+        let workloadProfileResolver
+      else { throw AdmissionPolicyError.invalidRequest }
+      let resolution = try workloadProfileResolver(profileID)
+      boundWorkloadProfile = resolution
+      let digestValue = ControlPlaneJSONValue.string(resolution.profileSHA256)
+      if let supplied = fields["profileHash"], supplied != digestValue {
+        decisions.append(
+          AdmissionDecision(
+            policyIdentifier: "hostwright.builtin.workload-profile@1",
+            stage: .conflictDetection, allowed: false, failurePolicy: .deny,
+            reasonCode: "admission.profile-hash-conflict", advisory: false))
+        return try denied(
+          subjectID: subjectID, request, body: effectiveBody, decisions: decisions, at: at)
+      }
+      fields["profileHash"] = digestValue
+      effectiveBody = .object(fields)
+      writes["/profileHash"] = (digestValue, "hostwright.builtin.workload-profile@1")
+      decisions.append(
+        AdmissionDecision(
+          policyIdentifier: "hostwright.builtin.workload-profile@1",
+          stage: .builtInMutation, allowed: true, failurePolicy: .deny,
+          reasonCode: "admission.workload-profile-bound",
+          mutations: [
+            AdmissionMutation(
+              policyIdentifier: "hostwright.builtin.workload-profile@1",
+              stage: .builtInMutation, fieldPath: "/profileHash", value: digestValue)
+          ], advisory: false))
+    }
     let policies = try repository.listPolicies(enabledOnly: true)
     let parsed = policies.map { policy in (policy, Result { try Document(policy: policy) }) }
 
@@ -104,6 +144,23 @@ public struct AdmissionPolicyEngine: Sendable {
         policyIdentifier: "hostwright.builtin.request-safety@1",
         stage: .builtInValidation, allowed: true, failurePolicy: .deny,
         reasonCode: "admission.request-bounds-valid", advisory: false))
+    if let profile = boundWorkloadProfile {
+      let denied = (request.operation == "logs" && !profile.profile.observability.logs)
+        || (request.operation == "metrics" && !profile.profile.observability.metrics)
+        || (request.operation == "traces" && !profile.profile.observability.traces)
+      decisions.append(
+        AdmissionDecision(
+          policyIdentifier: "hostwright.builtin.workload-profile@1",
+          stage: .builtInValidation, allowed: !denied, failurePolicy: .deny,
+          reasonCode: denied
+            ? "admission.profile-observability-denied"
+            : "admission.workload-profile-valid",
+          advisory: false))
+      if denied {
+        return try self.denied(
+          subjectID: subjectID, request, body: effectiveBody, decisions: decisions, at: at)
+      }
+    }
 
     let provisional = try makeEvaluationContext(
       subjectID: subjectID, request: request, effectiveBody: effectiveBody,

@@ -30,6 +30,7 @@ final class Phase09Gate08QualificationHarnessTests: XCTestCase {
     XCTAssertTrue(source.contains("signed-hostwrightd"))
     XCTAssertTrue(source.contains("--live --root"))
     XCTAssertTrue(source.contains("--resume --root"))
+    XCTAssertTrue(source.contains("--interval 5 --jitter 0 --parallelism 1"))
     XCTAssertTrue(source.contains("container delete --force"))
     XCTAssertTrue(source.contains("heartbeatWhileCreditExhausted==true"))
     XCTAssertTrue(source.contains("fullDuplexInputAcknowledged==true"))
@@ -339,7 +340,29 @@ final class Phase09Gate08QualificationHarnessTests: XCTestCase {
     XCTAssertTrue(source.contains("emergency_live_cleanup"))
     XCTAssertTrue(source.contains("record_process"))
     XCTAssertTrue(source.contains("record_container"))
-    XCTAssertTrue(source.contains("--cleanup --root"))
+    XCTAssertTrue(source.contains("keychain_namespace"))
+    XCTAssertTrue(source.contains("record_keychain_item"))
+    XCTAssertTrue(source.contains("record_keychain_items"))
+    XCTAssertTrue(source.contains("cleanup_keychain_items"))
+    XCTAssertTrue(source.contains("require_keychain_absent"))
+    XCTAssertTrue(source.contains("^dev\\.hostwright\\.(audit|stream-cursor)\\.v1\\.[a-f0-9]{32}$"))
+    XCTAssertTrue(source.contains("active-key-id"))
+    XCTAssertTrue(source.contains("chain-head-v1"))
+    XCTAssertTrue(source.contains("signing-key:p256:"))
+    XCTAssertTrue(source.contains(
+      "service=%s;account=%s;marker=hostwright-audit-owned-v1;scope=gate08-live"))
+    XCTAssertTrue(source.contains(
+      "/usr/bin/security delete-generic-password -s \"$service\" -a \"$account\""))
+    XCTAssertTrue(source.contains(
+      "/usr/bin/security find-generic-password -s \"$service\" -a \"$account\" >/dev/null 2>&1"))
+    XCTAssertTrue(source.contains(
+      "require_keychain_absent \"$service\" \"$account\""))
+    XCTAssertTrue(source.contains(
+      "require_keychain_absent \"$expected_audit\""))
+    XCTAssertTrue(source.contains(
+      "require_keychain_absent \"$expected_cursor\""))
+    XCTAssertTrue(source.contains("[[ \"$status\" == 44 ]] || die 'Gate 8 Keychain absence verification failed.'"))
+    XCTAssertFalse(source.contains("--cleanup --root"))
     XCTAssertTrue(source.contains("kill -TERM -- \"-$pgid\""))
     XCTAssertTrue(source.contains("HOSTWRIGHT_PHASE09_HARNESS_TEST_FORCE_LIVE_FAILURE"))
     XCTAssertTrue(source.contains("! -L \"$root/evidence-v1.sha256\""))

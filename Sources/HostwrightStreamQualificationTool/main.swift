@@ -33,7 +33,24 @@ private struct ResumeQualificationResult: Codable {
 
 @main
 private enum HostwrightStreamQualificationMain {
-  static func main() throws {
+  static func main() {
+    do {
+      try run()
+    } catch {
+      let nativeError = error as NSError
+      let code = nativeError.domain == "HostwrightStreamQualification"
+        && (64...80).contains(nativeError.code)
+        ? Int32(nativeError.code) : 70
+      let detail = "type=\(String(reflecting: type(of: error))),"
+        + " value=\(String(describing: error))"
+      FileHandle.standardError.write(
+        Data("stream qualification failed safely (code \(code); \(detail)).\n".utf8)
+      )
+      Foundation.exit(code)
+    }
+  }
+
+  private static func run() throws {
     let arguments = Array(CommandLine.arguments.dropFirst())
     guard arguments.count == 7,
       ["--bootstrap", "--live", "--resume", "--cleanup"].contains(arguments[0]),
@@ -83,11 +100,17 @@ private enum HostwrightStreamQualificationMain {
 
   private static func live(root: URL, statePath: String, socketPath: String) throws {
     let store = SQLiteStateStore(path: statePath)
-    let ownership = try waitForOwnership(store: store)
-    let session = try PersistentControlClient(socketPath: socketPath).connectSession()
-    defer { session.close() }
-    let projectID = "project-phase09-gate08-live"
+    var stage = "ownership"
+    do {
+      let projectID = "project-phase09-gate08-live"
+      let ownership = try waitForOwnership(store: store)
+      stage = "reconciliation-quiescence"
+      try waitForReconciliationQuiescence(store: store, projectID: projectID)
+      stage = "connect"
+      let session = try PersistentControlClient(socketPath: socketPath).connectSession()
+      defer { session.close() }
 
+    stage = "events-open"
     let eventStream = "gate08-events"
     try session.openStream(
       streamID: eventStream,
@@ -98,13 +121,16 @@ private enum HostwrightStreamQualificationMain {
       ),
       initialCredit: 1
     )
+    stage = "events-accept"
     try requireOpen(session, streamID: eventStream)
+    stage = "events-first"
     try store.events.append([
       event("gate08-live-event-1", projectID: projectID),
       event("gate08-live-event-2", projectID: projectID),
     ])
     let first = try nextData(session, streamID: eventStream, timeoutMilliseconds: 10_000)
     guard let firstCursor = first.cursor else { throw failure(66) }
+    stage = "events-heartbeat"
     var heartbeatObserved = false
     do {
       let frame = try session.nextFrame(streamID: eventStream, timeoutMilliseconds: 1_500)
@@ -113,14 +139,17 @@ private enum HostwrightStreamQualificationMain {
     } catch PersistentControlClientError.deadlineExceeded {
       heartbeatObserved = false
     }
+    stage = "events-second"
     try session.acknowledge(streamID: eventStream, credit: 1, cursor: firstCursor)
     let second = try nextData(session, streamID: eventStream, timeoutMilliseconds: 10_000)
     guard second.cursor != nil, second.cursor != firstCursor else { throw failure(68) }
     let cursor = second.cursor!
     try Data(cursor.utf8).write(to: root.appendingPathComponent("resume-cursor.txt"))
+    stage = "events-terminal"
     try session.cancel(streamID: eventStream)
     try requireTerminal(session, streamID: eventStream)
 
+    stage = "metrics"
     let metrics = "gate08-metrics"
     try session.openStream(streamID: metrics, request: ControlStreamOpenRequest(source: .metrics))
     try requireOpen(session, streamID: metrics)
@@ -128,6 +157,7 @@ private enum HostwrightStreamQualificationMain {
     try session.cancel(streamID: metrics)
     try requireTerminal(session, streamID: metrics)
 
+    stage = "logs"
     let logs = "gate08-logs"
     try session.openStream(
       streamID: logs,
@@ -144,6 +174,7 @@ private enum HostwrightStreamQualificationMain {
     try requireOpen(session, streamID: logs)
     let logsCompleted = try drainFinite(session, streamID: logs, requireData: true)
 
+    stage = "exec-open"
     let exec = "gate08-exec"
     try session.openStream(
       streamID: exec,
@@ -165,6 +196,13 @@ private enum HostwrightStreamQualificationMain {
       initialCredit: 32
     )
     try requireOpen(session, streamID: exec)
+    stage = "exec-start"
+    try waitForStreamOperationStarted(
+      store: store,
+      requestID: "gate08-exec-request",
+      timeoutMilliseconds: 120_000
+    )
+    stage = "exec-input-send"
     let echoInput = Data("hostwright-gate08-full-duplex\n".utf8)
     try session.sendStreamInput(
       streamID: exec,
@@ -173,11 +211,13 @@ private enum HostwrightStreamQualificationMain {
         payloadBase64: echoInput.base64EncodedString()
       ))
     )
+    stage = "exec-input-ack"
     var inputAcknowledged = false
     var prefetchedExecFrames: [StreamFrame] = []
-    let acknowledgementDeadline = Date().addingTimeInterval(10)
+    let acknowledgementDeadline = Date().addingTimeInterval(30)
     while !inputAcknowledged, Date() < acknowledgementDeadline {
-      let frame = try session.nextFrame(streamID: exec, timeoutMilliseconds: 10_000)
+      let remaining = max(1, Int(acknowledgementDeadline.timeIntervalSinceNow * 1_000))
+      let frame = try session.nextFrame(streamID: exec, timeoutMilliseconds: remaining)
       if frame.kind == .ack {
         guard frame.credit == 1 else { throw failure(77) }
         inputAcknowledged = true
@@ -188,7 +228,9 @@ private enum HostwrightStreamQualificationMain {
       }
     }
     guard inputAcknowledged else { throw failure(77) }
+    stage = "exec-input-finish"
     try session.finishStreamInput(streamID: exec)
+    stage = "exec-drain"
     let execEvidence = try drainInteractiveEcho(
       session,
       streamID: exec,
@@ -196,6 +238,7 @@ private enum HostwrightStreamQualificationMain {
       expected: echoInput
     )
 
+    stage = "cancel-open"
     let cancel = "gate08-cancel"
     try session.openStream(
       streamID: cancel,
@@ -216,24 +259,30 @@ private enum HostwrightStreamQualificationMain {
       )
     )
     try requireOpen(session, streamID: cancel)
+    stage = "cancel-start"
     try waitForStreamOperationStarted(
       store: store,
-      requestID: "gate08-cancel-request"
+      requestID: "gate08-cancel-request",
+      timeoutMilliseconds: 120_000
     )
+    stage = "cancel-marker"
     try waitForRuntimeMarker(
       session,
       streamID: cancel,
       marker: Data("hostwright-gate08-cancel-ready".utf8),
       timeoutMilliseconds: 20_000
     )
+    stage = "cancel-terminal"
     try session.cancel(streamID: cancel)
     try requireTerminal(session, streamID: cancel, timeoutMilliseconds: 20_000)
+    stage = "cancel-evidence"
     let cancellationDurable = try verifyCancellationEvidence(
       store: store,
-      statePath: statePath,
+      session: session,
       requestID: "gate08-cancel-request"
     )
 
+    stage = "result"
     let integrity = StateIntegrityService(store: store).inspect()
     try emit(LiveQualificationResult(
       kind: "hostwright.phase09.stream.live-qualification.v1",
@@ -252,6 +301,21 @@ private enum HostwrightStreamQualificationMain {
       cancellationTerminalObserved: true,
       cancellationDurabilityVerified: cancellationDurable
     ))
+    } catch {
+      let request = try? ControlRequestRepository(store: store).load("gate08-exec-request")
+      let operationStatus = request?.operationReference.flatMap { reference in
+        try? store.operations.loadAll().first(where: { $0.id == reference })?.status.rawValue
+      } ?? nil
+      let diagnostic = "stream qualification live stage '\(stage)' failed"
+        + " (execRequest=\(request?.status.rawValue ?? "absent"),"
+        + " execOperation=\(operationStatus ?? "absent"),"
+        + " errorType=\(String(reflecting: type(of: error))),"
+        + " error=\(String(describing: error))).\n"
+      FileHandle.standardError.write(
+        Data(diagnostic.utf8)
+      )
+      throw error
+    }
   }
 
   private static func resume(root: URL, statePath: String, socketPath: String) throws {
@@ -299,6 +363,24 @@ private enum HostwrightStreamQualificationMain {
           && $0.serviceName == "probe"
       }
       if matches.count == 1, let match = matches.first { return match }
+      usleep(250_000)
+    }
+    throw failure(70)
+  }
+
+  private static func waitForReconciliationQuiescence(
+    store: SQLiteStateStore,
+    projectID: String
+  ) throws {
+    let deadline = Date().addingTimeInterval(180)
+    while Date() < deadline {
+      let groups = try store.operationGroups.loadProject(projectID: projectID)
+      if groups.contains(where: { $0.status == .failed || $0.status == .interrupted }) {
+        throw failure(70)
+      }
+      if !groups.isEmpty, groups.allSatisfy({ $0.status == .succeeded }) {
+        return
+      }
       usleep(250_000)
     }
     throw failure(70)
@@ -370,7 +452,7 @@ private enum HostwrightStreamQualificationMain {
 
   private static func verifyCancellationEvidence(
     store: SQLiteStateStore,
-    statePath: String,
+    session: PersistentControlClientSession,
     requestID: String
   ) throws -> Bool {
     let requests = ControlRequestRepository(store: store)
@@ -391,10 +473,17 @@ private enum HostwrightStreamQualificationMain {
     })
     guard stages.isSuperset(of: ["planned", "started", "cancel-requested", "cancelled"])
     else { return false }
-    let keyStore = try MacOSAuditSigningKeyStore(
-      service: MacOSAuditSigningKeyStore.serviceName(stateDatabasePath: statePath))
-    let audit = TamperEvidentAuditTrail(store: store, keyStore: keyStore)
-    let exported = try audit.exportVerified()
+    let response = try session.send(ControlRequestEnvelope(
+      requestID: "gate08-audit-export",
+      operation: "audit.export",
+      timeoutMilliseconds: 30_000
+    ))
+    guard response.status == .completed,
+      case .object(let fields)? = response.result,
+      case .string("base64")? = fields["encoding"],
+      case .string(let payload)? = fields["payload"],
+      let exported = Data(base64Encoded: payload)
+    else { return false }
     let report = try TamperEvidentAuditTrail.verifyExport(exported)
     let bundle = try JSONDecoder().decode(AuditExportBundle.self, from: exported)
     let reasons = Set(bundle.records.compactMap { exported -> String? in
@@ -411,9 +500,10 @@ private enum HostwrightStreamQualificationMain {
 
   private static func waitForStreamOperationStarted(
     store: SQLiteStateStore,
-    requestID: String
+    requestID: String,
+    timeoutMilliseconds: Int
   ) throws {
-    let deadline = Date().addingTimeInterval(20)
+    let deadline = Date().addingTimeInterval(Double(timeoutMilliseconds) / 1_000)
     let requests = ControlRequestRepository(store: store)
     while Date() < deadline {
       if let operationReference = try requests.load(requestID)?.operationReference,

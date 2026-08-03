@@ -99,6 +99,7 @@ final class MutationCheckpointQualificationScriptTests: XCTestCase {
             "readonly sample_interval_seconds=300",
             "expected_samples=864",
             "compaction_attempt_limit=5",
+            "resource_uuid_pattern=",
             "phase08-soak-",
             "active-run-v1",
             "preflight)",
@@ -284,7 +285,7 @@ final class MutationCheckpointQualificationScriptTests: XCTestCase {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
         defer { try? FileManager.default.removeItem(at: root) }
         let exactID = "hostwright-v2-p08-soa-web-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-        let exactUUID = "646e5e79-7d1b-4bed-8bba-f18324262911"
+        let exactUUID = "646e5e79-7d1b-8bed-8bba-f18324262911"
         let image = "docker.io/library/python@sha256:\(String(repeating: "a", count: 64))"
         let exact = runtimeFixture(
             id: exactID,
@@ -295,7 +296,7 @@ final class MutationCheckpointQualificationScriptTests: XCTestCase {
         let foreign = runtimeFixture(
             id: "hostwright-v2-phase09-probe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
             project: "phase09-probe",
-            resourceUUID: "746e5e79-7d1b-4bed-8bba-f18324262912",
+            resourceUUID: "746e5e79-7d1b-8bed-8bba-f18324262912",
             image: image
         )
         let inventory = "[\(exact),\(foreign)]"

@@ -6,6 +6,7 @@ readonly sample_interval_seconds=300
 readonly expected_samples=864
 readonly compaction_attempt_limit=5
 readonly uuid_pattern='^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$'
+readonly resource_uuid_pattern='^[a-f0-9]{8}-[a-f0-9]{4}-8[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$'
 readonly subsystem='dev.hostwright'
 
 daemon_pid=''
@@ -106,7 +107,7 @@ verify_exclusive_runtime_inventory() {
     --arg id "$resource_identifier" \
     '.[] | select(.id == $id) | .configuration.labels["dev.hostwright.resource-uuid"]')" \
     || die 'The exact soak resource UUID is absent from the global runtime inventory.' 75
-  [[ "$current_uuid" =~ $uuid_pattern ]] \
+  [[ "$current_uuid" =~ $resource_uuid_pattern ]] \
     || die 'The exact soak resource UUID is malformed.' 75
   if [[ -n "$resource_uuid" && "$resource_uuid" != "$current_uuid" ]]; then
     die 'The soak runtime UUID changed.' 75

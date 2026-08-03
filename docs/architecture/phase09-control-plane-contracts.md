@@ -44,6 +44,55 @@ failure.
 Streams use `streamID`, monotonically increasing `sequence`, optional opaque
 `cursor`, `kind`, optional `credit`, and typed payload. The only frame kinds
 are `open`, `data`, `heartbeat`, `gap`, `ack`, `cancel`, `end`, and `error`.
+Client-to-server stream traffic is limited to `open`, output-credit `ack`,
+typed runtime-input `data`, per-stream input `end`, and `cancel`;
+server-to-client traffic is limited to `open`, output `data`, `heartbeat`,
+`gap`, input-credit `ack`, `end`, and `error`. Client and server sequence spaces are independent and each
+begins at one. An open carries one of the frozen sources `logs`, `attach`,
+`exec`, `events`, `metrics`, `traces`, `operation`, or `state`, an optional
+target and canonical filter, a 1--60 second heartbeat interval, and 1--256
+units of initial credit. One unit permits one data frame; control, heartbeat,
+gap, and terminal frames do not consume credit. An acknowledgement grants
+1--256 additional units and may bind the last delivered cursor. Credit may
+never exceed 256, a connection may buffer at most 128 unread frames, and a
+blocked write is evicted after five seconds.
+
+Exec and attach opens additionally require a stable client `requestID` and
+`idempotencyKey`. Their acceptance returns the durable `operationRef` and 16
+units of reverse input credit. Client input is a strict canonical object for
+bounded base64 stdin, a TTY resize with 1--1000 columns/rows, or an allowed
+POSIX signal. Each input consumes one reverse credit and the server returns one
+`ack` only after runtime control accepts it. Client `end` half-closes only that
+stream's stdin. Read-only sources reject mutation identity. A retry before the
+durable started transition may begin; a retry after an ambiguous start never
+repeats the external effect and receives a terminal non-replayable gap.
+
+Resume cursors use a Keychain-backed P-256 capability, expire within 24 hours,
+and bind the authenticated subject, stream source, target digest, filter
+digest, and underlying durable-source cursor. They do not bind a daemon
+generation, so a re-authenticated client can resume after restart. Rotation or
+revocation of the active cursor key immediately invalidates prior cursors.
+Every resume is re-authorized before source delivery. A missing retention
+anchor or a non-replayable snapshot discontinuity produces one terminal `gap`
+with an earliest/latest re-anchor and requires a fresh open; the server never
+continues silently after a gap. Metrics are global-only snapshot/change
+streams and reject project filters. Trace, operation, and state watches are
+distinct authorized projections of the durable event ledger. State watch
+excludes audit, trace, policy, operator, and unrelated event classes.
+Operation watch requires a canonical operation reference in the event payload;
+an event identifier is never an operation reference. Provider capability failures such as
+Apple-container attach or follow-without-resume are explicit terminal errors,
+not emulated streams.
+
+Runtime stream targets are Hostwright resource UUIDs, never ambient container
+names or provider identifiers. Their filter supplies the manifest service name;
+the daemon requires one matching ownership record and then repeats the existing
+live inventory, provider generation, resource generation, project generation,
+and fencing-token checks immediately before reading logs or executing. Finite
+logs use a distinct content-digest plus next-byte-offset cursor per chunk;
+exec is deliberately non-replayable and cancellation
+terminates its owned process tree.
+
 Long operations acknowledge with a durable operation reference and expose
 progress through a stream. Mutating acceptance persists request identity,
 idempotency key, authorization and admission decisions, operation reference,
@@ -271,3 +320,23 @@ Each later gate must provide focused U/I/L/M/S/R evidence, preserve passing
 evidence unless an explicitly recorded dependency changes, and stop on a
 failure. The existing one-shot adapter and declaration-only extension boundary
 remain current behavior until their respective gates prove replacement.
+
+## Gate 8 contract impact and evidence invalidation
+
+Gate 8 completed the Gate 1 stream placeholder with the already-planned
+full-duplex behavior. The reviewed delta is restricted to revision 2.1 stream
+traffic: strict typed server acceptance, typed client stdin/resize/signal
+input, reverse input credit, durable `exec`/`attach` request identity, explicit
+audit health, server cancellation terminalization, and the frozen per-frame,
+per-stream, per-subject, and daemon-wide limits documented above. It does not
+change revision 2.0, unary revision 2.1, schema v20, RBAC vocabulary,
+admission ordering, audit format, or Workload Profile v1.
+
+This delta invalidates only the stream-dependent slices of the prior immutable
+Gate 1, 3, 4, 5, 6, and 7 evidence. Their unrelated passing evidence remains
+valid. Gate 8 must supersede those slices by rerunning the production-decoded
+goldens, persistent transport/authentication, audit fail-closed/degraded-health,
+stream RBAC, effective-intent admission, workload/runtime authority, and
+restart/recovery tests in its single immutable six-cell root. Any later change
+to these stream fixtures, limits, direction rules, cancellation modes, or
+durable lifecycle semantics invalidates Gate 8 and every downstream consumer.

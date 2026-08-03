@@ -80,6 +80,21 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
     case .degraded, .tampered:
       throw PersistentControlServerError.persistenceFailed
     }
+    let streamCursorCodec = try ControlStreamCursorCodec(
+      keyStore: try MacOSAuditSigningKeyStore(
+        service: ControlStreamCursorCodec.keychainServiceName(
+          stateDatabasePath: configuration.stateDatabasePath
+        )
+      )
+    )
+    let streamSources = DaemonControlStreamSourceFactory(
+      store: store,
+      cursorCodec: streamCursorCodec,
+      manifestPath: configuration.configPath,
+      stateDatabasePath: configuration.stateDatabasePath,
+      auditRecorder: auditTrail
+    )
+    let requestRepository = ControlRequestRepository(store: store)
     let rbacAuthorizer = RBACAuthorizationEngine(repository: store.rbac)
     let rbacAdministration = RBACAdministrationService(
       repository: store.rbac, authorizer: rbacAuthorizer)
@@ -87,13 +102,21 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
     let admissionEngine = AdmissionPolicyEngine(
       repository: store.admission,
       workloadProfileResolver: { try profileEngine.resolve(id: $0) })
+    let streamAuthorizationPipeline = DaemonControlStreamAuthorizationPipeline(
+      store: store,
+      rbacAuthorizer: rbacAuthorizer,
+      admissionEngine: admissionEngine,
+      requestRepository: requestRepository,
+      auditRecorder: auditTrail,
+      validateStreamRequest: { try streamSources.validateRequest($0) }
+    )
     let admissionAdministration = AdmissionAdministrationService(
       repository: store.admission, authorizer: rbacAuthorizer)
     let profileAdministration = WorkloadProfileAdministrationService(
       repository: store.workloadProfiles, authorizer: rbacAuthorizer)
     let server = try PersistentControlConnectionServer(
       authenticator: authenticator,
-      requestRepository: ControlRequestRepository(store: store),
+      requestRepository: requestRepository,
       daemonGeneration: UInt64.random(in: 1...UInt64.max),
       socketIdentity: listener.identity,
       mutatingOperations: Set([
@@ -122,6 +145,43 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
           reasonCode: evaluated.reasonCode,
           evaluationDigestSHA256: evaluated.evaluationDigestSHA256,
           dryRun: evaluated.dryRun)
+      },
+      streamAuthorizer: { peer, streamID, request, at in
+        try streamAuthorizationPipeline.authorize(
+          peer: peer,
+          streamID: streamID,
+          request: request,
+          at: at
+        )
+      },
+      streamCursorValidator: { peer, request, cursor in
+        try streamSources.validateCursor(peer: peer, request: request, cursor: cursor)
+      },
+      streamReauthorizer: { peer, request, at in
+        try streamAuthorizationPipeline.reauthorize(peer: peer, request: request, at: at)
+      },
+      streamOpener: { peer, request, cursor, sink in
+        try streamSources.open(
+          peer: peer,
+          request: request,
+          cursor: cursor,
+          preStartAuthorization: {
+            try authenticator.validateSession(
+              peer.binding,
+              daemonGeneration: peer.binding.daemonGeneration
+            )
+            let decision = try streamAuthorizationPipeline.reauthorize(
+              peer: peer,
+              request: request,
+              at: Date()
+            )
+            try decision.validate()
+            guard decision.effect == .allow else {
+              throw ControlStreamAuthorizationError.admissionDenied
+            }
+          },
+          sink: sink
+        )
       },
       handler: { peer, request, _ in
         try Self.handle(
@@ -153,6 +213,12 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
     self.listener = nil
     lock.unlock()
     listener?.closeAndRemoveOwnedSocket()
+    lock.lock()
+    let drainingDescriptors = connections
+    for descriptor in drainingDescriptors {
+      _ = shutdown(descriptor, SHUT_RD)
+    }
+    lock.unlock()
     _ = connectionGroup.wait(timeout: .now() + 5)
     lock.lock()
     let descriptors = connections
@@ -196,7 +262,7 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
   private func register(_ descriptor: Int32) -> Bool {
     lock.lock()
     defer { lock.unlock() }
-    guard !stopped, connections.count < ControlPlaneContract.maximumOutstandingUnary else {
+    guard !stopped, connections.count < ControlPlaneContract.maximumClientConnections else {
       return false
     }
     connections.insert(descriptor)

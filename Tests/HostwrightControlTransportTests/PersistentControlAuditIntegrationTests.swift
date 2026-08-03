@@ -182,10 +182,12 @@ final class PersistentControlAuditIntegrationTests: XCTestCase {
       idempotencyKey: "audit-failure-idempotency"
     )
     try write(mutation, descriptor: session.client)
-    XCTAssertThrowsError(try readResponse(descriptor: session.client))
+    XCTAssertThrowsError(try readResponse(descriptor: session.client)) { error in
+      XCTAssertEqual(error as? ControlTransportError, .peerClosed)
+    }
     session.waitForServer()
 
-    XCTAssertEqual(session.result.error as? PersistentControlServerError, .persistenceFailed)
+    XCTAssertNil(session.result.error)
     XCTAssertEqual(mutationInvocations.value, 0)
     XCTAssertNil(try repository.load(mutation.requestID))
     XCTAssertTrue(recorder.events.isEmpty)

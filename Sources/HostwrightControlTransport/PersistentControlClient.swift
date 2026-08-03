@@ -9,6 +9,10 @@ public enum PersistentControlClientError: Error, Equatable, Sendable {
   case serverBindingMismatch
   case credentialRequired
   case invalidResponse
+  case concurrencyLimit
+  case streamLimit
+  case deadlineExceeded
+  case connectionClosed
 }
 
 public struct PersistentControlServerTrustPolicy: Sendable, Equatable {
@@ -78,6 +82,7 @@ public struct PersistentControlClient: Sendable {
     guard connected == 0, try pinSocket() == pinned else {
       throw PersistentControlClientError.connectionFailed
     }
+    try ControlFrameCodec.configureConnectedSocket(descriptor: descriptor)
     try validateServer(descriptor: descriptor)
     let handshakeDeadline = try ControlTransportDeadline(
       timeoutMilliseconds: ControlPlaneContract.maximumAuthenticationHandshakeMilliseconds)
@@ -127,6 +132,52 @@ public struct PersistentControlClient: Sendable {
       throw PersistentControlClientError.invalidResponse
     }
     return response
+  }
+
+  public func connectSession() throws -> PersistentControlClientSession {
+    let pinned = try pinSocket()
+    let descriptor = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
+    guard descriptor >= 0 else { throw PersistentControlClientError.connectionFailed }
+    do {
+      try ControlFrameCodec.configureNoSigPipe(descriptor: descriptor)
+      var address = try Self.address(socketPath)
+      let connected = withUnsafePointer(to: &address) { pointer in
+        pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+          Darwin.connect(descriptor, $0, Self.addressLength(socketPath))
+        }
+      }
+      guard connected == 0, try pinSocket() == pinned else {
+        throw PersistentControlClientError.connectionFailed
+      }
+      try ControlFrameCodec.configureConnectedSocket(descriptor: descriptor)
+      try validateServer(descriptor: descriptor)
+      let handshakeDeadline = try ControlTransportDeadline(
+        timeoutMilliseconds: ControlPlaneContract.maximumAuthenticationHandshakeMilliseconds)
+      let challenge = try ControlAuthenticationWireContract.decodeChallenge(
+        ControlFrameCodec.read(
+          kind: .frame,
+          descriptor: descriptor,
+          deadline: handshakeDeadline
+        )
+      )
+      try validate(challenge: challenge, pinned: pinned)
+      let proof = try credentialProofProvider(challenge)
+      guard challenge.credentialProofRequired == (proof != nil) else {
+        throw PersistentControlClientError.credentialRequired
+      }
+      try ControlFrameCodec.write(
+        try ControlPlaneCanonicalJSON.encode(ControlAuthenticationResponse(credentialProof: proof)),
+        kind: .request,
+        descriptor: descriptor,
+        deadline: handshakeDeadline
+      )
+      let session = PersistentControlClientSession(descriptor: descriptor)
+      session.start()
+      return session
+    } catch {
+      _ = Darwin.close(descriptor)
+      throw error
+    }
   }
 
   private func pinSocket() throws -> PinnedControlSocket {

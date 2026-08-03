@@ -80,7 +80,8 @@ signature, Keychain access controls, or a P-256 signature without its key.
 | P09-T05 | Admission mutation or stale approval bypass | Effective intent exceeds request | current plan/confirmation gates | fixed two-pass ordering, canonical conflict deny, effective-intent auth, plan-hash/expiry-bound exception (G6) | Faulty policy logic fails closed for security-sensitive actions. |
 | P09-T05A | Workload or provider silently weakens a selected profile | Runtime authority exceeds the reviewed profile | provider preflight and manifest validation | canonical inheritance hash, subset-only child policy, exact `profile.weaken` approval, second hash-bound RBAC, and provider/workload gap denial before effects (G7) | Legacy requests remain unprofiled until selected; Gate 9 removes remaining direct CLI mutation paths. |
 | P09-T06 | Audit deletion, reorder, fork, truncation, key rotation, clock change, storage pressure | Concealed security event or unsafe mutation | state migration ledger and existing audit boundaries | canonical SHA-256 chain, P-256 segment seals, Keychain keys, retention checkpoint, verification; audit append failure denies sensitive mutation (G4) | Physical destruction of all local evidence is detectable only against retained verification anchors. |
-| P09-T07 | Cursor forgery or slow stream consumer | Cross-subject data or resource exhaustion | existing bounded process I/O | opaque subject-bound cursors, credits, sequences, gaps, eviction, cancellation, restart recovery (G8) | Legitimate slow clients can observe a gap and must resync. |
+| P09-T07 | Cursor forgery, forged sequence/credit, or slow stream consumer | Cross-subject data, unbounded buffering, or stream desynchronization | existing bounded process I/O | opaque subject-bound cursors, bidirectional credits, ordered frame allocation/write, bounded queues, gaps, eviction, cancellation, restart recovery (G8) | Legitimate slow clients can observe a gap and must resync. |
+| P09-T07A | Oversized or unauthorized stdin, resize, or signal input; cancel/terminal race | Runtime input injection, surviving process, or false terminal evidence | interactive runtime ownership/fencing and process-control checks | strict typed input, reverse credit, allowed-signal set, per-emission reauthorization, deferred interactive cancellation until process exit plus audit/state terminal evidence (G8) | A correctly authorized interactive subject can control only the exact fenced workload it was granted. |
 | P09-T08 | WASI ambient authority / grant escape | Host filesystem/network/state compromise | WasmKit 0.3.1 limits in network provider path | fresh Preview 1 command, no preopens/env/network/socket/Keychain, deterministic host time/random, grant-filtered snapshots/actions and hard limits (G10) | Runtime implementation vulnerabilities require upstream remediation. |
 | P09-T09 | XPC wrong signer/identifier/entitlement or service crash | Native provider impersonation or daemon crash | Security.framework code-validation patterns | reciprocal requirements, exact team/service ID, sandbox-only entitlement, bounded v1 dictionaries, cancellation/crash isolation (G11) | Valid signed service defects remain inside its limited read-only capability. |
 | P09-T10 | Package substitution, downgrade, revoked signer, traversal | Malicious provider activation | existing reviewed-local declaration boundary rejects generic loading | CMS/provenance/content digests, compatibility, immutable digest store, staged health activation, atomic rollback, revocation/quarantine (G12) | Explicitly trusted signer compromise requires revocation response. |
@@ -106,9 +107,10 @@ hardening:
 - Audit record modification/deletion/reorder/fork/truncation, key substitution,
   clock anomaly, and append/storage pressure are detected; sensitive writes do
   not acknowledge without audit persistence.
-- A cursor forged for another subject, stream overflow, compaction gap,
-  reconnect, restart, cancellation, and slow client preserve isolation and
-  bounded recovery.
+- A cursor forged for another subject, sequence/credit overflow, malformed or
+  over-credit stdin/resize/signal, compaction gap, reconnect, restart,
+  cancellation/terminal race, and slow client preserve isolation, exact
+  durable lifecycle evidence, and bounded recovery.
 - WASI attempts to access an inherited environment, filesystem, network,
   socket, state, Keychain, or host runtime fail; oversize, hang, crash, and
   revoked providers recover without leaked authority.

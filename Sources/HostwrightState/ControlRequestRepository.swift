@@ -142,6 +142,23 @@ public enum ControlRequestRecordResult: Equatable, Sendable {
   }
 }
 
+public enum ControlStreamOperationStartDisposition: Equatable, Sendable {
+  case created
+  case retryNeverStarted
+  case ambiguousStarted
+  case terminal(ControlRequestStatus)
+
+  public var shouldStart: Bool {
+    self == .created || self == .retryNeverStarted
+  }
+}
+
+public enum ControlRequestRepositoryError: Error, Equatable, Sendable {
+  case idempotencyConflict
+}
+
+extension ControlRequestRepositoryError: StateTransactionPreservedError {}
+
 public struct ControlRequestRepository: Sendable {
   private let store: SQLiteStateStore
   private let now: @Sendable () -> Date
@@ -163,7 +180,337 @@ public struct ControlRequestRepository: Sendable {
   ) throws -> ControlRequestRecordResult {
     try submission.validate()
     return try store.withValidatedConnection { connection in
+      try connection.transaction { try recordOrReplay(submission, on: connection) }
+    }
+  }
+
+  public func beginStreamOperation(
+    _ submission: ControlRequestSubmission,
+    operationReference: String,
+    plannedActionType: String,
+    projectID: String? = nil,
+    serviceName: String? = nil
+  ) throws -> ControlStreamOperationStartDisposition {
+    try submission.validate()
+    try ControlRequestValidation.optionalOperationReference(operationReference)
+    guard let streamIdempotencyKey = submission.request.idempotencyKey,
+      !operationReference.isEmpty, !plannedActionType.isEmpty,
+      plannedActionType.utf8.count <= 128
+    else { throw StateStoreError.invalidRecord("Stream operation identity is invalid.") }
+    return try store.withValidatedConnection { connection in
       try connection.transaction {
+        let result: ControlRequestRecordResult
+        do {
+          result = try recordOrReplay(submission, on: connection)
+        } catch StateStoreError.invalidRecord(let message)
+          where Self.isDurableIdentityConflict(message)
+        {
+          throw ControlRequestRepositoryError.idempotencyConflict
+        }
+        let rows = try connection.query(
+          "SELECT status FROM operation_ledger WHERE id = ? LIMIT 1",
+          bindings: [.text(operationReference)]
+        )
+        switch result {
+        case .created:
+          guard rows.isEmpty else {
+            throw StateStoreError.transactionInvariantViolation(
+              message: "A new stream request collided with an operation ledger record.")
+          }
+          let request = submission.request
+          try connection.run(
+            """
+            INSERT INTO operation_ledger (
+              id, created_at, updated_at, planned_action_type, project_id, service_name,
+              status, idempotency_key, plan_hash, payload_json_redacted
+            ) VALUES (?, ?, ?, ?, ?, ?, 'planned', ?, ?, '{}')
+            """,
+            bindings: [
+              .text(operationReference), .text(request.createdAt), .text(request.updatedAt),
+              .text(plannedActionType), controlRequestOptionalText(projectID),
+              controlRequestOptionalText(serviceName), .text(streamIdempotencyKey),
+              .text(request.requestDigestSHA256),
+            ]
+          )
+          try insertStreamOperationEvent(
+            operationReference: operationReference,
+            stage: "planned",
+            timestamp: request.createdAt,
+            projectID: projectID,
+            serviceName: serviceName,
+            on: connection
+          )
+          return .created
+        case .replayed(let request):
+          guard rows.count == 1, let raw = rows[0].first ?? nil,
+            let status = OperationStatus(rawValue: raw),
+            request.operationReference == operationReference
+          else {
+            throw StateStoreError.transactionInvariantViolation(
+              message: "A replayed stream request lost its operation lifecycle.")
+          }
+          switch status {
+          case .planned: return .retryNeverStarted
+          case .recorded: return .ambiguousStarted
+          case .succeeded: return .terminal(.completed)
+          case .failed, .abandoned: return .terminal(.error)
+          }
+        }
+      }
+    }
+  }
+
+  private static func isDurableIdentityConflict(_ message: String) -> Bool {
+    message == "Idempotency key is already bound to a different request digest."
+      || message == "Idempotency key is already bound to a different request identifier."
+      || message == "Control request ID is already bound to different durable request data."
+      || message == "Expired idempotency records are retained and cannot be reused."
+  }
+
+  public func markStreamOperationStarted(
+    requestID: String,
+    operationReference: String,
+    updatedAt: String
+  ) throws {
+    _ = try ControlRequestValidation.timestamp(updatedAt, named: "stream operation start timestamp")
+    try store.withValidatedConnection { connection in
+      try connection.transaction {
+        try connection.run(
+          "UPDATE operation_ledger SET status = 'recorded', updated_at = ? WHERE id = ? AND status = 'planned'",
+          bindings: [.text(updatedAt), .text(operationReference)]
+        )
+        let changed = try connection.query("SELECT changes()").first?.first ?? nil
+        guard changed == "1", let request = try load(requestID, on: connection),
+          request.status == .accepted, request.operationReference == operationReference
+        else {
+          throw StateStoreError.transactionInvariantViolation(
+            message: "Stream operation start lost exact durable authority.")
+        }
+        let scope = try streamOperationScope(operationReference, on: connection)
+        try insertStreamOperationEvent(
+          operationReference: operationReference,
+          stage: "started",
+          timestamp: updatedAt,
+          projectID: scope.projectID,
+          serviceName: scope.serviceName,
+          on: connection
+        )
+      }
+    }
+  }
+
+  public func finishStreamOperation(
+    requestID: String,
+    operationReference: String,
+    succeeded: Bool,
+    abandoned: Bool = false,
+    updatedAt: String
+  ) throws {
+    _ = try ControlRequestValidation.timestamp(updatedAt, named: "stream operation finish timestamp")
+    try store.withValidatedConnection { connection in
+      try connection.transaction {
+        let operationStatus = succeeded ? "succeeded" : (abandoned ? "abandoned" : "failed")
+        try connection.run(
+          "UPDATE operation_ledger SET status = ?, updated_at = ? WHERE id = ? AND status = 'recorded'",
+          bindings: [.text(operationStatus), .text(updatedAt), .text(operationReference)]
+        )
+        let changed = try connection.query("SELECT changes()").first?.first ?? nil
+        guard changed == "1" else {
+          throw StateStoreError.transactionInvariantViolation(
+            message: "Stream operation terminal transition lost exact durable authority.")
+        }
+        let scope = try streamOperationScope(operationReference, on: connection)
+        try insertStreamOperationEvent(
+          operationReference: operationReference,
+          stage: succeeded ? "completed" : (abandoned ? "cancelled" : "failed"),
+          timestamp: updatedAt,
+          projectID: scope.projectID,
+          serviceName: scope.serviceName,
+          on: connection
+        )
+        let terminalRequestStatus = succeeded
+          ? ControlRequestStatus.completed : ControlRequestStatus.error
+        try connection.run(
+          "UPDATE control_requests SET status = ?, updated_at = ? WHERE request_id = ? AND status = 'accepted' AND operation_reference = ?",
+          bindings: [
+            .text(terminalRequestStatus.rawValue),
+            .text(updatedAt), .text(requestID), .text(operationReference),
+          ]
+        )
+        guard try connection.query("SELECT changes()").first?.first == "1",
+          let request = try load(requestID, on: connection),
+          request.status == terminalRequestStatus,
+          request.operationReference == operationReference,
+          let idempotencyKey = request.idempotencyKey
+        else {
+          throw StateStoreError.transactionInvariantViolation(
+            message: "Stream operation terminal request evidence lost its exact durable link.")
+        }
+        try connection.run(
+          "UPDATE idempotency_records SET status = ? WHERE request_id = ? AND subject_id = ? AND idempotency_key = ? AND status = 'accepted'",
+          bindings: [
+            .text(terminalRequestStatus.rawValue), .text(requestID),
+            .text(request.subjectID), .text(idempotencyKey),
+          ]
+        )
+        guard try connection.query("SELECT changes()").first?.first == "1",
+          let idempotency = try loadIdempotency(
+            subjectID: request.subjectID, idempotencyKey: idempotencyKey, on: connection),
+          idempotency.requestID == requestID,
+          idempotency.requestDigestSHA256 == request.requestDigestSHA256,
+          idempotency.status == terminalRequestStatus
+        else {
+          throw StateStoreError.transactionInvariantViolation(
+            message: "Stream operation terminal idempotency evidence lost its exact durable link.")
+        }
+      }
+    }
+  }
+
+  public func recordStreamOperationCancelRequested(
+    operationReference: String,
+    updatedAt: String
+  ) throws {
+    _ = try ControlRequestValidation.timestamp(updatedAt, named: "stream cancellation timestamp")
+    try store.withValidatedConnection { connection in
+      try connection.transaction {
+        let scope = try streamOperationScope(operationReference, on: connection)
+        guard scope.status == .recorded else {
+          throw StateStoreError.invalidRecord("Only a running stream operation can be cancelled.")
+        }
+        try insertStreamOperationEvent(
+          operationReference: operationReference,
+          stage: "cancel-requested",
+          timestamp: updatedAt,
+          projectID: scope.projectID,
+          serviceName: scope.serviceName,
+          on: connection
+        )
+      }
+    }
+  }
+
+  public func cancelPlannedStreamOperation(
+    requestID: String,
+    operationReference: String,
+    updatedAt: String
+  ) throws {
+    _ = try ControlRequestValidation.timestamp(updatedAt, named: "planned stream cancellation timestamp")
+    try store.withValidatedConnection { connection in
+      try connection.transaction {
+        let scope = try streamOperationScope(operationReference, on: connection)
+        guard scope.status == .planned else {
+          throw StateStoreError.invalidRecord("Only a planned stream operation can be cancelled before start.")
+        }
+        try insertStreamOperationEvent(
+          operationReference: operationReference,
+          stage: "cancel-requested",
+          timestamp: updatedAt,
+          projectID: scope.projectID,
+          serviceName: scope.serviceName,
+          on: connection
+        )
+        try connection.run(
+          "UPDATE operation_ledger SET status = 'abandoned', updated_at = ? WHERE id = ? AND status = 'planned'",
+          bindings: [.text(updatedAt), .text(operationReference)]
+        )
+        guard try connection.query("SELECT changes()").first?.first == "1" else {
+          throw StateStoreError.transactionInvariantViolation(
+            message: "Planned stream cancellation lost operation authority.")
+        }
+        try insertStreamOperationEvent(
+          operationReference: operationReference,
+          stage: "cancelled",
+          timestamp: updatedAt,
+          projectID: scope.projectID,
+          serviceName: scope.serviceName,
+          on: connection
+        )
+        try connection.run(
+          "UPDATE control_requests SET status = 'error', updated_at = ? WHERE request_id = ? AND status = 'accepted' AND operation_reference = ?",
+          bindings: [.text(updatedAt), .text(requestID), .text(operationReference)]
+        )
+        guard try connection.query("SELECT changes()").first?.first == "1",
+          let request = try load(requestID, on: connection),
+          request.status == .error,
+          request.operationReference == operationReference,
+          let idempotencyKey = request.idempotencyKey
+        else {
+          throw StateStoreError.transactionInvariantViolation(
+            message: "Planned stream cancellation lost request authority.")
+        }
+        try connection.run(
+          "UPDATE idempotency_records SET status = 'error' WHERE request_id = ? AND subject_id = ? AND idempotency_key = ? AND status = 'accepted'",
+          bindings: [.text(requestID), .text(request.subjectID), .text(idempotencyKey)]
+        )
+        guard try connection.query("SELECT changes()").first?.first == "1",
+          try loadIdempotency(
+            subjectID: request.subjectID,
+            idempotencyKey: idempotencyKey,
+            on: connection
+          )?.status == .error
+        else {
+          throw StateStoreError.transactionInvariantViolation(
+            message: "Planned stream cancellation lost idempotency authority.")
+        }
+      }
+    }
+  }
+
+  private func streamOperationScope(
+    _ operationReference: String,
+    on connection: SQLiteConnection
+  ) throws -> (projectID: String?, serviceName: String?, status: OperationStatus) {
+    let rows = try connection.query(
+      "SELECT project_id, service_name, status FROM operation_ledger WHERE id = ? LIMIT 1",
+      bindings: [.text(operationReference)]
+    )
+    guard rows.count == 1, rows[0].count == 3, let raw = rows[0][2],
+      let status = OperationStatus(rawValue: raw)
+    else { throw StateStoreError.notFound("Stream operation does not exist.") }
+    return (rows[0][0], rows[0][1], status)
+  }
+
+  private func insertStreamOperationEvent(
+    operationReference: String,
+    stage: String,
+    timestamp: String,
+    projectID: String?,
+    serviceName: String?,
+    on connection: SQLiteConnection
+  ) throws {
+    let payloadData: Data
+    do {
+      payloadData = try JSONSerialization.data(
+        withJSONObject: ["operationID": operationReference, "stage": stage],
+        options: [.sortedKeys, .withoutEscapingSlashes]
+      )
+    } catch {
+      throw StateStoreError.invalidRecord("Stream operation event payload is not encodable.")
+    }
+    guard let payload = String(data: payloadData, encoding: .utf8) else {
+      throw StateStoreError.invalidRecord("Stream operation event payload is not UTF-8.")
+    }
+    try connection.run(
+      """
+      INSERT INTO event_ledger (
+        id, timestamp, severity, type, source, project_id, service_name,
+        runtime_adapter, message, payload_json_redacted
+      ) VALUES (?, ?, 'info', ?, 'hostwrightd-control', ?, ?, NULL, ?, ?)
+      """,
+      bindings: [
+        .text("event-stream-\(UUID().uuidString.lowercased())"),
+        .text(timestamp), .text("operation.stream.\(stage)"),
+        controlRequestOptionalText(projectID), controlRequestOptionalText(serviceName),
+        .text("Stream operation \(stage)."), .text(payload),
+      ]
+    )
+  }
+
+  private func recordOrReplay(
+    _ submission: ControlRequestSubmission,
+    on connection: SQLiteConnection
+  ) throws -> ControlRequestRecordResult {
         if let key = submission.request.idempotencyKey {
           if let existing = try loadIdempotency(
             subjectID: submission.request.subjectID,
@@ -219,8 +566,6 @@ public struct ControlRequestRepository: Sendable {
           )
         }
         return .created(submission.request)
-      }
-    }
   }
 
   public func updateTerminal(

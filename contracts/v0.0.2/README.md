@@ -24,6 +24,8 @@ plugin lifecycle are already implemented.
 - `phase09-auth-challenge-v2.1.json`: server-first local authentication challenge.
 - `phase09-auth-response-v2.1.json`: credential-bearing client authentication response.
 - `phase09-stream-frame-v2.1.json`: revision 2.1 stream frame.
+- `phase09-stream-input-v2.1.json`: revision 2.1 bounded typed client stream input.
+- `phase09-stream-acceptance-v2.1.json`: revision 2.1 strict stream acceptance.
 - `phase09-rbac-v2.1.json`: scoped RBAC rule vocabulary.
 - `phase09-default-role-matrix.json`: frozen default-role permission matrix.
 - `phase09-admission-v2.1.json`: admission decision fixture.
@@ -38,6 +40,12 @@ plugin lifecycle are already implemented.
 `control-plan-request.json` and `control-plan-response.json` remain the legacy
 revision 2.0 compatibility fixtures. Revision 2.1 must preserve their decode
 and response behavior rather than silently reinterpret them.
+
+The Gate 8 stream-input and stream-acceptance fixtures are production-decoded
+goldens, not illustrative samples. Their exact keys, direction, bounds,
+full-duplex credit semantics, durable operation reference, and audit-health
+projection are part of revision 2.1. The reviewed impact/invalidation record
+is in the Gate 8 section of `phase09-control-plane-contracts.md`.
 
 The full frozen boundary and implementation sequencing are documented in
 [`phase09-control-plane-contracts.md`](../../docs/architecture/phase09-control-plane-contracts.md).

@@ -60,6 +60,106 @@ final class PersistentControlServerTests: XCTestCase {
     }
   }
 
+  func testStreamingHooksRequireCompleteFourHookBundle() throws {
+    let root = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let store = SQLiteStateStore(path: root.appendingPathComponent("state.sqlite").path)
+    try store.migrate()
+    let identity = fixtureIdentity()
+    try store.controlIdentities.bootstrap(
+      ControlPeerIdentityRecord(
+        subjectID: "stream-hook-subject",
+        userID: UInt32(geteuid()),
+        codeIdentity: identity,
+        declaredBySubjectID: "stream-hook-subject",
+        declaredAt: "2026-08-03T00:00:00Z",
+        updatedAt: "2026-08-03T00:00:00Z"
+      )
+    )
+    let adapter = try SQLiteControlIdentitySecurityAdapter(store: store, sessionLifetime: 600)
+    let credentials = RawControlPeerCredentials(
+      peerUID: UInt32(geteuid()),
+      peerGID: UInt32(getegid()),
+      peerPID: getpid(),
+      auditEffectiveUID: UInt32(geteuid()),
+      auditEffectiveGID: UInt32(getegid()),
+      auditPID: getpid(),
+      auditPIDVersion: 1,
+      auditSessionID: 1,
+      auditTokenData: Data(repeating: 7, count: MemoryLayout<audit_token_t>.size)
+    )
+    let authenticator = ControlPeerAuthenticator(
+      policy: try ControlPeerTrustPolicy(
+        expectedUserID: UInt32(geteuid()),
+        pinnedAdHocCodeDirectoryHashes: [identity.codeDirectoryHash]
+      ),
+      credentialReader: FixedCredentialReader(credentials: credentials),
+      codeValidator: FixedCodeValidator(identity: identity),
+      subjectResolver: adapter,
+      sessionStore: adapter
+    )
+    let repository = ControlRequestRepository(store: store)
+    let streamAuthorizer: ControlStreamAuthorizer = { _, _, _, _ in
+      ControlStreamAuthorization(
+        decision: RBACDecision(
+          effect: .allow, ruleIdentifiers: ["test.allow"], reasonCode: "authorization.allowed")
+      )
+    }
+    let streamCursorValidator: ControlStreamCursorValidator = { _, _, _ in }
+    let streamReauthorizer: ControlStreamReauthorizer = { _, _, _ in
+      RBACDecision(effect: .allow, ruleIdentifiers: ["test.allow"], reasonCode: "authorization.allowed")
+    }
+    let streamOpener: ControlStreamOpener = { _, _, _, _ in
+      ControlStreamProducerHandle(cancel: {})
+    }
+
+    func makeServer(
+      streamAuthorizer: ControlStreamAuthorizer?,
+      streamCursorValidator: ControlStreamCursorValidator?,
+      streamReauthorizer: ControlStreamReauthorizer?,
+      streamOpener: ControlStreamOpener?
+    ) throws -> PersistentControlConnectionServer {
+      try PersistentControlConnectionServer(
+        authenticator: authenticator,
+        requestRepository: repository,
+        daemonGeneration: 1,
+        socketIdentity: ControlSocketIdentity(device: 31, inode: 37),
+        mutatingOperations: [],
+        auditRecorder: TestControlAuditRecorder(),
+        authorizer: allowingTestControlRequestAuthorizer,
+        admissionEvaluator: allowingTestControlAdmissionEvaluator,
+        streamAuthorizer: streamAuthorizer,
+        streamCursorValidator: streamCursorValidator,
+        streamReauthorizer: streamReauthorizer,
+        streamOpener: streamOpener,
+        handler: { _, request, _ in
+          ControlResponseEnvelope(requestID: request.requestID, status: .completed, reasonCode: .completed)
+        }
+      )
+    }
+
+    // Every one of the 14 partial subsets must be rejected; absence and the
+    // complete bundle are the only valid server configurations.
+    for mask in 0..<16 {
+      let result = Result {
+        try makeServer(
+          streamAuthorizer: mask & 1 == 0 ? nil : streamAuthorizer,
+          streamCursorValidator: mask & 2 == 0 ? nil : streamCursorValidator,
+          streamReauthorizer: mask & 4 == 0 ? nil : streamReauthorizer,
+          streamOpener: mask & 8 == 0 ? nil : streamOpener
+        )
+      }
+      switch (mask, result) {
+      case (0, .success), (15, .success):
+        break
+      case (1...14, .failure(let error)):
+        XCTAssertEqual(error as? PersistentControlServerError, .invalidRequest, "mask \(mask)")
+      default:
+        XCTFail("unexpected stream hook configuration result for mask \(mask): \(result)")
+      }
+    }
+  }
+
   func testAuthenticatedMutationPersistsBeforeReplyAndIdempotentReplaySkipsHandler() throws {
     let root = try temporaryDirectory()
     defer { try? FileManager.default.removeItem(at: root) }
@@ -388,7 +488,7 @@ final class PersistentControlServerTests: XCTestCase {
     XCTAssertEqual(invocations.value, 0)
   }
 
-  func testExpiredRequestDeadlineDoesNotInvokeHandler() throws {
+  func testExpiredRequestDeadlineClosesConnectionWithoutInvokingHandler() throws {
     let root = try temporaryDirectory()
     defer { try? FileManager.default.removeItem(at: root) }
     let store = SQLiteStateStore(path: root.appendingPathComponent("state.sqlite").path)
@@ -473,8 +573,17 @@ final class PersistentControlServerTests: XCTestCase {
     try writeRequest(try ControlPlaneCanonicalJSON.encode(request), descriptor: pair.client)
 
     wait(for: [serverFinished], timeout: 2)
-    XCTAssertEqual(serverResult.error as? ControlTransportError, .deadlineExceeded)
+    XCTAssertNil(serverResult.error)
     XCTAssertEqual(invocations.value, 0)
+    XCTAssertThrowsError(
+      try ControlFrameCodec.read(
+        kind: .response,
+        descriptor: pair.client,
+        deadline: try ControlTransportDeadline(timeoutMilliseconds: 1_000)
+      )
+    ) { error in
+      XCTAssertEqual(error as? ControlTransportError, .peerClosed)
+    }
   }
 
   func testOversizedFrameClosesConnectionBeforeRequestAllocation() throws {

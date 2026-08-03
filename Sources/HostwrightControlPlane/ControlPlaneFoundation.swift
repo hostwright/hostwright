@@ -1,4 +1,5 @@
 import CryptoKit
+import Darwin
 import Foundation
 
 public enum ControlPlaneContract {
@@ -7,8 +8,17 @@ public enum ControlPlaneContract {
   public static let maximumResponseOrFrameBytes = 1_048_576
   public static let maximumStreams = 32
   public static let maximumOutstandingUnary = 64
+  public static let maximumClientConnections = 256
   public static let maximumUnaryDeadlineMilliseconds = 300_000
   public static let maximumAuthenticationHandshakeMilliseconds = 5_000
+  public static let maximumStreamCredit = 256
+  public static let maximumStreamIdentifierBytes = 128
+  public static let maximumStreamCursorBytes = 4_096
+  public static let maximumStreamInputBytes = 47 * 1_024
+  public static let maximumInteractiveStreamInputCredit = 16
+  public static let streamHeartbeatMilliseconds = 15_000
+  public static let streamWriteDeadlineMilliseconds = 5_000
+  public static let maximumBufferedStreamFrames = 128
   public static func validateRequestByteCount(_ value: Int) throws {
     guard (1...maximumRequestBytes).contains(value) else {
       throw ContractValidationError.outOfBounds("request bytes")
@@ -409,6 +419,187 @@ public struct ControlResponseEnvelope: Codable, Equatable, Sendable {
 
 public enum StreamFrameKind: String, Codable, CaseIterable, Sendable {
   case open, data, heartbeat, gap, ack, cancel, end, error
+}
+
+public enum ControlStreamSource: String, Codable, CaseIterable, Sendable {
+  case logs, attach, exec, events, metrics, traces, operation, state
+}
+
+public struct ControlStreamOpenRequest: Codable, Equatable, Sendable {
+  public let source: ControlStreamSource
+  public let target: String?
+  public let filter: ControlPlaneJSONValue?
+  public let heartbeatMilliseconds: Int
+  public let requestID: String?
+  public let idempotencyKey: String?
+
+  public init(
+    source: ControlStreamSource,
+    target: String? = nil,
+    filter: ControlPlaneJSONValue? = nil,
+    heartbeatMilliseconds: Int = ControlPlaneContract.streamHeartbeatMilliseconds,
+    requestID: String? = nil,
+    idempotencyKey: String? = nil
+  ) {
+    self.source = source
+    self.target = target
+    self.filter = filter
+    self.heartbeatMilliseconds = heartbeatMilliseconds
+    self.requestID = requestID
+    self.idempotencyKey = idempotencyKey
+  }
+
+  public func validate() throws {
+    if let target {
+      guard !target.isEmpty, target.utf8.count <= 512,
+        !target.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) })
+      else { throw ContractValidationError.invalid("stream target") }
+    }
+    guard (1_000...60_000).contains(heartbeatMilliseconds) else {
+      throw ContractValidationError.outOfBounds("stream heartbeat")
+    }
+    switch source {
+    case .logs, .operation:
+      guard target != nil else { throw ContractValidationError.required("stream target") }
+      guard requestID == nil, idempotencyKey == nil else {
+        throw ContractValidationError.invalid("read-only stream mutation identity")
+      }
+    case .attach, .exec:
+      guard target != nil, let requestID, let idempotencyKey,
+        requestID.range(of: "^[A-Za-z0-9._:-]{1,128}$", options: .regularExpression) != nil,
+        idempotencyKey.range(of: "^[A-Za-z0-9._:-]{1,256}$", options: .regularExpression) != nil
+      else { throw ContractValidationError.required("stream mutation identity") }
+    case .events, .metrics, .traces, .state:
+      guard requestID == nil, idempotencyKey == nil else {
+        throw ContractValidationError.invalid("read-only stream mutation identity")
+      }
+    }
+  }
+}
+
+public enum ControlStreamClientInputKind: String, Codable, CaseIterable, Sendable {
+  case stdin, resize, signal
+}
+
+public struct ControlStreamClientInput: Codable, Equatable, Sendable {
+  public let kind: ControlStreamClientInputKind
+  public let payloadBase64: String?
+  public let columns: Int?
+  public let rows: Int?
+  public let signal: Int32?
+
+  public init(
+    kind: ControlStreamClientInputKind,
+    payloadBase64: String? = nil,
+    columns: Int? = nil,
+    rows: Int? = nil,
+    signal: Int32? = nil
+  ) {
+    self.kind = kind
+    self.payloadBase64 = payloadBase64
+    self.columns = columns
+    self.rows = rows
+    self.signal = signal
+  }
+
+  public func validate() throws {
+    switch kind {
+    case .stdin:
+      guard columns == nil, rows == nil, signal == nil,
+        let payloadBase64, payloadBase64.utf8.count <= 96 * 1_024,
+        let data = Data(base64Encoded: payloadBase64), !data.isEmpty,
+        data.count <= ControlPlaneContract.maximumStreamInputBytes
+      else { throw ContractValidationError.invalid("stream stdin input") }
+    case .resize:
+      guard payloadBase64 == nil, signal == nil, let columns, let rows,
+        (1...1_000).contains(columns), (1...1_000).contains(rows)
+      else { throw ContractValidationError.invalid("stream resize input") }
+    case .signal:
+      guard payloadBase64 == nil, columns == nil, rows == nil, let signal,
+        [SIGINT, SIGTERM, SIGQUIT, SIGHUP, SIGWINCH].contains(signal)
+      else { throw ContractValidationError.invalid("stream signal input") }
+    }
+  }
+}
+
+public enum ControlStreamAuditHealth: String, Codable, Sendable {
+  case healthy, degraded
+}
+
+public struct ControlStreamAcceptance: Codable, Equatable, Sendable {
+  public let source: ControlStreamSource
+  public let resumed: Bool
+  public let heartbeatMilliseconds: Int
+  public let inputCredit: Int
+  public let operationRef: String?
+  public let auditHealth: ControlStreamAuditHealth
+
+  public init(
+    source: ControlStreamSource,
+    resumed: Bool,
+    heartbeatMilliseconds: Int,
+    inputCredit: Int,
+    operationRef: String? = nil,
+    auditHealth: ControlStreamAuditHealth
+  ) {
+    self.source = source
+    self.resumed = resumed
+    self.heartbeatMilliseconds = heartbeatMilliseconds
+    self.inputCredit = inputCredit
+    self.operationRef = operationRef
+    self.auditHealth = auditHealth
+  }
+
+  public func validate() throws {
+    guard (1_000...60_000).contains(heartbeatMilliseconds) else {
+      throw ContractValidationError.outOfBounds("stream heartbeat")
+    }
+    switch source {
+    case .exec, .attach:
+      guard inputCredit == 16, let operationRef,
+        operationRef.range(of: "^stream:[a-f0-9]{32}$", options: .regularExpression) != nil
+      else { throw ContractValidationError.invalid("runtime stream acceptance") }
+    case .logs, .events, .metrics, .traces, .operation, .state:
+      guard inputCredit == 0, operationRef == nil else {
+        throw ContractValidationError.invalid("read stream acceptance")
+      }
+    }
+  }
+}
+
+public struct ControlStreamGap: Codable, Equatable, Sendable {
+  public let reason: String
+  public let earliestCursor: String?
+  public let latestCursor: String?
+  public let requiresAcknowledgement: Bool
+
+  public init(
+    reason: String,
+    earliestCursor: String? = nil,
+    latestCursor: String? = nil,
+    requiresAcknowledgement: Bool = true
+  ) {
+    self.reason = reason
+    self.earliestCursor = earliestCursor
+    self.latestCursor = latestCursor
+    self.requiresAcknowledgement = requiresAcknowledgement
+  }
+
+  public func validate() throws {
+    guard reason.range(of: "^[A-Za-z0-9._:-]{1,128}$", options: .regularExpression) != nil,
+      requiresAcknowledgement
+    else { throw ContractValidationError.invalid("stream gap") }
+    try Self.validateCursor(earliestCursor)
+    try Self.validateCursor(latestCursor)
+  }
+
+  private static func validateCursor(_ cursor: String?) throws {
+    if let cursor {
+      guard !cursor.isEmpty,
+        cursor.utf8.count <= ControlPlaneContract.maximumStreamCursorBytes
+      else { throw ContractValidationError.outOfBounds("stream cursor") }
+    }
+  }
 }
 public struct StreamFrame: Codable, Equatable, Sendable {
   public let apiVersion: Int

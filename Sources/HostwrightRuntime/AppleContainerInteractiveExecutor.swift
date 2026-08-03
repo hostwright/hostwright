@@ -21,6 +21,7 @@ public final class RuntimeInteractiveProcessControl: @unchecked Sendable {
 
     private let lock = NSLock()
     private var input = Data()
+    private var inputConsumptionMilestones: [(remaining: Int, handler: @Sendable () -> Void)] = []
     private var inputFinished = false
     private var cancelled = false
     private var resize: (columns: UInt16, rows: UInt16)?
@@ -29,7 +30,10 @@ public final class RuntimeInteractiveProcessControl: @unchecked Sendable {
     public init() {}
 
     @discardableResult
-    public func sendInput(_ data: Data) -> Bool {
+    public func sendInput(
+        _ data: Data,
+        onConsumed: (@Sendable () -> Void)? = nil
+    ) -> Bool {
         guard !data.isEmpty, data.count <= RuntimeStreamEnvelope.maximumChunkBytes else {
             return false
         }
@@ -40,6 +44,9 @@ public final class RuntimeInteractiveProcessControl: @unchecked Sendable {
                 return false
             }
             input.append(data)
+            if let onConsumed {
+                inputConsumptionMilestones.append((data.count, onConsumed))
+            }
             return true
         }
     }
@@ -82,9 +89,25 @@ public final class RuntimeInteractiveProcessControl: @unchecked Sendable {
     }
 
     internal func consumeInput(_ count: Int) {
-        lock.withLock {
-            input.removeFirst(min(count, input.count))
+        let handlers: [@Sendable () -> Void] = lock.withLock {
+            let consumed = min(count, input.count)
+            input.removeFirst(consumed)
+            var remainingConsumed = consumed
+            var completed: [@Sendable () -> Void] = []
+            while remainingConsumed > 0, !inputConsumptionMilestones.isEmpty {
+                let first = inputConsumptionMilestones.removeFirst()
+                if remainingConsumed >= first.remaining {
+                    remainingConsumed -= first.remaining
+                    completed.append(first.handler)
+                } else {
+                    inputConsumptionMilestones.insert(
+                        (first.remaining - remainingConsumed, first.handler), at: 0)
+                    remainingConsumed = 0
+                }
+            }
+            return completed
         }
+        handlers.forEach { $0() }
     }
 
     internal var shouldCloseInput: Bool {

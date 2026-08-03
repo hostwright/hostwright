@@ -522,7 +522,7 @@ final class ControlPlaneContractTests: XCTestCase {
         "apiVersion", "protocolRevision", "streamID", "sequence", "cursor", "kind", "credit",
         "payload",
       ])
-    try frame.validate()
+    try ControlStreamFrameContract.validate(frame, direction: .serverToClient)
     let encodedFrame = try encoder.encode(frame)
     XCTAssertEqual(try decoder.decode(StreamFrame.self, from: encodedFrame), frame)
     let rule = try strict(

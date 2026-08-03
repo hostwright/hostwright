@@ -62,6 +62,50 @@ public final class RBACAuthorizationEngine: @unchecked Sendable {
       subjectID: subject.identifier, operation: request.operation, target: target, at: at)
   }
 
+  public func authorizeStream(
+    subject: LocalSubject,
+    request: ControlStreamOpenRequest,
+    projectIdentifier authoritativeProjectIdentifier: String? = nil,
+    at: Date
+  ) throws -> RBACDecision {
+    try subject.validate()
+    try request.validate()
+    let requestedProjectIdentifier: String?
+    if case .object(let fields) = request.filter,
+      case .string(let value) = fields["projectID"]
+    {
+      requestedProjectIdentifier = value
+    } else {
+      requestedProjectIdentifier = nil
+    }
+    guard requestedProjectIdentifier == nil || authoritativeProjectIdentifier == nil
+      || requestedProjectIdentifier == authoritativeProjectIdentifier
+    else { throw RBACAuthorizationError.invalidTarget }
+    let projectIdentifier = authoritativeProjectIdentifier ?? requestedProjectIdentifier
+    let resource: RBACResource
+    let verb: RBACVerb
+    switch request.source {
+    case .logs, .events, .metrics, .traces:
+      (resource, verb) = (.observability, .watch)
+    case .operation, .state:
+      (resource, verb) = (.state, .watch)
+    case .attach, .exec:
+      (resource, verb) = (.runtime, .execute)
+    }
+    return try decision(
+      subjectID: subject.identifier,
+      operation: "stream.\(request.source.rawValue)",
+      target: RBACAuthorizationTarget(
+        resource: resource,
+        verb: verb,
+        projectIdentifier: projectIdentifier,
+        resourceIdentifier: request.target,
+        profileHash: nil
+      ),
+      at: at
+    )
+  }
+
   public func preview(
     subjectID: String,
     request: ControlRequestEnvelope,

@@ -50,6 +50,10 @@ let package = Package(
             name: "hostwright-profile-qualification",
             targets: ["HostwrightProfileQualificationTool"]
         ),
+        .executable(
+            name: "hostwright-stream-qualification",
+            targets: ["HostwrightStreamQualificationTool"]
+        ),
         .executable(name: "hostwrightd", targets: ["HostwrightDaemon"]),
         .executable(name: "hostwright-dist", targets: ["HostwrightDistributionTool"]),
         .executable(
@@ -456,6 +460,16 @@ let package = Package(
                 "HostwrightControlPlane",
                 "HostwrightPolicy",
                 "HostwrightRuntime",
+                "HostwrightState"
+            ]
+        ),
+        .executableTarget(
+            name: "HostwrightStreamQualificationTool",
+            dependencies: [
+                "HostwrightControlPlane",
+                "HostwrightControlSecurity",
+                "HostwrightControlTransport",
+                "HostwrightCore",
                 "HostwrightState"
             ]
         ),

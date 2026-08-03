@@ -112,6 +112,79 @@ final class ControlFrameCodecTests: XCTestCase {
     }
   }
 
+  func testNonReadingUnixPeerExpiresMaximumFrameWriteAtDeadline() throws {
+    try withSocketPair { writer, _ in
+      try ControlFrameCodec.configureConnectedSocket(descriptor: writer)
+      try setSendBuffer(descriptor: writer, bytes: 1_024)
+      XCTAssertNotEqual(fcntl(writer, F_GETFL) & O_NONBLOCK, 0)
+
+      let payload = Data(
+        repeating: 0xA5,
+        count: ControlFrameCodec.maximumResponseOrFrameBytes
+      )
+      let started = DispatchTime.now().uptimeNanoseconds
+      XCTAssertThrowsError(
+        try ControlFrameCodec.write(
+          payload,
+          kind: .frame,
+          descriptor: writer,
+          deadline: try ControlTransportDeadline(timeoutMilliseconds: 50)
+        )
+      ) { error in
+        XCTAssertEqual(error as? ControlTransportError, .deadlineExceeded)
+      }
+      let elapsed = Double(DispatchTime.now().uptimeNanoseconds - started) / 1_000_000_000
+      XCTAssertLessThan(elapsed, 1.0, "a non-reading peer must not strand the writer")
+    }
+  }
+
+  func testDelayedUnixPeerReadCompletesMaximumFrameOnNonblockingWriter() throws {
+    try withSocketPair { writer, reader in
+      try ControlFrameCodec.configureConnectedSocket(descriptor: writer)
+      try setSendBuffer(descriptor: writer, bytes: 1_024)
+      XCTAssertNotEqual(fcntl(writer, F_GETFL) & O_NONBLOCK, 0)
+
+      let payload = Data(
+        repeating: 0x5A,
+        count: ControlFrameCodec.maximumResponseOrFrameBytes
+      )
+      let started = DispatchSemaphore(value: 0)
+      let finished = DispatchGroup()
+      let result = FrameWriteResult()
+      let began = DispatchTime.now().uptimeNanoseconds
+      finished.enter()
+      DispatchQueue.global(qos: .userInitiated).async {
+        defer { finished.leave() }
+        started.signal()
+        do {
+          try ControlFrameCodec.write(
+            payload,
+            kind: .frame,
+            descriptor: writer,
+            deadline: try ControlTransportDeadline(timeoutMilliseconds: 1_000)
+          )
+        } catch {
+          result.error = error
+        }
+      }
+
+      XCTAssertEqual(started.wait(timeout: .now() + 1), .success)
+      Thread.sleep(forTimeInterval: 0.050)
+      XCTAssertEqual(
+        try ControlFrameCodec.read(
+          kind: .frame,
+          descriptor: reader,
+          deadline: try ControlTransportDeadline(timeoutMilliseconds: 1_000)
+        ),
+        payload
+      )
+      XCTAssertEqual(finished.wait(timeout: .now() + 1), .success)
+      XCTAssertNil(result.error)
+      let elapsed = Double(DispatchTime.now().uptimeNanoseconds - began) / 1_000_000_000
+      XCTAssertLessThan(elapsed, 1.0, "a delayed reader must release the bounded frame write")
+    }
+  }
+
   private func deadline() throws -> ControlTransportDeadline {
     try ControlTransportDeadline(timeoutMilliseconds: 1_000)
   }
@@ -135,6 +208,19 @@ final class ControlFrameCodecTests: XCTestCase {
     return (descriptors[0], descriptors[1])
   }
 
+  private func setSendBuffer(descriptor: Int32, bytes: Int32) throws {
+    var bytes = bytes
+    guard setsockopt(
+      descriptor,
+      SOL_SOCKET,
+      SO_SNDBUF,
+      &bytes,
+      socklen_t(MemoryLayout<Int32>.size)
+    ) == 0 else {
+      throw NSError(domain: "ControlFrameCodecTests", code: Int(errno))
+    }
+  }
+
   private func writeRaw(_ data: Data, descriptor: Int32) throws {
     try data.withUnsafeBytes { source in
       guard let baseAddress = source.baseAddress else {
@@ -153,5 +239,15 @@ final class ControlFrameCodecTests: XCTestCase {
         offset += count
       }
     }
+  }
+}
+
+private final class FrameWriteResult: @unchecked Sendable {
+  private let lock = NSLock()
+  private var capturedError: Error?
+
+  var error: Error? {
+    get { lock.withLock { capturedError } }
+    set { lock.withLock { capturedError = newValue } }
   }
 }

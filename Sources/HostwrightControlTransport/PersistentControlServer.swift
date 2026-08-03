@@ -184,7 +184,7 @@ public final class ControlUnixSocketListener: @unchecked Sendable {
       throw PersistentControlServerError.acceptFailed
     }
     do {
-      try ControlFrameCodec.configureNoSigPipe(descriptor: accepted)
+      try ControlFrameCodec.configureConnectedSocket(descriptor: accepted)
       return accepted
     } catch {
       _ = Darwin.close(accepted)
@@ -308,6 +308,11 @@ public struct PersistentControlConnectionServer: Sendable {
   private let auditRecorder: any ControlSecurityAuditRecording
   private let authorizer: Authorizer
   private let admissionEvaluator: AdmissionEvaluator
+  private let streamAuthorizer: ControlStreamAuthorizer?
+  private let streamCursorValidator: ControlStreamCursorValidator?
+  private let streamOpener: ControlStreamOpener?
+  private let streamReauthorizer: ControlStreamReauthorizer?
+  private let streamBudget = ControlStreamGlobalBudget()
   private let handler: Handler
   private let now: @Sendable () -> Date
   private let monotonicNow: @Sendable () -> UInt64
@@ -323,6 +328,10 @@ public struct PersistentControlConnectionServer: Sendable {
     admissionEvaluator: @escaping AdmissionEvaluator = { _, _, _ in
       throw PersistentControlServerError.persistenceFailed
     },
+    streamAuthorizer: ControlStreamAuthorizer? = nil,
+    streamCursorValidator: ControlStreamCursorValidator? = nil,
+    streamReauthorizer: ControlStreamReauthorizer? = nil,
+    streamOpener: ControlStreamOpener? = nil,
     now: @escaping @Sendable () -> Date = Date.init,
     monotonicNow: @escaping @Sendable () -> UInt64 = {
       DispatchTime.now().uptimeNanoseconds
@@ -330,6 +339,15 @@ public struct PersistentControlConnectionServer: Sendable {
     handler: @escaping Handler
   ) throws {
     guard daemonGeneration > 0, socketIdentity.device > 0, socketIdentity.inode > 0 else {
+      throw PersistentControlServerError.invalidRequest
+    }
+    let streamHooksPresent = [
+      streamAuthorizer != nil,
+      streamCursorValidator != nil,
+      streamReauthorizer != nil,
+      streamOpener != nil,
+    ]
+    guard streamHooksPresent.allSatisfy({ $0 }) || streamHooksPresent.allSatisfy({ !$0 }) else {
       throw PersistentControlServerError.invalidRequest
     }
     self.authenticator = authenticator
@@ -340,6 +358,10 @@ public struct PersistentControlConnectionServer: Sendable {
     self.auditRecorder = auditRecorder
     self.authorizer = authorizer
     self.admissionEvaluator = admissionEvaluator
+    self.streamAuthorizer = streamAuthorizer
+    self.streamCursorValidator = streamCursorValidator
+    self.streamReauthorizer = streamReauthorizer
+    self.streamOpener = streamOpener
     self.now = now
     self.monotonicNow = monotonicNow
     self.handler = handler
@@ -347,6 +369,22 @@ public struct PersistentControlConnectionServer: Sendable {
 
   public func serve(descriptor: Int32) throws {
     let peer = try authenticate(descriptor: descriptor)
+    let context = ControlStreamConnectionContext(
+      descriptor: descriptor,
+      globalBudget: streamBudget,
+      validateSession: {
+        try authenticator.validateSession(peer.binding, daemonGeneration: daemonGeneration)
+      }
+    )
+    let unary = ControlUnaryDispatcher(
+      descriptor: descriptor,
+      context: context,
+      processor: { request in try process(peer: peer, request: request) }
+    )
+    defer {
+      unary.cancel()
+      context.cancelAll()
+    }
     while true {
       do {
         try authenticator.validateSession(peer.binding, daemonGeneration: daemonGeneration)
@@ -358,10 +396,35 @@ public struct PersistentControlConnectionServer: Sendable {
             timeoutMilliseconds: ControlPlaneContract.maximumAuthenticationHandshakeMilliseconds
           )
         )
-        let request = try Self.decodeRequest(requestData)
-        let processed = try process(peer: peer, request: request)
-        try write(processed.response, descriptor: descriptor, deadline: processed.deadline)
+        if let frame = try? ControlStreamFrameContract.decode(requestData) {
+          switch frame.kind {
+          case .open:
+            guard let streamAuthorizer, let streamCursorValidator, let streamReauthorizer,
+              let streamOpener
+            else {
+              throw PersistentControlServerError.invalidRequest
+            }
+            try context.open(
+              frame: frame,
+              peer: peer,
+              authorizer: streamAuthorizer,
+              cursorValidator: streamCursorValidator,
+              reauthorizer: streamReauthorizer,
+              opener: streamOpener,
+              now: now()
+            )
+          case .ack, .cancel, .data, .end:
+            try context.receiveControl(frame)
+          case .heartbeat, .gap, .error:
+            throw PersistentControlServerError.invalidRequest
+          }
+        } else {
+          let request = try Self.decodeRequest(requestData)
+          try unary.submit(request)
+        }
       } catch ControlTransportError.peerClosed {
+        unary.drain()
+        context.drainAfterInputHalfClose()
         return
       }
     }

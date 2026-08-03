@@ -1,0 +1,8 @@
+{
+  "auditHealth": "healthy",
+  "heartbeatMilliseconds": 15000,
+  "inputCredit": 16,
+  "operationRef": "stream:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "resumed": false,
+  "source": "exec"
+}

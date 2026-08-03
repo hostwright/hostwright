@@ -187,17 +187,270 @@ final class ControlRequestRepositoryTests: XCTestCase {
     }
   }
 
+  func testStreamOperationCreatesRequestAndPlannedLedgerAtomicallyThenRetriesBeforeStart() throws {
+    try withStore { store in
+      try bootstrapOwner(in: store)
+      let repository = makeRepository(store)
+      let submission = ControlRequestSubmission(
+        request: request(
+          id: "stream-request", key: "stream-key", operationReference: "stream-operation"),
+        idempotencyExpiresAt: expiresAt
+      )
+
+      XCTAssertEqual(
+        try repository.beginStreamOperation(
+          submission, operationReference: "stream-operation", plannedActionType: "stream.exec"),
+        .created
+      )
+      XCTAssertEqual(
+        try repository.load("stream-request"),
+        submission.request
+      )
+      XCTAssertEqual(
+        try store.operations.loadAll(),
+        [
+          OperationRecord(
+            id: "stream-operation", createdAt: createdAt, updatedAt: updatedAt,
+            plannedActionType: "stream.exec", projectID: nil, serviceName: nil, status: .planned,
+            idempotencyKey: "stream-key",
+            planHash: String(repeating: "a", count: 64), payloadJSONRedacted: "{}")
+        ]
+      )
+      XCTAssertEqual(
+        try repository.beginStreamOperation(
+          submission, operationReference: "stream-operation", plannedActionType: "stream.exec"),
+        .retryNeverStarted
+      )
+    }
+  }
+
+  func testExpiredStreamIdempotencyIsAStableConflict() throws {
+    try withStore { store in
+      try bootstrapOwner(in: store)
+      let submission = ControlRequestSubmission(
+        request: request(
+          id: "expired-stream-request", key: "expired-stream-key",
+          operationReference: "expired-stream-operation"),
+        idempotencyExpiresAt: expiresAt
+      )
+      _ = try makeRepository(store).beginStreamOperation(
+        submission,
+        operationReference: "expired-stream-operation",
+        plannedActionType: "stream.exec"
+      )
+      let expired = makeRepository(store, now: date("2026-08-02T21:00:01Z"))
+      XCTAssertThrowsError(
+        try expired.beginStreamOperation(
+          submission,
+          operationReference: "expired-stream-operation",
+          plannedActionType: "stream.exec"
+        )
+      ) { error in
+        XCTAssertEqual(error as? ControlRequestRepositoryError, .idempotencyConflict)
+      }
+    }
+  }
+
+  func testStartedStreamReplayIsAmbiguousAndNeverStartsAgain() throws {
+    try withStore { store in
+      try bootstrapOwner(in: store)
+      let repository = makeRepository(store)
+      let submission = ControlRequestSubmission(
+        request: request(
+          id: "started-request", key: "started-key", operationReference: "started-operation"),
+        idempotencyExpiresAt: expiresAt
+      )
+      _ = try repository.beginStreamOperation(
+        submission, operationReference: "started-operation", plannedActionType: "stream.attach")
+      try repository.markStreamOperationStarted(
+        requestID: "started-request", operationReference: "started-operation",
+        updatedAt: "2026-08-02T20:01:30Z")
+
+      XCTAssertEqual(
+        try repository.beginStreamOperation(
+          submission, operationReference: "started-operation", plannedActionType: "stream.attach"),
+        .ambiguousStarted
+      )
+      XCTAssertEqual(try store.operations.loadAll().first?.status, .recorded)
+      XCTAssertEqual(try repository.load("started-request")?.status, .accepted)
+    }
+  }
+
+  func testStreamOperationPersistsSuccessAndFailureTerminalStates() throws {
+    try withStore { store in
+      try bootstrapOwner(in: store)
+      let repository = makeRepository(store)
+
+      for (requestID, key, operation, succeeds, expected) in [
+        ("success-request", "success-key", "success-operation", true, ControlRequestStatus.completed),
+        ("failure-request", "failure-key", "failure-operation", false, ControlRequestStatus.error),
+      ] {
+        let submission = ControlRequestSubmission(
+          request: request(id: requestID, key: key, operationReference: operation),
+          idempotencyExpiresAt: expiresAt
+        )
+        _ = try repository.beginStreamOperation(
+          submission, operationReference: operation, plannedActionType: "stream.exec")
+        try repository.markStreamOperationStarted(
+          requestID: requestID, operationReference: operation, updatedAt: "2026-08-02T20:01:30Z")
+        try repository.finishStreamOperation(
+          requestID: requestID, operationReference: operation, succeeded: succeeds,
+          updatedAt: "2026-08-02T20:02:00Z")
+
+        XCTAssertEqual(try repository.load(requestID)?.status, expected)
+        XCTAssertEqual(try repository.loadIdempotency(subjectID: "owner", idempotencyKey: key)?.status, expected)
+        XCTAssertEqual(try store.operations.loadAll().first(where: { $0.id == operation })?.status,
+                       succeeds ? .succeeded : .failed)
+        XCTAssertEqual(
+          try repository.beginStreamOperation(
+            submission, operationReference: operation, plannedActionType: "stream.exec"),
+          .terminal(expected)
+        )
+      }
+    }
+  }
+
+  func testStreamOperationRejectsCompetingRequestDigestAndOperationIdentity() throws {
+    try withStore { store in
+      try bootstrapOwner(in: store)
+      let repository = makeRepository(store)
+      let original = ControlRequestSubmission(
+        request: request(id: "competing-request", key: "competing-key", operationReference: "operation-a"),
+        idempotencyExpiresAt: expiresAt
+      )
+      _ = try repository.beginStreamOperation(
+        original, operationReference: "operation-a", plannedActionType: "stream.exec")
+
+      let competingDigest = ControlRequestSubmission(
+        request: request(
+          id: "competing-request", key: "competing-key", digestCharacter: "b",
+          operationReference: "operation-a"),
+        idempotencyExpiresAt: expiresAt
+      )
+      XCTAssertThrowsError(
+        try repository.beginStreamOperation(
+          competingDigest, operationReference: "operation-a", plannedActionType: "stream.exec"))
+      XCTAssertThrowsError(
+        try repository.beginStreamOperation(
+          original, operationReference: "operation-b", plannedActionType: "stream.exec"))
+      XCTAssertEqual(try store.operations.loadAll().map(\.id), ["operation-a"])
+      XCTAssertEqual(try repository.load("competing-request"), original.request)
+    }
+  }
+
+  func testOperationWatchReceivesPlannedStartedCancelAndTerminalLifecycleInOrder() throws {
+    try withStore { store in
+      try bootstrapOwner(in: store)
+      let repository = makeRepository(store)
+      let submission = ControlRequestSubmission(
+        request: request(
+          id: "watch-request", key: "watch-key", operationReference: "watch-operation"),
+        idempotencyExpiresAt: expiresAt
+      )
+
+      _ = try repository.beginStreamOperation(
+        submission, operationReference: "watch-operation", plannedActionType: "stream.exec",
+        serviceName: "api")
+      try repository.markStreamOperationStarted(
+        requestID: "watch-request", operationReference: "watch-operation",
+        updatedAt: "2026-08-02T20:01:30Z")
+      try repository.recordStreamOperationCancelRequested(
+        operationReference: "watch-operation", updatedAt: "2026-08-02T20:01:45Z")
+      try repository.finishStreamOperation(
+        requestID: "watch-request", operationReference: "watch-operation", succeeded: true,
+        updatedAt: "2026-08-02T20:02:00Z")
+
+      let page = try store.events.streamPage(
+        after: nil,
+        filter: HostwrightEventStreamFilter(serviceName: "api"),
+        pageSize: 10
+      )
+      XCTAssertEqual(page.status, .ready)
+      XCTAssertEqual(
+        page.events.map { $0.event.type },
+        [
+          "operation.stream.planned",
+          "operation.stream.started",
+          "operation.stream.cancel-requested",
+          "operation.stream.completed",
+        ]
+      )
+      XCTAssertTrue(page.events.allSatisfy { $0.operationReferences == ["watch-operation"] })
+      XCTAssertEqual(try store.operations.loadAll().first?.status, .succeeded)
+      XCTAssertEqual(try repository.load("watch-request")?.status, .completed)
+    }
+  }
+
+  func testPlannedStreamCancellationIsAtomicAndNeverMarksStarted() throws {
+    try withStore { store in
+      try bootstrapOwner(in: store)
+      let repository = makeRepository(store)
+      let submission = ControlRequestSubmission(
+        request: request(
+          id: "planned-cancel-request", key: "planned-cancel-key",
+          operationReference: "planned-cancel-operation"),
+        idempotencyExpiresAt: expiresAt
+      )
+      _ = try repository.beginStreamOperation(
+        submission,
+        operationReference: "planned-cancel-operation",
+        plannedActionType: "stream.exec"
+      )
+      try repository.cancelPlannedStreamOperation(
+        requestID: "planned-cancel-request",
+        operationReference: "planned-cancel-operation",
+        updatedAt: "2026-08-02T20:01:30Z"
+      )
+
+      XCTAssertEqual(try repository.load("planned-cancel-request")?.status, .error)
+      XCTAssertEqual(try store.operations.loadAll().first?.status, .abandoned)
+      let lifecycle = try store.events.loadAll().filter {
+        $0.source == "hostwrightd-control"
+      }
+      XCTAssertEqual(
+        lifecycle.map(\.type),
+        ["operation.stream.planned", "operation.stream.cancel-requested", "operation.stream.cancelled"]
+      )
+      XCTAssertFalse(lifecycle.contains { $0.type == "operation.stream.started" })
+    }
+  }
+
+  func testOperationEventPayloadEscapesHostilePrintableReference() throws {
+    try withStore { store in
+      try bootstrapOwner(in: store)
+      let repository = makeRepository(store)
+      let hostile = "operation-\"},\"stage\":\"forged"
+      let submission = ControlRequestSubmission(
+        request: request(
+          id: "escaped-event-request", key: "escaped-event-key",
+          operationReference: hostile),
+        idempotencyExpiresAt: expiresAt
+      )
+      _ = try repository.beginStreamOperation(
+        submission,
+        operationReference: hostile,
+        plannedActionType: "stream.exec"
+      )
+      let event = try XCTUnwrap(store.events.loadAll().first)
+      let data = try XCTUnwrap(event.payloadJSONRedacted.data(using: .utf8))
+      let object = try XCTUnwrap(
+        JSONSerialization.jsonObject(with: data) as? [String: String])
+      XCTAssertEqual(object, ["operationID": hostile, "stage": "planned"])
+    }
+  }
+
   private func request(
     id: String,
     subject: String = "owner",
     key: String? = nil,
     digestCharacter: Character = "a",
-    status: ControlRequestStatus = .accepted
+    status: ControlRequestStatus = .accepted,
+    operationReference: String? = nil
   ) -> ControlRequestRecord {
     ControlRequestRecord(
       requestID: id, subjectID: subject, idempotencyKey: key,
       requestDigestSHA256: String(repeating: String(digestCharacter), count: 64),
-      status: status, createdAt: createdAt, updatedAt: updatedAt)
+      status: status, operationReference: operationReference, createdAt: createdAt, updatedAt: updatedAt)
   }
 
   private func identity(subjectID: String, declaredBy: String, hash: Character)

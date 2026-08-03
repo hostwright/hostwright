@@ -13,6 +13,17 @@ public enum ControlTransportError: Error, Equatable, Sendable {
   case ioFailure
 }
 
+typealias ControlFrameWriteOperation = @Sendable (
+  Data,
+  ControlPayloadKind,
+  Int32,
+  ControlTransportDeadline
+) throws -> Void
+
+let defaultControlFrameWrite: ControlFrameWriteOperation = {
+  try ControlFrameCodec.write($0, kind: $1, descriptor: $2, deadline: $3)
+}
+
 public struct ControlTransportDeadline: Sendable {
   private let endUptimeNanoseconds: UInt64
   private let monotonicNow: @Sendable () -> UInt64
@@ -41,6 +52,34 @@ public struct ControlTransportDeadline: Sendable {
     guard monotonicNow() < endUptimeNanoseconds else {
       throw ControlTransportError.deadlineExceeded
     }
+  }
+
+  func capped(toMilliseconds timeoutMilliseconds: Int) throws -> ControlTransportDeadline {
+    guard timeoutMilliseconds > 0,
+      timeoutMilliseconds <= ControlPlaneContract.maximumUnaryDeadlineMilliseconds
+    else { throw ControlTransportError.invalidDeadline }
+    let now = monotonicNow()
+    guard now < endUptimeNanoseconds else { throw ControlTransportError.deadlineExceeded }
+    let duration = UInt64(timeoutMilliseconds) * 1_000_000
+    guard UInt64.max - now >= duration else { throw ControlTransportError.invalidDeadline }
+    return ControlTransportDeadline(
+      endUptimeNanoseconds: min(endUptimeNanoseconds, now + duration),
+      monotonicNow: monotonicNow
+    )
+  }
+
+  func remainingTimeInterval() throws -> TimeInterval {
+    let now = monotonicNow()
+    guard now < endUptimeNanoseconds else { throw ControlTransportError.deadlineExceeded }
+    return TimeInterval(endUptimeNanoseconds - now) / 1_000_000_000
+  }
+
+  private init(
+    endUptimeNanoseconds: UInt64,
+    monotonicNow: @escaping @Sendable () -> UInt64
+  ) {
+    self.endUptimeNanoseconds = endUptimeNanoseconds
+    self.monotonicNow = monotonicNow
   }
 
   fileprivate func remainingPollMilliseconds() throws -> Int32 {
@@ -73,6 +112,14 @@ public enum ControlFrameCodec {
         socklen_t(MemoryLayout<Int32>.size)
       ) == 0
     else {
+      throw ControlTransportError.ioFailure
+    }
+  }
+
+  public static func configureConnectedSocket(descriptor: Int32) throws {
+    try configureNoSigPipe(descriptor: descriptor)
+    let flags = fcntl(descriptor, F_GETFL)
+    guard flags >= 0, fcntl(descriptor, F_SETFL, flags | O_NONBLOCK) == 0 else {
       throw ControlTransportError.ioFailure
     }
   }

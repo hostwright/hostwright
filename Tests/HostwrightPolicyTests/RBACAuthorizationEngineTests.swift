@@ -235,6 +235,74 @@ final class RBACAuthorizationEngineTests: XCTestCase {
     }
   }
 
+  func testStreamAuthorizationMapsWatchAndExecuteToExactProjectAndResourceScopes() throws {
+    try withSystem(subjects: ["streamer"]) { repository, engine in
+      try createRole(
+        "stream-watch", rules: [
+          rule(
+            "observability-watch", resources: [.observability], verbs: [.watch]
+          ),
+          rule("runtime-execute", resources: [.runtime], verbs: [.execute]),
+        ], repository: repository)
+      try bind(
+        "streamer", role: "stream-watch", id: "stream-project",
+        scope: .init(kind: .project, identifier: "project-a"), repository: repository)
+      try bind(
+        "streamer", role: "stream-watch", id: "stream-resource",
+        scope: .init(kind: .resource, identifier: "resource-a"), repository: repository)
+
+      let projectAllowed = try engine.authorizeStream(
+        subject: subject("streamer"),
+        request: ControlStreamOpenRequest(
+          source: .events,
+          filter: .object(["projectID": .string("project-a")])
+        ),
+        at: evaluationDate)
+      XCTAssertEqual(projectAllowed.effect, .allow)
+      XCTAssertEqual(projectAllowed.ruleIdentifiers, ["observability-watch"])
+
+      let projectDenied = try engine.authorizeStream(
+        subject: subject("streamer"),
+        request: ControlStreamOpenRequest(
+          source: .events,
+          filter: .object(["projectID": .string("project-b")])
+        ),
+        at: evaluationDate)
+      XCTAssertEqual(projectDenied.effect, .deny)
+
+      let resourceAllowed = try engine.authorizeStream(
+        subject: subject("streamer"),
+        request: ControlStreamOpenRequest(
+          source: .exec,
+          target: "resource-a",
+          filter: .object([
+            "serviceName": .string("api"),
+            "arguments": .array([.string("/usr/bin/true")]),
+          ]),
+          requestID: "exec-resource-a",
+          idempotencyKey: "exec-resource-a"
+        ),
+        at: evaluationDate)
+      XCTAssertEqual(resourceAllowed.effect, .allow)
+      XCTAssertEqual(resourceAllowed.ruleIdentifiers, ["runtime-execute"])
+
+      let resourceDenied = try engine.authorizeStream(
+        subject: subject("streamer"),
+        request: ControlStreamOpenRequest(
+          source: .exec,
+          target: "resource-b",
+          filter: .object([
+            "serviceName": .string("api"),
+            "arguments": .array([.string("/usr/bin/true")]),
+          ]),
+          requestID: "exec-resource-b",
+          idempotencyKey: "exec-resource-b"
+        ),
+        at: evaluationDate)
+      XCTAssertEqual(resourceDenied.effect, .deny)
+    }
+  }
+
   private func withSystem(
     subjects: [String], _ body: (RBACRepository, RBACAuthorizationEngine) throws -> Void
   ) throws {
@@ -310,6 +378,7 @@ final class RBACAuthorizationEngineTests: XCTestCase {
       "owner": "a", "viewer": "b", "operator": "c", "maintainer": "d", "security": "e",
       "unbound": "b", "member": "b", "scoped": "b", "delegate": "b", "expired-delegate": "c",
       "project-member": "c",
+      "streamer": "d",
     ]
     return LocalSubject(
       identifier: id, userID: 501,

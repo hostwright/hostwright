@@ -4,12 +4,14 @@ set -euo pipefail
 readonly duration_seconds=259200
 readonly sample_interval_seconds=300
 readonly expected_samples=864
+readonly compaction_attempt_limit=5
 readonly uuid_pattern='^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$'
 readonly subsystem='dev.hostwright'
 
 daemon_pid=''
 daemon_generation=0
 resource_identifier=''
+resource_uuid=''
 project_name=''
 state_file=''
 evidence_file=''
@@ -29,6 +31,7 @@ contract() {
   printf '%s\n' 'Phase 08 aggregate soak qualification contract v1 is valid.'
   printf '%s\n' 'The qualifying duration is exactly 259200 seconds with 300-second samples.'
   printf '%s\n' 'One foreground daemon, one exact digest-bound workload, and one private schema-v17 database are used.'
+  printf '%s\n' 'The global Apple-container inventory must contain no other Hostwright-managed runtime before or throughout the run.'
   printf '%s\n' 'Configuration churn, bounded pressure, daemon/workload/helper/runtime faults, and all local observability sinks are exercised serially.'
   printf '%s\n' 'A real sleep and wake must occur during the uninterrupted window; the runner never forces either transition.'
   printf '%s\n' 'Failure preserves evidence and exact resource identity; success performs confirmation-bound owned-only cleanup.'
@@ -56,6 +59,59 @@ require_canonical_file() {
   [[ "$path" == /* && "$path" != *$'\n'* && -f "$path" && ! -L "$path" \
       && "$(/bin/realpath "$path")" == "$path" ]] \
     || die "$variable must name one canonical absolute regular non-symlink file." 66
+}
+
+managed_runtime_count() {
+  /usr/bin/jq -er '[.[] | select((.configuration.labels["dev.hostwright.managed"] // "") == "true")] | length'
+}
+
+require_empty_managed_runtime_inventory() {
+  local inventory count
+  inventory="$(container list --all --format json)" \
+    || die 'The global Apple-container inventory could not be read.' 69
+  count="$(printf '%s' "$inventory" | managed_runtime_count)" \
+    || die 'The global Apple-container inventory was not valid bounded JSON.' 69
+  [[ "$count" == 0 ]] \
+    || die 'Another Hostwright-managed Apple-container runtime blocks this exclusive soak qualification.' 75
+}
+
+verify_exclusive_runtime_inventory() {
+  local output_path="${1:-}"
+  local inventory current_uuid
+  inventory="$(container list --all --format json)" \
+    || die 'The global Apple-container inventory could not be read.' 69
+  if [[ -n "$output_path" ]]; then
+    [[ ! -e "$output_path" ]] \
+      || die 'A per-sample runtime inventory artifact already exists.' 75
+    printf '%s\n' "$inventory" > "$output_path"
+    chmod 600 "$output_path"
+  fi
+  printf '%s' "$inventory" | /usr/bin/jq -e \
+    --arg id "$resource_identifier" \
+    --arg project "$project_name" \
+    --arg image "$HOSTWRIGHT_PHASE08_SOAK_IMAGE" '
+      [.[] | select((.configuration.labels["dev.hostwright.managed"] // "") == "true")] as $managed
+      | ($managed | length) == 1
+        and $managed[0].id == $id
+        and $managed[0].configuration.id == $id
+        and $managed[0].configuration.image.reference == $image
+        and $managed[0].configuration.labels["dev.hostwright.resource-id"] == $id
+        and $managed[0].configuration.labels["dev.hostwright.project"] == $project
+        and $managed[0].configuration.labels["dev.hostwright.provider-id"] == "apple-container-cli"
+        and $managed[0].configuration.labels["dev.hostwright.identity-version"] == "2"
+        and $managed[0].status.state == "running"
+    ' >/dev/null \
+    || die 'The global Apple-container inventory contains a foreign, ambiguous, or changed Hostwright-managed runtime.' 75
+  current_uuid="$(printf '%s' "$inventory" | /usr/bin/jq -er \
+    --arg id "$resource_identifier" \
+    '.[] | select(.id == $id) | .configuration.labels["dev.hostwright.resource-uuid"]')" \
+    || die 'The exact soak resource UUID is absent from the global runtime inventory.' 75
+  [[ "$current_uuid" =~ $uuid_pattern ]] \
+    || die 'The exact soak resource UUID is malformed.' 75
+  if [[ -n "$resource_uuid" && "$resource_uuid" != "$current_uuid" ]]; then
+    die 'The soak runtime UUID changed.' 75
+  fi
+  resource_uuid="$current_uuid"
 }
 
 validate_root() {
@@ -105,6 +161,7 @@ validate_inputs() {
   done
   [[ "$(container system status)" == *'status             running'* ]] \
     || die 'Apple container is not running.' 69
+  require_empty_managed_runtime_inventory
   local image_digest="${HOSTWRIGHT_PHASE08_SOAK_IMAGE##*@}"
   container image list --format json \
     | /usr/bin/jq -e --arg digest "$image_digest" \
@@ -210,6 +267,7 @@ verify_running() {
           die 'The soak workload identity changed.'
         fi
         resource_identifier="$current_identifier"
+        verify_exclusive_runtime_inventory
         return
       fi
     fi
@@ -238,8 +296,14 @@ read_with_retry() {
 record_sample() {
   local sequence="$1"
   local sample_root="$HOSTWRIGHT_PHASE08_SOAK_ROOT/current-sample"
+  local inventory_root="$HOSTWRIGHT_PHASE08_SOAK_ROOT/runtime-inventory-v1"
+  local inventory_file
   mkdir -p "$sample_root"
   chmod 700 "$sample_root"
+  mkdir -p "$inventory_root"
+  chmod 700 "$inventory_root"
+  inventory_file="$inventory_root/sequence-$(printf '%04d' "$sequence").json"
+  verify_exclusive_runtime_inventory "$inventory_file"
   read_with_retry "$sample_root/metrics.json" \
     "$HOSTWRIGHT_PHASE08_SOAK_HOSTWRIGHT" metrics snapshot \
       --state-db "$HOSTWRIGHT_PHASE08_SOAK_ROOT/state.sqlite" --output json
@@ -258,7 +322,7 @@ record_sample() {
     "$HOSTWRIGHT_PHASE08_SOAK_HOSTWRIGHT" state integrity \
       --state-db "$HOSTWRIGHT_PHASE08_SOAK_ROOT/state.sqlite" --output json
 
-  local epoch rss_kb descriptors database_bytes operations active_groups events traces retries metrics_series containers oslog_count
+  local epoch rss_kb descriptors database_bytes operations active_groups events traces retries metrics_series oslog_count runtime_inventory_sha256
   epoch="$(date +%s)"
   rss_kb="$(ps -o rss= -p "$daemon_pid" | tr -d ' ')"
   descriptors="$(/usr/sbin/lsof -p "$daemon_pid" 2>/dev/null | wc -l | tr -d ' ')"
@@ -269,19 +333,19 @@ record_sample() {
   traces="$(/usr/bin/sqlite3 "$HOSTWRIGHT_PHASE08_SOAK_ROOT/state.sqlite" "SELECT count(*) FROM event_ledger WHERE type = 'trace.span.v1';")"
   retries="$(/usr/bin/sqlite3 "$HOSTWRIGHT_PHASE08_SOAK_ROOT/state.sqlite" 'SELECT count(*) FROM restart_attempt_history;')"
   metrics_series="$(/usr/bin/jq -er '.series | length' "$sample_root/metrics.json")"
-  containers="$(container list --all --format json | /usr/bin/jq --arg id "$resource_identifier" '[.[] | select(.id == $id)] | length')"
+  runtime_inventory_sha256="$(sha256 "$inventory_file")"
   oslog_count="$(/usr/bin/log show --last 10m --style ndjson --predicate "subsystem == \"$subsystem\"" 2>/dev/null | wc -l | tr -d ' ')"
   [[ "$rss_kb" =~ ^[0-9]+$ && "$descriptors" =~ ^[0-9]+$ \
       && "$database_bytes" =~ ^[0-9]+$ && "$operations" =~ ^[0-9]+$ \
       && "$active_groups" =~ ^[0-9]+$ && "$events" =~ ^[0-9]+$ \
       && "$traces" =~ ^[0-9]+$ && "$retries" =~ ^[0-9]+$ \
-      && "$metrics_series" == 59 && "$containers" == 1 \
+      && "$metrics_series" == 59 && "$runtime_inventory_sha256" =~ ^[a-f0-9]{64}$ \
       && "$oslog_count" -gt 0 ]] \
     || die 'A soak sample was incomplete, unbounded, or lost exact runtime/observability identity.'
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
     "$sequence" "$epoch" "$daemon_pid" "$rss_kb" "$descriptors" \
     "$database_bytes" "$operations" "$active_groups" "$events" \
-    "$traces" "$retries" "$oslog_count" >> "$sample_file"
+    "$traces" "$retries" "$oslog_count" "$runtime_inventory_sha256" >> "$sample_file"
   chmod 600 "$sample_file"
 }
 
@@ -313,22 +377,78 @@ inject_pressure() {
 }
 
 compact_state() {
-  local plan="$HOSTWRIGHT_PHASE08_SOAK_ROOT/compaction-plan.json"
-  local result="$HOSTWRIGHT_PHASE08_SOAK_ROOT/compaction-result.json"
-  "$HOSTWRIGHT_PHASE08_SOAK_HOSTWRIGHT" state compact \
-    "$HOSTWRIGHT_PHASE08_SOAK_ROOT/hostwright.yaml" --dry-run \
-    --state-db "$HOSTWRIGHT_PHASE08_SOAK_ROOT/state.sqlite" --output json > "$plan"
-  chmod 600 "$plan"
-  if [[ "$(/usr/bin/jq -er '.executable' "$plan")" == true ]]; then
-    local token
-    token="$(/usr/bin/jq -er '.confirmationToken' "$plan")"
+  local sequence="$1"
+  local attempt=1
+  while [[ "$attempt" -le "$compaction_attempt_limit" ]]; do
+    local prefix="$HOSTWRIGHT_PHASE08_SOAK_ROOT/compaction-${sequence}-attempt-${attempt}"
+    local plan="${prefix}-plan.json"
+    local plan_error="${prefix}-plan.error"
+    local result="${prefix}-result.json"
+    local result_error="${prefix}-result.error"
+    if ! "$HOSTWRIGHT_PHASE08_SOAK_HOSTWRIGHT" state compact \
+        "$HOSTWRIGHT_PHASE08_SOAK_ROOT/hostwright.yaml" --dry-run \
+        --state-db "$HOSTWRIGHT_PHASE08_SOAK_ROOT/state.sqlite" --output json \
+        > "$plan" 2> "$plan_error"; then
+      chmod 600 "$plan" "$plan_error"
+      die "Soak compaction dry-run failed at sequence $sequence attempt $attempt."
+    fi
+    chmod 600 "$plan" "$plan_error"
+    if [[ "$(/usr/bin/jq -er '.executable' "$plan")" != true ]]; then
+      record "compaction-noop sequence=$sequence attempt=$attempt"
+      return
+    fi
+
+    local token status
+    token="$(/usr/bin/jq -er '.confirmationToken' "$plan")" \
+      || die "Soak compaction plan omitted its confirmation token at sequence $sequence attempt $attempt."
+    status=0
     "$HOSTWRIGHT_PHASE08_SOAK_HOSTWRIGHT" state compact \
       "$HOSTWRIGHT_PHASE08_SOAK_ROOT/hostwright.yaml" --confirm-compact "$token" \
-      --state-db "$HOSTWRIGHT_PHASE08_SOAK_ROOT/state.sqlite" --output json > "$result"
-    chmod 600 "$result"
-    [[ "$(/usr/bin/jq -er '.integrityHealth' "$result")" == healthy ]] \
-      || die 'Confirmed soak compaction did not preserve healthy integrity.'
+      --state-db "$HOSTWRIGHT_PHASE08_SOAK_ROOT/state.sqlite" --output json \
+      > "$result" 2> "$result_error" || status=$?
+    chmod 600 "$result" "$result_error"
+    if [[ "$status" == 0 ]]; then
+      [[ "$(/usr/bin/jq -er '.integrityHealth' "$result")" == healthy ]] \
+        || die 'Confirmed soak compaction did not preserve healthy integrity.'
+      record "compaction-pass sequence=$sequence attempt=$attempt"
+      return
+    fi
+    if [[ "$status" == 70 ]] \
+        && /usr/bin/jq -e '.code == "HW-CLI-003"' "$result_error" >/dev/null 2>&1; then
+      record "compaction-stale-plan sequence=$sequence attempt=$attempt"
+      attempt=$((attempt + 1))
+      sleep 1
+      continue
+    fi
+    die "Soak compaction confirmation failed at sequence $sequence attempt $attempt with exit $status."
+  done
+  die "Soak compaction exhausted $compaction_attempt_limit fresh confirmation attempts at sequence $sequence."
+}
+
+runner_exit() {
+  local status=$?
+  trap - EXIT
+  set +e
+  if [[ "$status" -ne 0 && -n "$state_file" && -f "$state_file" ]]; then
+    local current_phase
+    current_phase="$(awk -F '\t' '$1 == "phase" { phase = $2 } END { print phase }' "$state_file")"
+    if [[ "$current_phase" == running ]]; then
+      printf 'phase\tfailed\nfailureEpoch\t%s\nrunnerExitCode\t%s\n' \
+        "$(date +%s)" "$status" >> "$state_file"
+      chmod 600 "$state_file"
+      record "runner-exit-classified status=$status"
+    fi
   fi
+  if [[ -n "$daemon_pid" ]] && kill -0 "$daemon_pid" 2>/dev/null; then
+    kill -TERM "$daemon_pid" 2>/dev/null
+    local attempt=0
+    while kill -0 "$daemon_pid" 2>/dev/null && [[ "$attempt" -lt 30 ]]; do
+      sleep 1
+      attempt=$((attempt + 1))
+    done
+    wait "$daemon_pid" 2>/dev/null
+  fi
+  exit "$status"
 }
 
 inject_workload_fault() {
@@ -447,6 +567,7 @@ cleanup_workload() {
   [[ "$(/usr/bin/jq -er '.status' "$result")" == succeeded \
       && "$(container list --all --format json | /usr/bin/jq --arg id "$resource_identifier" '[.[] | select(.id == $id)] | length')" == 0 ]] \
     || die 'The soak workload did not complete exact owned-only cleanup.'
+  require_empty_managed_runtime_inventory
   record "workload-cleanup-pass resource=$resource_identifier"
 }
 
@@ -459,7 +580,7 @@ run_soak() {
     || die 'The soak root must be empty before its one qualifying run.' 75
   umask 077
   mkdir "$HOSTWRIGHT_PHASE08_SOAK_ROOT/active-run-v1"
-  trap 'if [[ -n "$daemon_pid" ]] && kill -0 "$daemon_pid" 2>/dev/null; then kill -TERM "$daemon_pid" 2>/dev/null || true; fi' EXIT
+  trap runner_exit EXIT
   touch "$evidence_file"
   chmod 600 "$evidence_file"
   write_manifest 0
@@ -487,10 +608,12 @@ run_soak() {
     printf 'wakeBaseline\t%s\n' "$wake_baseline"
   } > "$state_file"
   chmod 600 "$state_file"
-  printf 'sequence\tepoch\tdaemonPID\trssKB\tfileDescriptors\tdatabaseBytes\toperations\tactiveGroups\tevents\ttraces\tretries\toslog10m\n' > "$sample_file"
+  printf 'sequence\tepoch\tdaemonPID\trssKB\tfileDescriptors\tdatabaseBytes\toperations\tactiveGroups\tevents\ttraces\tretries\toslog10m\truntimeInventorySHA256\n' > "$sample_file"
   chmod 600 "$sample_file"
   container list --all --format json > "$HOSTWRIGHT_PHASE08_SOAK_ROOT/pre-runtime-inventory.json"
   chmod 600 "$HOSTWRIGHT_PHASE08_SOAK_ROOT/pre-runtime-inventory.json"
+  [[ "$(managed_runtime_count < "$HOSTWRIGHT_PHASE08_SOAK_ROOT/pre-runtime-inventory.json")" == 0 ]] \
+    || die 'A Hostwright-managed runtime appeared between soak validation and startup.' 75
 
   start_daemon
   verify_running
@@ -508,7 +631,7 @@ run_soak() {
     verify_running
     record_sample "$sequence"
     if (( sequence % 12 == 0 )); then
-      compact_state
+      compact_state "$sequence"
     fi
     if (( sequence % 72 == 0 )); then
       inject_pressure
@@ -565,6 +688,7 @@ run_soak() {
     "$source_sha" "$duration_seconds" "$((sequence + 1))" "$resource_identifier"
 }
 
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
 case "${1:-}" in
   contract)
     [[ "$#" == 1 ]] || die 'Usage: phase08-soak-qualification.sh contract|preflight|run' 64
@@ -584,3 +708,4 @@ case "${1:-}" in
     die 'Usage: phase08-soak-qualification.sh contract|preflight|run' 64
     ;;
 esac
+fi

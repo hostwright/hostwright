@@ -87,7 +87,8 @@ final class MutationCheckpointQualificationScriptTests: XCTestCase {
             "exactly 259200 seconds",
             "300-second samples",
             "no other Hostwright-managed runtime",
-            "real sleep and wake",
+            "writable internal non-removable storage",
+            "timestamp-bound real sleep then wake",
             "never forces either transition",
             "confirmation-bound owned-only cleanup",
             "No CI, GitHub"
@@ -99,15 +100,18 @@ final class MutationCheckpointQualificationScriptTests: XCTestCase {
             "readonly sample_interval_seconds=300",
             "expected_samples=864",
             "compaction_attempt_limit=5",
+            "power_evidence_version=1",
             "resource_uuid_pattern=",
-            "phase08-soak-",
+            "phase08-gate16-soak-",
             "active-run-v1",
             "preflight)",
             "source_digest",
             "HOSTWRIGHT_PHASE08_SOAK_SOURCE_COMMIT",
             ".configuration.descriptor.digest",
-            "pmset_count 'Entering Sleep state'",
-            "pmset_count 'Wake from'",
+            "require_internal_persistent_path",
+            "RemovableMediaOrExternalDevice",
+            "find_sleep_wake_pair",
+            "powerEvidenceVersion",
             "metrics snapshot",
             "traces inspect",
             "diagnostics support preview",
@@ -127,6 +131,7 @@ final class MutationCheckpointQualificationScriptTests: XCTestCase {
         }
         XCTAssertFalse(script.contains("duration_seconds=${"))
         XCTAssertFalse(script.contains("sample_interval_seconds=${"))
+        XCTAssertFalse(script.contains("pmset_count"))
         XCTAssertFalse(script.contains("rm -rf"))
         XCTAssertFalse(script.contains("sleepnow"))
         XCTAssertFalse(script.contains("container system stop"))
@@ -134,6 +139,118 @@ final class MutationCheckpointQualificationScriptTests: XCTestCase {
         XCTAssertFalse(script.contains("/sbin/reboot"))
         XCTAssertFalse(script.contains("/sbin/shutdown"))
         XCTAssertFalse(script.contains("gh "))
+    }
+
+    func testAggregateSoakRefusesExternalOrRemovableStorage() throws {
+        let scriptURL = packageRoot().appendingPathComponent(
+            "scripts/phase08-soak-qualification.sh"
+        )
+        let path = FileManager.default.temporaryDirectory.path
+        let internalStorage = #"""
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0"><dict>
+        <key>Internal</key><true/>
+        <key>RemovableMediaOrExternalDevice</key><false/>
+        <key>WritableVolume</key><true/>
+        <key>MountPoint</key><string>/System/Volumes/Data</string>
+        </dict></plist>
+        """#
+        let externalStorage = #"""
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0"><dict>
+        <key>Internal</key><false/>
+        <key>RemovableMediaOrExternalDevice</key><true/>
+        <key>WritableVolume</key><true/>
+        <key>MountPoint</key><string>/Volumes/T9</string>
+        </dict></plist>
+        """#
+        let source = #"""
+        source "$1"
+        storage_properties() { printf '%s' "$HOSTWRIGHT_TEST_STORAGE_PLIST"; }
+        require_internal_persistent_path "$2" 'The test path'
+        """#
+
+        let internalResult = try runBash(
+            source,
+            arguments: [scriptURL.path, path],
+            environment: ["HOSTWRIGHT_TEST_STORAGE_PLIST": internalStorage]
+        )
+        XCTAssertEqual(internalResult.status, 0, internalResult.output)
+
+        let externalResult = try runBash(
+            source,
+            arguments: [scriptURL.path, path],
+            environment: ["HOSTWRIGHT_TEST_STORAGE_PLIST": externalStorage]
+        )
+        XCTAssertEqual(externalResult.status, 77, externalResult.output)
+        XCTAssertTrue(
+            externalResult.output.contains("writable internal non-removable storage")
+        )
+    }
+
+    func testAggregateSoakRequiresOrderedInWindowSleepWakePair() throws {
+        let scriptURL = packageRoot().appendingPathComponent(
+            "scripts/phase08-soak-qualification.sh"
+        )
+        let source = #"""
+        source "$1"
+        start_epoch="$(LC_ALL=C /bin/date -j -f '%Y-%m-%d %H:%M:%S %z' "$HOSTWRIGHT_TEST_START" '+%s')"
+        end_epoch="$(LC_ALL=C /bin/date -j -f '%Y-%m-%d %H:%M:%S %z' "$HOSTWRIGHT_TEST_END" '+%s')"
+        printf '%s\n' "$HOSTWRIGHT_TEST_PMSET_LOG" | find_sleep_wake_pair "$start_epoch" "$end_epoch"
+        """#
+        let environment = [
+            "HOSTWRIGHT_TEST_START": "2026-08-03 07:30:00 -0400",
+            "HOSTWRIGHT_TEST_END": "2026-08-03 09:30:00 -0400"
+        ]
+        let validLog = """
+        2026-08-02 03:00:00 -0400 Sleep               \tEntering Sleep state due to 'Idle Sleep'
+        2026-08-02 03:10:00 -0400 Wake                \tWake from Normal Sleep
+        2026-08-03 07:33:23 -0400 Sleep               \tEntering Sleep state due to 'Low Power Sleep':TCPKeepAlive=active Using Batt (Charge:1%)
+        2026-08-03 08:00:00 -0400 DarkWake            \tDarkWake from Deep Idle [CDNP]
+        2026-08-03 09:11:19 -0400 Wake                \tWake from Hibernate [CDNVA] : due to EC.LidOpen/UserActivity Using AC (Charge:3%)
+        """
+        let validResult = try runBash(
+            source,
+            arguments: [scriptURL.path],
+            environment: environment.merging(["HOSTWRIGHT_TEST_PMSET_LOG": validLog]) {
+                _, value in value
+            }
+        )
+        XCTAssertEqual(validResult.status, 0, validResult.output)
+        XCTAssertEqual(
+            validResult.output.trimmingCharacters(in: .whitespacesAndNewlines)
+                .split(separator: "\t").count,
+            2
+        )
+
+        let rejectedLogs = [
+            """
+            2026-08-03 07:40:00 -0400 Wake                \tWake from Hibernate
+            2026-08-03 08:00:00 -0400 Sleep               \tEntering Sleep state due to 'Low Power Sleep'
+            """,
+            """
+            2026-08-03 08:00:00 -0400 Sleep               \tEntering Sleep state due to 'Low Power Sleep'
+            2026-08-03 08:10:00 -0400 DarkWake            \tDarkWake from Deep Idle [CDNP]
+            """,
+            """
+            2026-08-03 07:00:00 -0400 Sleep               \tEntering Sleep state due to 'Idle Sleep'
+            2026-08-03 07:10:00 -0400 Wake                \tWake from Normal Sleep
+            2026-08-03 09:40:00 -0400 Sleep               \tEntering Sleep state due to 'Idle Sleep'
+            2026-08-03 09:50:00 -0400 Wake                \tWake from Normal Sleep
+            """
+        ]
+        for log in rejectedLogs {
+            let result = try runBash(
+                source,
+                arguments: [scriptURL.path],
+                environment: environment.merging(["HOSTWRIGHT_TEST_PMSET_LOG": log]) {
+                    _, value in value
+                }
+            )
+            XCTAssertEqual(result.status, 1, result.output)
+        }
     }
 
     func testAggregateSoakRetriesFreshCompactionPlansOnlyForStaleConfirmation() throws {

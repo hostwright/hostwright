@@ -5,6 +5,7 @@ readonly duration_seconds=259200
 readonly sample_interval_seconds=300
 readonly expected_samples=864
 readonly compaction_attempt_limit=5
+readonly power_evidence_version=1
 readonly uuid_pattern='^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$'
 readonly resource_uuid_pattern='^[a-f0-9]{8}-[a-f0-9]{4}-8[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$'
 readonly subsystem='dev.hostwright'
@@ -33,8 +34,9 @@ contract() {
   printf '%s\n' 'The qualifying duration is exactly 259200 seconds with 300-second samples.'
   printf '%s\n' 'One foreground daemon, one exact digest-bound workload, and one private schema-v17 database are used.'
   printf '%s\n' 'The global Apple-container inventory must contain no other Hostwright-managed runtime before or throughout the run.'
+  printf '%s\n' 'The clean source, executables, template, and private evidence root must remain on writable internal non-removable storage.'
   printf '%s\n' 'Configuration churn, bounded pressure, daemon/workload/helper/runtime faults, and all local observability sinks are exercised serially.'
-  printf '%s\n' 'A real sleep and wake must occur during the uninterrupted window; the runner never forces either transition.'
+  printf '%s\n' 'A timestamp-bound real sleep then wake must occur inside the uninterrupted window; the runner never forces either transition.'
   printf '%s\n' 'Failure preserves evidence and exact resource identity; success performs confirmation-bound owned-only cleanup.'
   printf '%s\n' 'No CI, GitHub, network listener, upload, reboot, logout, release, tag, tap, or website action is performed.'
 }
@@ -60,6 +62,33 @@ require_canonical_file() {
   [[ "$path" == /* && "$path" != *$'\n'* && -f "$path" && ! -L "$path" \
       && "$(/bin/realpath "$path")" == "$path" ]] \
     || die "$variable must name one canonical absolute regular non-symlink file." 66
+}
+
+storage_properties() {
+  local path="$1"
+  local device
+  device="$(/bin/df -P "$path" | awk 'NR == 2 { print $1 }')"
+  [[ "$device" == /dev/* ]] || return 1
+  /usr/sbin/diskutil info -plist "$device"
+}
+
+require_internal_persistent_path() {
+  local path="$1"
+  local label="$2"
+  local properties internal external writable mount_point
+  properties="$(storage_properties "$path")" \
+    || die "$label storage identity could not be resolved." 69
+  internal="$(printf '%s' "$properties" | /usr/bin/plutil -extract Internal raw -o - - 2>/dev/null)" \
+    || die "$label storage did not declare internal identity." 77
+  external="$(printf '%s' "$properties" | /usr/bin/plutil -extract RemovableMediaOrExternalDevice raw -o - - 2>/dev/null)" \
+    || die "$label storage did not declare removable-media identity." 77
+  writable="$(printf '%s' "$properties" | /usr/bin/plutil -extract WritableVolume raw -o - - 2>/dev/null)" \
+    || die "$label storage did not declare writable-volume identity." 77
+  mount_point="$(printf '%s' "$properties" | /usr/bin/plutil -extract MountPoint raw -o - - 2>/dev/null)" \
+    || die "$label storage did not declare a mount point." 77
+  [[ "$internal" == true && "$external" == false && "$writable" == true \
+      && "$mount_point" == /* ]] \
+    || die "$label must remain on writable internal non-removable storage." 77
 }
 
 managed_runtime_count() {
@@ -117,26 +146,34 @@ verify_exclusive_runtime_inventory() {
 
 validate_root() {
   : "${HOSTWRIGHT_PHASE08_SOAK_ROOT:?HOSTWRIGHT_PHASE08_SOAK_ROOT is required}"
-  local root_parent root_name user_id
+  local account_home qualification_parent root_parent root_name user_id
+  account_home="$(python3 -c 'import os, pwd; print(pwd.getpwuid(os.getuid()).pw_dir)')"
+  qualification_parent="${account_home}/Library/Application Support/Hostwright/qualification"
   root_parent="$(dirname "$HOSTWRIGHT_PHASE08_SOAK_ROOT")"
   root_name="$(basename "$HOSTWRIGHT_PHASE08_SOAK_ROOT")"
   user_id="$(id -u)"
-  [[ "$root_parent" =~ ^/Volumes/T9/hostwright/qualification/phase08-gate16-[a-f0-9]+$ \
-      && "$root_name" =~ ^phase08-soak-${uuid_pattern#^} \
-      && -d "$root_parent" && ! -L "$root_parent" \
-      && "$(/bin/realpath "$root_parent")" == "$root_parent" \
-      && "$(stat -f '%u' "$root_parent")" == "$user_id" \
-      && "$(stat -f '%Lp' "$root_parent")" == 700 \
+  [[ -d "$qualification_parent" && ! -L "$qualification_parent" \
+      && "$(/bin/realpath "$qualification_parent")" == "$qualification_parent" \
+      && "$(stat -f '%u' "$qualification_parent")" == "$user_id" \
+      && "$(stat -f '%Lp' "$qualification_parent")" == 700 \
+      && "$root_parent" == "$qualification_parent" \
+      && "$root_name" =~ ^phase08-gate16-soak-${uuid_pattern#^} \
       && -d "$HOSTWRIGHT_PHASE08_SOAK_ROOT" \
       && ! -L "$HOSTWRIGHT_PHASE08_SOAK_ROOT" \
       && "$(/bin/realpath "$HOSTWRIGHT_PHASE08_SOAK_ROOT")" == "$HOSTWRIGHT_PHASE08_SOAK_ROOT" \
       && "$(stat -f '%u' "$HOSTWRIGHT_PHASE08_SOAK_ROOT")" == "$user_id" \
       && "$(stat -f '%Lp' "$HOSTWRIGHT_PHASE08_SOAK_ROOT")" == 700 ]] \
-    || die 'The soak root must be one private phase08-soak-<uuid> child of the exact T9 Gate 16 evidence root.' 77
+    || die 'The soak root must be one private phase08-gate16-soak-<uuid> child of the persistent Hostwright qualification parent.' 77
+  require_internal_persistent_path "$qualification_parent" 'The qualification parent'
+  require_internal_persistent_path "$HOSTWRIGHT_PHASE08_SOAK_ROOT" 'The soak root'
 }
 
 validate_inputs() {
   validate_root
+  local source_root
+  source_root="$(git rev-parse --show-toplevel)"
+  [[ "$(pwd -P)" == "$source_root" ]] \
+    || die 'The soak must run from the exact clean source root.' 70
   require_canonical_file HOSTWRIGHT_PHASE08_SOAK_HOSTWRIGHT
   require_canonical_file HOSTWRIGHT_PHASE08_SOAK_DAEMON
   require_canonical_file HOSTWRIGHT_PHASE08_SOAK_CONFIG_TEMPLATE
@@ -157,9 +194,14 @@ validate_inputs() {
   [[ "$(git rev-parse HEAD)" == "$HOSTWRIGHT_PHASE08_SOAK_SOURCE_COMMIT" \
       && -z "$(git status --porcelain --untracked-files=all -- . ':(exclude)tmp')" ]] \
     || die 'The soak requires the exact clean committed source head.' 70
-  for tool in /usr/bin/jq /usr/bin/sqlite3 /usr/sbin/lsof /usr/bin/log /usr/bin/pmset /usr/bin/shasum; do
+  for tool in /bin/date /bin/df /usr/bin/jq /usr/bin/plutil /usr/bin/sqlite3 \
+      /usr/sbin/diskutil /usr/sbin/lsof /usr/bin/log /usr/bin/pmset /usr/bin/shasum; do
     [[ -x "$tool" ]] || die "Required soak tool is unavailable: $tool" 69
   done
+  require_internal_persistent_path "$source_root" 'The source root'
+  require_internal_persistent_path "$HOSTWRIGHT_PHASE08_SOAK_HOSTWRIGHT" 'The hostwright executable'
+  require_internal_persistent_path "$HOSTWRIGHT_PHASE08_SOAK_DAEMON" 'The daemon executable'
+  require_internal_persistent_path "$HOSTWRIGHT_PHASE08_SOAK_CONFIG_TEMPLATE" 'The configuration template'
   [[ "$(container system status)" == *'status             running'* ]] \
     || die 'Apple container is not running.' 69
   require_empty_managed_runtime_inventory
@@ -177,9 +219,33 @@ record() {
   chmod 600 "$evidence_file"
 }
 
-pmset_count() {
-  local pattern="$1"
-  /usr/bin/pmset -g log | grep -c "$pattern" || true
+find_sleep_wake_pair() {
+  local start_epoch="$1"
+  local end_epoch="$2"
+  local line timestamp event_epoch sleep_epoch=''
+  [[ "$start_epoch" =~ ^[0-9]+$ && "$end_epoch" =~ ^[0-9]+$ \
+      && "$end_epoch" -gt "$start_epoch" ]] || return 1
+  while IFS= read -r line; do
+    [[ "$line" == *$'\tEntering Sleep state'* || "$line" == *$'\tWake from'* ]] \
+      || continue
+    timestamp="${line:0:25}"
+    [[ "$timestamp" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}\ [0-9]{2}:[0-9]{2}:[0-9]{2}\ [+-][0-9]{4}$ ]] \
+      || continue
+    event_epoch="$(LC_ALL=C /bin/date -j -f '%Y-%m-%d %H:%M:%S %z' "$timestamp" '+%s' 2>/dev/null)" \
+      || continue
+    if [[ "$line" == *$'\tEntering Sleep state'* ]]; then
+      if [[ "$event_epoch" -ge "$start_epoch" && "$event_epoch" -le "$end_epoch" ]]; then
+        sleep_epoch="$event_epoch"
+      fi
+      continue
+    fi
+    if [[ -n "$sleep_epoch" && "$event_epoch" -gt "$sleep_epoch" \
+        && "$event_epoch" -le "$end_epoch" ]]; then
+      printf '%s\t%s\n' "$sleep_epoch" "$event_epoch"
+      return 0
+    fi
+  done
+  return 1
 }
 
 write_manifest() {
@@ -589,12 +655,10 @@ run_soak() {
     > "$HOSTWRIGHT_PHASE08_SOAK_ROOT/manifest-validation.log"
   chmod 600 "$HOSTWRIGHT_PHASE08_SOAK_ROOT/manifest-validation.log"
 
-  local start_epoch end_epoch source_sha sleep_baseline wake_baseline
+  local start_epoch end_epoch source_sha
   start_epoch="$(date +%s)"
   end_epoch=$((start_epoch + duration_seconds))
   source_sha="$(source_digest)"
-  sleep_baseline="$(pmset_count 'Entering Sleep state')"
-  wake_baseline="$(pmset_count 'Wake from')"
   {
     printf 'schemaVersion\t1\n'
     printf 'phase\trunning\n'
@@ -605,8 +669,7 @@ run_soak() {
     printf 'templateSHA256\t%s\n' "$(sha256 "$HOSTWRIGHT_PHASE08_SOAK_CONFIG_TEMPLATE")"
     printf 'startEpoch\t%s\n' "$start_epoch"
     printf 'requiredEndEpoch\t%s\n' "$end_epoch"
-    printf 'sleepBaseline\t%s\n' "$sleep_baseline"
-    printf 'wakeBaseline\t%s\n' "$wake_baseline"
+    printf 'powerEvidenceVersion\t%s\n' "$power_evidence_version"
   } > "$state_file"
   chmod 600 "$state_file"
   printf 'sequence\tepoch\tdaemonPID\trssKB\tfileDescriptors\tdatabaseBytes\toperations\tactiveGroups\tevents\ttraces\tretries\toslog10m\truntimeInventorySHA256\n' > "$sample_file"
@@ -654,21 +717,26 @@ run_soak() {
     next_sample=$((start_epoch + sequence * sample_interval_seconds))
   done
 
-  local finish_epoch sleep_after wake_after
+  local finish_epoch power_pair sleep_epoch wake_epoch
   finish_epoch="$(date +%s)"
   [[ "$finish_epoch" -ge "$end_epoch" ]] || die 'The soak clock finished before 72 uninterrupted hours.'
   record_sample $((sequence + 1))
   analyze_samples
-  sleep_after="$(pmset_count 'Entering Sleep state')"
-  wake_after="$(pmset_count 'Wake from')"
-  [[ "$sleep_after" -gt "$sleep_baseline" && "$wake_after" -gt "$wake_baseline" ]] \
-    || die 'No real paired macOS sleep/wake occurred during the uninterrupted soak window.'
   /usr/bin/pmset -g log > "$HOSTWRIGHT_PHASE08_SOAK_ROOT/pmset-final.log"
+  chmod 600 "$HOSTWRIGHT_PHASE08_SOAK_ROOT/pmset-final.log"
+  power_pair="$(
+    find_sleep_wake_pair "$start_epoch" "$end_epoch" \
+      < "$HOSTWRIGHT_PHASE08_SOAK_ROOT/pmset-final.log"
+  )" || die 'No ordered timestamp-bound macOS sleep/wake pair occurred during the uninterrupted soak window.'
+  sleep_epoch="${power_pair%%$'\t'*}"
+  wake_epoch="${power_pair#*$'\t'}"
+  printf 'sleepEpoch\t%s\nwakeEpoch\t%s\n' "$sleep_epoch" "$wake_epoch" >> "$state_file"
+  chmod 600 "$state_file"
+  record "sleep-wake-pass sleepEpoch=$sleep_epoch wakeEpoch=$wake_epoch"
   /usr/bin/log show --start "$(date -r "$start_epoch" '+%Y-%m-%d %H:%M:%S')" --style ndjson \
     --predicate "subsystem == \"$subsystem\"" \
     > "$HOSTWRIGHT_PHASE08_SOAK_ROOT/oslog-v1.ndjson"
-  chmod 600 "$HOSTWRIGHT_PHASE08_SOAK_ROOT/pmset-final.log" \
-    "$HOSTWRIGHT_PHASE08_SOAK_ROOT/oslog-v1.ndjson"
+  chmod 600 "$HOSTWRIGHT_PHASE08_SOAK_ROOT/oslog-v1.ndjson"
   [[ -s "$HOSTWRIGHT_PHASE08_SOAK_ROOT/oslog-v1.ndjson" ]] \
     || die 'The complete soak OSLog evidence is empty.'
   export_observability

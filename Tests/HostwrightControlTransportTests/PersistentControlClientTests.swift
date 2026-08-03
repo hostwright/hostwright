@@ -349,8 +349,7 @@ final class PersistentControlClientTests: XCTestCase {
       return ControlResponseEnvelope(
         requestID: request.requestID,
         status: .completed,
-        reasonCode: .completed,
-        operationRef: request.operation == "service.start" ? "gate3-live-operation" : nil
+        reasonCode: .completed
       )
     }
     let accepted = DispatchGroup()

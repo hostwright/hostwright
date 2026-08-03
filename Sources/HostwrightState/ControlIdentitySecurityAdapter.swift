@@ -1,4 +1,5 @@
 import CryptoKit
+import Darwin
 import Foundation
 import HostwrightControlPlane
 import HostwrightControlSecurity
@@ -104,26 +105,37 @@ extension SQLiteControlIdentitySecurityAdapter: ControlSessionBindingStoring {
     let nonceDigest = SHA256.hash(data: Data(binding.serverNonce.utf8))
       .map { String(format: "%02x", $0) }
       .joined()
-    try store.controlIdentities.persistSession(
-      ControlSessionRecord(
-        sessionID: binding.sessionID,
-        subjectID: binding.subject.identifier,
-        daemonGeneration: binding.daemonGeneration,
-        serverNonceSHA256: nonceDigest,
-        socketDevice: binding.socketDevice,
-        socketInode: binding.socketInode,
-        effectiveUID: binding.peer.effectiveUID,
-        effectiveGID: binding.peer.effectiveGID,
-        pid: binding.peer.pid,
-        pidVersion: binding.peer.pidVersion,
-        auditSessionID: binding.peer.auditSessionID,
-        codeDirectoryHash: binding.peer.codeIdentity.codeDirectoryHash,
-        credentialID: binding.subject.credentialID,
-        createdAt: timestamp(createdAt),
-        expiresAt: timestamp(createdAt.addingTimeInterval(sessionLifetime)),
-        updatedAt: timestamp(createdAt)
-      )
+    let session = ControlSessionRecord(
+      sessionID: binding.sessionID,
+      subjectID: binding.subject.identifier,
+      daemonGeneration: binding.daemonGeneration,
+      serverNonceSHA256: nonceDigest,
+      socketDevice: binding.socketDevice,
+      socketInode: binding.socketInode,
+      effectiveUID: binding.peer.effectiveUID,
+      effectiveGID: binding.peer.effectiveGID,
+      pid: binding.peer.pid,
+      pidVersion: binding.peer.pidVersion,
+      auditSessionID: binding.peer.auditSessionID,
+      codeDirectoryHash: binding.peer.codeIdentity.codeDirectoryHash,
+      credentialID: binding.subject.credentialID,
+      createdAt: timestamp(createdAt),
+      expiresAt: timestamp(createdAt.addingTimeInterval(sessionLifetime)),
+      updatedAt: timestamp(createdAt)
     )
+    let deadline = DispatchTime.now().uptimeNanoseconds
+      + UInt64(ControlPlaneContract.maximumAuthenticationHandshakeMilliseconds) * 1_000_000
+    while true {
+      do {
+        try store.controlIdentities.persistSession(session)
+        return
+      } catch let error as StateStoreError {
+        guard case .databaseLocked = error,
+          DispatchTime.now().uptimeNanoseconds < deadline
+        else { throw error }
+        usleep(25_000)
+      }
+    }
   }
 
   public func isActive(sessionID: String, daemonGeneration: UInt64) throws -> Bool {

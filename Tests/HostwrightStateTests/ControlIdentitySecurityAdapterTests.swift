@@ -2,6 +2,7 @@ import Darwin
 import Foundation
 import HostwrightControlPlane
 import HostwrightControlSecurity
+import Synchronization
 import XCTest
 
 @testable import HostwrightState
@@ -94,6 +95,45 @@ final class ControlIdentitySecurityAdapterTests: XCTestCase {
           codeIdentity: identity.codeIdentity
         ).isRevoked
       )
+    }
+  }
+
+  func testSessionPersistenceWaitsForTransientWriterFenceContention() throws {
+    try withAdapter { store, adapter, identity in
+      let coordinator = StateAccessCoordinator(configuration: store.configuration)
+      let acquired = self.expectation(description: "writer fence acquired")
+      let finished = self.expectation(description: "writer fence released")
+      let release = DispatchSemaphore(value: 0)
+      let backgroundFailure = Mutex<String?>(nil)
+      DispatchQueue.global(qos: .userInitiated).async {
+        do {
+          try coordinator.withLock(.write) {
+            acquired.fulfill()
+            guard release.wait(timeout: .now() + 5) == .success else {
+              throw StateStoreError.databaseLocked(
+                path: store.path,
+                message: "the test writer release deadline expired"
+              )
+            }
+          }
+        } catch {
+          backgroundFailure.withLock { $0 = String(describing: error) }
+        }
+        finished.fulfill()
+      }
+      self.wait(for: [acquired], timeout: 2)
+      DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.6) {
+        release.signal()
+      }
+
+      let started = ContinuousClock.now
+      try adapter.persist(self.binding(identity: identity))
+      let elapsed = started.duration(to: .now)
+      self.wait(for: [finished], timeout: 2)
+
+      XCTAssertGreaterThanOrEqual(elapsed, .milliseconds(500))
+      XCTAssertLessThan(elapsed, .seconds(5))
+      XCTAssertNil(backgroundFailure.withLock { $0 })
     }
   }
 

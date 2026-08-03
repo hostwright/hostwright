@@ -124,6 +124,55 @@ final class PersistentControlAdmissionIntegrationTests: XCTestCase {
     }
   }
 
+  func testAdmissionMutatedPreparedRequestIsRepreparedBeforeAuthorizationAndExecution() throws {
+    let preparations = Counter()
+    let expectedBody = ControlPlaneJSONValue.object(["network": .string("isolated")])
+    try withServer(
+      requestPreparer: { _, request in
+        preparations.increment()
+        return try PersistentControlPreparedRequest(
+          request: request,
+          execution: { _, _ in
+            ControlResponseEnvelope(
+              requestID: request.requestID,
+              status: .completed,
+              reasonCode: .completed,
+              result: request.body
+            )
+          }
+        )
+      },
+      evaluator: { _, request, _ in
+        let effective = ControlRequestEnvelope(
+          requestID: request.requestID,
+          operation: request.operation,
+          timeoutMilliseconds: request.timeoutMilliseconds,
+          idempotencyKey: request.idempotencyKey,
+          body: expectedBody
+        )
+        return try admissionEvaluation(
+          request: effective,
+          allowed: true,
+          reason: "admission.allowed",
+          policy: "policy-ref",
+          plan: "a",
+          approval: nil,
+          digest: "b"
+        )
+      }
+    ) { fixture, session in
+      let request = mutationRequest("prepared-effective-request")
+      try session.write(request)
+      let response = try session.read()
+
+      XCTAssertEqual(response.status, .completed)
+      XCTAssertEqual(response.result, expectedBody)
+      XCTAssertEqual(preparations.value, 2)
+      XCTAssertEqual(fixture.invocations.value, 0)
+      XCTAssertEqual(try fixture.repository.load(request.requestID)?.status, .completed)
+    }
+  }
+
   func testIdempotencyBindsOriginalRequestAndAdmissionEffectiveIntent() throws {
     let phase = MutablePhase()
     try withServer(
@@ -156,6 +205,9 @@ final class PersistentControlAdmissionIntegrationTests: XCTestCase {
   private func withServer(
     authorizer: @escaping PersistentControlConnectionServer.Authorizer = { _, _, _ in
       RBACDecision(effect: .allow, ruleIdentifiers: ["allow"], reasonCode: "authorization.allowed")
+    },
+    requestPreparer: @escaping PersistentControlConnectionServer.RequestPreparer = {
+      _, request in try PersistentControlPreparedRequest(request: request)
     },
     evaluator: @escaping PersistentControlConnectionServer.AdmissionEvaluator,
     _ body: (Fixture, Session) throws -> Void
@@ -191,7 +243,8 @@ final class PersistentControlAdmissionIntegrationTests: XCTestCase {
     let server = try PersistentControlConnectionServer(
       authenticator: authenticator, requestRepository: repository, daemonGeneration: 1,
       socketIdentity: ControlSocketIdentity(device: 19, inode: 23),
-      mutatingOperations: ["service.update"], auditRecorder: recorder, authorizer: authorizer,
+      mutatingOperations: ["service.update"], requestPreparer: requestPreparer,
+      auditRecorder: recorder, authorizer: authorizer,
       admissionEvaluator: evaluator, now: now,
       handler: { _, request, _ in
         invocations.increment()

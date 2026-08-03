@@ -55,6 +55,156 @@ final class RBACAuthorizationEngineTests: XCTestCase {
     }
   }
 
+  func testCLIImageRegistryAndVolumeMutationsNeverInheritViewerReadCapabilities() throws {
+    try withSystem(subjects: ["viewer"]) { repository, engine in
+      try bind("viewer", role: "viewer", id: "viewer-role", repository: repository)
+
+      let mutations: [(operation: String, subcommand: String)] = [
+        ("image", "pull"), ("image", "push"), ("image", "tag"),
+        ("image", "load"), ("image", "save"), ("image", "build"),
+        ("image", "delete"), ("image", "prune"), ("image", "cache.prune"),
+        ("image", "pin"), ("image", "unpin"),
+        ("registry", "login"), ("registry", "logout"),
+        ("registry", "referrers.discover"), ("registry", "referrers.fetch"),
+        ("registry", "referrers.publish"), ("registry", "referrers.copy"),
+        ("registry", "referrers.retain"), ("registry", "referrers.release"),
+        ("registry", "referrers.prune"), ("registry", "referrers.resume"),
+        ("registry", "trust.verify"), ("registry", "trust.grant-exception"),
+        ("registry", "trust.revoke-exception"),
+        ("registry", "sbom.generate"), ("registry", "sbom.ingest"),
+        ("registry", "sbom.export"), ("registry", "sbom.resume"),
+        ("registry", "vulnerability.evaluate"),
+        ("registry", "vulnerability.grant-exception"),
+        ("registry", "vulnerability.revoke-exception"), ("registry", "vulnerability.resume"),
+        ("registry", "provenance.generate"), ("registry", "provenance.verify"),
+        ("registry", "provenance.resume"),
+        ("volume", "recover"), ("volume", "delete"), ("volume", "prune"),
+        ("volume", "snapshot.create"), ("volume", "snapshot.retain"),
+        ("volume", "snapshot.export"), ("volume", "snapshot.restore"),
+        ("volume", "snapshot.delete"), ("volume", "backup.create"),
+        ("volume", "backup.retain"), ("volume", "backup.restore"),
+        ("volume", "backup.delete"),
+      ]
+
+      for mutation in mutations {
+        XCTAssertDenied(
+          engine, subject: "viewer",
+          request: request(
+            mutation.operation,
+            body: body(subcommand: mutation.subcommand, mutating: true)),
+          reason: "authorization.no-allow")
+      }
+    }
+  }
+
+  func testCLIImageRegistryAndVolumeReadsRetainViewerLeastPrivilege() throws {
+    try withSystem(subjects: ["viewer"]) { repository, engine in
+      try bind("viewer", role: "viewer", id: "viewer-role", repository: repository)
+
+      let reads: [(operation: String, subcommand: String)] = [
+        ("image", "status"), ("image", "inspect"), ("image", "cache.status"),
+        ("image", "cache.list"), ("registry", "status"),
+        ("registry", "referrers.status"), ("registry", "trust.status"),
+        ("registry", "sbom.query"), ("registry", "vulnerability.status"),
+        ("registry", "provenance.status"), ("volume", "status"), ("volume", "list"),
+        ("volume", "inspect"), ("volume", "capacity"), ("volume", "health"),
+        ("volume", "snapshot.list"), ("volume", "snapshot.inspect"),
+        ("volume", "backup.list"), ("volume", "backup.inspect"), ("volume", "backup.verify"),
+      ]
+
+      for read in reads {
+        XCTAssertAllowed(
+          engine, subject: "viewer",
+          request: request(read.operation, body: body(subcommand: read.subcommand)),
+          rules: ["builtin.viewer.viewer.allow"])
+      }
+    }
+  }
+
+  func testRawLocalControlNestedOperationsCannotDowngradeMutationsToViewerReads() throws {
+    try withSystem(subjects: ["viewer", "maintainer"]) { repository, engine in
+      try bind("viewer", role: "viewer", id: "viewer-role", repository: repository)
+      try bind(
+        "maintainer", role: "maintainer", id: "maintainer-role", repository: repository)
+
+      let mutations: [(operation: String, field: String, selector: String)] = [
+        ("image", "imageOperation", "pull"),
+        ("image", "imageOperation", "delete"),
+        ("registry", "registryReferrerOperation", "publish"),
+        ("registry", "registryTrustOperation", "verify"),
+        ("registry", "registrySBOMOperation", "export"),
+        ("registry", "registryVulnerabilityOperation", "grant-exception"),
+        ("registry", "registryProvenanceOperation", "resume"),
+        ("volume", "volumeOperation", "snapshot-create"),
+        ("volume", "volumeOperation", "backup-restore"),
+        ("volume", "volumeOperation", "delete"),
+      ]
+      for mutation in mutations {
+        let nested = request(
+          mutation.operation,
+          body: .object([mutation.field: .string(mutation.selector)]))
+        XCTAssertDenied(
+          engine,
+          subject: "viewer",
+          request: nested,
+          reason: "authorization.no-allow"
+        )
+        XCTAssertAllowed(
+          engine,
+          subject: "maintainer",
+          request: nested,
+          rules: ["builtin.maintainer.maintainer.allow"]
+        )
+      }
+    }
+  }
+
+  func testRawLocalControlNestedReadOperationsRetainViewerLeastPrivilege() throws {
+    try withSystem(subjects: ["viewer"]) { repository, engine in
+      try bind("viewer", role: "viewer", id: "viewer-role", repository: repository)
+      let reads: [(operation: String, field: String, selector: String)] = [
+        ("image", "imageOperation", "inspect"),
+        ("image", "imageOperation", "cache-status"),
+        ("registry", "registryReferrerOperation", "status"),
+        ("registry", "registrySBOMOperation", "query"),
+        ("volume", "volumeOperation", "list"),
+        ("volume", "volumeOperation", "backup-verify"),
+      ]
+      for read in reads {
+        XCTAssertAllowed(
+          engine,
+          subject: "viewer",
+          request: request(
+            read.operation,
+            body: .object([read.field: .string(read.selector)])),
+          rules: ["builtin.viewer.viewer.allow"]
+        )
+      }
+    }
+  }
+
+  func testRawLocalControlConflictingOrUnknownSelectorsFailClosed() throws {
+    try withSystem(subjects: []) { _, engine in
+      XCTAssertThrowsError(try engine.authorize(
+        subject: subject("owner"),
+        request: request(
+          "registry",
+          body: .object([
+            "registryReferrerOperation": .string("status"),
+            "registryTrustOperation": .string("status"),
+          ])),
+        at: evaluationDate
+      ))
+      XCTAssertThrowsError(try engine.authorize(
+        subject: subject("owner"),
+        request: request(
+          "image",
+          body: .object(["imageOperation": .string("future-operation")])),
+        at: evaluationDate
+      ))
+    }
+  }
+
   func testMalformedOrConflictingTargetFieldsFailClosedBeforePolicyEvaluation() throws {
     try withSystem(subjects: []) { _, engine in
       XCTAssertThrowsError(
@@ -364,12 +514,15 @@ final class RBACAuthorizationEngineTests: XCTestCase {
   }
 
   private func body(
-    project: String? = nil, resource: String? = nil, profile: String? = nil
+    project: String? = nil, resource: String? = nil, profile: String? = nil,
+    subcommand: String? = nil, mutating: Bool? = nil
   ) -> ControlPlaneJSONValue {
     var fields: [String: ControlPlaneJSONValue] = [:]
     if let project { fields["projectUUID"] = .string(project) }
     if let resource { fields["resourceUUID"] = .string(resource) }
     if let profile { fields["profileHash"] = .string(profile) }
+    if let subcommand { fields["subcommand"] = .string(subcommand) }
+    if let mutating { fields["mutating"] = .bool(mutating) }
     return .object(fields)
   }
 

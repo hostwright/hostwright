@@ -4,6 +4,7 @@ import XCTest
 @testable import HostwrightControlSecurity
 @testable import HostwrightControlTransport
 @testable import HostwrightDaemon
+@testable import HostwrightManifest
 @testable import HostwrightPolicy
 @testable import HostwrightState
 
@@ -72,6 +73,106 @@ final class DaemonControlStreamAuthorizationPipelineTests: XCTestCase {
       }
       XCTAssertNil(try fixture.requests.load("audit-fail-exec"))
       XCTAssertTrue(try fixture.store.operations.loadAll().isEmpty)
+    }
+  }
+
+  func testEventAuthorizationResolvesLegacyFilterToAuthoritativeProjectUUID() throws {
+    try withFixture(subjects: ["event-reader"]) { fixture in
+      _ = try fixture.store.rbac.createCustomRole(
+        RBACRoleRecord(
+          roleID: "project-event-reader",
+          builtIn: false,
+          rules: [RBACRule(
+            identifier: "project-event-watch",
+            effect: .allow,
+            resources: [.observability],
+            verbs: [.watch],
+            scope: RBACScope(kind: .global)
+          )],
+          createdBySubjectID: "owner",
+          createdAt: timestamp,
+          updatedAt: timestamp
+        ),
+        actorSubjectID: "owner",
+        timestamp: timestamp
+      )
+      _ = try fixture.store.rbac.createBinding(RBACBindingRecord(
+        bindingID: "project-event-reader-binding",
+        subjectID: "event-reader",
+        roleID: "project-event-reader",
+        scope: RBACScope(kind: .project, identifier: projectUUID),
+        createdBySubjectID: "owner",
+        createdAt: timestamp,
+        updatedAt: timestamp
+      ))
+      let request = ControlStreamOpenRequest(
+        source: .events,
+        filter: .object(["projectID": .string("project-probe")])
+      )
+
+      let authorization = try fixture.pipeline().authorize(
+        peer: peer("event-reader", hash: "b"),
+        streamID: "project-events",
+        request: request,
+        at: decisionDate
+      )
+      XCTAssertEqual(authorization.decision.effect, .allow)
+      XCTAssertEqual(authorization.decision.ruleIdentifiers, ["project-event-watch"])
+
+      XCTAssertThrowsError(try fixture.pipeline().authorize(
+        peer: peer("event-reader", hash: "b"),
+        streamID: "missing-project-events",
+        request: ControlStreamOpenRequest(
+          source: .events,
+          filter: .object(["projectID": .string("project-missing")])
+        ),
+        at: decisionDate
+      )) { error in
+        XCTAssertEqual(error as? ControlStreamAuthorizationError, .invalidRequest)
+      }
+    }
+  }
+
+  func testPreparedRuntimeBindingRejectsSameUUIDOwnershipReplacementBeforeStart() throws {
+    try withFixture(subjects: []) { fixture in
+      let pipeline = fixture.pipeline()
+      let request = interactiveRequest(
+        target: targetA,
+        requestID: "binding-replacement",
+        idempotencyKey: "binding-replacement-key"
+      )
+      let authorization = try pipeline.authorize(
+        peer: peer("owner", hash: "a"),
+        streamID: "binding-replacement-stream",
+        request: request,
+        at: decisionDate
+      )
+      let bound = try XCTUnwrap(authorization.effectiveRequest)
+
+      try fixture.store.withValidatedConnection { connection in
+        try connection.transaction {
+          try connection.run(
+            """
+            UPDATE ownership_records
+            SET resource_identifier = ?
+            WHERE resource_uuid = ? AND service_name = ?
+            """,
+            bindings: [
+              .text("resource-swapped-after-authorization"),
+              .text(targetA),
+              .text("probe"),
+            ]
+          )
+        }
+      }
+
+      XCTAssertThrowsError(try pipeline.reauthorize(
+        peer: peer("owner", hash: "a"),
+        request: bound,
+        at: decisionDate
+      )) { error in
+        XCTAssertEqual(error as? ControlStreamAuthorizationError, .invalidRequest)
+      }
     }
   }
 
@@ -157,6 +258,25 @@ final class DaemonControlStreamAuthorizationPipelineTests: XCTestCase {
       let hash = String(UnicodeScalar(98 + index)!)
       try store.controlIdentities.declare(identity(subject, hash: hash, declaredBy: "owner"))
     }
+    let manifest = try ManifestValidator.validated(
+      """
+      version: 2
+      project: probe
+      services:
+        probe:
+          image: ghcr.io/example/probe:latest
+      """
+    )
+    try store.desiredStates.saveManifestSnapshot(
+      projectID: "project-probe",
+      manifestPath: root.appendingPathComponent("hostwright.yaml").path,
+      manifestHash: String(repeating: "a", count: 64),
+      desiredGeneration: 1,
+      manifest: manifest,
+      timestamp: timestamp,
+      mutationProvider: "AppleContainerApplyAdapter",
+      projectResourceUUID: projectUUID
+    )
     try store.ownership.upsert(ownership(id: "target-a", target: targetA))
     try store.ownership.upsert(ownership(id: "target-b", target: targetB))
     try body(Fixture(
@@ -192,7 +312,7 @@ final class DaemonControlStreamAuthorizationPipelineTests: XCTestCase {
       id: id,
       resourceIdentifier: "resource-\(id)",
       resourceType: "container",
-      projectID: nil,
+      projectID: "project-probe",
       serviceName: "probe",
       runtimeAdapter: "AppleContainerApplyAdapter",
       createdAt: timestamp,
@@ -200,7 +320,11 @@ final class DaemonControlStreamAuthorizationPipelineTests: XCTestCase {
       cleanupEligible: true,
       metadataJSONRedacted: "{}",
       resourceUUID: target,
-      projectResourceUUID: projectUUID
+      resourceGeneration: 1,
+      projectResourceUUID: projectUUID,
+      projectGeneration: 1,
+      providerGeneration: 1,
+      fencingToken: "33333333-3333-4333-8333-333333333333"
     )
   }
 

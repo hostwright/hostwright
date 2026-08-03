@@ -12,6 +12,131 @@ public enum ControlRuntimeStreamDriverError: Error, Sendable {
     case logSnapshotTooLarge
 }
 
+public struct ControlRuntimeStreamTarget: Codable, Equatable, Sendable {
+    public let projectID: String
+    public let projectResourceUUID: String
+    public let serviceName: String
+    public let resourceUUID: String
+    public let resourceIdentifier: String
+    public let providerID: RuntimeProviderID
+    public let resourceGeneration: Int
+    public let projectGeneration: Int
+    public let providerGeneration: Int
+    public let fencingToken: String
+
+    public init(
+        projectID: String,
+        projectResourceUUID: String,
+        serviceName: String,
+        resourceUUID: String,
+        resourceIdentifier: String,
+        providerID: RuntimeProviderID,
+        resourceGeneration: Int,
+        projectGeneration: Int,
+        providerGeneration: Int,
+        fencingToken: String
+    ) {
+        self.projectID = projectID
+        self.projectResourceUUID = projectResourceUUID
+        self.serviceName = serviceName
+        self.resourceUUID = resourceUUID
+        self.resourceIdentifier = resourceIdentifier
+        self.providerID = providerID
+        self.resourceGeneration = resourceGeneration
+        self.projectGeneration = projectGeneration
+        self.providerGeneration = providerGeneration
+        self.fencingToken = fencingToken
+    }
+
+    public func validate() throws {
+        guard !projectID.isEmpty, projectID.utf8.count <= 256,
+              !serviceName.isEmpty, serviceName.utf8.count <= 128,
+              !resourceIdentifier.isEmpty, resourceIdentifier.utf8.count <= 512,
+              HostwrightResourceUUID.isValid(projectResourceUUID),
+              HostwrightResourceUUID.isValid(resourceUUID),
+              HostwrightResourceUUID.isValid(fencingToken),
+              resourceGeneration > 0, projectGeneration >= 0,
+              providerGeneration > 0 else {
+            throw ControlRuntimeStreamDriverError.resourceBindingMismatch
+        }
+    }
+}
+
+public struct ControlRuntimeStreamTargetResolver: Sendable {
+    private let environment: CLIEnvironment
+
+    public init(environment: CLIEnvironment = .live) {
+        self.environment = environment
+    }
+
+    public func resolve(options: InteractiveCLIOptions) throws -> ControlRuntimeStreamTarget {
+        let manifestText = try hostwrightReadManifestText(
+            path: options.manifestPath,
+            environment: environment
+        )
+        let manifest = try hostwrightValidatedManifest(
+            text: manifestText,
+            teamProfilePath: nil,
+            environment: environment
+        ).manifest
+        guard let projectName = manifest.project, !projectName.isEmpty else {
+            throw InteractiveCommandRunnerError.missingProject
+        }
+        let serviceName = try InteractiveOperationBuilder.requestedService(options)
+        guard let service = manifest.services.first(where: { $0.name == serviceName }) else {
+            throw InteractiveCommandRunnerError.unknownService(serviceName)
+        }
+        guard service.replicas == 1 else {
+            throw InteractiveCommandRunnerError.replicatedServiceRequiresInstance(serviceName)
+        }
+        let store = SQLiteStateStore(
+            configuration: try hostwrightStateStoreConfiguration(
+                explicitPath: options.stateDatabasePath,
+                environment: environment
+            )
+        )
+        guard environment.fileExists(store.path) else {
+            throw InteractiveCommandRunnerError.missingProjectState(projectName)
+        }
+        guard try store.schemaVersion() == HostwrightContractVersions.stateSchema else {
+            throw InteractiveCommandRunnerError.invalidProjectBinding
+        }
+        let projectID = "project-\(projectName)"
+        let project = try store.desiredStates.loadProject(id: projectID)
+        guard project.name == projectName,
+              HostwrightResourceUUID.isValid(project.resourceUUID),
+              let providerName = project.mutationProvider,
+              let providerID = RuntimeProviderBinding.stableID(for: providerName),
+              project.providerGeneration > 0 else {
+            throw InteractiveCommandRunnerError.invalidProjectBinding
+        }
+        let ownership = try InteractiveOwnershipResolver.resolve(
+            records: store.ownership.loadAll(),
+            project: project,
+            serviceName: serviceName,
+            expectedIdentity: RuntimeServiceIdentity(
+                projectName: projectName,
+                serviceName: serviceName
+            ),
+            providerID: providerID
+        )
+        let target = ControlRuntimeStreamTarget(
+            projectID: projectID,
+            projectResourceUUID: project.resourceUUID,
+            serviceName: serviceName,
+            resourceUUID: ownership.resourceUUID,
+            resourceIdentifier: ownership.resourceIdentifier,
+            providerID: providerID,
+            resourceGeneration: ownership.resourceGeneration,
+            projectGeneration: ownership.projectGeneration,
+            providerGeneration: ownership.providerGeneration,
+            fencingToken: ownership.fencingToken
+        )
+        try target.validate()
+        return target
+    }
+}
+
 public struct ControlRuntimeLogSnapshotReader: Sendable {
     public static let maximumBytes = 1 * 1_024 * 1_024
     private let environment: CLIEnvironment
@@ -22,7 +147,7 @@ public struct ControlRuntimeLogSnapshotReader: Sendable {
         manifestPath: String,
         stateDatabasePath: String,
         serviceName: String,
-        expectedResourceUUID: String,
+        expectedTarget: ControlRuntimeStreamTarget,
         tail: Int
     ) throws -> Data {
         guard (1...1_000).contains(tail) else {
@@ -56,7 +181,14 @@ public struct ControlRuntimeLogSnapshotReader: Sendable {
             expectedIdentity: desired.identity,
             providerID: providerID
         )
-        guard ownership.resourceUUID == expectedResourceUUID else {
+        guard Self.matches(
+            target: expectedTarget,
+            projectID: projectID,
+            projectResourceUUID: project.resourceUUID,
+            providerID: providerID,
+            providerGeneration: project.providerGeneration,
+            ownership: ownership
+        ) else {
             throw ControlRuntimeStreamDriverError.resourceBindingMismatch
         }
         let desiredState = try hostwrightDesiredStateWithOwnershipHints(
@@ -102,6 +234,27 @@ public struct ControlRuntimeLogSnapshotReader: Sendable {
             throw ControlRuntimeStreamDriverError.logSnapshotTooLarge
         }
         return data
+    }
+
+    private static func matches(
+        target: ControlRuntimeStreamTarget,
+        projectID: String,
+        projectResourceUUID: String,
+        providerID: RuntimeProviderID,
+        providerGeneration: Int,
+        ownership: OwnershipRecord
+    ) -> Bool {
+        target.projectID == projectID
+            && target.projectResourceUUID == projectResourceUUID
+            && target.serviceName == ownership.serviceName
+            && target.resourceUUID == ownership.resourceUUID
+            && target.resourceIdentifier == ownership.resourceIdentifier
+            && target.providerID == providerID
+            && target.resourceGeneration == ownership.resourceGeneration
+            && target.projectGeneration == ownership.projectGeneration
+            && target.providerGeneration == providerGeneration
+            && target.providerGeneration == ownership.providerGeneration
+            && target.fencingToken == ownership.fencingToken
     }
 }
 
@@ -153,6 +306,22 @@ public final class ControlRuntimeStreamTask: @unchecked Sendable {
                         sink: sink
                     )
                 }
+                let resultPayload = try JSONSerialization.data(
+                    withJSONObject: [
+                        "exitStatus": Int(result.exitStatus),
+                        "kind": "cli-stream-result",
+                        "schemaVersion": 1,
+                    ],
+                    options: [.sortedKeys]
+                )
+                try sink(
+                    RuntimeStreamEnvelope(
+                        sequence: UInt64(result.emittedFrameCount) + 1,
+                        stream: .control,
+                        payload: resultPayload,
+                        endOfStream: true
+                    )
+                )
                 completion(.success(result))
             } catch {
                 completion(.failure(error))
@@ -199,13 +368,24 @@ public struct ControlRuntimeStreamDriver: Sendable {
 
     public func prepare(
         options: InteractiveCLIOptions,
-        expectedResourceUUID: String
+        expectedTarget: ControlRuntimeStreamTarget
     ) throws -> ControlRuntimeStreamTask {
         let driver = InteractiveLiveDriver(environment: environment, connectsStandardIO: false)
         let initial = try driver.prepare(options: options)
         let fresh = try driver.prepare(options: options)
         guard initial == fresh else { throw ControlRuntimeStreamDriverError.stalePreparation }
-        guard fresh.ownership.resourceUUID == expectedResourceUUID else {
+        try expectedTarget.validate()
+        guard fresh.projectID == expectedTarget.projectID,
+              fresh.projectResourceUUID == expectedTarget.projectResourceUUID,
+              fresh.providerID == expectedTarget.providerID,
+              fresh.providerGeneration == expectedTarget.providerGeneration,
+              fresh.ownership.serviceName == expectedTarget.serviceName,
+              fresh.ownership.resourceUUID == expectedTarget.resourceUUID,
+              fresh.ownership.resourceIdentifier == expectedTarget.resourceIdentifier,
+              fresh.ownership.resourceGeneration == expectedTarget.resourceGeneration,
+              fresh.ownership.projectGeneration == expectedTarget.projectGeneration,
+              fresh.ownership.providerGeneration == expectedTarget.providerGeneration,
+              fresh.ownership.fencingToken == expectedTarget.fencingToken else {
             throw ControlRuntimeStreamDriverError.resourceBindingMismatch
         }
         return ControlRuntimeStreamTask(preparation: fresh, options: options, environment: environment)

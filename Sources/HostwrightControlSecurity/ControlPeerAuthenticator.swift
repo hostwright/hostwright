@@ -317,6 +317,29 @@ public enum DarwinCurrentControlCodeIdentity {
     guard SecCodeCopySelf([], &code) == errSecSuccess, let code else {
       throw ControlPeerAuthenticationError.codeUnavailable
     }
+    return try inspect(code: code)
+  }
+
+  public static func inspect(processID: pid_t) throws -> CodeIdentity {
+    guard processID > 0 else {
+      throw ControlPeerAuthenticationError.codeUnavailable
+    }
+    let attributes = [
+      kSecGuestAttributePid as String: NSNumber(value: processID)
+    ] as CFDictionary
+    var code: SecCode?
+    guard SecCodeCopyGuestWithAttributes(
+      nil,
+      attributes,
+      SecCSFlags(),
+      &code
+    ) == errSecSuccess, let code else {
+      throw ControlPeerAuthenticationError.codeUnavailable
+    }
+    return try inspect(code: code)
+  }
+
+  private static func inspect(code: SecCode) throws -> CodeIdentity {
     guard
       SecCodeCheckValidity(
         code,

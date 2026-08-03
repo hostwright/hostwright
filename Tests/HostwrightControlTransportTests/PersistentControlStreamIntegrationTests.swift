@@ -617,6 +617,166 @@ final class PersistentControlStreamIntegrationTests: XCTestCase {
     XCTAssertNil(fixture.serverError)
   }
 
+  func testConcurrentInteractiveSendersReserveEachInputCreditExactlyOnce() throws {
+    let firstReceived = DispatchSemaphore(value: 0)
+    let permitSecondCredit = DispatchSemaphore(value: 0)
+    let fixture = try StreamITRawClientFixture { descriptor in
+      let deadline = try ControlTransportDeadline(timeoutMilliseconds: 2_000)
+      let open = try ControlStreamFrameContract.decode(
+        ControlFrameCodec.read(kind: .request, descriptor: descriptor, deadline: deadline))
+      try ControlFrameCodec.write(
+        try ControlPlaneCanonicalJSON.encode(StreamFrame(
+          streamID: open.streamID,
+          sequence: 1,
+          kind: .open,
+          payload: try ControlStreamFrameContract.value(ControlStreamAcceptance(
+            source: .exec, resumed: false,
+            heartbeatMilliseconds: ControlPlaneContract.streamHeartbeatMilliseconds,
+            inputCredit: 16,
+            operationRef: "stream:" + String(repeating: "a", count: 32),
+            auditHealth: .healthy
+          ))
+        )),
+        kind: .frame,
+        descriptor: descriptor,
+        deadline: deadline
+      )
+      for expectedSequence in 2...16 {
+        let preliminary = try ControlStreamFrameContract.decode(
+          ControlFrameCodec.read(kind: .request, descriptor: descriptor, deadline: deadline))
+        XCTAssertEqual(preliminary.kind, .data)
+        XCTAssertEqual(preliminary.sequence, UInt64(expectedSequence))
+      }
+      let first = try ControlStreamFrameContract.decode(
+        ControlFrameCodec.read(kind: .request, descriptor: descriptor, deadline: deadline))
+      XCTAssertEqual(first.kind, .data)
+      firstReceived.signal()
+
+      var state = pollfd(fd: descriptor, events: Int16(POLLIN), revents: 0)
+      XCTAssertEqual(poll(&state, 1, 150), 0, "one ACK must release exactly one sender")
+      XCTAssertEqual(permitSecondCredit.wait(timeout: .now() + 1), .success)
+      try ControlFrameCodec.write(
+        try ControlPlaneCanonicalJSON.encode(StreamFrame(
+          streamID: open.streamID, sequence: 2, kind: .ack, credit: 1
+        )),
+        kind: .frame,
+        descriptor: descriptor,
+        deadline: deadline
+      )
+      let second = try ControlStreamFrameContract.decode(
+        ControlFrameCodec.read(kind: .request, descriptor: descriptor, deadline: deadline))
+      XCTAssertEqual(second.kind, .data)
+      XCTAssertEqual(Set([first.sequence, second.sequence]), Set([17, 18]))
+    }
+    defer { fixture.close() }
+    try fixture.session.openStream(
+      streamID: "credit-reservation",
+      request: ControlStreamOpenRequest(
+        source: .exec, target: "resource-1", requestID: "credit-request",
+        idempotencyKey: "credit-key")
+    )
+    XCTAssertEqual(try fixture.session.nextFrame(streamID: "credit-reservation").kind, .open)
+
+    let preliminary: ControlPlaneJSONValue = .object([
+      "kind": .string("stdin"), "payloadBase64": .string("cHJlbGltaW5hcnk=")
+    ])
+    for _ in 0..<15 {
+      try fixture.session.sendStreamInput(
+        streamID: "credit-reservation", payload: preliminary)
+    }
+    let payloads: [ControlPlaneJSONValue] = [
+      .object(["kind": .string("stdin"), "payloadBase64": .string("YQ==")]),
+      .object(["kind": .string("signal"), "signal": .integer(Int64(SIGTERM))]),
+    ]
+    let group = DispatchGroup()
+    let results = StreamITVoidResultsBox()
+    for payload in payloads {
+      group.enter()
+      DispatchQueue.global().async {
+        results.append(Result {
+          try fixture.session.sendStreamInputWhenCreditAvailable(
+            streamID: "credit-reservation", payload: payload, timeoutMilliseconds: 1_000)
+        })
+        group.leave()
+      }
+    }
+    XCTAssertEqual(firstReceived.wait(timeout: .now() + 1), .success)
+    XCTAssertEqual(group.wait(timeout: .now() + 0.100), .timedOut)
+    permitSecondCredit.signal()
+    XCTAssertEqual(group.wait(timeout: .now() + 2), .success)
+    XCTAssertTrue(results.errors.isEmpty)
+    XCTAssertTrue(fixture.waitForExit())
+    XCTAssertNil(fixture.serverError)
+  }
+
+  func testPrewriteValidationFailureRefundsReservedInteractiveInputCredit() throws {
+    let fixture = try StreamITRawClientFixture { descriptor in
+      let deadline = try ControlTransportDeadline(timeoutMilliseconds: 2_000)
+      let open = try ControlStreamFrameContract.decode(
+        ControlFrameCodec.read(kind: .request, descriptor: descriptor, deadline: deadline))
+      try ControlFrameCodec.write(
+        try ControlPlaneCanonicalJSON.encode(StreamFrame(
+          streamID: open.streamID,
+          sequence: 1,
+          kind: .open,
+          payload: try ControlStreamFrameContract.value(ControlStreamAcceptance(
+            source: .exec,
+            resumed: false,
+            heartbeatMilliseconds: ControlPlaneContract.streamHeartbeatMilliseconds,
+            inputCredit: ControlPlaneContract.maximumInteractiveStreamInputCredit,
+            operationRef: "stream:" + String(repeating: "a", count: 32),
+            auditHealth: .healthy
+          ))
+        )),
+        kind: .frame,
+        descriptor: descriptor,
+        deadline: deadline
+      )
+      for sequence in 2...17 {
+        let input = try ControlStreamFrameContract.decode(
+          ControlFrameCodec.read(kind: .request, descriptor: descriptor, deadline: deadline))
+        XCTAssertEqual(input.sequence, UInt64(sequence))
+        XCTAssertEqual(input.kind, .data)
+      }
+    }
+    defer { fixture.close() }
+    try fixture.session.openStream(
+      streamID: "credit-refund",
+      request: ControlStreamOpenRequest(
+        source: .exec,
+        target: "resource-1",
+        requestID: "credit-refund-request",
+        idempotencyKey: "credit-refund-key"
+      )
+    )
+    XCTAssertEqual(try fixture.session.nextFrame(streamID: "credit-refund").kind, .open)
+
+    let preliminary: ControlPlaneJSONValue = .object([
+      "kind": .string("stdin"),
+      "payloadBase64": .string("cHJlbGltaW5hcnk="),
+    ])
+    for _ in 0..<15 {
+      try fixture.session.sendStreamInput(streamID: "credit-refund", payload: preliminary)
+    }
+
+    XCTAssertThrowsError(try fixture.session.sendStreamInputWhenCreditAvailable(
+      streamID: "credit-refund",
+      payload: .object([
+        "kind": .string("stdin"),
+        "payloadBase64": .string(String(repeating: "A", count: 2 * 1_024 * 1_024)),
+      ])
+    ))
+    try fixture.session.sendStreamInputWhenCreditAvailable(
+      streamID: "credit-refund",
+      payload: .object([
+        "kind": .string("stdin"),
+        "payloadBase64": .string("b2s="),
+      ])
+    )
+    XCTAssertTrue(fixture.waitForExit())
+    XCTAssertNil(fixture.serverError)
+  }
+
   func testThirtyThirdStreamIsRefusedAndFiniteStreamsTerminallyClose() throws {
     let emissions: [String: [ControlStreamEmission]] = Dictionary(
       uniqueKeysWithValues: (1...ControlPlaneContract.maximumStreams).map { index in

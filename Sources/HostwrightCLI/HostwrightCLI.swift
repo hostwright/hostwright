@@ -55,6 +55,46 @@ public enum HostwrightCLI {
         }
     }
 
+    public static func usageFailure(
+        _ error: CLIUsageError,
+        output: CLIOutputFormat = .text
+    ) -> CLIRunResult {
+        failure(
+            code: .commandUsage,
+            message: "\(error.message)\n\n\(helpText)",
+            output: output
+        )
+    }
+
+    public static func diagnosticFailure(
+        _ diagnostic: HostwrightDiagnostic,
+        output: CLIOutputFormat = .text
+    ) -> CLIRunResult {
+        failure(code: diagnostic.code, message: diagnostic.message, output: output)
+    }
+
+    public static func renderControlEventStream(
+        stateDatabasePath: String,
+        projectName: String?,
+        filters: EventFilters,
+        stream: EventStreamCLIOptions,
+        output: CLIOutputFormat,
+        page: HostwrightEventStreamPage
+    ) -> CLIRunResult {
+        EventsCommandRunner(
+            stateStoreConfiguration: StateStoreConfiguration(
+                explicitDatabasePath: stateDatabasePath
+            ),
+            projectName: projectName,
+            filters: filters,
+            stream: stream,
+            output: output
+        ).renderStream(
+            page,
+            pageSize: filters.limit ?? HostwrightEventStreamPage.defaultPageSize
+        )
+    }
+
     private static func runTraced(
         arguments: [String],
         environment: CLIEnvironment,

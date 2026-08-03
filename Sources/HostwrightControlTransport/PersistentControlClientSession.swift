@@ -175,6 +175,72 @@ public final class PersistentControlClientSession: @unchecked Sendable {
     )
   }
 
+  public func sendStreamInputWhenCreditAvailable(
+    streamID: String,
+    payload: ControlPlaneJSONValue,
+    timeoutMilliseconds: Int = ControlPlaneContract.streamWriteDeadlineMilliseconds
+  ) throws {
+    try reserveStreamInputCredit(
+      streamID: streamID,
+      timeoutMilliseconds: timeoutMilliseconds
+    )
+    try sendControl(
+      streamID: streamID,
+      kind: .data,
+      credit: nil,
+      cursor: nil,
+      payload: payload,
+      inputCreditAlreadyReserved: true
+    )
+  }
+
+  public func waitForStreamInputCredit(
+    streamID: String,
+    timeoutMilliseconds: Int = ControlPlaneContract.streamWriteDeadlineMilliseconds
+  ) throws {
+    guard timeoutMilliseconds > 0,
+      timeoutMilliseconds <= ControlPlaneContract.maximumUnaryDeadlineMilliseconds
+    else { throw PersistentControlClientError.deadlineExceeded }
+    let deadline = Date().addingTimeInterval(Double(timeoutMilliseconds) / 1_000)
+    try condition.withLock {
+      while true {
+        guard !closed, !terminalReceivedStreams.contains(streamID),
+          clientSequences[streamID] != nil
+        else { throw PersistentControlClientError.connectionClosed }
+        if (inputCredits[streamID] ?? 0) > 0 { return }
+        guard condition.wait(until: deadline) else {
+          throw PersistentControlClientError.deadlineExceeded
+        }
+      }
+    }
+  }
+
+  private func reserveStreamInputCredit(
+    streamID: String,
+    timeoutMilliseconds: Int
+  ) throws {
+    guard timeoutMilliseconds > 0,
+      timeoutMilliseconds <= ControlPlaneContract.maximumUnaryDeadlineMilliseconds
+    else { throw PersistentControlClientError.deadlineExceeded }
+    let deadline = Date().addingTimeInterval(Double(timeoutMilliseconds) / 1_000)
+    try condition.withLock {
+      while true {
+        guard !closed, !terminalReceivedStreams.contains(streamID),
+          !cancelledStreams.contains(streamID), clientSequences[streamID] != nil,
+          Self.isInteractive(acceptedStreamSources[streamID]),
+          !inputClosedStreams.contains(streamID)
+        else { throw PersistentControlClientError.connectionClosed }
+        if let available = inputCredits[streamID], available > 0 {
+          inputCredits[streamID] = available - 1
+          return
+        }
+        guard condition.wait(until: deadline) else {
+          throw PersistentControlClientError.deadlineExceeded
+        }
+      }
+    }
+  }
+
   public func finishStreamInput(streamID: String) throws {
     try sendControl(
       streamID: streamID,
@@ -248,7 +314,8 @@ public final class PersistentControlClientSession: @unchecked Sendable {
     credit: Int?,
     cursor: String?,
     payload: ControlPlaneJSONValue? = nil,
-    consumesInputCredit: Bool = false
+    consumesInputCredit: Bool = false,
+    inputCreditAlreadyReserved: Bool = false
   ) throws {
     var writeStarted = false
     let deadline = try ControlTransportDeadline(
@@ -257,7 +324,7 @@ public final class PersistentControlClientSession: @unchecked Sendable {
       // A control frame's sequence reservation and write are one ordered operation.
       // Otherwise two callers can reserve 2 and 3 but have 3 reach the socket first.
       try withWriterDeadline(deadline) {
-        let frame = try condition.withLock { () throws -> StreamFrame in
+        let data = try condition.withLock { () throws -> Data in
           guard !closed, !writeHalfClosed else {
             throw PersistentControlClientError.connectionClosed
           }
@@ -273,11 +340,15 @@ public final class PersistentControlClientSession: @unchecked Sendable {
               throw PersistentControlClientError.invalidResponse
             }
           }
-          if consumesInputCredit {
+          if consumesInputCredit || inputCreditAlreadyReserved {
             guard Self.isInteractive(acceptedStreamSources[streamID]),
-              inputClosedStreams.contains(streamID) == false,
-              let available = inputCredits[streamID], available > 0
+              inputClosedStreams.contains(streamID) == false
             else { throw PersistentControlClientError.invalidResponse }
+            if consumesInputCredit {
+              guard let available = inputCredits[streamID], available > 0 else {
+                throw PersistentControlClientError.invalidResponse
+              }
+            }
           } else if kind == .end {
             guard Self.isInteractive(acceptedStreamSources[streamID]),
               inputClosedStreams.contains(streamID) == false
@@ -295,6 +366,8 @@ public final class PersistentControlClientSession: @unchecked Sendable {
             payload: payload
           )
           try ControlStreamFrameContract.validate(frame, direction: .clientToServer)
+          let data = try ControlPlaneCanonicalJSON.encode(frame)
+          try ControlPlaneContract.validateRequestByteCount(data.count)
           if kind == .ack, let credit {
             let currentOutputCredit = outputCredits[streamID] ?? 0
             guard currentOutputCredit <= ControlPlaneContract.maximumStreamCredit - credit else {
@@ -308,9 +381,8 @@ public final class PersistentControlClientSession: @unchecked Sendable {
           } else if kind == .end {
             inputClosedStreams.insert(streamID)
           }
-          return frame
+          return data
         }
-        let data = try ControlPlaneCanonicalJSON.encode(frame)
         writeStarted = true
         try frameWriter(
           data,
@@ -320,6 +392,22 @@ public final class PersistentControlClientSession: @unchecked Sendable {
         )
       }
     } catch {
+      if inputCreditAlreadyReserved, !writeStarted {
+        let mustClose = condition.withLock { () -> Bool in
+          guard inputCredits[streamID] != nil,
+            clientSequences[streamID] != nil,
+            !terminalReceivedStreams.contains(streamID),
+            !cancelledStreams.contains(streamID)
+          else { return false }
+          guard inputCredits[streamID]! < ControlPlaneContract.maximumStreamCredit else {
+            return true
+          }
+          inputCredits[streamID]! += 1
+          condition.broadcast()
+          return false
+        }
+        if mustClose { close() }
+      }
       if writeStarted { close() }
       throw error
     }

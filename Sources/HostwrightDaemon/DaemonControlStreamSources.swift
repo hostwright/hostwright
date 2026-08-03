@@ -1,6 +1,7 @@
 import Foundation
 import CryptoKit
 import HostwrightCLI
+import HostwrightCommandTransport
 import HostwrightControlPlane
 import HostwrightControlSecurity
 import HostwrightControlTransport
@@ -11,6 +12,110 @@ import HostwrightState
 enum DaemonControlStreamSourceError: Error {
   case invalidFilter
   case unsupportedSource
+}
+
+enum DaemonRuntimeStreamBindingContract {
+  static let filterKey = "authorizedRuntimeBinding"
+
+  static func attach(
+    _ binding: ControlRuntimeStreamTarget,
+    to request: ControlStreamOpenRequest
+  ) throws -> ControlStreamOpenRequest {
+    try binding.validate()
+    guard case .object(var fields)? = request.filter else {
+      throw DaemonControlStreamSourceError.invalidFilter
+    }
+    fields[filterKey] = try ControlStreamFrameContract.value(binding)
+    return ControlStreamOpenRequest(
+      source: request.source,
+      target: request.target,
+      filter: .object(fields),
+      heartbeatMilliseconds: request.heartbeatMilliseconds,
+      requestID: request.requestID,
+      idempotencyKey: request.idempotencyKey
+    )
+  }
+
+  static func decode(_ request: ControlStreamOpenRequest) throws
+    -> ControlRuntimeStreamTarget?
+  {
+    guard case .object(let fields)? = request.filter,
+      let value = fields[filterKey] else { return nil }
+    let data = try ControlPlaneCanonicalJSON.encode(value)
+    let binding = try Phase09StrictDecoder.decode(
+      ControlRuntimeStreamTarget.self,
+      from: data,
+      allowedKeys: [
+        "fencingToken", "projectGeneration", "projectID", "projectResourceUUID",
+        "providerGeneration", "providerID", "resourceGeneration", "resourceIdentifier",
+        "resourceUUID", "serviceName",
+      ],
+      requiredKeys: [
+        "fencingToken", "projectGeneration", "projectID", "projectResourceUUID",
+        "providerGeneration", "providerID", "resourceGeneration", "resourceIdentifier",
+        "resourceUUID", "serviceName",
+      ]
+    )
+    try binding.validate()
+    return binding
+  }
+
+  static func make(
+    ownership: OwnershipRecord,
+    store: SQLiteStateStore
+  ) throws -> ControlRuntimeStreamTarget {
+    guard let projectID = ownership.projectID,
+      let projectResourceUUID = ownership.projectResourceUUID,
+      let serviceName = ownership.serviceName,
+      let providerID = RuntimeProviderBinding.stableID(for: ownership.runtimeAdapter)
+    else { throw DaemonControlStreamSourceError.invalidFilter }
+    let project = try store.desiredStates.loadProject(id: projectID)
+    guard project.resourceUUID == projectResourceUUID,
+      project.providerGeneration == ownership.providerGeneration else {
+      throw DaemonControlStreamSourceError.invalidFilter
+    }
+    let binding = ControlRuntimeStreamTarget(
+      projectID: projectID,
+      projectResourceUUID: projectResourceUUID,
+      serviceName: serviceName,
+      resourceUUID: ownership.resourceUUID,
+      resourceIdentifier: ownership.resourceIdentifier,
+      providerID: providerID,
+      resourceGeneration: ownership.resourceGeneration,
+      projectGeneration: ownership.projectGeneration,
+      providerGeneration: ownership.providerGeneration,
+      fencingToken: ownership.fencingToken
+    )
+    try binding.validate()
+    return binding
+  }
+
+  static func validateCurrent(
+    _ binding: ControlRuntimeStreamTarget,
+    store: SQLiteStateStore
+  ) throws {
+    let matches = try store.ownership.loadAll().filter {
+      $0.resourceType == "container"
+        && $0.projectID == binding.projectID
+        && $0.projectResourceUUID == binding.projectResourceUUID
+        && $0.serviceName == binding.serviceName
+        && $0.resourceUUID == binding.resourceUUID
+        && $0.resourceIdentifier == binding.resourceIdentifier
+        && RuntimeProviderBinding.stableID(for: $0.runtimeAdapter) == binding.providerID
+        && $0.resourceGeneration == binding.resourceGeneration
+        && $0.projectGeneration == binding.projectGeneration
+        && $0.providerGeneration == binding.providerGeneration
+        && $0.fencingToken == binding.fencingToken
+    }
+    guard matches.count == 1 else {
+      throw DaemonControlStreamSourceError.invalidFilter
+    }
+    let project = try store.desiredStates.loadProject(id: binding.projectID)
+    guard project.resourceUUID == binding.projectResourceUUID,
+      project.providerGeneration == binding.providerGeneration else {
+      throw DaemonControlStreamSourceError.invalidFilter
+    }
+  }
 }
 
 protocol DaemonInteractiveStreamTask: Sendable {
@@ -27,6 +132,11 @@ protocol DaemonInteractiveStreamTask: Sendable {
 }
 
 extension ControlRuntimeStreamTask: DaemonInteractiveStreamTask {}
+
+private protocol DaemonControlStreamProducer: AnyObject {
+  var handle: ControlStreamProducerHandle { get }
+  func start()
+}
 
 final class DaemonControlStreamSourceFactory: @unchecked Sendable {
   private let store: SQLiteStateStore
@@ -53,11 +163,12 @@ final class DaemonControlStreamSourceFactory: @unchecked Sendable {
 
   func open(
     peer: AuthenticatedControlPeer,
-    request: ControlStreamOpenRequest,
+    request originalRequest: ControlStreamOpenRequest,
     cursor: String?,
     preStartAuthorization: @escaping @Sendable () throws -> Void,
     sink: @escaping @Sendable (ControlStreamEmission) -> ControlStreamEmissionDisposition
   ) throws -> ControlStreamProducerHandle {
+    let request = try runtimeBoundRequestIfNeeded(originalRequest)
     switch request.source {
     case .events, .traces, .state:
       guard request.target == nil else { throw DaemonControlStreamSourceError.invalidFilter }
@@ -79,6 +190,10 @@ final class DaemonControlStreamSourceFactory: @unchecked Sendable {
       filter: request.filter
     )
     let sourceCursor = try cursor.map { try cursorCodec.verify($0, expectedBinding: binding).sourceCursor }
+    let streamManifestPath = try Self.manifestPath(
+      request: request,
+      fallback: manifestPath
+    )
     switch request.source {
     case .events, .state, .operation, .traces:
       let producer = try EventControlStreamProducer(
@@ -103,16 +218,33 @@ final class DaemonControlStreamSourceFactory: @unchecked Sendable {
       producer.start()
       return producer.handle
     case .logs:
-      let producer = try FiniteLogsControlStreamProducer(
-        store: store,
-        cursorCodec: cursorCodec,
-        binding: binding,
-        request: request,
-        sourceCursor: sourceCursor,
-        manifestPath: manifestPath,
-        stateDatabasePath: stateDatabasePath,
-        sink: sink
-      )
+      let producer: any DaemonControlStreamProducer
+      if try Self.isFollowingLogsRequest(request) {
+        producer = try InteractiveControlStreamProducer(
+          cursorCodec: cursorCodec,
+          binding: binding,
+          request: request,
+          sourceCursor: sourceCursor,
+          manifestPath: streamManifestPath,
+          stateDatabasePath: stateDatabasePath,
+          requestRepository: requestRepository,
+          auditRecorder: auditRecorder,
+          subjectID: peer.binding.subject.identifier,
+          preStartAuthorization: preStartAuthorization,
+          sink: sink
+        )
+      } else {
+        producer = try FiniteLogsControlStreamProducer(
+          store: store,
+          cursorCodec: cursorCodec,
+          binding: binding,
+          request: request,
+          sourceCursor: sourceCursor,
+          manifestPath: streamManifestPath,
+          stateDatabasePath: stateDatabasePath,
+          sink: sink
+        )
+      }
       producer.start()
       return producer.handle
     case .attach, .exec:
@@ -121,7 +253,7 @@ final class DaemonControlStreamSourceFactory: @unchecked Sendable {
         binding: binding,
         request: request,
         sourceCursor: sourceCursor,
-        manifestPath: manifestPath,
+        manifestPath: streamManifestPath,
         stateDatabasePath: stateDatabasePath,
         requestRepository: requestRepository,
         auditRecorder: auditRecorder,
@@ -132,6 +264,187 @@ final class DaemonControlStreamSourceFactory: @unchecked Sendable {
       producer.start()
       return producer.handle
     }
+  }
+
+  private func runtimeBoundRequestIfNeeded(
+    _ request: ControlStreamOpenRequest
+  ) throws -> ControlStreamOpenRequest {
+    guard request.source == .logs || request.source == .attach || request.source == .exec,
+      try DaemonRuntimeStreamBindingContract.decode(request) == nil,
+      let target = request.target,
+      case .object(let fields)? = request.filter,
+      case .string(let serviceName)? = fields["serviceName"] else { return request }
+    let ownership = try store.ownership.loadAll().filter {
+      $0.resourceType == "container" && $0.resourceUUID == target
+        && $0.serviceName == serviceName
+    }
+    guard ownership.count == 1 else {
+      throw DaemonControlStreamSourceError.invalidFilter
+    }
+    return try DaemonRuntimeStreamBindingContract.attach(
+      DaemonRuntimeStreamBindingContract.make(ownership: ownership[0], store: store),
+      to: request
+    )
+  }
+
+  func prepare(
+    peer: AuthenticatedControlPeer,
+    route: CLIControlRoute,
+    environment: CLIEnvironment
+  ) throws -> CLIControlStreamPreparation {
+    let commandEnvironment = try environment.resolvingRelativePaths(
+      against: route.workingDirectory
+    )
+    let command = try CLICommand.parse(arguments: route.arguments)
+    try CLIControlAuthorizationScopeResolver.validate(
+      declared: route.authorizationScope,
+      command: command,
+      arguments: route.arguments,
+      environment: commandEnvironment
+    )
+    switch command {
+    case .events(_, let projectName, let filters, let stream, let output):
+      var fields: [String: ControlPlaneJSONValue] = [:]
+      if let projectName { fields["projectID"] = .string("project-\(projectName)") }
+      if let type = filters.type { fields["type"] = .string(type) }
+      if let service = filters.serviceName { fields["serviceName"] = .string(service) }
+      if let severity = filters.severity { fields["severity"] = .string(severity.rawValue) }
+      fields["endAfterSnapshot"] = .bool(true)
+      fields["maximumEvents"] = .integer(Int64((filters.limit ?? 100) + 1))
+      fields["waitForFirst"] = .bool(stream.watch)
+      let filter: ControlPlaneJSONValue? = fields.isEmpty ? nil : .object(fields)
+      let rawCursor: String?
+      if stream.cursor == HostwrightEventCursor.beginning {
+        rawCursor = nil
+      } else if let supplied = stream.cursor {
+        rawCursor = try HostwrightEventCursor(token: supplied).token
+      } else if stream.watch {
+        rawCursor = try store.events.latestCursor()
+      } else {
+        rawCursor = nil
+      }
+      let binding = try ControlStreamCursorBinding(
+        subjectID: peer.binding.subject.identifier,
+        source: .events,
+        target: nil,
+        filter: filter
+      )
+      return try CLIControlStreamPreparation(
+        source: .events,
+        target: nil,
+        filter: filter,
+        cursor: try rawCursor.map { try cursorCodec.issue(binding: binding, sourceCursor: $0) },
+        timeoutMilliseconds: stream.timeoutSeconds * 1_000,
+        output: output
+      )
+    case .logs(let serviceName, let path, let tail, let stateDatabasePath):
+      let options = InteractiveCLIOptions(
+        command: .logsFollow,
+        manifestPath: path,
+        serviceName: serviceName,
+        stateDatabasePath: stateDatabasePath,
+        forwardsStandardInput: false,
+        tail: tail
+      )
+      let target = try ControlRuntimeStreamTargetResolver(environment: commandEnvironment)
+        .resolve(options: options)
+      return try CLIControlStreamPreparation(
+        source: .logs,
+        target: target.resourceUUID,
+        filter: .object([
+          "manifestPath": .string(try Self.resolve(
+            path,
+            against: route.workingDirectory
+          )),
+          "serviceName": .string(serviceName),
+          "tail": .integer(Int64(tail)),
+        ]),
+        cursor: nil,
+        timeoutMilliseconds: ControlPlaneContract.maximumUnaryDeadlineMilliseconds,
+        output: route.output
+      )
+    case .interactive(let options):
+      let source: ControlStreamSource
+      switch options.command {
+      case .exec: source = .exec
+      case .attach: source = .attach
+      case .logsFollow: source = .logs
+      case .copy, .export, .inspect, .stats:
+        throw DaemonControlStreamSourceError.unsupportedSource
+      }
+      let target = try ControlRuntimeStreamTargetResolver(environment: commandEnvironment)
+        .resolve(options: options)
+      var filter: [String: ControlPlaneJSONValue] = [
+        "manifestPath": .string(try Self.resolve(
+          options.manifestPath,
+          against: route.workingDirectory
+        )),
+        "serviceName": .string(target.serviceName),
+      ]
+      if source == .exec {
+        filter["arguments"] = .array(options.arguments.map(ControlPlaneJSONValue.string))
+      }
+      if source == .attach || source == .exec {
+        filter["timeoutSeconds"] = .integer(Int64(options.timeoutSeconds))
+        filter["tty"] = .bool(options.terminal)
+      } else {
+        filter["follow"] = .bool(true)
+        filter["tail"] = .integer(Int64(options.tail))
+        filter["timeoutSeconds"] = .integer(Int64(options.timeoutSeconds))
+      }
+      return try CLIControlStreamPreparation(
+        source: source,
+        target: target.resourceUUID,
+        filter: .object(filter),
+        cursor: nil,
+        timeoutMilliseconds: min(
+          options.timeoutSeconds * 1_000,
+          CLIControlStreamPreparation.maximumTimeoutMilliseconds
+        ),
+        output: options.output
+      )
+    default:
+      throw DaemonControlStreamSourceError.unsupportedSource
+    }
+  }
+
+  private static func isFollowingLogsRequest(_ request: ControlStreamOpenRequest) throws -> Bool {
+    guard request.source == .logs else { return false }
+    guard case .object(let fields)? = request.filter else { return false }
+    guard let value = fields["follow"] else { return false }
+    guard case .bool(let follow) = value else {
+      throw DaemonControlStreamSourceError.invalidFilter
+    }
+    return follow
+  }
+
+  private static func resolve(_ path: String, against workingDirectory: String?) throws -> String {
+    let resolved: String
+    if path.hasPrefix("/") {
+      resolved = URL(fileURLWithPath: path).standardizedFileURL.path
+    } else if let workingDirectory {
+      resolved = URL(fileURLWithPath: workingDirectory, isDirectory: true)
+        .appendingPathComponent(path).standardizedFileURL.path
+    } else {
+      resolved = path
+    }
+    guard resolved.hasPrefix("/"), resolved.utf8.count <= 4_096 else {
+      throw DaemonControlStreamSourceError.invalidFilter
+    }
+    return resolved
+  }
+
+  private static func manifestPath(
+    request: ControlStreamOpenRequest,
+    fallback: String
+  ) throws -> String {
+    guard case .object(let fields)? = request.filter,
+      let value = fields["manifestPath"] else { return fallback }
+    guard case .string(let path) = value, path.hasPrefix("/"), path.utf8.count <= 4_096,
+      URL(fileURLWithPath: path).standardizedFileURL.path == path else {
+      throw DaemonControlStreamSourceError.invalidFilter
+    }
+    return path
   }
 
   func validateCursor(
@@ -172,9 +485,21 @@ final class DaemonControlStreamSourceFactory: @unchecked Sendable {
       }
       let allowedKeys: Set<String>
       switch request.source {
-      case .logs: allowedKeys = ["serviceName", "tail"]
-      case .attach: allowedKeys = ["serviceName", "timeoutSeconds", "tty"]
-      case .exec: allowedKeys = ["arguments", "serviceName", "timeoutSeconds", "tty"]
+      case .logs:
+        allowedKeys = [
+          "follow", "manifestPath", "serviceName", "tail", "timeoutSeconds",
+          DaemonRuntimeStreamBindingContract.filterKey,
+        ]
+      case .attach:
+        allowedKeys = [
+          "manifestPath", "serviceName", "timeoutSeconds", "tty",
+          DaemonRuntimeStreamBindingContract.filterKey,
+        ]
+      case .exec:
+        allowedKeys = [
+          "arguments", "manifestPath", "serviceName", "timeoutSeconds", "tty",
+          DaemonRuntimeStreamBindingContract.filterKey,
+        ]
       default: throw DaemonControlStreamSourceError.invalidFilter
       }
       guard Set(fields.keys).isSubset(of: allowedKeys),
@@ -206,11 +531,31 @@ final class DaemonControlStreamSourceFactory: @unchecked Sendable {
         guard request.source == .logs, case .integer(let raw) = value, (1...1_000).contains(raw)
         else { throw DaemonControlStreamSourceError.invalidFilter }
       }
+      if let value = fields["follow"] {
+        guard request.source == .logs, case .bool(true) = value,
+          fields["timeoutSeconds"] != nil
+        else { throw DaemonControlStreamSourceError.invalidFilter }
+      } else if request.source == .logs, fields["timeoutSeconds"] != nil {
+        throw DaemonControlStreamSourceError.invalidFilter
+      }
+      if let value = fields["manifestPath"] {
+        guard case .string(let path) = value, path.hasPrefix("/"), path.utf8.count <= 4_096,
+          URL(fileURLWithPath: path).standardizedFileURL.path == path else {
+          throw DaemonControlStreamSourceError.invalidFilter
+        }
+      }
       let ownership = try store.ownership.loadAll().filter {
         $0.resourceType == "container" && $0.resourceUUID == target
           && $0.serviceName == serviceName
       }
       guard ownership.count == 1 else { throw DaemonControlStreamSourceError.invalidFilter }
+      if let binding = try DaemonRuntimeStreamBindingContract.decode(request) {
+        guard binding.resourceUUID == target,
+          binding.serviceName == serviceName else {
+          throw DaemonControlStreamSourceError.invalidFilter
+        }
+        try DaemonRuntimeStreamBindingContract.validateCurrent(binding, store: store)
+      }
     }
   }
 }
@@ -225,6 +570,9 @@ private final class EventControlStreamProducer: @unchecked Sendable {
   private let queue = DispatchQueue(label: "dev.hostwright.control.stream.events")
   private var rawCursor: String?
   private var cancelled = false
+  private let endAfterSnapshot: Bool
+  private let maximumEvents: Int?
+  private let waitForFirst: Bool
 
   init(
     store: SQLiteStateStore,
@@ -241,6 +589,10 @@ private final class EventControlStreamProducer: @unchecked Sendable {
     self.rawCursor = sourceCursor
     self.sink = sink
     _ = try Self.filter(request)
+    let controls = try Self.controls(request)
+    endAfterSnapshot = controls.endAfterSnapshot
+    maximumEvents = controls.maximumEvents
+    waitForFirst = controls.waitForFirst
   }
 
   var handle: ControlStreamProducerHandle {
@@ -256,17 +608,17 @@ private final class EventControlStreamProducer: @unchecked Sendable {
     do {
       let filter = try Self.filter(request)
       var lastHeartbeat = Date()
+      var delivered = 0
       while !isCancelled {
         let page = try store.events.streamPage(after: rawCursor, filter: filter, pageSize: 100)
         if page.status == .retentionGap {
-          let earliest = try page.retentionGap?.earliestAvailableCursor.map {
-            try cursorCodec.issue(binding: binding, sourceCursor: $0)
-          }
-          let latest = try page.retentionGap?.latestAvailableCursor.map {
+          let earliest = page.retentionGap?.earliestAvailableCursor
+          let latest = page.retentionGap?.latestAvailableCursor
+          let signedEarliest = try earliest.map {
             try cursorCodec.issue(binding: binding, sourceCursor: $0)
           }
           _ = sink(.gap(
-            cursor: earliest,
+            cursor: signedEarliest,
             payload: ControlStreamGap(
               reason: "retention.compacted",
               earliestCursor: earliest,
@@ -275,7 +627,12 @@ private final class EventControlStreamProducer: @unchecked Sendable {
           ))
           return
         }
-        for record in page.events where shouldDeliver(record) {
+        let matching = page.events.filter(shouldDeliver)
+        for record in matching {
+          if let maximumEvents, delivered >= maximumEvents {
+            _ = sink(.end(cursor: nil))
+            return
+          }
           let cursor = try cursorCodec.issue(binding: binding, sourceCursor: record.cursor)
           let payload = Self.eventPayload(record)
           while !isCancelled {
@@ -291,9 +648,18 @@ private final class EventControlStreamProducer: @unchecked Sendable {
             }
             break
           }
+          delivered += 1
+        }
+        if let maximumEvents, delivered >= maximumEvents {
+          _ = sink(.end(cursor: nil))
+          return
         }
         rawCursor = page.nextCursor ?? rawCursor
         if page.moreAvailable { continue }
+        if endAfterSnapshot, !matching.isEmpty || !waitForFirst {
+          _ = sink(.end(cursor: nil))
+          return
+        }
         if Date().timeIntervalSince(lastHeartbeat) * 1_000
           >= Double(request.heartbeatMilliseconds)
         {
@@ -339,7 +705,10 @@ private final class EventControlStreamProducer: @unchecked Sendable {
     var fields: [String: ControlPlaneJSONValue] = [:]
     if let filter = request.filter {
       guard case .object(let value) = filter,
-        Set(value.keys).isSubset(of: ["projectID", "type", "serviceName", "severity"])
+        Set(value.keys).isSubset(of: [
+          "projectID", "type", "serviceName", "severity", "endAfterSnapshot",
+          "maximumEvents", "waitForFirst",
+        ])
       else { throw DaemonControlStreamSourceError.invalidFilter }
       fields = value
     }
@@ -369,6 +738,34 @@ private final class EventControlStreamProducer: @unchecked Sendable {
     )
   }
 
+  private static func controls(
+    _ request: ControlStreamOpenRequest
+  ) throws -> (endAfterSnapshot: Bool, maximumEvents: Int?, waitForFirst: Bool) {
+    guard case .object(let fields)? = request.filter else {
+      return (false, nil, false)
+    }
+    func bool(_ key: String) throws -> Bool {
+      guard let value = fields[key] else { return false }
+      guard case .bool(let result) = value else {
+        throw DaemonControlStreamSourceError.invalidFilter
+      }
+      return result
+    }
+    let maximum: Int?
+    if let value = fields["maximumEvents"] {
+      guard case .integer(let raw) = value, (1...1_001).contains(raw) else {
+        throw DaemonControlStreamSourceError.invalidFilter
+      }
+      maximum = Int(raw)
+    } else {
+      maximum = nil
+    }
+    let end = try bool("endAfterSnapshot")
+    let wait = try bool("waitForFirst")
+    guard !wait || end else { throw DaemonControlStreamSourceError.invalidFilter }
+    return (end, maximum, wait)
+  }
+
   private static func eventPayload(_ record: HostwrightEventStreamRecord) -> ControlPlaneJSONValue {
     .object([
       "position": .integer(Int64(record.position)),
@@ -379,6 +776,7 @@ private final class EventControlStreamProducer: @unchecked Sendable {
       "source": .string(record.event.source),
       "projectID": record.event.projectID.map(ControlPlaneJSONValue.string) ?? .null,
       "serviceName": record.event.serviceName.map(ControlPlaneJSONValue.string) ?? .null,
+      "runtimeAdapter": record.event.runtimeAdapter.map(ControlPlaneJSONValue.string) ?? .null,
       "message": .string(record.event.message),
       "payloadJSONRedacted": .string(record.event.payloadJSONRedacted),
       "eventReference": .string(record.eventReference),
@@ -502,7 +900,7 @@ private final class MetricsControlStreamProducer: @unchecked Sendable {
   }
 }
 
-private final class FiniteLogsControlStreamProducer: @unchecked Sendable {
+private final class FiniteLogsControlStreamProducer: DaemonControlStreamProducer, @unchecked Sendable {
   private let cursorCodec: ControlStreamCursorCodec
   private let binding: ControlStreamCursorBinding
   private let request: ControlStreamOpenRequest
@@ -514,6 +912,7 @@ private final class FiniteLogsControlStreamProducer: @unchecked Sendable {
   private let queue = DispatchQueue(label: "dev.hostwright.control.stream.logs")
   private let tail: Int
   private let serviceName: String
+  private let expectedTarget: ControlRuntimeStreamTarget
   private var cancelled = false
 
   init(
@@ -533,7 +932,10 @@ private final class FiniteLogsControlStreamProducer: @unchecked Sendable {
     var serviceName: String?
     if let filter = request.filter {
       guard case .object(let fields) = filter,
-        Set(fields.keys).isSubset(of: ["serviceName", "tail"])
+        Set(fields.keys).isSubset(of: [
+          "manifestPath", "serviceName", "tail",
+          DaemonRuntimeStreamBindingContract.filterKey,
+        ])
       else { throw DaemonControlStreamSourceError.invalidFilter }
       if let value = fields["serviceName"] {
         guard case .string(let raw) = value, !raw.isEmpty, raw.utf8.count <= 128 else {
@@ -554,6 +956,10 @@ private final class FiniteLogsControlStreamProducer: @unchecked Sendable {
         && $0.serviceName == serviceName
     }
     guard ownership.count == 1 else { throw DaemonControlStreamSourceError.invalidFilter }
+    guard let expectedTarget = try DaemonRuntimeStreamBindingContract.decode(request) else {
+      throw DaemonControlStreamSourceError.invalidFilter
+    }
+    try DaemonRuntimeStreamBindingContract.validateCurrent(expectedTarget, store: store)
     self.cursorCodec = cursorCodec
     self.binding = binding
     self.request = request
@@ -563,6 +969,7 @@ private final class FiniteLogsControlStreamProducer: @unchecked Sendable {
     self.sink = sink
     self.tail = tail
     self.serviceName = serviceName
+    self.expectedTarget = expectedTarget
   }
 
   var handle: ControlStreamProducerHandle {
@@ -581,7 +988,7 @@ private final class FiniteLogsControlStreamProducer: @unchecked Sendable {
         manifestPath: manifestPath,
         stateDatabasePath: stateDatabasePath,
         serviceName: serviceName,
-        expectedResourceUUID: request.target!,
+        expectedTarget: expectedTarget,
         tail: tail
       )
     } catch {
@@ -683,7 +1090,7 @@ private final class FiniteLogsControlStreamProducer: @unchecked Sendable {
   }
 }
 
-final class InteractiveControlStreamProducer: @unchecked Sendable {
+final class InteractiveControlStreamProducer: DaemonControlStreamProducer, @unchecked Sendable {
   private enum DeliveryError: Error { case terminated }
   private enum Lifecycle { case prepared, preparing, running, cancelRequested, terminal }
   private struct PendingInput: @unchecked Sendable {
@@ -699,8 +1106,9 @@ final class InteractiveControlStreamProducer: @unchecked Sendable {
   private let preparationQueue = DispatchQueue(label: "dev.hostwright.control.runtime-prepare")
   private let requestHeartbeatMilliseconds: Int
   private let requestRepository: ControlRequestRepository
-  private let requestID: String
-  private let operationReference: String
+  private let requestID: String?
+  private let operationReference: String?
+  private let mutationOperation: Bool
   private let auditRecorder: any ControlSecurityAuditRecording
   private let subjectID: String
   private let target: String
@@ -731,10 +1139,13 @@ final class InteractiveControlStreamProducer: @unchecked Sendable {
     var serviceName: String?
     var timeoutSeconds = 300
     var terminal = false
+    var tail = 100
+    var follow = false
     if let filter = request.filter {
       guard case .object(let fields) = filter,
         Set(fields.keys).isSubset(of: [
-          "arguments", "serviceName", "timeoutSeconds", "tty", "tail",
+          "arguments", "follow", "manifestPath", "serviceName", "timeoutSeconds", "tty", "tail",
+          DaemonRuntimeStreamBindingContract.filterKey,
         ])
       else { throw DaemonControlStreamSourceError.invalidFilter }
       if let value = fields["serviceName"] {
@@ -766,23 +1177,54 @@ final class InteractiveControlStreamProducer: @unchecked Sendable {
         }
         terminal = raw
       }
+      if let value = fields["tail"] {
+        guard case .integer(let raw) = value, (1...1_000).contains(raw) else {
+          throw DaemonControlStreamSourceError.invalidFilter
+        }
+        tail = Int(raw)
+      }
+      if let value = fields["follow"] {
+        guard case .bool(let raw) = value else {
+          throw DaemonControlStreamSourceError.invalidFilter
+        }
+        follow = raw
+      }
     }
     if request.source == .exec, arguments.isEmpty {
       throw DaemonControlStreamSourceError.invalidFilter
     }
+    guard request.source != .logs || follow else {
+      throw DaemonControlStreamSourceError.invalidFilter
+    }
     guard let serviceName else { throw DaemonControlStreamSourceError.invalidFilter }
+    let expectedTarget = try DaemonRuntimeStreamBindingContract.decode(request)
+    guard expectedTarget == nil || (
+      expectedTarget!.resourceUUID == target
+        && expectedTarget!.serviceName == serviceName
+    ), expectedTarget != nil || prepareTaskOverride != nil else {
+      throw DaemonControlStreamSourceError.invalidFilter
+    }
     self.cursorCodec = cursorCodec
     self.binding = binding
     self.sourceCursor = sourceCursor
     self.sink = sink
     self.requestHeartbeatMilliseconds = request.heartbeatMilliseconds
-    guard let requestID = request.requestID else {
-      throw DaemonControlStreamSourceError.invalidFilter
+    mutationOperation = request.source == .exec || request.source == .attach
+    if mutationOperation {
+      guard let requestID = request.requestID else {
+        throw DaemonControlStreamSourceError.invalidFilter
+      }
+      self.requestID = requestID
+      self.operationReference = "stream:" + SHA256.hash(
+        data: Data("\(binding.subjectID):\(requestID)".utf8)
+      ).prefix(16).map { String(format: "%02x", $0) }.joined()
+    } else {
+      guard request.requestID == nil, request.idempotencyKey == nil else {
+        throw DaemonControlStreamSourceError.invalidFilter
+      }
+      self.requestID = nil
+      self.operationReference = nil
     }
-    self.requestID = requestID
-    self.operationReference = "stream:" + SHA256.hash(
-      data: Data("\(binding.subjectID):\(requestID)".utf8)
-    ).prefix(16).map { String(format: "%02x", $0) }.joined()
     self.requestRepository = requestRepository
     self.auditRecorder = auditRecorder
     self.subjectID = subjectID
@@ -792,8 +1234,12 @@ final class InteractiveControlStreamProducer: @unchecked Sendable {
     let preparedServiceName = serviceName
     let preparedTimeoutSeconds = timeoutSeconds
     let preparedTerminal = terminal
+    let preparedTail = tail
     let defaultPrepareTask: @Sendable () throws -> any DaemonInteractiveStreamTask = {
-      try ControlRuntimeStreamDriver().prepare(
+      guard let expectedTarget else {
+        throw DaemonControlStreamSourceError.invalidFilter
+      }
+      return try ControlRuntimeStreamDriver().prepare(
         options: InteractiveCLIOptions(
           command: request.source == .exec ? .exec : (request.source == .attach ? .attach : .logsFollow),
           manifestPath: manifestPath,
@@ -803,19 +1249,27 @@ final class InteractiveControlStreamProducer: @unchecked Sendable {
           timeoutSeconds: preparedTimeoutSeconds,
           output: .text,
           terminal: preparedTerminal,
-          forwardsStandardInput: request.source == .exec || request.source == .attach
+          forwardsStandardInput: request.source == .exec || request.source == .attach,
+          tail: preparedTail
         ),
-        expectedResourceUUID: target
+        expectedTarget: expectedTarget
       )
     }
     self.prepareTask = prepareTaskOverride ?? defaultPrepareTask
   }
 
   var handle: ControlStreamProducerHandle {
-    ControlStreamProducerHandle(
+    if mutationOperation {
+      return ControlStreamProducerHandle(
+        onCredit: { [self] _ in wake() },
+        onInput: { [self] payload, onConsumed in acceptInput(payload, onConsumed: onConsumed) },
+        finishInput: { [self] in finishInput() },
+        cancellationMode: .deferredUntilProducerTerminal,
+        cancel: { [self] in cancel() }
+      )
+    }
+    return ControlStreamProducerHandle(
       onCredit: { [self] _ in wake() },
-      onInput: { [self] payload, onConsumed in acceptInput(payload, onConsumed: onConsumed) },
-      finishInput: { [self] in finishInput() },
       cancellationMode: .deferredUntilProducerTerminal,
       cancel: { [self] in cancel() }
     )
@@ -876,6 +1330,17 @@ final class InteractiveControlStreamProducer: @unchecked Sendable {
     let boundary: ([PendingInput], Bool)
     do {
       try preStartAuthorization()
+      if !mutationOperation {
+        lifecycle = .running
+        boundary = ([], true)
+        pendingInputs.removeAll(keepingCapacity: false)
+        condition.unlock()
+        preparedTask.finishInput()
+        return
+      }
+      guard let requestID, let operationReference else {
+        throw DaemonControlStreamSourceError.invalidFilter
+      }
       let timestamp = ISO8601DateFormatter().string(from: Date())
       try requestRepository.markStreamOperationStarted(
         requestID: requestID,
@@ -891,8 +1356,18 @@ final class InteractiveControlStreamProducer: @unchecked Sendable {
     } catch {
       preparedTask.cancel()
       pendingInputs.removeAll(keepingCapacity: false)
+      if !mutationOperation {
+        lifecycle = .terminal
+        condition.broadcast()
+        condition.unlock()
+        _ = sink(.failure(SanitizedError(
+          code: "runtimeLogsAuthorizationRevoked",
+          message: "The runtime log stream was denied at its start boundary."
+        )))
+        throw DeliveryError.terminated
+      }
       var evidenceFailed = false
-      if !didMarkStarted {
+      if !didMarkStarted, let requestID, let operationReference {
         do {
           try requestRepository.cancelPlannedStreamOperation(
             requestID: requestID,
@@ -1028,6 +1503,27 @@ final class InteractiveControlStreamProducer: @unchecked Sendable {
     guard let (crossedStartBoundary, cancelWasRequested, evidenceFailed) = completionState else {
       return
     }
+    if !mutationOperation {
+      switch result {
+      case .success:
+        _ = sink(.end(cursor: nil))
+      case .failure:
+        _ = sink(.failure(SanitizedError(
+          code: cancelWasRequested ? "runtimeLogsCancelled" : "runtimeLogsFollowFailed",
+          message: cancelWasRequested
+            ? "The runtime log stream was cancelled."
+            : "The verified runtime log stream failed safely."
+        )))
+      }
+      return
+    }
+    guard let requestID, let operationReference else {
+      _ = sink(.failure(SanitizedError(
+        code: "runtimeExecutionPersistenceFailed",
+        message: "The runtime operation lost its durable mutation identity."
+      )))
+      return
+    }
     guard crossedStartBoundary else {
       do {
         try recordLifecycleAudit(
@@ -1104,6 +1600,26 @@ final class InteractiveControlStreamProducer: @unchecked Sendable {
   private func wake() { condition.withLock { condition.signal() } }
   private func cancel() {
     condition.lock()
+    if !mutationOperation {
+      guard lifecycle != .terminal else {
+        condition.unlock()
+        return
+      }
+      let currentTask = task
+      lifecycle = lifecycle == .running ? .cancelRequested : .terminal
+      pendingInputs.removeAll(keepingCapacity: false)
+      condition.broadcast()
+      condition.unlock()
+      currentTask?.cancel()
+      return
+    }
+    guard let requestID, let operationReference else {
+      lifecycle = .terminal
+      condition.broadcast()
+      condition.unlock()
+      task?.cancel()
+      return
+    }
     switch lifecycle {
     case .prepared, .preparing:
       let currentTask = task
@@ -1170,6 +1686,9 @@ final class InteractiveControlStreamProducer: @unchecked Sendable {
   }
 
   private func recordLifecycleAudit(outcome: String, reasonCode: String) throws {
+    guard let requestID, let operationReference else {
+      throw DaemonControlStreamSourceError.invalidFilter
+    }
     let digest = SHA256.hash(data: Data("\(requestID):\(operationReference):\(outcome)".utf8))
       .map { String(format: "%02x", $0) }.joined()
     _ = try auditRecorder.record(ControlSecurityAuditEvent(

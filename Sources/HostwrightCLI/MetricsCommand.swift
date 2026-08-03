@@ -30,12 +30,11 @@ struct MetricsCommandRunner {
                 throw StateStoreError.operationCancelled(path: stateStoreConfiguration.databasePath)
             }
             let data = try canonicalData(snapshot)
-            let written = try SecureLocalExportWriter.write(
+            let written = try environment.metricsExport(
                 data,
-                to: outputPath,
-                maximumBytes: HostwrightTraceContract.maximumExportBytes,
-                isCancelled: environment.metricsCancelled,
-                unsafeError: HostwrightMetricsError.unsafeExportPath
+                outputPath,
+                HostwrightTraceContract.maximumExportBytes,
+                environment.metricsCancelled
             )
             let receipt = HostwrightMetricsExportReceipt(
                 snapshotSHA256: snapshot.snapshotSHA256,
@@ -122,9 +121,12 @@ enum SecureLocalExportWriter {
         maximumBytes: Int,
         isCancelled: () -> Bool,
         unsafeError: any Error,
-        onPersist: (HostwrightSupportBundleFileIdentity) throws -> Void = { _ in }
+        onPersist: (HostwrightSupportBundleFileIdentity) throws -> Void = { _ in },
+        afterWrite: (Int) throws -> Void = { _ in },
+        maximumWriteChunkBytes: Int = .max
     ) throws -> SecureLocalExportReceipt {
         guard data.count <= maximumBytes else { throw unsafeError }
+        guard maximumWriteChunkBytes > 0 else { throw unsafeError }
         guard isNormalizedAbsolutePath(path) else {
             throw unsafeError
         }
@@ -210,13 +212,14 @@ enum SecureLocalExportWriter {
                 let written = Darwin.write(
                     descriptor,
                     bytes.baseAddress!.advanced(by: offset),
-                    bytes.count - offset
+                    min(bytes.count - offset, maximumWriteChunkBytes)
                 )
                 if written < 0, errno == EINTR { continue }
                 guard written > 0 else {
                     throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
                 }
                 offset += written
+                try afterWrite(offset)
             }
         }
         guard fchmod(descriptor, S_IRUSR | S_IWUSR) == 0,

@@ -67,8 +67,12 @@ final class DaemonControlStreamAuthorizationPipeline: @unchecked Sendable {
     guard Self.requiresAdmission(request.source) else {
       do { try validateStreamRequest(request) }
       catch { throw ControlStreamAuthorizationError.invalidRequest }
+      let effectiveRequest: ControlStreamOpenRequest?
+      do { effectiveRequest = try boundRuntimeRequest(request) }
+      catch { throw ControlStreamAuthorizationError.invalidRequest }
       return ControlStreamAuthorization(
         decision: decision,
+        effectiveRequest: effectiveRequest,
         auditHealthDegraded: auditHealthDegraded
       )
     }
@@ -182,16 +186,6 @@ final class DaemonControlStreamAuthorizationPipeline: @unchecked Sendable {
       throw ControlStreamAuthorizationError.admissionDenied
     }
 
-    let requestBinding: ControlPlaneJSONValue = .object([
-      "originalStreamRequest": try ControlStreamFrameContract.value(request),
-      "effectiveRequest": try ControlStreamFrameContract.value(evaluated.effectiveRequest),
-      "evaluationDigestSHA256": .string(evaluated.evaluationDigestSHA256),
-      "planHash": .string(evaluated.planHash),
-      "exceptionIDs": .array(evaluated.exceptionIDs.map(ControlPlaneJSONValue.string)),
-      "effectiveAuthorizationDigestSHA256": .string(effectiveDecisionDigest),
-    ])
-    let requestDigest = Self.digest(try ControlPlaneCanonicalJSON.encode(requestBinding))
-    let timestamp = ISO8601DateFormatter().string(from: at)
     guard let effectiveTarget = effectiveStreamRequest.target,
       case .object(let effectiveFilterFields)? = effectiveStreamRequest.filter,
       case .string(let effectiveServiceName)? = effectiveFilterFields["serviceName"]
@@ -203,6 +197,29 @@ final class DaemonControlStreamAuthorizationPipeline: @unchecked Sendable {
     guard operationOwnership.count == 1 else {
       throw ControlStreamAuthorizationError.admissionDenied
     }
+    let boundEffectiveRequest: ControlStreamOpenRequest
+    do {
+      boundEffectiveRequest = try DaemonRuntimeStreamBindingContract.attach(
+        DaemonRuntimeStreamBindingContract.make(
+          ownership: operationOwnership[0],
+          store: store
+        ),
+        to: effectiveStreamRequest
+      )
+    } catch {
+      throw ControlStreamAuthorizationError.admissionDenied
+    }
+    let requestBinding: ControlPlaneJSONValue = .object([
+      "originalStreamRequest": try ControlStreamFrameContract.value(request),
+      "effectiveRequest": try ControlStreamFrameContract.value(evaluated.effectiveRequest),
+      "authorizedRuntimeRequest": try ControlStreamFrameContract.value(boundEffectiveRequest),
+      "evaluationDigestSHA256": .string(evaluated.evaluationDigestSHA256),
+      "planHash": .string(evaluated.planHash),
+      "exceptionIDs": .array(evaluated.exceptionIDs.map(ControlPlaneJSONValue.string)),
+      "effectiveAuthorizationDigestSHA256": .string(effectiveDecisionDigest),
+    ])
+    let requestDigest = Self.digest(try ControlPlaneCanonicalJSON.encode(requestBinding))
+    let timestamp = ISO8601DateFormatter().string(from: at)
     if let existing = try requestRepository.load(
       subjectID: peer.binding.subject.identifier,
       idempotencyKey: idempotencyKey
@@ -250,7 +267,7 @@ final class DaemonControlStreamAuthorizationPipeline: @unchecked Sendable {
       decision: effectiveDecision,
       operationReference: operationRef,
       shouldStartProducer: startDisposition.shouldStart,
-      effectiveRequest: effectiveStreamRequest
+      effectiveRequest: boundEffectiveRequest
     )
   }
 
@@ -259,7 +276,16 @@ final class DaemonControlStreamAuthorizationPipeline: @unchecked Sendable {
     request: ControlStreamOpenRequest,
     at: Date
   ) throws -> RBACDecision {
-    try rbacAuthorizer.authorizeStream(
+    do {
+      if let binding = try DaemonRuntimeStreamBindingContract.decode(request) {
+        try DaemonRuntimeStreamBindingContract.validateCurrent(binding, store: store)
+      }
+    } catch {
+      throw ControlStreamAuthorizationError.invalidRequest
+    }
+    do { try validateStreamRequest(request) }
+    catch { throw ControlStreamAuthorizationError.invalidRequest }
+    return try rbacAuthorizer.authorizeStream(
       subject: peer.binding.subject,
       request: request,
       projectIdentifier: try authoritativeProject(request),
@@ -268,6 +294,16 @@ final class DaemonControlStreamAuthorizationPipeline: @unchecked Sendable {
   }
 
   private func authoritativeProject(_ request: ControlStreamOpenRequest) throws -> String? {
+    if request.source == .events,
+      case .object(let fields)? = request.filter,
+      case .string(let projectID)? = fields["projectID"]
+    {
+      do {
+        return try store.desiredStates.loadProject(id: projectID).resourceUUID
+      } catch {
+        throw ControlStreamAuthorizationError.invalidRequest
+      }
+    }
     guard request.source == .logs || request.source == .attach || request.source == .exec,
       let target = request.target,
       case .object(let fields)? = request.filter,
@@ -286,6 +322,23 @@ final class DaemonControlStreamAuthorizationPipeline: @unchecked Sendable {
         && $0.resourceUUID == target
         && $0.serviceName == serviceName
     }
+  }
+
+  private func boundRuntimeRequest(
+    _ request: ControlStreamOpenRequest
+  ) throws -> ControlStreamOpenRequest? {
+    guard request.source == .logs || request.source == .attach || request.source == .exec,
+      let target = request.target,
+      case .object(let fields)? = request.filter,
+      case .string(let serviceName)? = fields["serviceName"] else { return nil }
+    let ownership = try matchingOwnership(target: target, serviceName: serviceName)
+    guard ownership.count == 1 else {
+      throw ControlStreamAuthorizationError.invalidRequest
+    }
+    return try DaemonRuntimeStreamBindingContract.attach(
+      DaemonRuntimeStreamBindingContract.make(ownership: ownership[0], store: store),
+      to: request
+    )
   }
 
   private func recordRequiredAudit(_ event: ControlSecurityAuditEvent) throws -> AuditRecord {

@@ -223,8 +223,7 @@ final class PersistentControlServerTests: XCTestCase {
         return ControlResponseEnvelope(
           requestID: request.requestID,
           status: .completed,
-          reasonCode: .completed,
-          operationRef: "operation-one"
+          reasonCode: .completed
         )
       }
     )
@@ -256,13 +255,13 @@ final class PersistentControlServerTests: XCTestCase {
     try writeRequest(requestData, descriptor: pair.client)
     let first = try readResponse(descriptor: pair.client)
     XCTAssertEqual(first.status, .completed)
-    XCTAssertEqual(first.operationRef, "operation-one")
+    XCTAssertTrue(first.operationRef?.hasPrefix("unary:") == true)
     XCTAssertEqual(try repository.load("mutation-one")?.status, .completed)
 
     try writeRequest(requestData, descriptor: pair.client)
     let replay = try readResponse(descriptor: pair.client)
     XCTAssertEqual(replay.status, .completed)
-    XCTAssertEqual(replay.operationRef, "operation-one")
+    XCTAssertEqual(replay.operationRef, first.operationRef)
     XCTAssertEqual(invocations.value, 1)
     XCTAssertEqual(
       try repository.load(subjectID: "control-test-subject", idempotencyKey: "idem-one")?.status,

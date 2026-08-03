@@ -134,13 +134,50 @@ public final class SecureSubprocessCancellation: @unchecked Sendable {
 }
 
 public struct SecureSubprocessRunner: Sendable {
+    package typealias SuspendedProcessValidator = @Sendable (pid_t) throws -> Void
+
     public init() {}
 
     public func run(
         _ request: SecureSubprocessRequest,
         cancellation: SecureSubprocessCancellation = SecureSubprocessCancellation()
     ) throws -> SecureSubprocessResult {
-        try run(request, cancellation: cancellation, onLaunch: nil)
+        try run(
+            request,
+            cancellation: cancellation,
+            expectedExecutable: nil,
+            suspendedProcessValidator: nil,
+            onLaunch: nil
+        )
+    }
+
+    package func run(
+        _ request: SecureSubprocessRequest,
+        expectedExecutable: SecureExecutableIdentity,
+        cancellation: SecureSubprocessCancellation = SecureSubprocessCancellation()
+    ) throws -> SecureSubprocessResult {
+        try run(
+            request,
+            cancellation: cancellation,
+            expectedExecutable: expectedExecutable,
+            suspendedProcessValidator: nil,
+            onLaunch: nil
+        )
+    }
+
+    package func run(
+        _ request: SecureSubprocessRequest,
+        expectedExecutable: SecureExecutableIdentity,
+        suspendedProcessValidator: @escaping SuspendedProcessValidator,
+        cancellation: SecureSubprocessCancellation = SecureSubprocessCancellation()
+    ) throws -> SecureSubprocessResult {
+        try run(
+            request,
+            cancellation: cancellation,
+            expectedExecutable: expectedExecutable,
+            suspendedProcessValidator: suspendedProcessValidator,
+            onLaunch: nil
+        )
     }
 
     package func run(
@@ -148,12 +185,20 @@ public struct SecureSubprocessRunner: Sendable {
         cancellation: SecureSubprocessCancellation = SecureSubprocessCancellation(),
         onLaunch: @escaping @Sendable (pid_t) -> Void
     ) throws -> SecureSubprocessResult {
-        try run(request, cancellation: cancellation, onLaunch: Optional(onLaunch))
+        try run(
+            request,
+            cancellation: cancellation,
+            expectedExecutable: nil,
+            suspendedProcessValidator: nil,
+            onLaunch: Optional(onLaunch)
+        )
     }
 
     private func run(
         _ request: SecureSubprocessRequest,
         cancellation: SecureSubprocessCancellation,
+        expectedExecutable: SecureExecutableIdentity?,
+        suspendedProcessValidator: SuspendedProcessValidator?,
         onLaunch: (@Sendable (pid_t) -> Void)?
     ) throws -> SecureSubprocessResult {
         try validate(request)
@@ -162,10 +207,22 @@ public struct SecureSubprocessRunner: Sendable {
         }
 
         let executable: SecureExecutableIdentity
-        do {
-            executable = try SecureExecutableResolver.verify(path: request.executablePath)
-        } catch let error as SecureExecutableValidationError {
-            throw SecureSubprocessError.executableRejected(error)
+        if let expectedExecutable {
+            guard request.executablePath == expectedExecutable.path else {
+                throw SecureSubprocessError.executableChanged
+            }
+            do {
+                try SecureExecutableResolver.verifyUnchanged(expectedExecutable)
+                executable = expectedExecutable
+            } catch {
+                throw SecureSubprocessError.executableChanged
+            }
+        } else {
+            do {
+                executable = try SecureExecutableResolver.verify(path: request.executablePath)
+            } catch let error as SecureExecutableValidationError {
+                throw SecureSubprocessError.executableRejected(error)
+            }
         }
         let workingDirectory: (path: String, descriptor: Int32)
         do {
@@ -257,6 +314,7 @@ public struct SecureSubprocessRunner: Sendable {
         errorPipe.closeWrite()
         do {
             try SecureExecutableResolver.verifyUnchanged(executable)
+            try suspendedProcessValidator?(processID)
         } catch {
             terminateSuspendedProcess(processID)
             throw SecureSubprocessError.executableChanged
@@ -315,6 +373,8 @@ public struct SecureSubprocessRunner: Sendable {
                         continuation.resume(returning: try run(
                             request,
                             cancellation: cancellation,
+                            expectedExecutable: nil,
+                            suspendedProcessValidator: nil,
                             onLaunch: onLaunch
                         ))
                     } catch {

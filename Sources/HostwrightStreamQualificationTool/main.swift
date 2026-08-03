@@ -102,8 +102,15 @@ private enum HostwrightStreamQualificationMain {
     let store = SQLiteStateStore(path: statePath)
     var stage = "ownership"
     do {
-      let projectID = "project-phase09-gate08-live"
       let ownership = try waitForOwnership(store: store)
+      guard let projectID = ownership.projectID,
+        projectID.range(
+          of: "^project-[a-z0-9-]{1,96}$", options: .regularExpression
+        ) != nil
+      else { throw failure(70) }
+      try Data(projectID.utf8).write(
+        to: root.appendingPathComponent("resume-project.txt")
+      )
       stage = "reconciliation-quiescence"
       try waitForReconciliationQuiescence(store: store, projectID: projectID)
       stage = "connect"
@@ -367,7 +374,13 @@ private enum HostwrightStreamQualificationMain {
       let session = try PersistentControlClient(socketPath: socketPath).connectSession()
       defer { session.close() }
       let streamID = "gate08-resume"
-      let projectID = "project-phase09-gate08-live"
+      let projectID = String(
+        decoding: try Data(contentsOf: root.appendingPathComponent("resume-project.txt")),
+        as: UTF8.self
+      )
+      guard projectID.range(
+        of: "^project-[a-z0-9-]{1,96}$", options: .regularExpression
+      ) != nil else { throw failure(69) }
       stage = "stream-open"
       try session.openStream(
         streamID: streamID,
@@ -432,7 +445,8 @@ private enum HostwrightStreamQualificationMain {
     let deadline = Date().addingTimeInterval(90)
     while Date() < deadline {
       let matches = try store.ownership.loadAll().filter {
-        $0.resourceType == "container" && $0.projectID == "project-phase09-gate08-live"
+        $0.resourceType == "container"
+          && ($0.projectID?.hasPrefix("project-phase09-gate") == true)
           && $0.serviceName == "probe"
       }
       if matches.count == 1, let match = matches.first { return match }

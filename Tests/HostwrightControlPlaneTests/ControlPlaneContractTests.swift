@@ -522,12 +522,18 @@ final class ControlPlaneContractTests: XCTestCase {
       for: challenge
     )
     XCTAssertNotNil(authenticationResponse.credentialProof)
-    let frame = try strict(
-      StreamFrame.self, data("phase09-stream-frame-v2.1.json"),
-      [
+    let frame = try Phase09StrictDecoder.decode(
+      StreamFrame.self,
+      from: data("phase09-stream-frame-v2.1.json"),
+      allowedKeys: [
         "apiVersion", "protocolRevision", "streamID", "sequence", "cursor", "kind", "credit",
         "payload",
-      ])
+      ],
+      requiredKeys: [
+        "apiVersion", "protocolRevision", "streamID", "sequence", "cursor", "kind", "payload",
+      ],
+      decoder: decoder
+    )
     try ControlStreamFrameContract.validate(frame, direction: .serverToClient)
     let encodedFrame = try encoder.encode(frame)
     XCTAssertEqual(try decoder.decode(StreamFrame.self, from: encodedFrame), frame)

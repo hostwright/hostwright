@@ -1,9 +1,11 @@
 import Darwin
 import Foundation
 import XCTest
+@testable import HostwrightCLI
 @testable import HostwrightControlPlane
 @testable import HostwrightControlSecurity
 @testable import HostwrightControlTransport
+@testable import HostwrightCommandTransport
 @testable import HostwrightCore
 @testable import HostwrightDaemon
 @testable import HostwrightDaemonCore
@@ -90,6 +92,98 @@ final class HostwrightDaemonControlServiceTests: XCTestCase {
     }
   }
 
+  func testStreamPreparationDispatchesBeforeUnaryCLIParsing() throws {
+    try withPrivateHome { home in
+      let fixture = try makeService(home: home)
+      let service = fixture.service
+      try service.start()
+      defer { service.stop() }
+
+      let identity = try DarwinCurrentControlCodeIdentity.inspect()
+      let client = PersistentControlClient(
+        socketPath: fixture.socketPath,
+        serverTrustPolicy: PersistentControlServerTrustPolicy(
+          pinnedAdHocCodeDirectoryHashes: [identity.codeDirectoryHash]
+        )
+      )
+      let scope = CLIControlAuthorizationScope(
+        projectIdentifier: HostwrightResourceUUID.legacy(
+          kind: "project",
+          identifier: "project-daemon-control-tests"
+        ),
+        resourceIdentifier: nil
+      )
+      let route = try CLIControlRoute.classify(arguments: [
+        "events", "--state-db", fixture.statePath, "--project", "daemon-control-tests",
+        "--watch", "--limit", "1", "--output", "json",
+      ])
+        .withWorkingDirectory(home.path)
+        .withAuthorizationScope(scope)
+      let request = ControlRequestEnvelope(
+        requestID: "daemon-stream-prepare",
+        operation: CLIControlStreamPreparationContract.operation,
+        timeoutMilliseconds: 1_000,
+        body: route.requestBody()
+      )
+
+      let response = try client.send(request)
+      XCTAssertEqual(response.status, .completed)
+      XCTAssertEqual(response.reasonCode, .completed)
+      XCTAssertNotNil(response.result)
+    }
+  }
+
+  func testInterruptedUnaryRecoveryRetriesAuditBeforeTerminalState() throws {
+    try withPrivateHome { home in
+      let store = SQLiteStateStore(path: home.appendingPathComponent("state.sqlite").path)
+      try store.migrate()
+      try store.controlIdentities.bootstrap(ControlPeerIdentityRecord(
+        subjectID: "recovery-owner",
+        userID: UInt32(geteuid()),
+        codeIdentity: CodeIdentity(
+          signingIdentifier: "recovery-owner",
+          codeDirectoryHash: String(repeating: "a", count: 40),
+          validationMode: .pinnedAdHoc
+        ),
+        declaredBySubjectID: "recovery-owner",
+        declaredAt: "2026-08-02T00:00:00Z",
+        updatedAt: "2026-08-02T00:00:00Z"
+      ))
+      let repository = ControlRequestRepository(store: store)
+      _ = try repository.record(ControlRequestSubmission(
+        request: ControlRequestRecord(
+          requestID: "restart-recovery-request",
+          subjectID: "recovery-owner",
+          idempotencyKey: "restart-recovery-key",
+          requestDigestSHA256: String(repeating: "b", count: 64),
+          status: .accepted,
+          operationReference: "unary:" + String(repeating: "c", count: 64),
+          createdAt: "2026-08-02T00:00:00Z",
+          updatedAt: "2026-08-02T00:00:00Z"
+        ),
+        idempotencyExpiresAt: "2026-08-03T00:00:00Z"
+      ))
+      let recorder = FailOnceAuditRecorder()
+      let now = { Date(timeIntervalSince1970: 1_785_715_200) }
+
+      XCTAssertThrowsError(try HostwrightDaemonControlService.recoverInterruptedUnaryRequests(
+        repository: repository,
+        auditRecorder: recorder,
+        now: now
+      ))
+      XCTAssertEqual(try repository.load("restart-recovery-request")?.status, .accepted)
+
+      XCTAssertEqual(try HostwrightDaemonControlService.recoverInterruptedUnaryRequests(
+        repository: repository,
+        auditRecorder: recorder,
+        now: now
+      ), 1)
+      XCTAssertEqual(try repository.load("restart-recovery-request")?.status, .error)
+      XCTAssertEqual(recorder.recordedEvents.count, 1)
+      XCTAssertEqual(recorder.recordedEvents.first?.reasonCode, "operation.interrupted-by-daemon-restart")
+    }
+  }
+
   func testStopPreservesSocketThatReplacedTheOwnedInode() throws {
     try withPrivateHome { home in
       let fixture = try makeService(home: home)
@@ -115,7 +209,11 @@ final class HostwrightDaemonControlServiceTests: XCTestCase {
     }
   }
 
-  private func makeService(home: URL) throws -> (service: any DaemonControlServing, socketPath: String) {
+  private func makeService(home: URL) throws -> (
+    service: any DaemonControlServing,
+    socketPath: String,
+    statePath: String
+  ) {
     let resolution = try HostwrightLocalPathResolver.resolve(
       homeDirectory: home.path,
       environment: [:]
@@ -135,6 +233,10 @@ final class HostwrightDaemonControlServiceTests: XCTestCase {
         updatedAt: "2026-08-02T00:00:00Z"
       )
     )
+    try store.rbac.bootstrapDefaultRolesAndOwner(
+      subjectID: "daemon-control-test-owner",
+      timestamp: "2026-08-02T00:00:00Z"
+    )
     let configPath = home.appendingPathComponent("hostwright.yaml")
     try Data("version: 2\nproject: daemon-control-tests\nservices: {}\n".utf8).write(to: configPath)
     try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: configPath.path)
@@ -144,7 +246,11 @@ final class HostwrightDaemonControlServiceTests: XCTestCase {
       lockFilePath: resolution.layout.daemonLock,
       maxIterations: 1
     )
-    return (try HostwrightDaemonControlService.make(configuration: configuration), resolution.layout.controlSocket)
+    return (
+      try HostwrightDaemonControlService.make(configuration: configuration),
+      resolution.layout.controlSocket,
+      resolution.stateDatabasePath
+    )
   }
 
   private func bindSocket(at path: String) throws -> Int32 {
@@ -192,5 +298,43 @@ final class HostwrightDaemonControlServiceTests: XCTestCase {
     )
     defer { try? FileManager.default.removeItem(at: home) }
     try body(home)
+  }
+}
+
+private final class FailOnceAuditRecorder: ControlSecurityAuditRecording, @unchecked Sendable {
+  private let lock = NSLock()
+  private var attempts = 0
+  private var events: [ControlSecurityAuditEvent] = []
+
+  func record(_ event: ControlSecurityAuditEvent) throws -> AuditRecord {
+    try event.validate()
+    lock.lock()
+    defer { lock.unlock() }
+    attempts += 1
+    if attempts == 1 { throw POSIXError(.EIO) }
+    events.append(event)
+    return AuditRecord(
+      identifier: "restart-recovery-audit",
+      segmentID: "segment",
+      sequence: UInt64(events.count),
+      timestamp: Date(timeIntervalSince1970: 1_785_715_200),
+      previousDigest: nil,
+      subjectID: event.subjectID,
+      requestID: event.requestID,
+      target: event.target,
+      action: event.action,
+      outcome: event.outcome,
+      reasonCode: event.reasonCode,
+      operationRef: event.operationRef,
+      payloadDigest: event.payloadDigest,
+      recordDigest: "sha256:" + String(repeating: "d", count: 64),
+      signingKeyID: "test-key"
+    )
+  }
+
+  var recordedEvents: [ControlSecurityAuditEvent] {
+    lock.lock()
+    defer { lock.unlock() }
+    return events
   }
 }

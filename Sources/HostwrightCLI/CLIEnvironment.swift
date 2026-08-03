@@ -62,6 +62,9 @@ public struct CLIEnvironment: @unchecked Sendable {
     public var eventWatchCancelled: () -> Bool
     public var metricsDate: @Sendable () -> Date
     public var metricsCancelled: () -> Bool
+    public var metricsExport: (
+        Data, String, Int, @escaping () -> Bool
+    ) throws -> (outputSHA256: String, outputBytes: UInt64)
     public var traceDate: @Sendable () -> Date
     public var traceCancelled: () -> Bool
     public var supportDate: @Sendable () -> Date
@@ -159,6 +162,10 @@ public struct CLIEnvironment: @unchecked Sendable {
         eventWatchCancelled: @escaping () -> Bool = { false },
         metricsDate: @escaping @Sendable () -> Date = Date.init,
         metricsCancelled: @escaping () -> Bool = { false },
+        metricsExport: @escaping (
+            Data, String, Int, @escaping () -> Bool
+        ) throws -> (outputSHA256: String, outputBytes: UInt64) =
+            CLIEnvironment.defaultMetricsExport,
         traceDate: @escaping @Sendable () -> Date = Date.init,
         traceCancelled: @escaping () -> Bool = { false },
         supportDate: @escaping @Sendable () -> Date = Date.init,
@@ -241,12 +248,29 @@ public struct CLIEnvironment: @unchecked Sendable {
         self.eventWatchCancelled = eventWatchCancelled
         self.metricsDate = metricsDate
         self.metricsCancelled = metricsCancelled
+        self.metricsExport = metricsExport
         self.traceDate = traceDate
         self.traceCancelled = traceCancelled
         self.supportDate = supportDate
         self.supportCancelled = supportCancelled
         self.supportLogs = supportLogs
         self.supportEncrypt = supportEncrypt
+    }
+
+    public static func defaultMetricsExport(
+        _ data: Data,
+        _ path: String,
+        _ maximumBytes: Int,
+        _ isCancelled: @escaping () -> Bool
+    ) throws -> (outputSHA256: String, outputBytes: UInt64) {
+        let receipt = try SecureLocalExportWriter.write(
+            data,
+            to: path,
+            maximumBytes: maximumBytes,
+            isCancelled: isCancelled,
+            unsafeError: HostwrightMetricsError.unsafeExportPath
+        )
+        return (receipt.outputSHA256, receipt.outputBytes)
     }
 
     public static let live = CLIEnvironment(
@@ -337,7 +361,7 @@ public struct CLIEnvironment: @unchecked Sendable {
             FileHandle.standardError.write(Data((message + "\n").utf8))
         },
         controlIdentityBootstrap: {
-            try HostwrightControlIdentityBootstrap.bootstrapCurrentProcess()
+            try HostwrightControlIdentityBootstrap.bootstrapAPIProcesses()
         },
         observabilitySink: HostwrightOSLogSink(),
         observabilityStatus: { HostwrightObservabilityStatus(configuration: .live) },
@@ -346,6 +370,46 @@ public struct CLIEnvironment: @unchecked Sendable {
             try SupportBundlePlatformEncryptor.encrypt(data, recipientReference: recipient)
         }
     )
+}
+
+public extension CLIEnvironment {
+    func resolvingRelativePaths(against workingDirectory: String?) throws -> CLIEnvironment {
+        guard let workingDirectory else { return self }
+        guard workingDirectory.hasPrefix("/"), workingDirectory.utf8.count <= 4_096,
+              URL(fileURLWithPath: workingDirectory).standardizedFileURL.path
+                == workingDirectory else {
+            throw HostwrightLocalPathError.invalidPath(
+                role: "Control API working directory",
+                path: workingDirectory,
+                reason: "the path is not a canonical absolute directory"
+            )
+        }
+        var scoped = self
+        let originalFileExists = fileExists
+        let originalReadTextFile = readTextFile
+        let originalWriteTextFile = writeTextFile
+        let originalWriteNewTextFile = writeNewTextFile
+        let originalExecutablePath = executablePath
+        let originalLocalPathResolution = localPathResolution
+        func resolve(_ path: String) -> String {
+            guard !path.hasPrefix("/") else {
+                return URL(fileURLWithPath: path).standardizedFileURL.path
+            }
+            return URL(fileURLWithPath: workingDirectory, isDirectory: true)
+                .appendingPathComponent(path).standardizedFileURL.path
+        }
+        scoped.fileExists = { originalFileExists(resolve($0)) }
+        scoped.readTextFile = { try originalReadTextFile(resolve($0)) }
+        scoped.writeTextFile = { try originalWriteTextFile(resolve($0), $1) }
+        scoped.writeNewTextFile = { try originalWriteNewTextFile(resolve($0), $1) }
+        scoped.executablePath = { value in
+            value.contains("/") ? originalExecutablePath(resolve(value)) : originalExecutablePath(value)
+        }
+        scoped.localPathResolution = { explicitPath in
+            try originalLocalPathResolution(explicitPath.map(resolve))
+        }
+        return scoped
+    }
 }
 
 @usableFromInline

@@ -1,0 +1,219 @@
+import Foundation
+import HostwrightCLI
+import HostwrightControlPlane
+import HostwrightControlTransport
+import HostwrightCore
+
+public struct HostwrightCommandTransportEnvironment: @unchecked Sendable {
+    public typealias PersistentSend = @Sendable (
+        String,
+        ControlRequestEnvelope
+    ) throws -> ControlResponseEnvelope
+    public typealias BootstrapSend = @Sendable (
+        ControlRequestEnvelope
+    ) throws -> ControlResponseEnvelope
+    public typealias StreamRun = @Sendable (
+        String,
+        CLIControlRoute,
+        String
+    ) throws -> CLIRunResult
+    public typealias AuthorizationScope = @Sendable (
+        CLICommand,
+        [String]
+    ) throws -> CLIControlAuthorizationScope
+
+    public var socketPath: @Sendable () throws -> String
+    public var persistentSend: PersistentSend
+    public var bootstrapSend: BootstrapSend
+    public var streamRun: StreamRun
+    public var authorizationScope: AuthorizationScope
+    public var requestID: @Sendable () -> String
+    public var workingDirectory: @Sendable () throws -> String
+
+    public init(
+        socketPath: @escaping @Sendable () throws -> String,
+        persistentSend: @escaping PersistentSend,
+        bootstrapSend: @escaping BootstrapSend,
+        streamRun: @escaping StreamRun,
+        authorizationScope: @escaping AuthorizationScope = { _, _ in
+            CLIControlAuthorizationScope(projectIdentifier: nil, resourceIdentifier: nil)
+        },
+        requestID: @escaping @Sendable () -> String,
+        workingDirectory: @escaping @Sendable () throws -> String = {
+            FileManager.default.currentDirectoryPath
+        }
+    ) {
+        self.socketPath = socketPath
+        self.persistentSend = persistentSend
+        self.bootstrapSend = bootstrapSend
+        self.streamRun = streamRun
+        self.authorizationScope = authorizationScope
+        self.requestID = requestID
+        self.workingDirectory = workingDirectory
+    }
+
+    public static let live = HostwrightCommandTransportEnvironment(
+        socketPath: {
+            try HostwrightLocalPathResolver.resolve().layout.controlSocket
+        },
+        persistentSend: { socketPath, request in
+            try PersistentControlClient(socketPath: socketPath).send(request)
+        },
+        bootstrapSend: { request in
+            try BootstrapControlClient().send(request)
+        },
+        streamRun: { socketPath, route, requestID in
+            try CLIControlStreamClient(socketPath: socketPath)
+                .run(route: route, preparationRequestID: requestID)
+        },
+        authorizationScope: { command, arguments in
+            try CLIControlAuthorizationScopeResolver.resolve(
+                command: command,
+                arguments: arguments,
+                environment: .live
+            )
+        },
+        requestID: { UUID().uuidString.lowercased() },
+        workingDirectory: { FileManager.default.currentDirectoryPath }
+    )
+}
+
+public enum HostwrightCommandRunner {
+    public static func run(
+        arguments: [String],
+        environment: HostwrightCommandTransportEnvironment = .live
+    ) -> CLIRunResult {
+        let output = CLICommand.outputFormatHint(arguments: arguments) ?? .text
+        var route: CLIControlRoute
+        do {
+            route = try CLIControlRoute.classify(arguments: arguments)
+        } catch let usage as CLIUsageError {
+            return HostwrightCLI.usageFailure(usage, output: output)
+        } catch let diagnostic as HostwrightDiagnostic {
+            return HostwrightCLI.diagnosticFailure(diagnostic, output: output)
+        } catch {
+            return HostwrightCLI.diagnosticFailure(
+                HostwrightDiagnostic(
+                    code: .controlAPIInvalid,
+                    message: "The CLI command could not be classified safely."
+                ),
+                output: output
+            )
+        }
+
+        if route.transport == .localPresentation {
+            return HostwrightCLI.run(arguments: route.arguments)
+        }
+
+        do {
+            route = try route.withWorkingDirectory(environment.workingDirectory())
+            if route.transport == .persistentControlAPI {
+                route = route.withAuthorizationScope(
+                    try environment.authorizationScope(
+                        CLICommand.parse(arguments: route.arguments),
+                        route.arguments
+                    )
+                )
+            }
+        } catch let diagnostic as HostwrightDiagnostic {
+            return HostwrightCLI.diagnosticFailure(diagnostic, output: output)
+        } catch {
+            return HostwrightCLI.diagnosticFailure(
+                HostwrightDiagnostic(
+                    code: .controlAPIInvalid,
+                    message: "The CLI request context could not be resolved safely."
+                ),
+                output: output
+            )
+        }
+
+        let requestID = environment.requestID()
+        guard requestID.range(
+            of: "^[A-Za-z0-9._:-]{1,128}$",
+            options: .regularExpression
+        ) != nil else {
+            return HostwrightCLI.diagnosticFailure(
+                HostwrightDiagnostic(
+                    code: .controlAPIExecutionFailed,
+                    message: "The Control API request identifier generator returned an invalid value."
+                ),
+                output: output
+            )
+        }
+
+        do {
+            switch route.transport {
+            case .localPresentation:
+                preconditionFailure("local presentation returned before transport dispatch")
+            case .bootstrapAPI:
+                let response = try environment.bootstrapSend(
+                    request(route: route, requestID: requestID)
+                )
+                return try result(response: response, output: output)
+            case .persistentControlAPI:
+                let socketPath = try environment.socketPath()
+                switch route.execution {
+                case .unary:
+                    let response = try environment.persistentSend(
+                        socketPath,
+                        request(route: route, requestID: requestID)
+                    )
+                    return try result(response: response, output: output)
+                case .stream:
+                    return try environment.streamRun(socketPath, route, requestID)
+                }
+            }
+        } catch let diagnostic as HostwrightDiagnostic {
+            return HostwrightCLI.diagnosticFailure(diagnostic, output: output)
+        } catch {
+            return HostwrightCLI.diagnosticFailure(
+                HostwrightDiagnostic(
+                    code: .controlAPIUnavailable,
+                    message: "The authenticated local Control API is unavailable."
+                ),
+                output: output
+            )
+        }
+    }
+
+    private static func request(
+        route: CLIControlRoute,
+        requestID: String
+    ) -> ControlRequestEnvelope {
+        ControlRequestEnvelope(
+            requestID: requestID,
+            operation: route.operation,
+            timeoutMilliseconds: ControlPlaneContract.maximumUnaryDeadlineMilliseconds,
+            idempotencyKey: route.mutating ? requestID : nil,
+            body: route.requestBody()
+        )
+    }
+
+    private static func result(
+        response: ControlResponseEnvelope,
+        output: CLIOutputFormat
+    ) throws -> CLIRunResult {
+        if response.result != nil {
+            return try CLIControlResultContract.result(from: response)
+        }
+        let code: HostwrightErrorCode
+        switch response.reasonCode {
+        case .invalidFrame, .invalidRequest, .unsupportedAPIVersion,
+             .unsupportedProtocolRevision, .unsupportedOperation:
+            code = .controlAPIInvalid
+        case .unauthenticated, .identityMismatch, .unauthorized, .admissionDenied:
+            code = .unsafeExposure
+        case .conflict, .idempotencyConflict:
+            code = .confirmationMismatch
+        case .deadlineExceeded, .cancelled, .concurrencyLimit, .streamLimit,
+             .slowClient, .cursorGap, .auditUnavailable, .serviceUnavailable:
+            code = .controlAPIUnavailable
+        case .internalError, .accepted, .completed:
+            code = .controlAPIExecutionFailed
+        }
+        throw HostwrightDiagnostic(
+            code: code,
+            message: response.error?.message ?? "The Control API request was rejected safely."
+        )
+    }
+}

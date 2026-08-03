@@ -155,9 +155,25 @@ Control API v2.1. It has no TCP listener. Kernel peer credentials, audit token,
 live code identity, the persisted subject, RBAC, admission, effective-intent
 reauthorization, durable idempotency, and tamper-evident audit all run before a
 mutation handler. The one-shot `hostwright-control` companion remains only the
-bounded bootstrap path for daemon installation and repair. Neither surface
+bounded bootstrap path for daemon installation, repair, and uninstall. Neither surface
 permits request-selected state paths or direct calls around the shared
 validation, ownership, provider, migration, and audit boundaries.
+
+The bootstrap client validates the companion as an owned, non-symlink regular
+executable, pins its filesystem identity across spawn, and validates the live
+child code identity before it runs. Installed artifacts require the exact
+Hostwright Team ID and `hostwright-control` identifier. A fresh ad-hoc source
+installation is allowed only for the default companion adjacent to a running
+ad-hoc `hostwright` CLI and only while the identity state is absent or empty.
+SwiftPM's deterministic ad-hoc `hostwright-<40-hex>` and
+`hostwright-control-<40-hex>` identifiers are accepted only on this source-build
+path; Developer ID artifacts still require the unsuffixed release identifiers.
+The companion then derives the installer identity from its live parent process,
+bootstraps that installer as the sole owner, and records its own exact native
+CDHash as a separate non-owner identity. Later ad-hoc replacement remains
+fail-closed until explicitly declared; this first-install trust-on-first-use
+boundary does not protect against an attacker already controlling the invoking
+user account or its build directory.
 
 Admission policies are bounded declarative documents, not arbitrary native
 code. Conflicting writes, malformed policy state, stale plan hashes, expired or

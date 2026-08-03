@@ -148,6 +148,50 @@ final class ControlRequestRepositoryTests: XCTestCase {
     }
   }
 
+  func testRestartRecoveryTerminatesOnlyInterruptedUnaryRequests() throws {
+    try withStore { store in
+      try bootstrapOwner(in: store)
+      let repository = makeRepository(store)
+      _ = try repository.record(ControlRequestSubmission(
+        request: request(
+          id: "unary-interrupted", key: "unary-key",
+          operationReference: "unary:" + String(repeating: "a", count: 64)
+        ),
+        idempotencyExpiresAt: expiresAt
+      ))
+      _ = try repository.record(ControlRequestSubmission(
+        request: request(
+          id: "stream-active", key: "stream-key",
+          operationReference: "stream:" + String(repeating: "b", count: 64)
+        ),
+        idempotencyExpiresAt: expiresAt
+      ))
+
+      let interrupted = try repository.interruptedUnaryRequests()
+      XCTAssertEqual(interrupted.map(\.requestID), ["unary-interrupted"])
+      let recovered = try interrupted.map {
+        try repository.markInterruptedUnaryRequest(
+          requestID: $0.requestID,
+          operationReference: $0.operationReference!,
+          updatedAt: "2026-08-02T20:06:00Z"
+        )
+      }
+      XCTAssertEqual(recovered.map(\.requestID), ["unary-interrupted"])
+      XCTAssertEqual(recovered.first?.status, .error)
+      XCTAssertEqual(try repository.load("unary-interrupted")?.status, .error)
+      XCTAssertEqual(
+        try repository.loadIdempotency(subjectID: "owner", idempotencyKey: "unary-key")?.status,
+        .error
+      )
+      XCTAssertEqual(try repository.load("stream-active")?.status, .accepted)
+      XCTAssertEqual(
+        try repository.loadIdempotency(subjectID: "owner", idempotencyKey: "stream-key")?.status,
+        .accepted
+      )
+      XCTAssertTrue(try repository.interruptedUnaryRequests().isEmpty)
+    }
+  }
+
   func testInvalidInputsAndExpiredIdempotencyAreRejectedWithoutDeletion() throws {
     try withStore { store in
       try bootstrapOwner(in: store)

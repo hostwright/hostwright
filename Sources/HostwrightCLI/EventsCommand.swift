@@ -157,7 +157,7 @@ struct EventsCommandRunner {
         return renderStream(page.timedOut(), pageSize: pageSize)
     }
 
-    private func renderStream(
+    func renderStream(
         _ page: HostwrightEventStreamPage,
         pageSize: Int
     ) -> CLIRunResult {

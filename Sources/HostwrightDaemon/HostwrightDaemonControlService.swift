@@ -1,10 +1,13 @@
 import Darwin
 import Dispatch
 import Foundation
+import HostwrightCLI
 import HostwrightControl
+import HostwrightCommandTransport
 import HostwrightControlPlane
 import HostwrightControlSecurity
 import HostwrightControlTransport
+import HostwrightCore
 import HostwrightDaemonCore
 import HostwrightPolicy
 import HostwrightState
@@ -30,6 +33,33 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
 
   static func make(configuration: DaemonConfiguration) throws -> any DaemonControlServing {
     HostwrightDaemonControlService(configuration: configuration)
+  }
+
+  static func recoverInterruptedUnaryRequests(
+    repository: ControlRequestRepository,
+    auditRecorder: any ControlSecurityAuditRecording,
+    now: () -> Date
+  ) throws -> Int {
+    let interrupted = try repository.interruptedUnaryRequests()
+    for request in interrupted {
+      try auditRecorder.record(ControlSecurityAuditEvent(
+        subjectID: request.subjectID,
+        requestID: request.requestID,
+        target: "control.unary",
+        action: .operation,
+        outcome: "error",
+        reasonCode: "operation.interrupted-by-daemon-restart",
+        operationRef: request.operationReference,
+        payloadDigest: "sha256:\(request.requestDigestSHA256)",
+        deduplicationKey: "control:\(request.requestID):restart-recovery"
+      ))
+      _ = try repository.markInterruptedUnaryRequest(
+        requestID: request.requestID,
+        operationReference: request.operationReference!,
+        updatedAt: ISO8601DateFormatter().string(from: now())
+      )
+    }
+    return interrupted.count
   }
 
   func start() throws {
@@ -61,6 +91,25 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
         stateDatabasePath: configuration.stateDatabasePath
       )
     )
+    let authoritativeStatePath = configuration.stateDatabasePath
+    var mutableCommandEnvironment = CLIEnvironment.live
+    mutableCommandEnvironment.localPathResolution = { explicitPath in
+      if let explicitPath {
+        let normalized = try HostwrightLocalPathResolver.normalizedAbsolutePath(
+          explicitPath,
+          role: "Control API state database"
+        )
+        guard normalized == authoritativeStatePath else {
+          throw HostwrightLocalPathError.invalidPath(
+            role: "Control API state database",
+            path: explicitPath,
+            reason: "the path does not match the daemon's configured state authority"
+          )
+        }
+      }
+      return resolution
+    }
+    let commandEnvironment = mutableCommandEnvironment
     let auditTrail = TamperEvidentAuditTrail(
       store: store,
       keyStore: try MacOSAuditSigningKeyStore(
@@ -93,6 +142,11 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
       auditRecorder: auditTrail
     )
     let requestRepository = ControlRequestRepository(store: store)
+    _ = try Self.recoverInterruptedUnaryRequests(
+      repository: requestRepository,
+      auditRecorder: auditTrail,
+      now: Date.init
+    )
     let rbacAuthorizer = RBACAuthorizationEngine(repository: store.rbac)
     let rbacAdministration = RBACAdministrationService(
       repository: store.rbac, authorizer: rbacAuthorizer)
@@ -116,25 +170,79 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
       path: resolution.layout.controlSocket,
       recoverStaleSocket: true
     )
+    let mutatingOperations = Set([
+      "up", "down", "run", "start", "stop", "restart", "rm", "update",
+      "image", "registry", "volume",
+      "audit.export",
+      "rbac.role.create", "rbac.role.update", "rbac.role.delete",
+      "rbac.binding.create", "rbac.binding.delete",
+      "rbac.delegation.create", "rbac.delegation.revoke",
+      "admission.policy.create", "admission.policy.set-enabled",
+      "admission.policy.delete", "admission.exception.create",
+      "admission.exception.delete",
+    ]).union(WorkloadProfileControlOperations.mutatingOperations)
     let server = try PersistentControlConnectionServer(
       authenticator: authenticator,
       requestRepository: requestRepository,
       daemonGeneration: UInt64.random(in: 1...UInt64(Int64.max)),
       socketIdentity: listener.identity,
-      mutatingOperations: Set([
-        "up", "down", "run", "start", "stop", "restart", "rm", "update",
-        "image", "registry", "volume",
-        "audit.export",
-        "rbac.role.create", "rbac.role.update", "rbac.role.delete",
-        "rbac.binding.create", "rbac.binding.delete",
-        "rbac.delegation.create", "rbac.delegation.revoke",
-        "admission.policy.create", "admission.policy.set-enabled",
-        "admission.policy.delete", "admission.exception.create",
-        "admission.exception.delete",
-      ]).union(WorkloadProfileControlOperations.mutatingOperations),
+      mutatingOperations: mutatingOperations,
+      requestPreparer: { peer, request in
+        if let prepared = try CLIControlCommandExecutor.prepare(
+          request: request,
+          environment: commandEnvironment,
+          streamPreparation: true
+        ) {
+          return try PersistentControlPreparedRequest(
+            request: prepared.request,
+            execution: { _, _ in
+              let preparation = try streamSources.prepare(
+                peer: peer,
+                route: prepared.route,
+                environment: prepared.environment
+              )
+              return ControlResponseEnvelope(
+                requestID: request.requestID,
+                status: .completed,
+                reasonCode: .completed,
+                result: try Self.controlPlaneValue(preparation)
+              )
+            }
+          )
+        }
+        if let prepared = try CLIControlCommandExecutor.prepare(
+          request: request,
+          environment: commandEnvironment
+        ) {
+          return try PersistentControlPreparedRequest(
+            request: prepared.request,
+            execution: { _, _ in
+              try CLIControlCommandExecutor.execute(prepared: prepared)
+            }
+          )
+        }
+        return try PersistentControlPreparedRequest(request: request)
+      },
+      mutationClassifier: { request in
+        if try CLIControlRoute.validateStreamPreparation(request: request) != nil {
+          return false
+        }
+        if let route = try CLIControlRoute.validate(request: request) {
+          return route.mutating
+        }
+        return mutatingOperations.contains(request.operation)
+      },
       auditRecorder: auditTrail,
       authorizer: { peer, request, at in
-        try rbacAuthorizer.authorize(subject: peer.binding.subject, request: request, at: at)
+        let scope = try CLIControlRoute.validateStreamPreparation(request: request)?
+          .authorizationScope ?? CLIControlRoute.validate(request: request)?.authorizationScope
+        return try rbacAuthorizer.authorize(
+          subject: peer.binding.subject,
+          request: request,
+          authoritativeProjectIdentifier: scope?.projectIdentifier,
+          authoritativeResourceIdentifier: scope?.resourceIdentifier,
+          at: at
+        )
       },
       admissionEvaluator: { peer, request, at in
         let evaluated = try admissionEngine.evaluate(
@@ -187,7 +295,9 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
       },
       handler: { peer, request, _ in
         try Self.handle(
-          peer: peer, request: request, localAPI: localAPI, auditTrail: auditTrail,
+          peer: peer, request: request, localAPI: localAPI,
+          commandEnvironment: commandEnvironment, streamSources: streamSources,
+          auditTrail: auditTrail,
           rbacRepository: store.rbac, rbacAdministration: rbacAdministration,
           rbacAuthorizer: rbacAuthorizer, admissionRepository: store.admission,
           admissionAdministration: admissionAdministration,
@@ -293,6 +403,8 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
     peer: AuthenticatedControlPeer,
     request: ControlRequestEnvelope,
     localAPI: LocalControlAPI,
+    commandEnvironment: CLIEnvironment,
+    streamSources: DaemonControlStreamSourceFactory,
     auditTrail: TamperEvidentAuditTrail,
     rbacRepository: RBACRepository,
     rbacAdministration: RBACAdministrationService,
@@ -304,6 +416,25 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
     profileAdministration: WorkloadProfileAdministrationService,
     profileEngine: WorkloadProfilePolicyEngine
   ) throws -> ControlResponseEnvelope {
+    if let route = try CLIControlRoute.validateStreamPreparation(request: request) {
+      let preparation = try streamSources.prepare(
+        peer: peer,
+        route: route,
+        environment: commandEnvironment
+      )
+      return ControlResponseEnvelope(
+        requestID: request.requestID,
+        status: .completed,
+        reasonCode: .completed,
+        result: try controlPlaneValue(preparation)
+      )
+    }
+    if let response = try CLIControlCommandExecutor.execute(
+      request: request,
+      environment: commandEnvironment
+    ) {
+      return response
+    }
     if let response = WorkloadProfileControlOperations.handle(
       peer: peer, request: request, repository: profileRepository,
       administration: profileAdministration, engine: profileEngine, now: Date())

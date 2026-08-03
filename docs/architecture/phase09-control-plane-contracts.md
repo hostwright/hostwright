@@ -120,6 +120,16 @@ socket. The complete frozen command classification is
 Gate 9 proves parity and removes direct runtime/state mutation bypasses; this
 document does not claim that removal yet.
 
+Developer ID bootstrap requires the exact Hostwright team and companion
+identifier. Initial ad-hoc bootstrap is limited to the securely resolved default
+companion adjacent to the live `hostwright` installer while identity state is
+absent or empty. The companion validates the live parent identity, records the
+installer as owner, and pins the companion's distinct native CDHash as a
+non-owner bootstrap identity. Existing ad-hoc state never auto-accepts a changed
+installer or companion hash. SwiftPM's deterministic ad-hoc identifier suffix is
+restricted to exactly 40 lowercase hexadecimal characters and is never accepted
+for a Developer ID build.
+
 ## Local identity and socket boundary
 
 The default socket path is already resolved as

@@ -635,6 +635,52 @@ public struct ControlRequestRepository: Sendable {
     }
   }
 
+  public func interruptedUnaryRequests() throws -> [ControlRequestRecord] {
+    try store.withValidatedConnection { connection in
+      try connection.query(
+        """
+        SELECT request_id, subject_id, idempotency_key, request_digest_sha256,
+               status, operation_reference, created_at, updated_at
+        FROM control_requests
+        WHERE status = 'accepted' AND operation_reference LIKE 'unary:%'
+        ORDER BY request_id ASC
+        """
+      ).map(request(from:))
+    }
+  }
+
+  public func markInterruptedUnaryRequest(
+    requestID: String,
+    operationReference: String,
+    updatedAt: String
+  ) throws -> ControlRequestRecord {
+    try ControlRequestValidation.requestID(requestID)
+    try ControlRequestValidation.optionalOperationReference(operationReference)
+    guard operationReference.hasPrefix("unary:") else {
+      throw StateStoreError.invalidRecord(
+        "Only durable unary operations may use restart recovery."
+      )
+    }
+    _ = try ControlRequestValidation.timestamp(
+      updatedAt,
+      named: "request recovery timestamp"
+    )
+    guard let record = try load(requestID),
+      record.status == .accepted,
+      record.operationReference == operationReference
+    else {
+      throw StateStoreError.invalidRecord(
+        "Interrupted unary recovery no longer matches the accepted request."
+      )
+    }
+    return try updateTerminal(
+      requestID: requestID,
+      status: .error,
+      operationReference: operationReference,
+      updatedAt: updatedAt
+    )
+  }
+
   public func recordAcceptedOperationReference(
     requestID: String,
     operationReference: String,

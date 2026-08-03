@@ -54,10 +54,24 @@ public final class RBACAuthorizationEngine: @unchecked Sendable {
   public func authorize(
     subject: LocalSubject,
     request: ControlRequestEnvelope,
+    authoritativeProjectIdentifier: String? = nil,
+    authoritativeResourceIdentifier: String? = nil,
     at: Date
   ) throws -> RBACDecision {
     try subject.validate()
-    let target = try Self.target(for: request)
+    let requested = try Self.target(for: request)
+    guard requested.projectIdentifier == nil || authoritativeProjectIdentifier == nil
+      || requested.projectIdentifier == authoritativeProjectIdentifier,
+      requested.resourceIdentifier == nil || authoritativeResourceIdentifier == nil
+      || requested.resourceIdentifier == authoritativeResourceIdentifier
+    else { throw RBACAuthorizationError.invalidTarget }
+    let target = RBACAuthorizationTarget(
+      resource: requested.resource,
+      verb: requested.verb,
+      projectIdentifier: authoritativeProjectIdentifier ?? requested.projectIdentifier,
+      resourceIdentifier: authoritativeResourceIdentifier ?? requested.resourceIdentifier,
+      profileHash: requested.profileHash
+    )
     return try decision(
       subjectID: subject.identifier, operation: request.operation, target: target, at: at)
   }
@@ -78,9 +92,11 @@ public final class RBACAuthorizationEngine: @unchecked Sendable {
     } else {
       requestedProjectIdentifier = nil
     }
-    guard requestedProjectIdentifier == nil || authoritativeProjectIdentifier == nil
-      || requestedProjectIdentifier == authoritativeProjectIdentifier
-    else { throw RBACAuthorizationError.invalidTarget }
+    if request.source != .events {
+      guard requestedProjectIdentifier == nil || authoritativeProjectIdentifier == nil
+        || requestedProjectIdentifier == authoritativeProjectIdentifier
+      else { throw RBACAuthorizationError.invalidTarget }
+    }
     let projectIdentifier = authoritativeProjectIdentifier ?? requestedProjectIdentifier
     let resource: RBACResource
     let verb: RBACVerb
@@ -182,23 +198,74 @@ public final class RBACAuthorizationEngine: @unchecked Sendable {
       keys: ["resourceUUID", "resourceID", "serviceUUID", "service", "identifier"])
     let profileHash = try string(in: fields, keys: ["profileHash"])
     let subcommand = try string(in: fields, keys: ["subcommand", "action", "verb"])
+    let commandOperation = try string(in: fields, keys: ["commandOperation"])
+    let declaredMutation = try boolean(in: fields, key: "mutating")
+    let localControlIntent = try localControlAuthorizationIntent(
+      operation: request.operation,
+      fields: fields
+    )
+    guard subcommand == nil || localControlIntent == nil else {
+      throw RBACAuthorizationError.invalidTarget
+    }
 
     let resourceKind: RBACResource
-    let verb: RBACVerb
+    var verb: RBACVerb
     switch request.operation {
+    case "cli.stream.prepare":
+      switch commandOperation {
+      case "logs", "events": (resourceKind, verb) = (.observability, .watch)
+      case "exec", "attach": (resourceKind, verb) = (.runtime, .execute)
+      default: throw RBACAuthorizationError.invalidTarget
+      }
     case "plan": (resourceKind, verb) = (.project, .plan)
     case "status": (resourceKind, verb) = (.project, .get)
     case "events": (resourceKind, verb) = (.observability, .list)
-    case "recovery": (resourceKind, verb) = (.state, .update)
-    case "doctor", "capabilities": (resourceKind, verb) = (.daemon, .get)
+    case "recovery":
+      (resourceKind, verb) = (.state, mappedVerb(subcommand, default: .update))
+    case "doctor", "capabilities", "observability": (resourceKind, verb) = (.daemon, .get)
+    case "runtime":
+      (resourceKind, verb) = (.runtime, mappedVerb(subcommand, default: .get))
+    case "paths": (resourceKind, verb) = (.state, .get)
+    case "state": (resourceKind, verb) = (.state, mappedVerb(subcommand, default: .admin))
+    case "secret":
+      (resourceKind, verb) = (.secretMetadata, mappedVerb(subcommand, default: .admin))
+    case "daemon": (resourceKind, verb) = (.daemon, mappedVerb(subcommand, default: .admin))
+    case "restart-budget", "maintenance", "ownership":
+      (resourceKind, verb) = (.state, mappedVerb(subcommand, default: .admin))
+    case "metrics", "traces", "diagnostics":
+      (resourceKind, verb) = (.observability, mappedVerb(subcommand, default: .get))
+    case "migrate", "validate", "import-stack": (resourceKind, verb) = (.project, .plan)
+    case "init": (resourceKind, verb) = (.project, .create)
+    case "apply": (resourceKind, verb) = (.project, .update)
+    case "exec", "attach", "copy", "export": (resourceKind, verb) = (.runtime, .execute)
+    case "inspect", "stats": (resourceKind, verb) = (.runtime, .get)
+    case "logs": (resourceKind, verb) = (.observability, .watch)
+    case "cleanup": (resourceKind, verb) = (.project, .delete)
+    case "benchmark": (resourceKind, verb) = (.runtime, .execute)
+    case "extension": (resourceKind, verb) = (.plugin, .get)
     case "up", "run", "start": (resourceKind, verb) = (.service, .start)
     case "down", "stop": (resourceKind, verb) = (.service, .stop)
     case "restart": (resourceKind, verb) = (.service, .restart)
     case "rm": (resourceKind, verb) = (.service, .delete)
     case "update": (resourceKind, verb) = (.service, .update)
-    case "image": (resourceKind, verb) = (.image, mappedVerb(subcommand, default: .get))
-    case "registry": (resourceKind, verb) = (.registry, mappedVerb(subcommand, default: .get))
-    case "volume": (resourceKind, verb) = (.volume, mappedVerb(subcommand, default: .get))
+    case "image":
+      (resourceKind, verb) = (
+        .image,
+        localControlIntent?.verb
+          ?? (subcommand == nil ? .admin : mappedVerb(subcommand, default: .get))
+      )
+    case "registry":
+      (resourceKind, verb) = (
+        .registry,
+        localControlIntent?.verb
+          ?? (subcommand == nil ? .admin : mappedVerb(subcommand, default: .get))
+      )
+    case "volume":
+      (resourceKind, verb) = (
+        .volume,
+        localControlIntent?.verb
+          ?? (subcommand == nil ? .admin : mappedVerb(subcommand, default: .get))
+      )
     case "audit.verify", "audit.export": (resourceKind, verb) = (.audit, .get)
     case "rbac.preview": (resourceKind, verb) = (.policy, .get)
     case "rbac.role.list", "rbac.binding.list", "rbac.delegation.list":
@@ -224,20 +291,113 @@ public final class RBACAuthorizationEngine: @unchecked Sendable {
     case "profile.delete": (resourceKind, verb) = (.profile, .delete)
     default: (resourceKind, verb) = (.daemon, .admin)
     }
+    if declaredMutation == true {
+      switch verb {
+      case .get, .list, .watch, .plan:
+        verb = .update
+      case .create, .update, .delete, .start, .stop, .restart, .execute, .approve,
+           .delegate, .admin:
+        break
+      }
+    }
     return RBACAuthorizationTarget(
       resource: resourceKind, verb: verb, projectIdentifier: project,
       resourceIdentifier: resource, profileHash: profileHash)
   }
 
   private static func mappedVerb(_ value: String?, default fallback: RBACVerb) -> RBACVerb {
-    switch value {
-    case "list": return .list
-    case "get", "inspect", "status", "verify": return .get
-    case "create", "pull", "import": return .create
-    case "update", "push", "tag": return .update
-    case "delete", "remove", "rm", "prune": return .delete
+    let terminal = value?.split(separator: ".").last.map(String.init)
+    switch terminal {
+    case "list", "backups": return .list
+    case "get", "inspect", "status", "verify", "validate", "preview", "providers",
+         "query", "integrity", "snapshot": return .get
+    case "create", "pull", "import", "install", "backup", "generate", "ingest",
+         "discover", "fetch", "login", "bootstrap", "start", "kickstart": return .create
+    case "update", "push", "tag", "repair", "restore", "recover", "compact",
+         "retention", "resume", "release", "override", "handoff", "upgrade",
+         "rollback", "stop", "cancel": return .update
+    case "delete", "remove", "rm", "prune", "uninstall", "logout", "disable",
+         "revoke-exception": return .delete
     case "approve": return .approve
     default: return fallback
+    }
+  }
+
+  private struct LocalControlAuthorizationIntent {
+    let verb: RBACVerb
+  }
+
+  private static func localControlAuthorizationIntent(
+    operation: String,
+    fields: [String: ControlPlaneJSONValue]
+  ) throws -> LocalControlAuthorizationIntent? {
+    switch operation {
+    case "image":
+      guard let selector = try string(in: fields, keys: ["imageOperation"]) else {
+        return nil
+      }
+      let verb: RBACVerb
+      switch selector {
+      case "inspect", "cache-status": verb = .get
+      case "pull": verb = .create
+      case "push", "tag", "load", "save", "build", "pin", "unpin": verb = .update
+      case "delete", "prune": verb = .delete
+      default: throw RBACAuthorizationError.invalidTarget
+      }
+      return LocalControlAuthorizationIntent(verb: verb)
+    case "volume":
+      guard let selector = try string(in: fields, keys: ["volumeOperation"]) else {
+        return nil
+      }
+      let verb: RBACVerb
+      switch selector {
+      case "list", "inspect", "capacity", "health", "snapshot-list",
+           "snapshot-inspect", "backup-list", "backup-inspect", "backup-verify":
+        verb = selector == "list" || selector.hasSuffix("-list") ? .list : .get
+      case "snapshot-create", "backup-create": verb = .create
+      case "recover", "snapshot-retain", "snapshot-export", "snapshot-restore",
+           "backup-retain", "backup-restore":
+        verb = .update
+      case "delete", "prune", "snapshot-delete", "backup-delete": verb = .delete
+      default: throw RBACAuthorizationError.invalidTarget
+      }
+      return LocalControlAuthorizationIntent(verb: verb)
+    case "registry":
+      let selectors = try [
+        ("referrers", string(in: fields, keys: ["registryReferrerOperation"])),
+        ("trust", string(in: fields, keys: ["registryTrustOperation"])),
+        ("sbom", string(in: fields, keys: ["registrySBOMOperation"])),
+        ("vulnerability", string(in: fields, keys: ["registryVulnerabilityOperation"])),
+        ("provenance", string(in: fields, keys: ["registryProvenanceOperation"])),
+      ].compactMap { namespace, selector in
+        selector.map { (namespace, $0) }
+      }
+      guard selectors.count <= 1 else { throw RBACAuthorizationError.invalidTarget }
+      guard let (namespace, selector) = selectors.first else { return nil }
+      let verb: RBACVerb
+      switch (namespace, selector) {
+      case ("referrers", "status"), ("trust", "status"), ("sbom", "query"),
+           ("vulnerability", "status"), ("provenance", "status"):
+        verb = .get
+      case ("referrers", "discover"), ("referrers", "fetch"),
+           ("sbom", "generate"), ("sbom", "ingest"), ("provenance", "generate"):
+        verb = .create
+      case ("referrers", "prune"), ("trust", "revoke-exception"),
+           ("vulnerability", "revoke-exception"):
+        verb = .delete
+      case ("referrers", "publish"), ("referrers", "copy"),
+           ("referrers", "retain"), ("referrers", "release"),
+           ("referrers", "resume"), ("trust", "verify"),
+           ("trust", "grant-exception"), ("sbom", "export"),
+           ("sbom", "resume"), ("vulnerability", "evaluate"),
+           ("vulnerability", "grant-exception"), ("vulnerability", "resume"),
+           ("provenance", "verify"), ("provenance", "resume"):
+        verb = .update
+      default: throw RBACAuthorizationError.invalidTarget
+      }
+      return LocalControlAuthorizationIntent(verb: verb)
+    default:
+      return nil
     }
   }
 
@@ -254,6 +414,16 @@ public final class RBACAuthorizationEngine: @unchecked Sendable {
     }
     guard values.count <= 1 else { throw RBACAuthorizationError.invalidTarget }
     return values.first
+  }
+
+  private static func boolean(
+    in fields: [String: ControlPlaneJSONValue], key: String
+  ) throws -> Bool? {
+    guard let field = fields[key] else { return nil }
+    guard case .bool(let value) = field else {
+      throw RBACAuthorizationError.invalidTarget
+    }
+    return value
   }
 
   private static func evaluate(

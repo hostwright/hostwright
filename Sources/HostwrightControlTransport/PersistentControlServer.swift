@@ -77,6 +77,27 @@ public struct ControlSocketIdentity: Equatable, Sendable {
   }
 }
 
+public struct PersistentControlPreparedRequest: @unchecked Sendable {
+  public typealias Execution = @Sendable (
+    ControlRequestEnvelope, ControlTransportDeadline
+  ) throws -> ControlResponseEnvelope
+
+  public let request: ControlRequestEnvelope
+  let execution: Execution?
+  let cleanup: @Sendable () -> Void
+
+  public init(
+    request: ControlRequestEnvelope,
+    execution: Execution? = nil,
+    cleanup: @escaping @Sendable () -> Void = {}
+  ) throws {
+    try request.validate()
+    self.request = request
+    self.execution = execution
+    self.cleanup = cleanup
+  }
+}
+
 public final class ControlUnixSocketListener: @unchecked Sendable {
   public let path: String
   public let identity: ControlSocketIdentity
@@ -299,12 +320,20 @@ public struct PersistentControlConnectionServer: Sendable {
       ControlRequestEnvelope,
       Date
     ) throws -> PersistentControlAdmissionEvaluation
+  public typealias MutationClassifier =
+    @Sendable (ControlRequestEnvelope) throws -> Bool
+  public typealias RequestPreparer =
+    @Sendable (
+      AuthenticatedControlPeer, ControlRequestEnvelope
+    ) throws -> PersistentControlPreparedRequest
 
   private let authenticator: ControlPeerAuthenticator
   private let requestRepository: ControlRequestRepository
   private let daemonGeneration: UInt64
   private let socketIdentity: ControlSocketIdentity
   private let mutatingOperations: Set<String>
+  private let requestPreparer: RequestPreparer
+  private let mutationClassifier: MutationClassifier
   private let auditRecorder: any ControlSecurityAuditRecording
   private let authorizer: Authorizer
   private let admissionEvaluator: AdmissionEvaluator
@@ -323,6 +352,8 @@ public struct PersistentControlConnectionServer: Sendable {
     daemonGeneration: UInt64,
     socketIdentity: ControlSocketIdentity,
     mutatingOperations: Set<String>,
+    requestPreparer: RequestPreparer? = nil,
+    mutationClassifier: MutationClassifier? = nil,
     auditRecorder: any ControlSecurityAuditRecording,
     authorizer: @escaping Authorizer,
     admissionEvaluator: @escaping AdmissionEvaluator = { _, _, _ in
@@ -357,6 +388,12 @@ public struct PersistentControlConnectionServer: Sendable {
     self.daemonGeneration = daemonGeneration
     self.socketIdentity = socketIdentity
     self.mutatingOperations = mutatingOperations
+    self.requestPreparer = requestPreparer ?? { _, request in
+      try PersistentControlPreparedRequest(request: request)
+    }
+    self.mutationClassifier = mutationClassifier ?? { request in
+      mutatingOperations.contains(request.operation)
+    }
     self.auditRecorder = auditRecorder
     self.authorizer = authorizer
     self.admissionEvaluator = admissionEvaluator
@@ -462,14 +499,28 @@ public struct PersistentControlConnectionServer: Sendable {
 
   private func process(
     peer: AuthenticatedControlPeer,
-    request: ControlRequestEnvelope
+    request originalRequest: ControlRequestEnvelope
   ) throws -> (response: ControlResponseEnvelope, deadline: ControlTransportDeadline) {
     let deadline = try ControlTransportDeadline(
-      timeoutMilliseconds: request.timeoutMilliseconds!,
+      timeoutMilliseconds: originalRequest.timeoutMilliseconds!,
       monotonicNow: monotonicNow
     )
     try deadline.assertActive()
-    let isMutation = mutatingOperations.contains(request.operation)
+    let prepared = try requestPreparer(peer, originalRequest)
+    defer { prepared.cleanup() }
+    var effectivePrepared: PersistentControlPreparedRequest?
+    defer { effectivePrepared?.cleanup() }
+    var preparedExecution = prepared.execution
+    let request = prepared.request
+    guard request.apiVersion == originalRequest.apiVersion,
+      request.protocolRevision == originalRequest.protocolRevision,
+      request.requestID == originalRequest.requestID,
+      request.operation == originalRequest.operation,
+      request.timeoutMilliseconds == originalRequest.timeoutMilliseconds,
+      request.idempotencyKey == originalRequest.idempotencyKey
+    else { throw PersistentControlServerError.invalidRequest }
+    try deadline.assertActive()
+    let isMutation = try mutationClassifier(request)
     let authorization: RBACDecision
     do {
       authorization = try authorizer(
@@ -514,6 +565,7 @@ public struct PersistentControlConnectionServer: Sendable {
     }
     var effectiveRequest = request
     var admission: PersistentControlAdmissionEvaluation?
+    var durableMutationOperationReference: String?
     if isMutation {
       let evaluated: PersistentControlAdmissionEvaluation
       do {
@@ -561,9 +613,20 @@ public struct PersistentControlConnectionServer: Sendable {
               message: "Admission policy denied the requested mutation.")),
           deadline)
       }
+      if evaluated.effectiveRequest != request {
+        let canonical = try requestPreparer(peer, evaluated.effectiveRequest)
+        guard canonical.request == evaluated.effectiveRequest else {
+          canonical.cleanup()
+          throw PersistentControlServerError.invalidRequest
+        }
+        effectivePrepared = canonical
+        preparedExecution = canonical.execution
+      }
+      let authoritativeEffectiveRequest = effectivePrepared?.request
+        ?? evaluated.effectiveRequest
       let effectiveAuthorization: RBACDecision
       do {
-        effectiveAuthorization = try authorizer(peer, evaluated.effectiveRequest, now())
+        effectiveAuthorization = try authorizer(peer, authoritativeEffectiveRequest, now())
         try effectiveAuthorization.validate()
       } catch {
         throw PersistentControlServerError.invalidRequest
@@ -589,7 +652,10 @@ public struct PersistentControlConnectionServer: Sendable {
               message: "The admitted mutation exceeds the subject's effective authority.")),
           deadline)
       }
-      effectiveRequest = evaluated.effectiveRequest
+      effectiveRequest = authoritativeEffectiveRequest
+      guard try mutationClassifier(effectiveRequest) == isMutation else {
+        throw PersistentControlServerError.invalidRequest
+      }
       admission = evaluated
       if evaluated.dryRun {
         let result = try Self.controlPlaneValue(
@@ -617,6 +683,8 @@ public struct PersistentControlConnectionServer: Sendable {
           admissionPlanHash: admission!.planHash,
           exceptionIDs: admission!.exceptionIDs))
       let digest = Self.digest(canonicalRequest)
+      let operationReference = "unary:\(Self.digest(Data("\(peer.binding.subject.identifier):\(request.requestID):\(digest)".utf8)))"
+      durableMutationOperationReference = operationReference
       let submission = ControlRequestSubmission(
         request: ControlRequestRecord(
           requestID: request.requestID,
@@ -624,6 +692,7 @@ public struct PersistentControlConnectionServer: Sendable {
           idempotencyKey: request.idempotencyKey,
           requestDigestSHA256: digest,
           status: .accepted,
+          operationReference: operationReference,
           createdAt: timestamp,
           updatedAt: timestamp
         ),
@@ -664,7 +733,7 @@ public struct PersistentControlConnectionServer: Sendable {
             action: .request,
             outcome: "accepted",
             reasonCode: ControlReasonCode.accepted.rawValue,
-            operationRef: nil,
+            operationRef: operationReference,
             payloadDigest: "sha256:\(digest)",
             stage: "accepted"
           )
@@ -709,9 +778,13 @@ public struct PersistentControlConnectionServer: Sendable {
       }
     }
     try deadline.assertActive()
-    let response: ControlResponseEnvelope
+    var response: ControlResponseEnvelope
     do {
-      response = try handler(peer, effectiveRequest, deadline)
+      if let execution = preparedExecution {
+        response = try execution(effectiveRequest, deadline)
+      } else {
+        response = try handler(peer, effectiveRequest, deadline)
+      }
     } catch {
       response = ControlResponseEnvelope(
         requestID: request.requestID,
@@ -721,6 +794,26 @@ public struct PersistentControlConnectionServer: Sendable {
           code: "operationFailed",
           message: "The control operation did not complete."
         )
+      )
+    }
+    if isMutation {
+      guard let durableMutationOperationReference else {
+        throw PersistentControlServerError.persistenceFailed
+      }
+      if let returnedReference = response.operationRef,
+        returnedReference != durableMutationOperationReference
+      {
+        throw PersistentControlServerError.persistenceFailed
+      }
+      response = ControlResponseEnvelope(
+        apiVersion: response.apiVersion,
+        protocolRevision: response.protocolRevision,
+        requestID: response.requestID,
+        status: response.status,
+        reasonCode: response.reasonCode,
+        operationRef: durableMutationOperationReference,
+        result: response.result,
+        error: response.error
       )
     }
     try deadline.assertActive()

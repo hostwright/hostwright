@@ -5,12 +5,52 @@ import XCTest
 @testable import HostwrightControlPlane
 @testable import HostwrightControlSecurity
 @testable import HostwrightControlTransport
+@testable import HostwrightCommandTransport
+@testable import HostwrightCLI
 @testable import HostwrightDaemon
+@testable import HostwrightManifest
 @testable import HostwrightObservability
 @testable import HostwrightRuntime
 @testable import HostwrightState
 
 final class DaemonControlStreamSourcesTests: XCTestCase {
+  func testCLIStreamPreparationBindsRelativeManifestToClientWorkingDirectory() throws {
+    try withFixture { fixture in
+      try fixture.store.ownership.upsert(streamOwnership())
+      let savedProject = try fixture.store.desiredStates.loadProject(id: "project-stream-tests")
+      XCTAssertEqual(savedProject.resourceUUID, "11111111-1111-4111-8111-111111111111")
+      XCTAssertEqual(savedProject.mutationProvider, "apple-container-cli")
+      XCTAssertEqual(savedProject.providerGeneration, 1)
+      let workingDirectory = URL(fileURLWithPath: fixture.store.path)
+        .deletingLastPathComponent().path
+      let route = try CLIControlRoute.classify(arguments: [
+        "logs", "api", "hostwright.yaml",
+        "--state-db", fixture.store.path,
+      ]).withWorkingDirectory(workingDirectory)
+        .withAuthorizationScope(CLIControlAuthorizationScope(
+          projectIdentifier: "11111111-1111-4111-8111-111111111111",
+          resourceIdentifier: "22222222-2222-4222-8222-222222222222"
+        ))
+
+      let preparation = try fixture.factory.prepare(
+        peer: fixture.owner,
+        route: route,
+        environment: .live
+      )
+
+      guard case .object(let filter)? = preparation.filter else {
+        return XCTFail("Expected a bounded log preparation filter.")
+      }
+      XCTAssertEqual(
+        filter["manifestPath"],
+        .string(URL(fileURLWithPath: workingDirectory)
+          .appendingPathComponent("hostwright.yaml").path)
+      )
+      XCTAssertEqual(filter["serviceName"], .string("api"))
+      XCTAssertEqual(preparation.target, "22222222-2222-4222-8222-222222222222")
+    }
+  }
+
   func testEventsDeliverInOrderAndResumeWithSignedSubjectAndFilterBoundCursor() throws {
     try withFixture { fixture in
       try fixture.store.events.append([
@@ -109,7 +149,7 @@ final class DaemonControlStreamSourcesTests: XCTestCase {
     }
   }
 
-  func testCompactedRawCursorReturnsExplicitSignedRetentionGap() throws {
+  func testCompactedRawCursorReturnsSignedFrameAndResumableRawRecoveryHints() throws {
     try withFixture { fixture in
       try fixture.store.events.append([event("event-1"), event("event-2")])
       let rawCursor = try XCTUnwrap(
@@ -121,6 +161,8 @@ final class DaemonControlStreamSourcesTests: XCTestCase {
       try fixture.store.withValidatedConnection { connection in
         try connection.run("DELETE FROM event_ledger WHERE id = ?", bindings: [.text("event-1")])
       }
+      let rawGap = try fixture.store.events.streamPage(after: rawCursor)
+        .retentionGap
 
       let collector = EmissionCollector(gapCount: 1, terminateWhenSatisfied: true)
       let handle = try fixture.factory.open(
@@ -136,11 +178,17 @@ final class DaemonControlStreamSourcesTests: XCTestCase {
       let gap = try XCTUnwrap(collector.gaps.first)
       XCTAssertEqual(gap.reason, "retention.compacted")
       XCTAssertTrue(gap.requiresAcknowledgement)
-      XCTAssertNotNil(gap.earliestCursor)
-      XCTAssertNotNil(gap.latestCursor)
-      XCTAssertNoThrow(try fixture.cursorCodec.verify(
-        try XCTUnwrap(gap.earliestCursor), expectedBinding: binding
-      ))
+      let earliest = try XCTUnwrap(gap.earliestCursor)
+      let latest = try XCTUnwrap(gap.latestCursor)
+      XCTAssertEqual(earliest, rawGap?.earliestAvailableCursor)
+      XCTAssertEqual(latest, rawGap?.latestAvailableCursor)
+      XCTAssertNoThrow(try HostwrightEventCursor(token: earliest))
+      XCTAssertNoThrow(try HostwrightEventCursor(token: latest))
+      let signedFrameCursor = try XCTUnwrap(collector.gapCursors.first)
+      XCTAssertEqual(
+        try fixture.cursorCodec.verify(signedFrameCursor, expectedBinding: binding).sourceCursor,
+        rawGap?.earliestAvailableCursor
+      )
     }
   }
 
@@ -219,6 +267,88 @@ final class DaemonControlStreamSourcesTests: XCTestCase {
           sink: collector.receive
         ))
       }
+    }
+  }
+
+  func testLogsValidationDistinguishesFiniteAndFollowingFiltersWithoutMutationIdentity() throws {
+    try withFixture { fixture in
+      try fixture.store.ownership.upsert(streamOwnership())
+      let finite = followingLogsRequest(follow: false)
+      let following = followingLogsRequest(follow: true)
+
+      XCTAssertNoThrow(try fixture.factory.validateRequest(finite))
+      XCTAssertNoThrow(try fixture.factory.validateRequest(following))
+      XCTAssertThrowsError(try fixture.factory.validateRequest(ControlStreamOpenRequest(
+        source: .logs,
+        target: "22222222-2222-4222-8222-222222222222",
+        filter: .object([
+          "serviceName": .string("api"),
+          "follow": .bool(true),
+          "timeoutSeconds": .integer(300),
+        ]),
+        requestID: "logs-must-not-mutate",
+        idempotencyKey: "logs-must-not-mutate"
+      )))
+    }
+  }
+
+  func testFollowingLogsAreReadOnlyAndHonorPreStartReauthorizationAndCancellation() throws {
+    try withFixture { fixture in
+      let request = followingLogsRequest(follow: true)
+      let binding = try binding(for: fixture.owner, request: request)
+      let preStartGate = PreStartAuthorizationGate()
+      let revokedTask = PreStartRevocationTask()
+      let revokedEmissions = InteractiveEmissionCollector()
+      let revokedProducer = try InteractiveControlStreamProducer(
+        cursorCodec: fixture.cursorCodec,
+        binding: binding,
+        request: request,
+        sourceCursor: nil,
+        manifestPath: "/nonexistent/unused-by-test.yaml",
+        stateDatabasePath: fixture.store.path,
+        requestRepository: ControlRequestRepository(store: fixture.store),
+        auditRecorder: StreamSourceAuditRecorder(),
+        subjectID: fixture.owner.binding.subject.identifier,
+        preStartAuthorization: { try preStartGate.authorize() },
+        prepareTaskOverride: { revokedTask },
+        sink: revokedEmissions.receive
+      )
+
+      let input = try ControlStreamFrameContract.value(ControlStreamClientInput(
+        kind: .stdin,
+        payloadBase64: Data("must-not-forward".utf8).base64EncodedString()
+      ))
+      XCTAssertFalse(revokedProducer.handle.sendInput(input) {})
+      preStartGate.revoke()
+      revokedProducer.start()
+      XCTAssertEqual(revokedEmissions.waitForTerminal(), .success)
+      XCTAssertEqual(revokedTask.startCount, 0)
+      XCTAssertEqual(revokedTask.cancelCount, 1)
+      XCTAssertEqual(revokedEmissions.failureCodes, ["runtimeLogsAuthorizationRevoked"])
+      XCTAssertTrue(try fixture.store.operations.loadAll().isEmpty)
+
+      let cancellableTask = CancellableFollowingLogsTask()
+      let runningEmissions = InteractiveEmissionCollector()
+      let runningProducer = try InteractiveControlStreamProducer(
+        cursorCodec: fixture.cursorCodec,
+        binding: binding,
+        request: request,
+        sourceCursor: nil,
+        manifestPath: "/nonexistent/unused-by-test.yaml",
+        stateDatabasePath: fixture.store.path,
+        requestRepository: ControlRequestRepository(store: fixture.store),
+        auditRecorder: StreamSourceAuditRecorder(),
+        subjectID: fixture.owner.binding.subject.identifier,
+        preStartAuthorization: {},
+        prepareTaskOverride: { cancellableTask },
+        sink: runningEmissions.receive
+      )
+      runningProducer.start()
+      XCTAssertEqual(cancellableTask.waitForStart(), .success)
+      XCTAssertFalse(runningProducer.handle.sendInput(input) {})
+      runningProducer.handle.cancel()
+      XCTAssertEqual(cancellableTask.waitForCancellation(), .success)
+      XCTAssertTrue(try fixture.store.operations.loadAll().isEmpty)
     }
   }
 
@@ -589,6 +719,19 @@ final class DaemonControlStreamSourcesTests: XCTestCase {
           image: ghcr.io/example/api:latest
       """.utf8
     ).write(to: manifest)
+    let validatedManifest = try ManifestValidator.validated(
+      String(contentsOf: manifest, encoding: .utf8)
+    )
+    try store.desiredStates.saveManifestSnapshot(
+      projectID: "project-stream-tests",
+      manifestPath: manifest.path,
+      manifestHash: String(repeating: "a", count: 64),
+      desiredGeneration: 1,
+      manifest: validatedManifest,
+      timestamp: "2026-08-03T00:00:00Z",
+      mutationProvider: "apple-container-cli",
+      projectResourceUUID: "11111111-1111-4111-8111-111111111111"
+    )
     let cursorCodec = try ControlStreamCursorCodec(
       keyStore: InMemoryAuditSigningKeyStore(),
       now: { Date(timeIntervalSince1970: 1_754_252_800) }
@@ -621,6 +764,40 @@ final class DaemonControlStreamSourcesTests: XCTestCase {
       ]),
       requestID: requestID,
       idempotencyKey: idempotencyKey
+    )
+  }
+
+  private func followingLogsRequest(follow: Bool) -> ControlStreamOpenRequest {
+    var fields: [String: ControlPlaneJSONValue] = [
+      "serviceName": .string("api"),
+      "tail": .integer(25),
+    ]
+    if follow {
+      fields["follow"] = .bool(true)
+      fields["timeoutSeconds"] = .integer(300)
+    }
+    return ControlStreamOpenRequest(
+      source: .logs,
+      target: "22222222-2222-4222-8222-222222222222",
+      filter: .object(fields)
+    )
+  }
+
+  private func streamOwnership() -> OwnershipRecord {
+    OwnershipRecord(
+      id: "ownership-api",
+      resourceIdentifier: "hostwright-stream-tests-api",
+      resourceType: "container",
+      projectID: "project-stream-tests",
+      serviceName: "api",
+      runtimeAdapter: "apple-container-cli",
+      createdAt: "2026-08-03T00:00:00Z",
+      observedAt: "2026-08-03T00:00:00Z",
+      cleanupEligible: true,
+      metadataJSONRedacted: "{}",
+      resourceUUID: "22222222-2222-4222-8222-222222222222",
+      projectResourceUUID: "11111111-1111-4111-8111-111111111111",
+      fencingToken: "33333333-3333-4333-8333-333333333333"
     )
   }
 
@@ -903,6 +1080,15 @@ private final class EmissionCollector: @unchecked Sendable {
     }
   }
 
+  var gapCursors: [String] {
+    lock.lock()
+    defer { lock.unlock() }
+    return emissions.compactMap { emission in
+      guard case .gap(let cursor, _) = emission else { return nil }
+      return cursor
+    }
+  }
+
   var failures: [SanitizedError] {
     lock.lock()
     defer { lock.unlock() }
@@ -1071,6 +1257,34 @@ private final class PreStartRevocationTask: DaemonInteractiveStreamTask, @unchec
   func finishInput() {}
   func resize(columns: UInt16, rows: UInt16) -> Bool { false }
   func forward(signal: Int32) -> Bool { false }
+}
+
+private final class CancellableFollowingLogsTask: DaemonInteractiveStreamTask, @unchecked Sendable {
+  private let started = DispatchSemaphore(value: 0)
+  private let cancelled = DispatchSemaphore(value: 0)
+
+  func waitForStart() -> DispatchTimeoutResult {
+    started.wait(timeout: .now() + 1)
+  }
+
+  func waitForCancellation() -> DispatchTimeoutResult {
+    cancelled.wait(timeout: .now() + 1)
+  }
+
+  func start(
+    beforeExternalExecution: @escaping @Sendable () throws -> Void,
+    sink _: @escaping @Sendable (RuntimeStreamEnvelope) throws -> Void,
+    completion _: @escaping @Sendable (Result<RuntimeInteractiveExecutionResult, Error>) -> Void
+  ) throws {
+    try beforeExternalExecution()
+    started.signal()
+  }
+
+  func cancel() { cancelled.signal() }
+  func sendInput(_: Data, onConsumed _: @escaping @Sendable () -> Void) -> Bool { false }
+  func finishInput() {}
+  func resize(columns _: UInt16, rows _: UInt16) -> Bool { false }
+  func forward(signal _: Int32) -> Bool { false }
 }
 
 private enum CompletionBeforeExternalExecutionTaskError: Error {

@@ -4,7 +4,6 @@
   "streamID": "phase09-events-1",
   "sequence": 1,
   "cursor": "42",
-  "credit": 1,
   "kind": "data",
   "payload": { "event": "state.changed" }
 }

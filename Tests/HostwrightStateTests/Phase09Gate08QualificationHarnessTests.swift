@@ -23,6 +23,7 @@ final class Phase09Gate08QualificationHarnessTests: XCTestCase {
     XCTAssertTrue(source.contains("ControlStreamFrameContractTests|ControlStreamSessionStateTests|ControlStreamCursorTests"))
     XCTAssertTrue(source.contains("PersistentControlStreamIntegrationTests|DaemonControlStreamSourcesTests"))
     XCTAssertTrue(source.contains("ControlIdentitySecurityAdapterTests"))
+    XCTAssertTrue(source.contains("daemon-1.stderr.log"))
     XCTAssertTrue(source.contains("daemon-2.stderr.log"))
     let qualificationTool = try String(
       contentsOfFile: "Sources/HostwrightStreamQualificationTool/main.swift",

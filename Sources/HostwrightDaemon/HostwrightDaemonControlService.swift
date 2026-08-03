@@ -254,7 +254,13 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
           self?.unregister(descriptor)
           group.leave()
         }
-        try? server.serve(descriptor: descriptor)
+        do {
+          try server.serve(descriptor: descriptor)
+        } catch {
+          let diagnostic = "control connection failed safely"
+            + " (errorType=\(String(reflecting: type(of: error)))).\n"
+          FileHandle.standardError.write(Data(diagnostic.utf8))
+        }
       }
     }
   }

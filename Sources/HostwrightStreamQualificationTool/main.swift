@@ -54,6 +54,13 @@ private enum HostwrightStreamQualificationMain {
   }
 
   private static func bootstrap(root: URL, statePath: String) throws {
+    let stateParent = URL(fileURLWithPath: statePath).deletingLastPathComponent()
+    guard stateParent.path.hasPrefix(root.path + "/") else { throw failure(75) }
+    try FileManager.default.createDirectory(
+      at: stateParent,
+      withIntermediateDirectories: true,
+      attributes: [.posixPermissions: 0o700]
+    )
     let store = SQLiteStateStore(path: statePath)
     try store.migrate()
     guard try store.schemaVersion() == 20 else { throw failure(65) }

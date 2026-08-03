@@ -27,6 +27,22 @@ let package = Package(
             targets: ["HostwrightNetworkProviderWorker"]
         ),
         .executable(
+            name: "hostwright-wasi-provider-worker",
+            targets: ["HostwrightWASIProviderWorker"]
+        ),
+        .executable(
+            name: "hostwright-wasi-provider-qualification",
+            targets: ["HostwrightWASIProviderQualificationTool"]
+        ),
+        .executable(
+            name: "hostwright-wasi-reference-provider",
+            targets: ["HostwrightWASIReferenceProvider"]
+        ),
+        .executable(
+            name: "hostwright-wasi-adversarial-provider",
+            targets: ["HostwrightWASIAdversarialProvider"]
+        ),
+        .executable(
             name: "hostwright-tunnel-qualification",
             targets: ["HostwrightTunnelQualificationTool"]
         ),
@@ -82,6 +98,8 @@ let package = Package(
         .library(name: "HostwrightExtensions", targets: ["HostwrightExtensions"]),
         .library(name: "HostwrightNetworking", targets: ["HostwrightNetworking"]),
         .library(name: "HostwrightNetworkProviders", targets: ["HostwrightNetworkProviders"]),
+        .library(name: "HostwrightWASIProviderSDK", targets: ["HostwrightWASIProviderSDK"]),
+        .library(name: "HostwrightWASIProviderRuntime", targets: ["HostwrightWASIProviderRuntime"]),
         .library(name: "HostwrightObservability", targets: ["HostwrightObservability"]),
         .library(name: "HostwrightPolicy", targets: ["HostwrightPolicy"]),
         .library(name: "HostwrightRegistry", targets: ["HostwrightRegistry"]),
@@ -380,6 +398,35 @@ let package = Package(
             path: "Sources/HostwrightNetworkProviders/Worker"
         ),
         .target(
+            name: "HostwrightWASIProviderSDK"
+        ),
+        .target(
+            name: "HostwrightWASIProviderRuntime",
+            dependencies: [
+                "HostwrightControlPlane",
+                "HostwrightCore",
+                .product(name: "WasmKit", package: "WasmKit"),
+                .product(name: "WasmKitWASI", package: "WasmKit"),
+                .product(name: "WASI", package: "WasmKit")
+            ]
+        ),
+        .executableTarget(
+            name: "HostwrightWASIProviderWorker",
+            dependencies: ["HostwrightControlPlane", "HostwrightWASIProviderRuntime"]
+        ),
+        .executableTarget(
+            name: "HostwrightWASIProviderQualificationTool",
+            dependencies: ["HostwrightControlPlane", "HostwrightWASIProviderRuntime"]
+        ),
+        .executableTarget(
+            name: "HostwrightWASIReferenceProvider",
+            dependencies: ["HostwrightWASIProviderSDK"]
+        ),
+        .executableTarget(
+            name: "HostwrightWASIAdversarialProvider",
+            dependencies: ["HostwrightWASIProviderSDK"]
+        ),
+        .target(
             name: "HostwrightObservability",
             dependencies: ["HostwrightCore"]
         ),
@@ -676,6 +723,18 @@ let package = Package(
             dependencies: [
                 "HostwrightNetworkProviders",
                 "HostwrightNetworkProviderWorker"
+            ]
+        ),
+        .testTarget(
+            name: "HostwrightWASIProviderSDKTests",
+            dependencies: ["HostwrightWASIProviderSDK"]
+        ),
+        .testTarget(
+            name: "HostwrightWASIProviderRuntimeTests",
+            dependencies: [
+                "HostwrightControlPlane",
+                "HostwrightWASIProviderRuntime",
+                "HostwrightWASIProviderWorker"
             ]
         ),
         .testTarget(

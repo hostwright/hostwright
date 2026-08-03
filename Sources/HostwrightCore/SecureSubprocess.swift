@@ -351,18 +351,33 @@ public struct SecureSubprocessRunner: Sendable {
     }
 
     public func runAsync(_ request: SecureSubprocessRequest) async throws -> SecureSubprocessResult {
-        try await runAsync(request, onLaunch: nil)
+        try await runAsync(
+            request, expectedExecutable: nil, suspendedProcessValidator: nil, onLaunch: nil)
     }
 
     package func runAsync(
         _ request: SecureSubprocessRequest,
         onLaunch: @escaping @Sendable (pid_t) -> Void
     ) async throws -> SecureSubprocessResult {
-        try await runAsync(request, onLaunch: Optional(onLaunch))
+        try await runAsync(
+            request, expectedExecutable: nil, suspendedProcessValidator: nil,
+            onLaunch: Optional(onLaunch))
+    }
+
+    package func runAsync(
+        _ request: SecureSubprocessRequest,
+        expectedExecutable: SecureExecutableIdentity,
+        suspendedProcessValidator: @escaping SuspendedProcessValidator
+    ) async throws -> SecureSubprocessResult {
+        try await runAsync(
+            request, expectedExecutable: expectedExecutable,
+            suspendedProcessValidator: suspendedProcessValidator, onLaunch: nil)
     }
 
     private func runAsync(
         _ request: SecureSubprocessRequest,
+        expectedExecutable: SecureExecutableIdentity?,
+        suspendedProcessValidator: SuspendedProcessValidator?,
         onLaunch: (@Sendable (pid_t) -> Void)?
     ) async throws -> SecureSubprocessResult {
         let cancellation = SecureSubprocessCancellation()
@@ -373,8 +388,8 @@ public struct SecureSubprocessRunner: Sendable {
                         continuation.resume(returning: try run(
                             request,
                             cancellation: cancellation,
-                            expectedExecutable: nil,
-                            suspendedProcessValidator: nil,
+                            expectedExecutable: expectedExecutable,
+                            suspendedProcessValidator: suspendedProcessValidator,
                             onLaunch: onLaunch
                         ))
                     } catch {

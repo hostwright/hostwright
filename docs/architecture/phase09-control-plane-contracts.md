@@ -282,13 +282,43 @@ bounded canonical input on stdin, one bounded canonical result on stdout, and
 bounded diagnostic stderr. It gets no preopened directory, inherited
 environment, ambient network, host socket, state database, Keychain, or direct
 runtime access. Host-supplied time and randomness are deterministic. Capability
-grants decide which input snapshots and proposed actions are accepted.
+grants decide which input snapshots and proposed actions are accepted. Every
+invocation input carries one canonical `scope`; a capability grant must match
+that scope exactly, and every proposed action must repeat the same scope.
 
 The upper limits are 16 MiB module, 1 MiB input, 1 MiB output, 64 MiB memory,
 five-second normal deadline, and a 30-second absolute ceiling. Existing
 WasmKit 0.3.1 is the pinned runtime anchor. Gate 10 installs the separately
 pinned official Swift WASM SDK and proves the Swift guest SDK against
 WasmKit/WasmKitWASI; it does not introduce Wasmtime, Rust, or a public registry.
+
+Gate 10 implements that boundary in four parts. `HostwrightWASIProviderSDK` is
+the dependency-free guest contract and command runner; its WASI build uses
+`FoundationEssentials` and direct bounded stdio so the stripped reference guest
+stays below the 16 MiB module ceiling. `HostwrightWASIProviderRuntime` validates
+the immutable module path, owner/mode, SHA-256 digest, declared memory maximum,
+bounded table/global/element declarations, WASI-only function imports, canonical
+result, invocation identity, capability, and exact scope grant.
+`hostwright-wasi-provider-worker` creates a new WasmKit/WasmKitWASI store and
+Preview 1 bridge for every invocation with no preopens or environment and with
+seeded random and fixed clock providers. A fail-closed in-worker watchdog bounds
+the worker's peak resident memory to 512 MiB in addition to the 64 MiB guest
+linear-memory limit. The outer secure subprocess boundary enforces output
+limits, cancellation, and the hard deadline because WasmKit 0.3.1 has no stable
+public fuel or epoch-interruption API. The reference guest calls the Preview 1
+clock and random imports directly, and repeated fresh instances must produce
+identical canonical results.
+
+The reproducible guest build uses the separately installed official toolchain,
+an isolated SwiftPM scratch directory, the `swift-6.3.3-RELEASE_wasm` SDK,
+release optimization, a 64 MiB declared maximum, and linker stripping. The
+Gate 10 harness owns the exact command, reference/adversarial interop traffic,
+single active-run lock, source/toolchain digests, the published SDK archive
+checksum, a cryptographically recomputed expanded-bundle digest, and signed
+evidence; it never selects or mutates the Xcode toolchain used by the host
+build. Each worker's canonical executable identity and process-start identity
+are appended to the pinned ownership ledger while the child is suspended and
+before it is continued; ledger failure prevents execution.
 
 The XPC protocol is independently versioned at v1. Its service identifier is
 `dev.hostwright.xpc-provider`, team `993YC3JY4Q`, and entitlement set is

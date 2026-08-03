@@ -15,9 +15,10 @@ These files are executable compatibility fixtures for the contracts locked in Ph
 The following fixtures freeze Phase 09 contracts. Gates 2–6 implement the
 identity, persistent unary Control API, tamper-evident audit, RBAC, and bounded
 admission portions.
-The remaining fixtures are still inputs to their later qualification gates and
-do not claim that streams, profiles, provider runtimes, XPC, or the
-plugin lifecycle are already implemented.
+The remaining fixtures are inputs to their owning qualification gates. Streams,
+profiles, the bounded WASI provider runtime, and the signed XPC proof boundary
+have production codecs and implementations; the plugin lifecycle remains a
+Gate 12 contract and is not claimed as implemented here.
 
 - `phase09-control-request-v2.1.json`: revision 2.1 persistent Control API request.
 - `phase09-control-response-v2.1.json`: revision 2.1 response and reason-code envelope.
@@ -34,6 +35,9 @@ plugin lifecycle are already implemented.
 - `phase09-plugin-v1.json`: signed, digest-addressed Plugin ABI v1 package manifest.
 - `phase09-plugin-invocation-v1.json`: bounded deterministic provider invocation.
 - `phase09-xpc-v1.json`: independently versioned XPC request.
+- `phase09-xpc-response-completed-v1.json`: completed XPC identity-proof response.
+- `phase09-xpc-response-cancelled-v1.json`: cancellation response with no payload.
+- `phase09-xpc-response-error-v1.json`: bounded sanitized error response.
 - `phase09-migration-plan-v18-v21.json`: v17→v21 migration/backup/refusal/restore plan.
 - `phase09-cli-parity-inventory.json`: complete CLI transport classification.
 

@@ -18,7 +18,15 @@ Phase 08 is in progress. Gates 1–15 implement the exact current-user LaunchAge
 
 Permanent exclusions are limited to private Apple APIs, unsupported Intel/old-macOS emulation, unsafe writes without cluster quorum, silent telemetry, unauthenticated public exposure, and destructive garbage collection of unmanaged resources. Homebrew-core and direct guest accelerator constraints have implemented fallback tracks.
 
-Phase 02 issue #116 is implemented: production callers share bounded direct-argv process execution with root-owned PATH resolution, minimal environment, descriptor-pinned working directories, cancellation, I/O/time limits, and inherited session process-group cleanup. This is process lifecycle control, not native hostile-code isolation. A reviewed-local executable retains ambient same-user authority and can deliberately establish a new session; WASI/XPC isolation remains Phase 09 work under issues #203 and #204.
+Phase 02 issue #116 is implemented: production callers share bounded direct-argv process execution with root-owned PATH resolution, minimal environment, descriptor-pinned working directories, cancellation, I/O/time limits, and inherited session process-group cleanup. This is process lifecycle control, not native hostile-code isolation. A reviewed-local executable retains ambient same-user authority and can deliberately establish a new session. Phase 09's separately bounded WASI provider and signed sandboxed XPC service do not retrofit isolation onto that legacy reviewed-local handshake.
+
+The Phase 09 XPC provider is intentionally not a general native plugin host. It
+supports one read-only code-identity proof operation, requires reciprocal
+Developer ID code requirements, and has only the App Sandbox entitlement. It
+does not grant file, network, device, Keychain, state, runtime, or secret access.
+Any signed/notarized/stapled `.app` and embedded `.xpc` package produced by the
+Gate 11 harness is macOS qualification evidence, not a release or installation
+artifact.
 
 Phase 02 issue #113 is implemented: state-backed commands use a secure macOS Application Support default, deterministic override precedence, private path ownership/modes, truthful `paths`/`doctor` reporting, and resumable legacy-state migration. Explicit-only/default-path statements retained below are pre-v0.0.2 history, not current behavior. Installed distribution lifecycle is covered by issue #118 below; autonomous installed-service management remains a later phase.
 

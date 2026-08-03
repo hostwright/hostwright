@@ -55,6 +55,7 @@ public enum XPCMessageKind: String, Codable, Sendable { case request, cancel }
 public enum XPCResponseStatus: String, Codable, Sendable { case completed, cancelled, error }
 public struct XPCRequest: Codable, Equatable, Sendable {
   public static let maximumMessageBytes = 1_048_576
+  public static let maximumRequestIDBytes = 128
   public let protocolVersion: Int
   public let kind: XPCMessageKind
   public let requestID: String
@@ -71,8 +72,11 @@ public struct XPCRequest: Codable, Equatable, Sendable {
     self.timeoutMilliseconds = timeoutMilliseconds
   }
   public func validate() throws {
-    guard protocolVersion == 1, !requestID.isEmpty else {
+    guard protocolVersion == 1 else {
       throw ContractValidationError.unsupportedVersion("xpc")
+    }
+    guard Self.validRequestID(requestID) else {
+      throw ContractValidationError.invalid("xpc request id")
     }
     switch kind {
     case .request:
@@ -84,6 +88,14 @@ public struct XPCRequest: Codable, Equatable, Sendable {
         throw ContractValidationError.invalid("xpc cancel")
       }
     }
+  }
+
+  public static func validRequestID(_ value: String) -> Bool {
+    !value.isEmpty && value.utf8.count <= maximumRequestIDBytes
+      && value.unicodeScalars.allSatisfy {
+        (48...57).contains($0.value) || (65...90).contains($0.value)
+          || (97...122).contains($0.value) || "-_.:".unicodeScalars.contains($0)
+      }
   }
 }
 public struct XPCResponse: Codable, Equatable, Sendable {
@@ -103,8 +115,11 @@ public struct XPCResponse: Codable, Equatable, Sendable {
     self.error = error
   }
   public func validate() throws {
-    guard protocolVersion == 1, !requestID.isEmpty else {
+    guard protocolVersion == 1 else {
       throw ContractValidationError.unsupportedVersion("xpc response")
+    }
+    guard XPCRequest.validRequestID(requestID) else {
+      throw ContractValidationError.invalid("xpc response id")
     }
     switch status {
     case .completed:

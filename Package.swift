@@ -43,6 +43,14 @@ let package = Package(
             targets: ["HostwrightWASIAdversarialProvider"]
         ),
         .executable(
+            name: "hostwright-xpc-provider-service",
+            targets: ["HostwrightXPCProviderService"]
+        ),
+        .executable(
+            name: "hostwright-xpc-provider-qualification",
+            targets: ["HostwrightXPCProviderQualificationTool"]
+        ),
+        .executable(
             name: "hostwright-tunnel-qualification",
             targets: ["HostwrightTunnelQualificationTool"]
         ),
@@ -100,6 +108,7 @@ let package = Package(
         .library(name: "HostwrightNetworkProviders", targets: ["HostwrightNetworkProviders"]),
         .library(name: "HostwrightWASIProviderSDK", targets: ["HostwrightWASIProviderSDK"]),
         .library(name: "HostwrightWASIProviderRuntime", targets: ["HostwrightWASIProviderRuntime"]),
+        .library(name: "HostwrightXPCProvider", targets: ["HostwrightXPCProvider"]),
         .library(name: "HostwrightObservability", targets: ["HostwrightObservability"]),
         .library(name: "HostwrightPolicy", targets: ["HostwrightPolicy"]),
         .library(name: "HostwrightRegistry", targets: ["HostwrightRegistry"]),
@@ -427,6 +436,18 @@ let package = Package(
             dependencies: ["HostwrightWASIProviderSDK"]
         ),
         .target(
+            name: "HostwrightXPCProvider",
+            dependencies: ["HostwrightControlPlane"]
+        ),
+        .executableTarget(
+            name: "HostwrightXPCProviderService",
+            dependencies: ["HostwrightXPCProvider"]
+        ),
+        .executableTarget(
+            name: "HostwrightXPCProviderQualificationTool",
+            dependencies: ["HostwrightControlPlane", "HostwrightXPCProvider"]
+        ),
+        .target(
             name: "HostwrightObservability",
             dependencies: ["HostwrightCore"]
         ),
@@ -736,6 +757,10 @@ let package = Package(
                 "HostwrightWASIProviderRuntime",
                 "HostwrightWASIProviderWorker"
             ]
+        ),
+        .testTarget(
+            name: "HostwrightXPCProviderTests",
+            dependencies: ["HostwrightControlPlane", "HostwrightXPCProvider"]
         ),
         .testTarget(
             name: "HostwrightNetworkHelperTests",

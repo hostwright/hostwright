@@ -193,6 +193,29 @@ effects; unsupported enforcement never falls back permissively. See
 
 Phase 09 schema v18 adds the persistent identity foundation without yet opening a Control API listener. Authentication cross-checks `getpeereid`, `LOCAL_PEERPID`, and `LOCAL_PEERTOKEN`; binds the audit-token UID, GID, PID, PID version, audit session, daemon generation, socket device/inode, and nonce; and validates live code through `SecTaskCreateWithAuditToken` plus strict `SecCode` requirements. Installed peers are restricted to the frozen Hostwright team and identifier set. Ad-hoc peers require an explicit native CDHash pin. Optional P-256 proof refines but never replaces kernel and code identity. Sessions are persisted before use and are invalidated immediately by subject, credential, native CDHash, session, credential rotation, expiry, or daemon-generation change.
 
+The Phase 09 native-provider boundary is narrower than general plugin
+execution. It accepts only XPC protocol v1 `codeIdentityProof` requests through
+the per-user `dev.hostwright.xpc-provider` Mach service. The client requires
+team `993YC3JY4Q`, the exact service identifier, and the App Sandbox entitlement;
+the service reciprocally requires the exact Hostwright daemon team and signing
+identifier. The service's entitlement set is exactly
+`com.apple.security.app-sandbox=true`; file, network, device, Keychain, and
+temporary-exception entitlements are absent. The client inspects the connected
+service's live code-signing information, rejects an absent or additional
+entitlement, and matches a completed response to that independently derived
+identity. The response contains only the validated team, identifier, CDHash,
+and exact sandbox projection. It cannot resolve a
+secret, inspect Hostwright state, or mutate a runtime.
+
+Requests use exact-key, exact-type bounded XPC dictionaries, protocol version
+1, a bounded request ID, a 1–5000 millisecond deadline, and explicit request or
+cancel kinds. Unknown or malformed messages fail closed. The client cancels
+connections on timeout, task cancellation, provider revocation, invalid reply,
+or peer failure. Signed live qualification covers reciprocal requirement
+failures, malformed and oversized replies, crash and restart behavior, and
+owned-only cleanup. Notarization credentials are supplied only by Keychain
+profile name at qualification time and never enter repository files or logs.
+
 Configured files must be existing regular non-symlink files with safe ownership, no group/world write permission, and no set-ID bits. This check reduces accidental or cross-account substitution; it is not an operating-system sandbox or a guarantee against the invoking account replacing its own files. State-backed status can perform compatible path/schema migration, observation snapshot, and audit writes to the launch-configured database or the secure default when no state override is configured. An image mutation can affect only the exact versioned image request accepted by the shared coordinator. Source-consuming and destructive requests are bound to structured pre-observation digests before provider effects. Load verifies the complete inventory delta, and interrupted creation recovery requires durable reference-to-digest proof before adoption or exact rollback.
 
 ## Cleanup Safety

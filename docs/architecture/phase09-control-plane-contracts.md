@@ -326,8 +326,31 @@ exactly `com.apple.security.app-sandbox=true`. Reciprocal code requirements,
 bounded dictionaries, request IDs, deadlines, cancellation, and crash
 isolation are mandatory. Its sole reference native operation is read-only code
 identity proof: team, code identifier, the native 40-or-64-character CDHash,
-and declared entitlement projection. No secret or host mutation crosses it. Gate 11 supplies the signed,
-notarized, stapled qualification package only as evidence.
+and declared entitlement projection. No secret or host mutation crosses it.
+
+Gate 11 implements this boundary as the `HostwrightXPCProvider` library, a
+separately packaged `hostwright-xpc-provider-service`, and a qualification-only
+client. The client pins the service requirement before activation; the service
+pins the daemon requirement before accepting a request. Before accepting any
+reply, the client re-reads the connected service's live `SecCode` identity and
+rejects every entitlement set except the single sandbox key. The service also
+strict-validates its own live identity before returning that exact projection,
+and a completed response must match the independently inspected live proof.
+The dictionary codec rejects unknown
+keys, wrong XPC types, unsupported versions, invalid or overlong request IDs,
+timeouts outside 1–5000 milliseconds, invalid proof fields, and error text over
+its fixed bound. Client cancellation, deadline expiry, provider revocation,
+peer failure, and service crash close the connection and resolve the request
+with stable local reason codes.
+
+The Gate 11 live harness constructs a proper per-user `.app` containing the
+`.xpc` service, signs both boundaries with the pinned Developer ID identity,
+and exercises proof, restart, timeout, cancellation, revocation, malformed and
+oversized replies, crash isolation, and wrong identifier, entitlement, team,
+and client identities. The immutable live cell requires an externally supplied
+Keychain notary profile, notarizes the ephemeral package, staples and validates
+the ticket, and then removes only ledger-pinned launchd jobs, processes, and
+temporary files. The package is qualification evidence, not a release artifact.
 
 Packages contain a canonical manifest, immutable content digests, compatibility
 range, grants, provenance, and CMS signature. Sources are explicit local

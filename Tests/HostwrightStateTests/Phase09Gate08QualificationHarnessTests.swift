@@ -146,7 +146,7 @@ final class Phase09Gate08QualificationHarnessTests: XCTestCase {
       XCTAssertTrue(result.stderr.contains("cell 1 failed"), result.stderr)
       XCTAssertTrue(FileManager.default.fileExists(atPath: containerState.path))
       XCTAssertFalse(FileManager.default.fileExists(atPath: containerCalls.path), "pre-live cleanup must not query container inventory")
-      XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("live-runtime-v1").path))
+      XCTAssertFalse(FileManager.default.fileExists(atPath: try liveRuntime(for: root).path))
       XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("failure-v1.tsv").path))
       XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("active-run-v1").path))
       XCTAssertTrue(FileManager.default.fileExists(atPath: parent.appendingPathComponent(".phase09-gate08-active-v1").path))
@@ -215,8 +215,8 @@ final class Phase09Gate08QualificationHarnessTests: XCTestCase {
       let processFields = process.split(separator: "\t", omittingEmptySubsequences: false)
       let executable = try XCTUnwrap(processFields.indices.contains(3) ? String(processFields[3]) : nil)
       let pid = try XCTUnwrap(process.split(separator: "\t").last?.split(separator: ";").first?.split(separator: "=").last)
-      let expectedExecutable = URL(fileURLWithPath: try canonicalPath(root))
-        .appendingPathComponent("live-runtime-v1/signed-hostwrightd").path
+      let expectedExecutable = try liveRuntime(for: root)
+        .appendingPathComponent("signed-hostwrightd").path
       XCTAssertEqual(executable, expectedExecutable)
       XCTAssertFalse(isRunning(Int32(String(pid)) ?? 0), "ledgered test sleep must be stopped by EXIT cleanup")
 
@@ -228,7 +228,7 @@ final class Phase09Gate08QualificationHarnessTests: XCTestCase {
       XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("active-run-v1").path))
       XCTAssertTrue(FileManager.default.fileExists(atPath: root.deletingLastPathComponent().appendingPathComponent(".phase09-gate08-active-v1").path))
       XCTAssertFalse(FileManager.default.fileExists(atPath: executable), "the ledgered runtime-local executable must be removed")
-      XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("live-runtime-v1").path))
+      XCTAssertFalse(FileManager.default.fileExists(atPath: try liveRuntime(for: root).path))
       XCTAssertFalse(FileManager.default.fileExists(atPath: containerState.path))
     }
   }
@@ -307,13 +307,13 @@ final class Phase09Gate08QualificationHarnessTests: XCTestCase {
 
       XCTAssertEqual(result.status, 47, result.stderr)
       XCTAssertTrue(result.stderr.contains("cell 3 failed"), result.stderr)
-      let expectedExecutable = URL(fileURLWithPath: try canonicalPath(root))
-        .appendingPathComponent("live-runtime-v1/signed-hostwrightd").path
+      let expectedExecutable = try liveRuntime(for: root)
+        .appendingPathComponent("signed-hostwrightd").path
       XCTAssertEqual(executable, expectedExecutable)
       XCTAssertTrue(FileManager.default.fileExists(atPath: executable), "tampered identity must preserve the runtime-local executable")
       XCTAssertTrue(process.split(separator: "\t").dropFirst(4).first == "0", "test must corrupt the recorded device identity")
       XCTAssertTrue(FileManager.default.fileExists(atPath: containerState.path), "container deletion must be refused after process identity mismatch")
-      XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("live-runtime-v1").path), "runtime deletion must be refused after process identity mismatch")
+      XCTAssertTrue(FileManager.default.fileExists(atPath: try liveRuntime(for: root).path), "runtime deletion must be refused after process identity mismatch")
       let calls = (try? String(contentsOf: containerCalls, encoding: .utf8)) ?? ""
       XCTAssertFalse(calls.contains("delete"), calls)
       XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("failure-v1.tsv").path))
@@ -332,6 +332,8 @@ final class Phase09Gate08QualificationHarnessTests: XCTestCase {
     XCTAssertTrue(source.contains("root_lock_created=0; gate_lock_created=0"))
     XCTAssertTrue(source.contains("A6CFABEC0AA50ABE00A745BAFA83BC24783AA5DB"))
     XCTAssertTrue(source.contains("record_root"))
+    XCTAssertTrue(source.contains("short_live_runtime"))
+    XCTAssertTrue(source.contains("macOS Unix-domain path limit"))
     XCTAssertTrue(source.contains("inventory"))
     XCTAssertTrue(source.contains("live artifact identity changed; cleanup is refused"))
     XCTAssertTrue(source.contains("emergency_live_cleanup"))
@@ -387,6 +389,15 @@ final class Phase09Gate08QualificationHarnessTests: XCTestCase {
     guard process.terminationStatus == 0 else { throw NSError(domain: "Gate08Harness", code: 1) }
     return String(decoding: stdout.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
       .trimmingCharacters(in: .newlines)
+  }
+
+  private func liveRuntime(for root: URL) throws -> URL {
+    let canonicalRoot = URL(fileURLWithPath: try canonicalPath(root))
+    let prefix = "phase09-gate08-"
+    XCTAssertTrue(canonicalRoot.lastPathComponent.hasPrefix(prefix))
+    let suffix = canonicalRoot.lastPathComponent.dropFirst(prefix.count).prefix(17)
+    return canonicalRoot.deletingLastPathComponent()
+      .appendingPathComponent(".p09g8-\(suffix)", isDirectory: true)
   }
 
   private func permissions(_ url: URL) throws -> Int {

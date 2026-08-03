@@ -228,7 +228,8 @@ public struct ControlPeerCredentialChallenge: Codable, Equatable, Sendable {
       let nonce = Data(base64Encoded: serverNonce),
       (16...96).contains(nonce.count),
       nonce.base64EncodedString() == serverNonce,
-      daemonGeneration > 0, socketDevice > 0, socketInode > 0,
+      daemonGeneration > 0, daemonGeneration <= UInt64(Int64.max),
+      socketDevice > 0, socketInode > 0,
       peerPID > 0, peerPIDVersion > 0, peerAuditSessionID > 0,
       codeDirectoryHash.range(
         of: "^(?:[a-f0-9]{40}|[a-f0-9]{64})$", options: .regularExpression) != nil

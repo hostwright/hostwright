@@ -622,7 +622,9 @@ public final class ControlPeerAuthenticator: @unchecked Sendable {
     socketDevice: UInt64,
     socketInode: UInt64
   ) throws {
-    guard daemonGeneration > 0, socketDevice > 0, socketInode > 0 else {
+    guard daemonGeneration > 0, daemonGeneration <= UInt64(Int64.max),
+      socketDevice > 0, socketInode > 0
+    else {
       throw ControlPeerAuthenticationError.invalidSocketBinding
     }
     guard ControlPeerInputValidation.isServerNonce(serverNonce) else {

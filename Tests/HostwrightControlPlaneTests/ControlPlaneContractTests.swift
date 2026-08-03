@@ -70,6 +70,12 @@ final class ControlPlaneContractTests: XCTestCase {
     let challengeData = try challenge.canonicalData()
     XCTAssertLessThanOrEqual(challengeData.count, ControlPlaneContract.maximumResponseOrFrameBytes)
     XCTAssertEqual(try ControlAuthenticationWireContract.decodeChallenge(challengeData), challenge)
+    let unpersistableGeneration = ControlPeerCredentialChallenge(
+      subjectID: "owner", serverNonce: "MDEyMzQ1Njc4OWFiY2RlZg==",
+      daemonGeneration: UInt64.max,
+      socketDevice: 3, socketInode: 5, peer: peer, credentialProofRequired: true
+    )
+    XCTAssertThrowsError(try unpersistableGeneration.canonicalData())
 
     let proof = ControlPeerCredentialProof(
       credentialID: "owner-key",

@@ -119,7 +119,7 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
     let server = try PersistentControlConnectionServer(
       authenticator: authenticator,
       requestRepository: requestRepository,
-      daemonGeneration: UInt64.random(in: 1...UInt64.max),
+      daemonGeneration: UInt64.random(in: 1...UInt64(Int64.max)),
       socketIdentity: listener.identity,
       mutatingOperations: Set([
         "up", "down", "run", "start", "stop", "restart", "rm", "update",
@@ -257,8 +257,10 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
         do {
           try server.serve(descriptor: descriptor)
         } catch {
+          let reason = (error as? ControlPeerAuthenticationError)
+            .map { "; reason=\(String(describing: $0))" } ?? ""
           let diagnostic = "control connection failed safely"
-            + " (errorType=\(String(reflecting: type(of: error)))).\n"
+            + " (errorType=\(String(reflecting: type(of: error)))\(reason)).\n"
           FileHandle.standardError.write(Data(diagnostic.utf8))
         }
       }

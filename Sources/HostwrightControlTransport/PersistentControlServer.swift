@@ -338,7 +338,9 @@ public struct PersistentControlConnectionServer: Sendable {
     },
     handler: @escaping Handler
   ) throws {
-    guard daemonGeneration > 0, socketIdentity.device > 0, socketIdentity.inode > 0 else {
+    guard daemonGeneration > 0, daemonGeneration <= UInt64(Int64.max),
+      socketIdentity.device > 0, socketIdentity.inode > 0
+    else {
       throw PersistentControlServerError.invalidRequest
     }
     let streamHooksPresent = [

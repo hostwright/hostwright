@@ -282,12 +282,60 @@ final class Phase09Gate09QualificationHarnessTests: XCTestCase {
     XCTAssertTrue(keychainCleanup.contains("security find-generic-password -s \"$service\" -a \"$account\""))
     XCTAssertTrue(keychainCleanup.contains("hostwright-audit-owned-v1"))
     XCTAssertTrue(keychainCleanup.contains("security delete-generic-password -s \"$service\" -a \"$account\""))
+    XCTAssertTrue(source.contains("record_keychain_items_for_service"))
+    XCTAssertTrue(source.contains("security dump-keychain 2>/dev/null"))
+    XCTAssertFalse(source.contains("security dump-keychain -d"))
     XCTAssertTrue(absenceVerification.contains("security find-generic-password -s \"$service\" -a \"$account\""))
     XCTAssertTrue(absenceVerification.contains("[[ \"$status\" == 44 ]]"))
     XCTAssertTrue(live.contains("cleanup_keychain_items"))
     XCTAssertTrue(emergencyCleanup.contains("cleanup_keychain_items"))
     XCTAssertFalse(live.contains("\"$bootstrap\" --cleanup"))
     XCTAssertFalse(emergencyCleanup.contains("\"$bootstrap\" --cleanup"))
+  }
+
+  func testKeychainAccountParserFlushesHeaderDelimitedRecords() throws {
+    let source = try String(contentsOf: harness, encoding: .utf8)
+    let parser = try XCTUnwrap(source.section(named: "keychain_accounts_from_dump"))
+    XCTAssertTrue(parser.contains("/^keychain:/ { emit(); reset() }"))
+
+    let service = "dev.hostwright.stream-cursor.v1.0123456789abcdef0123456789abcdef"
+    let account = "signing-key:p256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    let sample = """
+    keychain: \"first\"
+    attributes:
+        \"svce\"<blob>=\"dev.hostwright.other\"
+        \"acct\"<blob>=\"ignored\"
+    keychain: \"second\"
+    attributes:
+        \"svce\"<blob>=\"\(service)\"
+        \"acct\"<blob>=\"\(account)\"
+    keychain: \"third\"
+    attributes:
+        \"svce\"<blob>=\"dev.hostwright.other\"
+        \"acct\"<blob>=\"ignored-after-target\"
+    """
+    let input = FileManager.default.temporaryDirectory.appendingPathComponent(
+      "hostwright-phase09-keychain-dump-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: input) }
+    try sample.write(to: input, atomically: true, encoding: .utf8)
+
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/bin/bash")
+    process.arguments = ["-c", "source \"$1\"; keychain_accounts_from_dump \"$2\"", "parser-test", harness.path, service]
+    let stdin = Pipe(); let stdout = Pipe(); let stderr = Pipe()
+    process.standardInput = stdin
+    process.standardOutput = stdout
+    process.standardError = stderr
+    try process.run()
+    stdin.fileHandleForWriting.write(try Data(contentsOf: input))
+    try stdin.fileHandleForWriting.close()
+    process.waitUntilExit()
+
+    XCTAssertEqual(process.terminationStatus, 0, String(
+      decoding: stderr.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self))
+    XCTAssertEqual(
+      String(decoding: stdout.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self),
+      "\(account)\n")
   }
 
   func testContainerDeletionIsCentralizedBehindExactLedgerRevalidation() throws {

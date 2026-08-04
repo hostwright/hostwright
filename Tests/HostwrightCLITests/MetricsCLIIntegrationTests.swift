@@ -59,7 +59,7 @@ final class MetricsCLIIntegrationTests: XCTestCase {
                 from: Data(snapshotResult.standardOutput.utf8)
             )
             XCTAssertEqual(snapshot.schemaVersion, 1)
-            XCTAssertEqual(snapshot.source.schemaVersion, 20)
+            XCTAssertEqual(snapshot.source.schemaVersion, MigrationRunner.latestSchemaVersion)
             XCTAssertEqual(snapshot.series.count, 59)
 
             let outputPath = root.appendingPathComponent("metrics-v1.json").path

@@ -1,4 +1,5 @@
 import Foundation
+import HostwrightControlPlane
 
 public enum ControlRequestStatus: String, Codable, CaseIterable, Sendable {
   case accepted
@@ -14,6 +15,7 @@ public struct ControlRequestRecord: Codable, Equatable, Sendable {
   public let requestDigestSHA256: String
   public let status: ControlRequestStatus
   public let operationReference: String?
+  public let responseCanonicalJSON: Data?
   public let createdAt: String
   public let updatedAt: String
 
@@ -24,6 +26,7 @@ public struct ControlRequestRecord: Codable, Equatable, Sendable {
     requestDigestSHA256: String,
     status: ControlRequestStatus,
     operationReference: String? = nil,
+    responseCanonicalJSON: Data? = nil,
     createdAt: String,
     updatedAt: String
   ) {
@@ -33,6 +36,7 @@ public struct ControlRequestRecord: Codable, Equatable, Sendable {
     self.requestDigestSHA256 = requestDigestSHA256
     self.status = status
     self.operationReference = operationReference
+    self.responseCanonicalJSON = responseCanonicalJSON
     self.createdAt = createdAt
     self.updatedAt = updatedAt
   }
@@ -43,6 +47,9 @@ public struct ControlRequestRecord: Codable, Equatable, Sendable {
     try ControlRequestValidation.optionalIdempotencyKey(idempotencyKey)
     try ControlRequestValidation.digest(requestDigestSHA256)
     try ControlRequestValidation.optionalOperationReference(operationReference)
+    try ControlRequestValidation.optionalResponse(
+      responseCanonicalJSON, requestID: requestID, status: status,
+      operationReference: operationReference)
     _ = try ControlRequestValidation.timestamp(createdAt, named: "request creation timestamp")
     _ = try ControlRequestValidation.timestamp(updatedAt, named: "request update timestamp")
     guard status == .accepted || status == .rejected else {
@@ -54,6 +61,10 @@ public struct ControlRequestRecord: Codable, Equatable, Sendable {
       throw StateStoreError.invalidRecord(
         "Rejected control requests cannot carry an operation reference."
       )
+    }
+    guard responseCanonicalJSON == nil else {
+      throw StateStoreError.invalidRecord(
+        "Initial control requests cannot carry a response.")
     }
   }
 }
@@ -572,10 +583,14 @@ public struct ControlRequestRepository: Sendable {
     requestID: String,
     status: ControlRequestStatus,
     operationReference: String?,
+    responseCanonicalJSON: Data? = nil,
     updatedAt: String
   ) throws -> ControlRequestRecord {
     try ControlRequestValidation.requestID(requestID)
     try ControlRequestValidation.optionalOperationReference(operationReference)
+    try ControlRequestValidation.optionalResponse(
+      responseCanonicalJSON, requestID: requestID, status: status,
+      operationReference: operationReference)
     _ = try ControlRequestValidation.timestamp(updatedAt, named: "request update timestamp")
     guard status == .completed || status == .rejected || status == .error else {
       throw StateStoreError.invalidRecord(
@@ -611,11 +626,14 @@ public struct ControlRequestRepository: Sendable {
         try connection.run(
           """
           UPDATE control_requests
-          SET status = ?, operation_reference = ?, updated_at = ?
+          SET status = ?, operation_reference = ?, response_json = ?, updated_at = ?
           WHERE request_id = ? AND status = 'accepted'
           """,
           bindings: [
             .text(status.rawValue), controlRequestOptionalText(effectiveOperationReference),
+            responseCanonicalJSON.map {
+              .text(String(decoding: $0, as: UTF8.self))
+            } ?? .null,
             .text(updatedAt), .text(requestID),
           ]
         )
@@ -640,7 +658,7 @@ public struct ControlRequestRepository: Sendable {
       try connection.query(
         """
         SELECT request_id, subject_id, idempotency_key, request_digest_sha256,
-               status, operation_reference, created_at, updated_at
+               status, operation_reference, response_json, created_at, updated_at
         FROM control_requests
         WHERE status = 'accepted' AND operation_reference LIKE 'unary:%'
         ORDER BY request_id ASC
@@ -684,10 +702,14 @@ public struct ControlRequestRepository: Sendable {
   public func recordAcceptedOperationReference(
     requestID: String,
     operationReference: String,
+    responseCanonicalJSON: Data? = nil,
     updatedAt: String
   ) throws -> ControlRequestRecord {
     try ControlRequestValidation.requestID(requestID)
     try ControlRequestValidation.optionalOperationReference(operationReference)
+    try ControlRequestValidation.optionalResponse(
+      responseCanonicalJSON, requestID: requestID, status: .accepted,
+      operationReference: operationReference)
     guard !operationReference.isEmpty else {
       throw StateStoreError.invalidRecord("Accepted operation references cannot be empty.")
     }
@@ -708,11 +730,24 @@ public struct ControlRequestRepository: Sendable {
               "The control request is already bound to a different operation reference."
             )
           }
-          return existing
+          if let responseCanonicalJSON, let recordedResponse = existing.responseCanonicalJSON,
+            responseCanonicalJSON != recordedResponse
+          {
+            throw StateStoreError.invalidRecord(
+              "The control request is already bound to a different accepted response.")
+          }
+          if responseCanonicalJSON == nil || existing.responseCanonicalJSON != nil {
+            return existing
+          }
         }
         try connection.run(
-          "UPDATE control_requests SET operation_reference = ?, updated_at = ? WHERE request_id = ? AND status = 'accepted' AND operation_reference IS NULL",
-          bindings: [.text(operationReference), .text(updatedAt), .text(requestID)]
+          "UPDATE control_requests SET operation_reference = ?, response_json = COALESCE(response_json, ?), updated_at = ? WHERE request_id = ? AND status = 'accepted' AND (operation_reference IS NULL OR operation_reference = ?)",
+          bindings: [
+            .text(operationReference), responseCanonicalJSON.map {
+              .text(String(decoding: $0, as: UTF8.self))
+            } ?? .null,
+            .text(updatedAt), .text(requestID), .text(operationReference),
+          ]
         )
         guard let updated = try load(requestID, on: connection),
           updated.status == .accepted,
@@ -794,13 +829,16 @@ public struct ControlRequestRepository: Sendable {
       """
       INSERT INTO control_requests (
         request_id, subject_id, idempotency_key, request_digest_sha256,
-        status, operation_reference, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        status, operation_reference, response_json, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       """,
       bindings: [
         .text(record.requestID), .text(record.subjectID),
         controlRequestOptionalText(record.idempotencyKey), .text(record.requestDigestSHA256),
         .text(record.status.rawValue), controlRequestOptionalText(record.operationReference),
+        record.responseCanonicalJSON.map {
+          .text(String(decoding: $0, as: UTF8.self))
+        } ?? .null,
         .text(record.createdAt), .text(record.updatedAt),
       ]
     )
@@ -828,7 +866,7 @@ public struct ControlRequestRepository: Sendable {
     let rows = try connection.query(
       """
       SELECT request_id, subject_id, idempotency_key, request_digest_sha256,
-             status, operation_reference, created_at, updated_at
+             status, operation_reference, response_json, created_at, updated_at
       FROM control_requests WHERE request_id = ? LIMIT 1
       """,
       bindings: [.text(requestID)]
@@ -855,10 +893,10 @@ public struct ControlRequestRepository: Sendable {
   }
 
   private func request(from row: [String?]) throws -> ControlRequestRecord {
-    guard row.count == 8,
+    guard row.count == 9,
       let requestID = row[0], let subjectID = row[1], let digest = row[3],
       let statusRaw = row[4], let status = ControlRequestStatus(rawValue: statusRaw),
-      let createdAt = row[6], let updatedAt = row[7]
+      let createdAt = row[7], let updatedAt = row[8]
     else {
       throw StateStoreError.invalidRecord("Stored control request has an invalid shape.")
     }
@@ -869,6 +907,7 @@ public struct ControlRequestRepository: Sendable {
       requestDigestSHA256: digest,
       status: status,
       operationReference: row[5] ?? nil,
+      responseCanonicalJSON: row[6].map { Data($0.utf8) },
       createdAt: createdAt,
       updatedAt: updatedAt
     )
@@ -905,6 +944,9 @@ extension ControlRequestRecord {
     try ControlRequestValidation.optionalIdempotencyKey(idempotencyKey)
     try ControlRequestValidation.digest(requestDigestSHA256)
     try ControlRequestValidation.optionalOperationReference(operationReference)
+    try ControlRequestValidation.optionalResponse(
+      responseCanonicalJSON, requestID: requestID, status: status,
+      operationReference: operationReference)
     _ = try ControlRequestValidation.timestamp(createdAt, named: "request creation timestamp")
     _ = try ControlRequestValidation.timestamp(updatedAt, named: "request update timestamp")
     guard status != .rejected || operationReference == nil else {
@@ -950,6 +992,41 @@ private enum ControlRequestValidation {
   static func optionalOperationReference(_ value: String?) throws {
     if let value, !safePrintable(value, maximumLength: 128) {
       throw StateStoreError.invalidRecord("Operation reference must be a bounded printable value.")
+    }
+  }
+
+  static func optionalResponse(
+    _ data: Data?, requestID: String, status: ControlRequestStatus,
+    operationReference: String?
+  ) throws {
+    guard let data else { return }
+    guard (2...ControlPlaneContract.maximumResponseOrFrameBytes).contains(data.count) else {
+      throw StateStoreError.invalidRecord("Stored control response exceeds its bounded size.")
+    }
+    let response: ControlResponseEnvelope
+    do {
+      response = try JSONDecoder().decode(ControlResponseEnvelope.self, from: data)
+      try response.validate()
+      guard try ControlPlaneCanonicalJSON.encode(response) == data else {
+        throw StateStoreError.invalidRecord("Stored control response is not canonical JSON.")
+      }
+    } catch let error as StateStoreError {
+      throw error
+    } catch {
+      throw StateStoreError.invalidRecord("Stored control response is invalid.")
+    }
+    let expectedStatus: ControlResponseStatus
+    switch status {
+    case .accepted: expectedStatus = .accepted
+    case .completed: expectedStatus = .completed
+    case .rejected: expectedStatus = .rejected
+    case .error: expectedStatus = .error
+    }
+    guard response.requestID == requestID, response.status == expectedStatus,
+      response.operationRef == operationReference
+    else {
+      throw StateStoreError.invalidRecord(
+        "Stored control response does not match its durable request.")
     }
   }
 

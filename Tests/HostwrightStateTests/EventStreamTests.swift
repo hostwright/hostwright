@@ -274,7 +274,7 @@ final class EventStreamTests: XCTestCase {
             }
             try store.migrate()
 
-            XCTAssertEqual(try store.schemaVersion(), 20)
+            XCTAssertEqual(try store.schemaVersion(), MigrationRunner.latestSchemaVersion)
             let page = try store.events.streamPage(after: nil)
             XCTAssertEqual(page.events.map(\.event.id), ["event-v16"])
             XCTAssertEqual(try HostwrightEventCursor(token: page.events[0].cursor).eventID, "event-v16")

@@ -1,5 +1,6 @@
 import Foundation
 import HostwrightControlPlane
+import HostwrightCore
 import HostwrightPolicy
 import HostwrightRuntime
 import HostwrightState
@@ -108,7 +109,8 @@ enum HostwrightProfileQualificationTool {
       admissionBound: admissionHash == resolution.profileSHA256,
       inheritanceResolved: resolution.inheritance == [base.identifier, child.identifier],
       driftDetected: drift.drifted, persistedAcrossReopen: persisted)
-    guard result.stateSchemaVersion == 20, integrity.health == .healthy,
+    guard result.stateSchemaVersion == HostwrightContractVersions.stateSchema,
+      integrity.health == .healthy,
       result.providerID == RuntimeProviderID.appleContainerCLI.rawValue,
       result.providerCapabilitySHA256.count == 64, result.appleContainerCapabilityProbed,
       result.supportedProfileAllowed, result.liveWorkloadValidated,

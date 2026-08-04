@@ -96,7 +96,10 @@ terminates its owned process tree.
 Long operations acknowledge with a durable operation reference and expose
 progress through a stream. Mutating acceptance persists request identity,
 idempotency key, authorization and admission decisions, operation reference,
-and audit record before acknowledgement.
+and audit record before acknowledgement. The bounded canonical accepted or
+terminal response is persisted with the durable request before it is returned;
+an exact request/idempotency replay decodes that response and never reinvokes
+the handler or synthesizes a result-less replacement.
 
 Every accepted connection completes one bounded authentication handshake before
 normal request framing. The server sends a canonical, response-sized
@@ -363,6 +366,32 @@ and quarantines the digest without daemon restart. Cleanup can remove only
 artifacts recorded in that plugin's ownership ledger. The package and invocation
 fixtures are [`phase09-plugin-v1.json`](../../contracts/v0.0.2/phase09-plugin-v1.json)
 and [`phase09-plugin-invocation-v1.json`](../../contracts/v0.0.2/phase09-plugin-invocation-v1.json).
+
+Gate 12 implements this lifecycle in schema v21 and the authenticated
+`plugin.*` Control API. A per-install signer identifier and bounded DER
+certificate make trust approval explicit; both the provenance signature over
+the immutable package digest and the manifest signature over the canonical
+signature-free payload must verify. Compatibility uses a bounded AND-only
+semantic-version range, and update accepts only a version greater than every
+installed version for the same identifier. The manifest is the complete
+dependency closure: undeclared files, traversal, symlinks, special files,
+content substitution, and signer substitution fail closed.
+
+The immutable store records rollback/install intent before effects, copies
+through descriptor-safe reads into a private stage, records exact file and
+directory device/inode/content ownership before atomic rename, and publishes
+only the verified digest directory. Cleanup pins each parent directory and
+performs descriptor-relative identity rechecks before removal. Interrupted
+effects persist a terminal-audit-pending stage; terminal audit append succeeds
+before that stage becomes final, so audit failure remains restart-retryable.
+Provider health then runs through the
+Gate 10 WASI worker or Gate 11 reciprocal XPC identity proof before the state
+pointer changes. Active WASI invocation resolves that pointer back to the exact
+immutable digest and grant, never a caller-supplied path. Revocation and
+quarantine cancel in-flight work and only sessions for affected digests.
+Configured HTTPS retrieval enforces the manifest or content limit inside the
+transport as bytes arrive. `hostwright extension` lifecycle commands construct direct typed
+`plugin.*` requests and never expose a local state-mutation fallback.
 
 ## Serial implementation ownership
 

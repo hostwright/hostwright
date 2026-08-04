@@ -281,6 +281,7 @@ public enum CLICommand: Equatable, Sendable {
     case diagnostics(stateDatabasePath: String?, bundlePath: String, projectName: String?, manifestPath: String?)
     case benchmark(options: BenchmarkCLIOptions)
     case extensionCheck(declarationPath: String, executablePath: String, output: CLIOutputFormat)
+    case plugin(options: PluginCLIOptions)
     case doctor(stateDatabasePath: String?, output: CLIOutputFormat)
     case help
 
@@ -1536,8 +1537,11 @@ public enum CLICommand: Equatable, Sendable {
     }
 
     private static func extensionCommand(arguments: [String]) throws -> CLICommand {
-        guard arguments.count >= 2, arguments[1] == "check" else {
-            throw CLIUsageError("extension supports only 'check'.")
+        guard arguments.count >= 2 else {
+            throw CLIUsageError("extension requires an operation.")
+        }
+        if arguments[1] != "check" {
+            return .plugin(options: try PluginCLIParser.parse(arguments: arguments))
         }
 
         var declarationPath: String?

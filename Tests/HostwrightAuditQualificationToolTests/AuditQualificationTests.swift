@@ -33,7 +33,7 @@ final class AuditQualificationTests: XCTestCase {
     let result = AuditQualificationResult(
       qualification: "phase09-gate4-live-v1",
       health: "healthy",
-      stateSchema: 20,
+      stateSchema: 21,
       recordCount: 3,
       segmentCount: 3,
       exportBytes: 512,
@@ -49,7 +49,7 @@ final class AuditQualificationTests: XCTestCase {
     let result = AuditQualificationResult(
       qualification: "phase09-gate4-live-v1",
       health: "healthy",
-      stateSchema: 20,
+      stateSchema: 21,
       recordCount: 3,
       segmentCount: 3,
       exportBytes: 0,

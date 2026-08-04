@@ -61,6 +61,10 @@ public struct SQLiteStateStore: StateStore {
         WorkloadProfileRepository(store: self)
     }
 
+    public var plugins: PluginLifecycleRepository {
+        PluginLifecycleRepository(store: self)
+    }
+
     public var operations: OperationLedger {
         OperationLedger(store: self)
     }

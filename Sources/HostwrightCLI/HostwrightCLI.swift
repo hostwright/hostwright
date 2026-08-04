@@ -540,6 +540,14 @@ public enum HostwrightCLI {
                 executablePath: executablePath,
                 output: output
             )
+        case .plugin(let options):
+            return diagnosticFailure(
+                HostwrightDiagnostic(
+                    code: .controlAPIUnavailable,
+                    message: "Plugin lifecycle commands require the authenticated persistent Control API."
+                ),
+                output: options.output
+            )
         case .doctor(let stateDatabasePath, let output):
             return doctor(
                 stateDatabasePath: stateDatabasePath,
@@ -675,6 +683,14 @@ public enum HostwrightCLI {
       hostwright diagnostics support recover [--state-db <path>] [--output text|json]
       hostwright benchmark --image <local-image> --samples <3-10> --report <path> --source-commit <40-hex> --source-dirty <true|false> --expected-container-version <version> [--attended-sleep-wake-seconds <15-300>] --confirm-live
       hostwright extension check --declaration <absolute-path> --executable <absolute-path> [--output text|json]
+      hostwright extension list [--identifier <id>] [--output text|json]
+      hostwright extension status (--identifier <id>|--digest <sha256>) [--output text|json]
+      hostwright extension (discover|install|update) --source <absolute-directory|https-url> --signer <id> --signer-certificate <absolute-der-path> [--output text|json]
+      hostwright extension activate --digest <sha256> [--expected-activation-generation <n>] [--output text|json]
+      hostwright extension rollback --identifier <id> [--expected-activation-generation <n>] [--output text|json]
+      hostwright extension revoke --revocation-id <id> --target-kind package|signer --target <digest|signer> --reason <reason> [--output text|json]
+      hostwright extension quarantine --quarantine-id <id> --digest <sha256> --reason-code <code> --detail-digest <sha256> [--output text|json]
+      hostwright extension uninstall --digest <sha256> --expected-generation <n> [--output text|json]
       hostwright doctor [--state-db <path>] [--json|--output text|json]
 
     Most commands are read-only. capabilities reports tested maturity without probing or mutating the host.
@@ -704,10 +720,11 @@ public enum HostwrightCLI {
     Lifecycle dry-runs emit deterministic plans; confirmed up, down, run, start, stop, restart, rm, and update executions emit deterministic per-resource outcomes. Every lifecycle command supports --json or --output json.
     Cleanup deletes only exact cleanup-eligible Hostwright-owned stopped/created/exited containers after dry-run token confirmation.
     Diagnostics-v1 remains a local redacted JSON export. Support bundles add bounded preview, confirmation-bound local creation, optional Keychain CMS encryption, durable recovery, and exact receipt-proven deletion. Neither workflow uploads telemetry.
-    JSON output is supported for capabilities, paths, migrate preview, restart-budget, maintenance, ownership, metrics, traces, support bundles, every state, secret, registry, and image subcommand, import-stack, plan, status, every lifecycle command, events, recovery, extension check, doctor, and errors when --json or --output json is present.
+    JSON output is supported for capabilities, paths, migrate preview, restart-budget, maintenance, ownership, metrics, traces, support bundles, every state, secret, registry, image, and extension subcommand, import-stack, plan, status, every lifecycle command, events, recovery, doctor, and errors when --json or --output json is present.
     Team profiles and approvals are loaded only from explicit local paths. Profile-aware mutations require an approval bound to the exact profile, manifest, and plan or cleanup token.
     Benchmark runs are explicit local hardware evidence. They refuse image pulls and broad cleanup, use bounded disposable Hostwright-owned resources, and write only the requested non-existing report path.
     Extension check executes one reviewed-local protocol handshake from explicit absolute paths. The protocol grants no Hostwright capability, but the reviewed executable still has the invoking macOS account's ambient privileges; it is not sandboxed.
+    Extension lifecycle commands use only the authenticated persistent Control API. Signed packages are explicit-source, compatibility-checked, immutable and digest-addressed; activation health-checks the WASI or XPC provider, and cleanup is ownership-ledger limited.
 
     Examples:
       hostwright plan --output json

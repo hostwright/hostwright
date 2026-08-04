@@ -279,9 +279,10 @@ final class DaemonControlStreamAuthorizationPipelineTests: XCTestCase {
     )
     try store.ownership.upsert(ownership(id: "target-a", target: targetA))
     try store.ownership.upsert(ownership(id: "target-b", target: targetB))
+    let repositoryNow = decisionDate
     try body(Fixture(
       store: store,
-      requests: ControlRequestRepository(store: store),
+      requests: ControlRequestRepository(store: store, now: { repositoryNow }),
       audit: PipelineAuditRecorder(),
       timestamp: timestamp,
       targetA: targetA,

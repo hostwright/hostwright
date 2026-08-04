@@ -3374,6 +3374,7 @@ public struct MigrationRunner: Sendable {
                 request_digest_sha256 TEXT NOT NULL CHECK (length(request_digest_sha256) = 64 AND request_digest_sha256 NOT GLOB '*[^0-9a-f]*'),
                 status TEXT NOT NULL CHECK (status IN ('accepted','completed','rejected','error')),
                 operation_reference TEXT,
+                response_json TEXT CHECK (response_json IS NULL OR (length(response_json) BETWEEN 2 AND 1048576 AND json_valid(response_json))),
                 created_at TEXT NOT NULL CHECK (julianday(created_at) IS NOT NULL),
                 updated_at TEXT NOT NULL CHECK (julianday(updated_at) IS NOT NULL),
                 CHECK (length(request_id) BETWEEN 1 AND 128 AND request_id NOT GLOB '*[^ -~]*'),
@@ -3670,6 +3671,160 @@ public struct MigrationRunner: Sendable {
             "CREATE INDEX admission_exceptions_lookup_idx ON admission_exceptions(policy_id, subject_id, target, expires_at)",
             "CREATE INDEX workload_profiles_parent_idx ON workload_profiles(parent_profile_id, profile_id)",
             "CREATE UNIQUE INDEX workload_profiles_digest_idx ON workload_profiles(profile_sha256)",
+          ]
+        ),
+        SchemaMigration(
+          version: 21,
+          description: "Immutable plugin packages, provenance, grants, activation, revocation, quarantine, and rollback authority",
+          implementationRevision: "phase09-plugin-lifecycle-v1",
+          statements: [
+            """
+            CREATE TABLE plugin_packages (
+                package_digest TEXT PRIMARY KEY CHECK (length(package_digest) = 71 AND package_digest GLOB 'sha256:*' AND substr(package_digest, 8) NOT GLOB '*[^0-9a-f]*'),
+                plugin_identifier TEXT NOT NULL CHECK (length(plugin_identifier) BETWEEN 1 AND 128 AND plugin_identifier NOT GLOB '*[^A-Za-z0-9._-]*'),
+                package_version TEXT NOT NULL CHECK (length(package_version) BETWEEN 1 AND 64 AND package_version NOT GLOB '*[^A-Za-z0-9.+-]*'),
+                hostwright_compatibility TEXT NOT NULL CHECK (length(hostwright_compatibility) BETWEEN 1 AND 256 AND hostwright_compatibility NOT GLOB '*[^ -~]*'),
+                provider_kind TEXT NOT NULL CHECK (provider_kind IN ('wasi','xpc')),
+                entrypoint TEXT NOT NULL CHECK (length(entrypoint) BETWEEN 1 AND 512 AND entrypoint NOT LIKE '/%' AND entrypoint != '..' AND entrypoint NOT LIKE '../%' AND entrypoint NOT LIKE '%/../%' AND entrypoint NOT LIKE '%/..'),
+                artifact_digest TEXT NOT NULL CHECK (length(artifact_digest) = 71 AND artifact_digest GLOB 'sha256:*' AND substr(artifact_digest, 8) NOT GLOB '*[^0-9a-f]*'),
+                manifest_json TEXT NOT NULL CHECK (json_valid(manifest_json) AND json_type(manifest_json) = 'object' AND length(manifest_json) BETWEEN 2 AND 1048576),
+                manifest_digest TEXT NOT NULL UNIQUE CHECK (length(manifest_digest) = 71 AND manifest_digest GLOB 'sha256:*' AND substr(manifest_digest, 8) NOT GLOB '*[^0-9a-f]*'),
+                cms_signature TEXT NOT NULL CHECK (length(cms_signature) BETWEEN 1 AND 1048576),
+                signer_identifier TEXT NOT NULL CHECK (length(signer_identifier) BETWEEN 1 AND 256 AND signer_identifier NOT GLOB '*[^ -~]*'),
+                storage_path TEXT NOT NULL CHECK (length(storage_path) BETWEEN 1 AND 4096 AND storage_path LIKE '/%' AND storage_path NOT LIKE '%/../%' AND storage_path NOT LIKE '%/..'),
+                ownership_ledger_json TEXT NOT NULL CHECK (json_valid(ownership_ledger_json) AND json_type(ownership_ledger_json) = 'array' AND length(ownership_ledger_json) BETWEEN 2 AND 1048576),
+                lifecycle_state TEXT NOT NULL CHECK (lifecycle_state IN ('discovered','verified','staged','active','rollback','quarantined','revoked','uninstalled')),
+                generation INTEGER NOT NULL CHECK (generation >= 1),
+                created_by_subject_id TEXT NOT NULL REFERENCES peer_identities(subject_id) ON DELETE RESTRICT,
+                created_at TEXT NOT NULL CHECK (julianday(created_at) IS NOT NULL),
+                updated_at TEXT NOT NULL CHECK (julianday(updated_at) IS NOT NULL),
+                CHECK (julianday(updated_at) >= julianday(created_at)),
+                UNIQUE (plugin_identifier, package_version)
+            )
+            """,
+            """
+            CREATE TABLE plugin_provenance (
+                package_digest TEXT PRIMARY KEY REFERENCES plugin_packages(package_digest) ON DELETE RESTRICT,
+                checksum TEXT NOT NULL CHECK (length(checksum) = 71 AND checksum GLOB 'sha256:*' AND substr(checksum, 8) NOT GLOB '*[^0-9a-f]*'),
+                signature TEXT NOT NULL CHECK (length(signature) BETWEEN 1 AND 1048576),
+                signer_identifier TEXT NOT NULL CHECK (length(signer_identifier) BETWEEN 1 AND 256 AND signer_identifier NOT GLOB '*[^ -~]*'),
+                source_kind TEXT NOT NULL CHECK (source_kind IN ('localDirectory','httpsRegistry')),
+                source_locator TEXT NOT NULL CHECK (length(source_locator) BETWEEN 1 AND 4096 AND source_locator NOT GLOB '*[^ -~]*'),
+                canonical_json TEXT NOT NULL CHECK (json_valid(canonical_json) AND json_type(canonical_json) = 'object' AND length(canonical_json) BETWEEN 2 AND 1048576),
+                verified_at TEXT NOT NULL CHECK (julianday(verified_at) IS NOT NULL),
+                CHECK ((source_kind = 'localDirectory' AND source_locator LIKE '/%' AND source_locator NOT LIKE '%/../%' AND source_locator NOT LIKE '%/..') OR (source_kind = 'httpsRegistry' AND source_locator LIKE 'https://%'))
+            )
+            """,
+            """
+            CREATE TABLE plugin_grants (
+                package_digest TEXT NOT NULL REFERENCES plugin_packages(package_digest) ON DELETE RESTRICT,
+                capability TEXT NOT NULL CHECK (capability IN ('policy','observation','storage','network','diagnostics','scheduler','secret-metadata')),
+                scope TEXT NOT NULL CHECK (length(scope) BETWEEN 1 AND 512 AND scope NOT GLOB '*[^ -~]*'),
+                approved_by_subject_id TEXT NOT NULL REFERENCES peer_identities(subject_id) ON DELETE RESTRICT,
+                approval_ref TEXT NOT NULL CHECK (length(approval_ref) BETWEEN 1 AND 128 AND approval_ref NOT GLOB '*[^ -~]*'),
+                granted_at TEXT NOT NULL CHECK (julianday(granted_at) IS NOT NULL),
+                revoked_at TEXT CHECK (revoked_at IS NULL OR julianday(revoked_at) IS NOT NULL),
+                CHECK (revoked_at IS NULL OR julianday(revoked_at) >= julianday(granted_at)),
+                PRIMARY KEY (package_digest, capability, scope)
+            )
+            """,
+            """
+            CREATE TABLE plugin_activations (
+                plugin_identifier TEXT PRIMARY KEY CHECK (length(plugin_identifier) BETWEEN 1 AND 128 AND plugin_identifier NOT GLOB '*[^A-Za-z0-9._-]*'),
+                active_package_digest TEXT NOT NULL REFERENCES plugin_packages(package_digest) ON DELETE RESTRICT,
+                prior_package_digest TEXT REFERENCES plugin_packages(package_digest) ON DELETE RESTRICT,
+                health_status TEXT NOT NULL CHECK (health_status IN ('pending','healthy','degraded','unhealthy','revoked')),
+                health_detail_digest TEXT CHECK (health_detail_digest IS NULL OR (length(health_detail_digest) = 71 AND health_detail_digest GLOB 'sha256:*' AND substr(health_detail_digest, 8) NOT GLOB '*[^0-9a-f]*')),
+                generation INTEGER NOT NULL CHECK (generation >= 1),
+                activated_by_subject_id TEXT NOT NULL REFERENCES peer_identities(subject_id) ON DELETE RESTRICT,
+                activated_at TEXT NOT NULL CHECK (julianday(activated_at) IS NOT NULL),
+                updated_at TEXT NOT NULL CHECK (julianday(updated_at) IS NOT NULL),
+                CHECK (prior_package_digest IS NULL OR prior_package_digest != active_package_digest),
+                CHECK (julianday(updated_at) >= julianday(activated_at))
+            )
+            """,
+            """
+            CREATE TABLE plugin_revocations (
+                revocation_id TEXT PRIMARY KEY CHECK (length(revocation_id) BETWEEN 1 AND 128 AND revocation_id NOT GLOB '*[^ -~]*'),
+                target_kind TEXT NOT NULL CHECK (target_kind IN ('package','signer')),
+                target_identifier TEXT NOT NULL CHECK (length(target_identifier) BETWEEN 1 AND 256 AND target_identifier NOT GLOB '*[^ -~]*'),
+                reason TEXT NOT NULL CHECK (length(reason) BETWEEN 1 AND 1024),
+                revoked_by_subject_id TEXT NOT NULL REFERENCES peer_identities(subject_id) ON DELETE RESTRICT,
+                revoked_at TEXT NOT NULL CHECK (julianday(revoked_at) IS NOT NULL),
+                UNIQUE (target_kind, target_identifier)
+            )
+            """,
+            """
+            CREATE TABLE plugin_quarantine (
+                quarantine_id TEXT PRIMARY KEY CHECK (length(quarantine_id) BETWEEN 1 AND 128 AND quarantine_id NOT GLOB '*[^ -~]*'),
+                package_digest TEXT NOT NULL REFERENCES plugin_packages(package_digest) ON DELETE RESTRICT,
+                reason_code TEXT NOT NULL CHECK (length(reason_code) BETWEEN 1 AND 128 AND reason_code NOT GLOB '*[^ -~]*'),
+                detail_digest TEXT NOT NULL CHECK (length(detail_digest) = 71 AND detail_digest GLOB 'sha256:*' AND substr(detail_digest, 8) NOT GLOB '*[^0-9a-f]*'),
+                quarantined_by_subject_id TEXT NOT NULL REFERENCES peer_identities(subject_id) ON DELETE RESTRICT,
+                quarantined_at TEXT NOT NULL CHECK (julianday(quarantined_at) IS NOT NULL),
+                resolved_at TEXT CHECK (resolved_at IS NULL OR julianday(resolved_at) IS NOT NULL),
+                CHECK (resolved_at IS NULL OR julianday(resolved_at) >= julianday(quarantined_at))
+            )
+            """,
+            """
+            CREATE TABLE plugin_rollback_state (
+                operation_id TEXT PRIMARY KEY CHECK (length(operation_id) BETWEEN 1 AND 128 AND operation_id NOT GLOB '*[^ -~]*'),
+                plugin_identifier TEXT NOT NULL CHECK (length(plugin_identifier) BETWEEN 1 AND 128 AND plugin_identifier NOT GLOB '*[^A-Za-z0-9._-]*'),
+                from_package_digest TEXT REFERENCES plugin_packages(package_digest) ON DELETE RESTRICT,
+                to_package_digest TEXT NOT NULL CHECK (length(to_package_digest) = 71 AND to_package_digest GLOB 'sha256:*' AND substr(to_package_digest, 8) NOT GLOB '*[^0-9a-f]*'),
+                stage TEXT NOT NULL CHECK (stage IN ('intent','install-intent','rollback-intent','uninstall-intent','staged','health-check','activation','cleanup','recovery-success-audit','recovery-failure-audit','complete','failed','cancelled')),
+                status TEXT NOT NULL CHECK (status IN ('pending','running','succeeded','failed','cancelled')),
+                idempotency_key TEXT NOT NULL UNIQUE CHECK (length(idempotency_key) BETWEEN 1 AND 256 AND idempotency_key NOT GLOB '*[^ -~]*'),
+                ownership_effects_json TEXT NOT NULL CHECK (json_valid(ownership_effects_json) AND json_type(ownership_effects_json) = 'array' AND length(ownership_effects_json) BETWEEN 2 AND 1048576),
+                failure_reason_code TEXT CHECK (failure_reason_code IS NULL OR (length(failure_reason_code) BETWEEN 1 AND 128 AND failure_reason_code NOT GLOB '*[^ -~]*')),
+                requested_by_subject_id TEXT NOT NULL REFERENCES peer_identities(subject_id) ON DELETE RESTRICT,
+                generation INTEGER NOT NULL CHECK (generation >= 1),
+                created_at TEXT NOT NULL CHECK (julianday(created_at) IS NOT NULL),
+                updated_at TEXT NOT NULL CHECK (julianday(updated_at) IS NOT NULL),
+                CHECK (from_package_digest IS NULL OR from_package_digest != to_package_digest),
+                CHECK (julianday(updated_at) >= julianday(created_at))
+            )
+            """,
+            """
+            CREATE TRIGGER plugin_package_immutable_content
+            BEFORE UPDATE OF plugin_identifier, package_version, hostwright_compatibility, provider_kind, entrypoint, artifact_digest, manifest_json, manifest_digest, cms_signature, signer_identifier, storage_path, ownership_ledger_json, created_by_subject_id, created_at ON plugin_packages
+            BEGIN SELECT RAISE(ABORT, 'plugin package content and ownership are immutable'); END
+            """,
+            """
+            CREATE TRIGGER plugin_provenance_immutable
+            BEFORE UPDATE ON plugin_provenance
+            BEGIN SELECT RAISE(ABORT, 'plugin provenance is immutable'); END
+            """,
+            """
+            CREATE TRIGGER plugin_provenance_delete
+            BEFORE DELETE ON plugin_provenance
+            BEGIN SELECT RAISE(ABORT, 'plugin provenance is retained'); END
+            """,
+            """
+            CREATE TRIGGER plugin_grant_delete
+            BEFORE DELETE ON plugin_grants
+            BEGIN SELECT RAISE(ABORT, 'plugin grants are revoked, not deleted'); END
+            """,
+            """
+            CREATE TRIGGER plugin_active_package_match_insert
+            BEFORE INSERT ON plugin_activations
+            WHEN (SELECT plugin_identifier FROM plugin_packages WHERE package_digest = NEW.active_package_digest) != NEW.plugin_identifier
+            BEGIN SELECT RAISE(ABORT, 'active plugin identifier does not match package'); END
+            """,
+            """
+            CREATE TRIGGER plugin_active_package_match_update
+            BEFORE UPDATE OF plugin_identifier, active_package_digest ON plugin_activations
+            WHEN (SELECT plugin_identifier FROM plugin_packages WHERE package_digest = NEW.active_package_digest) != NEW.plugin_identifier
+            BEGIN SELECT RAISE(ABORT, 'active plugin identifier does not match package'); END
+            """,
+            "CREATE INDEX plugin_packages_identifier_idx ON plugin_packages(plugin_identifier, package_version, package_digest)",
+            "CREATE INDEX plugin_packages_state_idx ON plugin_packages(lifecycle_state, plugin_identifier, package_digest)",
+            "CREATE INDEX plugin_provenance_signer_idx ON plugin_provenance(signer_identifier, package_digest)",
+            "CREATE INDEX plugin_grants_capability_idx ON plugin_grants(capability, scope, package_digest)",
+            "CREATE INDEX plugin_activations_digest_idx ON plugin_activations(active_package_digest, plugin_identifier)",
+            "CREATE INDEX plugin_revocations_target_idx ON plugin_revocations(target_kind, target_identifier, revoked_at)",
+            "CREATE INDEX plugin_quarantine_package_idx ON plugin_quarantine(package_digest, resolved_at, quarantined_at)",
+            "CREATE INDEX plugin_rollback_operation_idx ON plugin_rollback_state(plugin_identifier, status, updated_at, operation_id)",
           ]
         ),
     ]

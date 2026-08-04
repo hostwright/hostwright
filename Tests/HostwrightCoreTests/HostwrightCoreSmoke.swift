@@ -800,7 +800,7 @@ final class HostwrightCoreTests: XCTestCase {
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("control API listener is implemented"))
     }
 
-    func testExtensionArchitectureDocsDescribeDeclarationPolicyAndHandshakeOnly() throws {
+    func testExtensionArchitectureDocsSeparateLegacyHandshakeFromSecurePluginRuntime() throws {
         let root = try packageRoot()
         let architecture = try read("docs/architecture/plugin-extension-architecture.md", root: root)
         let policy = try read("docs/reference/policy.md", root: root)
@@ -829,7 +829,9 @@ final class HostwrightCoreTests: XCTestCase {
             cli
         ].joined(separator: "\n")
 
-        XCTAssertTrue(architecture.contains("Status: Phase 33 declaration policy plus Phase 41 reviewed-local handshake host."))
+        XCTAssertTrue(architecture.contains("Status: Phase 09 secure provider and package lifecycle implementation; aggregate qualification pending."))
+        XCTAssertTrue(architecture.contains("Hostwright retains the earlier reviewed-local declaration handshake and now adds a separate Plugin ABI v1 path."))
+        XCTAssertTrue(architecture.contains("Plugin packages are explicit-source, CMS-signed, immutable, digest-addressed, capability-limited"))
         XCTAssertTrue(architecture.contains("fixed `hostwright-extension-handshake-v1` protocol operation"))
         XCTAssertTrue(architecture.contains("A passing check proves only that the exact reviewed file completed this protocol handshake."))
         XCTAssertTrue(architecture.contains("| Tunnel provider | The general extension host blocks tunnel authority; Phase 07's separate SPI grants only exact brokered origins, secret references, identities, and routes. |"))

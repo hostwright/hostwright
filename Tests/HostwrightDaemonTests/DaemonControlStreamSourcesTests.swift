@@ -699,7 +699,7 @@ final class DaemonControlStreamSourcesTests: XCTestCase {
 
     let store = SQLiteStateStore(path: root.appendingPathComponent("state.sqlite").path)
     try store.migrate()
-    XCTAssertEqual(try store.schemaVersion(), 20)
+    XCTAssertEqual(try store.schemaVersion(), MigrationRunner.latestSchemaVersion)
     let owner = peer(subjectID: "owner", codeHash: String(repeating: "a", count: 40))
     try ControlIdentityRepository(store: store).bootstrap(ControlPeerIdentityRecord(
       subjectID: owner.binding.subject.identifier,

@@ -80,7 +80,7 @@ private enum HostwrightStreamQualificationMain {
     )
     let store = SQLiteStateStore(path: statePath)
     try store.migrate()
-    guard try store.schemaVersion() == 20 else { throw failure(65) }
+    guard try store.schemaVersion() == MigrationRunner.latestSchemaVersion else { throw failure(65) }
     let identity = try DarwinCurrentControlCodeIdentity.inspect()
     let timestamp = ISO8601DateFormatter().string(from: Date())
     let subjectID = "gate08-owner-\(identity.codeDirectoryHash.prefix(16))"

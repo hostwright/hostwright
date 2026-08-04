@@ -153,8 +153,10 @@ cleanup_live_runtime() {
 }
 run_live_qualification() {
   swift build --product hostwright-rbac-qualification
-  local bin tool runtime signed result canonical team tool_status=0
+  local bin tool runtime signed result canonical team tool_status=0 latest_schema
   bin="$(swift build --show-bin-path)"; tool="$bin/hostwright-rbac-qualification"; [[ -x "$tool" ]] || die 'Gate 5 RBAC qualification product was not built.' 70
+  latest_schema="$(/usr/bin/awk '/stateSchema = /{print $NF; exit}' Sources/HostwrightCore/ContractVersions.swift)"
+  [[ "$latest_schema" =~ ^[0-9]+$ ]] || die 'could not determine the latest Gate 5 state schema version.' 69
   runtime="$root/live-runtime-v1"; mkdir "$runtime"; chmod 700 "$runtime"; record_live_root "$runtime"
   signed="$runtime/signed-rbac-tool"; /bin/cp "$tool" "$signed"; codesign --force --sign "$signing_fingerprint" --identifier "$signing_identifier" "$signed"; codesign --verify --strict "$signed"; record_live_file "$runtime" "$signed"
   team="$(codesign -d --verbose=4 "$signed" 2>&1 | /usr/bin/awk -F= '$1 == "TeamIdentifier" {print $2}')"; [[ "$team" == 993YC3JY4Q ]] || die 'Gate 5 signed live tool has the wrong team.' 70
@@ -162,7 +164,7 @@ run_live_qualification() {
   [[ "$tool_status" == 0 ]] || die 'Gate 5 live qualification executable failed.' "$tool_status"
   [[ -n "$result" && "${#result}" -le 1048576 ]] || die 'Gate 5 live qualification executable returned an empty result.' 70
   canonical="$(printf '%s' "$result" | /usr/bin/jq -cS .)"; [[ "$canonical" == "$result" ]] || die 'Gate 5 live result is not canonical JSON.' 70
-  printf '%s' "$result" | /usr/bin/jq -e '.kind == "hostwright.phase09.rbac.qualification.v1" and .stateSchemaVersion == 20 and .integrityHealth == "healthy" and .roleCount == 5 and .initialViewerRead == "allow" and .initialViewerMutation == "deny" and .roleChangeWithoutRestart == "allow" and .delegatedBeforeRevocation == "allow" and .delegatedAfterRevocation == "deny" and .globalOwnerCount == 1' >/dev/null
+  printf '%s' "$result" | /usr/bin/jq -e --argjson latest "$latest_schema" '.kind == "hostwright.phase09.rbac.qualification.v1" and .stateSchemaVersion == $latest and .integrityHealth == "healthy" and .roleCount == 5 and .initialViewerRead == "allow" and .initialViewerMutation == "deny" and .roleChangeWithoutRestart == "allow" and .delegatedBeforeRevocation == "allow" and .delegatedAfterRevocation == "deny" and .globalOwnerCount == 1' >/dev/null
   printf '%s\n' "$result"; cleanup_live_runtime "$runtime"
 }
 run_cell() { case "$1" in 1) swift test --filter 'RBACAuthorizationEngineTests|RBACAdministrationServiceTests|RBACRepositoryTests';; 2) swift test --filter 'PersistentControlAuditIntegrationTests|RBACControlOperationsTests|HostwrightDaemonControlServiceTests';; 3) run_live_qualification;; 4) swift test --filter 'RBACSchemaV20MigrationTests|ControlIdentityBootstrapTests|StateUpgradeTests';; 5) swift test --filter 'RBACAuthorizationEngineTests/(testExplicitDenyOverridesAllowsWithDeterministicRuleExplanation|testHorizontalAndVerticalEscalationAttemptsDeny|testMalformedOrConflictingTargetFieldsFailClosedBeforePolicyEvaluation)|RBACAdministrationServiceTests/(testNonOwnerConditionalAndUnprivilegedGrantsAreRejected|testDirectNonOwnerManagementCallsRequireExactPolicyVerbs)|RBACRepositoryTests/(testBootstrapRefusesToMintOwnerWhenMultipleActiveIdentitiesExistWithoutAnOwner|testBindingsRejectDuplicatesAndProtectLastActiveOwner)';; 6) swift test --filter 'RBACAuthorizationEngineTests/(testDecisionCacheInvalidatesForBindingRoleAndDelegationChangesWithoutRestart|testActiveDelegationWorksThenRevocationAndExpiryStopItImmediately)|RBACRepositoryTests/(testBindingsRejectDuplicatesAndProtectLastActiveOwner|testBindingsAndDelegationsPersistAcrossReopen)|HostwrightDaemonControlServiceTests/testServiceCanRestartAfterOwnedSocketCleanup'; swift build --product hostwrightd; swift build --product hostwright-control; swift build --product hostwright-rbac-qualification; scripts/lint.sh; git diff --check; scripts/check-docs.sh;; *) die 'unknown Gate 5 cell.' 70;; esac; }

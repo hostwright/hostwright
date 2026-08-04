@@ -49,6 +49,28 @@ final class RegistryTransportTests: XCTestCase {
                 maximumResponseBodyBytes: 1_024
             )
         )
+        let perRequestBound = RegistryTransportRequest(
+            url: valid.url,
+            method: .get,
+            maximumResponseBodyBytes: 512
+        )
+        XCTAssertNoThrow(try URLSessionRegistryTransport.validate(
+            perRequestBound,
+            maximumRequestBodyBytes: 1_024,
+            maximumResponseBodyBytes: 1_024
+        ))
+        let excessivePerRequestBound = RegistryTransportRequest(
+            url: valid.url,
+            method: .get,
+            maximumResponseBodyBytes: 1_025
+        )
+        XCTAssertThrowsError(try URLSessionRegistryTransport.validate(
+            excessivePerRequestBound,
+            maximumRequestBodyBytes: 1_024,
+            maximumResponseBodyBytes: 1_024
+        )) { error in
+            XCTAssertEqual(error as? RegistryTransportError, .responseBodyTooLarge)
+        }
 
         let insecure = RegistryTransportRequest(
             url: try XCTUnwrap(URL(string: "http://registry.example.com/v2/")),

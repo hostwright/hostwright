@@ -26,7 +26,7 @@ final class StorageStateRepositoryTests: XCTestCase {
                 try store.schemaVersion(),
                 HostwrightContractVersions.stateSchema
             )
-            XCTAssertEqual(HostwrightContractVersions.stateSchema, 20)
+            XCTAssertEqual(HostwrightContractVersions.stateSchema, 21)
             XCTAssertEqual(
                 try migrationVersions(store),
                 Array(1...HostwrightContractVersions.stateSchema)

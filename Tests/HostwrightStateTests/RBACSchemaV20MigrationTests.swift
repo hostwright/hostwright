@@ -15,9 +15,9 @@ final class RBACSchemaV20MigrationTests: XCTestCase {
       let result = try service.migrateToLatestWithVerifiedBackup()
 
       XCTAssertEqual(result.migration.fromSchemaVersion, 19)
-      XCTAssertEqual(result.migration.toSchemaVersion, 20)
-      XCTAssertEqual(try store.schemaVersion(), 20)
-      XCTAssertEqual(HostwrightContractVersions.stateSchema, 20)
+      XCTAssertEqual(result.migration.toSchemaVersion, 21)
+      XCTAssertEqual(try store.schemaVersion(), 21)
+      XCTAssertEqual(HostwrightContractVersions.stateSchema, 21)
       try store.validateSchema()
 
       let snapshot = try XCTUnwrap(result.rollbackSnapshot)

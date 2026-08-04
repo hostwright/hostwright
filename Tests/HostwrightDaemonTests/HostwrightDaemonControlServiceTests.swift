@@ -1,4 +1,5 @@
 import Darwin
+import CryptoKit
 import Foundation
 import XCTest
 @testable import HostwrightCLI
@@ -130,6 +131,122 @@ final class HostwrightDaemonControlServiceTests: XCTestCase {
       XCTAssertEqual(response.status, .completed)
       XCTAssertEqual(response.reasonCode, .completed)
       XCTAssertNotNil(response.result)
+    }
+  }
+
+  func testPersistentPluginReadTraversesAuthenticationRBACAndAuditPipeline() throws {
+    try withPrivateHome { home in
+      let fixture = try makeService(home: home)
+      try fixture.service.start()
+      defer { fixture.service.stop() }
+      let identity = try DarwinCurrentControlCodeIdentity.inspect()
+      let client = PersistentControlClient(
+        socketPath: fixture.socketPath,
+        serverTrustPolicy: PersistentControlServerTrustPolicy(
+          pinnedAdHocCodeDirectoryHashes: [identity.codeDirectoryHash]))
+      let request = ControlRequestEnvelope(
+        requestID: "plugin-persistent-list", operation: "plugin.list",
+        timeoutMilliseconds: 1_000, body: .object([:]))
+      let response = try client.send(request)
+      XCTAssertEqual(response.status, .completed)
+      XCTAssertEqual(response.reasonCode, .completed)
+      XCTAssertEqual(response.result, .array([]))
+
+      let replay = try client.send(request)
+      XCTAssertEqual(replay, response)
+      let store = SQLiteStateStore(path: fixture.statePath)
+      let auditCount = try store.withConnection(createIfNeeded: false, readOnly: true) {
+        try $0.query(
+          "SELECT COUNT(*) FROM audit_records WHERE request_id = ?",
+          bindings: [.text(request.requestID)]).first?.first.flatMap { $0.flatMap(Int.init) } ?? 0
+      }
+      XCTAssertGreaterThanOrEqual(auditCount, 1)
+      XCTAssertNil(try ControlRequestRepository(store: store).load(request.requestID))
+    }
+  }
+
+  func testPersistentPluginUninstallPersistsTerminalStateAndReplaysIdempotently() throws {
+    try withPrivateHome { home in
+      let fixture = try makeService(home: home)
+      let resolution = try HostwrightLocalPathResolver.resolve(
+        homeDirectory: home.path,
+        environment: [:]
+      )
+      let store = SQLiteStateStore(path: fixture.statePath)
+      let seeded = try seedStagedPluginPackage(
+        home: home,
+        applicationSupportDirectory: resolution.layout.applicationSupportDirectory,
+        repository: store.plugins
+      )
+
+      try fixture.service.start()
+      defer { fixture.service.stop() }
+
+      let identity = try DarwinCurrentControlCodeIdentity.inspect()
+      let client = PersistentControlClient(
+        socketPath: fixture.socketPath,
+        serverTrustPolicy: PersistentControlServerTrustPolicy(
+          pinnedAdHocCodeDirectoryHashes: [identity.codeDirectoryHash]
+        )
+      )
+      let session = try client.connectSession()
+      defer { session.close() }
+      let request = ControlRequestEnvelope(
+        requestID: "plugin-persistent-uninstall",
+        operation: "plugin.uninstall",
+        timeoutMilliseconds: 1_000,
+        idempotencyKey: "plugin-persistent-uninstall-key",
+        body: .object([
+          "packageDigest": .string(seeded.packageDigest),
+          "expectedGeneration": .integer(Int64(seeded.generation)),
+        ])
+      )
+
+      let first = try session.send(request)
+      XCTAssertEqual(first.status, .completed)
+      XCTAssertEqual(first.reasonCode, .completed)
+      XCTAssertNotNil(first.operationRef)
+
+      let replay = try session.send(request)
+      XCTAssertEqual(replay, first)
+
+      let terminal = try XCTUnwrap(store.plugins.package(digest: seeded.packageDigest))
+      XCTAssertEqual(terminal.lifecycleState, .uninstalled)
+      XCTAssertEqual(terminal.generation, seeded.generation + 1)
+      XCTAssertEqual(terminal.ownershipLedger, seeded.ownershipLedger)
+      XCTAssertFalse(FileManager.default.fileExists(atPath: terminal.storagePath))
+      XCTAssertNil(try store.plugins.activation(identifier: terminal.manifest.identifier))
+      XCTAssertEqual(
+        try store.plugins.rollback(operationID: request.requestID)?.status,
+        "succeeded"
+      )
+      XCTAssertEqual(
+        try store.plugins.rollback(operationID: request.requestID)?.stage,
+        "complete"
+      )
+
+      let requests = ControlRequestRepository(store: store)
+      let persisted = try XCTUnwrap(try requests.load(request.requestID))
+      XCTAssertEqual(persisted.status, .completed)
+      XCTAssertEqual(persisted.operationReference, first.operationRef)
+      XCTAssertEqual(
+        try requests.load(
+          subjectID: "daemon-control-test-owner",
+          idempotencyKey: "plugin-persistent-uninstall-key"
+        ),
+        persisted
+      )
+
+      let auditEvents = try store.withConnection(createIfNeeded: false, readOnly: true) {
+        try $0.query(
+          "SELECT action, outcome, reason_code FROM audit_records WHERE request_id = ? ORDER BY sequence",
+          bindings: [.text(request.requestID)]
+        )
+      }
+      XCTAssertTrue(auditEvents.contains(["authorization", "allow", "authorization.allowed"]))
+      XCTAssertTrue(auditEvents.contains(["admission", "allowed", "admission.allowed"]))
+      XCTAssertTrue(auditEvents.contains(["request", "accepted", "accepted"]))
+      XCTAssertTrue(auditEvents.contains(["operation", "completed", "completed"]))
     }
   }
 
@@ -286,6 +403,97 @@ final class HostwrightDaemonControlServiceTests: XCTestCase {
     return descriptor
   }
 
+  private func seedStagedPluginPackage(
+    home: URL,
+    applicationSupportDirectory: String,
+    repository: PluginLifecycleRepository
+  ) throws -> PluginPackageRecord {
+    let content = Data("persistent plugin fixture".utf8)
+    let contentDigests = [PluginContentDigest(path: "plugin.wasm", digest: pluginDigest(content))]
+    let packageDigest = pluginDigest(try ControlPlaneCanonicalJSON.encode(
+      PluginContentIndexFixture(schemaVersion: 1, contentDigests: contentDigests)
+    ))
+    let manifest = PluginPackageManifest(
+      identifier: "dev.hostwright.persistent-plugin",
+      packageVersion: "1.0.0",
+      hostwrightCompatibility: ">=0.0.2,<0.0.3",
+      providerKind: .wasi,
+      entrypoint: "plugin.wasm",
+      grants: [PluginGrant(capability: .diagnostics, scope: "read")],
+      artifactDigest: contentDigests[0].digest,
+      contentDigests: contentDigests,
+      provenance: PluginProvenance(
+        checksum: packageDigest,
+        signature: "persistent-fixture-signature",
+        signerIdentifier: "dev.hostwright.persistent-plugin-signer",
+        source: PluginSource(kind: .localDirectory, locator: home.appendingPathComponent("source").path)
+      ),
+      cmsSignature: "persistent-fixture-signature",
+      signerIdentifier: "dev.hostwright.persistent-plugin-signer"
+    )
+    let manifestData = try ControlPlaneCanonicalJSON.encode(manifest)
+    let pluginRootURL = URL(
+      fileURLWithPath: applicationSupportDirectory,
+      isDirectory: true
+    )
+      .appendingPathComponent("plugins-v1", isDirectory: true)
+    if mkdir(pluginRootURL.path, 0o700) != 0, errno != EEXIST {
+      throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+    }
+    let packagesURL = pluginRootURL.appendingPathComponent("packages", isDirectory: true)
+    if mkdir(packagesURL.path, 0o700) != 0, errno != EEXIST {
+      throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+    }
+    let packageURL = packagesURL
+      .appendingPathComponent(String(packageDigest.dropFirst("sha256:".count)), isDirectory: true)
+    try FileManager.default.createDirectory(
+      at: packageURL,
+      withIntermediateDirectories: false,
+      attributes: [.posixPermissions: 0o700]
+    )
+    let manifestURL = packageURL.appendingPathComponent("manifest.json")
+    let contentURL = packageURL.appendingPathComponent("plugin.wasm")
+    try manifestData.write(to: manifestURL)
+    try content.write(to: contentURL)
+    XCTAssertEqual(chmod(manifestURL.path, 0o400), 0)
+    XCTAssertEqual(chmod(contentURL.path, 0o400), 0)
+
+    let ledger = try [
+      pluginOwnedArtifact(at: packageURL, kind: .directory),
+      pluginOwnedArtifact(at: manifestURL, kind: .file, digest: pluginDigest(manifestData)),
+      pluginOwnedArtifact(at: contentURL, kind: .file, digest: pluginDigest(content)),
+    ]
+    let record = try PluginPackageRecord(
+      packageDigest: packageDigest,
+      manifest: manifest,
+      storagePath: packageURL.path,
+      ownershipLedger: ledger,
+      lifecycleState: .staged,
+      createdBySubjectID: "daemon-control-test-owner",
+      createdAt: "2026-08-04T00:00:00Z",
+      updatedAt: "2026-08-04T00:00:00Z"
+    )
+    return try repository.persistVerifiedPackage(record)
+  }
+
+  private func pluginOwnedArtifact(
+    at url: URL,
+    kind: PluginOwnedArtifactKind,
+    digest: String? = nil
+  ) throws -> PluginOwnedArtifact {
+    var metadata = stat()
+    guard lstat(url.path, &metadata) == 0 else {
+      throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+    }
+    return try PluginOwnedArtifact(
+      path: url.path,
+      kind: kind,
+      deviceID: UInt64(metadata.st_dev),
+      inode: UInt64(metadata.st_ino),
+      sha256Digest: digest
+    )
+  }
+
   private func withPrivateHome(_ body: (URL) throws -> Void) throws {
     let home = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(
       "hwds-\(UUID().uuidString.prefix(8))",
@@ -299,6 +507,15 @@ final class HostwrightDaemonControlServiceTests: XCTestCase {
     defer { try? FileManager.default.removeItem(at: home) }
     try body(home)
   }
+}
+
+private struct PluginContentIndexFixture: Encodable {
+  let schemaVersion: Int
+  let contentDigests: [PluginContentDigest]
+}
+
+private func pluginDigest(_ data: Data) -> String {
+  "sha256:" + SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
 }
 
 private final class FailOnceAuditRecorder: ControlSecurityAuditRecording, @unchecked Sendable {

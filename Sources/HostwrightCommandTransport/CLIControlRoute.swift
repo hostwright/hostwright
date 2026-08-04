@@ -313,6 +313,9 @@ public struct CLIControlRoute: Equatable, Sendable {
 
     private static func normalizedOperation(_ arguments: [String]) -> String {
         guard let first = arguments.first else { return "help" }
+        if first == "extension", arguments.count >= 2, arguments[1] != "check" {
+            return "plugin.\(arguments[1])"
+        }
         switch first {
         case "--version": return "version"
         case "--help", "-h": return "help"
@@ -332,6 +335,8 @@ public struct CLIControlRoute: Equatable, Sendable {
             return arguments[index]
         }
         switch operation {
+        case "extension":
+            return value(1) ?? operation
         case "registry":
             guard let first = value(1) else { return operation }
             if ["referrers", "trust", "sbom", "vulnerability", "provenance"].contains(first),
@@ -367,6 +372,12 @@ public struct CLIControlRoute: Equatable, Sendable {
         case .runtimeMigrate, .apply, .lifecycle, .cleanup, .benchmark, .extensionCheck,
              .initManifest:
             return true
+        case .plugin(let options):
+            switch options.action {
+            case .list, .status, .discover: return false
+            case .install, .update, .activate, .rollback, .revoke, .quarantine, .uninstall:
+                return true
+            }
         case .events:
             return false
         case .interactive(let options):

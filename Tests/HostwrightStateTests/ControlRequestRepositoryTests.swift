@@ -30,6 +30,62 @@ final class ControlRequestRepositoryTests: XCTestCase {
       .accepted)
   }
 
+  func testTerminalResponsePersistsExactlyAcrossReopenAndRejectsMismatchedEnvelope() throws {
+    let root = try temporaryRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let path = root.appendingPathComponent("state.sqlite").path
+    let store = SQLiteStateStore(path: path)
+    try store.migrate()
+    try bootstrapOwner(in: store)
+    let repository = makeRepository(store)
+    _ = try repository.record(ControlRequestSubmission(
+      request: request(id: "response-request", key: "response-key"),
+      idempotencyExpiresAt: expiresAt
+    ))
+
+    let response = ControlResponseEnvelope(
+      requestID: "response-request",
+      status: .completed,
+      reasonCode: .completed,
+      operationRef: "unary:" + String(repeating: "c", count: 64),
+      result: .object(["generation": .integer(3), "state": .string("active")])
+    )
+    let canonicalResponse = try ControlPlaneCanonicalJSON.encode(response)
+    let completed = try repository.updateTerminal(
+      requestID: "response-request",
+      status: .completed,
+      operationReference: response.operationRef,
+      responseCanonicalJSON: canonicalResponse,
+      updatedAt: updatedAt
+    )
+    XCTAssertEqual(completed.responseCanonicalJSON, canonicalResponse)
+
+    let reopened = makeRepository(SQLiteStateStore(path: path))
+    let reloaded = try XCTUnwrap(reopened.load("response-request"))
+    XCTAssertEqual(reloaded.responseCanonicalJSON, canonicalResponse)
+    XCTAssertEqual(
+      try JSONDecoder().decode(ControlResponseEnvelope.self, from: canonicalResponse),
+      response
+    )
+
+    _ = try repository.record(ControlRequestSubmission(
+      request: request(id: "mismatch-request"), idempotencyExpiresAt: nil
+    ))
+    let mismatched = try ControlPlaneCanonicalJSON.encode(ControlResponseEnvelope(
+      requestID: "different-request",
+      status: .completed,
+      reasonCode: .completed
+    ))
+    XCTAssertThrowsError(try repository.updateTerminal(
+      requestID: "mismatch-request",
+      status: .completed,
+      operationReference: nil,
+      responseCanonicalJSON: mismatched,
+      updatedAt: updatedAt
+    ))
+    XCTAssertEqual(try repository.load("mismatch-request")?.status, .accepted)
+  }
+
   func testExactReplayReturnsPriorRecordAndDigestConflictIsRejected() throws {
     try withStore { store in
       try bootstrapOwner(in: store)

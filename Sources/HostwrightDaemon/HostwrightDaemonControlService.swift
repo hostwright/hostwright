@@ -9,7 +9,9 @@ import HostwrightControlSecurity
 import HostwrightControlTransport
 import HostwrightCore
 import HostwrightDaemonCore
+import HostwrightExtensions
 import HostwrightPolicy
+import HostwrightRegistry
 import HostwrightState
 
 final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sendable {
@@ -166,6 +168,64 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
       repository: store.admission, authorizer: rbacAuthorizer)
     let profileAdministration = WorkloadProfileAdministrationService(
       repository: store.workloadProfiles, authorizer: rbacAuthorizer)
+    let providerOwnershipLedgerURL = URL(
+      fileURLWithPath: resolution.layout.metadataDirectory,
+      isDirectory: true
+    ).appendingPathComponent("plugin-provider-workers.jsonl")
+    try Self.prepareProviderOwnershipLedger(providerOwnershipLedgerURL)
+    let pluginRuntime = PluginControlRuntime(
+      repository: store.plugins,
+      immutableStore: try PluginImmutableStore(
+        rootURL: URL(
+          fileURLWithPath: resolution.layout.applicationSupportDirectory,
+          isDirectory: true
+        ).appendingPathComponent("plugins-v1", isDirectory: true)),
+      healthChecker: try PluginProviderHealthChecker(
+        wasiOwnershipLedgerURL: providerOwnershipLedgerURL),
+      registryTransport: SynchronousURLSessionRegistryTransport(
+        maximumResponseBodyBytes: PluginPackageVerifier.maximumContentFileBytes),
+      activeProviders: try ActivePluginProviderRuntime(
+        repository: store.plugins,
+        wasiOwnershipLedgerURL: providerOwnershipLedgerURL))
+    let interruptedPluginOperations = try pluginRuntime.repository.incompleteRollbackOperations()
+    if !interruptedPluginOperations.isEmpty {
+      let recoveryTimestamp = ISO8601DateFormatter().string(from: Date())
+      for interrupted in interruptedPluginOperations {
+        try auditTrail.record(ControlSecurityAuditEvent(
+          subjectID: interrupted.requestedBySubjectID,
+          requestID: interrupted.operationID,
+          target: "plugin.lifecycle",
+          action: .operation,
+          outcome: "started",
+          reasonCode: "plugin.lifecycle-recovery-started",
+          operationRef: interrupted.operationID,
+          payloadDigest: interrupted.toPackageDigest,
+          deduplicationKey: "plugin:\(interrupted.operationID):restart-recovery-started"
+        ))
+        try pluginRuntime.immutableStore.recoverInterruptedOperation(
+          interrupted, repository: pluginRuntime.repository,
+          timestamp: recoveryTimestamp)
+        guard let recovered = try pluginRuntime.repository.rollback(
+          operationID: interrupted.operationID),
+          ["recovery-success-audit", "recovery-failure-audit"].contains(recovered.stage)
+        else { throw PersistentControlServerError.persistenceFailed }
+        try auditTrail.record(ControlSecurityAuditEvent(
+          subjectID: interrupted.requestedBySubjectID,
+          requestID: interrupted.operationID,
+          target: "plugin.lifecycle",
+          action: .operation,
+          outcome: recovered.stage == "recovery-success-audit" ? "success" : "error",
+          reasonCode: recovered.stage == "recovery-success-audit"
+            ? "plugin.lifecycle-recovered" : "plugin.lifecycle-interrupted",
+          operationRef: interrupted.operationID,
+          payloadDigest: interrupted.toPackageDigest,
+          deduplicationKey: "plugin:\(interrupted.operationID):restart-recovery"
+        ))
+        _ = try pluginRuntime.immutableStore.finalizeRecoveredOperation(
+          operationID: interrupted.operationID, repository: pluginRuntime.repository,
+          timestamp: recoveryTimestamp)
+      }
+    }
     let listener = try ControlUnixSocketListener(
       path: resolution.layout.controlSocket,
       recoverStaleSocket: true
@@ -181,6 +241,7 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
       "admission.policy.delete", "admission.exception.create",
       "admission.exception.delete",
     ]).union(WorkloadProfileControlOperations.mutatingOperations)
+      .union(PluginControlOperations.mutatingOperations)
     let server = try PersistentControlConnectionServer(
       authenticator: authenticator,
       requestRepository: requestRepository,
@@ -302,7 +363,8 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
           rbacAuthorizer: rbacAuthorizer, admissionRepository: store.admission,
           admissionAdministration: admissionAdministration,
           admissionEngine: admissionEngine, profileRepository: store.workloadProfiles,
-          profileAdministration: profileAdministration, profileEngine: profileEngine)
+          profileAdministration: profileAdministration, profileEngine: profileEngine,
+          pluginRuntime: pluginRuntime)
       }
     )
     lock.lock()
@@ -312,6 +374,33 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
     acceptQueue.async { [weak self] in
       self?.acceptLoop(listener: listener, server: server)
     }
+  }
+
+  private static func prepareProviderOwnershipLedger(_ url: URL) throws {
+    let descriptor = open(
+      url.path, O_WRONLY | O_APPEND | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC,
+      S_IRUSR | S_IWUSR)
+    if descriptor >= 0 {
+      defer { close(descriptor) }
+      let header = Data("recorded_at\ttype\tidentifier\tpath\tdevice\tinode\tidentity\n".utf8)
+      let written = header.withUnsafeBytes { bytes in
+        Darwin.write(descriptor, bytes.baseAddress, bytes.count)
+      }
+      guard written == header.count, fsync(descriptor) == 0 else {
+        throw PersistentControlServerError.persistenceFailed
+      }
+      return
+    }
+    guard errno == EEXIST else { throw PersistentControlServerError.persistenceFailed }
+    let existing = open(url.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+    guard existing >= 0 else { throw PersistentControlServerError.persistenceFailed }
+    defer { close(existing) }
+    var metadata = stat()
+    guard fstat(existing, &metadata) == 0, metadata.st_mode & S_IFMT == S_IFREG,
+      metadata.st_uid == geteuid(), metadata.st_nlink == 1,
+      metadata.st_mode & 0o777 == 0o600, metadata.st_size >= 0,
+      metadata.st_size <= 16 * 1_024 * 1_024
+    else { throw PersistentControlServerError.persistenceFailed }
   }
 
   func stop() {
@@ -414,7 +503,8 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
     admissionEngine: AdmissionPolicyEngine,
     profileRepository: WorkloadProfileRepository,
     profileAdministration: WorkloadProfileAdministrationService,
-    profileEngine: WorkloadProfilePolicyEngine
+    profileEngine: WorkloadProfilePolicyEngine,
+    pluginRuntime: PluginControlRuntime
   ) throws -> ControlResponseEnvelope {
     if let route = try CLIControlRoute.validateStreamPreparation(request: request) {
       let preparation = try streamSources.prepare(
@@ -450,6 +540,11 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
     if let response = RBACControlOperations.handle(
       peer: peer, request: request, repository: rbacRepository,
       administration: rbacAdministration, authorizer: rbacAuthorizer, now: Date())
+    {
+      return response
+    }
+    if let response = PluginControlOperations.handle(
+      peer: peer, request: request, runtime: pluginRuntime)
     {
       return response
     }

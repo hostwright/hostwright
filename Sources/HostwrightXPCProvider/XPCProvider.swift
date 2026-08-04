@@ -393,6 +393,20 @@ public enum XPCProviderCodeIdentity {
     return try inspect(code)
   }
 
+  public static func file(_ url: URL) throws -> CodeIdentityProof {
+    guard url.isFileURL, url.path.hasPrefix("/"), !url.path.contains("\0") else {
+      throw XPCProviderError.identityUnavailable
+    }
+    var staticCode: SecStaticCode?
+    guard SecStaticCodeCreateWithPath(url as CFURL, [], &staticCode) == errSecSuccess,
+      let staticCode,
+      SecStaticCodeCheckValidity(
+        staticCode, SecCSFlags(rawValue: kSecCSStrictValidate | revocationFlag), nil)
+        == errSecSuccess
+    else { throw XPCProviderError.identityUnavailable }
+    return try inspect(staticCode)
+  }
+
   private static func inspect(_ code: SecCode) throws -> CodeIdentityProof {
     guard SecCodeCheckValidity(
       code, SecCSFlags(rawValue: kSecCSStrictValidate | revocationFlag), nil) == errSecSuccess
@@ -401,6 +415,10 @@ public enum XPCProviderCodeIdentity {
     guard SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess, let staticCode else {
       throw XPCProviderError.identityUnavailable
     }
+    return try inspect(staticCode)
+  }
+
+  private static func inspect(_ staticCode: SecStaticCode) throws -> CodeIdentityProof {
     var information: CFDictionary?
     guard SecCodeCopySigningInformation(
       staticCode, SecCSFlags(rawValue: kSecCSSigningInformation), &information) == errSecSuccess,

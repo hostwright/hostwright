@@ -194,8 +194,10 @@ let package = Package(
                 "HostwrightControlTransport",
                 "HostwrightCore",
                 "HostwrightDaemonCore",
+                "HostwrightExtensions",
                 "HostwrightObservability",
                 "HostwrightPolicy",
+                "HostwrightRegistry",
                 "HostwrightRuntime",
                 "HostwrightState"
             ]
@@ -299,8 +301,14 @@ let package = Package(
         .target(
             name: "HostwrightExtensions",
             dependencies: [
+                "HostwrightControlPlane",
                 "HostwrightCore",
-                "HostwrightPolicy"
+                "HostwrightNetworkProviders",
+                "HostwrightPolicy",
+                "HostwrightRegistry",
+                "HostwrightState",
+                "HostwrightWASIProviderRuntime",
+                "HostwrightXPCProvider"
             ]
         ),
         .target(
@@ -630,8 +638,12 @@ let package = Package(
             name: "HostwrightExtensionsTests",
             dependencies: [
                 "HostwrightCore",
+                "HostwrightControlSecurity",
                 "HostwrightExtensions",
-                "HostwrightPolicy"
+                "HostwrightPolicy",
+                "HostwrightRegistry",
+                "HostwrightState",
+                "HostwrightWASIProviderRuntime"
             ],
             resources: [
                 .process("Fixtures")

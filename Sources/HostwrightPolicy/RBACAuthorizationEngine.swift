@@ -289,6 +289,14 @@ public final class RBACAuthorizationEngine: @unchecked Sendable {
     case "profile.create": (resourceKind, verb) = (.profile, .create)
     case "profile.update": (resourceKind, verb) = (.profile, .update)
     case "profile.delete": (resourceKind, verb) = (.profile, .delete)
+    case "plugin.list": (resourceKind, verb) = (.plugin, .list)
+    case "plugin.get", "plugin.status", "plugin.discover":
+      (resourceKind, verb) = (.plugin, .get)
+    case "plugin.install": (resourceKind, verb) = (.plugin, .create)
+    case "plugin.update", "plugin.activate", "plugin.rollback", "plugin.quarantine":
+      (resourceKind, verb) = (.plugin, .update)
+    case "plugin.revoke": (resourceKind, verb) = (.plugin, .admin)
+    case "plugin.uninstall": (resourceKind, verb) = (.plugin, .delete)
     default: (resourceKind, verb) = (.daemon, .admin)
     }
     if declaredMutation == true {

@@ -358,7 +358,12 @@ public struct PluginPackageManifest: Codable, Equatable, Sendable {
     guard abiVersion == 1 else { throw ContractValidationError.unsupportedVersion("plugin ABI") }
     guard
       !identifier.isEmpty && !packageVersion.isEmpty && !hostwrightCompatibility.isEmpty
-        && !entrypoint.isEmpty && AuditRecord.digest(artifactDigest) && !contentDigests.isEmpty
+        && Self.validSemanticVersion(packageVersion)
+        && hostwrightCompatibility.range(
+          of: "^(?:(?:>=|<=|>|<|=)?[0-9]+\\.[0-9]+\\.[0-9]+)(?:(?:\\s*,\\s*|\\s+)(?:(?:>=|<=|>|<|=)?[0-9]+\\.[0-9]+\\.[0-9]+)){0,3}$",
+          options: .regularExpression) != nil
+        && !entrypoint.isEmpty && !grants.isEmpty
+        && AuditRecord.digest(artifactDigest) && !contentDigests.isEmpty
         && Set(contentDigests.map(\.path)).count == contentDigests.count && !cmsSignature.isEmpty
         && !signerIdentifier.isEmpty
     else { throw ContractValidationError.required("plugin manifest") }
@@ -366,11 +371,50 @@ public struct PluginPackageManifest: Codable, Equatable, Sendable {
     try contentDigests.forEach { try $0.validate() }
     try provenance.validate()
   }
+
+  private static func validSemanticVersion(_ raw: String) -> Bool {
+    let buildParts = raw.split(separator: "+", maxSplits: 1, omittingEmptySubsequences: false)
+    guard buildParts.count <= 2,
+      buildParts.count == 1 || validIdentifiers(buildParts[1], numericLeadingZerosAllowed: true)
+    else { return false }
+    let versionParts = buildParts[0].split(
+      separator: "-", maxSplits: 1, omittingEmptySubsequences: false)
+    let core = versionParts[0].split(separator: ".", omittingEmptySubsequences: false)
+    guard versionParts.count <= 2, core.count == 3,
+      core.allSatisfy(validNumericIdentifier)
+    else { return false }
+    return versionParts.count == 1
+      || validIdentifiers(versionParts[1], numericLeadingZerosAllowed: false)
+  }
+
+  private static func validIdentifiers(
+    _ raw: Substring, numericLeadingZerosAllowed: Bool
+  ) -> Bool {
+    let identifiers = raw.split(separator: ".", omittingEmptySubsequences: false)
+    return !identifiers.isEmpty && identifiers.allSatisfy { identifier in
+      guard !identifier.isEmpty, identifier.utf8.allSatisfy({ byte in
+        (48...57).contains(byte) || (65...90).contains(byte)
+          || (97...122).contains(byte) || byte == 45
+      }) else { return false }
+      let numeric = identifier.utf8.allSatisfy { (48...57).contains($0) }
+      return numericLeadingZerosAllowed || !numeric || validNumericIdentifier(identifier)
+    }
+  }
+
+  private static func validNumericIdentifier(_ value: Substring) -> Bool {
+    !value.isEmpty && value.utf8.allSatisfy { (48...57).contains($0) }
+      && (value == "0" || !value.hasPrefix("0"))
+  }
 }
 public enum PluginSourceKind: String, Codable, Sendable { case localDirectory, httpsRegistry }
 public struct PluginSource: Codable, Equatable, Sendable {
   public let kind: PluginSourceKind
   public let locator: String
+
+  public init(kind: PluginSourceKind, locator: String) {
+    self.kind = kind
+    self.locator = locator
+  }
 
   public func validate() throws {
     switch kind {

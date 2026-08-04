@@ -251,12 +251,12 @@ final class ControlIdentityRepositoryTests: XCTestCase {
     try withStore(throughVersion: 17) { store in
       XCTAssertEqual(try store.schemaVersion(), 17)
       try store.migrate()
-      XCTAssertEqual(try store.schemaVersion(), 20)
+      XCTAssertEqual(try store.schemaVersion(), MigrationRunner.latestSchemaVersion)
       try store.withConnection(createIfNeeded: false, readOnly: true) { connection in
         let versions = try connection.query(
           "SELECT version FROM schema_migrations ORDER BY version"
         ).compactMap { $0.first ?? nil }.compactMap(Int.init)
-        XCTAssertEqual(versions, Array(1...20))
+        XCTAssertEqual(versions, Array(1...MigrationRunner.latestSchemaVersion))
       }
     }
   }

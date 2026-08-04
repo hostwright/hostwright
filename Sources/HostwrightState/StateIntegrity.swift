@@ -300,6 +300,12 @@ public struct StateIntegrityService: Sendable {
                      WHERE request_id = '' OR subject_id = ''
                         OR length(request_digest_sha256) != 64 OR request_digest_sha256 GLOB '*[^0-9a-f]*'
                         OR status NOT IN ('accepted', 'completed', 'rejected', 'error')
+                        OR (response_json IS NOT NULL AND (length(response_json) NOT BETWEEN 2 AND 1048576 OR NOT json_valid(response_json)))
+                        OR (response_json IS NOT NULL AND (
+                          COALESCE(json_extract(CASE WHEN json_valid(response_json) THEN response_json ELSE '{}' END, '$.requestID'), '') != request_id
+                          OR COALESCE(json_extract(CASE WHEN json_valid(response_json) THEN response_json ELSE '{}' END, '$.status'), '') != status
+                          OR COALESCE(json_extract(CASE WHEN json_valid(response_json) THEN response_json ELSE '{}' END, '$.operationRef'), '') != COALESCE(operation_reference, '')
+                        ))
                         OR julianday(created_at) IS NULL OR julianday(updated_at) IS NULL)
                   + (SELECT COUNT(*) FROM idempotency_records
                      WHERE subject_id = '' OR idempotency_key = '' OR request_id = ''
@@ -793,11 +799,54 @@ public struct StateIntegrityService: Sendable {
                         OR parent_profile_id = profile_id
                         OR json_type(CASE WHEN json_valid(profile_json) THEN profile_json ELSE 'null' END) != 'object'
                         OR length(profile_sha256) != 64 OR profile_sha256 GLOB '*[^0-9a-f]*')
+                  + (SELECT COUNT(*) FROM plugin_packages
+                     WHERE length(package_digest) != 71 OR package_digest NOT GLOB 'sha256:*'
+                        OR plugin_identifier = '' OR package_version = ''
+                        OR provider_kind NOT IN ('wasi','xpc')
+                        OR json_type(CASE WHEN json_valid(manifest_json) THEN manifest_json ELSE 'null' END) != 'object'
+                        OR length(manifest_digest) != 71 OR manifest_digest NOT GLOB 'sha256:*'
+                        OR lifecycle_state NOT IN ('discovered','verified','staged','active','rollback','quarantined','revoked','uninstalled')
+                        OR json_type(CASE WHEN json_valid(ownership_ledger_json) THEN ownership_ledger_json ELSE 'null' END) != 'array'
+                        OR generation < 1 OR julianday(created_at) IS NULL OR julianday(updated_at) IS NULL
+                        OR julianday(updated_at) < julianday(created_at))
+                  + (SELECT COUNT(*) FROM plugin_provenance
+                     WHERE length(checksum) != 71 OR checksum NOT GLOB 'sha256:*'
+                        OR source_kind NOT IN ('localDirectory','httpsRegistry')
+                        OR json_type(CASE WHEN json_valid(canonical_json) THEN canonical_json ELSE 'null' END) != 'object'
+                        OR julianday(verified_at) IS NULL)
+                  + (SELECT COUNT(*) FROM plugin_grants
+                     WHERE capability NOT IN ('policy','observation','storage','network','diagnostics','scheduler','secret-metadata')
+                        OR scope = '' OR approval_ref = '' OR julianday(granted_at) IS NULL
+                        OR (revoked_at IS NOT NULL AND julianday(revoked_at) < julianday(granted_at)))
+                  + (SELECT COUNT(*) FROM plugin_activations
+                     WHERE plugin_identifier = '' OR generation < 1
+                        OR health_status NOT IN ('pending','healthy','degraded','unhealthy','revoked')
+                        OR julianday(activated_at) IS NULL OR julianday(updated_at) IS NULL
+                        OR julianday(updated_at) < julianday(activated_at)
+                        OR (SELECT plugin_identifier FROM plugin_packages WHERE package_digest = active_package_digest) != plugin_identifier
+                        OR (prior_package_digest IS NOT NULL AND
+                            (SELECT plugin_identifier FROM plugin_packages WHERE package_digest = prior_package_digest) != plugin_identifier))
+                  + (SELECT COUNT(*) FROM plugin_revocations
+                     WHERE target_kind NOT IN ('package','signer') OR target_identifier = ''
+                        OR reason = '' OR julianday(revoked_at) IS NULL)
+                  + (SELECT COUNT(*) FROM plugin_quarantine
+                     WHERE reason_code = '' OR length(detail_digest) != 71 OR detail_digest NOT GLOB 'sha256:*'
+                        OR julianday(quarantined_at) IS NULL
+                        OR (resolved_at IS NOT NULL AND julianday(resolved_at) < julianday(quarantined_at)))
+                  + (SELECT COUNT(*) FROM plugin_rollback_state
+                     WHERE plugin_identifier = '' OR stage NOT IN ('intent','install-intent','rollback-intent','uninstall-intent','staged','health-check','activation','cleanup','recovery-success-audit','recovery-failure-audit','complete','failed','cancelled')
+                        OR status NOT IN ('pending','running','succeeded','failed','cancelled')
+                        OR idempotency_key = ''
+                        OR json_type(CASE WHEN json_valid(ownership_effects_json) THEN ownership_effects_json ELSE 'null' END) != 'array'
+                        OR generation < 1 OR julianday(created_at) IS NULL OR julianday(updated_at) IS NULL
+                        OR julianday(updated_at) < julianday(created_at))
                 """
             )
             let invalidFrozenRBACDefaults = try frozenRBACDefaultProblems(connection)
             let invalidAdmissionContent = try admissionContentProblems(connection)
             let invalidWorkloadProfileContent = try workloadProfileContentProblems(connection)
+            let invalidPluginContent = try PluginLifecycleRepository(store: store)
+                .integrityProblems(on: connection)
             let authoritativeProblems = sqlAuthoritativeProblems +
                 invalidIdentityProblems + invalidReferrerContent +
                 invalidImageTrustContent + invalidImageSBOMContent +
@@ -809,6 +858,7 @@ public struct StateIntegrityService: Sendable {
                 + invalidPolicyProfileStructure + invalidFrozenRBACDefaults
                 + invalidAdmissionContent
                 + invalidWorkloadProfileContent
+                + invalidPluginContent
             if authoritativeProblems == 0 {
                 checks.append(.init(identifier: "hostwright.authoritative-records", status: .passed, message: "Authoritative state records satisfy the v\(MigrationRunner.latestSchemaVersion) logical contract."))
             } else {
@@ -2130,7 +2180,14 @@ public struct StateIntegrityService: Sendable {
         "rbac_delegations",
         "admission_policies",
         "admission_exceptions",
-        "workload_profiles"
+        "workload_profiles",
+        "plugin_packages",
+        "plugin_provenance",
+        "plugin_grants",
+        "plugin_activations",
+        "plugin_revocations",
+        "plugin_quarantine",
+        "plugin_rollback_state"
     ]
 
     private static let requiredIndexes = [
@@ -2172,6 +2229,14 @@ public struct StateIntegrityService: Sendable {
         "admission_exceptions_lookup_idx",
         "workload_profiles_parent_idx",
         "workload_profiles_digest_idx",
+        "plugin_packages_identifier_idx",
+        "plugin_packages_state_idx",
+        "plugin_provenance_signer_idx",
+        "plugin_grants_capability_idx",
+        "plugin_activations_digest_idx",
+        "plugin_revocations_target_idx",
+        "plugin_quarantine_package_idx",
+        "plugin_rollback_operation_idx",
         "restart_recovery_operation_idx",
         "restart_recovery_project_idx",
         "operation_groups_operation_idx",
@@ -2269,6 +2334,12 @@ public struct StateIntegrityService: Sendable {
         "rbac_last_owner_delete",
         "rbac_delegation_owner_insert",
         "rbac_delegation_owner_update",
-        "rbac_owner_binding_update"
+        "rbac_owner_binding_update",
+        "plugin_package_immutable_content",
+        "plugin_provenance_immutable",
+        "plugin_provenance_delete",
+        "plugin_grant_delete",
+        "plugin_active_package_match_insert",
+        "plugin_active_package_match_update"
     ]
 }

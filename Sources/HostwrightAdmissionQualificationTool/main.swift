@@ -1,5 +1,6 @@
 import Foundation
 import HostwrightControlPlane
+import HostwrightCore
 import HostwrightPolicy
 import HostwrightState
 
@@ -100,7 +101,8 @@ enum HostwrightAdmissionQualificationTool {
       exceptionAllowed: approved.allowed && approved.exceptionIDs == [exception.exceptionID],
       expiredExceptionDenied: !expired.allowed, dryRunMarked: dryRun.dryRun,
       persistedAcrossReopen: persisted)
-    guard integrity.health == .healthy, result.stateSchemaVersion == 20,
+    guard integrity.health == .healthy,
+      result.stateSchemaVersion == HostwrightContractVersions.stateSchema,
       result.deterministicPlanHash, result.mutationApplied, result.conflictDenied,
       result.validationDenied, result.exceptionAllowed, result.expiredExceptionDenied,
       result.dryRunMarked, result.persistedAcrossReopen

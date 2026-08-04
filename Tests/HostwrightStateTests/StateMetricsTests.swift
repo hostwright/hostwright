@@ -32,7 +32,7 @@ final class StateMetricsTests: XCTestCase {
             ).snapshot()
 
             XCTAssertEqual(first.schemaVersion, 1)
-            XCTAssertEqual(first.source.schemaVersion, 20)
+            XCTAssertEqual(first.source.schemaVersion, MigrationRunner.latestSchemaVersion)
             XCTAssertEqual(first.series.count, 59)
             XCTAssertLessThanOrEqual(first.series.count, HostwrightMetricCatalog.maximumSeries)
             XCTAssertEqual(first.snapshotSHA256, second.snapshotSHA256)
@@ -175,8 +175,8 @@ final class StateMetricsTests: XCTestCase {
 
         try store.migrate()
         let snapshot = try StateMetricsService(store: store).snapshot()
-        XCTAssertEqual(snapshot.source.schemaVersion, 20)
-        XCTAssertEqual(try store.schemaVersion(), 20)
+        XCTAssertEqual(snapshot.source.schemaVersion, MigrationRunner.latestSchemaVersion)
+        XCTAssertEqual(try store.schemaVersion(), MigrationRunner.latestSchemaVersion)
         XCTAssertEqual(snapshot.series.count, 59)
     }
 

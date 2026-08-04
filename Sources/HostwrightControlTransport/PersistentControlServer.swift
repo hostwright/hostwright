@@ -704,7 +704,7 @@ public struct PersistentControlConnectionServer: Sendable {
       do {
         switch try requestRepository.recordOrReplay(submission) {
         case .replayed(let record):
-          let replay = Self.replayResponse(record)
+          let replay = try Self.replayResponse(record)
           if record.status == .accepted {
             try recordAudit(
               peer: peer,
@@ -826,6 +826,7 @@ public struct PersistentControlConnectionServer: Sendable {
         _ = try requestRepository.recordAcceptedOperationReference(
           requestID: request.requestID,
           operationReference: operationReference,
+          responseCanonicalJSON: try ControlPlaneCanonicalJSON.encode(response),
           updatedAt: ISO8601DateFormatter().string(from: now())
         )
       } catch {
@@ -863,6 +864,7 @@ public struct PersistentControlConnectionServer: Sendable {
           requestID: request.requestID,
           status: status,
           operationReference: response.operationRef,
+          responseCanonicalJSON: canonicalResponse,
           updatedAt: ISO8601DateFormatter().string(from: now())
         )
       } catch {
@@ -996,7 +998,17 @@ public struct PersistentControlConnectionServer: Sendable {
       from: ControlPlaneCanonicalJSON.encode(value))
   }
 
-  private static func replayResponse(_ record: ControlRequestRecord) -> ControlResponseEnvelope {
+  private static func replayResponse(_ record: ControlRequestRecord) throws
+    -> ControlResponseEnvelope
+  {
+    if let canonical = record.responseCanonicalJSON {
+      let response = try JSONDecoder().decode(ControlResponseEnvelope.self, from: canonical)
+      try response.validate()
+      guard try ControlPlaneCanonicalJSON.encode(response) == canonical else {
+        throw PersistentControlServerError.persistenceFailed
+      }
+      return response
+    }
     let status: ControlResponseStatus
     let reason: ControlReasonCode
     switch record.status {

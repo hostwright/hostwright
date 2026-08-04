@@ -38,6 +38,32 @@ final class Phase09Gate09QualificationHarnessTests: XCTestCase {
     XCTAssertTrue(source.contains("\"$cli\" exec probe --manifest \"$config\" --state-db \"$state\" --no-stdin"))
     XCTAssertTrue(source.contains("short_live_runtime"))
     XCTAssertTrue(source.contains("${#socket} < 104"))
+    XCTAssertTrue(source.contains("--identifier hostwright-control \"$bootstrap\""))
+    XCTAssertTrue(source.contains("--socket \"$socket\" --client \"$cli\""))
+    let qualificationTool = try String(
+      contentsOf: repository.appendingPathComponent(
+        "Sources/HostwrightStreamQualificationTool/main.swift"),
+      encoding: .utf8)
+    XCTAssertTrue(qualificationTool.contains("qualificationIdentity.signingIdentifier == \"hostwright-control\""))
+    XCTAssertTrue(qualificationTool.contains("roleID: DefaultRole.operator.rawValue"))
+    XCTAssertFalse(qualificationTool.contains("roleID: DefaultRole.owner.rawValue"))
+  }
+
+  func testStreamQualificationBootstrapDeclaresCliAndStreamSubjectsWhenCodeHashesDiffer() throws {
+    let source = try String(
+      contentsOfFile: "Sources/HostwrightStreamQualificationTool/main.swift",
+      encoding: .utf8
+    )
+    XCTAssertTrue(source.contains("codeIdentity(at:"))
+    XCTAssertTrue(source.contains("let ownerIdentity = try clientPath.map { try codeIdentity(at: $0) } ?? qualificationIdentity"))
+    XCTAssertTrue(source.contains("ownerIdentity.signingIdentifier == \"hostwright\""))
+    XCTAssertTrue(source.contains("qualificationIdentity.signingIdentifier == \"hostwright-control\""))
+    XCTAssertTrue(source.contains("\"gate09-owner-\\(ownerIdentity.codeDirectoryHash.prefix(16))\""))
+    XCTAssertTrue(source.contains("\"gate09-stream-\\(qualificationIdentity.codeDirectoryHash.prefix(16))\""))
+    XCTAssertTrue(source.contains("store.controlIdentities.declare"))
+    XCTAssertTrue(source.contains("store.rbac.createBinding(RBACBindingRecord("))
+    XCTAssertTrue(source.contains("roleID: DefaultRole.operator.rawValue"))
+    XCTAssertTrue(source.contains("Data(ownerSubjectID.utf8).write(to: root.appendingPathComponent(\"subject-id.txt\"))"))
   }
 
   func testPrepareBindsPrivateRootToGateNineDependenciesAndLedger() throws {

@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import Security
 import HostwrightControlPlane
 import HostwrightControlSecurity
 import HostwrightControlTransport
@@ -52,7 +53,9 @@ private enum HostwrightStreamQualificationMain {
 
   private static func run() throws {
     let arguments = Array(CommandLine.arguments.dropFirst())
-    guard arguments.count == 7,
+    let bootstrapClient = arguments.count == 9 && arguments.first == "--bootstrap"
+      && arguments[7] == "--client"
+    guard (arguments.count == 7 || bootstrapClient),
       ["--bootstrap", "--live", "--resume", "--cleanup"].contains(arguments[0]),
       arguments[1] == "--root", arguments[3] == "--state", arguments[5] == "--socket"
     else { throw NSError(domain: "HostwrightStreamQualification", code: 64) }
@@ -61,8 +64,10 @@ private enum HostwrightStreamQualificationMain {
     let socketPath = try validatedChild(
       arguments[6], of: root,
       mustExist: arguments[0] == "--live" || arguments[0] == "--resume")
+    let clientPath = bootstrapClient
+      ? try validatedChild(arguments[8], of: root, mustExist: true) : nil
     switch arguments[0] {
-    case "--bootstrap": try bootstrap(root: root, statePath: statePath)
+    case "--bootstrap": try bootstrap(root: root, statePath: statePath, clientPath: clientPath)
     case "--live": try live(root: root, statePath: statePath, socketPath: socketPath)
     case "--resume": try resume(root: root, statePath: statePath, socketPath: socketPath)
     case "--cleanup": try removeOwnedKeychainItems(statePath: statePath)
@@ -70,7 +75,7 @@ private enum HostwrightStreamQualificationMain {
     }
   }
 
-  private static func bootstrap(root: URL, statePath: String) throws {
+  private static func bootstrap(root: URL, statePath: String, clientPath: String?) throws {
     let stateParent = URL(fileURLWithPath: statePath).deletingLastPathComponent()
     guard stateParent.path.hasPrefix(root.path + "/") else { throw failure(75) }
     try FileManager.default.createDirectory(
@@ -81,21 +86,57 @@ private enum HostwrightStreamQualificationMain {
     let store = SQLiteStateStore(path: statePath)
     try store.migrate()
     guard try store.schemaVersion() == MigrationRunner.latestSchemaVersion else { throw failure(65) }
-    let identity = try DarwinCurrentControlCodeIdentity.inspect()
     let timestamp = ISO8601DateFormatter().string(from: Date())
-    let subjectID = "gate08-owner-\(identity.codeDirectoryHash.prefix(16))"
-    if try store.controlIdentities.listIdentities().isEmpty {
+    let qualificationIdentity = try DarwinCurrentControlCodeIdentity.inspect()
+    let ownerIdentity = try clientPath.map { try codeIdentity(at: $0) } ?? qualificationIdentity
+    if clientPath != nil {
+      guard ownerIdentity.validationMode == .installedRequirement,
+        qualificationIdentity.validationMode == .installedRequirement,
+        ownerIdentity.teamIdentifier == ControlPeerTrustPolicy.installedTeamIdentifier,
+        qualificationIdentity.teamIdentifier == ownerIdentity.teamIdentifier,
+        ownerIdentity.signingIdentifier == "hostwright",
+        qualificationIdentity.signingIdentifier == "hostwright-control"
+      else { throw failure(77) }
+    }
+    let ownerSubjectID = clientPath == nil
+      ? "gate08-owner-\(ownerIdentity.codeDirectoryHash.prefix(16))"
+      : "gate09-owner-\(ownerIdentity.codeDirectoryHash.prefix(16))"
+    let existingIdentities = try store.controlIdentities.listIdentities()
+    if clientPath != nil, !existingIdentities.isEmpty { throw failure(78) }
+    if existingIdentities.isEmpty {
       try store.controlIdentities.bootstrap(ControlPeerIdentityRecord(
-        subjectID: subjectID,
+        subjectID: ownerSubjectID,
         userID: UInt32(geteuid()),
-        codeIdentity: identity,
-        declaredBySubjectID: subjectID,
+        codeIdentity: ownerIdentity,
+        declaredBySubjectID: ownerSubjectID,
         declaredAt: timestamp,
         updatedAt: timestamp
       ))
     }
-    try store.rbac.bootstrapDefaultRolesAndOwner(subjectID: subjectID, timestamp: timestamp)
-    try Data(subjectID.utf8).write(to: root.appendingPathComponent("subject-id.txt"))
+    try store.rbac.bootstrapDefaultRolesAndOwner(
+      subjectID: ownerSubjectID, timestamp: timestamp)
+    if clientPath != nil {
+      let qualificationSubjectID =
+        "gate09-stream-\(qualificationIdentity.codeDirectoryHash.prefix(16))"
+      try store.controlIdentities.declare(ControlPeerIdentityRecord(
+        subjectID: qualificationSubjectID,
+        userID: UInt32(geteuid()),
+        codeIdentity: qualificationIdentity,
+        declaredBySubjectID: ownerSubjectID,
+        declaredAt: timestamp,
+        updatedAt: timestamp
+      ))
+      _ = try store.rbac.createBinding(RBACBindingRecord(
+        bindingID: "gate09-stream-operator",
+        subjectID: qualificationSubjectID,
+        roleID: DefaultRole.operator.rawValue,
+        scope: RBACScope(kind: .global),
+        createdBySubjectID: ownerSubjectID,
+        createdAt: timestamp,
+        updatedAt: timestamp
+      ))
+    }
+    try Data(ownerSubjectID.utf8).write(to: root.appendingPathComponent("subject-id.txt"))
   }
 
   private static func live(root: URL, statePath: String, socketPath: String) throws {
@@ -732,5 +773,51 @@ private enum HostwrightStreamQualificationMain {
 
   private static func failure(_ code: Int) -> NSError {
     NSError(domain: "HostwrightStreamQualification", code: code)
+  }
+
+  private static func codeIdentity(at path: String) throws -> CodeIdentity {
+    var status = stat()
+    guard lstat(path, &status) == 0,
+      (status.st_mode & S_IFMT) == S_IFREG,
+      status.st_uid == geteuid(),
+      (status.st_mode & (S_IWGRP | S_IWOTH)) == 0,
+      access(path, X_OK) == 0
+    else { throw failure(77) }
+    let url = URL(fileURLWithPath: path, isDirectory: false)
+    var staticCode: SecStaticCode?
+    let created = SecStaticCodeCreateWithPath(url as CFURL, [], &staticCode)
+    guard created == errSecSuccess, let staticCode else { throw failure(77) }
+    guard
+      SecStaticCodeCheckValidity(
+        staticCode,
+        SecCSFlags(rawValue: kSecCSStrictValidate | (UInt32(1) << 30)),
+        nil
+      ) == errSecSuccess
+    else { throw failure(77) }
+    var information: CFDictionary?
+    guard
+      SecCodeCopySigningInformation(
+        staticCode,
+        SecCSFlags(rawValue: kSecCSSigningInformation),
+        &information
+      ) == errSecSuccess,
+      let values = information as? [String: Any],
+      let identifier = values[kSecCodeInfoIdentifier as String] as? String,
+      let cdHashData = values[kSecCodeInfoUnique as String] as? Data
+    else { throw failure(77) }
+    let hash = cdHashData.map { String(format: "%02x", $0) }.joined()
+    let team = values[kSecCodeInfoTeamIdentifier as String] as? String
+    let identity = CodeIdentity(
+      teamIdentifier: team,
+      signingIdentifier: identifier,
+      codeDirectoryHash: hash,
+      validationMode: team == nil ? .pinnedAdHoc : .installedRequirement
+    )
+    do {
+      try identity.validate()
+    } catch {
+      throw failure(77)
+    }
+    return identity
   }
 }

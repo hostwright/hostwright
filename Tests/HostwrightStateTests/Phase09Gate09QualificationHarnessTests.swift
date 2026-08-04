@@ -228,18 +228,23 @@ final class Phase09Gate09QualificationHarnessTests: XCTestCase {
     XCTAssertFalse(source.contains("gh pr"))
   }
 
-  func testConfirmedApplyUsesFrozenFlagSetWithoutFormattingOptions() throws {
+  func testAutonomousConvergenceUsesPendingClaimAndMetricsExportMutation() throws {
     let source = try String(contentsOf: harness, encoding: .utf8)
     let live = try XCTUnwrap(source.section(named: "live"))
-    let confirmedApply =
-      "\"$cli\" apply \"$config\" --state-db \"$state\" --confirm-plan \"$plan_hash\" >/dev/null"
+    let pendingClaim = try XCTUnwrap(live.range(of: "record_pending_container_claim"))
+    let initialDaemon = try XCTUnwrap(
+      live.range(of: "pid=\"$(start_daemon \"$runtime\" \"$daemon\" \"$config\" \"$state\" initial)\"")
+    )
 
-    XCTAssertTrue(live.contains(confirmedApply))
-    XCTAssertFalse(live.contains("\"$cli\" apply \"$config\" --state-db \"$state\" --confirm-plan \"$plan_hash\" --json"))
-    XCTAssertFalse(live.contains("\"$cli\" apply \"$config\" --state-db \"$state\" --confirm-plan \"$plan_hash\" --output"))
+    XCTAssertLessThan(pendingClaim.lowerBound, initialDaemon.lowerBound)
+    XCTAssertFalse(live.contains("\"$cli\" apply"))
+    XCTAssertTrue(live.contains("for n in {1..1200}"))
+    XCTAssertTrue(live.contains("resource=\"$(resolve_pending_container_claim)\""))
+    XCTAssertTrue(live.contains("owned Gate 9 container was not observed."))
+    XCTAssertTrue(live.contains("\"$cli\" metrics export --state-db \"$state\""))
+    XCTAssertTrue(live.contains("--confirm-snapshot \"$metrics_hash\""))
     XCTAssertTrue(live.contains("\"$cli\" status \"$config\" --state-db \"$state\" --output json"))
     XCTAssertTrue(live.contains("qualification.status-plan-v1.json"))
-    XCTAssertTrue(live.contains("plan_hash=\"$(/usr/bin/jq -er '.planHash"))
   }
 
   func testKeychainCleanupIsLedgerOnlyMarkerVerifiedAndBootstrapFree() throws {
@@ -345,6 +350,9 @@ private extension String {
   func section(named function: String) -> String? {
     guard let start = range(of: "\(function)(){") else { return nil }
     let remaining = self[start.lowerBound...]
+    if let end = remaining.range(of: "\n}") {
+      return String(remaining[..<end.lowerBound])
+    }
     guard let end = remaining.range(of: "\n") else { return String(remaining) }
     return String(remaining[..<end.lowerBound])
   }

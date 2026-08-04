@@ -228,14 +228,15 @@ final class Phase09Gate09QualificationHarnessTests: XCTestCase {
     XCTAssertFalse(source.contains("gh pr"))
   }
 
-  func testConfirmedApplyUsesDedicatedJSONFlag() throws {
+  func testConfirmedApplyUsesFrozenFlagSetWithoutFormattingOptions() throws {
     let source = try String(contentsOf: harness, encoding: .utf8)
     let live = try XCTUnwrap(source.section(named: "live"))
     let confirmedApply =
-      "\"$cli\" apply \"$config\" --state-db \"$state\" --confirm-plan \"$plan_hash\" --json"
+      "\"$cli\" apply \"$config\" --state-db \"$state\" --confirm-plan \"$plan_hash\" >/dev/null"
 
     XCTAssertTrue(live.contains(confirmedApply))
-    XCTAssertFalse(live.contains("\"$cli\" apply \"$config\" --state-db \"$state\" --confirm-plan \"$plan_hash\" --output json"))
+    XCTAssertFalse(live.contains("\"$cli\" apply \"$config\" --state-db \"$state\" --confirm-plan \"$plan_hash\" --json"))
+    XCTAssertFalse(live.contains("\"$cli\" apply \"$config\" --state-db \"$state\" --confirm-plan \"$plan_hash\" --output"))
   }
 
   func testKeychainCleanupIsLedgerOnlyMarkerVerifiedAndBootstrapFree() throws {

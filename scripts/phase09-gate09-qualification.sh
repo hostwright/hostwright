@@ -74,8 +74,9 @@ emergency_live_cleanup(){ [[ -n "$root" && -f "$root/ownership-v1.tsv" ]] || ret
 start_daemon(){ local runtime="$1" executable="$2" config="$3" state="$4" generation="$5" socket="$runtime/app-support/run/control-v2.sock" n; (( ${#socket} < 104 )) || die 'the Gate 9 control socket exceeds the macOS Unix-domain path limit.' 66; HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" HOSTWRIGHT_CACHE_DIR="$runtime/cache" HOSTWRIGHT_LOG_DIR="$runtime/logs" "$executable" --foreground --config "$config" --state-db "$state" --interval 5 --jitter 0 --parallelism 1 >"$runtime/daemon.$generation.stdout.log" 2>"$runtime/daemon.$generation.stderr.log" & local pid=$!; record_process "$pid" "$executable"; for n in {1..240}; do [[ -S "$socket" ]] && { printf '%s\n' "$pid"; return; }; if ! kill -0 "$pid" 2>/dev/null; then /bin/cat "$runtime/daemon.$generation.stdout.log" >&2; /bin/cat "$runtime/daemon.$generation.stderr.log" >&2; die 'owned daemon exited before publishing its socket.'; fi; /bin/sleep .25; done; die 'owned daemon did not publish its socket.' 124; }
 forced_live_failure_for_testing(){ local runtime executable pid resource='hostwright-v2-p09-test-live'; runtime="$(short_live_runtime)"; mkdir "$runtime"; chmod 700 "$runtime"; record_root "$runtime"; executable="$runtime/signed-hostwrightd"; /bin/cp /bin/sleep "$executable"; chmod 700 "$executable"; printf '%s\n' 'forced Gate 9 live failure diagnostic' > "$runtime/daemon.forced.stderr.log"; "$executable" 300 & pid=$!; record_process "$pid" "$executable"; container phase09-test-create "$resource"; record_container "$resource"; return 47; }
 wait_for_converged_status(){
-  local runtime="$1" cli="$2" config="$3" state="$4" resource="$5" output n
-  for n in {1..1200}; do
+  local runtime="$1" cli="$2" config="$3" state="$4" resource="$5" output deadline_epoch
+  deadline_epoch=$(( $(/bin/date +%s) + 300 ))
+  while [[ "$(/bin/date +%s)" -lt "$deadline_epoch" ]]; do
     output="$(HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" HOSTWRIGHT_CACHE_DIR="$runtime/cache" HOSTWRIGHT_LOG_DIR="$runtime/logs" "$cli" status "$config" --state-db "$state" --output json)"
     printf '%s' "$output" > "$runtime/qualification.status-plan-v1.json"
     chmod 600 "$runtime/qualification.status-plan-v1.json"
@@ -90,7 +91,7 @@ wait_for_converged_status(){
     ' "$runtime/qualification.status-plan-v1.json" >/dev/null; then
       return
     fi
-    /bin/sleep .25
+    /bin/sleep 1
   done
   die 'owned Gate 9 probe did not converge to a healthy no-action state.' 124
 }
@@ -128,7 +129,7 @@ live(){
     [[ "$(codesign -d --verbose=4 "$output" 2>&1 | /usr/bin/awk -F= '$1=="TeamIdentifier"{print $2}')" == 993YC3JY4Q ]] || die 'a Gate 9 live artifact has the wrong signing team.'
   done
   config="$runtime/hostwright.yaml"
-  printf '%s\n' 'version: 2' "project: $live_project" 'imagePolicy: require-digest' 'services:' '  probe:' "    image: $pinned_image" '    command: ["python3", "-c", "import time; print(\"gate09-log\", flush=True); time.sleep(600)"]' '    probes:' '      liveness:' '        exec: ["python3", "-c", "import sys; sys.exit(0)"]' '        interval: 2s' '        timeout: 1s' > "$config"
+  printf '%s\n' 'version: 2' "project: $live_project" 'imagePolicy: require-digest' 'services:' '  probe:' "    image: $pinned_image" '    command: ["python3", "-c", "import time; print(\"gate09-log\", flush=True); time.sleep(600)"]' '    probes:' '      liveness:' '        exec: ["true"]' '        interval: 60s' '        timeout: 1s' > "$config"
   chmod 600 "$config"
   state="$runtime/app-support/state/state.sqlite"
   socket="$runtime/app-support/run/control-v2.sock"

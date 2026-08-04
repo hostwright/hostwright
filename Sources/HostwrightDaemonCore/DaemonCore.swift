@@ -282,6 +282,13 @@ public struct DaemonLoopRunner {
         defer { configurationMonitor?.stop() }
 
         let store = SQLiteStateStore(configuration: configuration.stateStoreConfiguration)
+        return try await StateUpgradeService(store: store)
+            .withBoundedStateAccessWait(lockWaitMilliseconds: 30_000) {
+                try await runStatefulLoop(store: store)
+            }
+    }
+
+    private func runStatefulLoop(store: SQLiteStateStore) async throws -> DaemonRunSummary {
         _ = try StateUpgradeService(store: store).migrateToLatestWithVerifiedBackup()
         try controlService?.start()
         defer { controlService?.stop() }

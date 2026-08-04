@@ -50,6 +50,58 @@ final class HostwrightDaemonCoreTests: XCTestCase {
         }
     }
 
+    func testDaemonStartupWaitsForStateAccessFenceContention() async throws {
+        try await withTemporaryDirectory { directory in
+            let databasePath = directory.appendingPathComponent("state.sqlite").path
+            let store = SQLiteStateStore(path: databasePath)
+            try store.migrate()
+            try store.configuration.prepareStateAccessFoundation()
+            let lockPath = try store.configuration.maintenancePaths().accessLockPath
+            let descriptor = open(lockPath, O_RDWR | O_NOFOLLOW | O_CLOEXEC)
+            XCTAssertGreaterThanOrEqual(descriptor, 0)
+            XCTAssertEqual(flock(descriptor, LOCK_EX | LOCK_NB), 0)
+            let release = Task.detached {
+                try? await Task.sleep(for: .milliseconds(400))
+                _ = flock(descriptor, LOCK_UN)
+                close(descriptor)
+            }
+
+            let runner = DaemonLoopRunner(
+                configuration: DaemonConfiguration(
+                    configPath: "hostwright.yaml",
+                    stateDatabasePath: databasePath,
+                    maxIterations: 1
+                ),
+                runtimeAdapter: CountingRuntimeAdapter(),
+                reconciliationDriver: ScriptedDaemonReconciliationDriver(),
+                clock: ManualDaemonClock(),
+                instanceLock: ScriptedDaemonLock(),
+                readConfig: { _ in
+                    """
+                    version: 2
+                    project: demo
+                    services:
+                      api:
+                        image: ghcr.io/example/api:latest
+                    """
+                },
+                idGenerator: DeterministicIDs().next
+            )
+
+            let summary: DaemonRunSummary
+            do {
+                summary = try await runner.run()
+            } catch {
+                await release.value
+                throw error
+            }
+            await release.value
+            XCTAssertEqual(summary.iterations, 1)
+            XCTAssertEqual(summary.successfulIterations, 1)
+            XCTAssertEqual(summary.failedIterations, 0)
+        }
+    }
+
     func testMaintenanceClassifiesEveryUnattendedUpdateDriftBeforeLifecycleAdmission() {
         let identity = RuntimeServiceIdentity(projectName: "demo", serviceName: "api")
         let plan = ReconciliationPlan(

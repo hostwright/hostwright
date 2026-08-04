@@ -33,6 +33,7 @@ private final class StateLifecycleFenceLease: @unchecked Sendable {
 
 private enum StateAccessExecutionContext {
     @TaskLocal static var lifecycleFence: StateLifecycleFenceLease?
+    @TaskLocal static var waitTimeoutNanoseconds: UInt64?
 }
 
 public final class OperationMutationFence: @unchecked Sendable {
@@ -69,7 +70,7 @@ struct StateAccessCoordinator {
     func withLock<T>(
         _ mode: StateAccessMode,
         allowPendingMaintenance: Bool = false,
-        waitTimeoutNanoseconds: UInt64 = 250_000_000,
+        waitTimeoutNanoseconds: UInt64? = nil,
         _ body: () throws -> T
     ) throws -> T {
         let paths = try configuration.maintenancePaths()
@@ -93,9 +94,13 @@ struct StateAccessCoordinator {
             }
             return try body()
         }
+        let wait = max(
+            waitTimeoutNanoseconds ?? 250_000_000,
+            StateAccessExecutionContext.waitTimeoutNanoseconds ?? 0
+        )
         let (deadline, overflow) = DispatchTime.now().uptimeNanoseconds
-            .addingReportingOverflow(waitTimeoutNanoseconds)
-        guard waitTimeoutNanoseconds > 0, !overflow else {
+            .addingReportingOverflow(wait)
+        guard wait > 0, !overflow else {
             throw StateStoreError.invalidRecord("state-access wait timeout is invalid")
         }
         let accessDescriptor = try openSecureLock(paths.accessLockPath)
@@ -189,9 +194,13 @@ struct StateAccessCoordinator {
             }
             return try await body()
         }
+        let effectiveWaitTimeoutNanoseconds = max(
+            waitTimeoutNanoseconds,
+            StateAccessExecutionContext.waitTimeoutNanoseconds ?? 0
+        )
         let (deadline, overflow) = DispatchTime.now().uptimeNanoseconds
-            .addingReportingOverflow(waitTimeoutNanoseconds)
-        guard waitTimeoutNanoseconds > 0, !overflow else {
+            .addingReportingOverflow(effectiveWaitTimeoutNanoseconds)
+        guard effectiveWaitTimeoutNanoseconds > 0, !overflow else {
             throw StateStoreError.invalidRecord("state-access wait timeout is invalid")
         }
         let descriptor = try openSecureLock(paths.accessLockPath)
@@ -215,6 +224,23 @@ struct StateAccessCoordinator {
         defer { lease.invalidate() }
         return try await StateAccessExecutionContext.$lifecycleFence.withValue(
             lease,
+            operation: body
+        )
+    }
+
+    func withBoundedStateAccessWait<T>(
+        waitTimeoutNanoseconds: UInt64,
+        _ body: () async throws -> T
+    ) async throws -> T {
+        guard waitTimeoutNanoseconds > 0 else {
+            throw StateStoreError.invalidRecord("state-access wait timeout is invalid")
+        }
+        let effectiveWaitTimeoutNanoseconds = max(
+            waitTimeoutNanoseconds,
+            StateAccessExecutionContext.waitTimeoutNanoseconds ?? 0
+        )
+        return try await StateAccessExecutionContext.$waitTimeoutNanoseconds.withValue(
+            effectiveWaitTimeoutNanoseconds,
             operation: body
         )
     }

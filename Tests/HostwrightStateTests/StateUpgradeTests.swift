@@ -327,6 +327,52 @@ final class StateUpgradeTests: XCTestCase {
         }
     }
 
+    func testBoundedStateAccessWaitPropagatesAcrossAwaitWithoutBypassingTheFence()
+        async throws
+    {
+        try await withTemporaryStore(throughVersion: MigrationRunner.latestSchemaVersion) {
+            store, _ in
+            try store.configuration.prepareStateAccessFoundation()
+            let lockPath = try store.configuration.maintenancePaths().accessLockPath
+            let descriptor = open(lockPath, O_RDWR | O_NOFOLLOW | O_CLOEXEC)
+            XCTAssertGreaterThanOrEqual(descriptor, 0)
+            XCTAssertEqual(flock(descriptor, LOCK_EX | LOCK_NB), 0)
+            let release = Task.detached {
+                try? await Task.sleep(for: .milliseconds(400))
+                _ = flock(descriptor, LOCK_UN)
+                close(descriptor)
+            }
+
+            let version = try await StateUpgradeService(store: store)
+                .withBoundedStateAccessWait(lockWaitMilliseconds: 1_000) {
+                    try await StateUpgradeService(store: store)
+                        .withBoundedStateAccessWait(lockWaitMilliseconds: 100) {
+                            try await Task.sleep(for: .milliseconds(10))
+                            return try store.schemaVersion()
+                        }
+                }
+            await release.value
+            XCTAssertEqual(version, MigrationRunner.latestSchemaVersion)
+        }
+    }
+
+    func testBoundedStateAccessWaitRejectsUnboundedWaits() async throws {
+        try await withTemporaryStore(throughVersion: MigrationRunner.latestSchemaVersion) {
+            store, _ in
+            for timeout in [0, 30_001] {
+                do {
+                    try await StateUpgradeService(store: store)
+                        .withBoundedStateAccessWait(lockWaitMilliseconds: timeout) {}
+                    XCTFail("Expected invalidRecord for \(timeout) milliseconds.")
+                } catch {
+                    guard case StateStoreError.invalidRecord = error else {
+                        return XCTFail("Expected invalidRecord, received \(error).")
+                    }
+                }
+            }
+        }
+    }
+
     func testExclusiveLifecycleFenceSupportsBoundedControlPlaneWait() throws {
         try withTemporaryStore(throughVersion: MigrationRunner.latestSchemaVersion) { store, _ in
             try store.configuration.prepareStateAccessFoundation()

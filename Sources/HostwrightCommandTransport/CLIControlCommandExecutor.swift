@@ -83,19 +83,11 @@ public enum CLIControlCommandExecutor {
         let command = try CLICommand.parse(arguments: route.arguments)
         return try CLIControlAuthorizationScopeResolver.withExecutionAuthorizationFence(
             command: command,
-            environment: prepared.environment
+            arguments: route.arguments,
+            authorizedScope: route.authorizationScope,
+            environment: prepared.environment,
+            mutating: prepared.route.mutating
         ) {
-            let currentScope = try CLIControlAuthorizationScopeResolver.resolve(
-                command: command,
-                arguments: route.arguments,
-                environment: prepared.environment
-            )
-            guard currentScope == route.authorizationScope else {
-                throw HostwrightDiagnostic(
-                    code: .controlAPIInvalid,
-                    message: "The daemon-authoritative CLI target changed before execution."
-                )
-            }
             let result = HostwrightCLI.run(
                 arguments: route.arguments,
                 environment: prepared.environment

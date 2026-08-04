@@ -42,6 +42,178 @@ final class CLIControlAuthorizationScopeTests: XCTestCase {
         }
     }
 
+    func testReadOnlyExecutionAuthorizationDoesNotWaitBehindLifecycleMutationFence() throws {
+        try withFixture { fixture in
+            let arguments = [
+                "status", fixture.manifestPath,
+                "--state-db", fixture.store.path,
+                "--output", "json",
+            ]
+            let command = try CLICommand.parse(arguments: arguments)
+            let authorizedScope = try CLIControlAuthorizationScopeResolver.resolve(
+                command: command,
+                arguments: arguments,
+                environment: fixture.environment
+            )
+            let hold = try holdLifecycleMutationFence(for: fixture.store)
+            defer { releaseAndAssertFenceCompleted(hold) }
+
+            let startedAt = Date()
+            let completed = try CLIControlAuthorizationScopeResolver.withExecutionAuthorizationFence(
+                command: command,
+                arguments: arguments,
+                authorizedScope: authorizedScope,
+                environment: fixture.environment,
+                mutating: false
+            ) {
+                true
+            }
+
+            XCTAssertTrue(completed)
+            XCTAssertLessThan(Date().timeIntervalSince(startedAt), 0.200)
+        }
+    }
+
+    func testMutatingExecutionAuthorizationStillSerializesBehindLifecycleMutationFence() throws {
+        try withFixture { fixture in
+            let arguments = [
+                "apply", fixture.manifestPath,
+                "--state-db", fixture.store.path,
+                "--confirm-plan", String(repeating: "a", count: 64),
+            ]
+            let command = try CLICommand.parse(arguments: arguments)
+            let authorizedScope = try CLIControlAuthorizationScopeResolver.resolve(
+                command: command,
+                arguments: arguments,
+                environment: fixture.environment
+            )
+            let hold = try holdLifecycleMutationFence(for: fixture.store)
+            defer { releaseAndAssertFenceCompleted(hold) }
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.4) {
+                hold.release.signal()
+            }
+
+            let startedAt = Date()
+            let completed = try CLIControlAuthorizationScopeResolver.withExecutionAuthorizationFence(
+                command: command,
+                arguments: arguments,
+                authorizedScope: authorizedScope,
+                environment: fixture.environment,
+                mutating: true
+            ) {
+                true
+            }
+
+            XCTAssertTrue(completed)
+            XCTAssertGreaterThanOrEqual(Date().timeIntervalSince(startedAt), 0.300)
+        }
+    }
+
+    func testMutatingExecutionAuthorizationBlocksConcurrentSerializedOwnershipMutation() throws {
+        try withFixture { fixture in
+            let mutationArguments = [
+                "apply", fixture.manifestPath,
+                "--state-db", fixture.store.path,
+                "--confirm-plan", String(repeating: "a", count: 64),
+            ]
+            let mutationCommand = try CLICommand.parse(arguments: mutationArguments)
+            let readArguments = [
+                "logs", "api", fixture.manifestPath, "--state-db", fixture.store.path,
+            ]
+            let readCommand = try CLICommand.parse(arguments: readArguments)
+            let expected = try CLIControlAuthorizationScopeResolver.resolve(
+                command: readCommand,
+                arguments: readArguments,
+                environment: fixture.environment
+            )
+            let mutationScope = try CLIControlAuthorizationScopeResolver.resolve(
+                command: mutationCommand,
+                arguments: mutationArguments,
+                environment: fixture.environment
+            )
+            let started = DispatchSemaphore(value: 0)
+            let completed = DispatchSemaphore(value: 0)
+            let result = ConcurrentResultBox()
+
+            try CLIControlAuthorizationScopeResolver.withExecutionAuthorizationFence(
+                command: mutationCommand,
+                arguments: mutationArguments,
+                authorizedScope: mutationScope,
+                environment: fixture.environment,
+                mutating: true
+            ) {
+                DispatchQueue.global(qos: .userInitiated).async {
+                    started.signal()
+                    result.capture {
+                        try StateUpgradeService(store: fixture.store).withSerializedLifecycleMutation {
+                            try fixture.store.ownership.upsert(fixture.ownership(
+                                id: "ownership-api-replacement",
+                                resourceIdentifier: "hostwright-scope-tests-api-replacement",
+                                resourceUUID: "22222222-2222-4222-8222-222222222222"
+                            ))
+                        }
+                    }
+                    completed.signal()
+                }
+                XCTAssertEqual(started.wait(timeout: .now() + 1), .success)
+                XCTAssertEqual(completed.wait(timeout: .now() + 0.100), .timedOut)
+                XCTAssertEqual(
+                    try CLIControlAuthorizationScopeResolver.resolve(
+                        command: readCommand,
+                        arguments: readArguments,
+                        environment: fixture.environment
+                    ),
+                    expected
+                )
+            }
+
+            XCTAssertEqual(completed.wait(timeout: .now() + 2), .success)
+            XCTAssertNil(result.error)
+            XCTAssertThrowsError(try CLIControlAuthorizationScopeResolver.resolve(
+                command: readCommand,
+                arguments: readArguments,
+                environment: fixture.environment
+            )) { error in
+                XCTAssertEqual((error as? HostwrightDiagnostic)?.code, .stateStoreUnavailable)
+            }
+        }
+    }
+
+    func testReadOnlyExecutionAuthorizationFailsClosedWhenOwnershipChangesDuringBody() throws {
+        try withFixture { fixture in
+            let arguments = [
+                "logs", "api", fixture.manifestPath, "--state-db", fixture.store.path,
+            ]
+            let command = try CLICommand.parse(arguments: arguments)
+            let authorizedScope = try CLIControlAuthorizationScopeResolver.resolve(
+                command: command,
+                arguments: arguments,
+                environment: fixture.environment
+            )
+
+            XCTAssertThrowsError(try CLIControlAuthorizationScopeResolver
+                .withExecutionAuthorizationFence(
+                    command: command,
+                    arguments: arguments,
+                    authorizedScope: authorizedScope,
+                    environment: fixture.environment,
+                    mutating: false
+                ) {
+                    try StateUpgradeService(store: fixture.store).withSerializedLifecycleMutation {
+                        try fixture.store.ownership.upsert(fixture.ownership(
+                            id: "ownership-api-concurrent",
+                            resourceIdentifier: "hostwright-scope-tests-api-concurrent",
+                            resourceUUID: "22222222-2222-4222-8222-222222222222"
+                        ))
+                    }
+                    return "in-memory result"
+                }
+            ) { error in
+                XCTAssertEqual((error as? HostwrightDiagnostic)?.code, .stateStoreUnavailable)
+            }
+        }
+    }
+
     func testManifestBackedSingleServiceResolvesAuthoritativeProjectAndResourceUUID() throws {
         try withFixture { fixture in
             let command = try CLICommand.parse(arguments: [
@@ -117,60 +289,6 @@ final class CLIControlAuthorizationScopeTests: XCTestCase {
         }
     }
 
-    func testExecutionAuthorizationFencePreventsConcurrentOwnershipReplacement() throws {
-        try withFixture { fixture in
-            let arguments = [
-                "logs", "api", fixture.manifestPath, "--state-db", fixture.store.path,
-            ]
-            let command = try CLICommand.parse(arguments: arguments)
-            let expected = try CLIControlAuthorizationScopeResolver.resolve(
-                command: command,
-                arguments: arguments,
-                environment: fixture.environment
-            )
-            let started = DispatchSemaphore(value: 0)
-            let completed = DispatchSemaphore(value: 0)
-            let result = ConcurrentResultBox()
-
-            try CLIControlAuthorizationScopeResolver.withExecutionAuthorizationFence(
-                command: command,
-                environment: fixture.environment
-            ) {
-                DispatchQueue.global().async {
-                    started.signal()
-                    result.capture {
-                        try fixture.store.ownership.upsert(fixture.ownership(
-                            id: "ownership-api-replacement",
-                            resourceIdentifier: "hostwright-scope-tests-api-replacement",
-                            resourceUUID: "22222222-2222-4222-8222-222222222222"
-                        ))
-                    }
-                    completed.signal()
-                }
-                XCTAssertEqual(started.wait(timeout: .now() + 1), .success)
-                XCTAssertEqual(completed.wait(timeout: .now() + 0.100), .timedOut)
-                XCTAssertEqual(
-                    try CLIControlAuthorizationScopeResolver.resolve(
-                        command: command,
-                        arguments: arguments,
-                        environment: fixture.environment
-                    ),
-                    expected
-                )
-            }
-
-            XCTAssertEqual(completed.wait(timeout: .now() + 2), .success)
-            XCTAssertNil(result.error)
-            XCTAssertThrowsError(try CLIControlAuthorizationScopeResolver.resolve(
-                command: command,
-                arguments: arguments,
-                environment: fixture.environment
-            )) { error in
-                XCTAssertEqual((error as? HostwrightDiagnostic)?.code, .stateStoreUnavailable)
-            }
-        }
-    }
-
     private func withFixture(_ body: (Fixture) throws -> Void) throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(
             "hostwright-cli-control-scope-\(UUID().uuidString)",
@@ -220,6 +338,38 @@ final class CLIControlAuthorizationScopeTests: XCTestCase {
             resourceUUID: fixture.apiResourceUUID
         ))
         try body(fixture)
+    }
+
+    private func holdLifecycleMutationFence(
+        for store: SQLiteStateStore
+    ) throws -> LifecycleFenceHold {
+        let hold = LifecycleFenceHold()
+        DispatchQueue.global(qos: .userInitiated).async {
+            hold.result.capture {
+                try StateUpgradeService(store: store).withSerializedLifecycleMutation(
+                    lockWaitMilliseconds: 1_000
+                ) {
+                    hold.acquired.signal()
+                    guard hold.release.wait(timeout: .now() + 2) == .success else {
+                        throw NSError(domain: "CLIControlAuthorizationScopeTests", code: 1)
+                    }
+                }
+            }
+            hold.finished.signal()
+        }
+        guard hold.acquired.wait(timeout: .now() + 1) == .success else {
+            hold.release.signal()
+            _ = hold.finished.wait(timeout: .now() + 1)
+            if let error = hold.result.error { throw error }
+            throw NSError(domain: "CLIControlAuthorizationScopeTests", code: 2)
+        }
+        return hold
+    }
+
+    private func releaseAndAssertFenceCompleted(_ hold: LifecycleFenceHold) {
+        hold.release.signal()
+        XCTAssertEqual(hold.finished.wait(timeout: .now() + 1), .success)
+        XCTAssertNil(hold.result.error)
     }
 
     private struct Fixture {
@@ -286,4 +436,11 @@ private final class ConcurrentResultBox: @unchecked Sendable {
             lock.withLock { storedError = error }
         }
     }
+}
+
+private final class LifecycleFenceHold: @unchecked Sendable {
+    let acquired = DispatchSemaphore(value: 0)
+    let release = DispatchSemaphore(value: 0)
+    let finished = DispatchSemaphore(value: 0)
+    let result = ConcurrentResultBox()
 }

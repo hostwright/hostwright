@@ -16,19 +16,53 @@ public struct CLIControlAuthorizationScope: Equatable, Sendable {
 public enum CLIControlAuthorizationScopeResolver {
     public static func withExecutionAuthorizationFence<T>(
         command: CLICommand,
+        arguments: [String],
+        authorizedScope: CLIControlAuthorizationScope,
         environment: CLIEnvironment,
+        mutating: Bool,
         _ body: () throws -> T
     ) throws -> T {
+        func execute() throws -> T {
+            guard try resolve(
+                command: command,
+                arguments: arguments,
+                environment: environment
+            ) == authorizedScope else {
+                throw HostwrightDiagnostic(
+                    code: .controlAPIInvalid,
+                    message: "The daemon-authoritative CLI target changed before execution."
+                )
+            }
+            let result = try body()
+            if !mutating {
+                guard try resolve(
+                    command: command,
+                    arguments: arguments,
+                    environment: environment
+                ) == authorizedScope else {
+                    throw HostwrightDiagnostic(
+                        code: .controlAPIInvalid,
+                        message: "The daemon-authoritative CLI target changed during execution."
+                    )
+                }
+            }
+            return result
+        }
+
+        guard mutating else { return try execute() }
         guard let stateDatabasePath = try stateDatabasePath(
             for: command,
             environment: environment
         ) else {
-            return try body()
+            return try execute()
         }
         let store = SQLiteStateStore(
             configuration: StateStoreConfiguration(explicitDatabasePath: stateDatabasePath)
         )
-        return try StateUpgradeService(store: store).withExclusiveLifecycleFence(body)
+        return try StateUpgradeService(store: store).withSerializedLifecycleMutation(
+            lockWaitMilliseconds: 30_000,
+            execute
+        )
     }
 
     public static func validate(

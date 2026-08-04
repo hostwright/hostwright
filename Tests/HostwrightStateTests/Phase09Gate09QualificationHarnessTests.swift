@@ -243,8 +243,30 @@ final class Phase09Gate09QualificationHarnessTests: XCTestCase {
     XCTAssertTrue(live.contains("owned Gate 9 container was not observed."))
     XCTAssertTrue(live.contains("\"$cli\" metrics export --state-db \"$state\""))
     XCTAssertTrue(live.contains("--confirm-snapshot \"$metrics_hash\""))
-    XCTAssertTrue(live.contains("\"$cli\" status \"$config\" --state-db \"$state\" --output json"))
-    XCTAssertTrue(live.contains("qualification.status-plan-v1.json"))
+    XCTAssertTrue(source.contains("\"$cli\" status \"$config\" --state-db \"$state\" --output json"))
+    XCTAssertTrue(source.contains("qualification.status-plan-v1.json"))
+  }
+
+  func testLiveManifestLivenessAndStatusConvergenceAreExplicitAndBounded() throws {
+    let source = try String(contentsOf: harness, encoding: .utf8)
+    let live = try XCTUnwrap(source.section(named: "live"))
+    let convergence = try XCTUnwrap(source.section(named: "wait_for_converged_status"))
+
+    XCTAssertTrue(live.contains("liveness:"))
+    XCTAssertTrue(live.contains("exec: [\"python3\", \"-c\", \"import sys; sys.exit(0)\"]"))
+    XCTAssertTrue(live.contains("interval: 2s"))
+    XCTAssertTrue(live.contains("timeout: 1s"))
+    XCTAssertTrue(live.contains("wait_for_converged_status \"$runtime\" \"$cli\" \"$config\" \"$state\" \"$resource\""))
+
+    XCTAssertTrue(convergence.contains("for n in {1..1200}"))
+    XCTAssertTrue(convergence.contains("/bin/sleep .25"))
+    XCTAssertTrue(convergence.contains("\"$cli\" status \"$config\" --state-db \"$state\" --output json"))
+    XCTAssertTrue(convergence.contains("--arg resource \"$resource\""))
+    XCTAssertTrue(convergence.contains(".resourceIdentifier == $resource"))
+    XCTAssertTrue(convergence.contains(".lifecycle == \"running\""))
+    XCTAssertTrue(convergence.contains(".health == \"healthy\""))
+    XCTAssertTrue(convergence.contains("(.actions | length) == 0"))
+    XCTAssertTrue(convergence.contains("owned Gate 9 probe did not converge"))
   }
 
   func testKeychainCleanupIsLedgerOnlyMarkerVerifiedAndBootstrapFree() throws {

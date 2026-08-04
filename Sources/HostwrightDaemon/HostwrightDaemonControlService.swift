@@ -307,11 +307,16 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
         return try PersistentControlPreparedRequest(request: request)
       },
       unaryRequestCoordinator: { request, operation in
-        guard try mutationClassifier(request) else { return try operation() }
-        return try StateUpgradeService(store: store).withExclusiveLifecycleFence(
-          lockWaitMilliseconds: min(request.timeoutMilliseconds ?? 30_000, 30_000),
-          operation
-        )
+        let lockWaitMilliseconds = min(request.timeoutMilliseconds ?? 30_000, 30_000)
+        return try StateUpgradeService(store: store).withBoundedStateAccessWait(
+          lockWaitMilliseconds: lockWaitMilliseconds
+        ) {
+          guard try mutationClassifier(request) else { return try operation() }
+          return try StateUpgradeService(store: store).withExclusiveLifecycleFence(
+            lockWaitMilliseconds: lockWaitMilliseconds,
+            operation
+          )
+        }
       },
       mutationClassifier: mutationClassifier,
       auditRecorder: auditTrail,
@@ -392,8 +397,13 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
     self.listener = listener
     stopped = false
     lock.unlock()
+    let connectionStateStoreConfiguration = configuration.stateStoreConfiguration
     acceptQueue.async { [weak self] in
-      self?.acceptLoop(listener: listener, server: server)
+      self?.acceptLoop(
+        listener: listener,
+        server: server,
+        stateStoreConfiguration: connectionStateStoreConfiguration
+      )
     }
   }
 
@@ -456,7 +466,8 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
 
   private func acceptLoop(
     listener: ControlUnixSocketListener,
-    server: PersistentControlConnectionServer
+    server: PersistentControlConnectionServer,
+    stateStoreConfiguration: StateStoreConfiguration
   ) {
     while isCurrent(listener) {
       guard let descriptor = try? listener.accept(timeoutMilliseconds: 250) else {
@@ -475,7 +486,14 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
           group.leave()
         }
         do {
-          try server.serve(descriptor: descriptor)
+          let connectionStore = SQLiteStateStore(configuration: stateStoreConfiguration)
+          try StateUpgradeService(store: connectionStore)
+            .withBoundedStateAccessWait(
+              lockWaitMilliseconds:
+                ControlPlaneContract.maximumAuthenticationHandshakeMilliseconds
+            ) {
+              try server.serve(descriptor: descriptor)
+            }
         } catch {
           let reason = (error as? ControlPeerAuthenticationError)
             .map { "; reason=\(String(describing: $0))" } ?? ""

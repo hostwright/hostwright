@@ -128,6 +128,75 @@ final class HostwrightDaemonControlServiceTests: XCTestCase {
     }
   }
 
+  func testAuthenticatedPersistentCapabilitiesWaitsForStateAccessFenceDuringSessionAndUnaryProcessing() throws {
+    try withPrivateHome { home in
+      let fixture = try makeService(home: home)
+      try fixture.service.start()
+      defer { fixture.service.stop() }
+
+      let identity = try DarwinCurrentControlCodeIdentity.inspect()
+      let client = PersistentControlClient(
+        socketPath: fixture.socketPath,
+        serverTrustPolicy: PersistentControlServerTrustPolicy(
+          pinnedAdHocCodeDirectoryHashes: [identity.codeDirectoryHash]
+        )
+      )
+
+      func holdAccessFenceForFourHundredMilliseconds() throws -> DispatchSemaphore {
+        let descriptor = open(
+          fixture.accessLockPath,
+          O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC,
+          S_IRUSR | S_IWUSR
+        )
+        guard descriptor >= 0 else {
+          throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+        guard fchmod(descriptor, S_IRUSR | S_IWUSR) == 0 else {
+          let error = POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+          close(descriptor)
+          throw error
+        }
+        guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
+          let error = POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+          close(descriptor)
+          throw error
+        }
+        let released = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+          Thread.sleep(forTimeInterval: 0.400)
+          _ = flock(descriptor, LOCK_UN)
+          close(descriptor)
+          released.signal()
+        }
+        return released
+      }
+
+      let authenticationRelease = try holdAccessFenceForFourHundredMilliseconds()
+      defer { XCTAssertEqual(authenticationRelease.wait(timeout: .now() + 2), .success) }
+      let authenticationStartedAt = Date()
+      let session = try client.connectSession()
+      defer { session.close() }
+      XCTAssertGreaterThanOrEqual(Date().timeIntervalSince(authenticationStartedAt), 0.350)
+
+      let route = try CLIControlRoute.classify(arguments: ["capabilities", "--output", "json"])
+      XCTAssertFalse(route.mutating)
+      let request = ControlRequestEnvelope(
+        requestID: "capabilities-state-access-fence",
+        operation: route.operation,
+        timeoutMilliseconds: 1_000,
+        body: route.requestBody()
+      )
+      let unaryRelease = try holdAccessFenceForFourHundredMilliseconds()
+      defer { XCTAssertEqual(unaryRelease.wait(timeout: .now() + 2), .success) }
+      let unaryStartedAt = Date()
+      let response = try session.send(request)
+      XCTAssertGreaterThanOrEqual(Date().timeIntervalSince(unaryStartedAt), 0.350)
+      XCTAssertEqual(response.status, .completed)
+      XCTAssertEqual(response.reasonCode, .completed)
+      XCTAssertNotNil(response.result)
+    }
+  }
+
   func testStreamPreparationDispatchesBeforeUnaryCLIParsing() throws {
     try withPrivateHome { home in
       let fixture = try makeService(home: home)
@@ -364,7 +433,8 @@ final class HostwrightDaemonControlServiceTests: XCTestCase {
   private func makeService(home: URL, explicitStateName: String? = nil) throws -> (
     service: any DaemonControlServing,
     socketPath: String,
-    statePath: String
+    statePath: String,
+    accessLockPath: String
   ) {
     let defaultResolution = try HostwrightLocalPathResolver.resolve(
       homeDirectory: home.path,
@@ -423,7 +493,8 @@ final class HostwrightDaemonControlServiceTests: XCTestCase {
     return (
       try HostwrightDaemonControlService.make(configuration: configuration),
       resolution.layout.controlSocket,
-      resolution.stateDatabasePath
+      resolution.stateDatabasePath,
+      try stateConfiguration.maintenancePaths().accessLockPath
     )
   }
 

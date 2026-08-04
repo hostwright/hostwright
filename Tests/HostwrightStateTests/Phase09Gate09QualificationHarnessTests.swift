@@ -260,6 +260,8 @@ final class Phase09Gate09QualificationHarnessTests: XCTestCase {
     XCTAssertTrue(live.contains("wait_for_converged_status \"$runtime\" \"$cli\" \"$config\" \"$state\" \"$resource\""))
     XCTAssertTrue(live.contains("start_daemon \"$runtime\" \"$daemon\" \"$config\" \"$state\" initial \"$cli\""))
     XCTAssertTrue(live.contains("start_daemon \"$runtime\" \"$daemon\" \"$config\" \"$state\" restarted \"$cli\""))
+    XCTAssertTrue(live.contains("if HOSTWRIGHT_APPLICATION_SUPPORT_DIR=\"$runtime/app-support\" \"$cli\" capabilities --json"))
+    XCTAssertTrue(live.contains("CLI unexpectedly bypassed the unavailable daemon."))
     XCTAssertTrue(readiness.contains("capabilities --json"))
     XCTAssertTrue(readiness.contains("deadline=$(( $(/bin/date +%s) + 60 ))"))
     XCTAssertTrue(readiness.contains("/bin/sleep 1"))

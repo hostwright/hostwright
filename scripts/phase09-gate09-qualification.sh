@@ -191,7 +191,9 @@ live(){
   record_keychain_items "$state"
   first_process_identity="$(/usr/bin/awk -F $'\t' -v p="$pid" '$2=="process"&&$7~("pid="p";"){print $7}' "$root/ownership-v1.tsv")"
   stop_exact_process "$daemon" "$(stat -f '%d' "$daemon")" "$(stat -f '%i' "$daemon")" "$first_process_identity"
-  HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" "$cli" capabilities --json >/dev/null 2>&1 && die 'CLI unexpectedly bypassed the unavailable daemon.'
+  if HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" "$cli" capabilities --json >/dev/null 2>&1; then
+    die 'CLI unexpectedly bypassed the unavailable daemon.'
+  fi
   pid="$(start_daemon "$runtime" "$daemon" "$config" "$state" restarted "$cli")"
   HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" "$cli" capabilities --json | /usr/bin/jq -e . >/dev/null
   HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" "$bootstrap" --resume --root "$runtime" --state "$state" --socket "$socket" > "$runtime/stream-resume.json"

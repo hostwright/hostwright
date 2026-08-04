@@ -37,7 +37,7 @@ source, configuration, toolchain, logs, and recorded checksums remain unchanged.
 Failure preserves the immutable evidence root, failure ledger, logs, and active locks.
 The live cell signs one isolated qualification executable with the declared Developer ID,
 records every temporary file/root and Keychain service before exact owned-only cleanup,
-and verifies the real v19 audit trail plus export on local macOS.
+and verifies the real v19 audit format inside the current additive state schema plus export on local macOS.
 EOF
 }
 
@@ -149,6 +149,7 @@ cell_classes() {
 config_digest() {
   {
     sha256_file "$0"
+    sha256_file contracts/v0.0.2/versions.json
     sha256_file scripts/lint.sh
     sha256_file scripts/check-docs.sh
     local cell
@@ -305,7 +306,7 @@ cleanup_live_runtime() {
 
 run_live_qualification() {
   swift build --product hostwright-audit-qualification
-  local bin tool runtime signed state service result canonical team tool_status=0
+  local bin tool runtime signed state service result canonical team expected_state_schema tool_status=0
   bin="$(swift build --show-bin-path)"
   tool="$bin/hostwright-audit-qualification"
   [[ -x "$tool" ]] || die 'Gate 4 audit qualification product was not built.' 70
@@ -336,8 +337,11 @@ run_live_qualification() {
     || die 'Gate 4 live result is empty or exceeds the response bound.' 70
   canonical="$(printf '%s' "$result" | /usr/bin/jq -cS .)"
   [[ "$canonical" == "$result" ]] || die 'Gate 4 live result is not canonical JSON.' 70
-  printf '%s' "$result" | /usr/bin/jq -e \
-    '.qualification == "phase09-gate4-live-v1" and .health == "healthy" and .stateSchema == 19 and .recordCount >= 3 and .segmentCount >= 3 and .exportBytes > 0 and (.exportSHA256 | test("^sha256:[a-f0-9]{64}$")) and (.activeKeyID | length > 0)' \
+  expected_state_schema="$(/usr/bin/jq -er '.stateSchema' contracts/v0.0.2/versions.json)"
+  [[ "$expected_state_schema" =~ ^[0-9]+$ && "$expected_state_schema" -ge 19 ]] \
+    || die 'Gate 4 current state schema contract is invalid.' 70
+  printf '%s' "$result" | /usr/bin/jq -e --argjson expectedStateSchema "$expected_state_schema" \
+    '.qualification == "phase09-gate4-live-v1" and .health == "healthy" and .stateSchema == $expectedStateSchema and .recordCount >= 3 and .segmentCount >= 3 and .exportBytes > 0 and (.exportSHA256 | test("^sha256:[a-f0-9]{64}$")) and (.activeKeyID | length > 0)' \
     >/dev/null
   printf '%s\n' "$result"
   cleanup_live_runtime "$runtime"

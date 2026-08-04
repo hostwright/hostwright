@@ -36,6 +36,8 @@ final class Phase09Gate09QualificationHarnessTests: XCTestCase {
     XCTAssertTrue(source.contains("for n in 1 2 3 4 5 6"))
     XCTAssertTrue(source.contains("\"$cli\" logs probe \"$config\" --state-db \"$state\" --tail 20"))
     XCTAssertTrue(source.contains("\"$cli\" exec probe --manifest \"$config\" --state-db \"$state\" --no-stdin"))
+    XCTAssertTrue(source.contains("short_live_runtime"))
+    XCTAssertTrue(source.contains("${#socket} < 104"))
   }
 
   func testPrepareBindsPrivateRootToGateNineDependenciesAndLedger() throws {
@@ -151,10 +153,18 @@ final class Phase09Gate09QualificationHarnessTests: XCTestCase {
         FileManager.default.fileExists(atPath: unrelatedContainerState.path),
         "cleanup must preserve a same-digest container owned by another evidence root"
       )
+      let suffix = root.lastPathComponent.replacingOccurrences(of: "phase09-gate09-", with: "")
+      let liveRuntime = parent.appendingPathComponent(".p09g9-\(suffix.prefix(17))")
       XCTAssertFalse(
-        FileManager.default.fileExists(atPath: root.appendingPathComponent("live-runtime-v1").path),
+        FileManager.default.fileExists(atPath: liveRuntime.path),
         result.stderr
       )
+      let preservedDiagnostic = root.appendingPathComponent(
+        "live-failure-diagnostics-v1/daemon.forced.stderr.log")
+      XCTAssertEqual(
+        try String(contentsOf: preservedDiagnostic, encoding: .utf8),
+        "forced Gate 9 live failure diagnostic\n")
+      XCTAssertEqual(try permissions(preservedDiagnostic), 0o600)
       XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("failure-v1.tsv").path))
       XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("active-run-v1").path))
       XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("cell-04.stdout.log").path))

@@ -31,6 +31,41 @@ final class HostwrightDaemonControlServiceTests: XCTestCase {
     }
   }
 
+  func testExplicitStateAuthoritiesUseDistinctPrivateLedgersWithoutDefaultMetadata() throws {
+    try withPrivateHome { home in
+      let first = try makeService(home: home, explicitStateName: "authority-a.sqlite")
+      let second = try makeService(home: home, explicitStateName: "authority-b.sqlite")
+      XCTAssertEqual(
+        URL(fileURLWithPath: first.statePath).deletingLastPathComponent(),
+        URL(fileURLWithPath: second.statePath).deletingLastPathComponent()
+      )
+      let metadataPath = home
+        .appendingPathComponent("Library/Application Support/Hostwright/metadata")
+        .path
+      XCTAssertFalse(FileManager.default.fileExists(atPath: metadataPath))
+
+      try first.service.start()
+      first.service.stop()
+      try second.service.start()
+      defer { second.service.stop() }
+
+      let stateDirectory = URL(fileURLWithPath: first.statePath).deletingLastPathComponent()
+      let ledgers = try FileManager.default.contentsOfDirectory(atPath: stateDirectory.path)
+        .filter { $0.hasSuffix("-plugin-provider-workers-v1.jsonl") }
+        .sorted()
+      XCTAssertEqual(ledgers.count, 2)
+      XCTAssertNotEqual(ledgers[0], ledgers[1])
+      for ledgerName in ledgers {
+        var ledger = stat()
+        XCTAssertEqual(lstat(stateDirectory.appendingPathComponent(ledgerName).path, &ledger), 0)
+        XCTAssertEqual(ledger.st_mode & S_IFMT, S_IFREG)
+        XCTAssertEqual(ledger.st_mode & 0o7777, 0o600)
+        XCTAssertEqual(ledger.st_uid, geteuid())
+      }
+      XCTAssertFalse(FileManager.default.fileExists(atPath: metadataPath))
+    }
+  }
+
   func testStopIsSafeWhenRepeated() throws {
     try withPrivateHome { home in
       let fixture = try makeService(home: home)
@@ -326,19 +361,41 @@ final class HostwrightDaemonControlServiceTests: XCTestCase {
     }
   }
 
-  private func makeService(home: URL) throws -> (
+  private func makeService(home: URL, explicitStateName: String? = nil) throws -> (
     service: any DaemonControlServing,
     socketPath: String,
     statePath: String
   ) {
-    let resolution = try HostwrightLocalPathResolver.resolve(
+    let defaultResolution = try HostwrightLocalPathResolver.resolve(
       homeDirectory: home.path,
       environment: [:]
     )
+    let resolution: HostwrightLocalPathResolution
+    if let explicitStateName {
+      resolution = try HostwrightLocalPathResolver.resolve(
+        explicitStateDatabasePath: URL(
+          fileURLWithPath: defaultResolution.layout.stateDirectory,
+          isDirectory: true
+        ).appendingPathComponent(explicitStateName).path,
+        homeDirectory: home.path,
+        environment: [:]
+      )
+    } else {
+      resolution = defaultResolution
+    }
+    if explicitStateName != nil {
+      try FileManager.default.createDirectory(
+        at: URL(fileURLWithPath: resolution.layout.stateDirectory, isDirectory: true),
+        withIntermediateDirectories: true,
+        attributes: [.posixPermissions: 0o700]
+      )
+      XCTAssertEqual(chmod(resolution.layout.applicationSupportDirectory, 0o700), 0)
+      XCTAssertEqual(chmod(resolution.layout.stateDirectory, 0o700), 0)
+    }
     let stateConfiguration = StateStoreConfiguration(localPathResolution: resolution)
+    try stateConfiguration.prepareRuntimeSupport()
     let store = SQLiteStateStore(configuration: stateConfiguration)
     try store.migrate()
-    try stateConfiguration.prepareRuntimeSupport()
     let identity = try DarwinCurrentControlCodeIdentity.inspect()
     try store.controlIdentities.bootstrap(
       ControlPeerIdentityRecord(

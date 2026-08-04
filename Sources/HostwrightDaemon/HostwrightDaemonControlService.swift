@@ -1,4 +1,5 @@
 import Darwin
+import CryptoKit
 import Dispatch
 import Foundation
 import HostwrightCLI
@@ -168,10 +169,22 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
       repository: store.admission, authorizer: rbacAuthorizer)
     let profileAdministration = WorkloadProfileAdministrationService(
       repository: store.workloadProfiles, authorizer: rbacAuthorizer)
-    let providerOwnershipLedgerURL = URL(
-      fileURLWithPath: resolution.layout.metadataDirectory,
-      isDirectory: true
-    ).appendingPathComponent("plugin-provider-workers.jsonl")
+    let providerOwnershipLedgerURL: URL
+    if resolution.usesApplicationSupportState {
+      providerOwnershipLedgerURL = URL(
+        fileURLWithPath: resolution.layout.metadataDirectory,
+        isDirectory: true
+      ).appendingPathComponent("plugin-provider-workers.jsonl")
+    } else {
+      let stateAuthority = SHA256.hash(data: Data(configuration.stateDatabasePath.utf8))
+        .prefix(8)
+        .map { String(format: "%02x", $0) }
+        .joined()
+      providerOwnershipLedgerURL = URL(fileURLWithPath: configuration.stateDatabasePath)
+        .deletingLastPathComponent()
+        .appendingPathComponent(
+          ".hostwright-\(stateAuthority)-plugin-provider-workers-v1.jsonl")
+    }
     try Self.prepareProviderOwnershipLedger(providerOwnershipLedgerURL)
     let pluginRuntime = PluginControlRuntime(
       repository: store.plugins,

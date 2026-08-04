@@ -7,6 +7,307 @@ import XCTest
 @testable import HostwrightState
 
 final class PersistentControlStreamIntegrationTests: XCTestCase {
+  func testLateAcknowledgementWaitsForAtomicTerminalPublication() throws {
+    let writer = StreamITTerminalTransitionWriter()
+    let emitterBox = StreamITEmissionBox()
+    let reauthorizationCount = StreamITCounter()
+    let creditCount = StreamITCounter()
+    let context = ControlStreamConnectionContext(
+      descriptor: -1,
+      globalBudget: ControlStreamGlobalBudget(),
+      frameWriter: writer.write,
+      validateSession: {}
+    )
+    let open = StreamFrame(
+      streamID: "atomic-finite", sequence: 1, kind: .open, credit: 1,
+      payload: try ControlStreamFrameContract.value(ControlStreamOpenRequest(source: .events))
+    )
+    try context.open(
+      frame: open,
+      peer: streamITPeer(),
+      authorizer: { _, _, _, _ in ControlStreamAuthorization(decision: streamITAllowDecision()) },
+      cursorValidator: { _, _, _ in },
+      reauthorizer: { _, _, _ in
+        reauthorizationCount.increment()
+        return streamITAllowDecision()
+      },
+      opener: { _, _, _, emit in
+        emitterBox.set(emit)
+        return ControlStreamProducerHandle(
+          onCredit: { _ in creditCount.increment() }, cancel: {})
+      },
+      now: Date()
+    )
+    guard let emit = emitterBox.value else { XCTFail("producer did not open"); return }
+    XCTAssertEqual(
+      emit(.data(cursor: "atomic-cursor", payload: .string("data"))), .accepted)
+
+    let terminalError = StreamITErrorBox()
+    let terminalFinished = DispatchSemaphore(value: 0)
+    DispatchQueue.global().async {
+      defer { terminalFinished.signal() }
+      do {
+        guard emit(.end(cursor: "atomic-cursor")) == .accepted else {
+          throw NSError(domain: "PersistentControlStreamIntegrationTests", code: 3)
+        }
+      } catch { terminalError.error = error }
+    }
+    XCTAssertEqual(writer.terminalWriteStarted.wait(timeout: .now() + 1), .success)
+
+    let acknowledgementError = StreamITErrorBox()
+    let acknowledgementStarted = DispatchSemaphore(value: 0)
+    let acknowledgementFinished = DispatchSemaphore(value: 0)
+    DispatchQueue.global().async {
+      defer { acknowledgementFinished.signal() }
+      acknowledgementStarted.signal()
+      do {
+        try context.receiveControl(StreamFrame(
+          streamID: "atomic-finite", sequence: 2,
+          cursor: "atomic-cursor", kind: .ack, credit: 1
+        ))
+      } catch { acknowledgementError.error = error }
+    }
+    XCTAssertEqual(acknowledgementStarted.wait(timeout: .now() + 1), .success)
+    XCTAssertEqual(
+      acknowledgementFinished.wait(timeout: .now() + 0.100), .timedOut,
+      "ACK must wait for terminal state removal and tombstone publication"
+    )
+
+    writer.releaseTerminalWrite.signal()
+    XCTAssertEqual(terminalFinished.wait(timeout: .now() + 1), .success)
+    XCTAssertEqual(acknowledgementFinished.wait(timeout: .now() + 1), .success)
+    XCTAssertNil(terminalError.error)
+    XCTAssertNil(acknowledgementError.error)
+    XCTAssertEqual(reauthorizationCount.value, 2)
+    XCTAssertEqual(creditCount.value, 0)
+
+    try context.open(
+      frame: StreamFrame(
+        streamID: "after-atomic", sequence: 1, kind: .open, credit: 1,
+        payload: try ControlStreamFrameContract.value(ControlStreamOpenRequest(source: .events))
+      ),
+      peer: streamITPeer(),
+      authorizer: { _, _, _, _ in ControlStreamAuthorization(decision: streamITAllowDecision()) },
+      cursorValidator: { _, _, _ in },
+      reauthorizer: { _, _, _ in streamITAllowDecision() },
+      opener: { _, _, _, _ in ControlStreamProducerHandle(cancel: {}) },
+      now: Date()
+    )
+    context.cancelAll()
+  }
+
+  func testCompletedReadOnlyTombstonesAreCursorBoundedEvictedAndCleared() throws {
+    let streamIDs = ["empty"] + (1...(ControlPlaneContract.maximumStreams + 1)).map {
+      "bounded-\($0)"
+    }
+    let harness = StreamITProducerHarness(expectedStreamIDs: streamIDs)
+    let context = ControlStreamConnectionContext(
+      descriptor: -1,
+      globalBudget: ControlStreamGlobalBudget(),
+      frameWriter: StreamITCountingWriter().write,
+      validateSession: {}
+    )
+    let open: (String) throws -> Void = { streamID in
+      try context.open(
+        frame: StreamFrame(
+          streamID: streamID, sequence: 1, kind: .open, credit: 1,
+          payload: try ControlStreamFrameContract.value(ControlStreamOpenRequest(source: .events))
+        ),
+        peer: streamITPeer(),
+        authorizer: { _, _, _, _ in ControlStreamAuthorization(decision: streamITAllowDecision()) },
+        cursorValidator: { _, _, _ in },
+        reauthorizer: { _, _, _ in streamITAllowDecision() },
+        opener: { peer, request, cursor, emit in
+          try harness.open(peer: peer, request: request, cursor: cursor, emit: emit)
+        },
+        now: Date()
+      )
+    }
+
+    try open("empty")
+    XCTAssertEqual(harness.emit(streamID: "empty", emission: .end(cursor: nil)), .accepted)
+    XCTAssertThrowsError(try context.receiveControl(StreamFrame(
+      streamID: "empty", sequence: 2, kind: .ack, credit: 1
+    ))) { XCTAssertEqual($0 as? ControlStreamSessionError, .unknownStream) }
+
+    for index in 1...(ControlPlaneContract.maximumStreams + 1) {
+      let streamID = "bounded-\(index)"
+      try open(streamID)
+      XCTAssertEqual(
+        harness.emit(
+          streamID: streamID,
+          emission: .data(cursor: "cursor-\(index)", payload: .string("data"))
+        ),
+        .accepted
+      )
+      XCTAssertEqual(
+        harness.emit(streamID: streamID, emission: .end(cursor: "cursor-\(index)")),
+        .accepted
+      )
+    }
+
+    let newest = "bounded-\(ControlPlaneContract.maximumStreams + 1)"
+    let newestCursor = "cursor-\(ControlPlaneContract.maximumStreams + 1)"
+    XCTAssertThrowsError(try context.receiveControl(StreamFrame(
+      streamID: newest, sequence: 3, cursor: newestCursor, kind: .ack, credit: 1
+    ))) { XCTAssertEqual($0 as? ControlStreamSessionError, .unknownStream) }
+    XCTAssertThrowsError(try context.receiveControl(StreamFrame(
+      streamID: newest, sequence: 2, cursor: "wrong-cursor", kind: .ack, credit: 1
+    ))) { XCTAssertEqual($0 as? ControlStreamSessionError, .unknownStream) }
+    XCTAssertNoThrow(try context.receiveControl(StreamFrame(
+      streamID: newest, sequence: 2, cursor: newestCursor, kind: .ack, credit: 1
+    )))
+    XCTAssertThrowsError(try context.receiveControl(StreamFrame(
+      streamID: "bounded-1", sequence: 2, cursor: "cursor-1", kind: .ack, credit: 1
+    ))) { XCTAssertEqual($0 as? ControlStreamSessionError, .unknownStream) }
+
+    context.cancelAll()
+    XCTAssertThrowsError(try context.receiveControl(StreamFrame(
+      streamID: "bounded-2", sequence: 2, cursor: "cursor-2", kind: .ack, credit: 1
+    ))) { XCTAssertEqual($0 as? ControlStreamSessionError, .unknownStream) }
+  }
+
+  func testLateAcknowledgementStrictnessCoversReuseMalformedCursorAndInteractiveStreams() throws {
+    let writer = StreamITCountingWriter()
+    let context = ControlStreamConnectionContext(
+      descriptor: -1, globalBudget: ControlStreamGlobalBudget(), frameWriter: writer.write,
+      validateSession: {}
+    )
+    let emitterBox = StreamITEmissionBox()
+    let openCount = StreamITCounter()
+    let creditCount = StreamITCounter()
+    let open: (ControlStreamOpenRequest, String) throws -> Void = { request, streamID in
+      try context.open(
+        frame: StreamFrame(
+          streamID: streamID, sequence: 1, kind: .open, credit: 1,
+          payload: try ControlStreamFrameContract.value(request)
+        ),
+        peer: streamITPeer(),
+        authorizer: { _, _, _, _ in
+          ControlStreamAuthorization(
+            decision: streamITAllowDecision(),
+            operationReference: request.source == .exec ? "stream:" + String(repeating: "a", count: 32) : nil
+          )
+        },
+        cursorValidator: { _, _, _ in },
+        reauthorizer: { _, _, _ in streamITAllowDecision() },
+        opener: { _, _, _, emit in
+          openCount.increment()
+          emitterBox.set(emit)
+          return ControlStreamProducerHandle(
+            onCredit: { _ in
+              creditCount.increment()
+              _ = emitterBox.value?(.heartbeat)
+            },
+            cancel: {}
+          )
+        },
+        now: Date()
+      )
+    }
+
+    try open(ControlStreamOpenRequest(source: .events), "reused")
+    guard let firstEmitter = emitterBox.value else { XCTFail("first producer did not open"); return }
+    XCTAssertEqual(firstEmitter(.data(cursor: "old-cursor", payload: .string("old"))), .accepted)
+    XCTAssertEqual(firstEmitter(.end(cursor: "old-cursor")), .accepted)
+
+    try open(ControlStreamOpenRequest(source: .events), "reused")
+    XCTAssertEqual(openCount.value, 2)
+    XCTAssertThrowsError(try context.receiveControl(StreamFrame(
+      streamID: "reused", sequence: 2, cursor: "old-cursor", kind: .ack, credit: 1
+    ))) { XCTAssertEqual($0 as? ControlStreamSessionError, .cursorMismatch) }
+    XCTAssertNoThrow(try context.receiveControl(StreamFrame(
+      streamID: "reused", sequence: 2, kind: .ack, credit: 1
+    )))
+    XCTAssertEqual(creditCount.value, 1)
+    XCTAssertThrowsError(try context.receiveControl(StreamFrame(
+      streamID: "malformed", sequence: 2, kind: .ack
+    )))
+
+    let interactiveEmitter = StreamITEmissionBox()
+    try context.open(
+      frame: StreamFrame(
+        streamID: "interactive", sequence: 1, kind: .open, credit: 1,
+        payload: try ControlStreamFrameContract.value(ControlStreamOpenRequest(
+          source: .exec, target: "target", requestID: "request", idempotencyKey: "idempotency"))
+      ),
+      peer: streamITPeer(),
+      authorizer: { _, _, _, _ in
+        ControlStreamAuthorization(
+          decision: streamITAllowDecision(),
+          operationReference: "stream:" + String(repeating: "a", count: 32)
+        )
+      },
+      cursorValidator: { _, _, _ in },
+      reauthorizer: { _, _, _ in streamITAllowDecision() },
+      opener: { _, _, _, emit in
+        interactiveEmitter.set(emit)
+        return ControlStreamProducerHandle(cancel: {})
+      },
+      now: Date()
+    )
+    guard let interactiveEmit = interactiveEmitter.value else {
+      XCTFail("interactive producer did not open")
+      return
+    }
+    XCTAssertEqual(
+      interactiveEmit(.data(cursor: "interactive-cursor", payload: .string("data"))), .accepted)
+    XCTAssertEqual(interactiveEmit(.end(cursor: "interactive-cursor")), .accepted)
+    XCTAssertThrowsError(try context.receiveControl(StreamFrame(
+      streamID: "interactive", sequence: 2, cursor: "interactive-cursor", kind: .ack, credit: 1
+    ))) { XCTAssertEqual($0 as? ControlStreamSessionError, .unknownStream) }
+    context.cancelAll()
+  }
+
+  func testLateAcknowledgementAfterFiniteReadOnlyEndDoesNotCloseConnection() throws {
+    let harness = StreamITProducerHarness(expectedStreamIDs: ["finite", "after-finite"])
+    let fixture = try makeFixture(producerHarness: harness)
+    defer { fixture.close() }
+    try fixture.authenticateRaw()
+
+    try fixture.sendRaw(StreamFrame(
+      streamID: "finite", sequence: 1, kind: .open, credit: 1,
+      payload: try ControlStreamFrameContract.value(ControlStreamOpenRequest(source: .events))
+    ))
+    XCTAssertEqual(try fixture.nextRawFrame(streamID: "finite").kind, .open)
+    XCTAssertTrue(harness.waitForOpen("finite"))
+
+    XCTAssertEqual(
+      harness.emit(
+        streamID: "finite",
+        emission: .data(cursor: "finite-1", payload: .string("one"))
+      ),
+      .accepted
+    )
+    let data = try fixture.nextRawFrame(streamID: "finite")
+    XCTAssertEqual(data.kind, .data)
+
+    XCTAssertEqual(
+      harness.emit(streamID: "finite", emission: .end(cursor: "finite-1")),
+      .accepted
+    )
+    XCTAssertEqual(try fixture.nextRawFrame(streamID: "finite").kind, .end)
+
+    // The terminal frame removed the server state before this ACK was processed.
+    try fixture.sendRaw(StreamFrame(
+      streamID: "finite", sequence: 2, cursor: data.cursor, kind: .ack, credit: 1
+    ))
+    try fixture.sendRaw(StreamFrame(
+      streamID: "after-finite", sequence: 1, kind: .open, credit: 1,
+      payload: try ControlStreamFrameContract.value(ControlStreamOpenRequest(source: .events))
+    ))
+    XCTAssertEqual(try fixture.nextRawFrame(streamID: "after-finite").kind, .open)
+    XCTAssertTrue(harness.waitForOpen("after-finite"))
+    XCTAssertNil(fixture.serverError)
+
+    // A valid ACK for an unknown stream remains fatal after the narrow exception.
+    try fixture.sendRaw(StreamFrame(
+      streamID: "unknown", sequence: 2, kind: .ack, credit: 1
+    ))
+    XCTAssertTrue(fixture.waitForExit())
+    XCTAssertNotNil(fixture.serverError)
+  }
+
   func testAuthenticatedStreamOpenDataAcknowledgementCreditAndEnd() throws {
     let harness = StreamITProducerHarness(expectedStreamIDs: ["events-1"])
     let fixture = try makeFixture(producerHarness: harness)
@@ -1512,6 +1813,38 @@ private final class StreamITFixture: @unchecked Sendable {
     return session
   }
 
+  func authenticateRaw() throws {
+    let deadline = try ControlTransportDeadline(timeoutMilliseconds: 1_000)
+    let challengeData = try ControlFrameCodec.read(kind: .frame, descriptor: client, deadline: deadline)
+    let challenge = try ControlAuthenticationWireContract.decodeChallenge(challengeData)
+    XCTAssertFalse(challenge.credentialProofRequired)
+    try ControlFrameCodec.write(
+      try ControlPlaneCanonicalJSON.encode(ControlAuthenticationResponse()),
+      kind: .request,
+      descriptor: client,
+      deadline: deadline
+    )
+  }
+
+  func sendRaw(_ frame: StreamFrame) throws {
+    try ControlFrameCodec.write(
+      try ControlPlaneCanonicalJSON.encode(frame),
+      kind: .request,
+      descriptor: client,
+      deadline: try ControlTransportDeadline(timeoutMilliseconds: 1_000)
+    )
+  }
+
+  func nextRawFrame(streamID _: String) throws -> StreamFrame {
+    try ControlStreamFrameContract.decode(
+      ControlFrameCodec.read(
+        kind: .frame,
+        descriptor: client,
+        deadline: try ControlTransportDeadline(timeoutMilliseconds: 1_000)
+      )
+    )
+  }
+
   var serverError: Error? { result.error }
 
   func waitForExit(timeout: TimeInterval = 2) -> Bool {
@@ -1900,6 +2233,50 @@ private final class StreamITExitState: @unchecked Sendable {
     lock.lock()
     exited = true
     lock.unlock()
+  }
+}
+
+private final class StreamITEmissionBox: @unchecked Sendable {
+  private let lock = NSLock()
+  private var stored: (@Sendable (ControlStreamEmission) -> ControlStreamEmissionDisposition)?
+
+  var value: (@Sendable (ControlStreamEmission) -> ControlStreamEmissionDisposition)? {
+    lock.withLock { stored }
+  }
+
+  func set(_ emission: @escaping @Sendable (ControlStreamEmission) -> ControlStreamEmissionDisposition) {
+    lock.withLock { stored = emission }
+  }
+}
+
+private final class StreamITCounter: @unchecked Sendable {
+  private let lock = NSLock()
+  private var count = 0
+
+  var value: Int { lock.withLock { count } }
+
+  func increment() {
+    lock.withLock { count += 1 }
+  }
+}
+
+private final class StreamITTerminalTransitionWriter: @unchecked Sendable {
+  let terminalWriteStarted = DispatchSemaphore(value: 0)
+  let releaseTerminalWrite = DispatchSemaphore(value: 0)
+
+  func write(
+    _ data: Data,
+    _ kind: ControlPayloadKind,
+    _ descriptor: Int32,
+    _ deadline: ControlTransportDeadline
+  ) throws {
+    guard kind == .frame,
+      let frame = try? ControlStreamFrameContract.decode(data), frame.kind == .end
+    else { return }
+    terminalWriteStarted.signal()
+    guard releaseTerminalWrite.wait(timeout: .now() + 1) == .success else {
+      throw ControlTransportError.deadlineExceeded
+    }
   }
 }
 

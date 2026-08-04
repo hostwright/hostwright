@@ -9,8 +9,15 @@ final class ControlStreamConnectionContext: @unchecked Sendable {
     let incarnation: UInt64
   }
 
+  private struct CompletedReadOnlyStream {
+    let streamKey: StreamKey
+    let nextClientSequence: UInt64
+    let lastDeliveredCursor: String
+  }
+
   private let descriptor: Int32
   private let state = ControlStreamSessionState()
+  private let streamStateLock = NSLock()
   private let writerLock = NSLock()
   private let producerLock = NSLock()
   private let terminalSignal = DispatchSemaphore(value: 0)
@@ -21,7 +28,11 @@ final class ControlStreamConnectionContext: @unchecked Sendable {
   private var producers: [StreamKey: ControlStreamProducerHandle] = [:]
   private var budgetKeys: [StreamKey: String] = [:]
   private var authorizationChecks: [StreamKey: @Sendable () throws -> Void] = [:]
+  private var completedReadOnlyStreams: [String: CompletedReadOnlyStream] = [:]
+  private var completedReadOnlyStreamOrder: [String] = []
   private var connectionTerminated = false
+
+  private static let maximumCompletedReadOnlyStreams = ControlPlaneContract.maximumStreams
 
   init(
     descriptor: Int32,
@@ -45,12 +56,18 @@ final class ControlStreamConnectionContext: @unchecked Sendable {
     now: Date
   ) throws {
     try validateSession()
-    guard producerLock.withLock({ !connectionTerminated }) else {
-      throw PersistentControlServerError.invalidRequest
-    }
     let request: ControlStreamOpenRequest
+    let incarnation: UInt64
     do {
-      request = try state.open(frame)
+      (request, incarnation) = try streamStateLock.withLock {
+        guard producerLock.withLock({ !connectionTerminated }) else {
+          throw PersistentControlServerError.invalidRequest
+        }
+        let request = try state.open(frame)
+        let incarnation = try state.incarnation(streamID: frame.streamID)
+        removeCompletedReadOnlyStream(streamID: frame.streamID)
+        return (request, incarnation)
+      }
     } catch ControlStreamSessionError.streamLimit {
       try write(StreamFrame(
         streamID: frame.streamID,
@@ -63,7 +80,6 @@ final class ControlStreamConnectionContext: @unchecked Sendable {
       ))
       return
     }
-    let incarnation = try state.incarnation(streamID: frame.streamID)
     let streamKey = StreamKey(streamID: frame.streamID, incarnation: incarnation)
     let budgetKey = "\(contextID):\(frame.streamID):\(incarnation)"
     do {
@@ -160,21 +176,19 @@ final class ControlStreamConnectionContext: @unchecked Sendable {
       return
     }
     let effectiveRequest = authorization.effectiveRequest ?? request
-    _ = try allocateAndWrite {
-      try state.makeServerFrame(
-        streamID: frame.streamID,
-        kind: .open,
-        payload: try ControlStreamFrameContract.value(ControlStreamAcceptance(
-          source: effectiveRequest.source,
-          resumed: frame.cursor != nil,
-          heartbeatMilliseconds: effectiveRequest.heartbeatMilliseconds,
-          inputCredit: effectiveRequest.source == .exec || effectiveRequest.source == .attach
-            ? ControlPlaneContract.maximumInteractiveStreamInputCredit : 0,
-          operationRef: authorization.operationReference,
-          auditHealth: authorization.auditHealthDegraded ? .degraded : .healthy
-        ))
-      )
-    }
+    _ = try allocateAndWriteServerFrame(
+      streamID: frame.streamID,
+      kind: .open,
+      payload: try ControlStreamFrameContract.value(ControlStreamAcceptance(
+        source: effectiveRequest.source,
+        resumed: frame.cursor != nil,
+        heartbeatMilliseconds: effectiveRequest.heartbeatMilliseconds,
+        inputCredit: effectiveRequest.source == .exec || effectiveRequest.source == .attach
+          ? ControlPlaneContract.maximumInteractiveStreamInputCredit : 0,
+        operationRef: authorization.operationReference,
+        auditHealth: authorization.auditHealthDegraded ? .degraded : .healthy
+      ))
+    )
     producerLock.withLock {
       authorizationChecks[streamKey] = {
         let decision = try reauthorizer(peer, effectiveRequest, Date())
@@ -197,16 +211,23 @@ final class ControlStreamConnectionContext: @unchecked Sendable {
       let handle = try opener(peer, effectiveRequest, frame.cursor) { [weak self] emission in
         self?.emit(emission, streamID: streamID, incarnation: incarnation) ?? .terminated
       }
-      producerLock.withLock {
-        if connectionTerminated {
-          handle.cancel()
-        } else if (try? state.snapshot(streamID: streamID).isTerminal) == false {
-          if budgetKeys[streamKey] != nil { producers[streamKey] = handle }
-          else { handle.cancel() }
-        } else {
-          handle.cancel()
+      let handleToCancel = streamStateLock.withLock { () -> ControlStreamProducerHandle? in
+        let streamIsActive = (try? state.snapshot(streamID: streamID).isTerminal) == false
+        return producerLock.withLock {
+          if connectionTerminated {
+            return handle
+          } else if streamIsActive {
+            if budgetKeys[streamKey] != nil {
+              producers[streamKey] = handle
+              return nil
+            }
+            return handle
+          } else {
+            return handle
+          }
         }
       }
+      handleToCancel?.cancel()
     } catch {
       try writeTerminalFailure(
         streamID: frame.streamID,
@@ -221,21 +242,28 @@ final class ControlStreamConnectionContext: @unchecked Sendable {
 
   func receiveControl(_ frame: StreamFrame) throws {
     try validateSession()
+    if frame.kind == .ack {
+      try ControlStreamFrameContract.validate(frame, direction: .clientToServer)
+    }
     if frame.kind == .cancel {
-      guard let incarnation = try? state.incarnation(streamID: frame.streamID) else { return }
+      guard let incarnation = streamStateLock.withLock({
+        try? state.incarnation(streamID: frame.streamID)
+      }) else { return }
       let streamKey = StreamKey(streamID: frame.streamID, incarnation: incarnation)
       let authorizationCheck = producerLock.withLock { authorizationChecks[streamKey] }
       try authorizationCheck?()
       let handle = producerLock.withLock { producers[streamKey] }
       let terminalImmediately = handle?.cancellationMode != .deferredUntilProducerTerminal
       let terminal = try withWriterDeadline { deadline -> StreamFrame? in
-        let terminal = try state.receiveCancellation(
-          frame,
-          expectedIncarnation: incarnation,
-          terminalImmediately: terminalImmediately
-        )
-        if let terminal { try writeUnlocked(terminal, deadline: deadline) }
-        return terminal
+        try streamStateLock.withLock {
+          let terminal = try state.receiveCancellation(
+            frame,
+            expectedIncarnation: incarnation,
+            terminalImmediately: terminalImmediately
+          )
+          if let terminal { try writeUnlocked(terminal, deadline: deadline) }
+          return terminal
+        }
       }
       handle?.cancel()
       if terminal != nil {
@@ -244,20 +272,29 @@ final class ControlStreamConnectionContext: @unchecked Sendable {
       }
       return
     }
-    let incarnation: UInt64
-    do {
-      incarnation = try state.incarnation(streamID: frame.streamID)
-    } catch ControlStreamSessionError.unknownStream where frame.kind == .cancel {
+    if frame.kind == .ack {
+      let handle = try streamStateLock.withLock {
+        try receiveAcknowledgementLocked(frame)
+      }
+      handle?.addCredit(frame.credit!)
       return
     }
-    let streamKey = StreamKey(streamID: frame.streamID, incarnation: incarnation)
-    let authorizationCheck = producerLock.withLock { authorizationChecks[streamKey] }
-    try authorizationCheck?()
-    let snapshot = try state.receiveClientControl(frame)
-    let handle = producerLock.withLock { producers[streamKey] }
-    if frame.kind == .ack {
-      handle?.addCredit(frame.credit!)
-    } else if frame.kind == .data {
+    let incarnation: UInt64
+    let snapshot: ControlStreamSnapshot
+    let handle: ControlStreamProducerHandle?
+    (incarnation, snapshot, handle) = try streamStateLock.withLock {
+      let incarnation = try state.incarnation(streamID: frame.streamID)
+      let streamKey = StreamKey(streamID: frame.streamID, incarnation: incarnation)
+      let authorizationCheck = producerLock.withLock { authorizationChecks[streamKey] }
+      try authorizationCheck?()
+      let snapshot = try state.receiveClientControl(frame)
+      return (
+        incarnation,
+        snapshot,
+        producerLock.withLock { producers[streamKey] }
+      )
+    }
+    if frame.kind == .data {
       guard let payload = frame.payload, handle?.sendInput(payload, onConsumed: { [weak self] in
         self?.acknowledgeConsumedInput(streamID: frame.streamID, incarnation: incarnation)
       }) == true else {
@@ -294,24 +331,29 @@ final class ControlStreamConnectionContext: @unchecked Sendable {
 
   func drainAfterInputHalfClose(timeoutMilliseconds: Int = 5_000) {
     let end = DispatchTime.now() + .milliseconds(timeoutMilliseconds)
-    while state.activeStreamCount > 0 {
+    while streamStateLock.withLock({ state.activeStreamCount > 0 }) {
       if terminalSignal.wait(timeout: end) == .timedOut { break }
     }
     cancelAll()
   }
 
   func cancelAll() {
-    let handles = producerLock.withLock { () -> [ControlStreamProducerHandle] in
-      connectionTerminated = true
-      let values = Array(producers.values)
-      producers.removeAll()
-      let keys = Array(budgetKeys.values)
-      budgetKeys.removeAll()
-      authorizationChecks.removeAll()
-      keys.forEach { globalBudget.release(key: $0) }
+    let handles = streamStateLock.withLock { () -> [ControlStreamProducerHandle] in
+      let values = producerLock.withLock { () -> [ControlStreamProducerHandle] in
+        connectionTerminated = true
+        let values = Array(producers.values)
+        producers.removeAll()
+        let keys = Array(budgetKeys.values)
+        budgetKeys.removeAll()
+        authorizationChecks.removeAll()
+        completedReadOnlyStreams.removeAll()
+        completedReadOnlyStreamOrder.removeAll()
+        keys.forEach { globalBudget.release(key: $0) }
+        return values
+      }
+      _ = state.cancelAll()
       return values
     }
-    _ = state.cancelAll()
     handles.forEach { $0.cancel() }
     _ = shutdown(descriptor, SHUT_RDWR)
     terminalSignal.signal()
@@ -329,26 +371,24 @@ final class ControlStreamConnectionContext: @unchecked Sendable {
       try authorizationCheck?()
       let frame: StreamFrame
       do {
-        frame = try allocateAndWrite {
-          switch emission {
-          case .data(let cursor, let payload):
-            return try state.makeServerFrame(
-              streamID: streamID, expectedIncarnation: incarnation,
-              kind: .data, cursor: cursor, payload: payload)
-          case .heartbeat:
-            return try state.makeServerFrame(
-              streamID: streamID, expectedIncarnation: incarnation, kind: .heartbeat)
-          case .gap(let cursor, let payload):
-            return try state.makeServerFrame(
-              streamID: streamID, expectedIncarnation: incarnation, kind: .gap,
-              cursor: cursor, payload: try ControlStreamFrameContract.value(payload))
-          case .end(let cursor):
-            return try state.makeServerFrame(
-              streamID: streamID, expectedIncarnation: incarnation, kind: .end, cursor: cursor)
-          case .failure(let error):
-            return try state.makeServerFrame(
-              streamID: streamID, expectedIncarnation: incarnation, kind: .error, error: error)
-          }
+        switch emission {
+        case .data(let cursor, let payload):
+          frame = try allocateAndWriteServerFrame(
+            streamID: streamID, expectedIncarnation: incarnation,
+            kind: .data, cursor: cursor, payload: payload)
+        case .heartbeat:
+          frame = try allocateAndWriteServerFrame(
+            streamID: streamID, expectedIncarnation: incarnation, kind: .heartbeat)
+        case .gap(let cursor, let payload):
+          frame = try allocateAndWriteServerFrame(
+            streamID: streamID, expectedIncarnation: incarnation, kind: .gap,
+            cursor: cursor, payload: try ControlStreamFrameContract.value(payload))
+        case .end(let cursor):
+          frame = try allocateAndWriteServerFrame(
+            streamID: streamID, expectedIncarnation: incarnation, kind: .end, cursor: cursor)
+        case .failure(let error):
+          frame = try allocateAndWriteServerFrame(
+            streamID: streamID, expectedIncarnation: incarnation, kind: .error, error: error)
         }
       } catch ControlStreamSessionError.creditExhausted {
         return .creditExhausted
@@ -385,14 +425,12 @@ final class ControlStreamConnectionContext: @unchecked Sendable {
       let streamKey = StreamKey(streamID: streamID, incarnation: incarnation)
       let authorizationCheck = producerLock.withLock { authorizationChecks[streamKey] }
       try authorizationCheck?()
-      _ = try allocateAndWrite {
-        try state.makeServerFrame(
-          streamID: streamID,
-          expectedIncarnation: incarnation,
-          kind: .ack,
-          credit: 1
-        )
-      }
+      _ = try allocateAndWriteServerFrame(
+        streamID: streamID,
+        expectedIncarnation: incarnation,
+        kind: .ack,
+        credit: 1
+      )
     } catch ControlStreamSessionError.unknownStream {
       return
     } catch {
@@ -405,11 +443,9 @@ final class ControlStreamConnectionContext: @unchecked Sendable {
     expectedIncarnation: UInt64? = nil,
     error: SanitizedError
   ) throws {
-    _ = try allocateAndWrite {
-      try state.makeServerFrame(
-        streamID: streamID, expectedIncarnation: expectedIncarnation,
-        kind: .error, error: error)
-    }
+    _ = try allocateAndWriteServerFrame(
+      streamID: streamID, expectedIncarnation: expectedIncarnation,
+      kind: .error, error: error)
     removeProducer(streamID: streamID, incarnation: expectedIncarnation, cancel: true)
     terminalSignal.signal()
   }
@@ -420,13 +456,42 @@ final class ControlStreamConnectionContext: @unchecked Sendable {
     }
   }
 
-  private func allocateAndWrite(
-    _ allocation: () throws -> StreamFrame
+  private func allocateAndWriteServerFrame(
+    streamID: String,
+    expectedIncarnation: UInt64? = nil,
+    kind: StreamFrameKind,
+    cursor: String? = nil,
+    payload: ControlPlaneJSONValue? = nil,
+    error: SanitizedError? = nil,
+    credit: Int? = nil
   ) throws -> StreamFrame {
     try withWriterDeadline { deadline in
-      let frame = try allocation()
-      try writeUnlocked(frame, deadline: deadline)
-      return frame
+      try streamStateLock.withLock {
+        let snapshot = try state.snapshot(streamID: streamID)
+        let frame = try state.makeServerFrame(
+          streamID: streamID,
+          expectedIncarnation: expectedIncarnation,
+          kind: kind,
+          cursor: cursor,
+          payload: payload,
+          error: error,
+          credit: credit
+        )
+        if frame.kind == .end, let expectedIncarnation,
+          !Self.isInteractive(snapshot.source),
+          let lastDeliveredCursor = snapshot.lastDeliveredCursor,
+          snapshot.lastClientSequence < UInt64.max
+        {
+          rememberCompletedReadOnlyStream(
+            streamID: streamID,
+            incarnation: expectedIncarnation,
+            nextClientSequence: snapshot.lastClientSequence + 1,
+            lastDeliveredCursor: lastDeliveredCursor
+          )
+        }
+        try writeUnlocked(frame, deadline: deadline)
+        return frame
+      }
     }
   }
 
@@ -482,6 +547,79 @@ final class ControlStreamConnectionContext: @unchecked Sendable {
     let (handle, budgetKey) = result
     if let budgetKey { globalBudget.release(key: budgetKey) }
     if cancel { handle?.cancel() }
+  }
+
+  private func receiveAcknowledgementLocked(_ frame: StreamFrame) throws
+    -> ControlStreamProducerHandle?
+  {
+    let incarnation: UInt64
+    do {
+      incarnation = try state.incarnation(streamID: frame.streamID)
+    } catch ControlStreamSessionError.unknownStream {
+      guard consumeExpectedLateReadOnlyAcknowledgementLocked(frame) else {
+        throw ControlStreamSessionError.unknownStream
+      }
+      return nil
+    }
+    let streamKey = StreamKey(streamID: frame.streamID, incarnation: incarnation)
+    let authorizationCheck = producerLock.withLock { authorizationChecks[streamKey] }
+    try authorizationCheck?()
+    do {
+      _ = try state.receiveClientControl(frame)
+    } catch ControlStreamSessionError.unknownStream {
+      guard consumeExpectedLateReadOnlyAcknowledgementLocked(frame) else {
+        throw ControlStreamSessionError.unknownStream
+      }
+      return nil
+    }
+    return producerLock.withLock { producers[streamKey] }
+  }
+
+  private func consumeExpectedLateReadOnlyAcknowledgementLocked(_ frame: StreamFrame) -> Bool {
+    return producerLock.withLock {
+      guard let completed = completedReadOnlyStreams[frame.streamID],
+        frame.sequence == completed.nextClientSequence,
+        frame.cursor == completed.lastDeliveredCursor
+      else { return false }
+      completedReadOnlyStreams.removeValue(forKey: frame.streamID)
+      completedReadOnlyStreamOrder.removeAll { $0 == frame.streamID }
+      return true
+    }
+  }
+
+  private func rememberCompletedReadOnlyStream(
+    streamID: String,
+    incarnation: UInt64,
+    nextClientSequence: UInt64,
+    lastDeliveredCursor: String
+  ) {
+    producerLock.withLock {
+      if completedReadOnlyStreams[streamID] != nil {
+        completedReadOnlyStreamOrder.removeAll { $0 == streamID }
+      } else if completedReadOnlyStreamOrder.count >= Self.maximumCompletedReadOnlyStreams,
+        let evictedStreamID = completedReadOnlyStreamOrder.first
+      {
+        completedReadOnlyStreamOrder.removeFirst()
+        completedReadOnlyStreams.removeValue(forKey: evictedStreamID)
+      }
+      completedReadOnlyStreamOrder.append(streamID)
+      completedReadOnlyStreams[streamID] = CompletedReadOnlyStream(
+        streamKey: StreamKey(streamID: streamID, incarnation: incarnation),
+        nextClientSequence: nextClientSequence,
+        lastDeliveredCursor: lastDeliveredCursor
+      )
+    }
+  }
+
+  private func removeCompletedReadOnlyStream(streamID: String) {
+    producerLock.withLock {
+      completedReadOnlyStreams.removeValue(forKey: streamID)
+      completedReadOnlyStreamOrder.removeAll { $0 == streamID }
+    }
+  }
+
+  private static func isInteractive(_ source: ControlStreamSource) -> Bool {
+    source == .exec || source == .attach
   }
 }
 

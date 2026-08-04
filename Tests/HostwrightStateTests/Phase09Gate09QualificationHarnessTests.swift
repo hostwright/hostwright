@@ -40,6 +40,9 @@ final class Phase09Gate09QualificationHarnessTests: XCTestCase {
     XCTAssertTrue(source.contains("${#socket} < 104"))
     XCTAssertTrue(source.contains("--identifier hostwright-control \"$bootstrap\""))
     XCTAssertTrue(source.contains("--socket \"$socket\" --client \"$cli\""))
+    XCTAssertTrue(source.contains("qualification.plan-v1.json"))
+    XCTAssertTrue(source.contains("^[a-f0-9]{16}$"))
+    XCTAssertTrue(source.contains("-o -name 'qualification.*.json'"))
     let qualificationTool = try String(
       contentsOf: repository.appendingPathComponent(
         "Sources/HostwrightStreamQualificationTool/main.swift"),

@@ -132,6 +132,22 @@ public struct StateUpgradeService: Sendable {
 
     public func withBoundedStateAccessWait<T>(
         lockWaitMilliseconds: Int,
+        _ body: () throws -> T
+    ) throws -> T {
+        guard (1...30_000).contains(lockWaitMilliseconds) else {
+            throw StateStoreError.invalidRecord(
+                "state-access wait must be between 1 and 30000 milliseconds"
+            )
+        }
+        return try StateAccessCoordinator(configuration: store.configuration)
+            .withBoundedStateAccessWait(
+                waitTimeoutNanoseconds: UInt64(lockWaitMilliseconds) * 1_000_000,
+                body
+            )
+    }
+
+    public func withBoundedStateAccessWait<T>(
+        lockWaitMilliseconds: Int,
         _ body: () async throws -> T
     ) async throws -> T {
         guard (1...30_000).contains(lockWaitMilliseconds) else {

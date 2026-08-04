@@ -356,12 +356,12 @@ final class StateUpgradeTests: XCTestCase {
         }
     }
 
-    func testBoundedStateAccessWaitRejectsUnboundedWaits() async throws {
-        try await withTemporaryStore(throughVersion: MigrationRunner.latestSchemaVersion) {
+    func testBoundedStateAccessWaitRejectsUnboundedWaits() throws {
+        try withTemporaryStore(throughVersion: MigrationRunner.latestSchemaVersion) {
             store, _ in
             for timeout in [0, 30_001] {
                 do {
-                    try await StateUpgradeService(store: store)
+                    try StateUpgradeService(store: store)
                         .withBoundedStateAccessWait(lockWaitMilliseconds: timeout) {}
                     XCTFail("Expected invalidRecord for \(timeout) milliseconds.")
                 } catch {

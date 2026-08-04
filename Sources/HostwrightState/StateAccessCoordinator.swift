@@ -230,6 +230,23 @@ struct StateAccessCoordinator {
 
     func withBoundedStateAccessWait<T>(
         waitTimeoutNanoseconds: UInt64,
+        _ body: () throws -> T
+    ) throws -> T {
+        guard waitTimeoutNanoseconds > 0 else {
+            throw StateStoreError.invalidRecord("state-access wait timeout is invalid")
+        }
+        let effectiveWaitTimeoutNanoseconds = max(
+            waitTimeoutNanoseconds,
+            StateAccessExecutionContext.waitTimeoutNanoseconds ?? 0
+        )
+        return try StateAccessExecutionContext.$waitTimeoutNanoseconds.withValue(
+            effectiveWaitTimeoutNanoseconds,
+            operation: body
+        )
+    }
+
+    func withBoundedStateAccessWait<T>(
+        waitTimeoutNanoseconds: UInt64,
         _ body: () async throws -> T
     ) async throws -> T {
         guard waitTimeoutNanoseconds > 0 else {

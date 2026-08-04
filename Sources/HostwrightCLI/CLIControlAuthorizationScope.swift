@@ -100,40 +100,43 @@ public enum CLIControlAuthorizationScopeResolver {
         let store = SQLiteStateStore(
             configuration: StateStoreConfiguration(explicitDatabasePath: stateDatabasePath)
         )
-        guard try store.schemaVersion() == HostwrightContractVersions.stateSchema else {
-            throw HostwrightDiagnostic(
-                code: .stateStoreUnavailable,
-                message: "The daemon state schema cannot establish the requested authorization scope."
-            )
-        }
-        if let project = try? store.desiredStates.loadProject(id: projectStateID) {
-            guard HostwrightResourceUUID.isValid(project.resourceUUID) else {
-                throw HostwrightDiagnostic(
-                    code: .stateStoreUnavailable,
-                    message: "The daemon state cannot establish the requested project UUID."
+        return try StateUpgradeService(store: store)
+            .withBoundedStateAccessWait(lockWaitMilliseconds: 30_000) {
+                guard try store.schemaVersion() == HostwrightContractVersions.stateSchema else {
+                    throw HostwrightDiagnostic(
+                        code: .stateStoreUnavailable,
+                        message: "The daemon state schema cannot establish the requested authorization scope."
+                    )
+                }
+                if let project = try? store.desiredStates.loadProject(id: projectStateID) {
+                    guard HostwrightResourceUUID.isValid(project.resourceUUID) else {
+                        throw HostwrightDiagnostic(
+                            code: .stateStoreUnavailable,
+                            message: "The daemon state cannot establish the requested project UUID."
+                        )
+                    }
+                    projectIdentifier = project.resourceUUID
+                }
+                guard serviceNames.count == 1 else {
+                    return CLIControlAuthorizationScope(
+                        projectIdentifier: projectIdentifier,
+                        resourceIdentifier: nil
+                    )
+                }
+                let matches = try store.ownership.loadAll().filter {
+                    $0.projectID == projectStateID && $0.serviceName == serviceNames[0]
+                }
+                guard matches.count <= 1 else {
+                    throw HostwrightDiagnostic(
+                        code: .stateStoreUnavailable,
+                        message: "The requested service has ambiguous authorization ownership."
+                    )
+                }
+                return CLIControlAuthorizationScope(
+                    projectIdentifier: projectIdentifier,
+                    resourceIdentifier: matches.first?.resourceUUID
                 )
             }
-            projectIdentifier = project.resourceUUID
-        }
-        guard serviceNames.count == 1 else {
-            return CLIControlAuthorizationScope(
-                projectIdentifier: projectIdentifier,
-                resourceIdentifier: nil
-            )
-        }
-        let matches = try store.ownership.loadAll().filter {
-            $0.projectID == projectStateID && $0.serviceName == serviceNames[0]
-        }
-        guard matches.count <= 1 else {
-            throw HostwrightDiagnostic(
-                code: .stateStoreUnavailable,
-                message: "The requested service has ambiguous authorization ownership."
-            )
-        }
-        return CLIControlAuthorizationScope(
-            projectIdentifier: projectIdentifier,
-            resourceIdentifier: matches.first?.resourceUUID
-        )
     }
 
     public static func manifestPath(for command: CLICommand) -> String? {

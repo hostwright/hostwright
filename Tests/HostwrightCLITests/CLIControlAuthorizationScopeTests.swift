@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import HostwrightCore
 import HostwrightManifest
@@ -7,6 +8,40 @@ import XCTest
 @testable import HostwrightCLI
 
 final class CLIControlAuthorizationScopeTests: XCTestCase {
+    func testApplyAuthorizationScopeWaitsForStateAccessFenceContention() throws {
+        try withFixture { fixture in
+            let arguments = [
+                "apply", fixture.manifestPath,
+                "--state-db", fixture.store.path,
+                "--confirm-plan", String(repeating: "a", count: 64),
+            ]
+            let command = try CLICommand.parse(arguments: arguments)
+            let lockPath = try fixture.store.configuration.maintenancePaths().accessLockPath
+            let descriptor = open(lockPath, O_RDWR | O_NOFOLLOW | O_CLOEXEC)
+            XCTAssertGreaterThanOrEqual(descriptor, 0)
+            XCTAssertEqual(flock(descriptor, LOCK_EX | LOCK_NB), 0)
+            let released = expectation(description: "state-access fence released")
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.4) {
+                _ = flock(descriptor, LOCK_UN)
+                close(descriptor)
+                released.fulfill()
+            }
+
+            do {
+                let scope = try CLIControlAuthorizationScopeResolver.resolve(
+                    command: command,
+                    arguments: arguments,
+                    environment: fixture.environment
+                )
+                XCTAssertEqual(scope.projectIdentifier, fixture.projectResourceUUID)
+                XCTAssertNil(scope.resourceIdentifier)
+            } catch {
+                XCTFail("Expected authorization scope resolution after contention: \(error)")
+            }
+            wait(for: [released], timeout: 1)
+        }
+    }
+
     func testManifestBackedSingleServiceResolvesAuthoritativeProjectAndResourceUUID() throws {
         try withFixture { fixture in
             let command = try CLICommand.parse(arguments: [

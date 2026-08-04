@@ -327,6 +327,170 @@ final class StateUpgradeTests: XCTestCase {
         }
     }
 
+    func testSerializedLifecycleMutationDoesNotBlockOrdinarySharedStateAccess() throws {
+        try withTemporaryStore(throughVersion: MigrationRunner.latestSchemaVersion) { store, _ in
+            let readerFinished = expectation(description: "ordinary state reader completes")
+            let readerOutcome = Mutex<String?>(nil)
+
+            try StateUpgradeService(store: store).withSerializedLifecycleMutation {
+                DispatchQueue.global(qos: .userInitiated).async {
+                    do {
+                        let version = try store.schemaVersion()
+                        readerOutcome.withLock {
+                            $0 = version == MigrationRunner.latestSchemaVersion
+                                ? "success" : "unexpected-schema-version"
+                        }
+                    } catch {
+                        readerOutcome.withLock { $0 = String(describing: error) }
+                    }
+                    readerFinished.fulfill()
+                }
+                wait(for: [readerFinished], timeout: 2)
+            }
+
+            XCTAssertEqual(readerOutcome.withLock { $0 }, "success")
+        }
+    }
+
+    func testSerializedLifecycleMutationsFailClosedAtTheirWaitBound() throws {
+        try withTemporaryStore(throughVersion: MigrationRunner.latestSchemaVersion) { store, _ in
+            let service = StateUpgradeService(store: store)
+            let enteredFirstMutation = DispatchSemaphore(value: 0)
+            let releaseFirstMutation = DispatchSemaphore(value: 0)
+            let firstOutcome = TaskOutcome()
+
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    try service.withSerializedLifecycleMutation(lockWaitMilliseconds: 1_000) {
+                        enteredFirstMutation.signal()
+                        guard releaseFirstMutation.wait(timeout: .now() + 2) == .success else {
+                            firstOutcome.record("release-timeout")
+                            return
+                        }
+                    }
+                    if firstOutcome.value == nil {
+                        firstOutcome.record("success")
+                    }
+                } catch {
+                    firstOutcome.record(String(describing: error))
+                }
+                firstOutcome.finish()
+            }
+
+            XCTAssertEqual(enteredFirstMutation.wait(timeout: .now() + 2), .success)
+            XCTAssertThrowsError(
+                try service.withSerializedLifecycleMutation(lockWaitMilliseconds: 50) {}
+            ) { error in
+                guard case let StateStoreError.databaseLocked(_, message) = error else {
+                    return XCTFail("Expected databaseLocked, received \(error).")
+                }
+                XCTAssertTrue(message.contains("lifecycle-mutation fence"), message)
+            }
+
+            releaseFirstMutation.signal()
+            XCTAssertEqual(firstOutcome.wait(timeout: .now() + 2), .success)
+            XCTAssertEqual(firstOutcome.value, "success")
+        }
+    }
+
+    func testEscapedInheritedSerializedLifecycleMutationAuthorityIsRevoked()
+        async throws
+    {
+        try await withTemporaryStore(throughVersion: MigrationRunner.latestSchemaVersion) {
+            store, _ in
+            let service = StateUpgradeService(store: store)
+            let permitEscapedAttempt = LifecycleMutationGate()
+            let holderEntered = LifecycleMutationGate()
+            let releaseHolder = LifecycleMutationGate()
+
+            let escaped = try await service.withSerializedLifecycleMutation {
+                await Task.yield()
+                return Task { [service, permitEscapedAttempt] in
+                    await permitEscapedAttempt.wait()
+                    do {
+                        return try await service.withSerializedLifecycleMutation(
+                            lockWaitMilliseconds: 50
+                        ) {
+                            await Task.yield()
+                            return "unexpected-success"
+                        }
+                    } catch {
+                        return String(describing: error)
+                    }
+                }
+            }
+
+            let holder = Task { () -> String in
+                do {
+                    return try await service.withSerializedLifecycleMutation(
+                        lockWaitMilliseconds: 1_000
+                    ) {
+                        await holderEntered.release()
+                        await releaseHolder.wait()
+                        return "holder-success"
+                    }
+                } catch {
+                    return String(describing: error)
+                }
+            }
+            await holderEntered.wait()
+            await permitEscapedAttempt.release()
+
+            let escapedOutcome = await escaped.value
+            XCTAssertNotEqual(escapedOutcome, "unexpected-success")
+            XCTAssertTrue(escapedOutcome.contains("lifecycle-mutation fence"), escapedOutcome)
+
+            await releaseHolder.release()
+            let holderOutcome = await holder.value
+            XCTAssertEqual(holderOutcome, "holder-success")
+        }
+    }
+
+    func testAsyncExclusiveLifecycleFenceWaitsBehindMutationAndIsNestedReentrant()
+        async throws
+    {
+        try await withTemporaryStore(throughVersion: MigrationRunner.latestSchemaVersion) {
+            store, _ in
+            let service = StateUpgradeService(store: store)
+            let mutationEntered = DispatchSemaphore(value: 0)
+            let releaseMutation = LifecycleMutationGate()
+            let state = LifecycleMutationTestState()
+
+            let mutation = Task { () throws -> Int in
+                try await service.withSerializedLifecycleMutation {
+                    state.setMutationActive(true)
+                    defer { state.setMutationActive(false) }
+                    mutationEntered.signal()
+                    let version = try await service.withExclusiveLifecycleFence {
+                        try await Task.sleep(for: .milliseconds(10))
+                        return try store.schemaVersion()
+                    }
+                    await releaseMutation.wait()
+                    return version
+                }
+            }
+
+            XCTAssertEqual(mutationEntered.wait(timeout: .now() + 2), .success)
+            let delayedRelease = Task.detached {
+                try? await Task.sleep(for: .milliseconds(100))
+                await releaseMutation.release()
+            }
+            try await service.withExclusiveLifecycleFence(lockWaitMilliseconds: 1_000) {
+                await Task.yield()
+                state.recordExclusiveEntry()
+            }
+            await delayedRelease.value
+
+            switch await mutation.result {
+            case .success(let version):
+                XCTAssertEqual(version, MigrationRunner.latestSchemaVersion)
+            case .failure(let error):
+                XCTFail("Nested lifecycle fence failed: \(error)")
+            }
+            XCTAssertFalse(state.exclusiveEnteredWhileMutationActive)
+        }
+    }
+
     func testBoundedStateAccessWaitPropagatesAcrossAwaitWithoutBypassingTheFence()
         async throws
     {
@@ -723,5 +887,51 @@ private final class TaskOutcome: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return storedValue
+    }
+}
+
+private final class LifecycleMutationTestState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var mutationActive = false
+    private var exclusiveEntrySawActiveMutation = false
+
+    func setMutationActive(_ active: Bool) {
+        lock.lock()
+        mutationActive = active
+        lock.unlock()
+    }
+
+    func recordExclusiveEntry() {
+        lock.lock()
+        exclusiveEntrySawActiveMutation = mutationActive
+        lock.unlock()
+    }
+
+    var exclusiveEnteredWhileMutationActive: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return exclusiveEntrySawActiveMutation
+    }
+}
+
+private actor LifecycleMutationGate {
+    private var released = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        guard !released else { return }
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+
+    func release() {
+        guard !released else { return }
+        released = true
+        let pending = waiters
+        waiters.removeAll()
+        for waiter in pending {
+            waiter.resume()
+        }
     }
 }

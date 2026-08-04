@@ -312,7 +312,7 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
           lockWaitMilliseconds: lockWaitMilliseconds
         ) {
           guard try mutationClassifier(request) else { return try operation() }
-          return try StateUpgradeService(store: store).withExclusiveLifecycleFence(
+          return try StateUpgradeService(store: store).withSerializedLifecycleMutation(
             lockWaitMilliseconds: lockWaitMilliseconds,
             operation
           )

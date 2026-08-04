@@ -557,7 +557,7 @@ public struct DaemonLoopRunner {
                         maintenanceAdmission: maintenance.binding
                     )
                     reconciliation = try await StateUpgradeService(store: store)
-                        .withExclusiveLifecycleFence(lockWaitMilliseconds: 30_000) {
+                        .withSerializedLifecycleMutation(lockWaitMilliseconds: 30_000) {
                             try await reconciliationDriver.reconcile(request: request)
                         }
                 } catch {

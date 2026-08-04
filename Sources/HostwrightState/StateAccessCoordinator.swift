@@ -31,8 +31,27 @@ private final class StateLifecycleFenceLease: @unchecked Sendable {
     }
 }
 
+private final class StateLifecycleMutationLease: @unchecked Sendable {
+    let lockPath: String
+    private let lock = NSLock()
+    private var active = true
+
+    init(lockPath: String) {
+        self.lockPath = lockPath
+    }
+
+    func applies(to path: String) -> Bool {
+        lock.withLock { active && lockPath == path }
+    }
+
+    func invalidate() {
+        lock.withLock { active = false }
+    }
+}
+
 private enum StateAccessExecutionContext {
     @TaskLocal static var lifecycleFence: StateLifecycleFenceLease?
+    @TaskLocal static var lifecycleMutationFence: StateLifecycleMutationLease?
     @TaskLocal static var waitTimeoutNanoseconds: UInt64?
 }
 
@@ -64,6 +83,8 @@ struct StateAccessCoordinator {
 
     private static let lifecycleFenceThreadKey =
         "dev.hostwright.state-access.exclusive-lifecycle-fence"
+    private static let lifecycleMutationFenceThreadKey =
+        "dev.hostwright.state-access.serialized-lifecycle-mutation"
     private static let pendingMaintenanceRecoveryThreadKey =
         "dev.hostwright.state-access.pending-maintenance-recovery"
 
@@ -143,39 +164,43 @@ struct StateAccessCoordinator {
         _ body: () throws -> T
     ) throws -> T {
         let paths = try configuration.maintenancePaths()
-        return try withLock(
-            .exclusive,
-            allowPendingMaintenance: allowPendingMaintenance,
+        return try withSerializedLifecycleMutation(
             waitTimeoutNanoseconds: waitTimeoutNanoseconds
         ) {
-            let dictionary = Thread.current.threadDictionary
-            let previous = dictionary[Self.lifecycleFenceThreadKey]
-            let previousRecovery = dictionary[Self.pendingMaintenanceRecoveryThreadKey]
-            dictionary[Self.lifecycleFenceThreadKey] = paths.accessLockPath
-            if allowPendingMaintenance {
-                dictionary[Self.pendingMaintenanceRecoveryThreadKey] = true
-            }
-            defer {
-                if let previous {
-                    dictionary[Self.lifecycleFenceThreadKey] = previous
-                } else {
-                    dictionary.removeObject(forKey: Self.lifecycleFenceThreadKey)
+            try withLock(
+                .exclusive,
+                allowPendingMaintenance: allowPendingMaintenance,
+                waitTimeoutNanoseconds: waitTimeoutNanoseconds
+            ) {
+                let dictionary = Thread.current.threadDictionary
+                let previous = dictionary[Self.lifecycleFenceThreadKey]
+                let previousRecovery = dictionary[Self.pendingMaintenanceRecoveryThreadKey]
+                dictionary[Self.lifecycleFenceThreadKey] = paths.accessLockPath
+                if allowPendingMaintenance {
+                    dictionary[Self.pendingMaintenanceRecoveryThreadKey] = true
                 }
-                if let previousRecovery {
-                    dictionary[Self.pendingMaintenanceRecoveryThreadKey] = previousRecovery
-                } else {
-                    dictionary.removeObject(forKey: Self.pendingMaintenanceRecoveryThreadKey)
+                defer {
+                    if let previous {
+                        dictionary[Self.lifecycleFenceThreadKey] = previous
+                    } else {
+                        dictionary.removeObject(forKey: Self.lifecycleFenceThreadKey)
+                    }
+                    if let previousRecovery {
+                        dictionary[Self.pendingMaintenanceRecoveryThreadKey] = previousRecovery
+                    } else {
+                        dictionary.removeObject(forKey: Self.pendingMaintenanceRecoveryThreadKey)
+                    }
                 }
+                let lease = StateLifecycleFenceLease(
+                    accessLockPath: paths.accessLockPath,
+                    allowsPendingMaintenanceRecovery: allowPendingMaintenance
+                )
+                defer { lease.invalidate() }
+                return try StateAccessExecutionContext.$lifecycleFence.withValue(
+                    lease,
+                    operation: body
+                )
             }
-            let lease = StateLifecycleFenceLease(
-                accessLockPath: paths.accessLockPath,
-                allowsPendingMaintenanceRecovery: allowPendingMaintenance
-            )
-            defer { lease.invalidate() }
-            return try StateAccessExecutionContext.$lifecycleFence.withValue(
-                lease,
-                operation: body
-            )
         }
     }
 
@@ -185,13 +210,109 @@ struct StateAccessCoordinator {
         _ body: () async throws -> T
     ) async throws -> T {
         let paths = try configuration.maintenancePaths()
-        if let inheritedRecovery = StateAccessExecutionContext.lifecycleFence?
-            .recoveryPermission(for: paths.accessLockPath) {
-            if !inheritedRecovery,
-               !allowPendingMaintenance,
-               let journal = pendingMaintenanceJournal(paths) {
+        return try await withSerializedLifecycleMutation(
+            waitTimeoutNanoseconds: waitTimeoutNanoseconds
+        ) {
+            if let inheritedRecovery = StateAccessExecutionContext.lifecycleFence?
+                .recoveryPermission(for: paths.accessLockPath) {
+                if !inheritedRecovery,
+                   !allowPendingMaintenance,
+                   let journal = pendingMaintenanceJournal(paths) {
+                    throw StateStoreError.maintenanceRecoveryRequired(journalPath: journal)
+                }
+                return try await body()
+            }
+            let effectiveWaitTimeoutNanoseconds = max(
+                waitTimeoutNanoseconds,
+                StateAccessExecutionContext.waitTimeoutNanoseconds ?? 0
+            )
+            let (deadline, overflow) = DispatchTime.now().uptimeNanoseconds
+                .addingReportingOverflow(effectiveWaitTimeoutNanoseconds)
+            guard effectiveWaitTimeoutNanoseconds > 0, !overflow else {
+                throw StateStoreError.invalidRecord("state-access wait timeout is invalid")
+            }
+            let descriptor = try openSecureLock(paths.accessLockPath)
+            defer {
+                _ = flock(descriptor, LOCK_UN)
+                close(descriptor)
+            }
+            try acquire(
+                descriptor,
+                operation: LOCK_EX,
+                deadline: deadline,
+                role: "state-access fence"
+            )
+            if !allowPendingMaintenance, let journal = pendingMaintenanceJournal(paths) {
                 throw StateStoreError.maintenanceRecoveryRequired(journalPath: journal)
             }
+            let lease = StateLifecycleFenceLease(
+                accessLockPath: paths.accessLockPath,
+                allowsPendingMaintenanceRecovery: allowPendingMaintenance
+            )
+            defer { lease.invalidate() }
+            return try await StateAccessExecutionContext.$lifecycleFence.withValue(
+                lease,
+                operation: body
+            )
+        }
+    }
+
+    func withSerializedLifecycleMutation<T>(
+        waitTimeoutNanoseconds: UInt64 = 250_000_000,
+        _ body: () throws -> T
+    ) throws -> T {
+        let paths = try configuration.maintenancePaths()
+        let lockPath = paths.accessLockPath + ".lifecycle-mutation"
+        if StateAccessExecutionContext.lifecycleMutationFence?.applies(to: lockPath) == true
+            || Thread.current.threadDictionary[Self.lifecycleMutationFenceThreadKey] as? String
+                == lockPath {
+            return try body()
+        }
+        let effectiveWaitTimeoutNanoseconds = max(
+            waitTimeoutNanoseconds,
+            StateAccessExecutionContext.waitTimeoutNanoseconds ?? 0
+        )
+        let (deadline, overflow) = DispatchTime.now().uptimeNanoseconds
+            .addingReportingOverflow(effectiveWaitTimeoutNanoseconds)
+        guard effectiveWaitTimeoutNanoseconds > 0, !overflow else {
+            throw StateStoreError.invalidRecord("lifecycle-mutation wait timeout is invalid")
+        }
+        let descriptor = try openSecureLock(lockPath)
+        defer {
+            _ = flock(descriptor, LOCK_UN)
+            close(descriptor)
+        }
+        try acquire(
+            descriptor,
+            operation: LOCK_EX,
+            deadline: deadline,
+            role: "lifecycle-mutation fence"
+        )
+        let dictionary = Thread.current.threadDictionary
+        let previous = dictionary[Self.lifecycleMutationFenceThreadKey]
+        dictionary[Self.lifecycleMutationFenceThreadKey] = lockPath
+        defer {
+            if let previous {
+                dictionary[Self.lifecycleMutationFenceThreadKey] = previous
+            } else {
+                dictionary.removeObject(forKey: Self.lifecycleMutationFenceThreadKey)
+            }
+        }
+        let lease = StateLifecycleMutationLease(lockPath: lockPath)
+        defer { lease.invalidate() }
+        return try StateAccessExecutionContext.$lifecycleMutationFence.withValue(
+            lease,
+            operation: body
+        )
+    }
+
+    func withSerializedLifecycleMutation<T>(
+        waitTimeoutNanoseconds: UInt64 = 250_000_000,
+        _ body: () async throws -> T
+    ) async throws -> T {
+        let paths = try configuration.maintenancePaths()
+        let lockPath = paths.accessLockPath + ".lifecycle-mutation"
+        if StateAccessExecutionContext.lifecycleMutationFence?.applies(to: lockPath) == true {
             return try await body()
         }
         let effectiveWaitTimeoutNanoseconds = max(
@@ -201,9 +322,9 @@ struct StateAccessCoordinator {
         let (deadline, overflow) = DispatchTime.now().uptimeNanoseconds
             .addingReportingOverflow(effectiveWaitTimeoutNanoseconds)
         guard effectiveWaitTimeoutNanoseconds > 0, !overflow else {
-            throw StateStoreError.invalidRecord("state-access wait timeout is invalid")
+            throw StateStoreError.invalidRecord("lifecycle-mutation wait timeout is invalid")
         }
-        let descriptor = try openSecureLock(paths.accessLockPath)
+        let descriptor = try openSecureLock(lockPath)
         defer {
             _ = flock(descriptor, LOCK_UN)
             close(descriptor)
@@ -212,17 +333,11 @@ struct StateAccessCoordinator {
             descriptor,
             operation: LOCK_EX,
             deadline: deadline,
-            role: "state-access fence"
+            role: "lifecycle-mutation fence"
         )
-        if !allowPendingMaintenance, let journal = pendingMaintenanceJournal(paths) {
-            throw StateStoreError.maintenanceRecoveryRequired(journalPath: journal)
-        }
-        let lease = StateLifecycleFenceLease(
-            accessLockPath: paths.accessLockPath,
-            allowsPendingMaintenanceRecovery: allowPendingMaintenance
-        )
+        let lease = StateLifecycleMutationLease(lockPath: lockPath)
         defer { lease.invalidate() }
-        return try await StateAccessExecutionContext.$lifecycleFence.withValue(
+        return try await StateAccessExecutionContext.$lifecycleMutationFence.withValue(
             lease,
             operation: body
         )

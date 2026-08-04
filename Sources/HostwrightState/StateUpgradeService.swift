@@ -146,6 +146,23 @@ public struct StateUpgradeService: Sendable {
             )
     }
 
+    public func withSerializedLifecycleMutation<T>(
+        lockWaitMilliseconds: Int = 250,
+        _ body: () throws -> T
+    ) throws -> T {
+        guard (1...30_000).contains(lockWaitMilliseconds) else {
+            throw StateStoreError.invalidRecord(
+                "serialized lifecycle mutation wait must be between 1 and 30000 milliseconds"
+            )
+        }
+        try store.configuration.prepareStateAccessFoundation()
+        return try StateAccessCoordinator(configuration: store.configuration)
+            .withSerializedLifecycleMutation(
+                waitTimeoutNanoseconds: UInt64(lockWaitMilliseconds) * 1_000_000,
+                body
+            )
+    }
+
     public func withBoundedStateAccessWait<T>(
         lockWaitMilliseconds: Int,
         _ body: () async throws -> T
@@ -176,6 +193,23 @@ public struct StateUpgradeService: Sendable {
         return try await StateAccessCoordinator(configuration: store.configuration)
             .withExclusiveLifecycleFence(
                 allowPendingMaintenance: allowPendingMaintenance,
+                waitTimeoutNanoseconds: UInt64(lockWaitMilliseconds) * 1_000_000,
+                body
+            )
+    }
+
+    public func withSerializedLifecycleMutation<T>(
+        lockWaitMilliseconds: Int = 250,
+        _ body: () async throws -> T
+    ) async throws -> T {
+        guard (1...30_000).contains(lockWaitMilliseconds) else {
+            throw StateStoreError.invalidRecord(
+                "serialized lifecycle mutation wait must be between 1 and 30000 milliseconds"
+            )
+        }
+        try store.configuration.prepareStateAccessFoundation()
+        return try await StateAccessCoordinator(configuration: store.configuration)
+            .withSerializedLifecycleMutation(
                 waitTimeoutNanoseconds: UInt64(lockWaitMilliseconds) * 1_000_000,
                 body
             )

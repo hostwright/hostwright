@@ -3,6 +3,7 @@ import CryptoKit
 import Foundation
 import XCTest
 @testable import HostwrightCLI
+@testable import HostwrightControl
 @testable import HostwrightControlPlane
 @testable import HostwrightControlSecurity
 @testable import HostwrightControlTransport
@@ -13,6 +14,45 @@ import XCTest
 @testable import HostwrightState
 
 final class HostwrightDaemonControlServiceTests: XCTestCase {
+  func testSanitizedLocalControlFailurePreservesValidStateCodeAndMessage() {
+    let response = LocalControlResponse(
+      requestID: "sanitized-state-failure",
+      operation: .status,
+      success: false,
+      exitCode: LocalControlExitCode.unavailable.rawValue,
+      error: .object([
+        "code": .string("HW-STATE-001"),
+        "message": .string("The configured state store is unavailable."),
+      ])
+    )
+
+    let failure = HostwrightDaemonControlService.sanitizedLocalControlFailure(response)
+
+    XCTAssertEqual(failure.code, "HW-STATE-001")
+    XCTAssertEqual(failure.message, "The configured state store is unavailable.")
+    XCTAssertFalse(failure.message.isEmpty)
+    XCTAssertLessThanOrEqual(failure.message.utf8.count, 256)
+  }
+
+  func testSanitizedLocalControlFailureFallsBackForInvalidCodeAndBoundsMessage() {
+    let response = LocalControlResponse(
+      requestID: "sanitized-invalid-failure",
+      operation: .status,
+      success: false,
+      exitCode: LocalControlExitCode.executionFailed.rawValue,
+      error: .object([
+        "code": .string("state store unavailable"),
+        "message": .string(String(repeating: "x", count: 1_024)),
+      ])
+    )
+
+    let failure = HostwrightDaemonControlService.sanitizedLocalControlFailure(response)
+
+    XCTAssertEqual(failure.code, "controlOperationFailed")
+    XCTAssertFalse(failure.message.isEmpty)
+    XCTAssertLessThanOrEqual(failure.message.utf8.count, 256)
+  }
+
   func testStartCreatesPrivateSocketAndStopRemovesIt() throws {
     try withPrivateHome { home in
       let fixture = try makeService(home: home)

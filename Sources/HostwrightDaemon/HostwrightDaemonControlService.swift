@@ -13,6 +13,7 @@ import HostwrightDaemonCore
 import HostwrightExtensions
 import HostwrightPolicy
 import HostwrightRegistry
+import HostwrightRuntime
 import HostwrightState
 
 final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sendable {
@@ -633,19 +634,18 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
       }
     }
     let result = localAPI.run(requestData: try ControlPlaneCanonicalJSON.encode(payload))
-    guard result.exitCode == 0,
-      let local = try? JSONDecoder().decode(
-        LocalControlResponse.self,
-        from: result.standardOutput
-      ),
-      local.success
-    else {
+    let local = try? JSONDecoder().decode(
+      LocalControlResponse.self,
+      from: result.standardOutput
+    )
+    guard result.exitCode == 0, let local, local.success else {
+      let diagnostic = sanitizedLocalControlFailure(local)
       return failure(
         requestID: request.requestID,
         reason: result.exitCode == LocalControlExitCode.invalidRequest.rawValue
           ? .invalidRequest : .internalError,
-        code: "controlOperationFailed",
-        message: "The control operation did not complete."
+        code: diagnostic.code,
+        message: diagnostic.message
       )
     }
     let responseResult: ControlPlaneJSONValue?
@@ -663,6 +663,42 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
       reasonCode: .completed,
       result: responseResult
     )
+  }
+
+  static func sanitizedLocalControlFailure(
+    _ response: LocalControlResponse?
+  ) -> (code: String, message: String) {
+    let fallback = (
+      code: "controlOperationFailed",
+      message: "The control operation did not complete."
+    )
+    guard let error = response?.error,
+      case .object(let fields) = error
+    else { return fallback }
+
+    let code: String
+    if case .string(let candidate) = fields["code"],
+      candidate.range(
+        of: "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$",
+        options: .regularExpression
+      ) != nil
+    {
+      code = candidate
+    } else {
+      code = fallback.code
+    }
+
+    guard case .string(let candidate) = fields["message"] else {
+      return (code, fallback.message)
+    }
+    let redacted = RuntimeRedactionPolicy.default.redact(candidate)
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !redacted.isEmpty else { return (code, fallback.message) }
+    var bounded = redacted
+    while bounded.utf8.count > 256 {
+      bounded.removeLast()
+    }
+    return (code, bounded)
   }
 
   private static func controlPlaneValue<T: Encodable>(

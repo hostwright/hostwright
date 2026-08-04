@@ -233,7 +233,7 @@ final class Phase09Gate09QualificationHarnessTests: XCTestCase {
     let live = try XCTUnwrap(source.section(named: "live"))
     let pendingClaim = try XCTUnwrap(live.range(of: "record_pending_container_claim"))
     let initialDaemon = try XCTUnwrap(
-      live.range(of: "pid=\"$(start_daemon \"$runtime\" \"$daemon\" \"$config\" \"$state\" initial)\"")
+      live.range(of: "pid=\"$(start_daemon \"$runtime\" \"$daemon\" \"$config\" \"$state\" initial \"$cli\")\"")
     )
 
     XCTAssertLessThan(pendingClaim.lowerBound, initialDaemon.lowerBound)
@@ -251,12 +251,19 @@ final class Phase09Gate09QualificationHarnessTests: XCTestCase {
     let source = try String(contentsOf: harness, encoding: .utf8)
     let live = try XCTUnwrap(source.section(named: "live"))
     let convergence = try XCTUnwrap(source.section(named: "wait_for_converged_status"))
+    let readiness = try XCTUnwrap(source.section(named: "wait_for_authenticated_daemon"))
 
     XCTAssertTrue(live.contains("liveness:"))
     XCTAssertTrue(live.contains("exec: [\"true\"]"))
     XCTAssertTrue(live.contains("interval: 60s"))
     XCTAssertTrue(live.contains("timeout: 1s"))
     XCTAssertTrue(live.contains("wait_for_converged_status \"$runtime\" \"$cli\" \"$config\" \"$state\" \"$resource\""))
+    XCTAssertTrue(live.contains("start_daemon \"$runtime\" \"$daemon\" \"$config\" \"$state\" initial \"$cli\""))
+    XCTAssertTrue(live.contains("start_daemon \"$runtime\" \"$daemon\" \"$config\" \"$state\" restarted \"$cli\""))
+    XCTAssertTrue(readiness.contains("capabilities --json"))
+    XCTAssertTrue(readiness.contains("deadline=$(( $(/bin/date +%s) + 60 ))"))
+    XCTAssertTrue(readiness.contains("/bin/sleep 1"))
+    XCTAssertTrue(readiness.contains("owned daemon did not pass authenticated readiness"))
 
     XCTAssertTrue(convergence.contains("deadline_epoch=$(( $(/bin/date +%s) + 300 ))"))
     XCTAssertTrue(convergence.contains("while [[ \"$(/bin/date +%s)\" -lt \"$deadline_epoch\" ]]"))

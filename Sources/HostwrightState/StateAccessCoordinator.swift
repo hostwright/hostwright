@@ -42,6 +42,7 @@ struct StateAccessCoordinator {
     func withLock<T>(
         _ mode: StateAccessMode,
         allowPendingMaintenance: Bool = false,
+        waitTimeoutNanoseconds: UInt64 = 250_000_000,
         _ body: () throws -> T
     ) throws -> T {
         let paths = try configuration.maintenancePaths()
@@ -55,7 +56,11 @@ struct StateAccessCoordinator {
             }
             return try body()
         }
-        let deadline = DispatchTime.now().uptimeNanoseconds + 250_000_000
+        let (deadline, overflow) = DispatchTime.now().uptimeNanoseconds
+            .addingReportingOverflow(waitTimeoutNanoseconds)
+        guard waitTimeoutNanoseconds > 0, !overflow else {
+            throw StateStoreError.invalidRecord("state-access wait timeout is invalid")
+        }
         let accessDescriptor = try openSecureLock(paths.accessLockPath)
         var writerDescriptor: Int32?
         defer {
@@ -92,10 +97,15 @@ struct StateAccessCoordinator {
 
     func withExclusiveLifecycleFence<T>(
         allowPendingMaintenance: Bool = false,
+        waitTimeoutNanoseconds: UInt64 = 250_000_000,
         _ body: () throws -> T
     ) throws -> T {
         let paths = try configuration.maintenancePaths()
-        return try withLock(.exclusive, allowPendingMaintenance: allowPendingMaintenance) {
+        return try withLock(
+            .exclusive,
+            allowPendingMaintenance: allowPendingMaintenance,
+            waitTimeoutNanoseconds: waitTimeoutNanoseconds
+        ) {
             let dictionary = Thread.current.threadDictionary
             let previous = dictionary[Self.lifecycleFenceThreadKey]
             let previousRecovery = dictionary[Self.pendingMaintenanceRecoveryThreadKey]

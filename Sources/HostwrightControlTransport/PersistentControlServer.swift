@@ -326,6 +326,15 @@ public struct PersistentControlConnectionServer: Sendable {
     @Sendable (
       AuthenticatedControlPeer, ControlRequestEnvelope
     ) throws -> PersistentControlPreparedRequest
+  public typealias UnaryRequestCoordinator =
+    @Sendable (
+      ControlRequestEnvelope,
+      @Sendable () throws -> (
+        response: ControlResponseEnvelope, deadline: ControlTransportDeadline
+      )
+    ) throws -> (
+      response: ControlResponseEnvelope, deadline: ControlTransportDeadline
+    )
 
   private let authenticator: ControlPeerAuthenticator
   private let requestRepository: ControlRequestRepository
@@ -333,6 +342,7 @@ public struct PersistentControlConnectionServer: Sendable {
   private let socketIdentity: ControlSocketIdentity
   private let mutatingOperations: Set<String>
   private let requestPreparer: RequestPreparer
+  private let unaryRequestCoordinator: UnaryRequestCoordinator
   private let mutationClassifier: MutationClassifier
   private let auditRecorder: any ControlSecurityAuditRecording
   private let authorizer: Authorizer
@@ -353,6 +363,7 @@ public struct PersistentControlConnectionServer: Sendable {
     socketIdentity: ControlSocketIdentity,
     mutatingOperations: Set<String>,
     requestPreparer: RequestPreparer? = nil,
+    unaryRequestCoordinator: UnaryRequestCoordinator? = nil,
     mutationClassifier: MutationClassifier? = nil,
     auditRecorder: any ControlSecurityAuditRecording,
     authorizer: @escaping Authorizer,
@@ -391,6 +402,9 @@ public struct PersistentControlConnectionServer: Sendable {
     self.requestPreparer = requestPreparer ?? { _, request in
       try PersistentControlPreparedRequest(request: request)
     }
+    self.unaryRequestCoordinator = unaryRequestCoordinator ?? { _, operation in
+      try operation()
+    }
     self.mutationClassifier = mutationClassifier ?? { request in
       mutatingOperations.contains(request.operation)
     }
@@ -418,7 +432,11 @@ public struct PersistentControlConnectionServer: Sendable {
     let unary = ControlUnaryDispatcher(
       descriptor: descriptor,
       context: context,
-      processor: { request in try process(peer: peer, request: request) }
+      processor: { request in
+        try unaryRequestCoordinator(request) {
+          try process(peer: peer, request: request)
+        }
+      }
     )
     defer {
       unary.cancel()

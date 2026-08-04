@@ -113,12 +113,19 @@ public struct StateUpgradeService: Sendable {
 
     public func withExclusiveLifecycleFence<T>(
         allowPendingMaintenance: Bool = false,
+        lockWaitMilliseconds: Int = 250,
         _ body: () throws -> T
     ) throws -> T {
+        guard (1...30_000).contains(lockWaitMilliseconds) else {
+            throw StateStoreError.invalidRecord(
+                "exclusive lifecycle fence wait must be between 1 and 30000 milliseconds"
+            )
+        }
         try store.configuration.prepareStateAccessFoundation()
         return try StateAccessCoordinator(configuration: store.configuration)
             .withExclusiveLifecycleFence(
                 allowPendingMaintenance: allowPendingMaintenance,
+                waitTimeoutNanoseconds: UInt64(lockWaitMilliseconds) * 1_000_000,
                 body
             )
     }

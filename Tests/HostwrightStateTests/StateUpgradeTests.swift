@@ -242,6 +242,47 @@ final class StateUpgradeTests: XCTestCase {
         }
     }
 
+    func testExclusiveLifecycleFenceSupportsBoundedControlPlaneWait() throws {
+        try withTemporaryStore(throughVersion: MigrationRunner.latestSchemaVersion) { store, _ in
+            try store.configuration.prepareStateAccessFoundation()
+            let lockPath = try store.configuration.maintenancePaths().accessLockPath
+            let descriptor = open(lockPath, O_RDWR | O_NOFOLLOW | O_CLOEXEC)
+            XCTAssertGreaterThanOrEqual(descriptor, 0)
+            XCTAssertEqual(flock(descriptor, LOCK_EX | LOCK_NB), 0)
+            let released = expectation(description: "competing writer released")
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.4) {
+                _ = flock(descriptor, LOCK_UN)
+                close(descriptor)
+                released.fulfill()
+            }
+
+            XCTAssertNoThrow(
+                try StateUpgradeService(store: store).withExclusiveLifecycleFence(
+                    lockWaitMilliseconds: 1_000
+                ) {
+                    XCTAssertEqual(try store.schemaVersion(), MigrationRunner.latestSchemaVersion)
+                }
+            )
+            wait(for: [released], timeout: 1)
+        }
+    }
+
+    func testExclusiveLifecycleFenceRejectsUnboundedWaits() throws {
+        try withTemporaryStore(throughVersion: MigrationRunner.latestSchemaVersion) { store, _ in
+            for timeout in [0, 30_001] {
+                XCTAssertThrowsError(
+                    try StateUpgradeService(store: store).withExclusiveLifecycleFence(
+                        lockWaitMilliseconds: timeout
+                    ) {}
+                ) { error in
+                    guard case StateStoreError.invalidRecord = error else {
+                        return XCTFail("Expected invalidRecord, received \(error).")
+                    }
+                }
+            }
+        }
+    }
+
     func testVerifiedStateRemovalDeletesOnlyTheManagedSQLiteFileSet() throws {
         try withTemporaryStore(throughVersion: MigrationRunner.latestSchemaVersion) { store, _ in
             let result = try StateDatabaseRemovalService(store: store).removeVerifiedDatabase()

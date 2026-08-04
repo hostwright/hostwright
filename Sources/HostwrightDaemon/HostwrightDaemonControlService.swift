@@ -297,6 +297,12 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
         }
         return try PersistentControlPreparedRequest(request: request)
       },
+      unaryRequestCoordinator: { _, operation in
+        try StateUpgradeService(store: store).withExclusiveLifecycleFence(
+          lockWaitMilliseconds: 5_000,
+          operation
+        )
+      },
       mutationClassifier: { request in
         if try CLIControlRoute.validateStreamPreparation(request: request) != nil {
           return false

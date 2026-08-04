@@ -487,6 +487,157 @@ final class PersistentControlServerTests: XCTestCase {
     XCTAssertEqual(invocations.value, 0)
   }
 
+  func testUnaryRequestCoordinatorDefaultsToProcessingRequest() throws {
+    let root = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let invocations = InvocationCounter()
+    let server = try minimalServer(root: root, handler: { _, request, _ in
+      invocations.increment()
+      return ControlResponseEnvelope(
+        requestID: request.requestID,
+        status: .completed,
+        reasonCode: .completed
+      )
+    })
+    let pair = try socketPair()
+    defer {
+      _ = Darwin.close(pair.client)
+      _ = Darwin.close(pair.server)
+    }
+    try ControlFrameCodec.configureNoSigPipe(descriptor: pair.client)
+    let serverResult = ServerResult()
+    let serverFinished = expectation(description: "default coordinator server exits after peer close")
+    DispatchQueue.global().async {
+      defer { serverFinished.fulfill() }
+      do {
+        try server.serve(descriptor: pair.server)
+      } catch {
+        serverResult.error = error
+      }
+    }
+
+    try completeAuthentication(descriptor: pair.client)
+    let request = ControlRequestEnvelope(
+      requestID: "unary-default-coordinator",
+      operation: "health.get",
+      timeoutMilliseconds: 1_000
+    )
+    try writeRequest(try ControlPlaneCanonicalJSON.encode(request), descriptor: pair.client)
+    let response = try readResponse(descriptor: pair.client)
+    XCTAssertEqual(response.requestID, request.requestID)
+    XCTAssertEqual(response.status, .completed)
+    XCTAssertEqual(invocations.value, 1)
+
+    _ = Darwin.close(pair.client)
+    wait(for: [serverFinished], timeout: 2)
+    XCTAssertNil(serverResult.error)
+  }
+
+  func testUnaryRequestCoordinatorWrapsSynchronousProcessing() throws {
+    let root = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let events = UnaryCoordinatorEventRecorder()
+    let coordinator: PersistentControlConnectionServer.UnaryRequestCoordinator = { _, process in
+      events.append("before")
+      let result = try process()
+      events.append("after")
+      return result
+    }
+    let server = try minimalServer(
+      root: root,
+      unaryRequestCoordinator: coordinator,
+      handler: { _, request, _ in
+        events.append("handler")
+        return ControlResponseEnvelope(
+          requestID: request.requestID,
+          status: .completed,
+          reasonCode: .completed
+        )
+      }
+    )
+    let pair = try socketPair()
+    defer {
+      _ = Darwin.close(pair.client)
+      _ = Darwin.close(pair.server)
+    }
+    try ControlFrameCodec.configureNoSigPipe(descriptor: pair.client)
+    let serverResult = ServerResult()
+    let serverFinished = expectation(description: "coordinated server exits after peer close")
+    DispatchQueue.global().async {
+      defer { serverFinished.fulfill() }
+      do {
+        try server.serve(descriptor: pair.server)
+      } catch {
+        serverResult.error = error
+      }
+    }
+
+    try completeAuthentication(descriptor: pair.client)
+    let request = ControlRequestEnvelope(
+      requestID: "unary-coordinator-wraps-processing",
+      operation: "health.get",
+      timeoutMilliseconds: 1_000
+    )
+    try writeRequest(try ControlPlaneCanonicalJSON.encode(request), descriptor: pair.client)
+    XCTAssertEqual(try readResponse(descriptor: pair.client).status, .completed)
+    XCTAssertEqual(events.values, ["before", "handler", "after"])
+
+    _ = Darwin.close(pair.client)
+    wait(for: [serverFinished], timeout: 2)
+    XCTAssertNil(serverResult.error)
+  }
+
+  func testUnaryRequestCoordinatorFailureClosesConnectionWithoutInvokingHandler() throws {
+    let root = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let invocations = InvocationCounter()
+    let coordinator: PersistentControlConnectionServer.UnaryRequestCoordinator = { _, _ in
+      throw UnaryCoordinatorTestError.rejected
+    }
+    let server = try minimalServer(
+      root: root,
+      unaryRequestCoordinator: coordinator,
+      handler: { _, request, _ in
+        invocations.increment()
+        return ControlResponseEnvelope(
+          requestID: request.requestID,
+          status: .completed,
+          reasonCode: .completed
+        )
+      }
+    )
+    let pair = try socketPair()
+    defer {
+      _ = Darwin.close(pair.client)
+      _ = Darwin.close(pair.server)
+    }
+    try ControlFrameCodec.configureNoSigPipe(descriptor: pair.client)
+    let serverResult = ServerResult()
+    let serverFinished = expectation(description: "coordinator failure closes server connection")
+    DispatchQueue.global().async {
+      defer { serverFinished.fulfill() }
+      do {
+        try server.serve(descriptor: pair.server)
+      } catch {
+        serverResult.error = error
+      }
+    }
+
+    try completeAuthentication(descriptor: pair.client)
+    let request = ControlRequestEnvelope(
+      requestID: "unary-coordinator-failure",
+      operation: "health.get",
+      timeoutMilliseconds: 1_000
+    )
+    try writeRequest(try ControlPlaneCanonicalJSON.encode(request), descriptor: pair.client)
+    XCTAssertThrowsError(try readResponse(descriptor: pair.client)) { error in
+      XCTAssertEqual(error as? ControlTransportError, .peerClosed)
+    }
+    wait(for: [serverFinished], timeout: 2)
+    XCTAssertNil(serverResult.error)
+    XCTAssertEqual(invocations.value, 0)
+  }
+
   func testExpiredRequestDeadlineClosesConnectionWithoutInvokingHandler() throws {
     let root = try temporaryDirectory()
     defer { try? FileManager.default.removeItem(at: root) }
@@ -615,7 +766,14 @@ final class PersistentControlServerTests: XCTestCase {
     XCTAssertEqual(serverResult.error as? ControlTransportError, .declaredLengthOutOfBounds)
   }
 
-  private func minimalServer(root: URL) throws -> PersistentControlConnectionServer {
+  private func minimalServer(
+    root: URL,
+    unaryRequestCoordinator: PersistentControlConnectionServer.UnaryRequestCoordinator? = nil,
+    handler: @escaping PersistentControlConnectionServer.Handler = { _, request, _ in
+      ControlResponseEnvelope(
+        requestID: request.requestID, status: .completed, reasonCode: .completed)
+    }
+  ) throws -> PersistentControlConnectionServer {
     let store = SQLiteStateStore(path: root.appendingPathComponent("state.sqlite").path)
     try store.migrate()
     let identity = fixtureIdentity()
@@ -651,13 +809,11 @@ final class PersistentControlServerTests: XCTestCase {
       daemonGeneration: 1,
       socketIdentity: ControlSocketIdentity(device: 31, inode: 37),
       mutatingOperations: ["service.start"],
+      unaryRequestCoordinator: unaryRequestCoordinator,
       auditRecorder: TestControlAuditRecorder(),
       authorizer: allowingTestControlRequestAuthorizer,
       admissionEvaluator: allowingTestControlAdmissionEvaluator,
-      handler: { _, request, _ in
-        ControlResponseEnvelope(
-          requestID: request.requestID, status: .completed, reasonCode: .completed)
-      }
+      handler: handler
     )
   }
 
@@ -831,6 +987,27 @@ private final class InvocationCounter: @unchecked Sendable {
     defer { lock.unlock() }
     return count
   }
+}
+
+private final class UnaryCoordinatorEventRecorder: @unchecked Sendable {
+  private let lock = NSLock()
+  private var events: [String] = []
+
+  func append(_ event: String) {
+    lock.lock()
+    events.append(event)
+    lock.unlock()
+  }
+
+  var values: [String] {
+    lock.lock()
+    defer { lock.unlock() }
+    return events
+  }
+}
+
+private enum UnaryCoordinatorTestError: Error {
+  case rejected
 }
 
 private final class ValidationGateSessionStore: ControlSessionBindingStoring, @unchecked Sendable {

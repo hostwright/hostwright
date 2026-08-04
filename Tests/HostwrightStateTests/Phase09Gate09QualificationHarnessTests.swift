@@ -17,7 +17,7 @@ final class Phase09Gate09QualificationHarnessTests: XCTestCase {
     XCTAssertEqual(result.status, 0, result.stderr)
     XCTAssertTrue(result.stdout.contains("Gate 9 — 56.25%"))
     XCTAssertTrue(result.stdout.contains("Exactly one Gate 9 qualification"))
-    XCTAssertTrue(result.stdout.contains("Phase 08 live qualification"))
+    XCTAssertTrue(result.stdout.contains("never inspects, stops, or removes"))
 
     let source = try String(contentsOf: harness, encoding: .utf8)
     XCTAssertTrue(source.contains("for n in 1 2 3 4 5 6"))
@@ -30,7 +30,9 @@ final class Phase09Gate09QualificationHarnessTests: XCTestCase {
     XCTAssertTrue(source.contains("revision 2.1"))
     XCTAssertTrue(source.contains("no hidden mutation entry point"))
     XCTAssertTrue(source.contains("signed daemon/CLI/control"))
-    XCTAssertTrue(source.contains("Phase 08 live qualification is active"))
+    XCTAssertFalse(source.contains("phase08"))
+    XCTAssertFalse(source.contains("p08-soak"))
+    XCTAssertFalse(source.contains("tmux list-sessions"))
     XCTAssertTrue(source.contains("for n in 1 2 3 4 5 6"))
     XCTAssertTrue(source.contains("\"$cli\" logs probe \"$config\" --state-db \"$state\" --tail 20"))
     XCTAssertTrue(source.contains("\"$cli\" exec probe --manifest \"$config\" --state-db \"$state\" --no-stdin"))
@@ -71,46 +73,12 @@ final class Phase09Gate09QualificationHarnessTests: XCTestCase {
     }
   }
 
-  func testPhaseEightExclusivityRefusesBeforeAnyQualificationCell() throws {
-    try withRoot { root, environment in
-      XCTAssertEqual(try run(["prepare", "9"], environment: environment).status, 0)
-      for fixture in [
-        "HOSTWRIGHT_PHASE09_HARNESS_TEST_PHASE08_LIVE_ACTIVE",
-        "HOSTWRIGHT_PHASE09_HARNESS_TEST_PHASE08_LIVE_RUNNER",
-        "HOSTWRIGHT_PHASE09_HARNESS_TEST_PHASE08_LIVE_DAEMON",
-        "HOSTWRIGHT_PHASE09_HARNESS_TEST_PHASE08_LIVE_RESOURCE",
-      ] {
-        var blocked = environment
-        blocked[fixture] = "1"
-
-        let result = try run(["run", "9"], environment: blocked)
-        XCTAssertNotEqual(result.status, 0, fixture)
-        XCTAssertTrue(result.stderr.contains("Phase 08 live qualification is active"), result.stderr)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("cell-01.stdout.log").path))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("active-run-v1").path))
-        XCTAssertFalse(FileManager.default.fileExists(
-          atPath: root.deletingLastPathComponent().appendingPathComponent(".phase09-gate09-active-v1").path))
-      }
-    }
-  }
-
-  func testPhaseEightReleaseDetectionCoversTmuxProcessesAndRetainedManagedResources() throws {
+  func testHarnessNeverInspectsAnotherPhase() throws {
     let source = try String(contentsOf: harness, encoding: .utf8)
-    let detector = try XCTUnwrap(source.section(named: "phase08_live_active"))
-    let runner = try XCTUnwrap(source.section(named: "phase08_live_runner"))
-    let daemon = try XCTUnwrap(source.section(named: "phase08_live_daemon"))
-    let resource = try XCTUnwrap(source.section(named: "phase08_managed_resource_active"))
-
-    XCTAssertTrue(detector.contains("tmux list-sessions"))
-    XCTAssertTrue(detector.contains("hostwright-p08-soak-"))
-    XCTAssertTrue(detector.contains("phase08_live_runner"))
-    XCTAssertTrue(detector.contains("phase08_live_daemon"))
-    XCTAssertTrue(detector.contains("phase08_managed_resource_active"))
-    XCTAssertTrue(runner.contains("HOSTWRIGHT_PHASE09_HARNESS_TEST_PHASE08_LIVE_RUNNER"))
-    XCTAssertTrue(daemon.contains("HOSTWRIGHT_PHASE09_HARNESS_TEST_PHASE08_LIVE_DAEMON"))
-    XCTAssertTrue(resource.contains("HOSTWRIGHT_PHASE09_HARNESS_TEST_PHASE08_LIVE_RESOURCE"))
-    XCTAssertTrue(resource.contains("container list --all --format json"))
-    XCTAssertTrue(resource.contains("dev.hostwright.project"))
+    XCTAssertFalse(source.contains("phase08"))
+    XCTAssertFalse(source.contains("p08-soak"))
+    XCTAssertFalse(source.contains("tmux list-sessions"))
+    XCTAssertFalse(source.contains("pgrep -afil"))
   }
 
   func testFailurePreservesLocksAndDoesNotRunNextCell() throws {
